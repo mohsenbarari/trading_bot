@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 2 frontend baseline instrumentation and design budget implemented; legacy Messenger remains the default
+> Status: Stage 3 controller contracts implemented; legacy Messenger remains the default
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -12,6 +12,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 
 - Stage 1 executive phase is implemented: the reversible feature-flag shell, baseline performance mark utility, legacy-default route switch, and focused Vitest coverage are in place.
 - Stage 2 executive phase is implemented for the frontend refactor surface: additive baseline metrics, Messenger-local design tokens, reduced-motion guardrails, build-size baseline capture, and focused Vitest coverage are in place.
+- Stage 3 executive phase is implemented for the first controller boundary: route query normalization, selection batch handling, album context resolution, and grouped timeline shaping now live behind typed, focused-tested pure helpers while `ChatView.vue` still owns runtime side effects.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -42,6 +43,18 @@ The Stage 2 design budget is also local to Messenger:
 - `frontend/src/styles/messenger-design-tokens.css` defines Messenger-only colors, density, radii, touch-target sizes, shadows, semantic states, z-indexes, and motion durations under `.messenger-page` and `.messenger-refactor-shell`.
 - `prefers-reduced-motion: reduce` disables expensive transitions and smooth scrolling inside the Messenger surface.
 - No global reset, backend contract, database shape, or production default path changed in this phase.
+
+## Stage 3 Controller Contract
+
+The Stage 3 slice reduces `ChatView.vue` without changing rendering behavior or the production route default. Current controller seams:
+
+- `frontend/src/utils/messengerStage3Controllers.ts` owns pure route-query normalization, conversation-query rebuilding, message-id normalization, selection-batch toggling, album metadata parsing, album context-menu id resolution, and timeline grouping.
+- `frontend/src/types/chat.ts` now exposes typed timeline contracts: `ChatSelectionPurpose`, `ChatAlbumTimelineItem`, `ChatTimelineItem`, and `ChatTimelineGroup`.
+- `ChatView.vue` delegates grouped timeline construction to `groupMessengerMessages(...)` and clears the extracted timeline cache through `clearMessengerTimelineCache(...)` on room switch.
+- The extracted timeline helper preserves the previous stable album-wrapper and stable day-group reference behavior, so the existing `v-memo`/album rendering optimizations remain intact.
+- The slice intentionally leaves websocket, media, composer, overlay back-stack, pinned-message, and search side effects in the legacy orchestrator until their focused controller tests are added in later phases.
+
+Rollback remains local: revert the Stage 3 utility/tests and the small `ChatView.vue` delegation patch; no backend, API, schema, or feature-flag default changed.
 
 ## Non-Negotiable Safety Rules
 
