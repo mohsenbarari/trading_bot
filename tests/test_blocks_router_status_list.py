@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 from api.routers.blocks import get_my_block_status, get_my_blocked_users
 
 
@@ -33,6 +35,17 @@ class BlocksRouterStatusListTests(unittest.IsolatedAsyncioTestCase):
 
         service_mock.assert_awaited_once_with(unittest.mock.ANY, 7)
         self.assertEqual(result, rows)
+
+    async def test_get_my_blocked_users_rejects_customer_viewer(self):
+        current_user = SimpleNamespace(id=7)
+        db = SimpleNamespace(execute=AsyncMock())
+
+        with patch("api.routers.blocks.is_user_customer", new=AsyncMock(return_value=True)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_my_blocked_users(db=db, current_user=current_user)
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertIn("مالک", exc_info.exception.detail)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { 
   Smartphone, Trash2, Loader2, HardDrive, 
-  ChevronDown, ChevronLeft, UserX, Search, Unlock, ShieldAlert
+  ChevronDown, ChevronLeft
 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
@@ -16,15 +16,11 @@ const cacheFeedback = ref<string | null>(null)
 
 const openSections = ref({
   sessions: false,
-  storage: false,
-  blocks: false
+  storage: false
 })
 
-function toggleSection(section: 'sessions' | 'storage' | 'blocks') {
+function toggleSection(section: 'sessions' | 'storage') {
   openSections.value[section] = !openSections.value[section]
-  if (section === 'blocks' && openSections.value.blocks && blockedUsers.value.length === 0) {
-    fetchBlockedUsers()
-  }
 }
 
 // ----------------- STORAGE -----------------
@@ -101,83 +97,6 @@ async function logout() {
     }
   }
   forceLogout()
-}
-
-// ----------------- BLOCKS -----------------
-const blockedUsers = ref<any[]>([])
-const blockSearchQuery = ref('')
-const searchResults = ref<any[]>([])
-const searchLoading = ref(false)
-const blockLoadingId = ref<number | null>(null)
-
-async function fetchBlockedUsers() {
-  try {
-    const res = await apiFetch('/api/blocks/')
-    if (res.ok) {
-      blockedUsers.value = await res.json()
-    }
-  } catch(e) {
-    console.error(e)
-  }
-}
-
-async function searchUsersToBlock() {
-  if (blockSearchQuery.value.trim().length < 2) {
-    searchResults.value = []
-    return
-  }
-  searchLoading.value = true
-  try {
-    const res = await apiFetch(`/api/blocks/search?q=${encodeURIComponent(blockSearchQuery.value)}&limit=5`)
-    if (res.ok) {
-      searchResults.value = await res.json()
-    }
-  } catch (e) {
-    console.error(e)
-  } finally {
-    searchLoading.value = false
-  }
-}
-
-async function blockUser(userId: number) {
-  blockLoadingId.value = userId
-  try {
-    const res = await apiFetch(`/api/blocks/${userId}`, { method: 'POST' })
-    if (res.ok) {
-      await fetchBlockedUsers()
-      blockSearchQuery.value = ''
-      searchResults.value = []
-      alert('کاربر با موفقیت مسدود شد.')
-    } else {
-      const data = await res.json()
-      alert(data.detail || 'خطا در بلاک کاربر')
-    }
-  } catch(e) {
-    console.error(e)
-    alert('خطا در برقراری ارتباط')
-  } finally {
-    blockLoadingId.value = null
-  }
-}
-
-async function unblockUser(userId: number) {
-  if (!confirm('آیا از رفع مسدودیت این کاربر اطمینان دارید؟')) return
-  
-  blockLoadingId.value = userId
-  try {
-    const res = await apiFetch(`/api/blocks/${userId}`, { method: 'DELETE' })
-    if (res.ok) {
-      await fetchBlockedUsers()
-    } else {
-      const data = await res.json()
-      alert(data.detail || 'خطا در رفع مسدودیت')
-    }
-  } catch(e) {
-    console.error(e)
-    alert('خطا در برقراری ارتباط')
-  } finally {
-    blockLoadingId.value = null
-  }
 }
 
 onMounted(() => {
@@ -282,81 +201,6 @@ onMounted(() => {
             </button>
             <p v-if="cacheFeedback" class="storage-feedback">{{ cacheFeedback }}</p>
           </div>
-        </div>
-      </div>
-
-      <!-- Blocked Users Accordion -->
-      <div class="ds-accordion">
-        <div class="ds-accordion-header" @click="toggleSection('blocks')">
-          <div class="ds-accordion-header-info">
-            <UserX :size="18" class="icon-primary" />
-            <h2>لیست مسدودشدگان</h2>
-          </div>
-          <component :is="openSections.blocks ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </div>
-        <div v-show="openSections.blocks" class="ds-accordion-body">
-          
-          <div class="block-search-box">
-            <p class="section-hint">کاربران مسدود شده تنها از انجام معامله در بازار با شما محروم می‌شوند و هیچ محدودیتی در پیام‌رسان نخواهند داشت. شخص مسدود شده متوجه مسدود شدنش نخواهد شد.</p>
-            <div class="search-input-wrapper">
-              <Search :size="18" class="search-icon" />
-              <input 
-                type="text" 
-                v-model="blockSearchQuery" 
-                placeholder="جستجوی نام کاربری یا شماره موبایل..." 
-                @input="searchUsersToBlock"
-              />
-              <Loader2 v-if="searchLoading" :size="18" class="search-loading spin-icon" />
-            </div>
-
-            <!-- Search Results -->
-            <div v-if="searchResults.length > 0" class="search-results">
-              <div v-for="user in searchResults" :key="user.id" class="user-row">
-                <div class="user-info">
-                  <span class="user-name">{{ user.full_name || user.account_name }}</span>
-                  <span class="user-phone">{{ user.mobile_number }}</span>
-                </div>
-                <button 
-                  v-if="!user.is_blocked" 
-                  class="btn-block" 
-                  @click="blockUser(user.id)"
-                  :disabled="blockLoadingId === user.id"
-                >
-                  <Loader2 v-if="blockLoadingId === user.id" :size="14" class="spin-icon" />
-                  <span v-else>مسدود کن</span>
-                </button>
-                <span v-else class="already-blocked">مسدود شده</span>
-              </div>
-            </div>
-          </div>
-
-          <hr class="divider" />
-
-          <!-- Blocked List -->
-          <div class="blocked-list">
-            <h4 class="list-title">کاربران مسدود شده ({{ blockedUsers.length }})</h4>
-            <div v-if="blockedUsers.length === 0" class="empty-inline">
-              لیست مسدودشدگان شما خالی است.
-            </div>
-            <div v-else class="blocked-list-items">
-              <div v-for="user in blockedUsers" :key="user.id" class="user-row blocked-user-row">
-                <div class="user-info">
-                  <span class="user-name">{{ user.full_name || user.account_name }}</span>
-                  <span class="user-phone">{{ user.mobile_number }}</span>
-                </div>
-                <button 
-                  class="btn-unblock" 
-                  @click="unblockUser(user.id)"
-                  :disabled="blockLoadingId === user.id"
-                >
-                  <Loader2 v-if="blockLoadingId === user.id" :size="14" class="spin-icon" />
-                  <Unlock v-else :size="14" />
-                  <span>رفع مسدودیت</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
 
@@ -570,144 +414,6 @@ onMounted(() => {
   margin: 0;
   text-align: center;
 }
-
-/* Blocks Section */
-.section-hint {
-  font-size: var(--ds-font-sm);
-  color: var(--ds-text-muted);
-  margin-bottom: 0.75rem;
-  line-height: 1.5;
-}
-
-.search-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.75rem;
-}
-.search-icon {
-  position: absolute;
-  right: 0.75rem;
-  color: var(--ds-text-placeholder);
-}
-.search-loading {
-  position: absolute;
-  left: 0.75rem;
-  color: var(--ds-primary-500);
-}
-.search-input-wrapper input {
-  width: 100%;
-  padding: 0.6rem 2.25rem 0.6rem 0.75rem;
-  border: 1px solid var(--ds-border-strong);
-  border-radius: var(--ds-radius-md);
-  font-size: var(--ds-font-base);
-  outline: none;
-  transition: border-color 0.2s;
-}
-.search-input-wrapper input:focus {
-  border-color: var(--ds-primary-500);
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
-}
-
-.search-results {
-  background: var(--ds-bg-inset);
-  border: 1px solid var(--ds-border-medium);
-  border-radius: var(--ds-radius-md);
-  overflow: hidden;
-  margin-bottom: 1rem;
-}
-.user-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--ds-border-light);
-}
-.user-row:last-child {
-  border-bottom: none;
-}
-.user-info {
-  display: flex;
-  flex-direction: column;
-}
-.user-name {
-  font-size: var(--ds-font-base);
-  font-weight: 600;
-  color: var(--ds-text-primary);
-}
-.user-phone {
-  font-size: var(--ds-font-sm);
-  color: var(--ds-text-muted);
-  direction: ltr;
-  text-align: right;
-}
-
-.btn-block {
-  padding: 0.35rem 0.6rem;
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-500);
-  border: 1px solid var(--ds-danger-200);
-  border-radius: 6px;
-  font-size: var(--ds-font-xs);
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-}
-.btn-block:hover { background: var(--ds-danger-100); }
-.btn-block:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.already-blocked {
-  font-size: var(--ds-font-xs);
-  color: var(--ds-text-placeholder);
-  font-weight: 500;
-}
-
-.divider {
-  border: 0;
-  height: 1px;
-  background: rgba(245, 158, 11, 0.1);
-  margin: 1.25rem 0;
-}
-
-.blocked-list {
-  display: flex;
-  flex-direction: column;
-}
-.blocked-list-items {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.list-title {
-  font-size: var(--ds-font-base);
-  font-weight: 700;
-  color: var(--ds-text-secondary);
-  margin: 0 0 0.75rem 0;
-}
-.blocked-user-row {
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
-}
-.btn-unblock {
-  padding: 0.35rem 0.6rem;
-  background: var(--ds-bg-hover);
-  color: var(--ds-text-secondary);
-  border: 1px solid var(--ds-border-strong);
-  border-radius: 6px;
-  font-size: var(--ds-font-xs);
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  white-space: nowrap;
-}
-.btn-unblock:hover { background: var(--ds-border-medium); }
-.btn-unblock:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .logout-btn {
   width: 100%;

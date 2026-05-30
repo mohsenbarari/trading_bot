@@ -12,6 +12,7 @@ from core.db import get_db
 from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.customer_relation_service import (
     create_owner_customer_relation,
+    is_user_customer,
     list_owner_customer_relations,
     load_customer_relation_invitation_map,
     unlink_owner_customer_relation,
@@ -72,9 +73,12 @@ def serialize_customer_session(session: UserSession) -> schemas.CustomerSessionR
     )
 
 
-def ensure_owner_context(context: EffectiveOwnerActor) -> None:
+async def ensure_owner_context(context: EffectiveOwnerActor, db: AsyncSession) -> None:
     if context.is_accountant_context:
         raise HTTPException(status_code=403, detail="Accountants cannot manage owner customers")
+    actor_user = getattr(context, "actor_user", None) or context.owner_user
+    if hasattr(db, "execute") and await is_user_customer(db, actor_user.id):
+        raise HTTPException(status_code=403, detail="Customers cannot manage owner customers")
 
 
 async def get_active_owner_customer_relation(
@@ -126,7 +130,7 @@ async def list_my_customers(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relations = await list_owner_customer_relations(db, owner_user_id=context.owner_user.id)
     invitation_map = await load_customer_relation_invitation_map(
         db,
@@ -144,7 +148,7 @@ async def create_my_customer(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation, invitation = await create_owner_customer_relation(
         db,
         owner_user=context.owner_user,
@@ -176,7 +180,7 @@ async def unlink_my_customer(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation = await unlink_owner_customer_relation(
         db,
         owner_user_id=context.owner_user.id,
@@ -193,7 +197,7 @@ async def update_my_customer(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation = await update_owner_customer_relation(
         db,
         owner_user_id=context.owner_user.id,
@@ -210,7 +214,7 @@ async def list_my_customer_sessions(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation = await get_active_owner_customer_relation(
         db,
         owner_user_id=context.owner_user.id,
@@ -227,7 +231,7 @@ async def terminate_my_customer_session(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     try:
         normalized_session_id = uuid.UUID(session_id)
     except ValueError as exc:

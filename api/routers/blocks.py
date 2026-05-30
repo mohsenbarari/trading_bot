@@ -21,6 +21,7 @@ from core.services.block_service import (
     search_users_for_block,
     is_blocked_by
 )
+from core.services.customer_relation_service import is_user_customer
 
 router = APIRouter(
     tags=["User Blocks"]
@@ -63,6 +64,14 @@ class MessageResponse(BaseModel):
     message: str
 
 
+CUSTOMER_BLOCK_MANAGEMENT_DETAIL = "سیستم بلاک مشتریان توسط مالک مدیریت می‌شود."
+
+
+async def ensure_block_management_allowed(db: AsyncSession, current_user: User) -> None:
+    if hasattr(db, "execute") and await is_user_customer(db, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=CUSTOMER_BLOCK_MANAGEMENT_DETAIL)
+
+
 # ===== Endpoints =====
 
 @router.get("/status", response_model=BlockStatusResponse)
@@ -89,6 +98,7 @@ async def get_my_blocked_users(
     """
     لیست کاربران مسدود شده توسط من
     """
+    await ensure_block_management_allowed(db, current_user)
     blocked = await get_blocked_users(db, current_user.id)
     return blocked
 
@@ -102,6 +112,7 @@ async def block_a_user(
     """
     مسدود کردن کاربر
     """
+    await ensure_block_management_allowed(db, current_user)
     # چک وجود کاربر هدف
     target_user = await db.get(User, user_id)
     if not target_user or target_user.is_deleted:
@@ -130,6 +141,7 @@ async def unblock_a_user(
     """
     رفع مسدودیت کاربر
     """
+    await ensure_block_management_allowed(db, current_user)
     success, message = await unblock_user(db, current_user.id, user_id)
     
     if not success:
@@ -171,5 +183,6 @@ async def search_users(
     """
     جستجوی کاربران برای بلاک/رفع بلاک
     """
+    await ensure_block_management_allowed(db, current_user)
     users = await search_users_for_block(db, q, current_user.id, limit)
     return users

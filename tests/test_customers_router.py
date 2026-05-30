@@ -56,6 +56,21 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             await create_my_customer(payload, context=context, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 403)
 
+    async def test_owner_routes_reject_customer_context(self):
+        context = SimpleNamespace(
+            is_accountant_context=False,
+            owner_user=SimpleNamespace(id=7),
+            actor_user=SimpleNamespace(id=7),
+        )
+        db = SimpleNamespace(execute=AsyncMock())
+
+        with patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=True)):
+            with self.assertRaises(HTTPException) as exc_info:
+                await list_my_customers(context=context, db=db)
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertIn("Customers cannot manage owner customers", exc_info.exception.detail)
+
     async def test_create_and_list_owner_customers_serialize_registration_links(self):
         relation = SimpleNamespace(
             id=9,

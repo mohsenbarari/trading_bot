@@ -46,25 +46,6 @@ const sessionsFixture = [
   },
 ]
 
-const blockedUsersFixture = [
-  {
-    id: 88,
-    full_name: 'Blocked User',
-    account_name: 'blocked-user',
-    mobile_number: '09120000000',
-  },
-]
-
-const searchResultsFixture = [
-  {
-    id: 99,
-    full_name: 'Search User',
-    account_name: 'search-user',
-    mobile_number: '09125550000',
-    is_blocked: false,
-  },
-]
-
 function responseOf(data: unknown, ok = true) {
   return {
     ok,
@@ -94,10 +75,6 @@ describe('SettingsView.vue', () => {
       if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({})
       if (path === '/api/sessions/logout-all' && options?.method === 'POST') return responseOf({})
       if (path === '/api/sessions/session-current' && options?.method === 'DELETE') return responseOf({})
-      if (path === '/api/blocks/') return responseOf(blockedUsersFixture)
-      if (path.startsWith('/api/blocks/search?')) return responseOf(searchResultsFixture)
-      if (path === '/api/blocks/99' && options?.method === 'POST') return responseOf({})
-      if (path === '/api/blocks/88' && options?.method === 'DELETE') return responseOf({})
       return responseOf({})
     })
 
@@ -162,35 +139,13 @@ describe('SettingsView.vue', () => {
     wrapper.unmount()
   })
 
-  it('loads blocked users, searches users, blocks, and unblocks through the blocks accordion', async () => {
+  it('does not render the blocked-users management section or call block APIs', async () => {
     const wrapper = await mountSettingsView()
     await flushPromises()
 
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    await accordions[2]!.trigger('click')
-    await flushPromises()
-
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/blocks/')
-    expect(wrapper.text()).toContain('Blocked User')
-
-    const searchInput = wrapper.find('.search-input-wrapper input')
-    await searchInput.setValue('se')
-    await flushPromises()
-
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/blocks/search?q=se&limit=5')
-    expect(wrapper.text()).toContain('Search User')
-
-    await wrapper.find('.btn-block').trigger('click')
-    await flushPromises()
-
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/blocks/99', { method: 'POST' })
-    expect(window.alert).toHaveBeenCalledWith('کاربر با موفقیت مسدود شد.')
-
-    await wrapper.find('.btn-unblock').trigger('click')
-    await flushPromises()
-
-    expect(window.confirm).toHaveBeenCalled()
-    expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/blocks/88', { method: 'DELETE' })
+    expect(wrapper.text()).not.toContain('لیست مسدودشدگان')
+    expect(wrapper.find('.search-input-wrapper').exists()).toBe(false)
+    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => String(path).startsWith('/api/blocks'))).toBe(false)
 
     wrapper.unmount()
   })
@@ -241,60 +196,7 @@ describe('SettingsView.vue', () => {
     expect(wrapper.find('.storage-feedback').exists()).toBe(false)
   })
 
-  it('handles short block searches, renders already-blocked results, and surfaces block API failures', async () => {
-    settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === '/api/sessions/active') return responseOf(sessionsFixture)
-      if (path === '/api/blocks/') return responseOf(blockedUsersFixture)
-      if (path === '/api/blocks/search?q=ab&limit=5') {
-        return responseOf([
-          {
-            id: 77,
-            full_name: 'Already Blocked',
-            account_name: 'already-blocked',
-            mobile_number: '09121111111',
-            is_blocked: true,
-          },
-          {
-            id: 88,
-            full_name: 'Blocked User',
-            account_name: 'blocked-user',
-            mobile_number: '09120000000',
-            is_blocked: true,
-          },
-        ])
-      }
-      if (path === '/api/blocks/search?q=xy&limit=5') return responseOf(searchResultsFixture)
-      if (path === '/api/blocks/99' && options?.method === 'POST') {
-        return responseOf({ detail: 'limit reached' }, false)
-      }
-      return responseOf({})
-    })
-
-    const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    await accordions[2]!.trigger('click')
-    await flushPromises()
-
-    const searchInput = wrapper.find('.search-input-wrapper input')
-    await searchInput.setValue('a')
-    await flushPromises()
-    expect(wrapper.find('.search-results').exists()).toBe(false)
-
-    await searchInput.setValue('ab')
-    await flushPromises()
-    expect(wrapper.find('.already-blocked').text()).toBe('مسدود شده')
-
-    await searchInput.setValue('xy')
-    await flushPromises()
-    await wrapper.find('.btn-block').trigger('click')
-    await flushPromises()
-
-    expect(window.alert).toHaveBeenCalledWith('limit reached')
-  })
-
-  it('surfaces unblock network failures and still force-logs out when no current session exists', async () => {
+  it('still force-logs out when no current session exists', async () => {
     settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/sessions/active') {
         return responseOf([
@@ -308,23 +210,11 @@ describe('SettingsView.vue', () => {
           },
         ])
       }
-      if (path === '/api/blocks/') return responseOf(blockedUsersFixture)
-      if (path === '/api/blocks/88' && options?.method === 'DELETE') {
-        throw new Error('network failed')
-      }
       return responseOf({})
     })
 
     const wrapper = await mountSettingsView()
     await flushPromises()
-
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    await accordions[2]!.trigger('click')
-    await flushPromises()
-
-    await wrapper.find('.btn-unblock').trigger('click')
-    await flushPromises()
-    expect(window.alert).toHaveBeenCalledWith('خطا در برقراری ارتباط')
 
     await wrapper.find('.logout-btn').trigger('click')
     await flushPromises()

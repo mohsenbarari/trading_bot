@@ -12,6 +12,7 @@ from core.services.accountant_relation_service import (
     unlink_owner_accountant_relation,
     update_owner_accountant_relation,
 )
+from core.services.customer_relation_service import is_user_customer
 from core.sms import send_accountant_invitation_sms
 
 
@@ -45,9 +46,12 @@ def serialize_accountant_relation(relation) -> dict:
     }
 
 
-def ensure_owner_context(context: EffectiveOwnerActor) -> None:
+async def ensure_owner_context(context: EffectiveOwnerActor, db: AsyncSession) -> None:
     if context.is_accountant_context:
         raise HTTPException(status_code=403, detail="Accountants cannot manage owner accountants")
+    actor_user = getattr(context, "actor_user", None) or context.owner_user
+    if hasattr(db, "execute") and await is_user_customer(db, actor_user.id):
+        raise HTTPException(status_code=403, detail="Customers cannot manage owner accountants")
 
 
 @router.get("/owner-relations", response_model=list[schemas.AccountantRelationRead])
@@ -55,7 +59,7 @@ async def list_my_accountants(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relations = await list_owner_accountant_relations(db, owner_user_id=context.owner_user.id)
     return [serialize_accountant_relation(relation) for relation in relations]
 
@@ -66,7 +70,7 @@ async def create_my_accountant(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation, _invitation = await create_owner_accountant_relation(
         db,
         owner_user=context.owner_user,
@@ -93,7 +97,7 @@ async def cancel_my_pending_accountant(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation = await unlink_owner_accountant_relation(
         db,
         owner_user_id=context.owner_user.id,
@@ -109,7 +113,7 @@ async def update_my_accountant(
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     db: AsyncSession = Depends(get_db),
 ):
-    ensure_owner_context(context)
+    await ensure_owner_context(context, db)
     relation = await update_owner_accountant_relation(
         db,
         owner_user_id=context.owner_user.id,
