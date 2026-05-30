@@ -79,6 +79,7 @@ interface AdminMarketMessage {
 }
 
 type CustomerTierValue = 'tier1' | 'tier2' | null
+type MarketFilterType = 'all' | 'buy' | 'sell' | 'my'
 
 const MARKET_CLOSED_DETAIL = 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.'
 
@@ -94,7 +95,7 @@ const marketRuntime = ref<MarketRuntimeState>({
   next_transition_at: null,
 })
 
-const filterType = ref<'all' | 'buy' | 'sell' | 'my'>('all')
+const filterType = ref<MarketFilterType>('all')
 
 const filteredOffers = computed(() => {
   let list = offers.value || []
@@ -135,6 +136,9 @@ const offerInputRef = ref<HTMLTextAreaElement | null>(null)
 const adminMarketMessage = ref<AdminMarketMessage | null>(null)
 const adminMarketMessageExpanded = ref(false)
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
+const visibleTabs = computed<MarketFilterType[]>(() => (
+  isTier2Customer.value ? ['all', 'buy', 'sell'] : ['all', 'buy', 'sell', 'my']
+))
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
@@ -575,6 +579,9 @@ async function fetchCurrentUser() {
 
 watch(isTier2Customer, (blocked) => {
   if (!blocked) return
+  if (filterType.value === 'my') {
+    filterType.value = 'all'
+  }
   offerText.value = ''
   pendingOfferPreview.value = null
   previewWarning.value = null
@@ -623,9 +630,9 @@ onUnmounted(() => {
       <div class="header-controls">
         <div class="tabs-container">
           <button 
-            v-for="tab in ['all', 'buy', 'sell', 'my']" 
+            v-for="tab in visibleTabs" 
             :key="tab"
-            @click="filterType = tab as any"
+            @click="filterType = tab"
             class="tab-btn"
             :class="{ active: filterType === tab }"
           >
@@ -689,84 +696,76 @@ onUnmounted(() => {
     />
 
     <!-- Bottom Action Bar -->
-    <div class="market-action-bar" :class="{ 'market-action-bar--notice': isTier2Customer }">
-        <div class="action-bar-inner">
-        <template v-if="isTier2Customer">
-          <div class="tier2-offer-note">
-            <div class="tier2-offer-note-title">ثبت لفظ برای مشتری سطح 2 غیرفعال است</div>
-            <div class="tier2-offer-note-text">شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.</div>
-          </div>
-        </template>
-        <template v-else>
-          <!-- Text Input Row -->
-          <div ref="recentOffersRef" class="input-wrapper">
-            <button
-              type="button"
-              class="recent-offers-toggle"
-              :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
-              :disabled="isSubmitting"
-              aria-label="نمایش لفظ‌های اخیر"
-              @click="toggleRecentOffersMenu"
-            >
-              <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
-              <ChevronDown v-else :size="17" />
-            </button>
-            <transition name="recent-offers-dropdown">
-              <div v-if="recentOffersOpen" class="recent-offers-dropdown">
-                <div v-if="recentOffersLoading" class="recent-offers-state">
-                  در حال بارگذاری...
-                </div>
-                <div v-else-if="recentOffersError" class="recent-offers-state recent-offers-state--error">
-                  {{ recentOffersError }}
-                </div>
-                <div v-else-if="!recentOffers.length" class="recent-offers-state">
-                  در یک ساعت گذشته لفظی نداشتید.
-                </div>
-                <button
-                  v-for="offer in recentOffers"
-                  :key="offer.id"
-                  type="button"
-                  class="recent-offer-item"
-                  @click="openRecentOfferPreview(offer)"
-                >
-                  <div class="recent-offer-item-main">
-                    <span class="recent-offer-item-badge" :class="offer.offer_type === 'buy' ? 'recent-offer-item-badge--buy' : 'recent-offer-item-badge--sell'">
-                      {{ offer.offer_type === 'buy' ? 'خ' : 'ف' }}
-                    </span>
-                    <span class="recent-offer-item-copy">
-                      <span class="recent-offer-item-summary">
-                        {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
-                      </span>
-                      <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
-                        {{ formatRecentOfferDetails(offer) }}
-                      </span>
-                    </span>
-                  </div>
-                </button>
+    <div v-if="!isTier2Customer" class="market-action-bar">
+      <div class="action-bar-inner">
+        <!-- Text Input Row -->
+        <div ref="recentOffersRef" class="input-wrapper">
+          <button
+            type="button"
+            class="recent-offers-toggle"
+            :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
+            :disabled="isSubmitting"
+            aria-label="نمایش لفظ‌های اخیر"
+            @click="toggleRecentOffersMenu"
+          >
+            <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
+            <ChevronDown v-else :size="17" />
+          </button>
+          <transition name="recent-offers-dropdown">
+            <div v-if="recentOffersOpen" class="recent-offers-dropdown">
+              <div v-if="recentOffersLoading" class="recent-offers-state">
+                در حال بارگذاری...
               </div>
-            </transition>
-            <textarea
-              ref="offerInputRef"
-              v-model="offerText"
-              :placeholder="marketInputPlaceholder"
-              class="text-offer-input"
-              rows="1"
-              :disabled="!isMarketOpen || isSubmitting"
-              @input="syncOfferInputHeight"
-              @keydown.enter.prevent="parseAndSubmitTextOffer"
-            ></textarea>
-            <button 
-              @click="parseAndSubmitTextOffer"
-              :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
-              class="send-btn"
-            >
-              <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
-              <Send v-else :size="20" />
-            </button>
-          </div>
-          <div v-if="parseError" class="parse-error">{{ parseError }}</div>
-        </template>
+              <div v-else-if="recentOffersError" class="recent-offers-state recent-offers-state--error">
+                {{ recentOffersError }}
+              </div>
+              <div v-else-if="!recentOffers.length" class="recent-offers-state">
+                در یک ساعت گذشته لفظی نداشتید.
+              </div>
+              <button
+                v-for="offer in recentOffers"
+                :key="offer.id"
+                type="button"
+                class="recent-offer-item"
+                @click="openRecentOfferPreview(offer)"
+              >
+                <div class="recent-offer-item-main">
+                  <span class="recent-offer-item-badge" :class="offer.offer_type === 'buy' ? 'recent-offer-item-badge--buy' : 'recent-offer-item-badge--sell'">
+                    {{ offer.offer_type === 'buy' ? 'خ' : 'ف' }}
+                  </span>
+                  <span class="recent-offer-item-copy">
+                    <span class="recent-offer-item-summary">
+                      {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
+                    </span>
+                    <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
+                      {{ formatRecentOfferDetails(offer) }}
+                    </span>
+                  </span>
+                </div>
+              </button>
+            </div>
+          </transition>
+          <textarea
+            ref="offerInputRef"
+            v-model="offerText"
+            :placeholder="marketInputPlaceholder"
+            class="text-offer-input"
+            rows="1"
+            :disabled="!isMarketOpen || isSubmitting"
+            @input="syncOfferInputHeight"
+            @keydown.enter.prevent="parseAndSubmitTextOffer"
+          ></textarea>
+          <button 
+            @click="parseAndSubmitTextOffer"
+            :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
+            class="send-btn"
+          >
+            <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
+            <Send v-else :size="20" />
+          </button>
         </div>
+        <div v-if="parseError" class="parse-error">{{ parseError }}</div>
+      </div>
     </div>
   </div>
 </template>
@@ -1014,34 +1013,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.market-action-bar--notice {
-  background: rgba(255, 248, 235, 0.97);
-  border-top-color: rgba(217, 119, 6, 0.18);
-}
-
-.tier2-offer-note {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.9rem 1rem;
-  border-radius: var(--ds-radius-lg);
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.98), rgba(255, 237, 213, 0.96));
-  border: 1px solid rgba(217, 119, 6, 0.2);
-  color: var(--ds-warning-700, #9a3412);
-  box-shadow: 0 10px 24px rgba(217, 119, 6, 0.08);
-}
-
-.tier2-offer-note-title {
-  font-size: 0.88rem;
-  font-weight: 800;
-}
-
-.tier2-offer-note-text {
-  font-size: 0.78rem;
-  line-height: 1.6;
-  color: var(--ds-warning-600, #b45309);
 }
 
 .input-wrapper {

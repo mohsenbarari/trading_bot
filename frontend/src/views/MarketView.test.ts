@@ -750,7 +750,7 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
-  it('replaces the create-offer bar with a read-only note for tier2 customers', async () => {
+  it('hides the create-offer bar and your-offers tab for tier2 customers', async () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
@@ -763,9 +763,45 @@ describe('MarketView.vue', () => {
 
     expect(wrapper.find('.text-offer-input').exists()).toBe(false)
     expect(wrapper.find('.send-btn').exists()).toBe(false)
-    expect(wrapper.find('.tier2-offer-note').exists()).toBe(true)
-    expect(wrapper.text()).toContain('ثبت لفظ برای مشتری سطح 2 غیرفعال است')
-    expect(wrapper.text()).toContain('شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.')
+    expect(wrapper.find('.market-action-bar').exists()).toBe(false)
+    expect(wrapper.find('.tier2-offer-note').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('ثبت لفظ برای مشتری سطح 2 غیرفعال است')
+    expect(wrapper.text()).not.toContain('شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.')
+    expect(wrapper.findAll('.tab-btn').map((btn) => btn.text())).not.toContain('لفظ های شما')
+
+    wrapper.unmount()
+  })
+
+  it('resets the selected your-offers tab when tier2 access loads', async () => {
+    let resolveMe: ((value: unknown) => void) | null = null
+    marketViewMocks.apiFetchMock.mockImplementation((path: string) => {
+      if (path === '/api/commodities/') return Promise.resolve(responseOf(commoditiesFixture))
+      if (path === '/api/trading-settings/') return Promise.resolve(responseOf(settingsFixture))
+      if (path === '/api/auth/me') {
+        return new Promise((resolve) => {
+          resolveMe = resolve
+        }) as Promise<any>
+      }
+      return Promise.resolve(responseOf(null))
+    })
+
+    const wrapper = await mountMarketView()
+    await nextTick()
+
+    const myTab = wrapper.findAll('.tab-btn').find((btn) => btn.text() === 'لفظ های شما')
+    expect(myTab?.exists()).toBe(true)
+    await myTab!.trigger('click')
+    expect(wrapper.find('.tab-btn.active').text()).toBe('لفظ های شما')
+
+    if (!resolveMe) {
+      throw new Error('Expected auth/me resolver')
+    }
+    ;(resolveMe as (value: unknown) => void)(responseOf({ id: 77, customer_tier: 'tier2' }))
+    await flushPromises()
+
+    expect(wrapper.findAll('.tab-btn').map((btn) => btn.text())).not.toContain('لفظ های شما')
+    expect(wrapper.find('.tab-btn.active').text()).toBe('همه')
+    expect(wrapper.find('.market-action-bar').exists()).toBe(false)
 
     wrapper.unmount()
   })
