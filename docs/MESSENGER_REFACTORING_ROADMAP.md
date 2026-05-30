@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-30  
-> Status: Stage 5 composer/overlay UX boundary implemented; legacy Messenger remains the default
+> Status: Stage 6 media/realtime polish boundary implemented; legacy Messenger remains the default
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -15,6 +15,7 @@ Rebuild the Messenger experience into a standard, cohesive, responsive, and poli
 - Stage 3 executive phase is implemented for the first controller boundary: route query normalization, selection batch handling, album context resolution, and grouped timeline shaping now live behind typed, focused-tested pure helpers while `ChatView.vue` still owns runtime side effects.
 - Stage 4 executive phase is implemented for conversation/timeline performance: conversation ordering and pin-order calculations now live behind a typed helper, the conversation list renders through a bounded progressive window, and timeline render-budget metrics identify future virtualization candidates without changing the risky message DOM contract.
 - Stage 5 executive phase is implemented for composer/overlay UX: composer surface decisions and overlay arbitration now live behind a typed, focused-tested pure helper while the existing `ChatInputBar.vue` and `ChatView.vue` production path remains active.
+- Stage 6 executive phase is implemented for media/realtime polish: realtime activity normalization, relation-safe activity labels, visible-conversation runtime event guards, and media download progress patches now live behind a typed, focused-tested pure helper while the existing `useChatWebSocket.ts` and `useChatMedia.ts` runtime paths remain active.
 - No real Messenger UI replacement is active by default. The existing `ChatView.vue` path remains the production path unless `messenger_ui_version=refactor` or `VITE_MESSENGER_REFACTOR_ENABLED=true` explicitly enables the shell.
 
 ## Current Baseline
@@ -81,6 +82,17 @@ The Stage 5 executive slice makes composer and overlay state explicit without re
 - Focused coverage lives in `messengerStage5ComposerOverlay.test.ts`, `ChatInputBar.test.ts`, and the existing `ChatView.test.ts` wiring suite.
 
 Rollback remains local: revert the Stage 5 utility/test plus the small `ChatInputBar.vue` and `ChatView.vue` wiring patches. No backend, API, schema, heavy attachment editor, map, cropper, or upload pipeline changed.
+
+## Stage 6 Media/Realtime Polish Contract
+
+The Stage 6 executive slice makes media progress state and realtime activity policy explicit without rewriting the advanced upload/cache/lightbox stack or backend realtime contracts.
+
+- `frontend/src/utils/messengerStage6MediaRealtime.ts` owns pure realtime conversation-key resolution, activity payload normalization, direct-vs-room activity label formatting, visible-conversation runtime event guards, and normalized media download progress patches.
+- `useChatWebSocket.ts` now delegates typing/upload activity payload parsing and label generation to the Stage 6 helper while preserving existing direct/group/channel websocket subscriptions, read-receipt handling, reaction patching, and debounced conversation reload behavior.
+- `useChatMedia.ts` now delegates document/media download state patches and visible-conversation upload/download event guards to the Stage 6 helper while preserving the existing EXIF-safe image path, edited-image passthrough, background/resumable upload ownership, document cache, media cache, cancellation, and lazy hydration behavior.
+- Focused coverage lives in `messengerStage6MediaRealtime.test.ts`, `useChatWebSocket.test.ts`, and `useChatMedia.test.ts`.
+
+Rollback remains local: revert the Stage 6 utility/test plus the small `useChatWebSocket.ts` and `useChatMedia.ts` wiring patches. No backend, API, schema, lightbox component, attachment editor, map, cropper, upload session, cache schema, or notification runtime contract changed.
 
 ## Non-Negotiable Safety Rules
 
