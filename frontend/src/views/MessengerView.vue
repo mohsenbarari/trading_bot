@@ -3,12 +3,20 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { apiFetch } from '../utils/auth'
 import ChatView from '../components/ChatView.vue'
+import MessengerRefactorShell from '../components/messenger-v2/MessengerRefactorShell.vue'
+import {
+  markMessengerPerformance,
+  measureMessengerPerformance,
+  resolveMessengerUiVersion,
+} from '../utils/messengerRefactor'
 
 const router = useRouter()
 const route = useRoute()
 
 const user = ref<any>(null)
 const loading = ref(true)
+const messengerUiVersion = ref(resolveMessengerUiVersion())
+let messengerSurfaceMarked = false
 
 const jwtToken = computed(() => {
   return localStorage.getItem('auth_token') || ''
@@ -31,7 +39,19 @@ const targetUserName = computed(() => {
   return route.query.user_name as string | undefined
 })
 
+const isMessengerRefactorShellEnabled = computed(() => messengerUiVersion.value === 'refactor')
+
+watch([loading, user, messengerUiVersion], () => {
+  if (loading.value || !user.value || messengerSurfaceMarked) {
+    return
+  }
+
+  messengerSurfaceMarked = true
+  markMessengerPerformance(`${messengerUiVersion.value}-surface-ready`)
+})
+
 async function fetchUser() {
+  markMessengerPerformance('current-user-fetch-start')
   try {
     const res = await apiFetch('/api/auth/me')
     if (res.ok) {
@@ -40,11 +60,14 @@ async function fetchUser() {
   } catch (e) {
     console.error(e)
   } finally {
+    markMessengerPerformance('current-user-fetch-end')
+    measureMessengerPerformance('current-user-fetch', 'current-user-fetch-start', 'current-user-fetch-end')
     loading.value = false
   }
 }
 
 onMounted(() => {
+  markMessengerPerformance('route-mounted')
   fetchUser()
 })
 
@@ -72,7 +95,21 @@ function handleBack() {
       <div class="loading-spinner"></div>
     </div>
     <div v-else-if="user" class="chat-wrapper">
+      <MessengerRefactorShell
+        v-if="isMessengerRefactorShellEnabled"
+        :apiBaseUrl="apiBaseUrl"
+        :jwtToken="jwtToken"
+        :currentUserId="user.id"
+        :currentUserRole="user.role || null"
+        :currentUserIsAccountant="user.is_accountant === true"
+        :currentUserIsCustomer="user.is_customer === true"
+        :targetUserId="targetUserId"
+        :targetUserName="targetUserName"
+        @navigate="handleNavigate"
+        @back="handleBack"
+      />
       <ChatView 
+        v-else
         :apiBaseUrl="apiBaseUrl"
         :jwtToken="jwtToken"
         :currentUserId="user.id"
