@@ -1532,6 +1532,15 @@ function openAdminBroadcastModal() {
   showAdminBroadcastModal.value = true
 }
 
+function closeGroupManager() {
+  showGroupManagerModal.value = false
+  groupManagerChatId.value = null
+}
+
+function closeAdminBroadcastModal() {
+  showAdminBroadcastModal.value = false
+}
+
 function closeChannelManager() {
   channelManagerChatId.value = null
   showChannelManagerModal.value = false
@@ -2844,6 +2853,18 @@ bindOverlayBackState(() => Boolean(lightboxMedia.value), () => {
   closeLightbox()
 })
 
+bindOverlayBackState(() => showGroupManagerModal.value, () => {
+  closeGroupManager()
+})
+
+bindOverlayBackState(() => showChannelManagerModal.value, () => {
+  closeChannelManager()
+})
+
+bindOverlayBackState(() => showAdminBroadcastModal.value, () => {
+  closeAdminBroadcastModal()
+})
+
 function handleToggleAttachment(composerValue?: string) {
   const canOpenAttachment = !(selectedRoomKind.value === 'channel' && !canSendToSelectedRoom.value)
   if (!canOpenAttachment) {
@@ -3021,7 +3042,10 @@ defineExpose({
     openNewConversation,
     openGroupCreation,
     openChannelCreation,
+    openAdminBroadcastModal,
+    closeGroupManager,
     closeChannelManager,
+    closeAdminBroadcastModal,
     startAlbumDownloadSelection,
     startAlbumForwardSelection,
     startAlbumShareSelection,
@@ -3476,7 +3500,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :show="showGroupManagerModal"
       :groupId="groupManagerChatId"
       :currentUserId="props.currentUserId"
-      @close="showGroupManagerModal = false"
+      @close="closeGroupManager"
       @created="handleGroupCreated"
       @updated="handleGroupUpdated"
       @left="handleGroupLeft"
@@ -3501,7 +3525,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     </div>
     <AdminBroadcastModal
       v-if="showAdminBroadcastModal"
-      @close="showAdminBroadcastModal = false"
+      @close="closeAdminBroadcastModal"
       @sent="void loadConversations()"
     />
     </div>

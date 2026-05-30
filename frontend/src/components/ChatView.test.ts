@@ -713,6 +713,51 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('registers manager and admin overlays on the back stack and closes them from the back callback', async () => {
+    const wrapper = await mountChatView({ currentUserRole: 'مدیر ارشد' })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    chatViewMocks.pushBackStateMock.mockClear()
+    hooks.state.groupManagerChatId.value = 91
+    hooks.state.showGroupManagerModal.value = true
+    await flushPromises()
+
+    let overlayBackCallback = chatViewMocks.pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(overlayBackCallback).toBeTypeOf('function')
+    overlayBackCallback?.()
+    await flushPromises()
+    expect(hooks.state.showGroupManagerModal.value).toBe(false)
+    expect(hooks.state.groupManagerChatId.value).toBeNull()
+
+    chatViewMocks.pushBackStateMock.mockClear()
+    chatViewMocks.loadConversationsMock.mockClear()
+    hooks.state.channelManagerChatId.value = 23
+    hooks.state.showChannelManagerModal.value = true
+    await flushPromises()
+
+    overlayBackCallback = chatViewMocks.pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(overlayBackCallback).toBeTypeOf('function')
+    overlayBackCallback?.()
+    await flushPromises()
+    expect(hooks.state.showChannelManagerModal.value).toBe(false)
+    expect(hooks.state.channelManagerChatId.value).toBeNull()
+    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+
+    chatViewMocks.pushBackStateMock.mockClear()
+    hooks.openAdminBroadcastModal()
+    await flushPromises()
+    expect(hooks.state.showAdminBroadcastModal.value).toBe(true)
+
+    overlayBackCallback = chatViewMocks.pushBackStateMock.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(overlayBackCallback).toBeTypeOf('function')
+    overlayBackCallback?.()
+    await flushPromises()
+    expect(hooks.state.showAdminBroadcastModal.value).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('rolls back optimistic reactions when the reaction request fails', async () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})

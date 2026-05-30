@@ -17,7 +17,11 @@
     "test:e2e:firefox": "playwright test --project=firefox --workers=1",
     "test:e2e:webkit": "playwright test --project=webkit --workers=1",
     "test:e2e:matrix": "playwright test --project=chromium --project=firefox --project=webkit --workers=1",
-    "test:e2e:all": "playwright test"
+    "test:e2e:all": "playwright test",
+    "benchmark:messenger:prepare": "python3 ../scripts/prepare_messenger_benchmark_versions.py",
+    "benchmark:messenger": "node ../scripts/run_messenger_benchmark.mjs",
+    "benchmark:messenger:report": "python3 ../scripts/build_messenger_benchmark_report.py",
+    "benchmark:messenger:surface-report": "python3 ../scripts/build_messenger_surface_report.py"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",

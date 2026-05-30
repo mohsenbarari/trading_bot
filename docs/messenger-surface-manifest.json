@@ -1,0 +1,989 @@
+{
+  "manifest_version": "2026-05-30.v1",
+  "status": "draft",
+  "surface_count": 14,
+  "canonical_sources": [
+    "docs/MESSENGER_REFACTORING_ROADMAP.md",
+    "docs/MESSENGER_VERSION_COMPARISON_TEST_PLAN.md",
+    "docs/AUTOMATED_TEST_CHECKLIST.md"
+  ],
+  "comparison_modes": [
+    {
+      "id": "historical-regression",
+      "label": "Mode A - Historical Regression Baseline",
+      "compare": [
+        "pre-refactor-legacy",
+        "current-legacy"
+      ],
+      "purpose": "Detect whether the current production Messenger regressed against the historical pre-refactor baseline."
+    },
+    {
+      "id": "live-parity",
+      "label": "Mode B - Live Parity Comparison",
+      "compare": [
+        "current-legacy",
+        "current-refactor"
+      ],
+      "purpose": "Detect functional and UX drift while both versions run on the same current backend/runtime."
+    },
+    {
+      "id": "release-gate",
+      "label": "Mode C - Release Gate Comparison",
+      "compare": [
+        "rollout-candidate-refactor",
+        "current-production-legacy"
+      ],
+      "purpose": "Decide whether the refactor can become the default and whether legacy retirement can begin."
+    }
+  ],
+  "test_layers": [
+    {
+      "id": "L0",
+      "label": "Surface Manifest Audit",
+      "outputs": [
+        "docs/messenger-surface-manifest.json",
+        "docs/messenger-surface-report.md"
+      ]
+    },
+    {
+      "id": "L1",
+      "label": "Contract And State Diff",
+      "outputs": [
+        "comparison-summary.json",
+        "surface-status.json"
+      ]
+    },
+    {
+      "id": "L2",
+      "label": "Deterministic Component And Composable Tests",
+      "outputs": [
+        "vitest parity results",
+        "component diff artifacts"
+      ]
+    },
+    {
+      "id": "L3",
+      "label": "Full Functional Parity E2E",
+      "outputs": [
+        "playwright traces",
+        "per-surface pass/fail report"
+      ]
+    },
+    {
+      "id": "L4",
+      "label": "Performance Benchmark",
+      "outputs": [
+        "performance-results.json",
+        "comparison-summary.md"
+      ]
+    },
+    {
+      "id": "L5",
+      "label": "Resilience And Recovery",
+      "outputs": [
+        "resilience scenario report",
+        "failure artifact links"
+      ]
+    },
+    {
+      "id": "L6",
+      "label": "Manual UX Review",
+      "outputs": [
+        "manual acceptance checklist",
+        "sign-off notes"
+      ]
+    }
+  ],
+  "severity_levels": {
+    "S1": "Data loss, wrong recipient/room behavior, broken access rule, or broken upload/download integrity.",
+    "S2": "Core action unavailable or inconsistent across versions, wrong navigation/back-stack outcome, or broken notification route/identity.",
+    "S3": "UX inconsistency, animation/layout mismatch, or non-blocking visual drift.",
+    "S4": "Cosmetic or non-user-facing instrumentation mismatch."
+  },
+  "scenario_packs": [
+    {
+      "id": "S00",
+      "label": "Fresh boot and empty-state sanity",
+      "seed_profile": "new user, no direct rooms, mandatory room only",
+      "primary_surfaces": [
+        "M01",
+        "M02",
+        "M05",
+        "M14"
+      ]
+    },
+    {
+      "id": "S01",
+      "label": "Light direct chat",
+      "seed_profile": "8 conversations, 40 active-room messages",
+      "primary_surfaces": [
+        "M02",
+        "M03",
+        "M06",
+        "M07",
+        "M08"
+      ]
+    },
+    {
+      "id": "S02",
+      "label": "Heavy direct chat",
+      "seed_profile": "120 conversations, 700 active-room messages",
+      "primary_surfaces": [
+        "M02",
+        "M03",
+        "M07",
+        "M14"
+      ]
+    },
+    {
+      "id": "S03",
+      "label": "Media-heavy direct room",
+      "seed_profile": "mixed image/video/voice/document/location album history",
+      "primary_surfaces": [
+        "M07",
+        "M09",
+        "M10",
+        "M14"
+      ]
+    },
+    {
+      "id": "S04",
+      "label": "Search/viewer stress",
+      "seed_profile": "long searchable history with replies and older matches",
+      "primary_surfaces": [
+        "M03",
+        "M09",
+        "M14"
+      ]
+    },
+    {
+      "id": "S05",
+      "label": "Group admin/member matrix",
+      "seed_profile": "one writable group, one read-only member view",
+      "primary_surfaces": [
+        "M04",
+        "M06",
+        "M11",
+        "M13"
+      ]
+    },
+    {
+      "id": "S06",
+      "label": "Channel admin/member matrix",
+      "seed_profile": "optional writable channel, mandatory read-only room",
+      "primary_surfaces": [
+        "M05",
+        "M06",
+        "M11",
+        "M13"
+      ]
+    },
+    {
+      "id": "S07",
+      "label": "Notification/realtime stress",
+      "seed_profile": "multi-room message bursts, reactions, mentions, typing/upload activity",
+      "primary_surfaces": [
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "id": "S08",
+      "label": "Identity and permission matrix",
+      "seed_profile": "owner/accountant/customer/blocked viewers and room/profile access",
+      "primary_surfaces": [
+        "M11",
+        "M12",
+        "M13"
+      ]
+    },
+    {
+      "id": "S09",
+      "label": "Upload/download persistence",
+      "seed_profile": "route leave, reload, resume, cancel, open/share/download from cache",
+      "primary_surfaces": [
+        "M08",
+        "M10",
+        "M14"
+      ]
+    },
+    {
+      "id": "S10",
+      "label": "Weak-device performance",
+      "seed_profile": "CPU/network throttled Chromium plus reduced-motion preference",
+      "primary_surfaces": [
+        "M01",
+        "M02",
+        "M03",
+        "M06",
+        "M07",
+        "M14"
+      ]
+    },
+    {
+      "id": "S11",
+      "label": "Long-session soak",
+      "seed_profile": "20-30 minute event mix with room switching and managers",
+      "primary_surfaces": [
+        "M02",
+        "M03",
+        "M10",
+        "M11",
+        "M13",
+        "M14"
+      ]
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "M01",
+      "area": "Shell, bootstrap, and navigation",
+      "release_owner": "frontend-messenger-shell",
+      "integration_owners": [
+        "frontend-auth-runtime",
+        "frontend-session-status-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Messenger route mount and feature-flag version gate",
+        "Auth bootstrap and loading states",
+        "Route-query restore and browser/device back-stack behavior",
+        "PWA boot interactions and session/account-status redirects"
+      ],
+      "primary_scenarios": [
+        "S00",
+        "S10",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/src/views/MessengerView.test.ts",
+        "frontend/e2e/auth.spec.ts",
+        "frontend/e2e/account-status.spec.ts"
+      ],
+      "required_new_work": [
+        "Add explicit old/new route-shell comparison",
+        "Add boot-state UX assertions for versioned Messenger startup",
+        "Include browser-back and route-restore comparison artifacts"
+      ],
+      "key_metrics": [
+        "route_ready_ms",
+        "boot_error_rate",
+        "route_restore_success_rate"
+      ]
+    },
+    {
+      "id": "M02",
+      "area": "Conversation list",
+      "release_owner": "frontend-conversation-runtime",
+      "integration_owners": [
+        "frontend-realtime-runtime",
+        "backend-chat-read-model"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Ordering, pin reorder, mandatory-room ordering",
+        "Mute/unmute, manual unread, hide/unfollow",
+        "Unread mention badge and long-press actions",
+        "Progressive rendering and empty/loading/error states"
+      ],
+      "primary_scenarios": [
+        "S00",
+        "S01",
+        "S02",
+        "S07",
+        "S10",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/messenger-conversation-actions.spec.ts",
+        "frontend/src/components/chat/ChatConversationList.test.ts",
+        "docs/AUTOMATED_TEST_CHECKLIST.md"
+      ],
+      "required_new_work": [
+        "Add version-diff snapshot for list density and action affordances",
+        "Benchmark list rendering on large seeded sets",
+        "Track progressive-window behavior across versions"
+      ],
+      "key_metrics": [
+        "conversation_list_ready_ms",
+        "conversation_row_render_count",
+        "conversation_menu_open_ms"
+      ]
+    },
+    {
+      "id": "M03",
+      "area": "Direct room core",
+      "release_owner": "frontend-direct-room-runtime",
+      "integration_owners": [
+        "backend-chat-runtime",
+        "frontend-realtime-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S1",
+      "must_include": [
+        "Open room, text send/edit/delete, read state",
+        "Reply, forward, reactions, mentions",
+        "Pinned messages, selection mode, draft/edit restore"
+      ],
+      "primary_scenarios": [
+        "S01",
+        "S02",
+        "S04",
+        "S07",
+        "S10",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/direct-chat.spec.ts",
+        "frontend/e2e/messenger-pinned-message.spec.ts",
+        "frontend/e2e/messenger-direct-room-ux.spec.ts"
+      ],
+      "required_new_work": [
+        "Add explicit old/new behavioral parity harness for direct-room core flows",
+        "Capture direct-room contract diffs for navigation, draft state, and message actions",
+        "Add per-version result summaries for reply/forward/reaction state"
+      ],
+      "key_metrics": [
+        "chat_first_paint_ms",
+        "message_action_latency_ms",
+        "direct_room_error_rate"
+      ]
+    },
+    {
+      "id": "M04",
+      "area": "Group room",
+      "release_owner": "frontend-group-room-runtime",
+      "integration_owners": [
+        "backend-chat-room-runtime",
+        "frontend-room-management"
+      ],
+      "comparison_modes": [
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Membership-aware send/read/react flows",
+        "Unread/live append behavior",
+        "Mentions and room activity labels",
+        "Manager entry points and group-specific header semantics"
+      ],
+      "primary_scenarios": [
+        "S05",
+        "S07",
+        "S08",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/channel-media.spec.ts",
+        "frontend/src/components/chat/ChatGroupManagerModal.test.ts"
+      ],
+      "required_new_work": [
+        "Add version-diff coverage for group header, density, and manager UX",
+        "Add explicit group parity report against legacy behavior contracts",
+        "Measure group room reaction and unread patch latency"
+      ],
+      "key_metrics": [
+        "group_room_open_ms",
+        "group_event_patch_ms",
+        "group_manager_flow_success_rate"
+      ]
+    },
+    {
+      "id": "M05",
+      "area": "Channel room",
+      "release_owner": "frontend-channel-room-runtime",
+      "integration_owners": [
+        "backend-chat-room-runtime",
+        "frontend-room-management"
+      ],
+      "comparison_modes": [
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Admin/member composer gating",
+        "Mandatory and optional channel behavior",
+        "Unread/read reset, reactions, room-open behavior",
+        "Channel-specific room management and header actions"
+      ],
+      "primary_scenarios": [
+        "S00",
+        "S06",
+        "S07",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/channel-media.spec.ts",
+        "frontend/e2e/mandatory-channel.spec.ts",
+        "frontend/src/views/CreateChannelView.vue"
+      ],
+      "required_new_work": [
+        "Add explicit old/new parity for admin/member composer semantics",
+        "Compare mandatory vs optional channel UX consistency across versions",
+        "Add channel manager parity artifacts"
+      ],
+      "key_metrics": [
+        "channel_room_open_ms",
+        "channel_read_reset_ms",
+        "channel_composer_gate_accuracy"
+      ]
+    },
+    {
+      "id": "M06",
+      "area": "Composer and overlays",
+      "release_owner": "frontend-composer-overlay-runtime",
+      "integration_owners": [
+        "frontend-keyboard-runtime",
+        "frontend-media-entry-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Text area, emoji/sticker picker, attachment sheet",
+        "Reply/edit banners and read-only banners",
+        "Selection action bar, search mode, overlay arbitration",
+        "Keyboard transitions and back-stack behavior"
+      ],
+      "primary_scenarios": [
+        "S01",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S10"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/src/components/chat/ChatInputBar.test.ts",
+        "frontend/src/components/chat/AttachmentMenu.test.ts",
+        "frontend/e2e/messenger-direct-room-ux.spec.ts"
+      ],
+      "required_new_work": [
+        "Add overlay-arbitration comparison across versions",
+        "Add keyboard-motion and composer-state consistency snapshots",
+        "Measure enter/exit latency for search and selection overlays"
+      ],
+      "key_metrics": [
+        "overlay_open_ms",
+        "selection_mode_enter_ms",
+        "selection_mode_exit_ms"
+      ]
+    },
+    {
+      "id": "M07",
+      "area": "Message rendering",
+      "release_owner": "frontend-message-renderer",
+      "integration_owners": [
+        "frontend-media-runtime",
+        "frontend-identity-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Text, sticker, emoji-rich text",
+        "Image, album, video, voice, document, file, location",
+        "Forwarded metadata, reply preview, mention highlight",
+        "Selection highlight and pinned indicator"
+      ],
+      "primary_scenarios": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S10"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/src/components/chat/ChatMessageItem.test.ts",
+        "frontend/e2e/channel-media.spec.ts",
+        "frontend/src/components/chat/ChatAlbumLayout.vue"
+      ],
+      "required_new_work": [
+        "Add per-message-family parity screenshots across versions",
+        "Split message-family comparison results by renderer type",
+        "Measure render cost for heavy media mixes"
+      ],
+      "key_metrics": [
+        "message_family_render_ms",
+        "media_bubble_layout_shift_count",
+        "heavy_room_dom_nodes"
+      ]
+    },
+    {
+      "id": "M08",
+      "area": "Actions and batch operations",
+      "release_owner": "frontend-message-actions",
+      "integration_owners": [
+        "frontend-selection-runtime",
+        "backend-chat-mutation-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Context menu, selection mode, copy, reply, forward, delete",
+        "Share, album actions, pin/unpin",
+        "Browser-back exit behavior and destructive confirmations"
+      ],
+      "primary_scenarios": [
+        "S01",
+        "S03",
+        "S04",
+        "S09"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/src/components/chat/ChatContextMenu.test.ts",
+        "frontend/e2e/messenger-direct-room-ux.spec.ts",
+        "frontend/e2e/messenger-pinned-message.spec.ts"
+      ],
+      "required_new_work": [
+        "Add one cross-version batch-actions suite",
+        "Compare destructive-confirmation semantics and browser-back exits",
+        "Measure context-menu and action-apply latency across versions"
+      ],
+      "key_metrics": [
+        "context_menu_open_ms",
+        "batch_action_apply_ms",
+        "browser_back_exit_success_rate"
+      ]
+    },
+    {
+      "id": "M09",
+      "area": "Search, history navigation, and viewer flows",
+      "release_owner": "frontend-search-viewer-runtime",
+      "integration_owners": [
+        "frontend-timeline-runtime",
+        "frontend-media-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "In-chat search, global search list, result navigation",
+        "Scroll-to-target and scroll-to-reply behavior",
+        "Date separators, search/list toggle",
+        "Lightbox, album viewer, and location viewer"
+      ],
+      "primary_scenarios": [
+        "S03",
+        "S04"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/messenger-direct-room-ux.spec.ts",
+        "frontend/src/components/chat/ChatLightbox.test.ts",
+        "frontend/src/components/chat/LocationViewerModal.test.ts"
+      ],
+      "required_new_work": [
+        "Add old/new parity for search result UX and viewer toolbar behavior",
+        "Add per-viewer screenshot comparisons",
+        "Measure search-ready and viewer-open latency"
+      ],
+      "key_metrics": [
+        "search_ready_ms",
+        "scroll_to_target_ms",
+        "lightbox_open_ms"
+      ]
+    },
+    {
+      "id": "M10",
+      "area": "Media, upload, download, and cache pipeline",
+      "release_owner": "frontend-media-runtime",
+      "integration_owners": [
+        "backend-upload-runtime",
+        "frontend-file-cache-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S1",
+      "must_include": [
+        "Background and resumable uploads",
+        "Upload/download progress and cancellation",
+        "Document/media cache reuse",
+        "Open/share/download flows and reload/route-leave survival"
+      ],
+      "primary_scenarios": [
+        "S03",
+        "S09",
+        "S10",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/src/composables/chat/useChatMedia.test.ts",
+        "frontend/src/composables/chat/useChatFileHandler.test.ts",
+        "frontend/e2e/channel-media.spec.ts",
+        "frontend/e2e/messenger-direct-room-ux.spec.ts"
+      ],
+      "required_new_work": [
+        "Add version-diff performance and resilience scenarios for media-heavy rooms",
+        "Promote temporary benchmark tooling into committed media comparison tooling",
+        "Add failure-artifact bundles for upload/download recovery mismatches"
+      ],
+      "key_metrics": [
+        "upload_handoff_ms",
+        "upload_first_progress_ms",
+        "download_first_progress_ms",
+        "download_completion_ms"
+      ]
+    },
+    {
+      "id": "M11",
+      "area": "Room and profile management",
+      "release_owner": "frontend-room-management",
+      "integration_owners": [
+        "backend-chat-room-runtime",
+        "frontend-public-profile-runtime"
+      ],
+      "comparison_modes": [
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "New conversation flow",
+        "Group/channel create, edit, avatar, member, and admin flows",
+        "Public profile opens from Messenger and owner/self profile entry points"
+      ],
+      "primary_scenarios": [
+        "S05",
+        "S06",
+        "S08",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/src/components/chat/ChatNewConversationModal.test.ts",
+        "frontend/e2e/messenger-room-manager-profile.spec.ts",
+        "frontend/src/components/PublicProfile.test.ts"
+      ],
+      "required_new_work": [
+        "Add full old/new manager-flow comparison including back-stack consistency",
+        "Add profile-entry parity checks from all Messenger launch points",
+        "Measure manager modal reopen and save latency"
+      ],
+      "key_metrics": [
+        "manager_open_ms",
+        "manager_save_ms",
+        "profile_open_from_messenger_ms"
+      ]
+    },
+    {
+      "id": "M12",
+      "area": "Identity, permission, and business rules",
+      "release_owner": "messenger-business-contracts",
+      "integration_owners": [
+        "backend-users-public-runtime",
+        "backend-customer-accountant-contracts"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S1",
+      "must_include": [
+        "Accountant and customer identity resolution",
+        "Public-profile routing and owner-resolution metadata",
+        "Block state, room access rules, and owner/customer visibility restrictions",
+        "Notification label correctness under business rules"
+      ],
+      "primary_scenarios": [
+        "S07",
+        "S08",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/customer-chat-privacy.spec.ts",
+        "frontend/e2e/accountant-owner-flow.spec.ts",
+        "frontend/e2e/customer-owner-flow.spec.ts"
+      ],
+      "required_new_work": [
+        "Add cross-version parity checks for labels, affordances, and blocked access",
+        "Compare business-rule-correct routes and room visibility outcomes",
+        "Produce identity-resolution diff reports for Messenger entry points"
+      ],
+      "key_metrics": [
+        "permission_denial_accuracy",
+        "identity_label_accuracy",
+        "profile_route_accuracy"
+      ]
+    },
+    {
+      "id": "M13",
+      "area": "Realtime and notification runtime",
+      "release_owner": "frontend-realtime-notification-runtime",
+      "integration_owners": [
+        "backend-realtime-runtime",
+        "frontend-notification-store"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "Message delivery, typing/upload activity, and read receipts",
+        "Reaction fanout and unread counters",
+        "Browser notifications, in-app toasts, and deep-link routing",
+        "Muted-room suppression and label correctness"
+      ],
+      "primary_scenarios": [
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "frontend/e2e/notifications.spec.ts",
+        "frontend/src/composables/useNotificationRuntime.test.ts",
+        "backend websocket and notification coverage"
+      ],
+      "required_new_work": [
+        "Add version-diff latency and label-correctness report for live events",
+        "Compare muted-room suppression behavior across versions",
+        "Capture deep-link routing parity under live event load"
+      ],
+      "key_metrics": [
+        "event_to_ui_latency_ms",
+        "toast_route_accuracy",
+        "notification_suppression_accuracy"
+      ]
+    },
+    {
+      "id": "M14",
+      "area": "Reliability, accessibility, localization, and performance",
+      "release_owner": "messenger-performance-and-reliability",
+      "integration_owners": [
+        "frontend-messenger-shell",
+        "frontend-media-runtime",
+        "frontend-realtime-notification-runtime"
+      ],
+      "comparison_modes": [
+        "historical-regression",
+        "live-parity",
+        "release-gate"
+      ],
+      "release_severity": "S2",
+      "must_include": [
+        "RTL, Jalali, and Tehran timestamp correctness",
+        "Reduced motion and weak-device behavior",
+        "Reconnect/offline recovery and browser compatibility",
+        "Bundle size, heap, DOM count, jank, and responsiveness"
+      ],
+      "primary_scenarios": [
+        "S00",
+        "S02",
+        "S03",
+        "S04",
+        "S07",
+        "S09",
+        "S10",
+        "S11"
+      ],
+      "test_layers": [
+        "L0",
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5",
+        "L6"
+      ],
+      "existing_evidence": [
+        "tmp/messenger_benchmark_results.json",
+        "frontend/e2e/account-status.spec.ts",
+        "reconnect/runtime test slices"
+      ],
+      "required_new_work": [
+        "Promote the current temporary benchmark into committed comparison tooling",
+        "Run median warmed Chromium benchmarks with per-surface metrics",
+        "Gate rollout on browser matrix plus manual UX review"
+      ],
+      "key_metrics": [
+        "bundle_js_gzip_kb",
+        "bundle_css_gzip_kb",
+        "js_heap_used_mb",
+        "dom_node_count",
+        "scroll_fps",
+        "janky_frame_count"
+      ]
+    }
+  ],
+  "release_gate": {
+    "blocking_severities": [
+      "S1",
+      "S2"
+    ],
+    "required_browsers": [
+      "chromium",
+      "firefox",
+      "webkit"
+    ],
+    "required_modes": [
+      "historical-regression",
+      "live-parity",
+      "release-gate"
+    ],
+    "required_artifacts": [
+      "comparison-summary.json",
+      "comparison-summary.md",
+      "surface-status.json",
+      "performance-results.json"
+    ],
+    "required_outcomes": [
+      "Every M01-M14 surface is covered by at least one deterministic comparison layer.",
+      "Chromium parity and performance comparison are green on the required scenario set.",
+      "Firefox and WebKit are green on the final parity slice.",
+      "Heavy-room metrics are measurably better than the current Stage 7 baseline.",
+      "Manual UX review confirms one unified interaction model across direct rooms, groups, channels, managers, and media viewers."
+    ]
+  }
+}
