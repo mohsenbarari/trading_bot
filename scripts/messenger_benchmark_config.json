@@ -5,6 +5,10 @@
   "comparison_summary_markdown": "tmp/messenger-benchmark/comparison-summary.md",
   "comparison_summary_json": "tmp/messenger-benchmark/comparison-summary.json",
   "surface_status_json": "tmp/messenger-benchmark/surface-status.json",
+  "resilience_report_markdown": "docs/MESSENGER_RESILIENCE_REPORT.md",
+  "resilience_report_json": "tmp/messenger-benchmark/resilience-report.json",
+  "manual_acceptance_markdown": "docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md",
+  "manual_acceptance_json": "tmp/messenger-benchmark/manual-acceptance.json",
   "performance": {
     "backend": {
       "host": "127.0.0.1",
@@ -662,6 +666,56 @@
       "covers": [
         "M11",
         "M12"
+      ]
+    },
+    {
+      "id": "messenger-resilience-report",
+      "layer": "L5",
+      "kind": "artifact",
+      "outputs": [
+        "docs/MESSENGER_RESILIENCE_REPORT.md",
+        "tmp/messenger-benchmark/resilience-report.json"
+      ],
+      "covers": [
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "M07",
+        "M08",
+        "M09",
+        "M10",
+        "M11",
+        "M12",
+        "M13",
+        "M14"
+      ]
+    },
+    {
+      "id": "messenger-manual-acceptance",
+      "layer": "L6",
+      "kind": "artifact",
+      "outputs": [
+        "docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md",
+        "tmp/messenger-benchmark/manual-acceptance.json"
+      ],
+      "covers": [
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06",
+        "M07",
+        "M08",
+        "M09",
+        "M10",
+        "M11",
+        "M12",
+        "M13",
+        "M14"
       ]
     }
   ]

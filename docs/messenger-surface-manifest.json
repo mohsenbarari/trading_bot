@@ -1,11 +1,13 @@
 {
-  "manifest_version": "2026-05-30.v1",
-  "status": "draft",
+  "manifest_version": "2026-05-31.v2",
+  "status": "benchmark-complete",
   "surface_count": 14,
   "canonical_sources": [
     "docs/MESSENGER_REFACTORING_ROADMAP.md",
     "docs/MESSENGER_VERSION_COMPARISON_TEST_PLAN.md",
-    "docs/AUTOMATED_TEST_CHECKLIST.md"
+    "docs/AUTOMATED_TEST_CHECKLIST.md",
+    "docs/MESSENGER_RESILIENCE_REPORT.md",
+    "docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md"
   ],
   "comparison_modes": [
     {
@@ -81,16 +83,16 @@
       "id": "L5",
       "label": "Resilience And Recovery",
       "outputs": [
-        "resilience scenario report",
-        "failure artifact links"
+        "docs/MESSENGER_RESILIENCE_REPORT.md",
+        "tmp/messenger-benchmark/resilience-report.json"
       ]
     },
     {
       "id": "L6",
       "label": "Manual UX Review",
       "outputs": [
-        "manual acceptance checklist",
-        "sign-off notes"
+        "docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md",
+        "tmp/messenger-benchmark/manual-acceptance.json"
       ]
     }
   ],
@@ -278,11 +280,7 @@
         "frontend/e2e/auth.spec.ts",
         "frontend/e2e/account-status.spec.ts"
       ],
-      "required_new_work": [
-        "Add explicit old/new route-shell comparison",
-        "Add boot-state UX assertions for versioned Messenger startup",
-        "Include browser-back and route-restore comparison artifacts"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "route_ready_ms",
         "boot_error_rate",
@@ -331,11 +329,7 @@
         "frontend/src/components/chat/ChatConversationList.test.ts",
         "docs/AUTOMATED_TEST_CHECKLIST.md"
       ],
-      "required_new_work": [
-        "Add version-diff snapshot for list density and action affordances",
-        "Benchmark list rendering on large seeded sets",
-        "Track progressive-window behavior across versions"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "conversation_list_ready_ms",
         "conversation_row_render_count",
@@ -383,11 +377,7 @@
         "frontend/e2e/messenger-pinned-message.spec.ts",
         "frontend/e2e/messenger-direct-room-ux.spec.ts"
       ],
-      "required_new_work": [
-        "Add explicit old/new behavioral parity harness for direct-room core flows",
-        "Capture direct-room contract diffs for navigation, draft state, and message actions",
-        "Add per-version result summaries for reply/forward/reaction state"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "chat_first_paint_ms",
         "message_action_latency_ms",
@@ -431,11 +421,7 @@
         "frontend/e2e/channel-media.spec.ts",
         "frontend/src/components/chat/ChatGroupManagerModal.test.ts"
       ],
-      "required_new_work": [
-        "Add version-diff coverage for group header, density, and manager UX",
-        "Add explicit group parity report against legacy behavior contracts",
-        "Measure group room reaction and unread patch latency"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "group_room_open_ms",
         "group_event_patch_ms",
@@ -480,11 +466,7 @@
         "frontend/e2e/mandatory-channel.spec.ts",
         "frontend/src/views/CreateChannelView.vue"
       ],
-      "required_new_work": [
-        "Add explicit old/new parity for admin/member composer semantics",
-        "Compare mandatory vs optional channel UX consistency across versions",
-        "Add channel manager parity artifacts"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "channel_room_open_ms",
         "channel_read_reset_ms",
@@ -533,11 +515,7 @@
         "frontend/src/components/chat/AttachmentMenu.test.ts",
         "frontend/e2e/messenger-direct-room-ux.spec.ts"
       ],
-      "required_new_work": [
-        "Add overlay-arbitration comparison across versions",
-        "Add keyboard-motion and composer-state consistency snapshots",
-        "Measure enter/exit latency for search and selection overlays"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "overlay_open_ms",
         "selection_mode_enter_ms",
@@ -585,11 +563,7 @@
         "frontend/e2e/channel-media.spec.ts",
         "frontend/src/components/chat/ChatAlbumLayout.vue"
       ],
-      "required_new_work": [
-        "Add per-message-family parity screenshots across versions",
-        "Split message-family comparison results by renderer type",
-        "Measure render cost for heavy media mixes"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "message_family_render_ms",
         "media_bubble_layout_shift_count",
@@ -635,11 +609,7 @@
         "frontend/e2e/messenger-direct-room-ux.spec.ts",
         "frontend/e2e/messenger-pinned-message.spec.ts"
       ],
-      "required_new_work": [
-        "Add one cross-version batch-actions suite",
-        "Compare destructive-confirmation semantics and browser-back exits",
-        "Measure context-menu and action-apply latency across versions"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "context_menu_open_ms",
         "batch_action_apply_ms",
@@ -684,11 +654,7 @@
         "frontend/src/components/chat/ChatLightbox.test.ts",
         "frontend/src/components/chat/LocationViewerModal.test.ts"
       ],
-      "required_new_work": [
-        "Add old/new parity for search result UX and viewer toolbar behavior",
-        "Add per-viewer screenshot comparisons",
-        "Measure search-ready and viewer-open latency"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "search_ready_ms",
         "scroll_to_target_ms",
@@ -736,11 +702,7 @@
         "frontend/e2e/channel-media.spec.ts",
         "frontend/e2e/messenger-direct-room-ux.spec.ts"
       ],
-      "required_new_work": [
-        "Add version-diff performance and resilience scenarios for media-heavy rooms",
-        "Promote temporary benchmark tooling into committed media comparison tooling",
-        "Add failure-artifact bundles for upload/download recovery mismatches"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "upload_handoff_ms",
         "upload_first_progress_ms",
@@ -785,11 +747,7 @@
         "frontend/e2e/messenger-room-manager-profile.spec.ts",
         "frontend/src/components/PublicProfile.test.ts"
       ],
-      "required_new_work": [
-        "Add full old/new manager-flow comparison including back-stack consistency",
-        "Add profile-entry parity checks from all Messenger launch points",
-        "Measure manager modal reopen and save latency"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "manager_open_ms",
         "manager_save_ms",
@@ -834,11 +792,7 @@
         "frontend/e2e/accountant-owner-flow.spec.ts",
         "frontend/e2e/customer-owner-flow.spec.ts"
       ],
-      "required_new_work": [
-        "Add cross-version parity checks for labels, affordances, and blocked access",
-        "Compare business-rule-correct routes and room visibility outcomes",
-        "Produce identity-resolution diff reports for Messenger entry points"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "permission_denial_accuracy",
         "identity_label_accuracy",
@@ -886,11 +840,7 @@
         "frontend/src/composables/useNotificationRuntime.test.ts",
         "backend websocket and notification coverage"
       ],
-      "required_new_work": [
-        "Add version-diff latency and label-correctness report for live events",
-        "Compare muted-room suppression behavior across versions",
-        "Capture deep-link routing parity under live event load"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "event_to_ui_latency_ms",
         "toast_route_accuracy",
@@ -942,11 +892,7 @@
         "frontend/e2e/account-status.spec.ts",
         "reconnect/runtime test slices"
       ],
-      "required_new_work": [
-        "Promote the current temporary benchmark into committed comparison tooling",
-        "Run median warmed Chromium benchmarks with per-surface metrics",
-        "Gate rollout on browser matrix plus manual UX review"
-      ],
+      "required_new_work": [],
       "key_metrics": [
         "bundle_js_gzip_kb",
         "bundle_css_gzip_kb",
