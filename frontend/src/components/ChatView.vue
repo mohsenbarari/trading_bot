@@ -670,6 +670,7 @@ const isCurrentUserCustomer = computed(() => props.currentUserIsCustomer === tru
 const canStartNewConversation = computed(() => true)
 const canCreateGroup = computed(() => !isCurrentUserCustomer.value)
 const canCreateOptionalChannel = computed(() => (props.currentUserRole ?? null) === 'مدیر ارشد')
+const canSendAdminBroadcast = computed(() => (props.currentUserRole ?? null) === 'مدیر ارشد')
 
 const canSendToSelectedRoom = computed(() => {
   if (selectedRoomKind.value === 'direct') return true
@@ -1525,7 +1526,7 @@ function openChannelCreation() {
 }
 
 function openAdminBroadcastModal() {
-  if (!canCreateOptionalChannel.value) return
+  if (!canSendAdminBroadcast.value) return
   closeNewChatModalForAction()
   showAdminBroadcastModal.value = true
 }
@@ -3125,7 +3126,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
       :isRoomSystem="selectedRoomIsSystem"
       :canCreateGroup="canCreateGroup"
       :canCreateChannel="canCreateOptionalChannel"
-      :canSendAdminBroadcast="canCreateOptionalChannel"
+      :canSendAdminBroadcast="canSendAdminBroadcast"
       @back="goBack"
       @view-profile="viewProfile"
       @toggle-search="toggleSearch"

@@ -51,90 +51,103 @@
           </Transition>
         </div>
         <div class="menu-actions-panel telegram-panel telegram-menu-shadow">
-        <div class="menu-item" v-ripple @click="$emit('reply')" role="menuitem">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
-          <span style="flex:1;">پاسخ</span>
-        </div>
-        <div class="menu-item" v-ripple @click="$emit('forward')" role="menuitem">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
-          <span style="flex:1;">{{ isAlbumSelection ? 'هدایت آلبوم' : 'هدایت پیام' }}</span>
-        </div>
-        <template v-if="isAlbumSelection">
-            <div class="menu-item" v-ripple @click="$emit('save-album')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span style="flex:1;">دانلود آلبوم</span>
-            </div>
-            <div v-if="supportsFileShare" class="menu-item" v-ripple @click="$emit('share-album')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="18" cy="5" r="3"></circle>
-                <circle cx="6" cy="12" r="3"></circle>
-                <circle cx="18" cy="19" r="3"></circle>
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-              </svg>
-              <span style="flex:1;">اشتراک‌گذاری آلبوم</span>
-            </div>
-        </template>
-        <template v-if="menuState.message?.message_type === 'text'">
-            <div class="menu-item" v-ripple @click="$emit('copy')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span style="flex:1;">کپی کردن</span>
-            </div>
-        </template>
-        <!-- Save media option for images/videos -->
-        <template v-if="!isAlbumSelection && (menuState.message?.message_type === 'image' || menuState.message?.message_type === 'video')">
-            <div class="menu-item" v-ripple @click="$emit('save-media')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span style="flex:1;">ذخیره در گالری</span>
-            </div>
-        </template>
-        <!-- Share option for any cacheable media -->
-        <template v-if="supportsFileShare && !isAlbumSelection && shareableType">
-            <div class="menu-item" v-ripple @click="$emit('share')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="18" cy="5" r="3"></circle>
-                <circle cx="6" cy="12" r="3"></circle>
-                <circle cx="18" cy="19" r="3"></circle>
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-              </svg>
-              <span style="flex:1;">اشتراک‌گذاری</span>
-            </div>
-        </template>
-        <template v-if="canEdit">
-            <div class="menu-item" v-ripple @click="$emit('edit')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-              <span style="flex:1;">ویرایش</span>
-            </div>
-        </template>
-        <template v-if="canPin && !isAlbumSelection">
-            <div class="menu-item is-warning" v-ripple @click="$emit('pin-message')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 17v5"></path>
-                <path d="M5 7V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path>
-                <path d="M4 7h16l-3 6H7z"></path>
-              </svg>
-              <span style="flex:1;">{{ isPinnedMessage ? 'برداشتن پیام سنجاق‌شده' : 'سنجاق کردن پیام' }}</span>
-            </div>
-        </template>
-        <template v-if="canDelete">
+          <div class="menu-section-label">اقدام اصلی</div>
+          <div class="menu-item" v-ripple @click="$emit('reply')" role="menuitem">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
+            <span style="flex:1;">پاسخ</span>
+          </div>
+          <div class="menu-item" v-ripple @click="$emit('forward')" role="menuitem">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
+            <span style="flex:1;">{{ isAlbumSelection ? 'هدایت آلبوم' : 'هدایت پیام' }}</span>
+          </div>
+
+          <template v-if="hasRoomFileSection">
             <div class="menu-divider"></div>
+            <div class="menu-section-label">رسانه و فایل</div>
+            <template v-if="isAlbumSelection">
+              <div class="menu-item" v-ripple @click="$emit('save-album')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span style="flex:1;">دانلود آلبوم</span>
+              </div>
+              <div v-if="supportsFileShare" class="menu-item" v-ripple @click="$emit('share-album')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="18" cy="5" r="3"></circle>
+                  <circle cx="6" cy="12" r="3"></circle>
+                  <circle cx="18" cy="19" r="3"></circle>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+                <span style="flex:1;">اشتراک‌گذاری آلبوم</span>
+              </div>
+            </template>
+
+            <template v-if="!isAlbumSelection && (menuState.message?.message_type === 'image' || menuState.message?.message_type === 'video')">
+              <div class="menu-item" v-ripple @click="$emit('save-media')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span style="flex:1;">ذخیره در گالری</span>
+              </div>
+            </template>
+
+            <template v-if="supportsFileShare && !isAlbumSelection && shareableType">
+              <div class="menu-item" v-ripple @click="$emit('share')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="18" cy="5" r="3"></circle>
+                  <circle cx="6" cy="12" r="3"></circle>
+                  <circle cx="18" cy="19" r="3"></circle>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+                <span style="flex:1;">اشتراک‌گذاری</span>
+              </div>
+            </template>
+          </template>
+
+          <template v-if="hasCommunicationSection">
+            <div class="menu-divider"></div>
+            <div class="menu-section-label">ارتباط و پیام</div>
+            <template v-if="menuState.message?.message_type === 'text'">
+              <div class="menu-item" v-ripple @click="$emit('copy')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span style="flex:1;">کپی کردن</span>
+              </div>
+            </template>
+            <template v-if="canEdit">
+              <div class="menu-item" v-ripple @click="$emit('edit')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                <span style="flex:1;">ویرایش</span>
+              </div>
+            </template>
+            <template v-if="canPin && !isAlbumSelection">
+              <div class="menu-item is-warning" v-ripple @click="$emit('pin-message')" role="menuitem">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 17v5"></path>
+                  <path d="M5 7V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path>
+                  <path d="M4 7h16l-3 6H7z"></path>
+                </svg>
+                <span style="flex:1;">{{ isPinnedMessage ? 'برداشتن پیام سنجاق‌شده' : 'سنجاق کردن پیام' }}</span>
+              </div>
+            </template>
+          </template>
+
+          <template v-if="canDelete">
+            <div class="menu-divider"></div>
+            <div class="menu-section-label is-danger">اقدام حساس</div>
             <div class="menu-item is-danger" v-ripple @click="$emit('delete')" role="menuitem">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
               <span style="flex:1;">حذف</span>
             </div>
-        </template>
+          </template>
         </div>
       </div>
     </Transition>
@@ -188,6 +201,16 @@ const shareableType = computed(() => {
   return t === 'image' || t === 'video' || t === 'voice' || t === 'document'
 })
 
+const hasRoomFileSection = computed(() => {
+  if (props.isAlbumSelection) return true
+  if (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video') return true
+  return Boolean(supportsFileShare && !props.isAlbumSelection && shareableType.value)
+})
+
+const hasCommunicationSection = computed(() => {
+  return Boolean(props.menuState.message?.message_type === 'text' || props.canEdit || (props.canPin && !props.isAlbumSelection))
+})
+
 const currentUserReactionEmoji = computed(() => {
   const reactions = Array.isArray(props.menuState.message?.reactions) ? props.menuState.message.reactions : []
   const match = reactions.find((reaction: any) => Number(reaction?.user_id) === Number(props.currentUserId))
@@ -221,17 +244,22 @@ const menuPosition = computed(() => {
   const actionCount = [
     true,
     true,
-    props.isAlbumSelection,
-    props.isAlbumSelection && supportsFileShare,
+    hasRoomFileSection.value && props.isAlbumSelection,
+    hasRoomFileSection.value && props.isAlbumSelection && supportsFileShare,
     props.menuState.message?.message_type === 'text',
-    !props.isAlbumSelection && (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video'),
-    supportsFileShare && !props.isAlbumSelection && shareableType.value,
+    hasRoomFileSection.value && !props.isAlbumSelection && (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video'),
+    hasRoomFileSection.value && supportsFileShare && !props.isAlbumSelection && shareableType.value,
     props.canEdit,
-    props.canPin && !props.isAlbumSelection,
+    hasCommunicationSection.value && props.canPin && !props.isAlbumSelection,
     props.canDelete,
   ].filter(Boolean).length
+  const sectionCount = 1
+    + (hasRoomFileSection.value ? 1 : 0)
+    + (hasCommunicationSection.value ? 1 : 0)
+    + (props.canDelete ? 1 : 0)
+  const dividerCount = Math.max(sectionCount - 1, 0)
   const menuW = showReactionRow.value ? reactionPanelW : actionPanelW
-  const actionPanelH = actionCount * 44 + (props.canDelete ? 9 : 0) + 16
+  const actionPanelH = actionCount * 44 + sectionCount * 22 + dividerCount * 9 + 16
   const reactionSectionHeight = showReactionRow.value
     ? hasOverflowReactions.value
       ? (isReactionPickerExpanded.value ? 232 : 102)
@@ -342,6 +370,19 @@ const menuPosition = computed(() => {
 
 .menu-item.is-warning:hover {
   background: rgba(249, 115, 22, 0.08);
+}
+
+.menu-section-label {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.menu-section-label.is-danger {
+  color: #b91c1c;
 }
 
 .reaction-picker-shell {
