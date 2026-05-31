@@ -173,6 +173,36 @@
         ]
       },
       {
+        "id": "S08",
+        "runner_key": "identity_matrix",
+        "label": "Identity and permission matrix",
+        "scenario_type": "identity_matrix",
+        "conversation_count": 14,
+        "active_message_count": 36,
+        "filler_length": 20,
+        "switch_iterations": 2,
+        "surface_ids": [
+          "M11",
+          "M12",
+          "M13"
+        ]
+      },
+      {
+        "id": "S09",
+        "runner_key": "upload_persistence",
+        "label": "Upload/download persistence",
+        "scenario_type": "upload_persistence",
+        "conversation_count": 12,
+        "active_message_count": 52,
+        "filler_length": 18,
+        "switch_iterations": 1,
+        "surface_ids": [
+          "M08",
+          "M10",
+          "M14"
+        ]
+      },
+      {
         "id": "S10",
         "runner_key": "weak_device",
         "label": "Weak-device performance",

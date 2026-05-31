@@ -123,13 +123,16 @@ function seedBenchmarkFixture(scenarios) {
     'from core.security import create_access_token, create_refresh_token',
     'from core.services.chat_room_service import ensure_mandatory_channel_rollout',
     'from core.services.session_service import hash_token',
+    'from models.accountant_relation import AccountantRelation, AccountantRelationStatus',
     'from models.chat import Chat',
     'from models.chat_file import ChatFile',
     'from models.chat_member import ChatMember',
     'from models.conversation import Conversation',
+    'from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier',
     'from models.message import Message',
     'from models.session import Platform, UserSession',
     'from models.user import User, UserRole',
+    'from models.user_block import UserBlock',
     '',
     `fixture = json.loads(${JSON.stringify(JSON.stringify(fixture))})`,
     'run_id = uuid.uuid4().hex[:10]',
@@ -692,6 +695,188 @@ function seedBenchmarkFixture(scenarios) {
     '        ],',
     '    }',
     '',
+    'async def seed_identity_matrix_scenario(db, scenario_key, scenario, offset):',
+    '    actor = await make_user(db, f"{scenario_key}_actor", offset, role=UserRole.SUPER_ADMIN)',
+    '    access_token, refresh_token = await attach_session(db, actor, scenario_key)',
+    '    owner = await make_user(db, f"{scenario_key}_owner", offset + 1)',
+    '    owner_access, _ = await attach_session(db, owner, f"{scenario_key}_owner")',
+    '    accountant = await make_user(db, f"{scenario_key}_accountant", offset + 2)',
+    '    accountant_access, _ = await attach_session(db, accountant, f"{scenario_key}_accountant")',
+    '    customer = await make_user(db, f"{scenario_key}_customer", offset + 3)',
+    '    await attach_session(db, customer, f"{scenario_key}_customer")',
+    '    blocked_peer = await make_user(db, f"{scenario_key}_blocked", offset + 4)',
+    '    relation_expires_at = datetime.now(timezone.utc) + timedelta(days=30)',
+    '    db.add(AccountantRelation(',
+    '        owner_user_id=owner.id,',
+    '        accountant_user_id=accountant.id,',
+    '        created_by_user_id=actor.id,',
+    '        invitation_token=f"{scenario_key}_acct_{run_id}",',
+    '        global_account_name=accountant.account_name,',
+    '        relation_display_name=f"{owner.account_name} accountant",',
+    '        duty_description="Benchmark accountant",',
+    '        mobile_number=accountant.mobile_number,',
+    '        status=AccountantRelationStatus.ACTIVE,',
+    '        expires_at=relation_expires_at,',
+    '        activated_at=datetime.now(timezone.utc),',
+    '    ))',
+    '    db.add(CustomerRelation(',
+    '        owner_user_id=owner.id,',
+    '        customer_user_id=customer.id,',
+    '        created_by_user_id=actor.id,',
+    '        invitation_token=f"{scenario_key}_cust_{run_id}",',
+    '        management_name=f"{owner.account_name} customer",',
+    '        customer_tier=CustomerTier.TIER_1,',
+    '        commission_rate=0,',
+    '        status=CustomerRelationStatus.ACTIVE,',
+    '        expires_at=relation_expires_at,',
+    '        activated_at=datetime.now(timezone.utc),',
+    '    ))',
+    '    db.add(UserBlock(blocker_id=blocked_peer.id, blocked_id=actor.id))',
+    '    await db.flush()',
+    '    await create_thread(',
+    '        db,',
+    '        actor,',
+    '        accountant,',
+    '        int(scenario["activeMessageCount"]),',
+    '        scenario_key,',
+    '        int(scenario["fillerLength"]),',
+    '        offset,',
+    '    )',
+    '    await create_thread(db, actor, owner, 10, f"{scenario_key}_owner", 12, offset + 20)',
+    '    await create_thread(db, actor, customer, 8, f"{scenario_key}_customer", 12, offset + 40)',
+    '    await create_thread(db, actor, blocked_peer, 6, f"{scenario_key}_blocked", 10, offset + 60)',
+    '    group_room, _ = await create_room(',
+    '        db,',
+    '        chat_type=ChatType.GROUP,',
+    '        title=f"{scenario_key} identity group",',
+    '        members=[actor, owner, accountant, customer],',
+    '        admin_ids={actor.id, owner.id},',
+    '        label=f"{scenario_key}_group",',
+    '        filler_length=12,',
+    '        minute_offset=offset + 80,',
+    '        message_count=10,',
+    '        max_members=50,',
+    '    )',
+    '    channel_room, _ = await create_room(',
+    '        db,',
+    '        chat_type=ChatType.CHANNEL,',
+    '        title=f"{scenario_key} identity channel",',
+    '        members=[actor, owner, accountant],',
+    '        admin_ids={actor.id, owner.id},',
+    '        label=f"{scenario_key}_channel",',
+    '        filler_length=12,',
+    '        minute_offset=offset + 100,',
+    '        message_count=8,',
+    '    )',
+    '    base_conversation_count = 6',
+    '    for peer_index in range(max(0, int(scenario["conversationCount"]) - base_conversation_count)):',
+    '        peer = await make_user(db, f"{scenario_key}_peer_{peer_index}", offset + 140 + peer_index)',
+    '        await create_thread(db, actor, peer, 1, f"{scenario_key}_list_{peer_index}", 10, offset + 200 + peer_index)',
+    '    return {',
+    "        'actor': {",
+    "            'userId': actor.id,",
+    "            'accountName': actor.account_name,",
+    "            'accessToken': access_token,",
+    "            'refreshToken': refresh_token,",
+    '        },',
+    "        'scenarioType': 'identity_matrix',",
+    "        'activeTargetId': accountant.id,",
+    "        'activeTargetName': accountant.account_name,",
+    "        'activeMessagesApiPath': f'/api/chat/messages/{accountant.id}',",
+    "        'conversationCount': int(scenario['conversationCount']),",
+    "        'activeMessageCount': int(scenario['activeMessageCount']),",
+    "        'realtimeBurst': {",
+    "            'directSenderToken': accountant_access,",
+    "            'groupSenderToken': owner_access,",
+    "            'groupChatId': group_room.id,",
+    "            'channelSenderToken': owner_access,",
+    "            'channelChatId': channel_room.id,",
+    '        },',
+    "        'switchTargets': [",
+    "            {'kind': 'direct', 'routeUserId': accountant.id, 'title': accountant.account_name},",
+    "            {'kind': 'direct', 'routeUserId': owner.id, 'title': owner.account_name},",
+    "            {'kind': 'direct', 'routeUserId': customer.id, 'title': customer.account_name},",
+    "            room_target(group_room, 'group'),",
+    "            room_target(channel_room, 'channel'),",
+    '        ],',
+    "        'identityProbe': {",
+    "            'expectedProfileUserId': owner.id,",
+    "            'expectedProfileLabel': owner.account_name,",
+    '        },',
+    '    }',
+    '',
+    'async def seed_upload_persistence_scenario(db, scenario_key, scenario, offset):',
+    '    actor = await make_user(db, f"{scenario_key}_actor", offset)',
+    '    access_token, refresh_token = await attach_session(db, actor, scenario_key)',
+    '    active_peer = await make_user(db, f"{scenario_key}_active_peer", offset + 1)',
+    '    other_peer = await make_user(db, f"{scenario_key}_other_peer", offset + 2)',
+    '    other_peer_access, _ = await attach_session(db, other_peer, f"{scenario_key}_other_peer")',
+    '    base_message_count = max(12, int(scenario["activeMessageCount"]) - 1)',
+    '    conversation, _ = await create_thread(',
+    '        db,',
+    '        actor,',
+    '        active_peer,',
+    '        base_message_count,',
+    '        scenario_key,',
+    '        int(scenario["fillerLength"]),',
+    '        offset,',
+    '    )',
+    '    document_file = await create_chat_file(',
+    '        db,',
+    '        active_peer,',
+    '        label=f"{scenario_key}_document",',
+    '        file_name=f"{scenario_key}-{run_id}-resume.txt",',
+    '        mime_type="text/plain",',
+    '        data=doc_bytes,',
+    '    )',
+    '    document_message = Message(',
+    '        sender_id=active_peer.id,',
+    '        receiver_id=actor.id,',
+    '        content=json.dumps({',
+    '            "file_id": document_file.id,',
+    '            "file_name": document_file.file_name,',
+    '            "mime_type": document_file.mime_type,',
+    '            "size": document_file.size,',
+    '        }),',
+    '        message_type=MessageType.DOCUMENT,',
+    '        is_read=True,',
+    '        created_at=datetime.now(timezone.utc) - timedelta(hours=6, minutes=offset),',
+    '    )',
+    '    db.add(document_message)',
+    '    await db.flush()',
+    '    conversation.last_message_id = document_message.id',
+    '    conversation.last_message_at = document_message.created_at',
+    '    await create_thread(db, actor, other_peer, 6, f"{scenario_key}_switch", 12, offset + 30)',
+    '    base_conversation_count = 2',
+    '    for peer_index in range(max(0, int(scenario["conversationCount"]) - base_conversation_count)):',
+    '        peer = await make_user(db, f"{scenario_key}_peer_{peer_index}", offset + 60 + peer_index)',
+    '        await create_thread(db, actor, peer, 1, f"{scenario_key}_list_{peer_index}", 10, offset + 100 + peer_index)',
+    '    return {',
+    "        'actor': {",
+    "            'userId': actor.id,",
+    "            'accountName': actor.account_name,",
+    "            'accessToken': access_token,",
+    "            'refreshToken': refresh_token,",
+    '        },',
+    "        'scenarioType': 'upload_persistence',",
+    "        'activeTargetId': active_peer.id,",
+    "        'activeTargetName': active_peer.account_name,",
+    "        'activeMessagesApiPath': f'/api/chat/messages/{active_peer.id}',",
+    "        'conversationCount': int(scenario['conversationCount']),",
+    "        'activeMessageCount': int(scenario['activeMessageCount']),",
+    "        'realtimeBurst': {",
+    "            'directSenderToken': other_peer_access,",
+    '        },',
+    "        'switchTargets': [",
+    "            {'kind': 'direct', 'routeUserId': active_peer.id, 'title': active_peer.account_name},",
+    "            {'kind': 'direct', 'routeUserId': other_peer.id, 'title': other_peer.account_name},",
+    '        ],',
+    "        'persistenceProbe': {",
+    "            'documentFileName': document_file.file_name,",
+    "            'switchTarget': {'kind': 'direct', 'routeUserId': other_peer.id, 'title': other_peer.account_name},",
+    '        },',
+    '    }',
+    '',
     'async def seed_scenario(db, scenario_key, scenario, offset):',
     '    scenario_type = scenario.get("scenarioType") or "direct"',
     '    if scenario_type == "media_direct":',
@@ -702,6 +887,10 @@ function seedBenchmarkFixture(scenarios) {
     '        return await seed_group_matrix_scenario(db, scenario_key, scenario, offset)',
     '    if scenario_type == "channel_matrix":',
     '        return await seed_channel_matrix_scenario(db, scenario_key, scenario, offset)',
+    '    if scenario_type == "identity_matrix":',
+    '        return await seed_identity_matrix_scenario(db, scenario_key, scenario, offset)',
+    '    if scenario_type == "upload_persistence":',
+    '        return await seed_upload_persistence_scenario(db, scenario_key, scenario, offset)',
     '    if scenario_type in {"realtime_stress", "long_session"}:',
     '        return await seed_room_mix_scenario(db, scenario_key, scenario, offset)',
     '    return await seed_direct_scenario(db, scenario_key, scenario, offset)',
@@ -1029,6 +1218,131 @@ async function runSearchProbe(page, seeded) {
   }
 }
 
+async function getDocumentBubbleTransferState(documentBubble) {
+  const className = (await documentBubble.getAttribute('class').catch(() => '')) || ''
+  if (/is-busy/.test(className)) return 'busy'
+  if ((await documentBubble.locator('.doc-icon.doc-uploading').count().catch(() => 0)) > 0) return 'busy'
+  if ((await documentBubble.locator('.doc-download-icon').count().catch(() => 0)) === 0) return 'completed'
+  return 'idle'
+}
+
+async function waitForDocumentBubbleState(page, documentBubble, matcher, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs
+  let lastState = 'idle'
+  while (Date.now() < deadline) {
+    lastState = await getDocumentBubbleTransferState(documentBubble).catch(() => 'idle')
+    if (matcher(lastState)) return lastState
+    await page.waitForTimeout(200).catch(() => null)
+  }
+  return lastState
+}
+
+async function runIdentityMatrixProbe(page, seeded) {
+  if (!seeded.identityProbe?.expectedProfileUserId) return null
+  const headerInfo = page.locator('.chat-header .header-user-info').last()
+  if (!(await headerInfo.count().catch(() => 0))) return null
+  const originalUrl = page.url()
+  const probeTimeoutMs = 8000
+  const start = performance.now()
+  await headerInfo.click({ timeout: probeTimeoutMs }).catch(() => null)
+  const expectedUrl = new RegExp(`/users/${seeded.identityProbe.expectedProfileUserId}`)
+  const resolved = await page.waitForURL(expectedUrl, { timeout: probeTimeoutMs }).then(() => true).catch(() => false)
+  const profileOpenMs = performance.now() - start
+  const profileVisible = await page.locator('.public-profile-view').first().isVisible().catch(() => false)
+  const profileText = profileVisible ? await page.locator('.public-profile-view').first().textContent().catch(() => '') : ''
+  const labelMatched = seeded.identityProbe.expectedProfileLabel
+    ? String(profileText || '').includes(String(seeded.identityProbe.expectedProfileLabel))
+    : null
+  if (resolved || profileVisible || page.url() !== originalUrl) {
+    const backButton = page.locator('.public-profile-view .back-button').first()
+    if (await backButton.count().catch(() => 0)) {
+      await backButton.click({ timeout: probeTimeoutMs }).catch(() => null)
+    } else {
+      await page.goBack().catch(() => null)
+    }
+    await waitForRoomReady(page).catch(() => null)
+  }
+  return {
+    profileOpenMs: Number(profileOpenMs.toFixed(1)),
+    resolvedProfile: resolved,
+    labelMatched,
+  }
+}
+
+async function runUploadPersistenceProbe(page, seeded, baseUrl) {
+  if (!seeded.persistenceProbe?.documentFileName) return null
+  const documentFileName = seeded.persistenceProbe.documentFileName
+  const activeTarget = {
+    routeUserId: seeded.activeTargetId,
+    title: seeded.activeTargetName,
+  }
+  const switchTarget = seeded.persistenceProbe.switchTarget ?? null
+  let releaseDownload = null
+  const holdDownload = new Promise((resolve) => {
+    releaseDownload = resolve
+  })
+  const routeHandler = async (route) => {
+    await holdDownload
+    await route.continue()
+  }
+  await page.route('**/api/chat/files/**', routeHandler)
+  try {
+    const documentBubble = page.locator('.messages-container .msg-document').filter({ hasText: documentFileName }).first()
+    const visible = await documentBubble.waitFor({ timeout: 30000 }).then(() => true).catch(() => false)
+    if (!visible) return null
+    const downloadStart = performance.now()
+    await documentBubble.click({ timeout: 30000 }).catch(() => null)
+    const initialState = await waitForDocumentBubbleState(page, documentBubble, (state) => state !== 'idle', 30000)
+    const downloadStartMs = performance.now() - downloadStart
+
+    const leaveStart = performance.now()
+    await backToConversationList(page, baseUrl).catch(() => null)
+    if (switchTarget) {
+      await openConversationFromList(page, baseUrl, switchTarget).catch(() => false)
+      await backToConversationList(page, baseUrl).catch(() => null)
+    }
+    await openConversationFromList(page, baseUrl, activeTarget).catch(() => false)
+    const resumedBubble = page.locator('.messages-container .msg-document').filter({ hasText: documentFileName }).first()
+    await resumedBubble.waitFor({ timeout: 30000 }).catch(() => null)
+    const resumedState = await waitForDocumentBubbleState(page, resumedBubble, (state) => state !== 'idle', 30000)
+    const leaveReturnMs = performance.now() - leaveStart
+
+    if (releaseDownload) {
+      releaseDownload()
+      releaseDownload = null
+    }
+
+    const settleStart = performance.now()
+    const completedState = await waitForDocumentBubbleState(page, resumedBubble, (state) => state === 'completed', 60000)
+    const completionMs = performance.now() - settleStart
+
+    const reloadStart = performance.now()
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => null)
+    await waitForRoomReady(page).catch(() => null)
+    const reloadedBubble = page.locator('.messages-container .msg-document').filter({ hasText: documentFileName }).first()
+    await reloadedBubble.waitFor({ timeout: 30000 }).catch(() => null)
+    const reloadedState = await waitForDocumentBubbleState(page, reloadedBubble, (state) => state !== 'idle', 15000)
+    const reloadMs = performance.now() - reloadStart
+
+    return {
+      documentFileName,
+      initialState,
+      resumedState,
+      completedState,
+      reloadedState,
+      downloadStartMs: Number(downloadStartMs.toFixed(1)),
+      leaveReturnMs: Number(leaveReturnMs.toFixed(1)),
+      completionMs: Number(completionMs.toFixed(1)),
+      reloadMs: Number(reloadMs.toFixed(1)),
+    }
+  } finally {
+    if (releaseDownload) {
+      releaseDownload()
+    }
+    await page.unroute('**/api/chat/files/**', routeHandler).catch(() => null)
+  }
+}
+
 async function triggerRealtimeBurst(page, seeded, backendConfig, baseUrl) {
   if (!seeded.realtimeBurst) return null
   const backendBaseUrl = `http://${backendConfig.host}:${backendConfig.port}`
@@ -1067,7 +1381,7 @@ async function triggerRealtimeBurst(page, seeded, backendConfig, baseUrl) {
   const directAppendMs = null
   await backToConversationList(page, baseUrl).catch(() => null)
   const unreadStart = performance.now()
-  await waitForUnreadBadges(page, Math.min(2, burstRequests.length))
+  await waitForUnreadBadges(page, Math.min(2, burstRequests.length)).catch(() => null)
   const unreadBadgeCount = await page.locator('.conversation-card .unread-badge, .conversation-item .unread-badge').count().catch(() => 0)
   return {
     directAppendMs: directAppendMs !== null ? Number(directAppendMs.toFixed(1)) : null,
@@ -1194,6 +1508,8 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
   console.log(`[benchmark] ${version.key}/${scenario.id}: scroll probe done`)
   const contextMenuMs = await runContextMenuProbe(page)
   console.log(`[benchmark] ${version.key}/${scenario.id}: context probe done`)
+  const identity = await runIdentityMatrixProbe(page, seeded)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: identity probe done`)
   console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe start`)
   const realtime = await triggerRealtimeBurst(page, seeded, backendConfig, baseUrl)
   console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe done`)
@@ -1203,6 +1519,8 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
       title: seeded.activeTargetName,
     }).catch(() => null)
   }
+  const persistence = await runUploadPersistenceProbe(page, seeded, baseUrl)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: persistence probe done`)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe start`)
   const longSession = await runLongSessionProbe(page, seeded, baseUrl, scenario)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe done`)
@@ -1228,7 +1546,9 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
     chatMessageBubbles: chatSnapshot.messageBubbles,
     chatDomNodes: chatSnapshot.totalNodes,
     contextMenuMs: Number(contextMenuMs.toFixed(1)),
+    identity,
     realtime,
+    persistence,
     longSession,
     scroll,
     counters,
