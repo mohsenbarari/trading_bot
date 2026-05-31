@@ -43,6 +43,24 @@ type ConversationMenuAction = {
   icon: Component
 }
 
+type ConversationRowVm = {
+  conv: Conversation
+  isRoom: boolean
+  isChannel: boolean
+  isGroup: boolean
+  isManagement: boolean
+  isMandatoryPinned: boolean
+  isPinned: boolean
+  isMuted: boolean
+  isActive: boolean
+  hasUnread: boolean
+  activityText: string
+  previewText: string
+  avatarUrl: string
+  avatarInitial: string
+  isOnlineDirectUser: boolean
+}
+
 const props = defineProps<{
   conversations: Conversation[]
   selectedUserId: number | null
@@ -169,6 +187,39 @@ function getConversationActivityText(conv: Conversation) {
 
   return ''
 }
+
+const conversationRows = computed<ConversationRowVm[]>(() => {
+  return displayedConversations.value.map((conv) => {
+    const isRoom = isRoomConversation(conv)
+    const isChannel = isChannelConversation(conv)
+    const isGroup = isGroupConversation(conv)
+    const isManagement = isManagementConversation(conv)
+    const isMandatoryPinned = isMandatoryPinnedConversation(conv)
+    const isPinned = isConversationPinned(conv)
+    const isMuted = isConversationMuted(conv)
+    const isActive = props.selectedUserId === conv.other_user_id
+    const hasUnread = (conv.unread_count || 0) > 0
+    const activityText = getConversationActivityText(conv)
+
+    return {
+      conv,
+      isRoom,
+      isChannel,
+      isGroup,
+      isManagement,
+      isMandatoryPinned,
+      isPinned,
+      isMuted,
+      isActive,
+      hasUnread,
+      activityText,
+      previewText: activityText || getPreviewText(conv),
+      avatarUrl: getConversationAvatarUrl(conv),
+      avatarInitial: getConversationInitial(conv),
+      isOnlineDirectUser: !isRoom && isUserOnline(conv.other_user_last_seen_at),
+    }
+  })
+})
 
 const conversationWindow = computed(() => selectConversationWindow(props.conversations, {
   limit: conversationWindowLimit.value,
@@ -485,40 +536,40 @@ onBeforeUnmount(() => {
 
         <div class="conversation-items" v-auto-animate>
             <div
-              v-for="conv in displayedConversations"
-              :key="conv.id"
+              v-for="row in conversationRows"
+              :key="row.conv.id"
               v-memo="[
-                conv.id,
-                conv.other_user_id,
-                conv.other_user_name,
-                conv.room_kind,
-                conv.chat_id,
-                conv.other_user_is_deleted,
-                conv.other_user_last_seen_at,
-                conv.last_message_at,
-                conv.last_message_type,
-                conv.last_message_content,
-                conv.unread_count,
-                conv.unread_mention_count,
-                conv.is_muted,
-                conv.is_pinned,
-                conv.pinned_at,
-                conv.pin_order,
-                selectedUserId === conv.other_user_id,
-                !isRoomConversation(conv) && !!typingUsers[conv.other_user_id],
+                row.conv.id,
+                row.conv.other_user_id,
+                row.conv.other_user_name,
+                row.conv.room_kind,
+                row.conv.chat_id,
+                row.conv.other_user_is_deleted,
+                row.conv.other_user_last_seen_at,
+                row.conv.last_message_at,
+                row.conv.last_message_type,
+                row.conv.last_message_content,
+                row.conv.unread_count,
+                row.conv.unread_mention_count,
+                row.conv.is_muted,
+                row.conv.is_pinned,
+                row.conv.pinned_at,
+                row.conv.pin_order,
+                row.isActive,
+                row.activityText,
               ]"
               class="conversation-card conversation-item"
               v-ripple
               :class="{
-                'conversation-card--active': selectedUserId === conv.other_user_id,
-                'conversation-card--pinned': isConversationPinned(conv),
-                'conversation-card--mandatory': isMandatoryPinnedConversation(conv),
-                'conversation-card--management': isManagementConversation(conv),
-                'conversation-card--unread': conv.unread_count > 0,
+                'conversation-card--active': row.isActive,
+                'conversation-card--pinned': row.isPinned,
+                'conversation-card--mandatory': row.isMandatoryPinned,
+                'conversation-card--management': row.isManagement,
+                'conversation-card--unread': row.hasUnread,
               }"
-              @click="handleConversationClick(conv)"
-              @contextmenu="handleContextMenu(conv, $event)"
-              @pointerdown="handlePointerDown(conv, $event)"
+              @click="handleConversationClick(row.conv)"
+              @contextmenu="handleContextMenu(row.conv, $event)"
+              @pointerdown="handlePointerDown(row.conv, $event)"
               @pointermove="handlePointerMove($event)"
               @pointerup="cancelLongPress"
               @pointercancel="cancelLongPress"
@@ -529,53 +580,53 @@ onBeforeUnmount(() => {
               <div
                 class="conv-avatar"
                 :class="{
-                  'room-avatar': isRoomConversation(conv),
-                  'channel-avatar': isChannelConversation(conv),
-                  'group-avatar': isGroupConversation(conv),
-                  'management-avatar': isManagementConversation(conv),
+                  'room-avatar': row.isRoom,
+                  'channel-avatar': row.isChannel,
+                  'group-avatar': row.isGroup,
+                  'management-avatar': row.isManagement,
                 }"
               >
-                <img v-if="getConversationAvatarUrl(conv)" :src="getConversationAvatarUrl(conv)" :alt="conv.other_user_name" class="conv-avatar-image" />
-                <Shield v-else-if="isManagementConversation(conv)" :size="22" />
-                <Megaphone v-else-if="isChannelConversation(conv)" :size="22" />
-                <UsersRound v-else-if="isGroupConversation(conv)" :size="22" />
-                <template v-else>{{ getConversationInitial(conv) }}</template>
-                <div v-if="!isRoomConversation(conv) && isUserOnline(conv.other_user_last_seen_at)" class="online-indicator-dot"></div>
+                <img v-if="row.avatarUrl" :src="row.avatarUrl" :alt="row.conv.other_user_name" class="conv-avatar-image" />
+                <Shield v-else-if="row.isManagement" :size="22" />
+                <Megaphone v-else-if="row.isChannel" :size="22" />
+                <UsersRound v-else-if="row.isGroup" :size="22" />
+                <template v-else>{{ row.avatarInitial }}</template>
+                <div v-if="row.isOnlineDirectUser" class="online-indicator-dot"></div>
               </div>
 
               <div class="conv-content">
                 <div class="conv-header">
                   <div class="conv-title-block">
                     <div class="conv-name-row">
-                      <span class="conv-name">{{ conv.other_user_name }}</span>
-                      <span v-if="isChannelConversation(conv)" class="channel-badge-list" hidden>کانال</span>
-                      <span v-else-if="isGroupConversation(conv)" class="channel-badge-list" hidden>گروه</span>
+                      <span class="conv-name">{{ row.conv.other_user_name }}</span>
+                      <span v-if="row.isChannel" class="channel-badge-list" hidden>کانال</span>
+                      <span v-else-if="row.isGroup" class="channel-badge-list" hidden>گروه</span>
                     </div>
-                    <span class="conv-time" v-if="conv.last_message_at">{{ formatTime(conv.last_message_at) }}</span>
+                    <span class="conv-time" v-if="row.conv.last_message_at">{{ formatTime(row.conv.last_message_at) }}</span>
                   </div>
                 </div>
 
                 <div class="conv-preview-row">
-                  <span v-if="getConversationActivityText(conv)" class="typing-text">
-                    {{ getConversationActivityText(conv) }}
+                  <span v-if="row.activityText" class="typing-text">
+                    {{ row.activityText }}
                   </span>
                   <template v-else>
-                    {{ getPreviewText(conv) }}
+                    {{ row.previewText }}
                   </template>
                 </div>
               </div>
 
               <div class="conversation-side">
-                <div v-if="(conv.unread_mention_count ?? 0) > 0" class="unread-badge mention-badge" title="منشن جدید">
+                <div v-if="(row.conv.unread_mention_count ?? 0) > 0" class="unread-badge mention-badge" title="منشن جدید">
                   @
                 </div>
-                <div v-if="conv.unread_count > 0" class="unread-badge">
-                  {{ conv.unread_count.toLocaleString('fa-IR') }}
+                <div v-if="row.conv.unread_count > 0" class="unread-badge">
+                  {{ row.conv.unread_count.toLocaleString('fa-IR') }}
                 </div>
-                <div v-else-if="isConversationMuted(conv)" class="side-muted-indicator" aria-label="بی‌صدا">
+                <div v-else-if="row.isMuted" class="side-muted-indicator" aria-label="بی‌صدا">
                   <BellOff :size="14" />
                 </div>
-                <div v-else-if="isConversationPinned(conv)" class="side-pin-indicator">
+                <div v-else-if="row.isPinned" class="side-pin-indicator">
                   <Pin :size="14" />
                 </div>
               </div>
@@ -634,17 +685,15 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .conversation-list-wrapper {
-  --surface: rgba(255, 255, 255, 0.76);
-  --surface-strong: rgba(255, 255, 255, 0.96);
-  --line-soft: rgba(203, 213, 225, 0.82);
-  --text-strong: #0f172a;
-  --text-muted: #64748b;
-  --accent: #3390ec;
-  --accent-soft: #93c5fd;
+  --surface: var(--messenger-surface-panel, rgba(255, 255, 255, 0.76));
+  --line-soft: var(--messenger-border-subtle, rgba(203, 213, 225, 0.82));
+  --text-strong: var(--messenger-text-strong, #0f172a);
+  --text-muted: var(--messenger-text-muted, #64748b);
+  --accent: var(--messenger-accent, #3390ec);
   --teal: #0f766e;
   --blue: #2563eb;
-  --danger: #dc2626;
-  --warning: #c2410c;
+  --danger: var(--messenger-danger, #dc2626);
+  --warning: var(--messenger-warning, #c2410c);
   flex: 1;
   position: relative;
   display: flex;
@@ -809,13 +858,14 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: var(--messenger-list-row-min-height, 64px);
   padding: 12px 14px;
   border-radius: 22px;
   border: 1px solid var(--line-soft);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
   cursor: pointer;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.065), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease, border-color var(--messenger-motion-standard, 180ms) ease;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -1168,7 +1218,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   box-shadow: 0 18px 30px rgba(37, 99, 235, 0.28);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease;
 }
 
 .fab-new-chat:hover {

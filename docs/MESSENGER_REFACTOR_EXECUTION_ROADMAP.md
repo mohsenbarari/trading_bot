@@ -60,7 +60,7 @@ Do not merge multiple stages into a single prompt.
 | --- | --- | --- | --- | --- | --- |
 | 1 | Baseline Lock + Perf Budget | Completed | Copilot | 2026-05-31 | Baseline locked from `tmp/messenger-benchmark/comparison-summary.json` (`generatedAt=2026-05-31T19:13:12Z`) |
 | 2 | Menu IA Normalization | In Progress | Copilot | 2026-05-31 | IA sectioning applied in header/context menus + focused Vitest/Playwright green |
-| 3 | Conversation List Performance + Visual Cohesion | Pending | Copilot | - | - |
+| 3 | Conversation List Performance + Visual Cohesion | Completed | Copilot | 2026-05-31 | Row view-model memoization, shared-token visual alignment, and S07/S10 list-ready benchmark check passed |
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Pending | Copilot | - | - |
 | 5 | Composer/Overlay State Machine Stabilization | Pending | Copilot | - | - |
 | 6 | Context Menu Latency Fix (S05) | Pending | Copilot | - | - |
@@ -190,6 +190,24 @@ Exit criteria:
 
 Rollback:
 - Revert list rendering and style-token deltas.
+
+Stage 3 kickoff progress:
+- Applied row-level view-model precomputation in `ChatConversationList.vue` to reduce repeated per-row function calls in template render paths.
+- Aligned key conversation list visuals and motion values with shared messenger tokens (`--messenger-*`) for consistency with the broader messenger shell.
+- Focused validation completed:
+	- `npm run test:unit:run -- src/components/chat/ChatConversationList.test.ts`
+	- `npm run test:unit:run -- src/components/chat/ChatConversationList.test.ts src/utils/messengerStage4Performance.test.ts`
+	- `npm run test:e2e -- e2e/messenger-conversation-actions.spec.ts --project=chromium --workers=1`
+
+Stage 3 exit validation (S07/S10 subset):
+- Baseline snapshot (pre-Stage 3 local benchmark run):
+	- S07 list-ready: `633.4 ms`
+	- S10 list-ready: `8088.0 ms`
+- Stage 3 snapshot (after build and Stage 3 changes):
+	- S07 list-ready: `631.7 ms`
+	- S10 list-ready: `8055.4 ms`
+- Command used:
+	- `npm run benchmark:messenger -- --config tmp/messenger-benchmark/stage3-s07-s10-config.json`
 
 ### Stage 4 - Chat Open Pipeline (Heavy/Search/Identity)
 
