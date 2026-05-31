@@ -37,6 +37,7 @@ import {
     buildChatSendBody,
     buildChatSendEndpoint,
 } from '../utils/chatRoomRouting'
+import { serializeChatMediaMessagePayload } from '../utils/chatMediaMessagePayload'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
 import { measureMessengerStage2, recordMessengerMetric } from '../utils/messengerStage2Metrics'
 
@@ -1166,44 +1167,22 @@ async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
 // -----------------------------------------------------------------------------
 
 function buildContent(upload: PendingUpload, phase: 'preview' | 'final'): string {
-    const payload: Record<string, unknown> = {}
-
-    if (phase === 'final' && upload.fileId) {
-        payload.file_id = upload.fileId
-    } else {
-        payload.placeholder = true
-    }
-
-    if (upload.msgType !== 'document' && upload.thumbnail) {
-        payload.thumbnail =
-            phase === 'final' ? upload.serverThumbnail || upload.thumbnail : upload.thumbnail
-    }
-
-    if (upload.msgType === 'document') {
-        payload.file_name = upload.fileName
-        payload.mime_type = upload.mimeType || 'application/octet-stream'
-        payload.size = upload.file.size
-    }
-
-    if (upload.msgType !== 'document' && upload.width && upload.height) {
-        payload.width = upload.width
-        payload.height = upload.height
-    }
-
-    if (upload.msgType !== 'document' && upload.albumId) {
-        payload.album_id = upload.albumId
-        payload.album_index = upload.albumIndex
-    }
-
-    if (upload.msgType !== 'document' && typeof upload.durationMs === 'number') {
-        payload.durationMs = upload.durationMs
-    }
-
-    if ((upload.msgType === 'image' || upload.msgType === 'video') && upload.caption) {
-        payload.caption = upload.caption
-    }
-
-    return JSON.stringify(payload)
+    return serializeChatMediaMessagePayload({
+        phase,
+        msgType: upload.msgType,
+        fileId: upload.fileId,
+        thumbnail: upload.thumbnail,
+        serverThumbnail: upload.serverThumbnail,
+        width: upload.width,
+        height: upload.height,
+        durationMs: upload.durationMs,
+        albumId: upload.albumId,
+        albumIndex: upload.albumIndex,
+        caption: upload.caption,
+        fileName: upload.fileName,
+        mimeType: upload.mimeType,
+        fileSize: upload.file.size,
+    })
 }
 
 type UploadSessionStatePayload = {

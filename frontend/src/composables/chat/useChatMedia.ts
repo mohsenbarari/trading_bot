@@ -8,6 +8,7 @@ import {
     getMessengerMediaDownloadPatch,
     isMessengerRuntimeEventForConversation,
 } from '../../utils/messengerStage6MediaRealtime'
+import { serializeChatMediaMessagePayload } from '../../utils/chatMediaMessagePayload'
 import {
     submitUpload as backgroundSubmitUpload,
     cancelUpload as backgroundCancelUpload,
@@ -1499,27 +1500,21 @@ export function useChatMedia(options: UseChatMediaOptions) {
             mime_type: file.type || 'application/octet-stream',
             size: file.size,
         }
+        const durationMs = typeof (file as any).durationMs === 'number' ? (file as any).durationMs : undefined
 
         const optimisticId = createOptimisticUploadId()
         const localUrl = URL.createObjectURL(file)
-        const initialContent = appendCaptionMetadata(
-            appendAlbumMetadata(
-                sendAsDocument
-                    ? {
-                        placeholder: true,
-                        ...documentPayload,
-                    }
-                    : {
-                        placeholder: true,
-                        durationMs: (file as any).durationMs,
-                    },
-                msgType,
-                normalizedAlbumId,
-                normalizedAlbumIndex,
-            ),
+        const initialContent = serializeChatMediaMessagePayload({
+            phase: 'preview',
             msgType,
-            normalizedCaption,
-        )
+            durationMs,
+            albumId: normalizedAlbumId,
+            albumIndex: normalizedAlbumIndex,
+            caption: normalizedCaption,
+            fileName: sendAsDocument ? documentPayload.file_name : undefined,
+            mimeType: sendAsDocument ? documentPayload.mime_type : undefined,
+            fileSize: sendAsDocument ? documentPayload.size : undefined,
+        })
         const optimisticMsg: Message = {
             id: optimisticId,
             sender_id: currentUserId,
@@ -1618,21 +1613,17 @@ export function useChatMedia(options: UseChatMediaOptions) {
                         height: finalHeight,
                     })
 
-                    const previewContent: any = appendCaptionMetadata(
-                        appendAlbumMetadata({
-                            thumbnail: thumbBase64,
-                            placeholder: true,
-                        }, msgType, normalizedAlbumId, normalizedAlbumIndex),
+                    getOptimisticTarget().content = serializeChatMediaMessagePayload({
+                        phase: 'preview',
                         msgType,
-                        normalizedCaption,
-                    )
-
-                    if (finalWidth && finalHeight) {
-                        previewContent.width = finalWidth
-                        previewContent.height = finalHeight
-                    }
-
-                    getOptimisticTarget().content = JSON.stringify(previewContent)
+                        thumbnail: thumbBase64,
+                        width: finalWidth,
+                        height: finalHeight,
+                        durationMs,
+                        albumId: normalizedAlbumId,
+                        albumIndex: normalizedAlbumIndex,
+                        caption: normalizedCaption,
+                    })
                 } catch (warn) {
                     trackPreprocessEvent({
                         mediaType: 'video',
@@ -1878,28 +1869,20 @@ export function useChatMedia(options: UseChatMediaOptions) {
             }
 
             const targetMsg = getOptimisticTarget();
-            const optimisticContent: any = appendCaptionMetadata(
-                appendAlbumMetadata(
-                    sendAsDocument
-                        ? {
-                            ...documentPayload,
-                        }
-                        : {
-                            thumbnail: thumbBase64,
-                        },
-                    msgType,
-                    normalizedAlbumId,
-                    normalizedAlbumIndex,
-                ),
+            const serializedOptimisticContent = serializeChatMediaMessagePayload({
+                phase: 'preview',
                 msgType,
-                normalizedCaption,
-            );
-            if (!sendAsDocument && finalWidth && finalHeight) {
-                optimisticContent.width = finalWidth;
-                optimisticContent.height = finalHeight;
-            }
-            if (isVideo) optimisticContent.placeholder = true;
-            const serializedOptimisticContent = JSON.stringify(optimisticContent)
+                thumbnail: thumbBase64,
+                width: finalWidth,
+                height: finalHeight,
+                durationMs,
+                albumId: normalizedAlbumId,
+                albumIndex: normalizedAlbumIndex,
+                caption: normalizedCaption,
+                fileName: sendAsDocument ? documentPayload.file_name : undefined,
+                mimeType: sendAsDocument ? documentPayload.mime_type : undefined,
+                fileSize: sendAsDocument ? documentPayload.size : undefined,
+            })
             if (normalizedCaption && serializedOptimisticContent.length > CHAT_MESSAGE_MAX_CONTENT_LENGTH) {
                 throw new Error('متن کپشن برای این رسانه بیش از حد طولانی است.')
             }
@@ -1941,7 +1924,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
                 thumbnail: thumbBase64,
                 width: finalWidth,
                 height: finalHeight,
-                durationMs: (file as any).durationMs,
+                durationMs,
                 caption: normalizedCaption || undefined,
                 albumId: normalizedAlbumId ?? null,
                 albumIndex: normalizedAlbumIndex,

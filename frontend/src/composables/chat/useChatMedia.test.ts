@@ -1601,6 +1601,10 @@ describe('useChatMedia', () => {
       is_sending: true,
       upload_handoff_pending: false,
     })
+    expect(JSON.parse(vm.messages[0].content)).toMatchObject({
+      placeholder: true,
+      durationMs: 1234,
+    })
     expect(scrollToBottom).toHaveBeenCalled()
     expect(preprocessMocks.recordMediaPreprocessTelemetry).toHaveBeenCalledWith(expect.objectContaining({
       mediaType: 'voice',
