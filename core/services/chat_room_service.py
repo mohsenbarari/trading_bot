@@ -1063,6 +1063,54 @@ async def list_group_conversations(
     *,
     current_user_id: int,
 ) -> list[ChannelConversationSummary]:
+    stmt = build_room_conversation_projection_stmt(
+        current_user_id=current_user_id,
+        room_type=ChatType.GROUP,
+    )
+    result = await db.execute(stmt)
+
+    rows: list[ChannelConversationSummary] = []
+    for row in result.all():
+        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mentions = _unpack_conversation_projection_row(row)
+        synthetic_room_id = -int(chat.id)
+        rows.append(
+            ChannelConversationSummary(
+                id=synthetic_room_id,
+                other_user_id=synthetic_room_id,
+                other_user_name=chat.title or f"گروه {chat.id}",
+                avatar_file_id=getattr(chat, "avatar_file_id", None),
+                other_user_is_deleted=False,
+                last_message_content=last_content,
+                last_message_type=last_type,
+                last_message_at=chat.last_message_at,
+                unread_count=int(unread or 0),
+                other_user_last_seen_at=None,
+                room_kind="group",
+                chat_id=chat.id,
+                can_send=not bool(chat.is_system),
+                member_role=member_role.value if member_role is not None else None,
+                member_count=int(member_count or 0),
+                max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
+                is_system=bool(chat.is_system),
+                is_mandatory=bool(chat.is_mandatory),
+                is_muted=bool(is_muted),
+                is_pinned=bool(is_pinned),
+                pinned_at=pinned_at,
+                pin_order=pin_order,
+                unread_mention_count=int(unread_mentions or 0),
+            )
+        )
+    return rows
+
+
+def build_room_conversation_projection_stmt(
+    *,
+    current_user_id: int,
+    room_type: ChatType,
+):
+    if room_type not in {ChatType.GROUP, ChatType.CHANNEL}:
+        raise ValueError("room_type must be GROUP or CHANNEL")
+
     current_member = aliased(ChatMember)
     last_message_alias = aliased(Message)
 
@@ -1136,45 +1184,12 @@ async def list_group_conversations(
         )
         .outerjoin(last_message_alias, last_message_alias.id == Chat.last_message_id)
         .where(
-            Chat.type == ChatType.GROUP,
+            Chat.type == room_type,
             Chat.is_deleted.is_(False),
         )
         .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
     )
-    result = await db.execute(stmt)
-
-    rows: list[ChannelConversationSummary] = []
-    for row in result.all():
-        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mentions = _unpack_conversation_projection_row(row)
-        synthetic_room_id = -int(chat.id)
-        rows.append(
-            ChannelConversationSummary(
-                id=synthetic_room_id,
-                other_user_id=synthetic_room_id,
-                other_user_name=chat.title or f"گروه {chat.id}",
-                avatar_file_id=getattr(chat, "avatar_file_id", None),
-                other_user_is_deleted=False,
-                last_message_content=last_content,
-                last_message_type=last_type,
-                last_message_at=chat.last_message_at,
-                unread_count=int(unread or 0),
-                other_user_last_seen_at=None,
-                room_kind="group",
-                chat_id=chat.id,
-                can_send=not bool(chat.is_system),
-                member_role=member_role.value if member_role is not None else None,
-                member_count=int(member_count or 0),
-                max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
-                is_system=bool(chat.is_system),
-                is_mandatory=bool(chat.is_mandatory),
-                is_muted=bool(is_muted),
-                is_pinned=bool(is_pinned),
-                pinned_at=pinned_at,
-                pin_order=pin_order,
-                unread_mention_count=int(unread_mentions or 0),
-            )
-        )
-    return rows
+    return stmt
 
 
 async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMemberSummary]:
@@ -1506,83 +1521,9 @@ async def list_channel_conversations(
     *,
     current_user_id: int,
 ) -> list[ChannelConversationSummary]:
-    current_member = aliased(ChatMember)
-    last_message_alias = aliased(Message)
-
-    unread_count = (
-        select(func.count(Message.id))
-        .where(
-            Message.chat_id == Chat.id,
-            Message.sender_id != current_user_id,
-            Message.is_deleted.is_(False),
-            Message.id > func.coalesce(current_member.last_read_message_id, 0),
-        )
-        .correlate(Chat, current_member)
-        .scalar_subquery()
-    )
-    unread_mention_count = (
-        select(func.count(Message.id))
-        .where(
-            Message.chat_id == Chat.id,
-            Message.sender_id != current_user_id,
-            Message.is_deleted.is_(False),
-            Message.id > func.coalesce(current_member.last_read_message_id, 0),
-            or_(
-                Message.mention_all.is_(True),
-                text("messages.mentions::jsonb @> CAST(:user_id_str AS jsonb)").bindparams(user_id_str=str(current_user_id))
-            )
-        )
-        .correlate(Chat, current_member)
-        .scalar_subquery()
-    )
-    manual_unread_count = case(
-        (
-            (current_member.is_marked_unread.is_(True)) & (Chat.last_message_id.is_not(None)),
-            1,
-        ),
-        else_=0,
-    )
-    active_member_count = (
-        select(func.count(ChatMember.id))
-        .where(
-            ChatMember.chat_id == Chat.id,
-            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
-        )
-        .correlate(Chat)
-        .scalar_subquery()
-    )
-    last_message_content = case(
-        (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
-        (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
-        else_=None,
-    ).label("last_message_content")
-
-    stmt = (
-        select(
-            Chat,
-            current_member.role.label("member_role"),
-            current_member.is_muted.label("is_muted"),
-            current_member.is_pinned.label("is_pinned"),
-            current_member.pinned_at.label("pinned_at"),
-            current_member.pin_order.label("pin_order"),
-            last_message_content,
-            last_message_alias.message_type.label("last_message_type"),
-            func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
-            active_member_count.label("member_count"),
-            func.coalesce(unread_mention_count, 0).label("unread_mention_count"),
-        )
-        .join(
-            current_member,
-            (current_member.chat_id == Chat.id)
-            & (current_member.user_id == current_user_id)
-            & (current_member.membership_status == ChatMembershipStatus.ACTIVE),
-        )
-        .outerjoin(last_message_alias, last_message_alias.id == Chat.last_message_id)
-        .where(
-            Chat.type == ChatType.CHANNEL,
-            Chat.is_deleted.is_(False),
-        )
-        .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
+    stmt = build_room_conversation_projection_stmt(
+        current_user_id=current_user_id,
+        room_type=ChatType.CHANNEL,
     )
     result = await db.execute(stmt)
 
@@ -1656,15 +1597,7 @@ async def list_channel_messages(
     before_id: int | None = None,
     around_id: int | None = None,
 ) -> list[Message]:
-    base_stmt = (
-        select(Message)
-        .options(
-            joinedload(Message.reply_to_message),
-            joinedload(Message.forwarded_from),
-            joinedload(Message.sender),
-        )
-        .where(Message.chat_id == chat.id)
-    )
+    base_stmt = build_room_message_history_stmt(chat_id=chat.id)
 
     if around_id:
         older_limit = max(limit // 2, 1)
@@ -1685,6 +1618,18 @@ async def list_channel_messages(
 
     result = await db.execute(stmt)
     return list(reversed(result.scalars().all()))
+
+
+def build_room_message_history_stmt(*, chat_id: int):
+    return (
+        select(Message)
+        .options(
+            joinedload(Message.reply_to_message),
+            joinedload(Message.forwarded_from),
+            joinedload(Message.sender),
+        )
+        .where(Message.chat_id == chat_id)
+    )
 
 
 def build_channel_message_event_payload(

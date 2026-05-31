@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
+.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
 
 help:
 	@echo ""
@@ -36,6 +36,7 @@ help:
 	@echo "  make frontend-test-e2e-webkit - Run frontend Playwright on WebKit"
 	@echo "  make frontend-test-e2e-matrix - Run frontend Playwright on Chromium + Firefox + WebKit"
 	@echo "  make messenger-surface-report - Generate docs/messenger-surface-report.md from the manifest"
+	@echo "  make messenger-query-plans - Run EXPLAIN ANALYZE on the core Messenger query surfaces"
 	@echo "  make messenger-benchmark-prepare - Prepare reproducible old/current benchmark builds"
 	@echo "  make messenger-benchmark-run - Run the official Messenger performance benchmark"
 	@echo "  make messenger-benchmark-report - Build comparison-summary and surface-status artifacts"
@@ -116,6 +117,9 @@ frontend-test-e2e-matrix:
 
 messenger-surface-report:
 	@python3 ./scripts/build_messenger_surface_report.py
+
+messenger-query-plans:
+	@python3 ./scripts/report_messenger_query_plans.py
 
 messenger-benchmark-prepare:
 	@python3 ./scripts/prepare_messenger_benchmark_versions.py
