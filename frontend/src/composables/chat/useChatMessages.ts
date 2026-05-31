@@ -96,10 +96,12 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const messageSnapshotCache = new Map<number, Message[]>()
     const MAX_CACHED_CHAT_SNAPSHOTS = 12
     const INITIAL_CHAT_OPEN_LIMIT = 48
+    const FAST_CHAT_OPEN_LIMIT = 24
     const SEARCH_CONTEXT_LIMIT = 50
     const OLDER_MESSAGES_PAGE_LIMIT = 60
     const hasOlderMessages = ref(true)
     const isLoadingOlderMessages = ref(false)
+    const pendingBackgroundHydrationUsers = new Set<number>()
     let latestLoadRequestId = 0
     let chatLoadMetricSequence = 0
 
@@ -225,6 +227,39 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         return requestId === latestLoadRequestId
     }
 
+    function mergeLatePendingOptimisticMessages(userId: number, requestId: number) {
+        void (async () => {
+            await waitForChatUploadBackgroundReady()
+            if (!isActiveLoadRequest(requestId, userId)) {
+                return
+            }
+            const pendingOptimistic = getPendingOptimisticMessages(userId)
+            if (pendingOptimistic.length === 0) {
+                return
+            }
+            messages.value = mergeOptimisticMessages(messages.value, pendingOptimistic)
+            storeMessageSnapshot(userId, messages.value)
+        })()
+    }
+
+    function scheduleBackgroundHydration(userId: number) {
+        if (pendingBackgroundHydrationUsers.has(userId)) {
+            return
+        }
+
+        pendingBackgroundHydrationUsers.add(userId)
+        queueMicrotask(async () => {
+            try {
+                if (selectedUserId.value !== userId) {
+                    return
+                }
+                await loadMessages(userId, true)
+            } finally {
+                pendingBackgroundHydrationUsers.delete(userId)
+            }
+        })
+    }
+
     watch(selectedUserId, (nextUserId, previousUserId) => {
         if (typeof previousUserId === 'number' && previousUserId !== nextUserId) {
             storeMessageSnapshot(previousUserId, messages.value)
@@ -335,7 +370,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         if (!effectiveSilent) isLoadingMessages.value = true
 
         try {
-            let url = buildMessagesEndpoint(userId, `limit=${INITIAL_CHAT_OPEN_LIMIT}&_t=${Date.now()}`)
+            const cachedSnapshot = (!aroundId && !silent) ? getMessageSnapshot(userId) : null
+            const shouldUseFastOpen = !aroundId && !silent && !cachedSnapshot
+            const openLimit = shouldUseFastOpen ? FAST_CHAT_OPEN_LIMIT : INITIAL_CHAT_OPEN_LIMIT
+            let shouldHydrateAfterFastOpen = shouldUseFastOpen
+            let url = buildMessagesEndpoint(userId, `limit=${openLimit}&_t=${Date.now()}`)
 
             if (!aroundId && !silent) {
                 hasOlderMessages.value = true
@@ -345,9 +384,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 url = buildMessagesEndpoint(userId, `limit=${SEARCH_CONTEXT_LIMIT}&around_id=${aroundId}&_t=${Date.now()}`)
                 if (!effectiveSilent) messages.value = []
             } else if (!effectiveSilent) {
-                const cachedMessages = getMessageSnapshot(userId)
-                if (cachedMessages) {
-                    messages.value = mergeOptimisticMessages(cachedMessages, getPendingOptimisticMessages(userId))
+                if (cachedSnapshot) {
+                    messages.value = mergeOptimisticMessages(cachedSnapshot, getPendingOptimisticMessages(userId))
                     unreadNewMessagesCount.value = 0
                     isLoadingMessages.value = false
                     await nextTick()
@@ -385,11 +423,9 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 else error.value = ''
             }
 
-            // Append any pending background-service uploads for this user
-            // (both currently uploading + those resumed from IndexedDB after
-            // a page reload) so the optimistic messages are visible on mount.
-            await waitForChatUploadBackgroundReady()
-            const pendingOptimistic = getPendingOptimisticMessages(userId)
+            const pendingOptimistic = effectiveSilent
+                ? []
+                : getPendingOptimisticMessages(userId)
 
             if (aroundId) {
                 messages.value = loadedMessages
@@ -404,7 +440,10 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             }
 
             storeMessageSnapshot(userId, loadedMessages)
-            hasOlderMessages.value = loadedMessages.length >= INITIAL_CHAT_OPEN_LIMIT
+            hasOlderMessages.value = loadedMessages.length >= openLimit
+            if (shouldHydrateAfterFastOpen && loadedMessages.length < FAST_CHAT_OPEN_LIMIT) {
+                shouldHydrateAfterFastOpen = false
+            }
 
             if (effectiveSilent) {
                 const lastOldMsg = messages.value[messages.value.length - 1]
@@ -412,10 +451,12 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 const isNewMessage = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
                 const oldLength = messages.value.length
 
+                await waitForChatUploadBackgroundReady()
+                const resolvedPendingOptimistic = getPendingOptimisticMessages(userId)
                 const tempParams = messages.value.filter(m => m.id < 0)
                 messages.value = mergeOptimisticMessages(
                     mergeServerTailIntoExistingMessages(messages.value, loadedMessages),
-                    mergeOptimisticMessages(tempParams, pendingOptimistic)
+                    mergeOptimisticMessages(tempParams, resolvedPendingOptimistic)
                 )
 
                 if (isNewMessage) {
@@ -445,6 +486,14 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 markFirstMessagePaint('server')
                 scrollToUnreadOrBottom()
                 void markAsRead()
+
+                // Don't block first paint waiting for upload service restore.
+                // Reconcile resumed pending uploads after initial render.
+                mergeLatePendingOptimisticMessages(userId, requestId)
+
+                if (shouldHydrateAfterFastOpen && selectedUserId.value === userId) {
+                    scheduleBackgroundHydration(userId)
+                }
             }
         } catch (e: any) {
             if (isRoomConversationKey(userId) && selectedUserId.value === userId && (e?.status === 403 || e?.status === 404)) {

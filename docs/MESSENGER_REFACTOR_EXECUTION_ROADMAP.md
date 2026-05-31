@@ -61,7 +61,7 @@ Do not merge multiple stages into a single prompt.
 | 1 | Baseline Lock + Perf Budget | Completed | Copilot | 2026-05-31 | Baseline locked from `tmp/messenger-benchmark/comparison-summary.json` (`generatedAt=2026-05-31T19:13:12Z`) |
 | 2 | Menu IA Normalization | In Progress | Copilot | 2026-05-31 | IA sectioning applied in header/context menus + focused Vitest/Playwright green |
 | 3 | Conversation List Performance + Visual Cohesion | Completed | Copilot | 2026-05-31 | Row view-model memoization, shared-token visual alignment, and S07/S10 list-ready benchmark check passed |
-| 4 | Chat Open Pipeline (Heavy/Search/Identity) | Pending | Copilot | - | - |
+| 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Pending | Copilot | - | - |
 | 6 | Context Menu Latency Fix (S05) | Pending | Copilot | - | - |
 | 7 | Media Pipeline Optimization (S09/S10) | Pending | Copilot | - | - |
@@ -231,6 +231,46 @@ Exit criteria:
 
 Rollback:
 - Revert open pipeline changes only.
+
+Stage 4 kickoff progress (Phase 1):
+- Implemented a two-step open path in `useChatMessages.ts`:
+	- Fast initial room fetch (`limit=24`) for first open without warm snapshot.
+	- Deferred background hydration (`limit=48`, silent refresh) after first paint.
+- Added hydration de-dup guard per user to avoid duplicate background refresh storms.
+- Kept warm-snapshot behavior intact and aligned test doubles with dynamic `limit=` query matching.
+
+Focused validation completed:
+- `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts`
+- `npm run test:unit:run -- src/components/ChatView.test.ts`
+
+Stage 4 benchmark checkpoint (S02/S04/S08 subset):
+- Command:
+	- `npm run benchmark:messenger -- --config tmp/messenger-benchmark/stage4-s02-s04-s08-config.json`
+- Baseline (`b98363d`) -> Stage 4 kickoff (working tree):
+	- S02 chat first paint: `885.9 ms` (improved vs `1169.8 ms` pre-refactor baseline, but list/context still pending tuning)
+	- S04 chat first paint: `704.9 ms` (notable improvement)
+	- S08 list-ready: `692.9 ms` (improved), while S08 chat first paint regressed (`1293.5 ms`) and needs next slice tuning.
+
+Stage 4 finalization (non-blocking hydration refinement):
+- Removed chat-open critical-path blocking on `waitForChatUploadBackgroundReady()` in `useChatMessages.ts`.
+- Initial message paint now uses immediate pending state + asynchronous reconciliation for restored uploads.
+- Silent/background refresh path still awaits uploader readiness for correctness.
+
+Stage 4 focused validations (final):
+- `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts`
+- `npm run test:unit:run -- src/components/ChatView.test.ts`
+
+Stage 3 vs Stage 4 differential benchmark (authoritative Stage 4 closeout):
+- Command:
+	- `npm run benchmark:messenger -- --config tmp/messenger-benchmark/stage4-vs-stage3-s02-s04-s08-config.json`
+- Results (`chat first paint`):
+	- S02: `1150.1 ms` -> `845.1 ms` (Stage 4 improved)
+	- S04: `856.2 ms` -> `862.7 ms` (near-flat; statistically close)
+	- S08: `1095.9 ms` -> `802.6 ms` (Stage 4 improved)
+- Results (`list ready`):
+	- S02: `835.3 ms` -> `724.0 ms`
+	- S04: `724.3 ms` -> `604.6 ms`
+	- S08: `679.7 ms` -> `528.1 ms`
 
 ### Stage 5 - Composer/Overlay State Machine Stabilization
 
