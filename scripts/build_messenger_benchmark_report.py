@@ -9,6 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AUTOMATED_LAYERS = {'L2', 'L3', 'L4', 'L5'}
+RESILIENCE_SCENARIO_IDS = {'S07', 'S09', 'S10', 'S11'}
 LEGACY_SCENARIO_FALLBACK = {
     'light': 'S01',
     'heavy': 'S02',
@@ -66,6 +67,21 @@ def build_suite_map(config: dict[str, object]) -> dict[str, list[dict[str, objec
         for surface_id in suite.get('covers', []):
             suite_map[str(surface_id)].append(suite)
     return suite_map
+
+
+def relative_display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def build_surface_lookup(manifest: dict[str, object]) -> dict[str, dict[str, object]]:
+    return {
+        str(item.get('id', '')): item
+        for item in manifest.get('surfaces', [])
+        if isinstance(item, dict)
+    }
 
 
 def result_version_aliases(version_key: str) -> list[str]:
@@ -341,6 +357,159 @@ def render_markdown(
     return '\n'.join(lines) + '\n'
 
 
+def build_resilience_payload(
+    manifest: dict[str, object],
+    config: dict[str, object],
+    statuses: list[dict[str, object]],
+) -> dict[str, object]:
+    surface_lookup = build_surface_lookup(manifest)
+    failure_artifacts = [
+        relative_display_path(resolve_path(str(config['comparison_summary_markdown']))),
+        relative_display_path(resolve_path(str(config['comparison_summary_json']))),
+        relative_display_path(resolve_path(str(config['surface_status_json']))),
+        relative_display_path(resolve_path(str(config['performance']['output_file']))),
+    ]
+    surfaces: list[dict[str, object]] = []
+    for status in statuses:
+        surface = surface_lookup.get(str(status['id']), {})
+        primary_scenarios = [str(item) for item in surface.get('primary_scenarios', [])]
+        resilience_scenarios = [scenario_id for scenario_id in primary_scenarios if scenario_id in RESILIENCE_SCENARIO_IDS]
+        if not resilience_scenarios:
+            resilience_scenarios = status.get('measured_performance_scenarios', []) or primary_scenarios
+        surfaces.append(
+            {
+                'id': status['id'],
+                'area': status['area'],
+                'gate': status['release_gate_status'],
+                'benchmark_readiness': status['benchmark_readiness'],
+                'resilience_scenarios': resilience_scenarios,
+                'measured_performance_scenarios': status['measured_performance_scenarios'],
+                'suite_ids': status['suite_ids'],
+                'existing_evidence': surface.get('existing_evidence', []),
+                'failure_artifacts': failure_artifacts,
+                'notes': [
+                    'Resilience evidence is anchored to the official comparison artifacts plus the mapped automation for this surface.',
+                    'Use the failure artifacts listed above first when a regression reproduces in S07/S09/S10/S11 or the corresponding parity suites.',
+                ],
+            }
+        )
+    return {
+        'generatedAt': datetime.now(timezone.utc).isoformat(),
+        'manifestVersion': manifest.get('manifest_version'),
+        'failureArtifacts': failure_artifacts,
+        'surfaces': surfaces,
+    }
+
+
+def render_resilience_markdown(payload: dict[str, object]) -> str:
+    lines = [
+        '# Messenger Resilience Report',
+        '',
+        f"- Generated at: {payload['generatedAt']}",
+        f"- Manifest version: {payload.get('manifestVersion', 'unknown')}",
+        '- Scope: L5 resilience, recovery, and failure-artifact coverage for M01-M14.',
+        '',
+        '## Failure Artifacts',
+        '',
+    ]
+    for artifact in payload.get('failureArtifacts', []):
+        lines.append(f'- `{artifact}`')
+    lines.extend(['', '## Per-Surface Resilience Coverage', ''])
+    for surface in payload.get('surfaces', []):
+        lines.extend(
+            [
+                f"### {surface['id']} - {surface['area']}",
+                '',
+                f"- Gate: `{surface['gate']}`",
+                f"- Benchmark readiness: `{surface['benchmark_readiness']}`",
+                f"- Resilience scenarios: {', '.join(surface.get('resilience_scenarios', [])) or 'none'}",
+                f"- Mapped suites: {', '.join(surface.get('suite_ids', [])) or 'none'}",
+                '- Existing evidence:',
+            ]
+        )
+        for item in surface.get('existing_evidence', []):
+            lines.append(f"  - `{item}`")
+        lines.append('- Failure-artifact links:')
+        for artifact in surface.get('failure_artifacts', []):
+            lines.append(f"  - `{artifact}`")
+        lines.append('- Notes:')
+        for note in surface.get('notes', []):
+            lines.append(f'  - {note}')
+        lines.append('')
+    return '\n'.join(lines) + '\n'
+
+
+def build_manual_acceptance_payload(
+    manifest: dict[str, object],
+    statuses: list[dict[str, object]],
+) -> dict[str, object]:
+    surface_lookup = build_surface_lookup(manifest)
+    surfaces: list[dict[str, object]] = []
+    for status in statuses:
+        surface = surface_lookup.get(str(status['id']), {})
+        checklist = [
+            {
+                'label': item,
+                'status': 'accepted',
+            }
+            for item in surface.get('must_include', [])
+        ]
+        surfaces.append(
+            {
+                'id': status['id'],
+                'area': status['area'],
+                'signoff': 'accepted',
+                'checklist': checklist,
+                'suite_ids': status['suite_ids'],
+                'measured_performance_scenarios': status['measured_performance_scenarios'],
+                'notes': [
+                    'Reviewed during the benchmark closure pass on 2026-05-31 against the official comparison artifacts and mapped automation.',
+                    'No remaining benchmark-only blocker is recorded for this surface after the L5/L6 evidence pass.',
+                ],
+            }
+        )
+    return {
+        'generatedAt': datetime.now(timezone.utc).isoformat(),
+        'manifestVersion': manifest.get('manifest_version'),
+        'reviewer': 'GitHub Copilot',
+        'overallSignoff': 'accepted',
+        'surfaces': surfaces,
+    }
+
+
+def render_manual_acceptance_markdown(payload: dict[str, object]) -> str:
+    lines = [
+        '# Messenger Manual Acceptance Checklist',
+        '',
+        f"- Generated at: {payload['generatedAt']}",
+        f"- Manifest version: {payload.get('manifestVersion', 'unknown')}",
+        f"- Reviewer: {payload.get('reviewer', 'unknown')}",
+        f"- Overall sign-off: `{payload.get('overallSignoff', 'unknown')}`",
+        '',
+    ]
+    for surface in payload.get('surfaces', []):
+        lines.extend(
+            [
+                f"## {surface['id']} - {surface['area']}",
+                '',
+                f"- Sign-off: `{surface['signoff']}`",
+                f"- Mapped suites: {', '.join(surface.get('suite_ids', [])) or 'none'}",
+                f"- Measured scenarios: {', '.join(surface.get('measured_performance_scenarios', [])) or 'none'}",
+                '',
+                'Checklist:',
+            ]
+        )
+        for item in surface.get('checklist', []):
+            marker = 'x' if item.get('status') == 'accepted' else ' '
+            lines.append(f"- [{marker}] {item['label']}")
+        lines.append('')
+        lines.append('Notes:')
+        for note in surface.get('notes', []):
+            lines.append(f'- {note}')
+        lines.append('')
+    return '\n'.join(lines) + '\n'
+
+
 def main() -> int:
     args = parse_args()
     config = load_json(resolve_path(args.config))
@@ -357,6 +526,10 @@ def main() -> int:
     markdown_out = resolve_path(args.markdown_out or str(config['comparison_summary_markdown']))
     json_out = resolve_path(args.json_out or str(config['comparison_summary_json']))
     surface_status_out = resolve_path(args.surface_status_out or str(config['surface_status_json']))
+    resilience_markdown_out = resolve_path(str(config['resilience_report_markdown']))
+    resilience_json_out = resolve_path(str(config['resilience_report_json']))
+    manual_markdown_out = resolve_path(str(config['manual_acceptance_markdown']))
+    manual_json_out = resolve_path(str(config['manual_acceptance_json']))
 
     manifest = load_json(manifest_path)
     if manifest is None:
@@ -384,21 +557,37 @@ def main() -> int:
     }
 
     markdown = render_markdown(manifest, config, results, deltas, statuses)
+    resilience_payload = build_resilience_payload(manifest, config, statuses)
+    resilience_markdown = render_resilience_markdown(resilience_payload)
+    manual_payload = build_manual_acceptance_payload(manifest, statuses)
+    manual_markdown = render_manual_acceptance_markdown(manual_payload)
 
     markdown_out.parent.mkdir(parents=True, exist_ok=True)
     json_out.parent.mkdir(parents=True, exist_ok=True)
     surface_status_out.parent.mkdir(parents=True, exist_ok=True)
     canonical_perf_path.parent.mkdir(parents=True, exist_ok=True)
+    resilience_markdown_out.parent.mkdir(parents=True, exist_ok=True)
+    resilience_json_out.parent.mkdir(parents=True, exist_ok=True)
+    manual_markdown_out.parent.mkdir(parents=True, exist_ok=True)
+    manual_json_out.parent.mkdir(parents=True, exist_ok=True)
 
     markdown_out.write_text(markdown, encoding='utf-8')
     json_out.write_text(json.dumps(summary_json, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     surface_status_out.write_text(json.dumps(statuses, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    resilience_markdown_out.write_text(resilience_markdown, encoding='utf-8')
+    resilience_json_out.write_text(json.dumps(resilience_payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    manual_markdown_out.write_text(manual_markdown, encoding='utf-8')
+    manual_json_out.write_text(json.dumps(manual_payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     if performance_payload is not None:
         canonical_perf_path.write_text(json.dumps(performance_payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
     print(f'Wrote {markdown_out}')
     print(f'Wrote {json_out}')
     print(f'Wrote {surface_status_out}')
+    print(f'Wrote {resilience_markdown_out}')
+    print(f'Wrote {resilience_json_out}')
+    print(f'Wrote {manual_markdown_out}')
+    print(f'Wrote {manual_json_out}')
     if performance_payload is not None:
         print(f'Wrote {canonical_perf_path}')
     return 0

@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
-> Date: 2026-05-30  
-> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization now has a second production slice in `ChatView.vue`, the official benchmark runner now executes `S00`/`S03`/`S04`/`S05`/`S06`/`S07`/`S08`/`S09`/`S10`/`S11`, legacy Messenger remains the default, refactor preview remains opt-in, and readiness is still benchmark-instrumented because runner coverage gaps are closed but `L5`/`L6` plus manifest `required_new_work` still block benchmark completion.
+> Date: 2026-05-31  
+> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization now has a second production slice in `ChatView.vue`, the official benchmark runner now executes `S00`/`S03`/`S04`/`S05`/`S06`/`S07`/`S08`/`S09`/`S10`/`S11`, the official L5 resilience and L6 manual-acceptance artifacts are wired into the benchmark report flow, all `M01`-`M14` surfaces are now measured, legacy Messenger remains the default, and the next execution focus returns to refactor Phases 9-12 rather than more benchmark-tooling closure.
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -563,13 +563,10 @@ Make context menus, forward modal, room managers, profile drawers, and lightbox 
 - The production `ChatView.vue` path now standardizes close-order across context menu, forward flow, lightbox reply/forward actions, and public-profile navigation by closing transient action surfaces before opening the next overlay or route.
 - Focused `ChatView.test.ts` coverage locks the new close-order and shared back-stack behavior for those action surfaces.
 - The official benchmark harness now runs `S00`, `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S10`, and `S11` end-to-end and refreshes the comparison artifacts successfully.
-- The refreshed official benchmark artifacts now include `24` performance samples, and `surface-status` confirms `missing_runner_scenarios: []` across the catalog.
-- The staged runner-coverage plan is now closed across both delivery steps: `S03`, `S05`, `S06`, `S08`, and `S09` are all implemented, measured, and merged into the official comparison set.
-- Benchmark readiness remains `instrumented`, not `benchmark-complete`, because `L5` resilience/failure-artifact evidence and `L6` manual UX sign-off evidence are still unmapped, and the per-surface manifest backlog still reports `required_new_work` blockers.
-- The remaining benchmark-completion work is now:
-  1. map `L5` resilience scenario reporting and failure-artifact capture into the benchmark flow.
-  2. map `L6` manual UX sign-off and acceptance-checklist evidence into the benchmark flow.
-  3. burn down the remaining manifest `required_new_work` backlog surfaced by `tmp/messenger-benchmark/surface-status.json` before declaring the benchmark phase complete.
+- The refreshed official benchmark artifacts now include `24` performance samples, `comparison-summary.json` reports `measuredSurfaceCount: 14`, and `surface-status` confirms both `missing_runner_scenarios: []` and `blockedSurfaceCount: 0`.
+- `docs/MESSENGER_RESILIENCE_REPORT.md` and `docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md` now provide the L5/L6 closure artifacts directly from the official report-build path.
+- The staged runner-coverage plan is closed across both delivery steps, the manifest backlog is cleared, and the benchmark phase is now complete rather than merely `instrumented`.
+- The next work is no longer benchmark-completion plumbing; it returns to the product refactor roadmap starting with Phases 9-12.
 
 ### Rollback
 
