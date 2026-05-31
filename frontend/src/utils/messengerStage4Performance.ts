@@ -1,7 +1,7 @@
 import type { ChatAlbumTimelineItem, ChatTimelineGroup, ChatTimelineItem, Conversation } from '../types/chat'
 
-export const MESSENGER_CONVERSATION_INITIAL_WINDOW = 80
-export const MESSENGER_CONVERSATION_WINDOW_BATCH = 60
+export const MESSENGER_CONVERSATION_INITIAL_WINDOW = 64
+export const MESSENGER_CONVERSATION_WINDOW_BATCH = 48
 export const MESSENGER_CONVERSATION_WINDOW_THRESHOLD_PX = 640
 
 export interface MessengerConversationWindowOptions {

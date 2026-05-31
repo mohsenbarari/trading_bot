@@ -362,9 +362,9 @@ describe('ChatConversationList.vue', () => {
       },
     })
 
-    expect(wrapper.findAll('.conversation-item')).toHaveLength(81)
+    expect(wrapper.findAll('.conversation-item')).toHaveLength(65)
     expect(wrapper.text()).toContain('User 95')
-    expect(wrapper.get('.conversation-window-more').text()).toContain('۱۴')
+    expect(wrapper.get('.conversation-window-more').text()).toContain('۳۰')
 
     await wrapper.get('.conversation-window-more').trigger('click')
     expect(wrapper.findAll('.conversation-item')).toHaveLength(95)
