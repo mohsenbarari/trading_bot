@@ -7,12 +7,11 @@
  * even after the user leaves the messenger.
  *
  * Responsibilities:
- *  - For single direct/group uploads: create resumable upload batches +
- *    sessions, append chunks, finalize the uploaded file, then commit the
+ *  - For session-backed direct/group uploads: create resumable upload batches
+ *    + sessions, append chunks, finalize the uploaded file, then commit the
  *    batch into the final chat message.
- *  - For channel uploads and album uploads: keep the legacy
- *    `/api/chat/upload-media` path until the resumable album/channel slices
- *    are migrated.
+ *  - For channel uploads: keep the legacy `/api/chat/upload-media` path until
+ *    the resumable channel slice is migrated.
  *  - Post committed messages with the captured conversation target (NOT
  *    reading `selectedUserId.value` — which may have been cleared when the
  *    user navigated away)
@@ -25,9 +24,9 @@
  *  - Event emission for any subscribed chat UI (`useChatMedia`) to update
  *    the visible optimistic messages in real time
  *
- * This service now uses the resumable upload backend for single direct/group
- * uploads. Album + channel media still use the legacy monolithic upload path
- * until their batch semantics are migrated on the frontend.
+ * This service now uses the resumable upload backend for direct/group uploads,
+ * including albums. Channel media still use the legacy monolithic upload path
+ * until the dedicated channel slice is migrated.
  */
 
 import type { Message } from '../types/chat'
@@ -254,6 +253,13 @@ function shouldUseSessionBackedUpload(upload: PendingUpload): boolean {
 
 function isSingleSessionBackedUpload(upload: PendingUpload): boolean {
     return shouldUseSessionBackedUpload(upload) && !upload.albumId
+}
+
+function buildAlbumServiceWorkerHandoffKey(
+    upload: Pick<PendingUpload, 'roomKind' | 'userId' | 'albumId'>,
+): string | null {
+    if (!upload.albumId) return null
+    return `${upload.roomKind}:${upload.userId}:${upload.albumId}`
 }
 
 function canUseUploadServiceWorker(): boolean {
@@ -892,6 +898,37 @@ async function flushAlbumBatchIfReady(albumId: string) {
     }
 }
 
+async function restoreAlbumBatchFromSendingState(albumId: string): Promise<void> {
+    const batch = albumBatches.get(albumId)
+    if (!batch) return
+
+    const ids = Array.from(batch.optimisticIds)
+    await Promise.all(ids.map(async (id) => {
+        const upload = pendingUploads.get(id)
+        if (!upload || upload.phase !== 'sending') return
+
+        if (upload.fileId) {
+            upload.phase = 'uploaded'
+            upload.progress = 100
+            upload.totalBytes = upload.file.size
+            upload.uploadedBytes = upload.totalBytes
+        } else if (shouldUseSessionBackedUpload(upload)) {
+            upload.phase = 'queued'
+            upload.totalBytes = upload.file.size
+            upload.uploadedBytes = Math.max(0, Math.min(upload.nextOffset ?? upload.uploadedBytes ?? 0, upload.file.size))
+            upload.progress = getUploadResumeProgress(upload)
+        } else {
+            upload.phase = 'queued'
+            upload.progress = 0
+            upload.uploadedBytes = 0
+            upload.totalBytes = upload.file.size
+        }
+
+        upload.errorMessage = undefined
+        await idbPut(upload)
+    }))
+}
+
 // Safety net invoked whenever the upload pipeline fully drains. Guarantees
 // that any album whose items are all in a terminal-ish phase gets its
 // pending `/chat/send` dispatches fired, even if the last `runUpload` did
@@ -992,12 +1029,39 @@ async function postUploadsToServiceWorker(uploadIds: number[]): Promise<boolean>
 async function handoffEligibleUploadsToServiceWorker(): Promise<void> {
     if (!canUseUploadServiceWorker()) return
 
-    const eligibleUploads = Array.from(pendingUploads.values()).filter((upload) => {
-        if (!isSingleSessionBackedUpload(upload)) return false
+    const initialEligibleUploads = Array.from(pendingUploads.values()).filter((upload) => {
+        if (!shouldUseSessionBackedUpload(upload)) return false
         if (serviceWorkerOwnedUploads.has(upload.id)) return false
         if (abortFlags.has(upload.id)) return false
         return upload.phase !== 'sent' && upload.phase !== 'cancelled' && upload.phase !== 'failed'
     })
+
+    const albumHandoffReadiness = new Map<string, boolean>()
+    const eligibleUploads: PendingUpload[] = []
+
+    for (const upload of initialEligibleUploads.sort(comparePendingUploadsForTimeline)) {
+        const albumKey = buildAlbumServiceWorkerHandoffKey(upload)
+        if (!albumKey) {
+            eligibleUploads.push(upload)
+            continue
+        }
+
+        let isReady = albumHandoffReadiness.get(albumKey)
+        if (isReady === undefined) {
+            try {
+                await ensureResumableUploadBatch(upload)
+                isReady = Boolean(upload.batchId)
+            } catch (error) {
+                console.warn('[uploadService] failed to prepare album handoff batch:', error)
+                isReady = false
+            }
+            albumHandoffReadiness.set(albumKey, isReady)
+        }
+
+        if (isReady) {
+            eligibleUploads.push(upload)
+        }
+    }
 
     if (eligibleUploads.length === 0) return
 
@@ -1074,6 +1138,9 @@ function ensureUploadServiceWorkerBridge(): void {
             upload.phase = 'sent'
             stopUploadActivity(upload)
             pendingUploads.delete(upload.id)
+            if (upload.albumId) {
+                cleanupAlbumBatchIfSettled(upload.albumId)
+            }
             void idbDelete(upload.id)
             emit({
                 type: 'sent',
@@ -1117,6 +1184,8 @@ function ensureUploadForegroundRecovery(): void {
 async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
     if (!config) return
 
+    const resumedAlbumIds = new Set<string>()
+
     for (const upload of pendingUploads.values()) {
         if (abortFlags.has(upload.id)) continue
         if (serviceWorkerOwnedUploads.has(upload.id)) continue
@@ -1149,6 +1218,8 @@ async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
 
         if (upload.phase === 'uploaded') {
             if (upload.albumId) {
+                if (resumedAlbumIds.has(upload.albumId)) continue
+                resumedAlbumIds.add(upload.albumId)
                 void flushAlbumBatchIfReady(upload.albumId)
             } else {
                 void sendOne(upload)
@@ -1157,7 +1228,14 @@ async function resumePendingUploadsAfterForegroundWake(): Promise<void> {
         }
 
         if (upload.phase === 'sending' && !sendControllers.has(upload.id)) {
-            void sendOne(upload)
+            if (upload.albumId) {
+                if (resumedAlbumIds.has(upload.albumId)) continue
+                resumedAlbumIds.add(upload.albumId)
+                await restoreAlbumBatchFromSendingState(upload.albumId)
+                void flushAlbumBatchIfReady(upload.albumId)
+            } else {
+                void sendOne(upload)
+            }
         }
     }
 }
@@ -2190,6 +2268,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
             }
 
             // Resume each upload in the background
+            const resumedAlbumIds = new Set<string>()
             for (const upload of pendingUploads.values()) {
                 // Rebuild a local blob URL so UI can show the preview again
                 if (upload.file && !upload.localBlobUrl) {
@@ -2223,6 +2302,11 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
                 ) {
                     // upload-media already done; just re-send
                     if (upload.albumId) {
+                        if (resumedAlbumIds.has(upload.albumId)) continue
+                        resumedAlbumIds.add(upload.albumId)
+                        if (upload.phase === 'sending') {
+                            await restoreAlbumBatchFromSendingState(upload.albumId)
+                        }
                         void flushAlbumBatchIfReady(upload.albumId)
                     } else {
                         void sendOne(upload)
@@ -2458,6 +2542,7 @@ export const __chatUploadBackgroundTestHooks = {
     sendOne,
     markFailed,
     forceFlushStalledAlbums,
+    restoreAlbumBatchFromSendingState,
     pauseUploadForServiceWorker,
     postUploadsToServiceWorker,
     handoffEligibleUploadsToServiceWorker,

@@ -2965,6 +2965,153 @@ describe('chatUploadBackground', () => {
     expect(service.getPendingForUser(77)).toEqual([])
   })
 
+  it('hands off a hidden resumable group album to the service worker as one owned batch', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+
+    let serviceWorkerMessageHandler: ((event: { data: any }) => void) | null = null
+    const postMessage = vi.fn()
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 Chrome/124.0.0.0 Safari/537.36',
+    })
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      writable: true,
+      value: {
+        controller: { postMessage },
+        addEventListener: vi.fn((type: string, handler: (event: { data: any }) => void) => {
+          if (type === 'message') {
+            serviceWorkerMessageHandler = handler
+          }
+        }),
+      },
+    })
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    })
+
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    const hooks = service.__chatUploadBackgroundTestHooks
+    hooks.state.albumBatches.set('sw-album', {
+      albumId: 'sw-album',
+      userId: -77,
+      roomKind: 'group',
+      expectedCount: 2,
+      optimisticIds: new Set([-721, -722]),
+      batchId: 'sw-album-batch',
+      commitRetryCount: 0,
+      flushing: false,
+    })
+    hooks.state.pendingUploads.set(-721, {
+      ...makeBaseSubmitParams({
+        optimisticId: -721,
+        userId: -77,
+        roomKind: 'group',
+        file: new Blob(['album-0'], { type: 'image/png' }),
+        fileName: 'album-0.png',
+      }),
+      phase: 'uploaded',
+      id: -721,
+      progress: 100,
+      uploadedBytes: 7,
+      totalBytes: 7,
+      senderId: 15,
+      msgType: 'image',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 120,
+      height: 80,
+      albumId: 'sw-album',
+      albumIndex: 0,
+      albumSize: 2,
+      batchId: 'sw-album-batch',
+      fileId: 'sw-album-file-0',
+      createdAt: '2026-05-31T08:30:00Z',
+    })
+    hooks.state.pendingUploads.set(-722, {
+      ...makeBaseSubmitParams({
+        optimisticId: -722,
+        userId: -77,
+        roomKind: 'group',
+        file: new Blob(['album-1'], { type: 'image/png' }),
+        fileName: 'album-1.png',
+      }),
+      phase: 'uploading',
+      id: -722,
+      progress: 35,
+      uploadedBytes: 3,
+      totalBytes: 7,
+      senderId: 15,
+      msgType: 'image',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 120,
+      height: 80,
+      albumId: 'sw-album',
+      albumIndex: 1,
+      albumSize: 2,
+      batchId: 'sw-album-batch',
+      sessionId: 'sw-album-session-1',
+      resumeToken: 'sw-album-resume-1',
+      nextOffset: 3,
+      fileId: undefined,
+      createdAt: '2026-05-31T08:30:01Z',
+    })
+
+    document.dispatchEvent(new Event('visibilitychange'))
+    await Promise.resolve()
+    await Promise.resolve()
+    await vi.runAllTimersAsync()
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'chat-upload:handoff',
+      uploadIds: [-721, -722],
+    }))
+    expect(hooks.state.serviceWorkerOwnedUploads.has(-721)).toBe(true)
+    expect(hooks.state.serviceWorkerOwnedUploads.has(-722)).toBe(true)
+
+    ;(serviceWorkerMessageHandler as ((event: { data: any }) => void) | null)?.({
+      data: {
+        type: 'chat-upload:sent',
+        uploadId: -721,
+        serverMessage: {
+          id: 9721,
+          sender_id: 15,
+          receiver_id: 77,
+          content: JSON.stringify({ file_id: 'sw-album-file-0', album_index: 0 }),
+          message_type: 'image',
+          is_read: false,
+          created_at: '2026-05-31T08:31:00Z',
+        },
+      },
+    })
+    ;(serviceWorkerMessageHandler as ((event: { data: any }) => void) | null)?.({
+      data: {
+        type: 'chat-upload:sent',
+        uploadId: -722,
+        serverMessage: {
+          id: 9722,
+          sender_id: 15,
+          receiver_id: 77,
+          content: JSON.stringify({ file_id: 'sw-album-file-1', album_index: 1 }),
+          message_type: 'image',
+          is_read: false,
+          created_at: '2026-05-31T08:31:01Z',
+        },
+      },
+    })
+    await vi.runAllTimersAsync()
+
+    expect(events.filter((event) => event.type === 'sent').map((event) => event.optimisticId)).toEqual([-721, -722])
+    expect(service.getPendingForUser(-77)).toEqual([])
+    expect(hooks.state.albumBatches.has('sw-album')).toBe(false)
+  })
+
   it('restores uploaded document resumes from persisted file bytes and reuses the reconstructed file on commit', async () => {
     installIndexedDb([
       {
@@ -4072,6 +4219,73 @@ describe('chatUploadBackground', () => {
     await vi.runAllTimersAsync()
 
     expect(events).toContainEqual(expect.objectContaining({ type: 'sent', optimisticId: -952 }))
+  })
+
+  it('replays album uploads restored in sending phase on foreground wake', async () => {
+    installIndexedDb([])
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/activity')) {
+        return { ok: true, status: 204, json: async () => ({}) } as Response
+      }
+      if (url.endsWith('/api/chat/upload-batches/album-sending-batch/commit') && init?.method === 'POST') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            messages: [{
+              id: 9751,
+              sender_id: 15,
+              receiver_id: 55,
+              content: JSON.stringify({ file_id: 'album-sending-file', album_index: 0 }),
+              message_type: 'image',
+              is_read: false,
+              created_at: '2026-05-31T08:40:00Z',
+            }],
+          }),
+        } as Response
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    const albumUpload = {
+      id: -751,
+      userId: -55,
+      roomKind: 'group' as const,
+      senderId: 15,
+      msgType: 'image' as const,
+      file: new Blob(['album-sending'], { type: 'image/png' }),
+      fileName: 'album-sending.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 20,
+      height: 20,
+      albumId: 'album-sending',
+      albumIndex: 0,
+      albumSize: 1,
+      phase: 'sending' as const,
+      progress: 100,
+      uploadedBytes: 13,
+      totalBytes: 13,
+      batchId: 'album-sending-batch',
+      fileId: 'album-sending-file',
+      createdAt: '2026-05-31T08:39:30Z',
+    }
+
+    hooks.state.pendingUploads.set(albumUpload.id, albumUpload)
+    hooks.ensureAlbumBatch('album-sending', -55, 1, 'group', 'album-sending-batch').optimisticIds.add(albumUpload.id)
+
+    await hooks.resumePendingUploadsAfterForegroundWake()
+    await vi.runAllTimersAsync()
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'sent', optimisticId: -751 }))
+    expect(service.getPendingForUser(-55)).toEqual([])
   })
 
   it('reuses the existing init promise on repeat init calls and tolerates resume failures', async () => {
