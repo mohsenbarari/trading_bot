@@ -142,29 +142,28 @@
           <template v-if="isCached || msg.local_blob_url">
             <div class="absolute inset-0 w-full h-full flex items-center justify-center">
               <img v-if="msg.message_type === 'image'"
-                   v-show="!msg.is_sending || thumbnail"
+                    v-show="!mediaTransferState.isSendingBusy || thumbnail"
                     :data-media-msg-id="msg.id"
                    :src="msg.local_blob_url || cachedUrl"
                   alt="تصویر" draggable="false" class="msg-media-content w-full h-full object-cover absolute inset-0 block" />
                    
               <div v-else-if="msg.message_type === 'video'" class="absolute inset-0 w-full h-full">
-                  <video v-show="!msg.is_sending" :src="msg.local_blob_url || cachedUrl" draggable="false"
+                  <video v-show="!mediaTransferState.isSendingBusy" :src="msg.local_blob_url || cachedUrl" draggable="false"
                        class="w-full h-full object-cover absolute inset-0 block" autoplay muted loop playsinline></video>
-                <div v-if="!msg.is_sending" class="video-play-indicator">
+                <div v-if="!mediaTransferState.isSendingBusy" class="video-play-indicator">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
                 </div>
               </div>
               
               <!-- Overlay for uploading state -->
-              <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-media-overlay cancelable-overlay" @click.stop="$emit('cancel-send', msg)" style="cursor:pointer;">
-                <div v-if="msg.upload_total > 0" class="telegram-size-badge" :style="{ direction: msg.upload_progress === 100 ? 'rtl' : 'ltr' }">
-                  <span v-if="msg.upload_progress === 100">در حال پردازش...</span>
-                  <span v-else>{{ formatBytes(msg.upload_loaded) }} / {{ formatBytes(msg.upload_total) }}</span>
+              <div v-if="mediaTransferState.isSendingBusy" class="msg-media-overlay cancelable-overlay" @click.stop="$emit('cancel-send', msg)" style="cursor:pointer;">
+                <div v-if="mediaUploadStatusText" class="telegram-size-badge" :style="{ direction: mediaTransferState.isProcessing ? 'rtl' : 'ltr' }">
+                  <span>{{ mediaUploadStatusText }}</span>
                 </div>
                 <div class="progress-container cancelable" style="background: rgba(0,0,0,0.5); border-radius: 50%; padding: 8px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
                   <svg class="progress-ring" viewBox="0 0 36 36" style="position: absolute; width: 44px; height: 44px;">
                     <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-                    <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
+                    <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
                   </svg>
                   <div class="progress-cancel-icon" style="color: white; font-size: 18px; z-index: 2;">✕</div>
                 </div>
@@ -175,10 +174,10 @@
           <!-- 2. Needs Download State -->
           <template v-else>
             <div class="w-full h-full absolute inset-0 msg-media-overlay z-10" @click.stop>
-              <div v-if="msg.is_downloading" class="progress-container cancelable" @click.stop="$emit('cancel-download', msg)">
+              <div v-if="mediaTransferState.isDownloadingBusy" class="progress-container cancelable" @click.stop="$emit('cancel-download', msg)">
                 <svg class="progress-ring" viewBox="0 0 36 36">
                   <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-                  <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.download_progress || 0}, 100`"></circle>
+                  <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
                 </svg>
                 <div class="progress-cancel-icon">✕</div>
               </div>
@@ -235,15 +234,22 @@
             </div>
           </div>
           
-          <div v-if="msg.is_sending && msg.upload_progress !== undefined" class="msg-voice-uploading" @click.stop="$emit('cancel-send', msg)">
+          <div v-if="mediaTransferState.isSendingBusy" class="msg-voice-uploading" style="position: relative;" @click.stop="$emit('cancel-send', msg)">
+            <span
+              v-if="voiceUploadStatusText"
+              class="voice-upload-status"
+              style="position:absolute; inset-block-end: calc(100% + 6px); inset-inline-start:50%; transform:translateX(-50%); background:rgba(0,0,0,0.62); color:#fff; border-radius:999px; padding:2px 6px; font-size:10px; white-space:nowrap; line-height:1.2;"
+            >
+              {{ voiceUploadStatusText }}
+            </span>
             <svg class="progress-ring-small" viewBox="0 0 36 36">
               <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
-              <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${msg.upload_progress}, 100`"></circle>
+              <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
             </svg>
             <div class="voice-cancel-icon" style="position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); font-size:12px; color:white;">✕</div>
           </div>
           <button
-            v-if="showMediaShare && !msg.is_sending"
+            v-if="showMediaShare && !mediaTransferState.isSendingBusy"
             type="button"
             class="voice-share-btn"
             title="اشتراک‌گذاری"
@@ -426,6 +432,7 @@ import { useAudioStore } from '../../stores/audio'
 import type { Message, MessageReaction, RecoveryAction, UserMentionDetail } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
 import { resolveForwardedProfileTarget } from '../../utils/accountantChatIdentity'
+import { getChatMessageTransferState } from '../../utils/chatMessageTransferState'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
 import { MESSAGE_REACTION_ORDER } from '../../utils/messageReactions'
 import {
@@ -685,17 +692,16 @@ const docFileUrl = computed(() => {
   return `${baseUrl}/api/chat/files/${fileId}?token=${token}`
 })
 const isCachedDownloading = computed(() => Boolean(docFileId.value && cachedDownloadingFiles[docFileId.value!]))
-const isDocumentBusy = computed(() => Boolean(
-  props.msg.is_sending || props.msg.is_downloading || isCachedDownloading.value
-))
-const docTransferProgress = computed(() => {
-  if (props.msg.is_sending) return props.msg.upload_progress || 0
-  if (props.msg.is_downloading) return props.msg.download_progress || 0
-  // Cached fetch path doesn't expose granular progress; show indeterminate-ish 60%.
-  if (isCachedDownloading.value) return 60
-  return 0
-})
-const showDocumentShare = computed(() => supportsFileShare && !isDocumentBusy.value && !props.msg.is_sending)
+const documentTransferState = computed(() => getChatMessageTransferState({
+  isSending: props.msg.is_sending,
+  isDownloading: props.msg.is_downloading,
+  uploadProgress: props.msg.upload_progress,
+  downloadProgress: props.msg.download_progress,
+  cachedDownloadBusy: isCachedDownloading.value,
+}))
+const isDocumentBusy = computed(() => documentTransferState.value.isBusy)
+const docTransferProgress = computed(() => documentTransferState.value.progress)
+const showDocumentShare = computed(() => supportsFileShare && !isDocumentBusy.value)
 const isDocumentCached = computed(() => {
   const id = docFileId.value
   if (!id) return false
@@ -705,12 +711,12 @@ const isDocumentCached = computed(() => {
 })
 
 function handleDocumentBusyClick() {
-  if (props.msg.is_sending) {
+  if (documentTransferState.value.cancelAction === 'send') {
     emit('cancel-send', props.msg)
     return
   }
 
-  if (props.msg.is_downloading) {
+  if (documentTransferState.value.cancelAction === 'download') {
     emit('cancel-download', props.msg)
   }
   // Cached fetches are short-lived and intentionally non-cancellable.
@@ -828,6 +834,30 @@ const isMediaMessage = computed(() =>
   props.msg.message_type === 'voice',
 )
 
+const mediaTransferState = computed(() => getChatMessageTransferState({
+  isSending: props.msg.is_sending,
+  isDownloading: props.msg.is_downloading,
+  uploadProgress: props.msg.upload_progress,
+  downloadProgress: props.msg.download_progress,
+}))
+
+const mediaUploadStatusText = computed(() => {
+  if (!mediaTransferState.value.isSendingBusy) return ''
+  if (mediaTransferState.value.isProcessing) return 'در حال پردازش...'
+
+  const uploadTotal = Number(props.msg.upload_total || 0)
+  if (uploadTotal > 0) {
+    return `${formatBytes(props.msg.upload_loaded || 0)} / ${formatBytes(uploadTotal)}`
+  }
+
+  return ''
+})
+
+const voiceUploadStatusText = computed(() => {
+  if (props.msg.message_type !== 'voice') return ''
+  return mediaUploadStatusText.value
+})
+
 const isFullWidthBubble = computed(() => (
   !props.isAlbum
   && props.msg.message_type !== 'image'
@@ -837,7 +867,7 @@ const isFullWidthBubble = computed(() => (
 const showMediaShare = computed(() => (
   supportsFileShare &&
   isMediaMessage.value &&
-  !props.msg.is_sending &&
+  !mediaTransferState.value.isSendingBusy &&
   !props.msg.is_error &&
   Boolean(mediaFileId.value)
 ))
@@ -862,12 +892,17 @@ async function handleMediaShareClick(event: Event) {
 }
 
 const docStatusText = computed(() => {
-  if (props.msg.is_sending) {
+  if (documentTransferState.value.isProcessing) {
+    return 'در حال پردازش...'
+  }
+  if (documentTransferState.value.kind === 'uploading') {
     return `${formatBytes(props.msg.upload_loaded || 0)} / ${formatBytes(props.msg.upload_total || docParsed.value?.size || 0)}`
   }
-  if (props.msg.is_downloading) {
-    const progress = props.msg.download_progress || 0
-    return `در حال دانلود... ${progress}%`
+  if (documentTransferState.value.kind === 'downloading') {
+    return `در حال دانلود... ${documentTransferState.value.progress}%`
+  }
+  if (documentTransferState.value.kind === 'cached-download') {
+    return 'در حال آماده‌سازی...'
   }
 
   const parts = [] as string[]
