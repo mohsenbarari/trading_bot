@@ -58,7 +58,7 @@ Do not merge multiple stages into a single prompt.
 
 | Stage | Name | Status | Owner | Last Run | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Baseline Lock + Perf Budget | Pending | Copilot | - | - |
+| 1 | Baseline Lock + Perf Budget | Completed | Copilot | 2026-05-31 | Baseline locked from `tmp/messenger-benchmark/comparison-summary.json` (`generatedAt=2026-05-31T19:13:12Z`) |
 | 2 | Menu IA Normalization | Pending | Copilot | - | - |
 | 3 | Conversation List Performance + Visual Cohesion | Pending | Copilot | - | - |
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Pending | Copilot | - | - |
@@ -95,6 +95,44 @@ Exit criteria:
 
 Rollback:
 - Revert config/doc-only updates.
+
+Stage 1 execution result (locked):
+- Command run: `make messenger-benchmark-all`
+- Artifacts refreshed:
+	- `tmp/messenger-benchmark/comparison-summary.json`
+	- `tmp/messenger-benchmark/performance-results.json`
+	- `docs/messenger-surface-report.md`
+	- `docs/MESSENGER_RESILIENCE_REPORT.md`
+	- `docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md`
+
+Stage 1 locked performance budget (final gate thresholds):
+
+| Scenario | Old list (ms) | Current list (ms) | Budget list max (ms) | Old chat (ms) | Current chat (ms) | Budget chat max (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| S00 | 683.3 | 732.5 | 683.3 | 868.9 | 815.9 | 815.9 |
+| S01 | 631.0 | 747.7 | 631.0 | 787.5 | 1234.4 | 787.5 |
+| S02 | 733.4 | 840.2 | 733.4 | 1252.3 | 786.6 | 786.6 |
+| S03 | 707.1 | 612.2 | 612.2 | 795.1 | 1640.0 | 795.1 |
+| S04 | 559.2 | 665.9 | 559.2 | 886.9 | 1265.5 | 886.9 |
+| S05 | 630.1 | 665.8 | 630.1 | 1628.5 | 842.2 | 842.2 |
+| S06 | 598.8 | 658.2 | 598.8 | 840.0 | 887.5 | 840.0 |
+| S07 | 830.5 | 999.3 | 830.5 | 1472.9 | 1389.2 | 1389.2 |
+| S08 | 836.7 | 614.0 | 614.0 | 831.4 | 1165.1 | 831.4 |
+| S09 | 633.6 | 859.5 | 633.6 | 1149.8 | 883.4 | 883.4 |
+| S10 | 8156.9 | 8126.8 | 8126.8 | 2699.0 | 2765.0 | 2699.0 |
+| S11 | 636.0 | 686.6 | 636.0 | 1105.6 | 1243.8 | 1105.6 |
+
+Additional Stage 1 guardrails:
+- Context menu latency:
+	- Global hard target: `< 180 ms`
+	- S05 hard target: `<= 140.1 ms` (current best baseline)
+- Realtime/long-session:
+	- `averageSwitchMs <= 800 ms` for S05/S07
+	- `averageMenuMs <= 110 ms` for S05/S07/S09
+- Memory and render envelope (from `comparison-summary.json` deltas):
+	- `heapDeltaMb <= +2.0` for every scenario
+	- `heapDeltaMb <= 0` for S07/S09 critical paths
+	- `|domNodeDelta| <= 5` for every scenario
 
 ### Stage 2 - Menu IA Normalization
 

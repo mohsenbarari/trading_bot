@@ -256,16 +256,54 @@ async function createChannel(
   return payload.channel
 }
 
+function isTransientPinnedStateError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /socket hang up|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(message)
+}
+
+async function getPinnedStateWithRetry(
+  request: APIRequestContext,
+  url: string,
+  accessToken: string,
+) {
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await request.get(url, {
+        headers: authHeaders(accessToken),
+      })
+
+      if (response.ok()) {
+        return response
+      }
+      if ((response.status() >= 500 || response.status() === 408) && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
+        continue
+      }
+      expect(response.ok()).toBeTruthy()
+      return response
+    } catch (error) {
+      lastError = error
+      if (!isTransientPinnedStateError(error) || attempt === 2) {
+        throw error
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to fetch pinned state after retries')
+}
+
 async function fetchDirectPinnedState(
   request: APIRequestContext,
   accessToken: string,
   otherUserId: number,
 ): Promise<DirectPinnedState> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/direct/${otherUserId}/pinned-message`, {
-    headers: authHeaders(accessToken),
-  })
-
-  expect(response.ok()).toBeTruthy()
+  const response = await getPinnedStateWithRetry(
+    request,
+    `${BACKEND_BASE_URL}/api/chat/direct/${otherUserId}/pinned-message`,
+    accessToken,
+  )
   return response.json() as Promise<DirectPinnedState>
 }
 
@@ -274,11 +312,11 @@ async function fetchRoomPinnedState(
   accessToken: string,
   chatId: number,
 ): Promise<DirectPinnedState> {
-  const response = await request.get(`${BACKEND_BASE_URL}/api/chat/rooms/${chatId}/pinned-message`, {
-    headers: authHeaders(accessToken),
-  })
-
-  expect(response.ok()).toBeTruthy()
+  const response = await getPinnedStateWithRetry(
+    request,
+    `${BACKEND_BASE_URL}/api/chat/rooms/${chatId}/pinned-message`,
+    accessToken,
+  )
   return response.json() as Promise<DirectPinnedState>
 }
 

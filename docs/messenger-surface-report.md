@@ -1,9 +1,9 @@
 # Messenger Surface Report
 
-- Generated at: 2026-05-30T18:01:08.314645+00:00
+- Generated at: 2026-05-31T18:44:25.586451+00:00
 - Manifest: docs/messenger-surface-manifest.json
 - Surface count: 14
-- Manifest status: draft
+- Manifest status: benchmark-complete
 
 ## Comparison Modes
 
@@ -22,8 +22,8 @@
 | L2 | Deterministic Component And Composable Tests | vitest parity results, component diff artifacts |
 | L3 | Full Functional Parity E2E | playwright traces, per-surface pass/fail report |
 | L4 | Performance Benchmark | performance-results.json, comparison-summary.md |
-| L5 | Resilience And Recovery | resilience scenario report, failure artifact links |
-| L6 | Manual UX Review | manual acceptance checklist, sign-off notes |
+| L5 | Resilience And Recovery | docs/MESSENGER_RESILIENCE_REPORT.md, tmp/messenger-benchmark/resilience-report.json |
+| L6 | Manual UX Review | docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md, tmp/messenger-benchmark/manual-acceptance.json |
 
 ## Scenario Packs
 
@@ -46,20 +46,20 @@
 
 | ID | Area | Severity | Primary Scenarios | Layers | Evidence | New Work |
 | --- | --- | --- | --- | --- | --- | --- |
-| M01 | Shell, bootstrap, and navigation | S2 | S00, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M02 | Conversation list | S2 | S00, S01, S02, S07, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M03 | Direct room core | S1 | S01, S02, S04, S07, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M04 | Group room | S2 | S05, S07, S08, S11 | L0, L1, L2, L3, L5, L6 | 2 | 3 |
-| M05 | Channel room | S2 | S00, S06, S07, S11 | L0, L1, L2, L3, L5, L6 | 3 | 3 |
-| M06 | Composer and overlays | S2 | S01, S03, S04, S05, S06, S10 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M07 | Message rendering | S2 | S01, S02, S03, S04, S10 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M08 | Actions and batch operations | S2 | S01, S03, S04, S09 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M09 | Search, history navigation, and viewer flows | S2 | S03, S04 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M10 | Media, upload, download, and cache pipeline | S1 | S03, S09, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 4 | 3 |
-| M11 | Room and profile management | S2 | S05, S06, S08, S11 | L0, L1, L2, L3, L5, L6 | 3 | 3 |
-| M12 | Identity, permission, and business rules | S1 | S07, S08, S11 | L0, L1, L2, L3, L5, L6 | 3 | 3 |
-| M13 | Realtime and notification runtime | S2 | S05, S06, S07, S08, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
-| M14 | Reliability, accessibility, localization, and performance | S2 | S00, S02, S03, S04, S07, S09, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 3 |
+| M01 | Shell, bootstrap, and navigation | S2 | S00, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M02 | Conversation list | S2 | S00, S01, S02, S07, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M03 | Direct room core | S1 | S01, S02, S04, S07, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M04 | Group room | S2 | S05, S07, S08, S11 | L0, L1, L2, L3, L5, L6 | 2 | 0 |
+| M05 | Channel room | S2 | S00, S06, S07, S11 | L0, L1, L2, L3, L5, L6 | 3 | 0 |
+| M06 | Composer and overlays | S2 | S01, S03, S04, S05, S06, S10 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M07 | Message rendering | S2 | S01, S02, S03, S04, S10 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M08 | Actions and batch operations | S2 | S01, S03, S04, S09 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M09 | Search, history navigation, and viewer flows | S2 | S03, S04 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M10 | Media, upload, download, and cache pipeline | S1 | S03, S09, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 4 | 0 |
+| M11 | Room and profile management | S2 | S05, S06, S08, S11 | L0, L1, L2, L3, L5, L6 | 3 | 0 |
+| M12 | Identity, permission, and business rules | S1 | S07, S08, S11 | L0, L1, L2, L3, L5, L6 | 3 | 0 |
+| M13 | Realtime and notification runtime | S2 | S05, S06, S07, S08, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
+| M14 | Reliability, accessibility, localization, and performance | S2 | S00, S02, S03, S04, S07, S09, S10, S11 | L0, L1, L2, L3, L4, L5, L6 | 3 | 0 |
 
 ## M01 — Shell, bootstrap, and navigation
 
@@ -82,9 +82,6 @@ Existing evidence:
 - frontend/e2e/account-status.spec.ts
 
 Required new work:
-- Add explicit old/new route-shell comparison
-- Add boot-state UX assertions for versioned Messenger startup
-- Include browser-back and route-restore comparison artifacts
 
 Key metrics:
 - route_ready_ms
@@ -112,9 +109,6 @@ Existing evidence:
 - docs/AUTOMATED_TEST_CHECKLIST.md
 
 Required new work:
-- Add version-diff snapshot for list density and action affordances
-- Benchmark list rendering on large seeded sets
-- Track progressive-window behavior across versions
 
 Key metrics:
 - conversation_list_ready_ms
@@ -141,9 +135,6 @@ Existing evidence:
 - frontend/e2e/messenger-direct-room-ux.spec.ts
 
 Required new work:
-- Add explicit old/new behavioral parity harness for direct-room core flows
-- Capture direct-room contract diffs for navigation, draft state, and message actions
-- Add per-version result summaries for reply/forward/reaction state
 
 Key metrics:
 - chat_first_paint_ms
@@ -170,9 +161,6 @@ Existing evidence:
 - frontend/src/components/chat/ChatGroupManagerModal.test.ts
 
 Required new work:
-- Add version-diff coverage for group header, density, and manager UX
-- Add explicit group parity report against legacy behavior contracts
-- Measure group room reaction and unread patch latency
 
 Key metrics:
 - group_room_open_ms
@@ -200,9 +188,6 @@ Existing evidence:
 - frontend/src/views/CreateChannelView.vue
 
 Required new work:
-- Add explicit old/new parity for admin/member composer semantics
-- Compare mandatory vs optional channel UX consistency across versions
-- Add channel manager parity artifacts
 
 Key metrics:
 - channel_room_open_ms
@@ -230,9 +215,6 @@ Existing evidence:
 - frontend/e2e/messenger-direct-room-ux.spec.ts
 
 Required new work:
-- Add overlay-arbitration comparison across versions
-- Add keyboard-motion and composer-state consistency snapshots
-- Measure enter/exit latency for search and selection overlays
 
 Key metrics:
 - overlay_open_ms
@@ -260,9 +242,6 @@ Existing evidence:
 - frontend/src/components/chat/ChatAlbumLayout.vue
 
 Required new work:
-- Add per-message-family parity screenshots across versions
-- Split message-family comparison results by renderer type
-- Measure render cost for heavy media mixes
 
 Key metrics:
 - message_family_render_ms
@@ -289,9 +268,6 @@ Existing evidence:
 - frontend/e2e/messenger-pinned-message.spec.ts
 
 Required new work:
-- Add one cross-version batch-actions suite
-- Compare destructive-confirmation semantics and browser-back exits
-- Measure context-menu and action-apply latency across versions
 
 Key metrics:
 - context_menu_open_ms
@@ -319,9 +295,6 @@ Existing evidence:
 - frontend/src/components/chat/LocationViewerModal.test.ts
 
 Required new work:
-- Add old/new parity for search result UX and viewer toolbar behavior
-- Add per-viewer screenshot comparisons
-- Measure search-ready and viewer-open latency
 
 Key metrics:
 - search_ready_ms
@@ -350,9 +323,6 @@ Existing evidence:
 - frontend/e2e/messenger-direct-room-ux.spec.ts
 
 Required new work:
-- Add version-diff performance and resilience scenarios for media-heavy rooms
-- Promote temporary benchmark tooling into committed media comparison tooling
-- Add failure-artifact bundles for upload/download recovery mismatches
 
 Key metrics:
 - upload_handoff_ms
@@ -380,9 +350,6 @@ Existing evidence:
 - frontend/src/components/PublicProfile.test.ts
 
 Required new work:
-- Add full old/new manager-flow comparison including back-stack consistency
-- Add profile-entry parity checks from all Messenger launch points
-- Measure manager modal reopen and save latency
 
 Key metrics:
 - manager_open_ms
@@ -410,9 +377,6 @@ Existing evidence:
 - frontend/e2e/customer-owner-flow.spec.ts
 
 Required new work:
-- Add cross-version parity checks for labels, affordances, and blocked access
-- Compare business-rule-correct routes and room visibility outcomes
-- Produce identity-resolution diff reports for Messenger entry points
 
 Key metrics:
 - permission_denial_accuracy
@@ -440,9 +404,6 @@ Existing evidence:
 - backend websocket and notification coverage
 
 Required new work:
-- Add version-diff latency and label-correctness report for live events
-- Compare muted-room suppression behavior across versions
-- Capture deep-link routing parity under live event load
 
 Key metrics:
 - event_to_ui_latency_ms
@@ -470,9 +431,6 @@ Existing evidence:
 - reconnect/runtime test slices
 
 Required new work:
-- Promote the current temporary benchmark into committed comparison tooling
-- Run median warmed Chromium benchmarks with per-surface metrics
-- Gate rollout on browser matrix plus manual UX review
 
 Key metrics:
 - bundle_js_gzip_kb

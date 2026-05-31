@@ -4,6 +4,8 @@ import { defineConfig, devices } from '@playwright/test'
 const shouldRunHeadless = !!process.env.CI || !process.env.DISPLAY
 const ciBaseUrl = 'http://127.0.0.1:4173'
 const ciPreviewCommand = 'npm run preview -- --host 127.0.0.1 --strictPort --port 4173'
+const localBaseUrl = 'http://127.0.0.1:5173'
+const localDevCommand = 'npm run dev -- --host 127.0.0.1 --strictPort --port 5173'
 
 /**
  * Read environment variables from file.
@@ -38,7 +40,7 @@ export default defineConfig({
     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
     actionTimeout: 0,
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.CI ? ciBaseUrl : 'http://localhost:5173',
+    baseURL: process.env.CI ? ciBaseUrl : localBaseUrl,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -107,7 +109,7 @@ export default defineConfig({
      * Use the preview server on CI for more realistic testing.
      * Playwright will re-use the local server if there is already a dev-server running.
      */
-    command: process.env.CI ? ciPreviewCommand : 'npm run dev',
+    command: process.env.CI ? ciPreviewCommand : localDevCommand,
     port: process.env.CI ? 4173 : 5173,
     reuseExistingServer: !process.env.CI,
   },
