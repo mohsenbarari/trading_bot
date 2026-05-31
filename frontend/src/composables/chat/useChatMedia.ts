@@ -26,7 +26,7 @@ import {
     subscribeToDocumentDownloads as backgroundSubscribeToDocumentDownloads,
     type DocumentDownloadEvent,
 } from '../../services/chatDocumentDownloadBackground'
-import { getCachedFileObjectUrl } from './useChatFileHandler'
+import { ensureFileCached, getCachedFileObjectUrl } from './useChatFileHandler'
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
@@ -1011,6 +1011,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
         if (!fileId) return null
         if (imageCache.value[fileId]) return imageCache.value[fileId] || null
 
+        const payload = parseMediaPayload(content)
+        const cachedFileEntry = await ensureFileCached(fileId, getMediaFileName(content, type), {
+            mimeType: typeof payload.mime_type === 'string' ? payload.mime_type : undefined,
+        })
+        if (cachedFileEntry?.blob) {
+            const objectUrl = URL.createObjectURL(cachedFileEntry.blob)
+            setCachedMediaUrl(fileId, objectUrl)
+            return objectUrl
+        }
+
         const allowNetwork = Boolean(options.allowNetwork && type === 'image')
         const loadKey = buildMediaLoadKey(fileId, allowNetwork)
 
@@ -1074,6 +1084,23 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const payload = parseMediaPayload(msg.content)
         const fileName = typeof payload.file_name === 'string' ? payload.file_name.trim() : ''
         return fileName || `file_${msg.id}`
+    }
+
+    function getMediaFileName(content: string, type?: string): string {
+        const payload = parseMediaPayload(content)
+        const fileName = typeof payload.file_name === 'string' ? payload.file_name.trim() : ''
+        if (fileName) return fileName
+
+        const fileId = typeof payload.file_id === 'string' ? payload.file_id : getFileId(content)
+        const extension = type === 'video'
+            ? '.mp4'
+            : type === 'voice'
+                ? '.webm'
+                : type === 'sticker'
+                    ? '.webp'
+                    : '.jpg'
+
+        return fileId ? `${fileId}${extension}` : `media${extension}`
     }
 
     function triggerBrowserDownload(url: string, fileName: string) {
