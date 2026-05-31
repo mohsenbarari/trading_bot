@@ -1,7 +1,8 @@
 /* eslint-disable */
 // Service Worker fragment imported into the generated workbox SW.
 // Provides a narrow Chromium-oriented best-effort background executor for
-// single direct/group resumable uploads. If the worker is terminated or the
+// session-backed direct/group resumable uploads, including albums once the
+// page hands off a shared batch id. If the worker is terminated or the
 // platform declines to keep it alive, the page-owned IndexedDB queue still
 // resumes on the next foreground wake.
 
@@ -11,6 +12,8 @@
   const STORE_NAME = 'pending'
   const DEFAULT_RESUMABLE_CHUNK_SIZE_BYTES = 512 * 1024
   const ACTIVE_TASKS = new Map()
+  const ACTIVE_ALBUM_COMMITS = new Map()
+  const ACTIVE_BATCH_COMMIT_CONTROLLERS = new Map()
   const READY_LIKE_STATUSES = new Set(['ready', 'committed'])
   const TERMINAL_STATUSES = new Set(['failed', 'cancelled', 'expired'])
 
@@ -107,8 +110,74 @@
     db.close()
   }
 
-  function isSingleSessionBackedUpload(upload) {
-    return Boolean(upload) && (upload.roomKind === 'direct' || upload.roomKind === 'group') && !upload.albumId
+  async function getAllUploadRecords() {
+    const db = await openDB()
+    return await new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const req = tx.objectStore(STORE_NAME).getAll()
+      req.onsuccess = () => {
+        const records = Array.isArray(req.result) ? req.result : []
+        const restored = records.map((record) => {
+          const restoredFile = restorePersistedFile(record)
+          if (!restoredFile) return null
+          return { ...record, file: restoredFile }
+        }).filter(Boolean)
+        db.close()
+        resolve(restored)
+      }
+      req.onerror = () => {
+        db.close()
+        resolve([])
+      }
+    })
+  }
+
+  function isSessionBackedUpload(upload) {
+    return Boolean(upload) && (upload.roomKind === 'direct' || upload.roomKind === 'group')
+  }
+
+  function compareUploadsForAlbumOrder(left, right) {
+    const leftIndex = Number(left && left.albumIndex)
+    const rightIndex = Number(right && right.albumIndex)
+    const normalizedLeftIndex = Number.isFinite(leftIndex) ? leftIndex : Number.MAX_SAFE_INTEGER
+    const normalizedRightIndex = Number.isFinite(rightIndex) ? rightIndex : Number.MAX_SAFE_INTEGER
+    if (normalizedLeftIndex !== normalizedRightIndex) {
+      return normalizedLeftIndex - normalizedRightIndex
+    }
+
+    if (String(left && left.createdAt || '') !== String(right && right.createdAt || '')) {
+      return String(left && left.createdAt || '').localeCompare(String(right && right.createdAt || ''))
+    }
+
+    return Math.abs(Number(left && left.id || 0)) - Math.abs(Number(right && right.id || 0))
+  }
+
+  function getCommittedAlbumMessageIndex(message) {
+    try {
+      const parsed = JSON.parse(message.content)
+      const albumIndex = Number(parsed && parsed.album_index)
+      if (Number.isFinite(albumIndex) && albumIndex >= 0) {
+        return albumIndex
+      }
+    } catch {
+      // ignore malformed payloads and fall back to message order
+    }
+    return Number.MAX_SAFE_INTEGER
+  }
+
+  function resolveAlbumCommitKey(upload) {
+    if (!upload || !upload.albumId) return null
+    if (upload.batchId) return `batch:${upload.batchId}`
+    return `album:${upload.roomKind}:${upload.userId}:${upload.albumId}`
+  }
+
+  async function getAlbumSiblingUploads(upload) {
+    const commitKey = resolveAlbumCommitKey(upload)
+    if (!commitKey) return []
+    const allUploads = await getAllUploadRecords()
+    return allUploads
+      .filter((candidate) => isSessionBackedUpload(candidate) && resolveAlbumCommitKey(candidate) === commitKey)
+      .sort(compareUploadsForAlbumOrder)
   }
 
   function resolveUploadTargetId(upload) {
@@ -247,6 +316,9 @@
 
   async function ensureResumableUploadBatch(upload, runtime) {
     if (upload.batchId) return
+    if (upload.albumId) {
+      throw new Error('Album handoff missing shared batch id')
+    }
     const payload = await uploadApiFetchJson('/chat/upload-batches', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -356,9 +428,133 @@
     }
   }
 
+  async function commitAlbumBatchIfReady(upload, runtime, task) {
+    const commitKey = resolveAlbumCommitKey(upload)
+    if (!commitKey || !upload.batchId || !upload.albumId) {
+      return false
+    }
+
+    const existingCommit = ACTIVE_ALBUM_COMMITS.get(commitKey)
+    if (existingCommit) {
+      return await existingCommit
+    }
+
+    const commitPromise = (async () => {
+      const siblingUploads = await getAlbumSiblingUploads(upload)
+      const expectedItems = Math.max(Number(upload.albumSize || 0), 1)
+      if (siblingUploads.length < expectedItems) {
+        return false
+      }
+
+      const hasBlockingSibling = siblingUploads.some((candidate) => (
+        candidate.phase === 'queued' ||
+        candidate.phase === 'uploading' ||
+        candidate.phase === 'sending'
+      ))
+      if (hasBlockingSibling) {
+        return false
+      }
+
+      const hasFailedSibling = siblingUploads.some((candidate) => (
+        candidate.phase === 'failed' || candidate.phase === 'cancelled'
+      ))
+      if (hasFailedSibling) {
+        return false
+      }
+
+      const sendableUploads = siblingUploads.filter((candidate) => candidate.phase === 'uploaded')
+      if (sendableUploads.length === 0) {
+        return true
+      }
+
+      await Promise.all(sendableUploads.map(async (candidate) => {
+        candidate.phase = 'sending'
+        delete candidate.errorMessage
+        await putUploadRecord(candidate)
+      }))
+
+      const controller = new AbortController()
+      task.controller = controller
+      sendableUploads.forEach((candidate) => {
+        ACTIVE_BATCH_COMMIT_CONTROLLERS.set(candidate.id, controller)
+      })
+
+      try {
+        const payload = await uploadApiFetchJson(`/chat/upload-batches/${upload.batchId}/commit`, {
+          method: 'POST',
+          signal: controller.signal,
+        }, runtime)
+
+        const committedMessages = Array.isArray(payload && payload.messages)
+          ? [...payload.messages].sort((left, right) => {
+              const leftIndex = getCommittedAlbumMessageIndex(left)
+              const rightIndex = getCommittedAlbumMessageIndex(right)
+              if (leftIndex !== rightIndex) {
+                return leftIndex - rightIndex
+              }
+              return left.id - right.id
+            })
+          : []
+
+        if (committedMessages.length < sendableUploads.length) {
+          throw new Error('Final album messages missing')
+        }
+
+        await Promise.all(sendableUploads.map(async (candidate, index) => {
+          await deleteUploadRecord(candidate.id)
+          broadcast({
+            type: 'chat-upload:sent',
+            uploadId: candidate.id,
+            serverMessage: committedMessages[index],
+          })
+        }))
+        return true
+      } catch (error) {
+        if (task.reclaimed || (error && error.name === 'AbortError') || isTransientUploadError(error)) {
+          await Promise.all(sendableUploads.map(async (candidate) => {
+            candidate.phase = 'uploaded'
+            delete candidate.errorMessage
+            await putUploadRecord(candidate)
+          }))
+          return false
+        }
+
+        await Promise.all(sendableUploads.map(async (candidate) => {
+          candidate.phase = 'failed'
+          candidate.errorMessage = error && error.message ? error.message : String(error)
+          await putUploadRecord(candidate)
+          broadcast({
+            type: 'chat-upload:error',
+            uploadId: candidate.id,
+            errorMessage: candidate.errorMessage,
+          })
+        }))
+        return false
+      } finally {
+        sendableUploads.forEach((candidate) => {
+          if (ACTIVE_BATCH_COMMIT_CONTROLLERS.get(candidate.id) === controller) {
+            ACTIVE_BATCH_COMMIT_CONTROLLERS.delete(candidate.id)
+          }
+        })
+        if (task.controller === controller) {
+          task.controller = null
+        }
+      }
+    })()
+
+    ACTIVE_ALBUM_COMMITS.set(commitKey, commitPromise)
+    try {
+      return await commitPromise
+    } finally {
+      if (ACTIVE_ALBUM_COMMITS.get(commitKey) === commitPromise) {
+        ACTIVE_ALBUM_COMMITS.delete(commitKey)
+      }
+    }
+  }
+
   async function runSingleUpload(uploadId, task) {
     let upload = await getUploadRecord(uploadId)
-    if (!upload || !isSingleSessionBackedUpload(upload)) return
+    if (!upload || !isSessionBackedUpload(upload)) return
 
     if (upload.phase === 'sent' || upload.phase === 'cancelled') {
       await deleteUploadRecord(uploadId)
@@ -415,7 +611,11 @@
       upload = await getUploadRecord(uploadId)
       if (!upload || task.reclaimed) return
       if (upload.phase === 'uploaded') {
-        await commitSingleUpload(upload, task.runtime, task)
+        if (upload.albumId) {
+          await commitAlbumBatchIfReady(upload, task.runtime, task)
+        } else {
+          await commitSingleUpload(upload, task.runtime, task)
+        }
       }
     } catch (error) {
       if (task.reclaimed || (error && error.name === 'AbortError')) {
@@ -476,6 +676,14 @@
     if (data.type === 'chat-upload:reclaim') {
       const uploadIds = Array.isArray(data.uploadIds) ? data.uploadIds.filter((id) => typeof id === 'number') : []
       uploadIds.forEach((uploadId) => {
+        const batchCommitController = ACTIVE_BATCH_COMMIT_CONTROLLERS.get(uploadId)
+        if (batchCommitController) {
+          try {
+            batchCommitController.abort()
+          } catch {
+            // ignore
+          }
+        }
         const task = ACTIVE_TASKS.get(uploadId)
         if (!task) return
         task.reclaimed = true
