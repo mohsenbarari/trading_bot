@@ -12,6 +12,7 @@ PYTHON_SCRIPTS = (
     'scripts/backfill_direct_chats.py',
     'scripts/create_superadmin.py',
     'scripts/free_deleted_user.py',
+    'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
     'scripts/reset_sessions.py',
     'scripts/restore_default_commodities.py',
@@ -57,6 +58,11 @@ class ScriptsSurfaceSmokeTests(unittest.TestCase):
         self.assertGreaterEqual(payload['summary']['frontend_unit_files'], 10)
         self.assertGreaterEqual(payload['summary']['frontend_e2e_files'], 7)
         self.assertEqual(payload['summary']['manual_non_regression_tools'], 5)
+
+    def test_messenger_query_plan_report_help_executes(self):
+        result = run_checked([PYTHON_BIN, 'scripts/report_messenger_query_plans.py', '--help'])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn('Run EXPLAIN ANALYZE for the core Messenger chat queries', result.stdout)
 
 
 if __name__ == '__main__':
