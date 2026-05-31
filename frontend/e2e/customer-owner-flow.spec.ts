@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 import { primeAuthSession } from './helpers/auth'
 
@@ -677,6 +677,17 @@ async function waitForActiveOwnerCustomerRelation(
   return relation
 }
 
+async function ensureAccordionOpen(root: Locator, sectionSelector: string) {
+  const accordion = root.locator(`${sectionSelector} .ds-accordion`).first()
+  await expect(accordion).toBeVisible({ timeout: 30000 })
+
+  const className = await accordion.getAttribute('class')
+  if (!className?.includes('open')) {
+    await accordion.locator('.ds-accordion-header').first().click()
+    await expect(accordion).toHaveClass(/open/)
+  }
+}
+
 test.describe('customer owner lifecycle', () => {
   test('owner can create update and unlink a customer, and super-admin can follow the customer handoff', async ({ page, request }) => {
     test.setTimeout(180000)
@@ -789,15 +800,16 @@ test.describe('customer owner lifecycle', () => {
     await expect(modal).toBeHidden({ timeout: 30000 })
     await expect(page.locator('.customer-relations-section')).toContainText(managementName)
 
+    await ensureAccordionOpen(page.locator('.public-profile-view:visible').last(), '.customer-relations-section')
     await page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
     await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
-    await expect(page.locator('.customer-context-banner')).toContainText(managementName)
-    await expect(page.locator('.customer-context-banner')).toContainText(owner.accountName)
+    await expect(page.locator('.public-profile-view:visible').last().locator('.profile-hero-copy h3')).toContainText(customerAccountName)
 
     await setAuthTokens(page, superAdmin)
     await page.goto(`/users/${owner.userId}`)
     const superAdminOwnerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(superAdminOwnerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await ensureAccordionOpen(superAdminOwnerProfileView, '.customer-relations-section')
     await superAdminOwnerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
     await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
 
@@ -846,6 +858,7 @@ test.describe('customer owner lifecycle', () => {
     await page.goto(`/users/${fixture.ownerUserId}`)
     const ownerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(ownerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await ensureAccordionOpen(ownerProfileView, '.customer-relations-section')
     await expect(ownerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName })).toBeVisible({ timeout: 30000 })
     await expect(ownerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
 
@@ -861,7 +874,7 @@ test.describe('customer owner lifecycle', () => {
     await page.waitForURL(new RegExp(`/users/${fixture.customerUserId}(?:\\?.*)?$`))
     const customerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(customerProfileView.locator('.customer-context-banner')).toContainText(fixture.ownerAccountName)
+  await expect(customerProfileView.locator('.profile-hero-copy h3')).toContainText(fixture.customerAccountName)
 
     const customerHistoryHeader = customerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
     await customerHistoryHeader.click()

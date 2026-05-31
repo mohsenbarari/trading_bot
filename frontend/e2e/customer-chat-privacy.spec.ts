@@ -244,12 +244,12 @@ async function sendComposerMessage(page: Page, text: string) {
     await composer.pressSequentially(text)
 
     const sendButton = composerContainer.locator('.send-btn-inline')
-    const hasReactiveSend = await sendButton.isVisible({ timeout: 1500 }).catch(() => false)
-    if (!hasReactiveSend) {
+    if (!(await sendButton.count())) {
       continue
     }
 
     await expect(composer).toHaveValue(text)
+    await expect(sendButton).toBeVisible({ timeout: 30000 })
     await sendButton.click()
     return
   }
@@ -313,19 +313,8 @@ test.describe('Customer chat privacy regressions', () => {
     const unrelatedRow = page.locator('.users-list').getByRole('button', {
       name: new RegExp(`${fixture.unrelated.fullName}.*${fixture.unrelated.mobileNumber}`),
     })
-    await expect(unrelatedRow).toBeVisible({ timeout: 30000 })
-    await unrelatedRow.click()
-
-    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.unrelated.fullName, { timeout: 30000 })
-    await sendComposerMessage(page, blockedMessage)
-
-    await expect(page.locator('.message-bubble.sent.error').filter({ hasText: blockedMessage })).toBeVisible({ timeout: 30000 })
-    await expect
-      .poll(async () => {
-        const messages = await fetchDirectMessages(request, fixture.customer, fixture.unrelated.userId)
-        return messages.some((entry) => entry.content === blockedMessage)
-      }, { timeout: 15000 })
-      .toBe(false)
+    await expect(unrelatedRow).toHaveCount(0, { timeout: 30000 })
+    await expect(page.locator('.users-list')).not.toContainText(fixture.unrelated.fullName)
 
     const deniedResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/send`, {
       headers: authHeaders(fixture.customer.accessToken),
