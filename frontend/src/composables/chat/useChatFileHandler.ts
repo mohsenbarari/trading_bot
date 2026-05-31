@@ -63,6 +63,7 @@ export function isFileCached(fileId: string): boolean {
 // By keeping a synchronous Map mirror, subsequent taps on a previously-fetched
 // file resolve immediately without breaking the user-activation window.
 const memoryCache = new Map<string, CachedFileEntry>()
+const cachedObjectUrls = new Map<string, string>()
 
 // ─── Diagnostic overlay (disabled) ─────────────────────────────────────────
 // The on-screen [chat-file] diagnostic overlay was removed by user request.
@@ -89,6 +90,21 @@ function isCachedFileEntry(value: unknown): value is CachedFileEntry {
 
 function readMemoryEntry(fileId: string): CachedFileEntry | null {
     return memoryCache.get(fileId) || null
+}
+
+function revokeCachedObjectUrl(fileId: string): void {
+    const existingUrl = cachedObjectUrls.get(fileId)
+    if (!existingUrl) return
+    try {
+        URL.revokeObjectURL(existingUrl)
+    } catch { /* noop */ }
+    cachedObjectUrls.delete(fileId)
+}
+
+function revokeAllCachedObjectUrls(): void {
+    for (const fileId of Array.from(cachedObjectUrls.keys())) {
+        revokeCachedObjectUrl(fileId)
+    }
 }
 
 function normalizeCachedEntry(entry: CachedFileEntry, fileName: string, mimeType?: string): CachedFileEntry {
@@ -312,6 +328,7 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
         // still hand the freshly fetched blob to the caller.
         console.warn('[useChatFileHandler] cache write failed', err)
     }
+    revokeCachedObjectUrl(fileId)
     memoryCache.set(fileId, entry)
     cachedFileIds[fileId] = true
     return entry
@@ -400,6 +417,20 @@ export async function prewarmFileCache(fileId: string): Promise<void> {
     } catch { /* noop */ }
 }
 
+export async function getCachedFileObjectUrl(fileId: string): Promise<string | null> {
+    if (!fileId) return null
+
+    const existingUrl = cachedObjectUrls.get(fileId)
+    if (existingUrl) return existingUrl
+
+    const entry = readMemoryEntry(fileId) || await readCachedEntry(fileId)
+    if (!entry?.blob) return null
+
+    const objectUrl = URL.createObjectURL(entry.blob)
+    cachedObjectUrls.set(fileId, objectUrl)
+    return objectUrl
+}
+
 /**
  * Insert an externally-acquired blob (e.g. an image/video that was already
  * downloaded by `useChatMedia`'s `imageCache`) into the unified file cache
@@ -422,6 +453,7 @@ export async function seedFileCache(fileId: string, blob: Blob, fileName: string
         size: blob.size,
         cachedAt: Date.now(),
     }
+    revokeCachedObjectUrl(fileId)
     memoryCache.set(fileId, entry)
     cachedFileIds[fileId] = true
     try {
@@ -584,6 +616,7 @@ export async function shareMultipleFiles(fileIds: string[]): Promise<boolean> {
 export async function clearFileCache(): Promise<void> {
     try {
         await fileStore.clear()
+        revokeAllCachedObjectUrls()
         memoryCache.clear()
         for (const k of Object.keys(cachedFileIds)) delete cachedFileIds[k]
     } catch (err) {

@@ -171,6 +171,21 @@ describe('useChatFileHandler.ts', () => {
     expect(document.getElementById('chat-file-debug-box')).toBeNull()
   })
 
+  it('reuses cached object URLs for seeded files and revokes them when the cache is cleared', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+
+    await fileHandler.seedFileCache('media-1', new Blob(['media'], { type: 'image/png' }), 'media.png', 'image/png')
+
+    expect(await fileHandler.getCachedFileObjectUrl('media-1')).toBe('blob:cached-file')
+    expect(await fileHandler.getCachedFileObjectUrl('media-1')).toBe('blob:cached-file')
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+
+    await fileHandler.clearFileCache()
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:cached-file')
+    expect(await fileHandler.getCachedFileObjectUrl('media-1')).toBeNull()
+  })
+
   it('downloads uncached files once, reuses the cache, and exposes the wrapper composable api', async () => {
     const fileHandler = await import('./useChatFileHandler')
     const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
