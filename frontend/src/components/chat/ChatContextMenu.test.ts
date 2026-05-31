@@ -47,6 +47,8 @@ describe('ChatContextMenu.vue', () => {
 
     expect(wrapper.text()).toContain('کپی کردن')
     expect(wrapper.text()).toContain('سنجاق کردن پیام')
+    expect(wrapper.text()).toContain('اقدام اصلی')
+    expect(wrapper.text()).toContain('ارتباط و پیام')
 
     const reactionButton = wrapper.findAll('.reaction-btn').find((button) => button.text().includes('🔥'))
     expect(reactionButton).toBeTruthy()
@@ -96,6 +98,7 @@ describe('ChatContextMenu.vue', () => {
 
     expect(wrapper.text()).toContain('دانلود آلبوم')
     expect(wrapper.text()).toContain('اشتراک‌گذاری آلبوم')
+    expect(wrapper.text()).toContain('رسانه و فایل')
     expect(wrapper.text()).not.toContain('ذخیره در گالری')
 
     const shareAlbumButton = wrapper.findAll('.menu-item').find((item) => item.text().includes('اشتراک‌گذاری آلبوم'))

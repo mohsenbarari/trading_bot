@@ -92,15 +92,18 @@
               </svg>
             </button>
             <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
-               <div class="header-menu-item" @click="handleMenuSearch">
-                  <span>جستجو</span>
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-                  </svg>
-               </div>
-               <div class="header-menu-item" @click="handleMenuViewProfile">
-                  <span>اطلاعات فرد</span>
-               </div>
+              <div class="header-menu-section-label">اقدام اصلی</div>
+              <div class="header-menu-item" @click="handleMenuViewProfile">
+                <span>اطلاعات فرد</span>
+              </div>
+              <div class="header-menu-divider"></div>
+              <div class="header-menu-section-label">ارتباط</div>
+              <div class="header-menu-item" @click="handleMenuSearch">
+                <span>جستجو</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                  <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+              </div>
             </div>
             <div v-if="isMenuOpen" class="menu-overlay" @click="closeMenu"></div>
         </div>
@@ -112,10 +115,15 @@
             <MoreVertical :size="22" />
           </button>
           <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+            <div class="header-menu-section-label">ارتباط</div>
             <div class="header-menu-item" @click="handleMenuSearch">
               <span>جستجو</span>
               <Search :size="18" />
             </div>
+            <template v-if="!isManagementRoom">
+              <div class="header-menu-divider"></div>
+              <div class="header-menu-section-label">مدیریت اتاق</div>
+            </template>
             <div v-if="!isManagementRoom" class="header-menu-item" @click="handleMenuManageRoom">
               <span>{{ selectedRoomKind === 'group' ? 'مدیریت گروه' : 'تنظیمات کانال' }}</span>
               <UsersRound :size="18" />
@@ -138,10 +146,15 @@
             <MoreVertical :size="22" />
           </button>
           <div v-if="isMenuOpen" class="header-dropdown-menu" v-click-outside="closeMenu">
+            <div class="header-menu-section-label">اقدام اصلی</div>
             <div class="header-menu-item" @click="handleMenuViewProfile">
               <span>پروفایل عمومی من</span>
               <UsersRound :size="18" />
             </div>
+            <template v-if="canCreateGroup || canCreateChannel">
+              <div class="header-menu-divider"></div>
+              <div class="header-menu-section-label">مدیریت پیام‌رسان</div>
+            </template>
             <div v-if="canCreateGroup" class="header-menu-item" @click="handleMenuCreateGroup">
               <span>ساخت گروه جدید</span>
               <UsersRound :size="18" />
@@ -150,6 +163,10 @@
               <span>ساخت کانال</span>
               <Megaphone :size="18" />
             </div>
+            <template v-if="canSendAdminBroadcast">
+              <div class="header-menu-divider"></div>
+              <div class="header-menu-section-label">مدیریت سیستم</div>
+            </template>
             <div v-if="canSendAdminBroadcast" class="header-menu-item" @click="handleMenuAdminBroadcast">
               <span>ارسال پیام مدیریت</span>
               <Shield :size="18" />
@@ -618,6 +635,21 @@ function formatDateForSeparator(dateString: string) {
 }
 .header-menu-item:hover { background: rgba(15, 23, 42, 0.05); }
 .header-menu-item svg { color: #64748b; }
+
+.header-menu-divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: rgba(100, 116, 139, 0.22);
+}
+
+.header-menu-section-label {
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.2px;
+}
+
 .menu-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;

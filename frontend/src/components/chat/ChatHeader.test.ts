@@ -70,6 +70,8 @@ describe('ChatHeader.vue', () => {
     expect(pushBackStateMock).toHaveBeenCalledTimes(1)
     const searchItem = wrapper.findAll('.header-menu-item').find((item) => item.text().includes('جستجو'))
     expect(searchItem).toBeTruthy()
+    expect(wrapper.text()).toContain('اقدام اصلی')
+    expect(wrapper.text()).toContain('ارتباط')
 
     await searchItem!.trigger('click')
     await flushPromises()
@@ -206,6 +208,8 @@ describe('ChatHeader.vue', () => {
     const createChannelItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ساخت کانال'))
     const createGroupItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ساخت گروه جدید'))
     const adminBroadcastItem = visibleWrapper.findAll('.header-menu-item').find((item) => item.text().includes('ارسال پیام مدیریت'))
+    expect(visibleWrapper.text()).toContain('مدیریت پیام‌رسان')
+    expect(visibleWrapper.text()).toContain('مدیریت سیستم')
     expect(createGroupItem).toBeTruthy()
     expect(createChannelItem).toBeTruthy()
     expect(adminBroadcastItem).toBeTruthy()

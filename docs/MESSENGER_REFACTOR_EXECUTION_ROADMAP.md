@@ -59,7 +59,7 @@ Do not merge multiple stages into a single prompt.
 | Stage | Name | Status | Owner | Last Run | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Baseline Lock + Perf Budget | Completed | Copilot | 2026-05-31 | Baseline locked from `tmp/messenger-benchmark/comparison-summary.json` (`generatedAt=2026-05-31T19:13:12Z`) |
-| 2 | Menu IA Normalization | Pending | Copilot | - | - |
+| 2 | Menu IA Normalization | In Progress | Copilot | 2026-05-31 | IA sectioning applied in header/context menus + focused Vitest/Playwright green |
 | 3 | Conversation List Performance + Visual Cohesion | Pending | Copilot | - | - |
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Pending | Copilot | - | - |
 | 5 | Composer/Overlay State Machine Stabilization | Pending | Copilot | - | - |
@@ -160,6 +160,15 @@ Exit criteria:
 
 Rollback:
 - Revert context-menu/header/view wiring commits.
+
+Stage 2 kickoff progress:
+- Sectioned IA labels and ordering now applied in:
+	- `frontend/src/components/chat/ChatContextMenu.vue`
+	- `frontend/src/components/chat/ChatHeader.vue`
+	- `frontend/src/components/ChatView.vue`
+- Focused validations completed:
+	- `npm run test:unit:run -- src/components/chat/ChatContextMenu.test.ts src/components/chat/ChatHeader.test.ts`
+	- `npm run test:e2e -- e2e/messenger-conversation-actions.spec.ts --project=chromium --workers=1`
 
 ### Stage 3 - Conversation List Performance + Visual Cohesion
 
