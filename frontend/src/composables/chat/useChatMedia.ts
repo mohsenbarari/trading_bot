@@ -26,6 +26,7 @@ import {
     subscribeToDocumentDownloads as backgroundSubscribeToDocumentDownloads,
     type DocumentDownloadEvent,
 } from '../../services/chatDocumentDownloadBackground'
+import { getCachedFileObjectUrl } from './useChatFileHandler'
 
 const CHAT_MEDIA_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 const CHAT_MEDIA_MAX_UPLOAD_LABEL = '50MB'
@@ -1056,6 +1057,9 @@ export function useChatMedia(options: UseChatMediaOptions) {
         const fileId = getFileId(msg.content)
         const existingUrl = msg.local_blob_url || imageCache.value[fileId] || ''
         if (existingUrl) return existingUrl
+
+        const cachedFileUrl = await getCachedFileObjectUrl(fileId)
+        if (cachedFileUrl) return cachedFileUrl
 
         const restoredUrl = await loadImageForMessage(msg.content, msg.message_type)
         return msg.local_blob_url || restoredUrl || imageCache.value[fileId] || ''

@@ -43,6 +43,10 @@ const heicMocks = vi.hoisted(() => ({
   convert: vi.fn<(options?: unknown) => Promise<Blob | Blob[]>>(async () => new Blob(['converted-heic'], { type: 'image/jpeg' })),
 }))
 
+const fileCacheMocks = vi.hoisted(() => ({
+  getCachedFileObjectUrl: vi.fn<(fileId: string) => Promise<string | null>>(async () => null),
+}))
+
 vi.mock('../../utils/imagePreprocessClient', () => ({
   canUseImagePreprocessWorker: preprocessMocks.canUseImagePreprocessWorker,
   getRecommendedImagePreprocessParallelism: preprocessMocks.getRecommendedImagePreprocessParallelism,
@@ -56,6 +60,10 @@ vi.mock('../../utils/chatMediaTelemetry', () => ({
 
 vi.mock('heic2any', () => ({
   default: heicMocks.convert,
+}))
+
+vi.mock('./useChatFileHandler', () => ({
+  getCachedFileObjectUrl: fileCacheMocks.getCachedFileObjectUrl,
 }))
 
 vi.mock('../../services/chatUploadBackground', () => ({
@@ -416,6 +424,8 @@ describe('useChatMedia', () => {
     preprocessMocks.recordMediaPreprocessTelemetry.mockClear()
     heicMocks.convert.mockReset()
     heicMocks.convert.mockResolvedValue(new Blob(['converted-heic'], { type: 'image/jpeg' }))
+    fileCacheMocks.getCachedFileObjectUrl.mockReset()
+    fileCacheMocks.getCachedFileObjectUrl.mockResolvedValue(null)
 
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     vi.spyOn(window, 'alert').mockImplementation(() => {})
@@ -1402,6 +1412,31 @@ describe('useChatMedia', () => {
         expect.objectContaining({
           fileId: 'file-81',
           url: 'https://coin.test/api/chat/files/file-81?token=jwt',
+        }),
+      ],
+    })
+  })
+
+  it('prefers unified file-cache object URLs in the lightbox before authenticated media fallbacks', async () => {
+    const cachedImage = makeImageMessage(82, {
+      local_blob_url: undefined,
+      content: JSON.stringify({ file_id: 'file-82' }),
+    })
+    fileCacheMocks.getCachedFileObjectUrl.mockResolvedValueOnce('blob:file-handler-cache')
+
+    const { wrapper } = mountHarness([cachedImage])
+    const vm = wrapper.vm as any
+
+    await vm.handleMediaClick(cachedImage)
+    await nextTick()
+
+    expect(fileCacheMocks.getCachedFileObjectUrl).toHaveBeenCalledWith('file-82')
+    expect(vm.lightboxMedia).toMatchObject({
+      currentIndex: 0,
+      items: [
+        expect.objectContaining({
+          fileId: 'file-82',
+          url: 'blob:file-handler-cache',
         }),
       ],
     })
