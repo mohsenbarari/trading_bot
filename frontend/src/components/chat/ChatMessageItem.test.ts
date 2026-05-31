@@ -427,10 +427,22 @@ describe('ChatMessageItem.vue', () => {
     const voiceUploadingWrapper = mountVoiceMessage({
       is_sending: true,
       upload_progress: 55,
+      upload_loaded: 550,
+      upload_total: 1000,
     })
     expect(voiceUploadingWrapper.find('.msg-voice-uploading').exists()).toBe(true)
+    expect(voiceUploadingWrapper.find('.voice-upload-status').text()).toContain('550 Bytes / 1000 Bytes')
     await voiceUploadingWrapper.get('.msg-voice-uploading').trigger('click')
     expect(voiceUploadingWrapper.emitted('cancel-send')).toHaveLength(1)
+
+    const voiceProcessingWrapper = mountVoiceMessage({
+      is_sending: true,
+      upload_progress: 140,
+      upload_loaded: 2048,
+      upload_total: 2048,
+    })
+    expect(voiceProcessingWrapper.find('.voice-upload-status').text()).toContain('در حال پردازش...')
+    expect(voiceProcessingWrapper.find('.progress-ring-small .ring-fg').attributes('stroke-dasharray')).toBe('100, 100')
 
     const readWrapper = mountTextMessage({
       sender_id: 7,
@@ -553,10 +565,19 @@ describe('ChatMessageItem.vue', () => {
 
     const sendingWrapper = mountDocumentMessage({
       is_sending: true,
+      upload_progress: 25,
       upload_loaded: 512,
       upload_total: 2048,
     })
     expect(sendingWrapper.find('.doc-size').text()).toContain('512 Bytes')
+
+    const processingWrapper = mountDocumentMessage({
+      is_sending: true,
+      upload_progress: 100,
+      upload_loaded: 2048,
+      upload_total: 2048,
+    })
+    expect(processingWrapper.find('.doc-size').text()).toContain('در حال پردازش...')
 
     const downloadingWrapper = mountDocumentMessage({
       is_downloading: true,
@@ -695,10 +716,12 @@ describe('ChatMessageItem.vue', () => {
     const uploadingMediaWrapper = mountMediaMessage({
       local_blob_url: 'blob:uploading-image',
       is_sending: true,
-      upload_progress: 40,
+      upload_progress: 140,
       upload_total: 100,
-      upload_loaded: 40,
+      upload_loaded: 100,
     })
+    expect(uploadingMediaWrapper.find('.telegram-size-badge').text()).toContain('در حال پردازش...')
+    expect(uploadingMediaWrapper.find('.msg-media-overlay .ring-fg').attributes('stroke-dasharray')).toBe('100, 100')
     await uploadingMediaWrapper.get('.msg-media-overlay.cancelable-overlay').trigger('click')
     expect(uploadingMediaWrapper.emitted('cancel-send')).toHaveLength(1)
   })

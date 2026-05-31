@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { getChatMessageTransferState } from '../../utils/chatMessageTransferState'
+
 /**
  * ChatAlbumLayout.vue
  * Telegram-like dynamic album layout driven by media aspect ratios.
@@ -82,20 +84,43 @@ function handleCellClick(msg: any) {
 
 function shouldShowInlineDownload(item: AlbumItem) {
   if (props.isDownloadSelectionMode) return false
-  if (item.msg?.is_sending) return false
-  return item.type === 'video' && !item.hasResolvedMedia && !item.msg?.is_downloading
+  const transferState = getItemTransferState(item)
+  if (transferState.isSendingBusy || transferState.isDownloadBusy) return false
+  return item.type === 'video' && !item.hasResolvedMedia
 }
 
 function shouldShowDownloadProgress(item: AlbumItem) {
   if (props.isDownloadSelectionMode) return false
-  if (item.msg?.is_sending) return false
-  return item.type === 'video' && Boolean(item.msg?.is_downloading)
+  const transferState = getItemTransferState(item)
+  return item.type === 'video' && !transferState.isSendingBusy && transferState.isDownloadBusy
 }
 
 function shouldShowCenteredPlay(item: AlbumItem) {
   if (props.isDownloadSelectionMode) return false
-  if (item.msg?.is_sending) return false
+  if (getItemTransferState(item).isSendingBusy) return false
   return item.type === 'video' && Boolean(item.hasResolvedMedia)
+}
+
+function getItemTransferState(item: AlbumItem) {
+  return getChatMessageTransferState({
+    isSending: Boolean(item.msg?.is_sending),
+    isDownloading: Boolean(item.msg?.is_downloading),
+    uploadProgress: Number(item.msg?.upload_progress ?? 0),
+    downloadProgress: Number(item.msg?.download_progress ?? 0),
+  })
+}
+
+function getAlbumTransferBadgeText(item: AlbumItem) {
+  const transferState = getItemTransferState(item)
+  if (!transferState.isSendingBusy) return ''
+  if (transferState.isProcessing) return 'در حال پردازش...'
+
+  const uploadTotal = Number(item.msg?.upload_total || 0)
+  if (uploadTotal > 0) {
+    return `${formatBytes(item.msg?.upload_loaded || 0)} / ${formatBytes(uploadTotal)}`
+  }
+
+  return ''
 }
 
 function isItemSelected(msgId: number) {
@@ -342,7 +367,7 @@ const layout = computed(() => buildLayout(props.items))
                 cx="18"
                 cy="18"
                 r="16"
-                :stroke-dasharray="`${cell.item.msg.download_progress || 0}, 100`"
+                :stroke-dasharray="`${getItemTransferState(cell.item).progress}, 100`"
               ></circle>
             </svg>
             <span class="album-progress-cancel">✕</span>
@@ -356,13 +381,13 @@ const layout = computed(() => buildLayout(props.items))
           </span>
         </div>
         <div
-          v-if="cell.item.msg.is_sending"
+          v-if="getItemTransferState(cell.item).isSendingBusy"
           class="album-upload-overlay"
           @click.stop="emit('cancel-send', cell.item.msg)"
         >
-          <div v-if="(cell.item.msg.upload_progress || 0) < 100" class="album-upload-badge">
+          <div v-if="getAlbumTransferBadgeText(cell.item)" class="album-upload-badge">
             <span>
-              {{ formatBytes(cell.item.msg.upload_loaded || 0) }} / {{ formatBytes(cell.item.msg.upload_total || 0) }}
+              {{ getAlbumTransferBadgeText(cell.item) }}
             </span>
           </div>
           <div class="album-progress-shell">
@@ -373,7 +398,7 @@ const layout = computed(() => buildLayout(props.items))
                 cx="18"
                 cy="18"
                 r="16"
-                :stroke-dasharray="`${cell.item.msg.upload_progress || 0}, 100`"
+                :stroke-dasharray="`${getItemTransferState(cell.item).progress}, 100`"
               ></circle>
             </svg>
             <span class="album-progress-cancel">✕</span>
