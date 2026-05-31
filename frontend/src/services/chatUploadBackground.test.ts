@@ -654,6 +654,19 @@ describe('chatUploadBackground', () => {
       mime_type: 'video/mp4',
       size: baseUpload.file.size,
     })
+    expect(JSON.parse(hooks.buildContent({
+      ...baseUpload,
+      msgType: 'voice',
+      thumbnail: 'ignored-voice-thumb',
+      width: 500,
+      height: 250,
+      albumId: 'album-hook',
+      caption: 'ignored caption',
+      durationMs: 1900,
+    }, 'preview'))).toEqual({
+      placeholder: true,
+      durationMs: 1900,
+    })
     expect(hooks.getCommittedAlbumMessageIndex({ content: JSON.stringify({ album_index: 2 }), id: 10 } as any)).toBe(2)
     expect(hooks.getCommittedAlbumMessageIndex({ content: '{bad', id: 10 } as any)).toBe(Number.MAX_SAFE_INTEGER)
 
