@@ -56,6 +56,14 @@ function buildChatNotificationBody(payload: ChatRealtimeNotificationPayload): st
     return payload.content || 'فایل جدید'
 }
 
+function hasRealtimeMention(payload: ChatRealtimeNotificationPayload, currentUserId: number | null | undefined): boolean {
+    if (!currentUserId) return false
+    if (payload.mention_all === true) return true
+    if (!Array.isArray(payload.mentions)) return false
+
+    return payload.mentions.some((mentionedUserId) => Number(mentionedUserId) === currentUserId)
+}
+
 export function useNotificationRuntime({ connect, on, off, ensureSessionValidation }: NotificationRuntimeOptions) {
     const route = useRoute()
     const router = useRouter()
@@ -143,10 +151,7 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
         const isMutedConversation = notificationStore.isConversationMuted(conversationKey)
 
         const currentUserId = currentUserSummary.value?.id
-        const isMentioned = currentUserId && (
-            (Array.isArray(payload.mentions) && payload.mentions.includes(currentUserId)) ||
-            payload.mention_all === true
-        )
+        const isMentioned = hasRealtimeMention(payload, currentUserId)
 
         if (shouldTreatAsUnread) {
             notificationStore.incrementChatUnread(conversationKey)
