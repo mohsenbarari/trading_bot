@@ -1505,6 +1505,27 @@ export function buildOptimisticMessageFromUpload(upload: PendingUpload): Message
     }
 }
 
+function comparePendingUploadsForTimeline(left: Pick<PendingUpload, 'id' | 'createdAt' | 'albumId' | 'albumIndex'>, right: Pick<PendingUpload, 'id' | 'createdAt' | 'albumId' | 'albumIndex'>): number {
+    if (left.albumId && right.albumId && left.albumId === right.albumId) {
+        const albumIndexDiff = left.albumIndex - right.albumIndex
+        if (albumIndexDiff !== 0) {
+            return albumIndexDiff
+        }
+    }
+
+    const leftTimestamp = Date.parse(left.createdAt)
+    const rightTimestamp = Date.parse(right.createdAt)
+    if (Number.isFinite(leftTimestamp) && Number.isFinite(rightTimestamp) && leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp
+    }
+
+    if (left.createdAt !== right.createdAt) {
+        return left.createdAt.localeCompare(right.createdAt)
+    }
+
+    return Math.abs(left.id) - Math.abs(right.id)
+}
+
 // -----------------------------------------------------------------------------
 // Pipeline phases
 // -----------------------------------------------------------------------------
@@ -2152,7 +2173,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
 
     resumePromise = (async () => {
         try {
-            const stored = await idbGetAll()
+            const stored = (await idbGetAll()).sort(comparePendingUploadsForTimeline)
             for (const record of stored) {
                 // Reset transient XHR state; progress is preserved from last write
                 pendingUploads.set(record.id, record)
@@ -2351,7 +2372,7 @@ export function getPendingForUser(userId: number): PendingUpload[] {
         if (upload.phase === 'sent' || upload.phase === 'cancelled') continue
         result.push(upload)
     }
-    return result
+    return result.sort(comparePendingUploadsForTimeline)
 }
 
 export function retryFailedUpload(id: number): void {

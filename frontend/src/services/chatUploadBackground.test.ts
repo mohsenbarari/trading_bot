@@ -2227,6 +2227,216 @@ describe('chatUploadBackground', () => {
     expect(service.getPendingForUser(77)).toEqual([])
   })
 
+  it('returns pending uploads in stable timeline order for remount adoption', async () => {
+    const service = await importFreshModule()
+    const hooks = service.__chatUploadBackgroundTestHooks
+
+    hooks.state.pendingUploads.set(-611, {
+      id: -611,
+      userId: 77,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'image',
+      file: new Blob(['later'], { type: 'image/png' }),
+      fileName: 'later.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 40,
+      height: 40,
+      phase: 'queued',
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 5,
+      createdAt: '2026-05-14T00:10:03Z',
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+    })
+    hooks.state.pendingUploads.set(-612, {
+      id: -612,
+      userId: 77,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'image',
+      file: new Blob(['album-1'], { type: 'image/png' }),
+      fileName: 'album-1.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 40,
+      height: 40,
+      phase: 'queued',
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 5,
+      createdAt: '2026-05-14T00:10:01Z',
+      albumId: 'album-a',
+      albumIndex: 1,
+      albumSize: 2,
+    })
+    hooks.state.pendingUploads.set(-613, {
+      id: -613,
+      userId: 77,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'image',
+      file: new Blob(['album-0'], { type: 'image/png' }),
+      fileName: 'album-0.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 40,
+      height: 40,
+      phase: 'queued',
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 5,
+      createdAt: '2026-05-14T00:10:01Z',
+      albumId: 'album-a',
+      albumIndex: 0,
+      albumSize: 2,
+    })
+    hooks.state.pendingUploads.set(-614, {
+      id: -614,
+      userId: 77,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'image',
+      file: new Blob(['sent'], { type: 'image/png' }),
+      fileName: 'sent.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 40,
+      height: 40,
+      phase: 'sent',
+      progress: 100,
+      uploadedBytes: 5,
+      totalBytes: 5,
+      createdAt: '2026-05-14T00:10:00Z',
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+    })
+    hooks.state.pendingUploads.set(-615, {
+      id: -615,
+      userId: 88,
+      roomKind: 'direct',
+      senderId: 15,
+      msgType: 'image',
+      file: new Blob(['other-user'], { type: 'image/png' }),
+      fileName: 'other-user.png',
+      mimeType: 'image/png',
+      thumbnail: '',
+      width: 40,
+      height: 40,
+      phase: 'queued',
+      progress: 0,
+      uploadedBytes: 0,
+      totalBytes: 5,
+      createdAt: '2026-05-14T00:09:59Z',
+      albumId: null,
+      albumIndex: 0,
+      albumSize: 1,
+    })
+
+    expect(service.getPendingForUser(77).map((upload) => upload.id)).toEqual([-613, -612, -611])
+  })
+
+  it('emits restored added events in stable timeline order during init', async () => {
+    installIndexedDb([
+      {
+        id: -621,
+        userId: 77,
+        roomKind: 'direct',
+        senderId: 15,
+        msgType: 'image',
+        fileName: 'later.png',
+        mimeType: 'image/png',
+        thumbnail: '',
+        width: 40,
+        height: 40,
+        albumId: null,
+        albumIndex: 0,
+        albumSize: 1,
+        phase: 'uploaded',
+        progress: 100,
+        uploadedBytes: 5,
+        totalBytes: 5,
+        createdAt: '2026-05-14T00:11:03Z',
+        batchId: 'later-batch',
+        fileId: 'later-file',
+        file: new Blob(['later'], { type: 'image/png' }),
+      },
+      {
+        id: -622,
+        userId: 77,
+        roomKind: 'direct',
+        senderId: 15,
+        msgType: 'image',
+        fileName: 'album-1.png',
+        mimeType: 'image/png',
+        thumbnail: '',
+        width: 40,
+        height: 40,
+        albumId: 'album-init',
+        albumIndex: 1,
+        albumSize: 2,
+        phase: 'uploaded',
+        progress: 100,
+        uploadedBytes: 5,
+        totalBytes: 5,
+        createdAt: '2026-05-14T00:11:01Z',
+        batchId: 'album-init-batch',
+        fileId: 'album-file-1',
+        file: new Blob(['album-1'], { type: 'image/png' }),
+      },
+      {
+        id: -623,
+        userId: 77,
+        roomKind: 'direct',
+        senderId: 15,
+        msgType: 'image',
+        fileName: 'album-0.png',
+        mimeType: 'image/png',
+        thumbnail: '',
+        width: 40,
+        height: 40,
+        albumId: 'album-init',
+        albumIndex: 0,
+        albumSize: 2,
+        phase: 'uploaded',
+        progress: 100,
+        uploadedBytes: 5,
+        totalBytes: 5,
+        createdAt: '2026-05-14T00:11:01Z',
+        batchId: 'album-init-batch',
+        fileId: 'album-file-0',
+        file: new Blob(['album-0'], { type: 'image/png' }),
+      },
+    ])
+
+    const service = await importFreshModule()
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/activity')) {
+        return Promise.resolve({ ok: true, status: 204, json: async () => ({}) } as Response)
+      }
+      if (
+        (url.endsWith('/api/chat/upload-batches/album-init-batch/commit') ||
+          url.endsWith('/api/chat/upload-batches/later-batch/commit')) &&
+        init?.method === 'POST'
+      ) {
+        return new Promise<Response>(() => {})
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+
+    await service.initChatUploadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+    await service.waitForChatUploadBackgroundReady()
+
+    expect(events.filter((event) => event.type === 'added').map((event) => event.optimisticId)).toEqual([-623, -622, -621])
+  })
+
   it('commits a resumable group album through one shared batch and preserves album order', async () => {
     const service = await importFreshModule()
     const events: any[] = []
