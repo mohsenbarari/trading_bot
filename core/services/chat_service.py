@@ -191,18 +191,40 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     user1_owner_alias = aliased(User)
     user2_owner_alias = aliased(User)
     last_message_alias = aliased(Message)
+    current_direct_member_alias = aliased(ChatMember)
+    other_direct_member_alias = aliased(ChatMember)
+    current_member_alias = aliased(ChatMember)
     direct_chat_lookup = (
         select(
             Chat.id.label("chat_id"),
-            func.min(ChatMember.user_id).label("user1_id"),
-            func.max(ChatMember.user_id).label("user2_id"),
+            func.least(
+                current_direct_member_alias.user_id,
+                other_direct_member_alias.user_id,
+            ).label("user1_id"),
+            func.greatest(
+                current_direct_member_alias.user_id,
+                other_direct_member_alias.user_id,
+            ).label("user2_id"),
             Chat.last_message_id.label("chat_last_message_id"),
             Chat.last_message_at.label("chat_last_message_at"),
         )
-        .join(ChatMember, ChatMember.chat_id == Chat.id)
+        .join(
+            current_direct_member_alias,
+            sa.and_(
+                current_direct_member_alias.chat_id == Chat.id,
+                current_direct_member_alias.user_id == current_user_id,
+                current_direct_member_alias.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
+        .join(
+            other_direct_member_alias,
+            sa.and_(
+                other_direct_member_alias.chat_id == Chat.id,
+                other_direct_member_alias.user_id != current_user_id,
+                other_direct_member_alias.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
         .where(Chat.type == ChatType.DIRECT, Chat.is_deleted.is_(False))
-        .group_by(Chat.id, Chat.last_message_id, Chat.last_message_at)
-        .having(func.count(sa.distinct(ChatMember.user_id)) == 2)
         .subquery()
     )
     resolved_last_message_id = func.coalesce(
@@ -213,26 +235,6 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         direct_chat_lookup.c.chat_last_message_at,
         Conversation.last_message_at,
     ).label("last_message_at")
-    current_member_lookup = (
-        select(
-            ChatMember.chat_id.label("chat_id"),
-            func.max(ChatMember.last_read_message_id).label("last_read_message_id"),
-            func.max(ChatMember.last_read_at).label("last_read_at"),
-            func.max(case((ChatMember.is_muted.is_(True), 1), else_=0)).label("is_muted_flag"),
-            func.max(case((ChatMember.is_marked_unread.is_(True), 1), else_=0)).label("is_marked_unread_flag"),
-            func.max(case((ChatMember.is_pinned.is_(True), 1), else_=0)).label("is_pinned_flag"),
-            func.max(ChatMember.pinned_at).label("pinned_at"),
-            func.max(ChatMember.pin_order).label("pin_order"),
-            func.max(case((ChatMember.is_hidden.is_(True), 1), else_=0)).label("is_hidden_flag"),
-        )
-        .where(
-            ChatMember.user_id == current_user_id,
-            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
-        )
-        .group_by(ChatMember.chat_id)
-        .subquery()
-    )
-
     other_user_id = case(
         (Conversation.user1_id == current_user_id, Conversation.user2_id),
         else_=Conversation.user1_id,
@@ -295,16 +297,16 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             Message.chat_id == direct_chat_lookup.c.chat_id,
             Message.sender_id != current_user_id,
             Message.is_deleted.is_(False),
-            Message.id > func.coalesce(current_member_lookup.c.last_read_message_id, 0),
+            Message.id > func.coalesce(current_member_alias.last_read_message_id, 0),
         )
-        .correlate(direct_chat_lookup, current_member_lookup)
+        .correlate(direct_chat_lookup, current_member_alias)
         .scalar_subquery()
     )
     computed_unread_count = case(
         (
             sa.and_(
                 direct_chat_lookup.c.chat_id.is_not(None),
-                current_member_lookup.c.last_read_message_id.is_not(None),
+                current_member_alias.last_read_message_id.is_not(None),
             ),
             generic_unread_count,
         ),
@@ -313,7 +315,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     manual_unread_count = case(
         (
             sa.and_(
-                current_member_lookup.c.is_marked_unread_flag > 0,
+                current_member_alias.is_marked_unread.is_(True),
                 resolved_last_message_id.is_not(None),
             ),
             1,
@@ -324,16 +326,14 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         func.coalesce(computed_unread_count, 0),
         manual_unread_count,
     ).label("unread_count")
-    is_muted = case(
-        (current_member_lookup.c.is_muted_flag > 0, True),
-        else_=False,
-    ).label("is_muted")
-    is_pinned = case(
-        (current_member_lookup.c.is_pinned_flag > 0, True),
-        else_=False,
-    ).label("is_pinned")
-    pinned_at = current_member_lookup.c.pinned_at.label("pinned_at")
-    pin_order = current_member_lookup.c.pin_order.label("pin_order")
+    is_muted = func.coalesce(current_member_alias.is_muted, False).label("is_muted")
+    is_pinned = func.coalesce(current_member_alias.is_pinned, False).label("is_pinned")
+    pinned_at = current_member_alias.pinned_at.label("pinned_at")
+    pin_order = current_member_alias.pin_order.label("pin_order")
+    hidden_flag = case(
+        (current_member_alias.is_hidden.is_(True), 1),
+        else_=0,
+    ).label("is_hidden_flag")
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
         (last_message_alias.message_type == MessageType.TEXT, last_message_alias.content),
@@ -405,12 +405,16 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             ),
         )
         .outerjoin(
-            current_member_lookup,
-            current_member_lookup.c.chat_id == direct_chat_lookup.c.chat_id,
+            current_member_alias,
+            sa.and_(
+                current_member_alias.chat_id == direct_chat_lookup.c.chat_id,
+                current_member_alias.user_id == current_user_id,
+                current_member_alias.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
         )
         .outerjoin(last_message_alias, last_message_alias.id == resolved_last_message_id)
     )
-    return stmt, unread_count, resolved_last_message_at, current_member_lookup.c.is_hidden_flag
+    return stmt, unread_count, resolved_last_message_at, hidden_flag
 
 
 def build_direct_conversation_scope_condition(current_user_id: int):

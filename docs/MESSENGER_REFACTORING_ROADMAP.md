@@ -637,6 +637,13 @@ Separate true server bottlenecks from frontend jank and prepare production deplo
 - Tune uvicorn worker count and DB pool size for the production server, not the current development VPS.
 - Consider Nginx/static media optimization for `chat_files` downloads.
 
+### Current Findings
+
+- `scripts/report_messenger_query_plans.py` is now the repeatable `EXPLAIN ANALYZE` entrypoint for direct/group/channel conversation and history queries.
+- The direct conversation list/unread path was the only measured hot spot on the live Compose dataset. Replacing global direct-chat/member aggregate subqueries with current-user point lookups dropped the measured direct list runtime from roughly `17-19ms` to `~2.9ms` and direct unread poll from roughly `10-11ms` to `~2.0ms`.
+- Group/channel conversation and message-history paths already stayed on indexed `messages` / `chat_members` access paths. No additional speculative index was added for `messages.mentions` after the live plans showed index-backed room mention counts rather than a proven JSON full-scan bottleneck.
+- The remaining infra-side items in this phase stay operational follow-ups, not blockers for Messenger correctness: upload CPU is already off the event loop from prior slices, and worker/pool/static tuning should be driven by measured production load rather than development-VPS guesses.
+
 ### Validation Gate
 
 - Backend p95/p99 targets are recorded under load.
