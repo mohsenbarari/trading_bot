@@ -44,6 +44,7 @@ const heicMocks = vi.hoisted(() => ({
 }))
 
 const fileCacheMocks = vi.hoisted(() => ({
+  ensureFileCached: vi.fn<(fileId: string, fileName: string, options?: Record<string, unknown>) => Promise<any | null>>(async () => null),
   getCachedFileObjectUrl: vi.fn<(fileId: string) => Promise<string | null>>(async () => null),
 }))
 
@@ -63,6 +64,7 @@ vi.mock('heic2any', () => ({
 }))
 
 vi.mock('./useChatFileHandler', () => ({
+  ensureFileCached: fileCacheMocks.ensureFileCached,
   getCachedFileObjectUrl: fileCacheMocks.getCachedFileObjectUrl,
 }))
 
@@ -424,6 +426,8 @@ describe('useChatMedia', () => {
     preprocessMocks.recordMediaPreprocessTelemetry.mockClear()
     heicMocks.convert.mockReset()
     heicMocks.convert.mockResolvedValue(new Blob(['converted-heic'], { type: 'image/jpeg' }))
+    fileCacheMocks.ensureFileCached.mockReset()
+    fileCacheMocks.ensureFileCached.mockResolvedValue(null)
     fileCacheMocks.getCachedFileObjectUrl.mockReset()
     fileCacheMocks.getCachedFileObjectUrl.mockResolvedValue(null)
 
@@ -893,6 +897,7 @@ describe('useChatMedia', () => {
       const secondLoad = vm.loadImageForMessage(JSON.stringify({ file_id: 'shared-pending' }), 'image', {
         allowNetwork: true,
       })
+      await Promise.resolve()
       expect(hooks.state.pendingMediaLoads.size).toBe(1)
       await flushPromises()
       const sharedPendingFetchCount = fetchMock.mock.calls.reduce((count, call) => (
@@ -1286,6 +1291,38 @@ describe('useChatMedia', () => {
     expect(hydratedUrl).toBe('blob:generated-media')
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(vm.imageCache['file-71']).toBe('blob:generated-media')
+  })
+
+  it('hydrates uncached media from the unified file cache before falling back to network', async () => {
+    const imageMessage = makeImageMessage(73, { local_blob_url: undefined })
+    const { wrapper } = mountHarness([imageMessage])
+    const vm = wrapper.vm as any
+    const fetchMock = vi.fn()
+
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        throw new Error('indexeddb unavailable')
+      },
+    })
+    fileCacheMocks.ensureFileCached.mockResolvedValueOnce({
+      blob: new Blob(['cached-inline-media'], { type: 'image/png' }),
+      fileName: 'file-73.png',
+      mimeType: 'image/png',
+      size: 19,
+      cachedAt: Date.now(),
+    })
+
+    const hydratedUrl = await vm.loadImageForMessage(imageMessage.content, 'image', { allowNetwork: true })
+
+    expect(hydratedUrl).toBe('blob:generated-media')
+    expect(vm.imageCache['file-73']).toBe('blob:generated-media')
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fileCacheMocks.ensureFileCached).toHaveBeenCalledWith(
+      'file-73',
+      'file-73.jpg',
+      { mimeType: undefined },
+    )
   })
 
   it('tracks streaming media download progress before caching the combined blob', async () => {
