@@ -435,11 +435,11 @@ import {
 import {
   handleFileClick as cachedFileClick,
   shareFile as cachedShareFile,
+  ensureFileCached,
   canShareFiles,
   useChatFileHandler,
   prewarmFileCache,
   isFileCached,
-  seedFileCache,
   useFileCacheRegistry,
 } from '../../composables/chat/useChatFileHandler'
 import { formatIranTime } from '../../utils/iranTime'
@@ -768,12 +768,10 @@ function showShareUnavailableToast() {
 
 // --- Media (image/video/voice) share + cache integration ---
 //
-// Image/video bubbles cache their blob via `useChatMedia.imageCache` (a
-// separate IndexedDB store optimized for thumbnails and album hydration).
-// Voice messages cache via the same store under their file_id. To avoid
-// downloading those bytes a second time when the user shares them, we
-// "donate" the existing cached blob URL into the unified file cache via
-// `seedFileCache()` and then call `shareFile()`.
+// Media bubbles may already expose a resolved local blob URL while the
+// canonical file still lives behind the authenticated download URL. Route
+// both sources through the shared file-handler authority so components do not
+// maintain their own cache/fallback logic.
 
 function getMediaMimeFallback(): string {
   const t = props.msg.message_type
@@ -813,30 +811,13 @@ async function ensureMediaInFileCache(): Promise<boolean> {
   const fileId = mediaFileId.value
   if (!fileId) return false
   if (isFileCached(fileId)) return true
-  // Try to convert the existing imageCache blob URL into a Blob without a
-  // second network request. blob: URLs resolve instantly via fetch().
-  const localUrl = props.imageCache[fileId] || props.msg.local_blob_url
-  if (localUrl) {
-    try {
-      const resp = await fetch(localUrl)
-      const blob = await resp.blob()
-      await seedFileCache(fileId, blob, getMediaFileNameFallback(), blob.type || getMediaMimeFallback())
-      return true
-    } catch (err) {
-      console.warn('[chat-media-share] seed from local blob failed', err)
-    }
-  }
-  // Fall back to fetching from the API into the unified cache.
-  const apiUrl = getMediaApiUrl()
-  if (!apiUrl) return false
   try {
-    const resp = await fetch(apiUrl, { credentials: 'include' })
-    if (!resp.ok) return false
-    const blob = await resp.blob()
-    await seedFileCache(fileId, blob, getMediaFileNameFallback(), blob.type || getMediaMimeFallback())
-    return true
-  } catch (err) {
-    console.warn('[chat-media-share] api fetch failed', err)
+    return Boolean(await ensureFileCached(fileId, getMediaFileNameFallback(), {
+      mimeType: getMediaMimeFallback(),
+      localUrl: props.imageCache[fileId] || props.msg.local_blob_url || undefined,
+      fileUrl: getMediaApiUrl() || undefined,
+    }))
+  } catch {
     return false
   }
 }

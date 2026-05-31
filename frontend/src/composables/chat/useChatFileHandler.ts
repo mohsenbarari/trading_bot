@@ -31,7 +31,15 @@ interface CachedFileEntry {
     cachedAt: number
 }
 
+interface EnsureFileCachedOptions {
+    blob?: Blob
+    mimeType?: string
+    fileUrl?: string
+    localUrl?: string
+}
+
 const downloadingFiles = reactive<Record<string, boolean>>({})
+const inflightCacheLoads = new Map<string, Promise<CachedFileEntry | null>>()
 
 /**
  * Reactive map of cached file ids → true. Components can use this to hide
@@ -81,6 +89,18 @@ function isCachedFileEntry(value: unknown): value is CachedFileEntry {
 
 function readMemoryEntry(fileId: string): CachedFileEntry | null {
     return memoryCache.get(fileId) || null
+}
+
+function normalizeCachedEntry(entry: CachedFileEntry, fileName: string, mimeType?: string): CachedFileEntry {
+    const normalizedFileName = entry.fileName || fileName || 'file'
+    const normalizedMimeType = entry.mimeType || entry.blob.type || mimeType || 'application/octet-stream'
+    if (normalizedFileName === entry.fileName && normalizedMimeType === entry.mimeType) return entry
+    return {
+        ...entry,
+        fileName: normalizedFileName,
+        mimeType: normalizedMimeType,
+        size: entry.size || entry.blob.size || 0,
+    }
 }
 
 async function readCachedEntry(fileId: string): Promise<CachedFileEntry | null> {
@@ -272,7 +292,7 @@ async function presentCachedFile(entry: CachedFileEntry, fileName: string, mode:
     triggerAnchorDownload(entry.blob, displayName)
 }
 
-async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string): Promise<CachedFileEntry> {
+async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: string, mimeType?: string): Promise<CachedFileEntry> {
     const response = await fetch(fileUrl, { credentials: 'include' })
     if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -281,7 +301,7 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
     const entry: CachedFileEntry = {
         blob,
         fileName: fileName || 'file',
-        mimeType: blob.type || 'application/octet-stream',
+        mimeType: blob.type || mimeType || 'application/octet-stream',
         size: blob.size,
         cachedAt: Date.now(),
     }
@@ -295,6 +315,70 @@ async function fetchAndCacheFile(fileId: string, fileUrl: string, fileName: stri
     memoryCache.set(fileId, entry)
     cachedFileIds[fileId] = true
     return entry
+}
+
+export async function ensureFileCached(
+    fileId: string,
+    fileName: string,
+    options: EnsureFileCachedOptions = {},
+): Promise<CachedFileEntry | null> {
+    if (!fileId) return null
+
+    const inMemory = readMemoryEntry(fileId)
+    if (inMemory) {
+        const normalized = normalizeCachedEntry(inMemory, fileName, options.mimeType)
+        memoryCache.set(fileId, normalized)
+        cachedFileIds[fileId] = true
+        return normalized
+    }
+
+    const cached = await readCachedEntry(fileId)
+    if (cached) {
+        const normalized = normalizeCachedEntry(cached, fileName, options.mimeType)
+        memoryCache.set(fileId, normalized)
+        cachedFileIds[fileId] = true
+        return normalized
+    }
+
+    if (options.blob) {
+        await seedFileCache(fileId, options.blob, fileName, options.mimeType)
+        const entry = readMemoryEntry(fileId)
+        return entry ? normalizeCachedEntry(entry, fileName, options.mimeType) : null
+    }
+
+    const inflight = inflightCacheLoads.get(fileId)
+    if (inflight) return inflight
+
+    const loadPromise = (async () => {
+        if (options.localUrl) {
+            try {
+                const response = await fetch(options.localUrl)
+                if (response.ok === false) {
+                    throw new Error(`HTTP ${response.status}`)
+                }
+                const blob = await response.blob()
+                await seedFileCache(fileId, blob, fileName, blob.type || options.mimeType)
+                const entry = readMemoryEntry(fileId)
+                return entry ? normalizeCachedEntry(entry, fileName, options.mimeType) : null
+            } catch (err) {
+                console.warn('[useChatFileHandler] local cache source fetch failed', err)
+            }
+        }
+
+        if (!options.fileUrl) return null
+
+        downloadingFiles[fileId] = true
+        try {
+            return await fetchAndCacheFile(fileId, options.fileUrl, fileName, options.mimeType)
+        } finally {
+            delete downloadingFiles[fileId]
+        }
+    })().finally(() => {
+        inflightCacheLoads.delete(fileId)
+    })
+
+    inflightCacheLoads.set(fileId, loadPromise)
+    return loadPromise
 }
 
 /**
@@ -360,7 +444,6 @@ export async function seedFileCache(fileId: string, blob: Blob, fileName: string
 export async function handleFileClick(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
     diagLog('handleFileClick id=' + fileId, 'name=' + fileName)
-    if (downloadingFiles[fileId]) { diagLog('already downloading -> skip'); return }
 
     // SYNCHRONOUS fast-path: if the file is already in memory, call
     // presentCachedFile WITHOUT awaiting an IDB read first. This preserves the
@@ -374,25 +457,13 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
         return
     }
 
-    // Not yet in memory: try IDB (still async, but the very first tap on a
-    // fresh page load may consume the activation; that's acceptable because
-    // window.open / share will work on the first interaction in most cases
-    // and subsequent taps hit the synchronous memory cache).
-    const cached = await readCachedEntry(fileId)
-    if (cached) {
-        await presentCachedFile(cached, cached.fileName || fileName, 'open')
-        return
-    }
-
-    downloadingFiles[fileId] = true
     try {
-        const entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
+        const entry = await ensureFileCached(fileId, fileName, { fileUrl })
+        if (!entry) throw new Error('File unavailable')
         await presentCachedFile(entry, entry.fileName, 'open')
     } catch (err) {
         console.error('[useChatFileHandler] file download failed', err)
         throw err
-    } finally {
-        delete downloadingFiles[fileId]
     }
 }
 
@@ -401,19 +472,9 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
  */
 export async function downloadFileToDisk(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
-    const cached = await readCachedEntry(fileId)
-    if (cached) {
-        await presentCachedFile(cached, cached.fileName || fileName, 'download')
-        return
-    }
-    if (downloadingFiles[fileId]) return
-    downloadingFiles[fileId] = true
-    try {
-        const entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
-        await presentCachedFile(entry, entry.fileName, 'download')
-    } finally {
-        delete downloadingFiles[fileId]
-    }
+    const entry = await ensureFileCached(fileId, fileName, { fileUrl })
+    if (!entry) return
+    await presentCachedFile(entry, entry.fileName, 'download')
 }
 
 /**
@@ -437,24 +498,16 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
         return await result
     }
 
-    let entry = await readCachedEntry(fileId)
-    if (!entry && fileUrl) {
-        if (downloadingFiles[fileId]) return false
-        downloadingFiles[fileId] = true
-        try {
-            entry = await fetchAndCacheFile(fileId, fileUrl, fileName)
-        } catch (err) {
-            console.warn('[useChatFileHandler] share pre-fetch failed', err)
-            return false
-        } finally {
-            delete downloadingFiles[fileId]
-        }
+    let entry: CachedFileEntry | null = null
+    try {
+        entry = await ensureFileCached(fileId, fileName, { fileUrl, mimeType })
+    } catch (err) {
+        console.warn('[useChatFileHandler] share pre-fetch failed', err)
+        return false
     }
     if (!entry) return false
 
-    if (mimeType && !entry.mimeType) {
-        entry = { ...entry, mimeType }
-    }
+    entry = normalizeCachedEntry(entry, fileName, mimeType)
 
     const displayName = entry.fileName || fileName || 'file'
     const result = shareBlobSync(entry, displayName)
@@ -565,6 +618,7 @@ export function useChatFileHandler() {
         handleFileClick,
         downloadFileToDisk,
         shareFile,
+        ensureFileCached,
         canShareFiles,
         clearFileCache,
         getCacheSize,

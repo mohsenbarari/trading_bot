@@ -389,6 +389,7 @@ describe('useChatFileHandler.ts', () => {
 
   it('short-circuits prewarm and share/download requests while a fetch is already in flight', async () => {
     const fileHandler = await import('./useChatFileHandler')
+    const anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const fetchMock = vi.fn(() => new Promise((resolve) => {
       setTimeout(() => {
         resolve({
@@ -412,14 +413,50 @@ describe('useChatFileHandler.ts', () => {
     expect(localforageInstance.getItem).toHaveBeenCalledTimes(1)
 
     const slowShare = fileHandler.shareFile('slow-share', 'slow.pdf', 'application/pdf', '/api/chat/files/slow-share')
-    expect(await fileHandler.shareFile('slow-share', 'slow.pdf', 'application/pdf', '/api/chat/files/slow-share')).toBe(false)
-    expect(await slowShare).toBe(true)
+    const secondShare = fileHandler.shareFile('slow-share', 'slow.pdf', 'application/pdf', '/api/chat/files/slow-share')
+    await expect(Promise.all([slowShare, secondShare])).resolves.toEqual([true, true])
 
     const slowDownload = fileHandler.downloadFileToDisk('slow-download', '/api/chat/files/slow-download', 'slow.zip')
-    await fileHandler.downloadFileToDisk('slow-download', '/api/chat/files/slow-download', 'slow.zip')
-    await slowDownload
+    const secondDownload = fileHandler.downloadFileToDisk('slow-download', '/api/chat/files/slow-download', 'slow.zip')
+    await Promise.all([slowDownload, secondDownload])
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const slowOpen = fileHandler.handleFileClick('slow-open', '/api/chat/files/slow-open', 'slow-open.pdf')
+    const secondOpen = fileHandler.handleFileClick('slow-open', '/api/chat/files/slow-open', 'slow-open.pdf')
+    await Promise.all([slowOpen, secondOpen])
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(anchorClickSpy).toHaveBeenCalledTimes(4)
+  })
+
+  it('hydrates local blob sources through one shared cache promise for media-style callers', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    const localBlob = new Blob(['image'], { type: 'image/png' })
+    const fetchMock = vi.fn(() => new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          ok: true,
+          blob: async () => localBlob,
+        })
+      }, 0)
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = fileHandler.ensureFileCached('media-1', 'photo.png', {
+      mimeType: 'image/png',
+      localUrl: 'blob:photo',
+    })
+    const second = fileHandler.ensureFileCached('media-1', 'photo.png', {
+      mimeType: 'image/png',
+      localUrl: 'blob:photo',
+    })
+
+    const [firstEntry, secondEntry] = await Promise.all([first, second])
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(firstEntry?.fileName).toBe('photo.png')
+    expect(firstEntry?.mimeType).toBe('image/png')
+    expect(secondEntry?.mimeType).toBe('image/png')
+    expect(fileHandler.isFileCached('media-1')).toBe(true)
   })
 
   it('covers cache-read failures, no-op ids, healthy seed skips, and object-url revocation timers', async () => {

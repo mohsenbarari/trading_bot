@@ -13,6 +13,7 @@ const chatMessageItemMocks = vi.hoisted(() => ({
   prewarmFileCacheMock: vi.fn(),
   observeVisibilityMock: vi.fn(() => () => {}),
   handleFileClickMock: vi.fn(),
+  ensureFileCachedMock: vi.fn(),
   shareFileMock: vi.fn(),
   seedFileCacheMock: vi.fn(),
   canShareFilesMock: vi.fn(() => false),
@@ -45,6 +46,7 @@ vi.mock('../../composables/chat/useChatFileHandler', async () => {
   const { reactive } = await import('vue')
   return {
     handleFileClick: chatMessageItemMocks.handleFileClickMock,
+    ensureFileCached: chatMessageItemMocks.ensureFileCachedMock,
     shareFile: chatMessageItemMocks.shareFileMock,
     canShareFiles: chatMessageItemMocks.canShareFilesMock,
     useChatFileHandler: () => ({ downloadingFiles: reactive({}) }),
@@ -264,6 +266,7 @@ describe('ChatMessageItem.vue', () => {
     chatMessageItemMocks.observeVisibilityMock.mockClear()
     chatMessageItemMocks.handleFileClickMock.mockReset()
     chatMessageItemMocks.handleFileClickMock.mockResolvedValue(undefined)
+    chatMessageItemMocks.ensureFileCachedMock.mockReset()
     chatMessageItemMocks.shareFileMock.mockReset()
     chatMessageItemMocks.shareFileMock.mockResolvedValue(true)
     chatMessageItemMocks.seedFileCacheMock.mockReset()
@@ -836,15 +839,7 @@ describe('ChatMessageItem.vue', () => {
 
   it('shares media by seeding the unified file cache from an existing local blob URL', async () => {
     chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === 'blob:cached-image') {
-        return new Response(new Blob(['image-cache'], { type: 'image/png' }), {
-          status: 200,
-        })
-      }
-      throw new Error(`Unexpected fetch ${String(input)}`)
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    chatMessageItemMocks.ensureFileCachedMock.mockResolvedValue({ fileName: 'image-image-71.jpg' })
 
     const wrapper = mountMediaMessage({}, {
       imageCache: { 'image-71': 'blob:cached-image' },
@@ -853,16 +848,15 @@ describe('ChatMessageItem.vue', () => {
     await wrapper.get('.media-share-btn').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('blob:cached-image')
-    expect(chatMessageItemMocks.seedFileCacheMock).toHaveBeenCalledTimes(1)
-    const [seededFileId, seededBlob, seededFileName, seededMime] = chatMessageItemMocks.seedFileCacheMock.mock.calls[0]!
-    expect(seededFileId).toBe('image-71')
-    expect(seededBlob).toMatchObject({
-      size: expect.any(Number),
-      type: expect.any(String),
-    })
-    expect(seededFileName).toBe('image-image-71.jpg')
-    expect(seededMime).toBeTruthy()
+    expect(chatMessageItemMocks.ensureFileCachedMock).toHaveBeenCalledWith(
+      'image-71',
+      'image-image-71.jpg',
+      {
+        mimeType: 'image/jpeg',
+        localUrl: 'blob:cached-image',
+        fileUrl: expect.stringContaining('/api/chat/files/image-71?token=test-token'),
+      },
+    )
     expect(chatMessageItemMocks.shareFileMock).toHaveBeenCalledWith(
       'image-71',
       'image-image-71.jpg',
@@ -966,18 +960,8 @@ describe('ChatMessageItem.vue', () => {
 
   it('falls back from local media share seeding to the authenticated API and shows a toast on share rejection', async () => {
     chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
+    chatMessageItemMocks.ensureFileCachedMock.mockResolvedValue({ fileName: 'image-image-71.jpg' })
     chatMessageItemMocks.shareFileMock.mockResolvedValue(false)
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === 'blob:broken-local') {
-        throw new Error('local blob revoked')
-      }
-      if (url.includes('/api/chat/files/image-71')) {
-        return new Response(new Blob(['api-image'], { type: 'image/webp' }), { status: 200 })
-      }
-      throw new Error(`Unexpected fetch ${url}`)
-    })
-    vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = mountMediaMessage({}, {
       imageCache: { 'image-71': 'blob:broken-local' },
@@ -986,13 +970,14 @@ describe('ChatMessageItem.vue', () => {
     await wrapper.get('.media-share-btn').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('blob:broken-local')
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/chat/files/image-71?token=test-token'), { credentials: 'include' })
-    expect(chatMessageItemMocks.seedFileCacheMock).toHaveBeenCalledWith(
+    expect(chatMessageItemMocks.ensureFileCachedMock).toHaveBeenCalledWith(
       'image-71',
-      expect.anything(),
       'image-image-71.jpg',
-      expect.any(String),
+      {
+        mimeType: 'image/jpeg',
+        localUrl: 'blob:broken-local',
+        fileUrl: expect.stringContaining('/api/chat/files/image-71?token=test-token'),
+      },
     )
     expect(chatMessageItemMocks.shareFileMock).toHaveBeenCalledWith(
       'image-71',
@@ -1006,10 +991,7 @@ describe('ChatMessageItem.vue', () => {
 
   it('falls back when media cache seeding fails and tears down voice audio when the source changes', async () => {
     chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
-    const fetchMock = vi.fn(async () => {
-      throw new Error('offline')
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    chatMessageItemMocks.ensureFileCachedMock.mockResolvedValue(null)
 
     const mediaWrapper = mountMediaMessage()
     await mediaWrapper.get('.media-share-btn').trigger('click')
@@ -1188,6 +1170,7 @@ describe('ChatMessageItem.vue', () => {
   it('covers media fallback helpers and failed API seeding paths', async () => {
     chatMessageItemMocks.canShareFilesMock.mockReturnValue(true)
     localStorage.removeItem('auth_token')
+    chatMessageItemMocks.ensureFileCachedMock.mockResolvedValueOnce(null)
     const pngWrapper = mountMediaMessage({
       content: JSON.stringify({ file_id: 'png-1', file_name: 'photo.png' }),
     })
@@ -1195,6 +1178,15 @@ describe('ChatMessageItem.vue', () => {
     expect((pngWrapper.vm as any).getMediaFileNameFallback()).toBe('photo.png')
     expect((pngWrapper.vm as any).getMediaApiUrl()).toBe('')
     expect(await (pngWrapper.vm as any).ensureMediaInFileCache()).toBe(false)
+    expect(chatMessageItemMocks.ensureFileCachedMock).toHaveBeenCalledWith(
+      'png-1',
+      'photo.png',
+      {
+        mimeType: 'image/png',
+        localUrl: undefined,
+        fileUrl: undefined,
+      },
+    )
 
     localStorage.setItem('auth_token', 'test-token')
     const heicWrapper = mountMediaMessage({
@@ -1208,8 +1200,16 @@ describe('ChatMessageItem.vue', () => {
     expect((voiceWrapper.vm as any).getMediaMimeFallback()).toBe('audio/webm')
     expect((voiceWrapper.vm as any).getMediaFileNameFallback()).toBe('voice-voice-api.webm')
 
-    const fetchMock = vi.fn(async () => new Response('not found', { status: 404 }))
-    vi.stubGlobal('fetch', fetchMock)
+    chatMessageItemMocks.ensureFileCachedMock.mockResolvedValueOnce(null)
     expect(await (voiceWrapper.vm as any).ensureMediaInFileCache()).toBe(false)
+    expect(chatMessageItemMocks.ensureFileCachedMock).toHaveBeenLastCalledWith(
+      'voice-api',
+      'voice-voice-api.webm',
+      {
+        mimeType: 'audio/webm',
+        localUrl: undefined,
+        fileUrl: expect.stringContaining('/api/chat/files/voice-api?token=test-token'),
+      },
+    )
   })
 })

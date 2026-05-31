@@ -28,7 +28,7 @@ import { useChatMessages } from '../composables/chat/useChatMessages'
 import { useChatScroll } from '../composables/chat/useChatScroll'
 import { useNotificationStore } from '../stores/notifications'
 import {
-  seedFileCache,
+  ensureFileCached,
   shareMultipleFiles,
   shareFile as cachedShareFileGlobal,
 } from '../composables/chat/useChatFileHandler'
@@ -2072,28 +2072,14 @@ function inferMediaFileName(msg: Message, fileId: string, index = 0): string {
 async function ensureMessageBlobInFileCache(msg: Message): Promise<string | null> {
   const fileId = getMediaFileId(msg)
   if (!fileId) return null
-  // Try local blob URL (imageCache) → fetch as blob without network roundtrip.
-  const localUrl = imageCache.value[fileId] || msg.local_blob_url
-  if (localUrl) {
-    try {
-      const resp = await fetch(localUrl)
-      const blob = await resp.blob()
-      await seedFileCache(fileId, blob, inferMediaFileName(msg, fileId), blob.type || inferMediaMime(msg))
-      return fileId
-    } catch (err) {
-      console.warn('[chat-share] seed from local blob failed', err)
-    }
-  }
-  // Fall back to backend fetch.
-  const downloadUrl = buildMediaDownloadUrl(fileId)
   try {
-    const resp = await fetch(downloadUrl)
-    if (!resp.ok) return null
-    const blob = await resp.blob()
-    await seedFileCache(fileId, blob, inferMediaFileName(msg, fileId), blob.type || inferMediaMime(msg))
-    return fileId
-  } catch (err) {
-    console.warn('[chat-share] api fetch failed', err)
+    const entry = await ensureFileCached(fileId, inferMediaFileName(msg, fileId), {
+      mimeType: inferMediaMime(msg),
+      localUrl: imageCache.value[fileId] || msg.local_blob_url || undefined,
+      fileUrl: buildMediaDownloadUrl(fileId),
+    })
+    return entry ? fileId : null
+  } catch {
     return null
   }
 }
