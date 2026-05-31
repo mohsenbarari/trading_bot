@@ -101,6 +101,8 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("greatest", projection_sql.lower())
         self.assertIn("is_pinned", projection_sql)
         self.assertIn("coalesce(", unread_sql)
+        self.assertNotIn("HAVING count(DISTINCT", projection_sql)
+        self.assertNotIn("max(chat_members", projection_sql.lower())
         self.assertIn("messages.sender_id = 10", legacy_sql)
         self.assertIn("messages.receiver_id = 20", legacy_sql)
         self.assertIsNotNone(unread_count)
