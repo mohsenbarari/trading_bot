@@ -359,7 +359,7 @@ describe('ChatMessageItem.vue', () => {
     const wrapper = mountVoiceMessage()
 
     expect(wrapper.findAll('.voice-wave-bar')).toHaveLength(40)
-    expect(chatMessageItemMocks.prewarmFileCacheMock).toHaveBeenCalledWith('voice-51')
+    expect(chatMessageItemMocks.prewarmFileCacheMock).not.toHaveBeenCalled()
 
     await wrapper.find('.voice-play-btn').trigger('click')
     await flushPromises()
@@ -510,6 +510,8 @@ describe('ChatMessageItem.vue', () => {
 
   it('opens document messages through the shared file handler and falls back to legacy download when needed', async () => {
     const wrapper = mountDocumentMessage()
+
+    expect(chatMessageItemMocks.prewarmFileCacheMock).toHaveBeenCalledWith('doc-91')
 
     await wrapper.get('.msg-document').trigger('click')
     expect(chatMessageItemMocks.handleFileClickMock).toHaveBeenCalledWith(

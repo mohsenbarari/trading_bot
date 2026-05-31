@@ -1079,16 +1079,10 @@ onMounted(() => {
   if (props.msg.message_type === 'document' && docFileId.value) {
     prewarmFileCache(docFileId.value)
   }
-  // Same pre-warm for media (image/video/voice) so share/open taps stay
-  // synchronous after the file lands in the unified cache once.
-  if (
-    (props.msg.message_type === 'image' ||
-     props.msg.message_type === 'video' ||
-     props.msg.message_type === 'voice') &&
-    mediaFileId.value
-  ) {
-    prewarmFileCache(mediaFileId.value)
-  }
+  // Media share/open already routes through ensureMediaInFileCache(), which
+  // remains async by design. Pre-warming every mounted media bubble would add
+  // eager IndexedDB work for off-screen rows without preserving a synchronous
+  // first-tap share path the way document bubbles need.
 })
 
 watch(audioUrl, (newUrl, oldUrl) => {
