@@ -289,7 +289,7 @@ describe('useNotificationRuntime', () => {
       sender_name: 'رضا',
       message_type: 'text',
       content: 'بی‌صدای منشن‌دار',
-      mentions: [7],
+      mentions: ['7'],
     })
     await flushPromises()
     expect(notificationRuntimeMocks.store.incrementMentionUnread).toHaveBeenCalledWith(43)
