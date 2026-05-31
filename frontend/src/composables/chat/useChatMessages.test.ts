@@ -175,7 +175,7 @@ describe('useChatMessages', () => {
       ] as any
     )
     messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
-      if (url.startsWith('/api/chat/messages/12?limit=48')) {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
         return [
           {
             id: 1,
@@ -206,7 +206,7 @@ describe('useChatMessages', () => {
   it('reuses the snapshot warm path before the fresh server load resolves', async () => {
     createSubject()
     messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
-      if (url.startsWith('/api/chat/messages/12?limit=48')) {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
         return [
           {
             id: 10,
@@ -234,7 +234,7 @@ describe('useChatMessages', () => {
 
     let resolveMessages: ((value: any[]) => void) | null = null
     messageMocks.apiFetchJson.mockImplementation((url: string) => {
-      if (url.startsWith('/api/chat/messages/12?limit=48')) {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
         return new Promise((resolve) => {
           resolveMessages = resolve
         })
@@ -298,8 +298,8 @@ describe('useChatMessages', () => {
     await nextTick()
 
     messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
-      if (url.startsWith('/api/chat/messages/100?limit=48')) return []
-      if (url.startsWith('/api/chat/messages/101?limit=48')) {
+      if (url.startsWith('/api/chat/messages/100?limit=')) return []
+      if (url.startsWith('/api/chat/messages/101?limit=')) {
         return [{ id: 500, sender_id: 101, receiver_id: 7, content: 'fresh snapshot miss', message_type: 'text' }]
       }
       if (url === '/api/chat/read/100' || url === '/api/chat/read/101') return {}
@@ -494,7 +494,7 @@ describe('useChatMessages', () => {
       if (url === '/api/chat/conversations') {
         return []
       }
-      if (url.startsWith('/api/chat/messages/12?limit=48')) {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
         return []
       }
       if (url === '/api/chat/read/12') {
