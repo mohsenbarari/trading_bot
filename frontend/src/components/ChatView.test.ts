@@ -38,6 +38,7 @@ const chatViewMocks = vi.hoisted(() => ({
   clearBackStackMock: vi.fn(),
   setConversationMutedMock: vi.fn(),
   seedFileCacheMock: vi.fn(),
+  ensureFileCachedMock: vi.fn(),
   shareMultipleFilesMock: vi.fn(),
   shareFileMock: vi.fn(),
 }))
@@ -170,6 +171,7 @@ vi.mock('../composables/chat/useChatScroll', async () => {
 
 vi.mock('../composables/chat/useChatFileHandler', () => ({
   seedFileCache: chatViewMocks.seedFileCacheMock,
+  ensureFileCached: chatViewMocks.ensureFileCachedMock,
   shareMultipleFiles: chatViewMocks.shareMultipleFilesMock,
   shareFile: chatViewMocks.shareFileMock,
 }))
@@ -226,6 +228,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.clearBackStackMock.mockReset()
     chatViewMocks.setConversationMutedMock.mockReset()
     chatViewMocks.seedFileCacheMock.mockReset()
+    chatViewMocks.ensureFileCachedMock.mockReset()
     chatViewMocks.shareMultipleFilesMock.mockReset()
     chatViewMocks.shareFileMock.mockReset()
     chatViewResizeObserverCallback = null
@@ -3535,10 +3538,8 @@ describe('ChatView.vue', () => {
     })
     chatViewMocks.messagesSeed = [imageMessage]
     chatViewMocks.imageCacheState = { 'img-1': 'blob:cached-image' }
+    chatViewMocks.ensureFileCachedMock.mockResolvedValue({ fileName: '01_img-1.jpg' })
     chatViewMocks.shareFileMock.mockResolvedValue(true)
-
-    const fetchMock = vi.fn(async () => new Response(new Blob(['cached-image'], { type: 'image/jpeg' }), { status: 200 }))
-    vi.stubGlobal('fetch', fetchMock)
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
     const wrapper = await mountChatView({
@@ -3554,12 +3555,15 @@ describe('ChatView.vue', () => {
     await wrapper.get('.lightbox-share').trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('blob:cached-image')
-    const seedCall = chatViewMocks.seedFileCacheMock.mock.calls[0]
-    expect(seedCall?.[0]).toBe('img-1')
-    expect(seedCall?.[1]).toBeTruthy()
-    expect(seedCall?.[2]).toBe('01_img-1.jpg')
-    expect(typeof seedCall?.[3]).toBe('string')
+    expect(chatViewMocks.ensureFileCachedMock).toHaveBeenCalledWith(
+      'img-1',
+      '01_img-1.jpg',
+      {
+        mimeType: 'image/jpeg',
+        localUrl: 'blob:cached-image',
+        fileUrl: '/api/chat/files/img-1?token=jwt-token',
+      },
+    )
     expect(chatViewMocks.shareFileMock).toHaveBeenCalledWith(
       'img-1',
       '01_img-1.jpg',
@@ -3604,7 +3608,7 @@ describe('ChatView.vue', () => {
     ]
     chatViewMocks.apiFetchMock.mockClear()
     chatViewMocks.closeLightboxMock.mockClear()
-    chatViewMocks.seedFileCacheMock.mockClear()
+    chatViewMocks.ensureFileCachedMock.mockClear()
     chatViewMocks.shareFileMock.mockClear()
     const clipboardWriteText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', {
@@ -3669,7 +3673,7 @@ describe('ChatView.vue', () => {
     expect(chatViewMocks.shareFileMock).not.toHaveBeenCalled()
     await hooks.handleLightboxShare(11)
     await flushPromises()
-    expect(chatViewMocks.seedFileCacheMock).not.toHaveBeenCalled()
+    expect(chatViewMocks.ensureFileCachedMock).not.toHaveBeenCalled()
     expect(document.body.textContent).toContain('این پیام قابل اشتراک‌گذاری نیست')
 
     wrapper.unmount()
@@ -3708,9 +3712,9 @@ describe('ChatView.vue', () => {
     expect(document.body.textContent).toContain('این پیام قابل اشتراک‌گذاری نیست')
     textWrapper.unmount()
 
-    chatViewMocks.seedFileCacheMock.mockClear()
+    chatViewMocks.ensureFileCachedMock.mockClear()
     chatViewMocks.shareFileMock.mockClear()
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })))
+    chatViewMocks.ensureFileCachedMock.mockResolvedValueOnce(null)
     const unseededWrapper = await mountShareHarness(buildImageMessage({ content: JSON.stringify({ file_id: 'missing-img' }) }))
     await unseededWrapper.get('.menu-share-action').trigger('click')
     await flushPromises()
@@ -3719,16 +3723,19 @@ describe('ChatView.vue', () => {
     unseededWrapper.unmount()
 
     chatViewMocks.imageCacheState = { 'img-unsupported': 'blob:unsupported-image' }
+    chatViewMocks.ensureFileCachedMock.mockResolvedValueOnce({ fileName: '01_img-unsupported.jpg' })
     chatViewMocks.shareFileMock.mockResolvedValueOnce(false)
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['image'], { type: 'image/jpeg' }), { status: 200 })))
     const unsupportedWrapper = await mountShareHarness(buildImageMessage({ content: JSON.stringify({ file_id: 'img-unsupported' }) }))
     await unsupportedWrapper.get('.menu-share-action').trigger('click')
     await flushPromises()
-    expect(chatViewMocks.seedFileCacheMock).toHaveBeenCalledWith(
+    expect(chatViewMocks.ensureFileCachedMock).toHaveBeenCalledWith(
       'img-unsupported',
-      expect.anything(),
       '01_img-unsupported.jpg',
-      expect.any(String),
+      {
+        mimeType: 'image/jpeg',
+        localUrl: 'blob:unsupported-image',
+        fileUrl: '/api/chat/files/img-unsupported?token=jwt-token',
+      },
     )
     expect(chatViewMocks.shareFileMock).toHaveBeenCalledWith(
       'img-unsupported',
@@ -3837,12 +3844,8 @@ describe('ChatView.vue', () => {
       'img-1': 'blob:cached-image-1',
       'img-2': 'blob:cached-image-2',
     }
+    chatViewMocks.ensureFileCachedMock.mockResolvedValue({ fileName: 'album.jpg' })
     chatViewMocks.shareMultipleFilesMock.mockResolvedValue(true)
-    const fetchMock = vi.fn(async (input: unknown) => {
-      const url = String(input)
-      return new Response(new Blob([url], { type: 'image/jpeg' }), { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
 
     const wrapper = await mountChatView({
       targetUserId: 55,
@@ -4016,60 +4019,38 @@ describe('ChatView.vue', () => {
     expect(hooks.inferMediaFileName(buildMessage({ message_type: 'voice', content: JSON.stringify({ file_id: 'voice-1' }) }), 'voice-1', 0)).toBe('01_voice-1.webm')
     expect(hooks.inferMediaFileName(documentMessage, 'doc-seed', 0)).toBe('report.pdf')
 
-    chatViewMocks.seedFileCacheMock.mockClear()
-    let fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === 'blob:local-image') {
-        return new Response(new Uint8Array([1, 2, 3]), {
-          status: 200,
-          headers: { 'Content-Type': 'image/png' },
-        })
-      }
-      return new Response('missing', { status: 404 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    chatViewMocks.ensureFileCachedMock.mockClear()
+    chatViewMocks.ensureFileCachedMock.mockResolvedValueOnce({ fileName: '01_img-seed.jpg' })
 
     await expect(hooks.ensureMessageBlobInFileCache(imageMessage)).resolves.toBe('img-seed')
-    expect(chatViewMocks.seedFileCacheMock).toHaveBeenCalledWith(
+    expect(chatViewMocks.ensureFileCachedMock).toHaveBeenCalledWith(
       'img-seed',
-      expect.anything(),
       '01_img-seed.jpg',
-      'image/png',
+      {
+        mimeType: 'image/jpeg',
+        localUrl: 'blob:local-image',
+        fileUrl: '/api/chat/files/img-seed?token=jwt-token',
+      },
     )
 
-    chatViewMocks.seedFileCacheMock.mockClear()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input)
-      if (url === 'blob:local-doc') {
-        throw new Error('local blob failed')
-      }
-      if (url === '/api/chat/files/doc-seed?token=jwt-token') {
-        return new Response(new Uint8Array([4, 5, 6]), {
-          status: 200,
-          headers: { 'Content-Type': 'application/pdf' },
-        })
-      }
-      return new Response('missing', { status: 404 })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    chatViewMocks.ensureFileCachedMock.mockClear()
+    chatViewMocks.ensureFileCachedMock.mockResolvedValueOnce({ fileName: 'report.pdf' })
 
     await expect(hooks.ensureMessageBlobInFileCache(documentMessage)).resolves.toBe('doc-seed')
-    expect(fetchMock).toHaveBeenNthCalledWith(1, 'blob:local-doc')
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/chat/files/doc-seed?token=jwt-token')
-    expect(chatViewMocks.seedFileCacheMock).toHaveBeenCalledWith(
+    expect(chatViewMocks.ensureFileCachedMock).toHaveBeenCalledWith(
       'doc-seed',
-      expect.anything(),
       'report.pdf',
-      'application/pdf',
+      {
+        mimeType: 'application/pdf',
+        localUrl: 'blob:local-doc',
+        fileUrl: '/api/chat/files/doc-seed?token=jwt-token',
+      },
     )
-    expect(warnSpy).toHaveBeenCalledWith('[chat-share] seed from local blob failed', expect.any(Error))
 
-    fetchMock = vi.fn(async () => new Response('missing', { status: 404 }))
-    vi.stubGlobal('fetch', fetchMock)
+    chatViewMocks.ensureFileCachedMock.mockResolvedValueOnce(null)
     await expect(hooks.ensureMessageBlobInFileCache(buildImageMessage({ content: JSON.stringify({ file_id: 'img-missing' }) }))).resolves.toBeNull()
     await expect(hooks.ensureMessageBlobInFileCache(buildImageMessage({ content: '{}' }))).resolves.toBeNull()
 
-    warnSpy.mockRestore()
     wrapper.unmount()
   })
 
