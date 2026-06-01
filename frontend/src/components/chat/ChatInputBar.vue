@@ -1298,7 +1298,7 @@ const sendMessage = () => {
   height: 10px;
   background-color: #E53935;
   border-radius: 50%;
-  animation: pulse-red 1.2s infinite;
+  animation: pulse-red calc(var(--messenger-motion-standard, 180ms) * 7) infinite;
 }
 @keyframes pulse-red {
   0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.7); }
@@ -1323,7 +1323,7 @@ const sendMessage = () => {
 }
 .voice-btn:active svg {
   transform: scale(1.2);
-  transition: transform 0.1s;
+  transition: transform var(--messenger-motion-fast, 120ms);
   stroke: #3390ec;
 }
 
@@ -1338,6 +1338,7 @@ const sendMessage = () => {
   box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.05);
   position: relative;
   z-index: 60;
+  contain: layout paint;
 }
 
 .input-area.picker-open {
@@ -1350,6 +1351,7 @@ const sendMessage = () => {
     radial-gradient(circle at top right, rgba(51, 144, 236, 0.12), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 251, 0.98));
   border-top: 1px solid rgba(15, 23, 42, 0.06);
+  contain: layout paint;
 }
 
 /*
@@ -1423,7 +1425,7 @@ const sendMessage = () => {
   border-radius: 20px;
   padding: 8px 4px;
   min-height: 44px;
-  transition: background 0.2s;
+  transition: background var(--messenger-motion-standard, 180ms);
 }
 .input-container:focus-within { background: #ffffff; }
 .input-container textarea {
@@ -1473,7 +1475,8 @@ const sendMessage = () => {
 .reply-banner {
   position: relative; display: flex; align-items: center; background: #FFFFFF;
   padding: 8px 16px 8px 12px; border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  animation: slideUp 0.15s ease-out; min-height: 46px; gap: 12px;
+  animation: slideUp var(--messenger-motion-fast, 120ms) ease-out; min-height: 46px; gap: 12px;
+  contain: layout paint;
 }
 @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .reply-banner-icon { display: flex; align-items: center; justify-content: center; color: #3390ec; }
@@ -1481,12 +1484,12 @@ const sendMessage = () => {
 .reply-banner-author { font-size: 14px; font-weight: 500; color: #3390ec; line-height: 1.2; margin-bottom: 2px; }
 .reply-banner-text { font-size: 13px; color: #8e8e93; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .edit-banner-icon { color: #3390ec; }
-.close-reply { background: none; border: none; color: #8E8E93; cursor: pointer; padding: 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+.close-reply { background: none; border: none; color: #8E8E93; cursor: pointer; padding: 4px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: background var(--messenger-motion-standard, 180ms); }
 .close-reply:hover { background: rgba(0, 0, 0, 0.05); color: #000; }
 
 /* Selection Bar */
-.selection-bottom-bar { display: flex; align-items: center; justify-content: space-around; width: 100%; padding: 8px 0; background: white; min-height: 56px; }
-.selection-action-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; background: none; border: none; color: #8e8e93; font-size: 11px; font-weight: 500; gap: 4px; padding: 6px 16px; border-radius: 8px; cursor: pointer; transition: opacity 0.2s, background 0.2s; }
+.selection-bottom-bar { display: flex; align-items: center; justify-content: space-around; width: 100%; padding: 8px 0; background: white; min-height: 56px; contain: layout paint; }
+.selection-action-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; background: none; border: none; color: #8e8e93; font-size: 11px; font-weight: 500; gap: 4px; padding: 6px 16px; border-radius: 8px; cursor: pointer; transition: opacity var(--messenger-motion-standard, 180ms), background var(--messenger-motion-standard, 180ms); }
 .selection-action-btn:hover { background: rgba(0,0,0,0.05); color: #000; }
 .selection-action-btn.delete { color: #ef4444; }
 .selection-action-btn.delete:hover { background: rgba(239, 68, 68, 0.1); }

@@ -67,8 +67,8 @@ Do not merge multiple stages into a single prompt.
 | 7 | Media Pipeline Optimization (S09/S10) | Completed | Copilot | 2026-06-01 | Corrected benchmark timing confirmed S09/S10 list/chat gains versus the old baseline; Stage 7 closed and handed off to Stage 8 |
 | 8 | Realtime/Notification Coalescing (S07) | Completed | Copilot | 2026-06-01 | S07 benchmark passed the list/chat exit gate after realtime/notification coalescing; unread refresh also improved |
 | 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
-| 10 | Group/Channel/Direct Manager Standardization | In Progress | Copilot | 2026-06-01 | First manager IA slice applied to group/channel overview surfaces with role strips, grouped actions, and focused unit/build validation |
-| 11 | Weak-Device and Motion Final Pass | Pending | Copilot | - | - |
+| 10 | Group/Channel/Direct Manager Standardization | Completed | Copilot | 2026-06-01 | Manager IA, role-aware action placement, header entry labels, and manager/profile browser matrix are complete |
+| 11 | Weak-Device and Motion Final Pass | In Progress | Copilot | 2026-06-01 | Entered after Stage 10 closure; motion and weak-device containment pass is next |
 | 12 | Final Benchmark + Release Closure | Pending | Copilot | - | - |
 
 ## Detailed Stage Plan
@@ -569,6 +569,12 @@ Exit criteria:
 
 Rollback:
 - Revert low-end and motion-only patches.
+
+Stage 11 progress:
+- `messenger-design-tokens.css` now includes a list-row intrinsic-size token and an explicit reduced-motion duration token used by the global reduced-motion rule.
+- `ChatConversationList.vue` now applies `content-visibility: auto` with a stable intrinsic row size to conversation cards and resolves menu/mention motion durations through messenger tokens.
+- `ChatInputBar.vue` now scopes composer/reply/selection layout work with containment and resolves pulse, reply, active-button, and selection-bar motion through messenger tokens.
+- Focused validation: `npm run test:unit:run -- src/components/chat/ChatConversationList.test.ts src/components/chat/ChatInputBar.test.ts`, `npm run build`, and `git diff --check`.
 
 ### Stage 12 - Final Benchmark + Release Closure
 
