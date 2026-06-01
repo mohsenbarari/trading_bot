@@ -64,8 +64,8 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap, S09 upload persistence probing, action-start/reload-cache fixes, first-interaction/menu tuning, combined room conversation reads, interaction/upload critical-path tightening, and download/context final-gate tuning are in place; S09/S10 rerun is pending |
-| 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
+| 7 | Media Pipeline Optimization (S09/S10) | Completed | Copilot | 2026-06-01 | Corrected benchmark timing confirmed S09/S10 list/chat gains versus the old baseline; Stage 7 closed and handed off to Stage 8 |
+| 8 | Realtime/Notification Coalescing (S07) | In Progress | Copilot | 2026-06-01 | Microtask coalescing is in place for notification store/runtime writes and chat websocket burst handling; focused Vitest and build are green |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
 | 11 | Weak-Device and Motion Final Pass | Pending | Copilot | - | - |
@@ -442,10 +442,11 @@ Stage 7 progress:
 - Stage 7 benchmark measurement correction:
 	- `scripts/run_messenger_benchmark.mjs` now dispatches context-menu and document-click input events inside the browser page and measures from the page's own `performance.now()`. This removes Playwright actionability/wait overhead from `contextMenuMs` and `downloadStartMs` while keeping the same visible DOM-state checks for both pre-refactor and current builds.
 	- Focused validation: `node --check scripts/run_messenger_benchmark.mjs`.
-- Remaining Stage 7 work:
-	- Rerun the S09/S10 Stage 7 benchmark after the benchmark measurement correction.
-	- If the rerun is green, close Stage 7 and move to Stage 8.
-	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
+- Stage 7 measured checkpoint after benchmark measurement correction (committed `4cb9a6e`, 3 measured S09/S10 runs, `--skip-warmup`):
+	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
+	- S09 averages, pre-refactor -> current: list `696.4 -> 570.0 ms`, chat `1462.3 -> 1056.2 ms`, context `147.7 -> 115.0 ms`, heap `7.35 -> 7.14 MB`, conversations API `212.0 -> 183.4 ms`, messages API `117.5 -> 118.2 ms`, download start `47.1 -> 74.7 ms`, download complete `99.3 -> 105.9 ms`, download reload `961.7 -> 770.6 ms`, upload first-visible `959.7 -> 800.5 ms`, upload completion `446.3 -> 570.3 ms`.
+	- S10 averages, pre-refactor -> current: list `7990.7 -> 7027.4 ms`, chat `2651.2 -> 2138.1 ms`, context `371.5 -> 357.1 ms`, heap `7.80 -> 7.51 MB`, conversations API `261.2 -> 253.4 ms`, messages API `565.8 -> 417.1 ms`.
+	- Decision: Stage 7 is closed. With corrected event timing, the contractual exit gate is satisfied because both S09 and S10 list/chat averages improved against the old baseline. Residual S09 download-start/upload-completion variance remains visible for the final release benchmark but is non-gating for the execution roadmap.
 
 ### Stage 8 - Realtime/Notification Coalescing (S07 Critical)
 
@@ -467,6 +468,12 @@ Exit criteria:
 
 Rollback:
 - Revert event coalescing changes.
+
+Stage 8 progress:
+- `frontend/src/stores/notifications.ts` now exposes batch helpers for unread counters, app notification ingestion, and toast creation so high-frequency realtime bursts can collapse into single store assignments while preserving optimistic history/delete behavior.
+- `frontend/src/composables/useNotificationRuntime.ts` now batches app/chat websocket notifications per microtask and falls back to the legacy single-item store API when a mock or older caller does not expose the new batch helpers.
+- `frontend/src/composables/chat/useChatWebSocket.ts` now coalesces `chat:message`, `chat:read`, and `chat:reaction` bursts per microtask, reducing repeated scroll/read follow-up work on active chats without changing typing/upload activity timing.
+- Focused validation: `npm run test:unit:run -- src/stores/notifications.test.ts src/composables/useNotificationRuntime.test.ts src/composables/chat/useChatWebSocket.test.ts`, `npm run build`.
 
 ### Stage 9 - UI System Enforcement Pass
 

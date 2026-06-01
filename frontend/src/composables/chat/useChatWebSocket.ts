@@ -48,6 +48,13 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     const typingParticipantNames = ref<Record<number, Record<number, string>>>({})
     const uploadingParticipantNames = ref<Record<number, Record<number, string>>>({})
     const typingTimeouts = new Map<string, number>()
+    const pendingRealtimeEvents: Array<
+        | { kind: 'message'; data: any }
+        | { kind: 'read'; data: any }
+        | { kind: 'reaction'; data: any }
+    > = []
+    let flushScheduled = false
+    let isUnmounted = false
 
     const isTyping = computed(() => selectedUserId.value ? !!typingUsers.value[selectedUserId.value] : false)
     const activityTextByConversation = computed<Record<number, string>>(() => {
@@ -229,7 +236,14 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         return getConversationPreviewText(data?.message_type, data?.content)
     }
 
-    function handleNewMessageEvent(data: any) {
+    function applyNewMessageEvent(
+        data: any,
+        flushState: {
+            shouldScrollToBottom: boolean
+            shouldMarkAsRead: boolean
+            shouldReloadSelectedMessages: boolean
+        }
+    ) {
         const senderId = Number(data?.sender_id)
         const arrivingConversationKey = getConversationKeyFromPayload(data)
 
@@ -244,13 +258,11 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             const alreadyExists = list.some((m: any) => m && m.id === data.id)
             if (!alreadyExists) {
                 list.push(data)
-                if (isUserAtBottom?.value) {
-                    Promise.resolve().then(() => scrollToBottom())
-                }
+                flushState.shouldScrollToBottom = flushState.shouldScrollToBottom || !!isUserAtBottom?.value
             }
-            markAsRead()
+            flushState.shouldMarkAsRead = true
         } else if (currentSelected !== null && arrivingConversationKey === currentSelected) {
-            loadMessages(currentSelected, true).then(() => markAsRead())
+            flushState.shouldReloadSelectedMessages = true
         }
 
         let shouldReloadConversations = arrivingConversationKey === null
@@ -273,7 +285,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
     }
 
-    function handleReadEvent(data: any) {
+    function applyReadEvent(data: any) {
         const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
         if (roomConversationKey !== null) {
             const conversationKey = roomConversationKey
@@ -296,7 +308,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
     }
 
-    function handleReactionEvent(data: any) {
+    function applyReactionEvent(data: any) {
         if (!data || typeof data.id !== 'number') {
             return
         }
@@ -320,6 +332,67 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
     }
 
+    function flushRealtimeEvents() {
+        flushScheduled = false
+        if (isUnmounted) {
+            pendingRealtimeEvents.length = 0
+            return
+        }
+
+        const events = pendingRealtimeEvents.splice(0, pendingRealtimeEvents.length)
+        const flushState = {
+            shouldScrollToBottom: false,
+            shouldMarkAsRead: false,
+            shouldReloadSelectedMessages: false,
+        }
+
+        for (const event of events) {
+            if (event.kind === 'message') {
+                applyNewMessageEvent(event.data, flushState)
+                continue
+            }
+            if (event.kind === 'read') {
+                applyReadEvent(event.data)
+                continue
+            }
+            applyReactionEvent(event.data)
+        }
+
+        const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null
+        if (flushState.shouldReloadSelectedMessages && currentSelected !== null) {
+            void loadMessages(currentSelected, true).then(() => markAsRead())
+        } else if (flushState.shouldMarkAsRead) {
+            void markAsRead()
+        }
+
+        if (flushState.shouldScrollToBottom) {
+            Promise.resolve().then(() => {
+                if (!isUnmounted) {
+                    scrollToBottom()
+                }
+            })
+        }
+    }
+
+    function enqueueRealtimeEvent(event: (typeof pendingRealtimeEvents)[number]) {
+        pendingRealtimeEvents.push(event)
+        if (flushScheduled) return
+        flushScheduled = true
+        Promise.resolve().then(flushRealtimeEvents)
+    }
+
+    function handleNewMessageEvent(data: any) {
+        enqueueRealtimeEvent({ kind: 'message', data })
+    }
+
+    function handleReadEvent(data: any) {
+        enqueueRealtimeEvent({ kind: 'read', data })
+    }
+
+    function handleReactionEvent(data: any) {
+        enqueueRealtimeEvent({ kind: 'reaction', data })
+    }
+
     function setupWebSocketListeners() {
         ws.on('chat:message', handleNewMessageEvent)
         ws.on('chat:typing', handleTypingEvent)
@@ -341,6 +414,9 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     })
 
     onUnmounted(() => {
+        isUnmounted = true
+        flushScheduled = false
+        pendingRealtimeEvents.length = 0
         typingTimeouts.forEach((timeoutId) => {
             window.clearTimeout(timeoutId)
         })

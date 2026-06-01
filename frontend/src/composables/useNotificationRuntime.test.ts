@@ -13,9 +13,13 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
   store: {
     addAppNotification: vi.fn(),
     addToast: vi.fn(),
+    addAppNotificationsBatch: undefined as any,
+    addToastsBatch: undefined as any,
     isConversationMuted: vi.fn(),
     incrementChatUnread: vi.fn(),
+    incrementChatUnreadBatch: undefined as any,
     incrementMentionUnread: vi.fn(),
+    incrementMentionUnreadBatch: undefined as any,
     fetchInitialCounts: vi.fn(),
   },
   requestNotificationPermission: vi.fn(),
@@ -117,9 +121,13 @@ describe('useNotificationRuntime', () => {
     notificationRuntimeMocks.unlockAudioContext.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReset()
     notificationRuntimeMocks.store.addToast.mockReset()
+    notificationRuntimeMocks.store.addAppNotificationsBatch = undefined
+    notificationRuntimeMocks.store.addToastsBatch = undefined
     notificationRuntimeMocks.store.isConversationMuted.mockReset()
     notificationRuntimeMocks.store.incrementChatUnread.mockReset()
+    notificationRuntimeMocks.store.incrementChatUnreadBatch = undefined
     notificationRuntimeMocks.store.incrementMentionUnread.mockReset()
+    notificationRuntimeMocks.store.incrementMentionUnreadBatch = undefined
     notificationRuntimeMocks.store.fetchInitialCounts.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReturnValue({
       title: 'اعلان جدید',
@@ -381,6 +389,39 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenLastCalledWith('دفتر مالک', 'پیام تست', {
       route: '/chat?user_id=58&user_name=%D8%AF%D9%81%D8%AA%D8%B1%20%D9%85%D8%A7%D9%84%DA%A9',
     })
+
+    wrapper.unmount()
+  })
+
+  it('batches chat unread and toast writes when batch store APIs are available', async () => {
+    notificationRuntimeMocks.store.incrementChatUnreadBatch = vi.fn()
+    notificationRuntimeMocks.store.incrementMentionUnreadBatch = vi.fn()
+    notificationRuntimeMocks.store.addToastsBatch = vi.fn()
+
+    const wrapper = mountRuntime()
+
+    setRoute('/dashboard')
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 42,
+      sender_name: 'علی',
+      message_type: 'text',
+      content: 'اول',
+    })
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 43,
+      sender_name: 'رضا',
+      message_type: 'text',
+      content: 'دوم',
+      mentions: ['7'],
+    })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.incrementChatUnreadBatch).toHaveBeenCalledWith([42, 43])
+    expect(notificationRuntimeMocks.store.incrementMentionUnreadBatch).toHaveBeenCalledWith([43])
+    expect(notificationRuntimeMocks.store.addToastsBatch).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.store.incrementChatUnread).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.store.incrementMentionUnread).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.store.addToast).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })

@@ -125,6 +125,35 @@ describe('notification store', () => {
     expect(store.activeToasts).toHaveLength(0)
   })
 
+  it('batch unread, notification, and toast helpers coalesce duplicate work', async () => {
+    vi.useFakeTimers()
+    const { useNotificationStore } = await import('./notifications')
+    const store = useNotificationStore()
+
+    store.incrementChatUnreadBatch([5, 5, -77])
+    store.incrementMentionUnreadBatch([5, null, -77])
+    expect(store.unreadChatUserIds).toEqual([5, -77])
+    expect(store.unreadMentionChats).toEqual([5, -77])
+
+    store.addAppNotificationsBatch([
+      { id: 10, message: 'ten', category: 'system' },
+      { id: 11, message: 'eleven', category: 'system' },
+      { id: 10, message: 'ten updated', category: 'system' },
+    ])
+    expect(store.appNotifications).toHaveLength(2)
+    expect(store.appNotifications.find((notification) => notification.id === 10)).toMatchObject({ message: 'ten updated' })
+
+    store.addToastsBatch([
+      { title: 'one', body: '1' },
+      { title: 'two', body: '2' },
+    ])
+    expect(store.activeToasts).toHaveLength(2)
+    expect(playNotificationSoundMock).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(5000)
+    expect(store.activeToasts).toHaveLength(0)
+  })
+
   it('tracks unique unread conversations and clears them for direct chats and rooms', async () => {
     const { useNotificationStore } = await import('./notifications')
     const store = useNotificationStore()
