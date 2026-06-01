@@ -64,7 +64,7 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap optimized, S09 persistence benchmark now covers true document upload resume, and latest checkpoint leaves upload-completion/S10-list gates open |
+| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap, S09 upload persistence probing, action-start responsiveness, and inactive-surface bundle splitting are in place; S09/S10 rerun is pending |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
@@ -382,14 +382,30 @@ Stage 7 progress:
 	- `MessengerView.vue` and `ChatConversationList.vue` now keep their performance marks synchronous but defer non-critical DOM counting/frame probes until idle, including the conversation-menu diagnostic snapshot.
 	- `commit_upload_batch_endpoint` now keeps the authoritative upload commit, message reload, and response serialization on the request path, then schedules realtime message fanout and upload-session committed runtime events after the HTTP response to reduce sender-visible upload completion latency.
 	- Focused validation: `npm run test:unit:run -- src/utils/messengerStage2Metrics.test.ts`, `python3 -m unittest tests.test_chat_router_upload_sessions.ChatRouterUploadSessionEndpointTests.test_commit_upload_batch_publishes_direct_and_group_branches`, `python3 -m unittest tests.test_chat_router_remaining_paths.ChatRouterRemainingPathTests.test_room_mute_channel_avatar_toggle_pin_and_commit_fallback_paths`, `python3 -m unittest tests.test_chat_router_upload_sessions`, `python3 -m py_compile api/routers/chat.py`, `npm run build`, and `git diff --check`.
+- Stage 7 transfer-start follow-up:
+	- `useChatFileHandler.ts` now marks uncached document/file opens as downloading before the async IndexedDB cache lookup, so the document bubble enters the busy state immediately while the held network request waits.
+	- Upload and document-download action-triggered auto-init no longer waits for the stored-transfer restore scan; explicit shell/init recovery still restores stored queues, while new action paths skip restore and avoid re-adopting the just-created transfer.
+	- Focused validation: `npm run test:unit:run -- src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`, and `git diff --check`.
 - Stage 7 measured checkpoint after latency follow-up (working-tree, 3 measured S09/S10 runs, `--skip-warmup`):
 	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
 	- S09 averages, pre-refactor -> current: list `748.0 -> 637.6 ms`, chat `1116.6 -> 1008.1 ms`, context `246.3 -> 217.5 ms`, heap `7.40 -> 7.50 MB`, download start `255.3 -> 527.9 ms`, download reload `1069.5 -> 954.3 ms`, upload first-visible `969.7 -> 1023.9 ms`, upload completion `680.6 -> 470.7 ms`.
 	- S10 averages, pre-refactor -> current: list `8005.6 -> 8121.6 ms`, chat `2610.4 -> 2221.7 ms`, context `483.0 -> 514.4 ms`, heap `7.47 -> 8.14 MB`, conversations API `266.7 -> 268.1 ms`, messages API `551.8 -> 460.5 ms`.
 	- Decision: Stage 7 now closes the S09 upload-completion regression and improves S09 list/chat/context plus S09 download reload, but remains open because S09 download start/upload first-visible and S10 list/context/heap are still outside the target direction.
+- Stage 7 measured checkpoint after transfer-start follow-up (working-tree, 3 measured S09/S10 runs, `--skip-warmup`):
+	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
+	- S09 averages, pre-refactor -> current: list `830.1 -> 628.9 ms`, chat `1073.3 -> 1027.3 ms`, context `189.1 -> 187.2 ms`, heap `7.39 -> 7.58 MB`, download start `396.1 -> 574.9 ms`, download reload `691.3 -> 860.2 ms`, upload first-visible `1024.6 -> 984.8 ms`, upload completion `766.2 -> 842.4 ms`.
+	- S10 averages, pre-refactor -> current: list `7871.5 -> 8034.9 ms`, chat `2537.7 -> 2355.7 ms`, context `476.8 -> 518.2 ms`, heap `7.47 -> 7.59 MB`, conversations API `266.8 -> 268.4 ms`, messages API `555.4 -> 524.3 ms`.
+	- Decision: Stage 7 remains open. The action-start split kept S09 list/chat/context directionally green and improved upload first-visible, but S09 download-start/reload and upload completion regressed in this run, and S10 list/context/heap still miss the target direction.
+- Stage 7 bundle/start responsiveness follow-up:
+	- `ChatView.vue` now lazy-loads inactive heavy Messenger surfaces (context menu, search result surfaces, attachment sheet, forward/new/group/channel/admin modals, location modal, and lightbox) and only mounts them in production when their owning state is active. Vitest keeps the previous always-mounted stubs through a test-only guard.
+	- Chat route entry now warms the context-menu/search chunks from an idle diagnostic slot so first interaction remains responsive without forcing those chunks into the initial conversation-list route.
+	- `ChatMessageItem.vue` now sets a component-local document intent busy flag and flushes the DOM before the shared file handler starts async cache/network work, making tap-to-download visible immediately even when IndexedDB or network setup is delayed.
+	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`.
+	- Build checkpoint: the Messenger route chunk reported by Vite dropped to `113.69 KB gzip` after splitting inactive surfaces out of the initial Messenger bundle; benchmark rerun is pending.
 - Remaining Stage 7 work:
-	- Stabilize S09 download-start and upload first-visible variability while keeping the upload-completion fix green.
-	- Recover S10 weak-device list-ready/context/heap before moving to Stage 8.
+	- Rerun the S09/S10 Stage 7 benchmark after the bundle/start responsiveness follow-up.
+	- If the rerun is green, close Stage 7 and move to Stage 8.
+	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
 
 ### Stage 8 - Realtime/Notification Coalescing (S07 Critical)
 
