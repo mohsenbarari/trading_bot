@@ -99,6 +99,34 @@ def normalize_version_key(raw_version: object, versions: list[dict[str, object]]
     return raw
 
 
+def nested_number(item: dict[str, object], *path: str) -> float | None:
+    current: object = item
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    if isinstance(current, bool) or current is None:
+        return None
+    try:
+        return float(current)
+    except (TypeError, ValueError):
+        return None
+
+
+def optional_delta(current: dict[str, object], previous: dict[str, object], *path: str) -> float | None:
+    current_value = nested_number(current, *path)
+    previous_value = nested_number(previous, *path)
+    if current_value is None or previous_value is None:
+        return None
+    return round(current_value - previous_value, 1)
+
+
+def format_optional_ms(value: object) -> str:
+    if value is None:
+        return 'n/a'
+    return f'{value} ms'
+
+
 def build_perf_map(results: list[dict[str, object]], versions: list[dict[str, object]]) -> dict[str, dict[str, object]]:
     perf_map: dict[str, dict[str, object]] = defaultdict(lambda: {'results': [], 'versions': set(), 'surface_ids': set()})
     for item in results:
@@ -167,6 +195,9 @@ def summarize_deltas(results: list[dict[str, object]], versions: list[dict[str, 
                 'scenarioLabel': current.get('scenarioLabel') or previous.get('scenarioLabel'),
                 'listReadyDeltaMs': round(float(current.get('listReadyMs', 0)) - float(previous.get('listReadyMs', 0)), 1),
                 'chatReadyDeltaMs': round(float(current.get('chatReadyMs', 0)) - float(previous.get('chatReadyMs', 0)), 1),
+                'contextMenuDeltaMs': optional_delta(current, previous, 'contextMenuMs'),
+                'downloadStartDeltaMs': optional_delta(current, previous, 'persistence', 'downloadStartMs'),
+                'uploadCompletionDeltaMs': optional_delta(current, previous, 'persistence', 'upload', 'completionMs'),
                 'domNodeDelta': int(current.get('chatDomNodes', 0)) - int(previous.get('chatDomNodes', 0)),
                 'heapDeltaMb': round(
                     float(current.get('counters', {}).get('jsHeapUsedMb', 0))
@@ -316,16 +347,16 @@ def render_markdown(
         '',
         '## Performance Deltas',
         '',
-        '| Scenario | Δ list ready | Δ chat ready | Δ DOM nodes | Δ heap |',
-        '| --- | ---: | ---: | ---: | ---: |',
+        '| Scenario | Δ list ready | Δ chat ready | Δ context | Δ download start | Δ upload complete | Δ DOM nodes | Δ heap |',
+        '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ]
     if deltas:
         for item in deltas:
             lines.append(
-                f"| {item['scenarioId']} ({item['scenarioLabel']}) | {item['listReadyDeltaMs']} ms | {item['chatReadyDeltaMs']} ms | {item['domNodeDelta']} | {item['heapDeltaMb']} MB |"
+                f"| {item['scenarioId']} ({item['scenarioLabel']}) | {item['listReadyDeltaMs']} ms | {item['chatReadyDeltaMs']} ms | {format_optional_ms(item['contextMenuDeltaMs'])} | {format_optional_ms(item['downloadStartDeltaMs'])} | {format_optional_ms(item['uploadCompletionDeltaMs'])} | {item['domNodeDelta']} | {item['heapDeltaMb']} MB |"
             )
     else:
-        lines.append('| No measured delta yet | n/a | n/a | n/a | n/a |')
+        lines.append('| No measured delta yet | n/a | n/a | n/a | n/a | n/a | n/a | n/a |')
 
     lines.extend(
         [

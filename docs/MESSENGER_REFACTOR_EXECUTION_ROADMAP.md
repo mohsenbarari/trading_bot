@@ -64,7 +64,7 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap optimized: upload/download workers now lazy-start from resume hints instead of eager shell boot, with focused unit coverage and production build green |
+| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap optimized and S09 persistence benchmark now covers true document upload resume in addition to document download recovery |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
@@ -370,9 +370,13 @@ Stage 7 progress:
 - Validation completed:
 	- `npm run test:unit:run -- src/services/chatUploadBackground.test.ts src/services/chatDocumentDownloadBackground.test.ts src/components/AppAuthenticatedShell.test.ts`
 	- `npm run build`
+- Benchmark tooling progress:
+	- `scripts/run_messenger_benchmark.mjs` now adds a true S09 document-upload persistence probe that holds the first upload chunk/legacy media request, leaves and reopens the active conversation, then records upload first-visible, resume, completion, transport, and hold-state metrics under `persistence.upload`.
+	- `scripts/messenger_benchmark_config.json` defines `upload_probe_size_bytes` for S09 so the upload path is large enough to exercise resumable transfer behavior.
+	- `scripts/build_messenger_benchmark_report.py` now includes context-menu, download-start, and upload-completion deltas in the generated performance report.
 - Remaining Stage 7 work:
-	- Add a true upload-resume action probe to S09; the current benchmark persistence probe is primarily document-download route leave/reload recovery.
 	- Rerun S09/S10 with at least 3 measured runs and publish the subset comparison summary before closing the stage.
+	- If S09 upload completion or restore still regresses after the measured run, optimize the media/cache service path before moving to Stage 8.
 
 ### Stage 8 - Realtime/Notification Coalescing (S07 Critical)
 
