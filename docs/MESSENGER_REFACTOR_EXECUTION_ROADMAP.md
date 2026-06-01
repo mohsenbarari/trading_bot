@@ -66,8 +66,8 @@ Do not merge multiple stages into a single prompt.
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
 | 7 | Media Pipeline Optimization (S09/S10) | Completed | Copilot | 2026-06-01 | Corrected benchmark timing confirmed S09/S10 list/chat gains versus the old baseline; Stage 7 closed and handed off to Stage 8 |
 | 8 | Realtime/Notification Coalescing (S07) | Completed | Copilot | 2026-06-01 | S07 benchmark passed the list/chat exit gate after realtime/notification coalescing; unread refresh also improved |
-| 9 | UI System Enforcement Pass | In Progress | Copilot | 2026-06-01 | Entered after Stage 8 closure; design-token drift audit is next |
-| 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
+| 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
+| 10 | Group/Channel/Direct Manager Standardization | In Progress | Copilot | 2026-06-01 | Entered after Stage 9 closure; manager IA and role-aware action placement audit is next |
 | 11 | Weak-Device and Motion Final Pass | Pending | Copilot | - | - |
 | 12 | Final Benchmark + Release Closure | Pending | Copilot | - | - |
 
@@ -514,6 +514,9 @@ Stage 9 progress:
 	- `ChatAlbumLayout.vue` now resolves album shell, selection, download, progress, upload, and ring colors through messenger tokens while preserving previous fallback values.
 	- `ChatMessageItem.vue` now resolves document/media/share/download/location control colors and overlay states through messenger tokens for better cross-surface consistency.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatAlbumLayout.test.ts src/components/chat/ChatMessageItem.test.ts`, `npm run build`, and `git diff --check`.
+- Stage 9 closure audit:
+	- Remaining hardcoded style values in the audited messenger files are scoped to semantic file-type gradients, voice waveform/readability states, map pin color, mention/highlight states, and local `var(...)` fallbacks.
+	- Decision: no critical cross-surface visual drift remains in the Stage 9 scope; Stage 9 is closed and Stage 10 starts.
 
 ### Stage 10 - Group/Channel/Direct Manager Standardization
 
