@@ -2918,6 +2918,83 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('resets composer overlays and draft state when entering reply/edit or opening another conversation', async () => {
+    const message = buildMessage({ id: 77, content: 'draft text' })
+    chatViewMocks.messagesSeed = [message]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatInputBar: {
+        props: ['modelValue', 'editingMessage', 'replyingToMessage'],
+        template: '<div class="chat-input-bar-state">{{ modelValue }}|{{ editingMessage?.id ?? "none" }}|{{ replyingToMessage?.id ?? "none" }}</div>',
+      },
+    })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    hooks.state.isSearchActive.value = true
+    hooks.state.showInChatSearchList.value = true
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message,
+      messageIds: [77],
+      x: 0,
+      y: 0,
+    }
+
+    hooks.handleReplyMessage()
+    await flushPromises()
+
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+    expect(hooks.state.replyingToMessage.value?.id).toBe(77)
+    expect(hooks.state.editingMessage.value).toBeNull()
+
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message,
+      messageIds: [77],
+      x: 0,
+      y: 0,
+    }
+
+    hooks.handleEditMessage()
+    await flushPromises()
+
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+    expect(hooks.state.contextMenu.value.visible).toBe(false)
+    expect(hooks.state.editingMessage.value?.id).toBe(77)
+    expect(hooks.state.replyingToMessage.value).toBeNull()
+    expect(hooks.state.messageInput.value).toBe('draft text')
+
+    hooks.state.showAttachmentMenu.value = true
+    hooks.state.showStickerPicker.value = true
+    hooks.state.messageInput.value = 'stale draft'
+    hooks.state.editingMessage.value = message
+    hooks.state.replyingToMessage.value = message
+
+    hooks.openConversationFromRoute(-88, 'اتاق جدید')
+    await flushPromises()
+
+    expect(hooks.state.selectedUserId.value).toBe(-88)
+    expect(hooks.state.selectedUserName.value).toBe('اتاق جدید')
+    expect(hooks.state.showAttachmentMenu.value).toBe(false)
+    expect(hooks.state.showStickerPicker.value).toBe(false)
+    expect(hooks.state.messageInput.value).toBe('')
+    expect(hooks.state.editingMessage.value).toBeNull()
+    expect(hooks.state.replyingToMessage.value).toBeNull()
+
+    wrapper.unmount()
+  })
+
   it('shows an inline toast when a named-room action is missing chat metadata', async () => {
     const wrapper = await mountChatView({}, {
       ChatConversationList: {

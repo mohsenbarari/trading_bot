@@ -401,6 +401,24 @@ describe('ChatInputBar.vue', () => {
     expect(wrapper.find('.recording-state').exists()).toBe(false)
   })
 
+  it('closes the sticker picker before entering recording mode', async () => {
+    const wrapper = mountInputBar({
+      isSelectionMode: false,
+      selectedMessages: [],
+      modelValue: '',
+      stickerPickerOpen: true,
+    })
+    const vm = wrapper.vm as unknown as {
+      startVoiceRecording: () => Promise<void>
+    }
+
+    await vm.startVoiceRecording()
+    await flushPromises()
+
+    expect(wrapper.emitted('update:stickerPickerOpen')).toContainEqual([false])
+    expect(wrapper.find('.recording-state').exists()).toBe(true)
+  })
+
   it('blocks inserts and sends when the sticker count exceeds the message cap', async () => {
     const maxedMessage = new Array(MAX_STICKERS_PER_MESSAGE).fill('🔥').join('')
     const insertionWrapper = mountInputBar({
