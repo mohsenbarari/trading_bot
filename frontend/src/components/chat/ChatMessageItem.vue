@@ -293,7 +293,12 @@
 
       <!-- Document/File Message -->
       <template v-else-if="msg.message_type === 'document'">
-        <div class="msg-document" :class="{ 'is-busy': isDocumentBusy }" @click.stop="handleDocumentOpenClick">
+        <div
+          class="msg-document"
+          :class="{ 'is-busy': isDocumentBusy }"
+          @pointerdown="handleDocumentPointerDown"
+          @click.stop="handleDocumentOpenClick"
+        >
           <div v-if="isDocumentBusy" class="doc-icon doc-uploading" @click.stop="handleDocumentBusyClick">
             <svg class="progress-ring-small" viewBox="0 0 36 36" style="width:36px;height:36px;">
               <circle class="ring-bg" cx="18" cy="18" r="16" stroke="rgba(255,255,255,0.3)" stroke-width="3" fill="none"></circle>
@@ -738,6 +743,19 @@ function beginDocumentIntentBusy() {
   }, 1200)
 }
 
+function canPrimeDocumentIntentBusy() {
+  if (documentTransferState.value.cancelAction !== null) return false
+  if (!docFileId.value || !docFileUrl.value) return false
+  if (hasDocumentLocalBlobUrl.value || isDocumentCached.value) return false
+  return true
+}
+
+function handleDocumentPointerDown(event: PointerEvent) {
+  if (event.button !== 0) return
+  if (!canPrimeDocumentIntentBusy()) return
+  beginDocumentIntentBusy()
+}
+
 function handleDocumentBusyClick() {
   if (documentTransferState.value.cancelAction === 'send') {
     emit('cancel-send', props.msg)
@@ -751,7 +769,7 @@ function handleDocumentBusyClick() {
 }
 
 async function handleDocumentOpenClick() {
-  if (isDocumentBusy.value) return
+  if (documentTransferState.value.cancelAction !== null) return
   const fileId = docFileId.value
   const url = docFileUrl.value
   if (!fileId || !url) {
@@ -764,8 +782,9 @@ async function handleDocumentOpenClick() {
     return
   }
   if (!isDocumentCached.value) {
-    beginDocumentIntentBusy()
-    await nextTick()
+    if (!documentIntentBusy.value) {
+      beginDocumentIntentBusy()
+    }
     emit('download', props.msg)
     return
   }

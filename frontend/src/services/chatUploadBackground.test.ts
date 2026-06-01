@@ -491,7 +491,8 @@ describe('chatUploadBackground', () => {
 
     await hooks.idbPut(documentUpload)
     expect(records.get(-940)?.localBlobUrl).toBeUndefined()
-    expect(records.get(-940)?.fileDataUrl).toMatch(/^data:application\/pdf/)
+    expect(records.get(-940)?.fileDataUrl).toBeUndefined()
+    expect(records.get(-940)?.file).toBeInstanceOf(File)
 
     const restored = await hooks.idbGet(-940)
     expect(restored).toMatchObject({ id: -940, roomKind: 'direct', fileName: 'report.pdf' })

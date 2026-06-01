@@ -22,6 +22,7 @@ import {
     measureMessengerStage2,
     recordMessengerDomSnapshot,
     recordMessengerMetric,
+    scheduleMessengerDiagnosticTask,
 } from '../../utils/messengerStage2Metrics'
 import {
     getPendingForUser as backgroundGetPendingForUser,
@@ -355,11 +356,13 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 ? document.querySelector('.messages-container') || document.body
                 : null
             if (root) {
-                recordMessengerDomSnapshot('chat-first-message-paint', root, {
-                    userId,
-                    source,
-                    messageCount: messages.value.length,
-                })
+                scheduleMessengerDiagnosticTask(() => {
+                    recordMessengerDomSnapshot('chat-first-message-paint', root, {
+                        userId,
+                        source,
+                        messageCount: messages.value.length,
+                    })
+                }, { timeoutMs: 900, fallbackDelayMs: 120 })
             }
         }
 
