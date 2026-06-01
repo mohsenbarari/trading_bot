@@ -199,6 +199,7 @@
         "conversation_count": 12,
         "active_message_count": 52,
         "filler_length": 18,
+        "upload_probe_size_bytes": 786432,
         "switch_iterations": 1,
         "surface_ids": [
           "M08",

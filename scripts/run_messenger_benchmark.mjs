@@ -1,4 +1,5 @@
 import { createServer, request as httpRequest } from 'node:http'
+import { Buffer } from 'node:buffer'
 import { mkdirSync, existsSync, readFileSync, statSync, writeFileSync, createReadStream, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -1237,6 +1238,20 @@ async function waitForDocumentBubbleState(page, documentBubble, matcher, timeout
   return lastState
 }
 
+async function waitForFlag(page, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await page.waitForTimeout(100).catch(() => null)
+  }
+  return predicate()
+}
+
+function formatBenchmarkError(error) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.split('\n')[0].slice(0, 240)
+}
+
 async function runIdentityMatrixProbe(page, seeded) {
   if (!seeded.identityProbe?.expectedProfileUserId) return null
   const headerInfo = page.locator('.chat-header .header-user-info').last()
@@ -1269,7 +1284,122 @@ async function runIdentityMatrixProbe(page, seeded) {
   }
 }
 
-async function runUploadPersistenceProbe(page, seeded, baseUrl) {
+async function runDocumentUploadPersistenceProbe(page, seeded, baseUrl, scenario) {
+  const activeTarget = {
+    routeUserId: seeded.activeTargetId,
+    title: seeded.activeTargetName,
+  }
+  const switchTarget = seeded.persistenceProbe?.switchTarget ?? null
+  const uploadFileName = `bench-upload-${Date.now()}.txt`
+  const uploadSizeBytes = Math.max(1024, Number(scenario.upload_probe_size_bytes ?? 786432))
+  let releaseUpload = null
+  let heldUploadRequest = false
+  let uploadTransport = 'none'
+  const holdUpload = new Promise((resolve) => {
+    releaseUpload = resolve
+  })
+  const routeHandler = async (route) => {
+    const requestUrl = route.request().url()
+    if (!heldUploadRequest) {
+      heldUploadRequest = true
+      uploadTransport = requestUrl.includes('/upload-sessions/') ? 'resumable' : 'legacy'
+      await holdUpload
+    }
+    await route.continue()
+  }
+
+  await page.route('**/api/chat/upload-sessions/*/chunk', routeHandler)
+  await page.route('**/api/chat/upload-media', routeHandler)
+  const uploadStart = performance.now()
+  try {
+    const attachButton = page.locator('button.attach-btn').first()
+    const canAttach = await attachButton.waitFor({ timeout: 15000 }).then(() => true).catch(() => false)
+    if (!canAttach) {
+      return {
+        documentFileName: uploadFileName,
+        sizeBytes: uploadSizeBytes,
+        transport: uploadTransport,
+        requestHeld: heldUploadRequest,
+        failed: true,
+        errorMessage: 'attach button unavailable',
+        elapsedMs: Number((performance.now() - uploadStart).toFixed(1)),
+      }
+    }
+
+    await attachButton.click({ timeout: 30000 })
+    await page.locator('.attachment-sheet').waitFor({ timeout: 30000 })
+    await page.getByRole('button', { name: 'فایل' }).first().click({ timeout: 30000 })
+    const fileInput = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="*"]').last()
+    await fileInput.waitFor({ state: 'attached', timeout: 30000 })
+    await fileInput.setInputFiles({
+      name: uploadFileName,
+      mimeType: 'text/plain',
+      buffer: Buffer.alloc(uploadSizeBytes, 'u'),
+    })
+
+    const uploadBubble = page.locator('.messages-container .msg-document').filter({ hasText: uploadFileName }).first()
+    await uploadBubble.waitFor({ timeout: 30000 })
+    const firstVisibleMs = performance.now() - uploadStart
+    const initialState = await waitForDocumentBubbleState(page, uploadBubble, (state) => state !== 'idle', 10000)
+    const requestHeld = await waitForFlag(page, () => heldUploadRequest, 10000)
+    if (!requestHeld && releaseUpload) {
+      releaseUpload()
+      releaseUpload = null
+    }
+
+    const leaveStart = performance.now()
+    await backToConversationList(page, baseUrl).catch(() => null)
+    if (switchTarget) {
+      await openConversationFromList(page, baseUrl, switchTarget).catch(() => false)
+      await backToConversationList(page, baseUrl).catch(() => null)
+    }
+    await openConversationFromList(page, baseUrl, activeTarget).catch(() => false)
+    const resumedBubble = page.locator('.messages-container .msg-document').filter({ hasText: uploadFileName }).first()
+    await resumedBubble.waitFor({ timeout: 30000 }).catch(() => null)
+    const resumedState = await waitForDocumentBubbleState(page, resumedBubble, (state) => state !== 'idle', 30000)
+    const leaveReturnMs = performance.now() - leaveStart
+
+    if (releaseUpload) {
+      releaseUpload()
+      releaseUpload = null
+    }
+
+    const settleStart = performance.now()
+    const completedState = await waitForDocumentBubbleState(page, resumedBubble, (state) => state !== 'busy', 60000)
+    const completionMs = performance.now() - settleStart
+
+    return {
+      documentFileName: uploadFileName,
+      sizeBytes: uploadSizeBytes,
+      transport: uploadTransport,
+      requestHeld,
+      initialState,
+      resumedState,
+      completedState,
+      firstVisibleMs: Number(firstVisibleMs.toFixed(1)),
+      leaveReturnMs: Number(leaveReturnMs.toFixed(1)),
+      completionMs: Number(completionMs.toFixed(1)),
+    }
+  } catch (error) {
+    return {
+      documentFileName: uploadFileName,
+      sizeBytes: uploadSizeBytes,
+      transport: uploadTransport,
+      requestHeld: heldUploadRequest,
+      failed: true,
+      errorMessage: formatBenchmarkError(error),
+      elapsedMs: Number((performance.now() - uploadStart).toFixed(1)),
+    }
+  } finally {
+    if (releaseUpload) {
+      releaseUpload()
+    }
+    await page.unroute('**/api/chat/upload-sessions/*/chunk', routeHandler).catch(() => null)
+    await page.unroute('**/api/chat/upload-media', routeHandler).catch(() => null)
+  }
+}
+
+async function runUploadPersistenceProbe(page, seeded, baseUrl, scenario) {
   if (!seeded.persistenceProbe?.documentFileName) return null
   const documentFileName = seeded.persistenceProbe.documentFileName
   const activeTarget = {
@@ -1323,6 +1453,7 @@ async function runUploadPersistenceProbe(page, seeded, baseUrl) {
     await reloadedBubble.waitFor({ timeout: 30000 }).catch(() => null)
     const reloadedState = await waitForDocumentBubbleState(page, reloadedBubble, (state) => state !== 'idle', 15000)
     const reloadMs = performance.now() - reloadStart
+    const upload = await runDocumentUploadPersistenceProbe(page, seeded, baseUrl, scenario)
 
     return {
       documentFileName,
@@ -1334,6 +1465,7 @@ async function runUploadPersistenceProbe(page, seeded, baseUrl) {
       leaveReturnMs: Number(leaveReturnMs.toFixed(1)),
       completionMs: Number(completionMs.toFixed(1)),
       reloadMs: Number(reloadMs.toFixed(1)),
+      upload,
     }
   } finally {
     if (releaseDownload) {
@@ -1519,7 +1651,7 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
       title: seeded.activeTargetName,
     }).catch(() => null)
   }
-  const persistence = await runUploadPersistenceProbe(page, seeded, baseUrl)
+  const persistence = await runUploadPersistenceProbe(page, seeded, baseUrl, scenario)
   console.log(`[benchmark] ${version.key}/${scenario.id}: persistence probe done`)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe start`)
   const longSession = await runLongSessionProbe(page, seeded, baseUrl, scenario)
@@ -1565,15 +1697,28 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
 
 function makeMarkdownTable(results, buildMetrics) {
   const rows = []
-  rows.push('| نسخه | تست | داده seed شده | list ready | chat first paint | پیام‌های render | DOM nodes | FPS اسکرول | jank | context menu | heap JS | API conv/msg | Bundle JS gzip |')
-  rows.push('| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |')
+  rows.push('| نسخه | تست | داده seed شده | list ready | chat first paint | پیام‌های render | DOM nodes | FPS اسکرول | jank | context menu | persistence | heap JS | API conv/msg | Bundle JS gzip |')
+  rows.push('| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: |')
   for (const result of results) {
     const build = buildMetrics[result.version]
     rows.push(
-      `| ${result.versionLabel} (${result.commit}) | ${result.scenarioId} | ${result.seededConversations} conv / ${result.seededActiveMessages} msg | ${result.listReadyMs} ms | ${result.chatReadyMs} ms | ${result.chatMessageBubbles} | ${result.chatDomNodes} | ${result.scroll?.fps ?? 'n/a'} | ${result.scroll?.jankyFrames ?? 'n/a'} | ${result.contextMenuMs} ms | ${result.counters.jsHeapUsedMb} MB | ${result.api.conversationsMs ?? 'n/a'} / ${result.api.messagesMs ?? 'n/a'} ms | ${(((build?.messengerJs?.gzipBytes ?? 0) / 1024).toFixed(1))} KB |`,
+      `| ${result.versionLabel} (${result.commit}) | ${result.scenarioId} | ${result.seededConversations} conv / ${result.seededActiveMessages} msg | ${result.listReadyMs} ms | ${result.chatReadyMs} ms | ${result.chatMessageBubbles} | ${result.chatDomNodes} | ${result.scroll?.fps ?? 'n/a'} | ${result.scroll?.jankyFrames ?? 'n/a'} | ${result.contextMenuMs} ms | ${formatPersistenceSummary(result.persistence)} | ${result.counters.jsHeapUsedMb} MB | ${result.api.conversationsMs ?? 'n/a'} / ${result.api.messagesMs ?? 'n/a'} ms | ${(((build?.messengerJs?.gzipBytes ?? 0) / 1024).toFixed(1))} KB |`,
     )
   }
   return rows.join('\n')
+}
+
+function formatPersistenceSummary(persistence) {
+  if (!persistence) return 'n/a'
+  const download = typeof persistence.downloadStartMs === 'number'
+    ? `dl ${persistence.downloadStartMs}/${persistence.completionMs}/${persistence.reloadMs} ms`
+    : 'dl n/a'
+  const upload = persistence.upload && typeof persistence.upload.completionMs === 'number'
+    ? `up ${persistence.upload.firstVisibleMs}/${persistence.upload.completionMs} ms ${persistence.upload.transport}${persistence.upload.requestHeld ? '' : ' no-hold'}`
+    : persistence.upload?.errorMessage
+      ? `up error ${persistence.upload.transport ?? 'none'}${persistence.upload.requestHeld ? '' : ' no-hold'}`
+    : 'up n/a'
+  return `${download}; ${upload}`
 }
 
 async function main() {
