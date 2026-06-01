@@ -68,8 +68,8 @@ Do not merge multiple stages into a single prompt.
 | 8 | Realtime/Notification Coalescing (S07) | Completed | Copilot | 2026-06-01 | S07 benchmark passed the list/chat exit gate after realtime/notification coalescing; unread refresh also improved |
 | 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
 | 10 | Group/Channel/Direct Manager Standardization | Completed | Copilot | 2026-06-01 | Manager IA, role-aware action placement, header entry labels, and manager/profile browser matrix are complete |
-| 11 | Weak-Device and Motion Final Pass | In Progress | Copilot | 2026-06-01 | Entered after Stage 10 closure; motion and weak-device containment pass is next |
-| 12 | Final Benchmark + Release Closure | Pending | Copilot | - | - |
+| 11 | Weak-Device and Motion Final Pass | Completed | Copilot | 2026-06-01 | S10 weak-device benchmark passed practical responsiveness gate: list/chat/heap/API/bundle improved with zero scroll jank |
+| 12 | Final Benchmark + Release Closure | In Progress | Copilot | 2026-06-01 | Entered after Stage 11 closure; official full benchmark and release decision package are next |
 
 ## Detailed Stage Plan
 
@@ -579,6 +579,12 @@ Stage 11 progress:
 	- `ChatView.vue` now resolves typing/history pulses, message entrance/swipe transitions, sticker/scroll/context/ripple/reply/highlight motion, media progress transitions, and selection actions through messenger motion tokens instead of hardcoded durations.
 	- Added `tmp/messenger-benchmark/stage11-s10-config.json` for the 3-run S10 weak-device benchmark gate.
 	- Focused validation: `npm run test:unit:run -- src/components/ChatView.test.ts src/components/chat/ChatConversationList.test.ts src/components/chat/ChatInputBar.test.ts`, `npm run build`, and `git diff --check`.
+- Stage 11 S10 benchmark closure:
+	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage11-s10-config.json --skip-warmup`
+	- Artifact: `tmp/messenger-benchmark/stage11-s10/performance-results.json` (`generatedAt=2026-06-01T15:35:09.445Z`, commit `ee7486c`, 3 measured runs).
+	- S10 averages, pre-refactor -> current: list `8231.3 -> 7309.5 ms`, chat `2862.9 -> 2218.8 ms`, heap `7.80 -> 7.51 MB`, conversations API `494.6 -> 287.9 ms`, messages API `574.6 -> 442.2 ms`, Messenger JS gzip `138.3 -> 113.4 KB`, scroll `61.1 -> 61.3 FPS`, jank `0 -> 0`.
+	- Watch item: context menu average moved `371.4 -> 387.0 ms`; keep under final Stage 12 benchmark observation, but Stage 11 practical responsiveness gate is satisfied.
+	- Decision: Stage 11 is closed and Stage 12 starts.
 
 ### Stage 12 - Final Benchmark + Release Closure
 
