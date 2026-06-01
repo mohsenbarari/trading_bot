@@ -3,9 +3,13 @@
   --messenger-surface-page: #fceceb;
   --messenger-surface-panel: rgba(255, 255, 255, 0.92);
   --messenger-surface-muted: #f8fafc;
+  --messenger-bubble-sent: #eeffde;
+  --messenger-bubble-received: #ffffff;
   --messenger-border-subtle: rgba(148, 163, 184, 0.32);
   --messenger-text-strong: #1f2937;
   --messenger-text-muted: #64748b;
+  --messenger-chat-link: #3390ec;
+  --messenger-chat-success: #43a047;
   --messenger-accent: #f59e0b;
   --messenger-accent-strong: #b45309;
   --messenger-danger: #dc2626;

@@ -504,6 +504,12 @@ Exit criteria:
 Rollback:
 - Revert token and style enforcement commits.
 
+Stage 9 progress:
+- `messenger-design-tokens.css` now exposes bubble and chat semantic tokens for sent/received surfaces, chat link color, and success/read state color.
+- `ChatHeader.vue` removed repeated inline positioning/count styles and now resolves core surfaces, controls, menu panels, text, borders, shadows, radius, and motion through messenger tokens with local fallbacks.
+- `ChatMessageItem.vue` now resolves core message bubble sent/received surfaces, text, motion, forwarded/reply accents, and read-state color through messenger tokens while preserving existing fallback values.
+- Focused validation: `npm run test:unit:run -- src/components/chat/ChatHeader.test.ts src/components/chat/ChatMessageItem.test.ts`, `npm run build`, and `git diff --check`.
+
 ### Stage 10 - Group/Channel/Direct Manager Standardization
 
 Goal:

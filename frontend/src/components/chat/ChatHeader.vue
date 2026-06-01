@@ -83,7 +83,7 @@
           </svg>
         </button>
         <!-- Three-dot Menu -->
-        <div class="header-menu-container" style="position: relative;">
+        <div class="header-menu-container">
             <button class="header-btn" v-ripple @click.stop="toggleMenu">
               <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="1"></circle>
@@ -110,7 +110,7 @@
       </template>
 
       <template v-else-if="selectedUserId && !isSearchActive && selectedRoomKind !== 'direct'">
-        <div class="header-menu-container" style="position: relative;">
+        <div class="header-menu-container">
           <button class="header-btn" v-ripple @click.stop="toggleMenu">
             <MoreVertical :size="22" />
           </button>
@@ -141,7 +141,7 @@
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
         </button>
-        <div class="header-menu-container" style="position: relative;">
+        <div class="header-menu-container">
           <button class="header-btn" v-ripple @click.stop="toggleMenu">
             <MoreVertical :size="22" />
           </button>
@@ -185,7 +185,7 @@
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
       </button>
-      <div class="header-title" style="flex: 1; margin-right: 16px;">
+      <div class="header-title selection-count-title">
         {{ selectedMessagesCount }}
       </div>
     </template>
@@ -380,38 +380,38 @@ function formatDateForSeparator(dateString: string) {
   display: flex;
   align-items: center;
   padding: 0 8px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  background: var(--messenger-surface-panel, #ffffff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   border-bottom: none;
   gap: 8px;
   direction: ltr; /* Force LTR layout */
 }
 
 .header-btn {
-  background: none;
+  background: transparent;
   border: none;
   cursor: pointer;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  transition: background 0.2s;
-  color: #000000;
-  width: 40px;
-  height: 40px;
+  border-radius: var(--messenger-radius-control, 8px);
+  transition: background var(--messenger-motion-standard, 180ms);
+  color: var(--messenger-text-strong, #1f2937);
+  width: var(--messenger-touch-target, 44px);
+  height: var(--messenger-touch-target, 44px);
   flex-shrink: 0;
 }
 
 .header-btn svg { width: 24px; height: 24px; }
-.header-btn:hover { background: rgba(0, 0, 0, 0.05); }
-.header-btn:active { background: rgba(0, 0, 0, 0.1); }
+.header-btn:hover { background: rgba(15, 23, 42, 0.06); }
+.header-btn:active { background: rgba(15, 23, 42, 0.1); }
 
 .header-avatar {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  background: linear-gradient(135deg, #fbbf24, var(--messenger-accent, #f59e0b));
   color: white;
   display: flex;
   align-items: center;
@@ -460,7 +460,7 @@ function formatDateForSeparator(dateString: string) {
 .header-name {
   font-size: 16px;
   font-weight: 600;
-  color: #000000;
+  color: var(--messenger-text-strong, #1f2937);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -471,7 +471,7 @@ function formatDateForSeparator(dateString: string) {
 
 .header-status {
   font-size: 13px;
-  color: #8E8E93;
+  color: var(--messenger-text-muted, #64748b);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
@@ -480,12 +480,12 @@ function formatDateForSeparator(dateString: string) {
   text-align: left;
 }
 
-.header-status.online { color: #f59e0b; }
+.header-status.online { color: var(--messenger-accent, #f59e0b); }
 .header-spacer { display: none; }
 .header-title {
   font-size: 17px;
   font-weight: 600;
-  color: #000000;
+  color: var(--messenger-text-strong, #1f2937);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -494,21 +494,21 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .badge {
-  background: #f59e0b;
+  background: var(--messenger-accent, #f59e0b);
   color: white;
-  border-radius: 12px;
+  border-radius: var(--messenger-radius-control, 8px);
   padding: 2px 8px;
   font-size: 12px;
   font-weight: bold;
 }
 
 .deleted-badge-small {
-  background: #fef2f2;
-  color: #ef4444;
-  border: 1px solid #fecaca;
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--messenger-danger, #dc2626);
+  border: 1px solid rgba(220, 38, 38, 0.24);
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 10px;
+  border-radius: var(--messenger-radius-control, 8px);
   margin-right: 6px;
   vertical-align: middle;
 }
@@ -539,12 +539,12 @@ function formatDateForSeparator(dateString: string) {
 
 .header-room-meta {
   background: rgba(148, 163, 184, 0.14);
-  color: #64748b;
+  color: var(--messenger-text-muted, #64748b);
 }
 
 .header-room-meta.mandatory {
   background: rgba(245, 158, 11, 0.16);
-  color: #b45309;
+  color: var(--messenger-accent-strong, #b45309);
 }
 
 .header-room-meta.system {
@@ -557,16 +557,16 @@ function formatDateForSeparator(dateString: string) {
   align-items: center;
   flex: 1;
   gap: 8px;
-  background: white;
+  background: var(--messenger-surface-panel, #ffffff);
   width: 100%;
 }
 
 .header-search-input {
   flex: 1;
   height: 38px;
-  background: #f1f2f6;
+  background: var(--messenger-surface-muted, #f8fafc);
   border: none;
-  border-radius: 19px;
+  border-radius: var(--messenger-radius-control, 8px);
   padding: 0 16px;
   font-size: 14px;
   font-family: inherit;
@@ -584,9 +584,9 @@ function formatDateForSeparator(dateString: string) {
   top: 100%;
   left: 0;
   right: 0;
-  background: white;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  border-radius: 8px;
+  background: var(--messenger-surface-panel, #ffffff);
+  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
+  border-radius: var(--messenger-radius-control, 8px);
   max-height: 300px;
   overflow-y: auto;
   z-index: 1001;
@@ -599,21 +599,21 @@ function formatDateForSeparator(dateString: string) {
   flex-direction: column;
   gap: 4px;
   cursor: pointer;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
 }
-.search-result-item:hover { background: #f9fafb; }
-.search-res-text { font-size: 14px; color: #111827; }
-.search-res-date { font-size: 12px; color: #6b7280; }
+.search-result-item:hover { background: var(--messenger-surface-muted, #f8fafc); }
+.search-res-text { font-size: 14px; color: var(--messenger-text-strong, #1f2937); }
+.search-res-date { font-size: 12px; color: var(--messenger-text-muted, #64748b); }
 
 .header-menu-container { position: relative; }
 .header-dropdown-menu {
   position: absolute;
   top: 100%;
   right: 0;
-  background: rgba(255, 255, 255, 0.96);
-  border-radius: 16px;
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  background: var(--messenger-surface-panel, rgba(255, 255, 255, 0.96));
+  border-radius: var(--messenger-radius-control, 8px);
+  border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
+  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
   min-width: 196px;
   padding: 6px;
   z-index: 1001;
@@ -625,16 +625,16 @@ function formatDateForSeparator(dateString: string) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 44px;
+  min-height: var(--messenger-touch-target, 44px);
   padding: 10px 14px;
-  border-radius: 12px;
+  border-radius: var(--messenger-radius-control, 8px);
   cursor: pointer;
-  color: #111827;
+  color: var(--messenger-text-strong, #1f2937);
   font-size: 14px;
   font-weight: 700;
 }
 .header-menu-item:hover { background: rgba(15, 23, 42, 0.05); }
-.header-menu-item svg { color: #64748b; }
+.header-menu-item svg { color: var(--messenger-text-muted, #64748b); }
 
 .header-menu-divider {
   height: 1px;
@@ -646,8 +646,13 @@ function formatDateForSeparator(dateString: string) {
   padding: 4px 10px 2px;
   font-size: 11px;
   font-weight: 700;
-  color: #64748b;
+  color: var(--messenger-text-muted, #64748b);
   letter-spacing: 0.2px;
+}
+
+.selection-count-title {
+  flex: 1;
+  margin-right: 16px;
 }
 
 .menu-overlay {
