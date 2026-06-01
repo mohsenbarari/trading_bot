@@ -509,6 +509,11 @@ Stage 9 progress:
 - `ChatHeader.vue` removed repeated inline positioning/count styles and now resolves core surfaces, controls, menu panels, text, borders, shadows, radius, and motion through messenger tokens with local fallbacks.
 - `ChatMessageItem.vue` now resolves core message bubble sent/received surfaces, text, motion, forwarded/reply accents, and read-state color through messenger tokens while preserving existing fallback values.
 - Focused validation: `npm run test:unit:run -- src/components/chat/ChatHeader.test.ts src/components/chat/ChatMessageItem.test.ts`, `npm run build`, and `git diff --check`.
+- Stage 9 media-token follow-up:
+	- `messenger-design-tokens.css` now exposes overlay intensity and overlay text tokens used by media, album, and transfer controls.
+	- `ChatAlbumLayout.vue` now resolves album shell, selection, download, progress, upload, and ring colors through messenger tokens while preserving previous fallback values.
+	- `ChatMessageItem.vue` now resolves document/media/share/download/location control colors and overlay states through messenger tokens for better cross-surface consistency.
+	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatAlbumLayout.test.ts src/components/chat/ChatMessageItem.test.ts`, `npm run build`, and `git diff --check`.
 
 ### Stage 10 - Group/Channel/Direct Manager Standardization
 

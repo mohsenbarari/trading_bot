@@ -2007,7 +2007,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   height: 150px;
   background-size: cover;
   background-position: center;
-  border-radius: 12px;
+  border-radius: var(--messenger-radius-control, 8px);
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   display: flex;
@@ -2023,8 +2023,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   bottom: 0;
   left: 0;
   right: 0;
-  background: rgba(0,0,0,0.6);
-  color: white;
+  background: var(--messenger-overlay-strong, rgba(0,0,0,0.6));
+  color: var(--messenger-overlay-text, #ffffff);
   text-align: center;
   font-size: 12px;
   padding: 4px 0;
@@ -2036,13 +2036,13 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  background: #fef2f2;
-  border-radius: 12px;
-  border: 1px solid #fecaca;
+  background: rgba(220, 38, 38, 0.08);
+  border-radius: var(--messenger-radius-control, 8px);
+  border: 1px solid rgba(220, 38, 38, 0.24);
 }
 .location-label {
   font-size: 14px;
-  color: #374151;
+  color: var(--messenger-text-strong, #1f2937);
   font-weight: 500;
 }
 
@@ -2062,7 +2062,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   width: 44px;
   height: 44px;
   min-width: 44px;
-  border-radius: 10px;
+  border-radius: var(--messenger-radius-control, 8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2072,11 +2072,11 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .doc-icon.doc-pdf { background: linear-gradient(135deg, #e53935, #c62828); }
 .doc-icon.doc-archive { background: linear-gradient(135deg, #ff9800, #e65100); }
-.doc-icon.doc-excel { background: linear-gradient(135deg, #43a047, #2e7d32); }
+.doc-icon.doc-excel { background: linear-gradient(135deg, var(--messenger-chat-success, #43a047), #2e7d32); }
 .doc-icon.doc-word { background: linear-gradient(135deg, #1e88e5, #1565c0); }
 .doc-icon.doc-generic { background: linear-gradient(135deg, #78909c, #546e7a); }
 .doc-icon.doc-uploading {
-  background: var(--primary-color, #3390ec);
+  background: var(--messenger-chat-link, #3390ec);
   position: relative;
 }
 .doc-cancel-icon {
@@ -2112,28 +2112,28 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .doc-name {
   font-size: 14px;
   font-weight: 500;
-  color: #111827;
+  color: var(--messenger-text-strong, #1f2937);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .doc-size {
   font-size: 12px;
-  color: #8e8e93;
+  color: var(--messenger-text-muted, #64748b);
   margin-top: 2px;
 }
 .doc-download-icon {
-  color: #3390ec;
+  color: var(--messenger-chat-link, #3390ec);
   flex-shrink: 0;
 }
 .doc-share-btn {
   flex-shrink: 0;
   background: transparent;
   border: none;
-  color: #3390ec;
+  color: var(--messenger-chat-link, #3390ec);
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: var(--messenger-radius-control, 8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2151,10 +2151,10 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   inset-inline-end: 8px;
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: var(--messenger-radius-control, 8px);
   border: none;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0, 0, 0, 0.6)) 92%, transparent);
+  color: var(--messenger-overlay-text, #ffffff);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2172,7 +2172,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   flex-shrink: 0;
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: var(--messenger-radius-control, 8px);
   border: none;
   background: transparent;
   color: inherit;
@@ -2193,27 +2193,27 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .selected-message { position: relative; z-index: 10; }
 .selected-message::before {
   content: ''; position: absolute; top: -4px; right: -16px; bottom: -4px; left: -16px;
-  background-color: rgba(51, 144, 236, 0.15); pointer-events: none; z-index: -1; border-radius: 6px;
+  background-color: rgba(51, 144, 236, 0.15); pointer-events: none; z-index: -1; border-radius: var(--messenger-radius-control, 8px);
 }
 
 /* Base Media Styles */
 .msg-video-wrapper { position: relative; width: 100%; height: 100%; }
-.video-play-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.5); border-radius: 50%; padding: 12px; pointer-events: none; }
+.video-play-indicator { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0,0,0,0.6)) 84%, transparent); border-radius: var(--messenger-radius-control, 8px); padding: 12px; pointer-events: none; }
 .msg-media-overlay {
-  position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(5px);
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0,0,0,0.6)) 67%, transparent); backdrop-filter: blur(5px);
   display: flex; align-items: center; justify-content: center;
 }
 .progress-container { position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
 .progress-ring { position: absolute; width: 100%; height: 100%; transform: rotate(-90deg); }
-.ring-bg { fill: none; stroke: rgba(255,255,255,0.2); stroke-width: 3; }
-.ring-fg { fill: none; stroke: white; stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray 0.3s ease; }
-.progress-text { color: white; font-size: 11px; font-weight: bold; }
+.ring-bg { fill: none; stroke: color-mix(in srgb, var(--messenger-overlay-text, #ffffff) 20%, transparent); stroke-width: 3; }
+.ring-fg { fill: none; stroke: var(--messenger-overlay-text, #ffffff); stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray 0.3s ease; }
+.progress-text { color: var(--messenger-overlay-text, #ffffff); font-size: 11px; font-weight: bold; }
 .download-btn {
-  background: rgba(0,0,0,0.5); border: none; border-radius: 50%; color: white; width: 48px; height: 48px; display: flex;
+  background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0,0,0,0.6)) 84%, transparent); border: none; border-radius: var(--messenger-radius-control, 8px); color: var(--messenger-overlay-text, #ffffff); width: 48px; height: 48px; display: flex;
   align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s;
 }
 .download-btn:hover { background: rgba(0,0,0,0.7); }
-.media-type-badge { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.6); color: white; font-size: 10px; padding: 2px 6px; border-radius: 12px; display: flex; align-items: center; gap: 4px; }
+.media-type-badge { position: absolute; bottom: 8px; left: 8px; background: var(--messenger-overlay-strong, rgba(0,0,0,0.6)); color: var(--messenger-overlay-text, #ffffff); font-size: 10px; padding: 2px 6px; border-radius: var(--messenger-radius-control, 8px); display: flex; align-items: center; gap: 4px; }
 
 /* Highlight */
 .highlight-message::after {
@@ -2242,7 +2242,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 
 :deep(.message-mention) {
-  color: #2563eb;
+  color: var(--messenger-chat-link, #3390ec);
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
