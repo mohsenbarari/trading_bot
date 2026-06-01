@@ -12,6 +12,7 @@ from core.services.chat_room_service import (
     list_group_members,
     list_group_messages,
     list_groups_for_user,
+    list_room_conversations,
 )
 
 
@@ -157,6 +158,46 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[1].member_count, 50)
         self.assertTrue(rows[1].is_system)
         self.assertTrue(rows[1].is_mandatory)
+
+    async def test_list_room_conversations_combines_group_and_channel_rows(self):
+        group_chat = SimpleNamespace(
+            id=21,
+            type=ChatType.GROUP,
+            title="Ops",
+            last_message_at=datetime(2026, 5, 3, 10, 0, 0),
+            max_members=100,
+            is_system=False,
+            is_mandatory=False,
+        )
+        channel_chat = SimpleNamespace(
+            id=31,
+            type=ChatType.CHANNEL,
+            title="Broadcast",
+            last_message_at=datetime(2026, 5, 3, 11, 0, 0),
+            is_system=True,
+            is_mandatory=True,
+        )
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(
+                    rows=[
+                        (channel_chat, ChatMemberRole.MEMBER, True, False, None, None, "notice", None, 3, 50, 1),
+                        (group_chat, ChatMemberRole.ADMIN, False, False, None, None, "hello", None, 4, 10, 2),
+                    ]
+                )
+            ]
+        )
+
+        rows = await list_room_conversations(db, current_user_id=5)
+
+        self.assertEqual([row.room_kind for row in rows], ["channel", "group"])
+        self.assertFalse(rows[0].can_send)
+        self.assertIsNone(rows[0].max_members)
+        self.assertTrue(rows[0].is_muted)
+        self.assertEqual(rows[0].unread_mention_count, 1)
+        self.assertTrue(rows[1].can_send)
+        self.assertEqual(rows[1].max_members, 100)
+        self.assertEqual(rows[1].unread_mention_count, 2)
 
     async def test_list_group_members_shapes_creator_flag(self):
         joined_at = datetime(2026, 5, 2, 8, 0, 0)

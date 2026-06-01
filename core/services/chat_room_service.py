@@ -206,6 +206,59 @@ def _unpack_conversation_projection_row(row):
     raise ValueError(f"Unexpected conversation projection row size: {len(row)}")
 
 
+def _room_kind_from_chat(chat: Chat, fallback: str = "group") -> str:
+    chat_type = getattr(chat, "type", None)
+    if chat_type == ChatType.CHANNEL:
+        return "channel"
+    if chat_type == ChatType.GROUP:
+        return "group"
+    return fallback
+
+
+def _build_room_conversation_summary(row, *, fallback_room_kind: str = "group") -> ChannelConversationSummary:
+    (
+        chat,
+        member_role,
+        is_muted,
+        is_pinned,
+        pinned_at,
+        pin_order,
+        last_content,
+        last_type,
+        unread,
+        member_count,
+        unread_mentions,
+    ) = _unpack_conversation_projection_row(row)
+    room_kind = _room_kind_from_chat(chat, fallback_room_kind)
+    synthetic_room_id = -int(chat.id)
+    is_channel = room_kind == "channel"
+    return ChannelConversationSummary(
+        id=synthetic_room_id,
+        other_user_id=synthetic_room_id,
+        other_user_name=chat.title or (f"کانال {chat.id}" if is_channel else f"گروه {chat.id}"),
+        avatar_file_id=getattr(chat, "avatar_file_id", None),
+        other_user_is_deleted=False,
+        last_message_content=last_content,
+        last_message_type=last_type,
+        last_message_at=chat.last_message_at,
+        unread_count=int(unread or 0),
+        other_user_last_seen_at=None,
+        room_kind=room_kind,
+        chat_id=chat.id,
+        can_send=member_role == ChatMemberRole.ADMIN if is_channel else not bool(chat.is_system),
+        member_role=member_role.value if member_role is not None else None,
+        member_count=int(member_count or 0),
+        max_members=None if is_channel else int(chat.max_members or GROUP_MAX_MEMBERS),
+        is_system=bool(chat.is_system),
+        is_mandatory=bool(chat.is_mandatory),
+        is_muted=bool(is_muted),
+        is_pinned=bool(is_pinned),
+        pinned_at=pinned_at,
+        pin_order=pin_order,
+        unread_mention_count=int(unread_mentions or 0),
+    )
+
+
 GROUP_MAX_MEMBERS = 50
 MANDATORY_CHANNEL_TITLE = "اطلاع‌رسانی"
 MANDATORY_CHANNEL_DESCRIPTION = "کانال اجباری اطلاع‌رسانی سامانه"
@@ -1069,47 +1122,21 @@ async def list_group_conversations(
     )
     result = await db.execute(stmt)
 
-    rows: list[ChannelConversationSummary] = []
-    for row in result.all():
-        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mentions = _unpack_conversation_projection_row(row)
-        synthetic_room_id = -int(chat.id)
-        rows.append(
-            ChannelConversationSummary(
-                id=synthetic_room_id,
-                other_user_id=synthetic_room_id,
-                other_user_name=chat.title or f"گروه {chat.id}",
-                avatar_file_id=getattr(chat, "avatar_file_id", None),
-                other_user_is_deleted=False,
-                last_message_content=last_content,
-                last_message_type=last_type,
-                last_message_at=chat.last_message_at,
-                unread_count=int(unread or 0),
-                other_user_last_seen_at=None,
-                room_kind="group",
-                chat_id=chat.id,
-                can_send=not bool(chat.is_system),
-                member_role=member_role.value if member_role is not None else None,
-                member_count=int(member_count or 0),
-                max_members=int(chat.max_members or GROUP_MAX_MEMBERS),
-                is_system=bool(chat.is_system),
-                is_mandatory=bool(chat.is_mandatory),
-                is_muted=bool(is_muted),
-                is_pinned=bool(is_pinned),
-                pinned_at=pinned_at,
-                pin_order=pin_order,
-                unread_mention_count=int(unread_mentions or 0),
-            )
-        )
-    return rows
+    return [
+        _build_room_conversation_summary(row, fallback_room_kind="group")
+        for row in result.all()
+    ]
 
 
 def build_room_conversation_projection_stmt(
     *,
     current_user_id: int,
-    room_type: ChatType,
+    room_type: ChatType | Sequence[ChatType],
 ):
-    if room_type not in {ChatType.GROUP, ChatType.CHANNEL}:
-        raise ValueError("room_type must be GROUP or CHANNEL")
+    room_types = (room_type,) if isinstance(room_type, ChatType) else tuple(room_type)
+    if not room_types or any(value not in {ChatType.GROUP, ChatType.CHANNEL} for value in room_types):
+        raise ValueError("room_type must be GROUP, CHANNEL, or a sequence of them")
+    room_type_filter = Chat.type == room_types[0] if len(room_types) == 1 else Chat.type.in_(room_types)
 
     current_member = aliased(ChatMember)
     last_message_alias = aliased(Message)
@@ -1184,7 +1211,7 @@ def build_room_conversation_projection_stmt(
         )
         .outerjoin(last_message_alias, last_message_alias.id == Chat.last_message_id)
         .where(
-            Chat.type == room_type,
+            room_type_filter,
             Chat.is_deleted.is_(False),
         )
         .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
@@ -1527,38 +1554,28 @@ async def list_channel_conversations(
     )
     result = await db.execute(stmt)
 
-    rows: list[ChannelConversationSummary] = []
-    for row in result.all():
-        chat, member_role, is_muted, is_pinned, pinned_at, pin_order, last_content, last_type, unread, member_count, unread_mentions = _unpack_conversation_projection_row(row)
-        synthetic_room_id = -int(chat.id)
-        rows.append(
-            ChannelConversationSummary(
-                id=synthetic_room_id,
-                other_user_id=synthetic_room_id,
-                other_user_name=chat.title or f"کانال {chat.id}",
-                avatar_file_id=getattr(chat, "avatar_file_id", None),
-                other_user_is_deleted=False,
-                last_message_content=last_content,
-                last_message_type=last_type,
-                last_message_at=chat.last_message_at,
-                unread_count=int(unread or 0),
-                other_user_last_seen_at=None,
-                room_kind="channel",
-                chat_id=chat.id,
-                can_send=member_role == ChatMemberRole.ADMIN,
-                member_role=member_role.value if member_role is not None else None,
-                member_count=int(member_count or 0),
-                max_members=None,
-                is_system=bool(chat.is_system),
-                is_mandatory=bool(chat.is_mandatory),
-                is_muted=bool(is_muted),
-                is_pinned=bool(is_pinned),
-                pinned_at=pinned_at,
-                pin_order=pin_order,
-                unread_mention_count=int(unread_mentions or 0),
-            )
-        )
-    return rows
+    return [
+        _build_room_conversation_summary(row, fallback_room_kind="channel")
+        for row in result.all()
+    ]
+
+
+async def list_room_conversations(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+) -> list[ChannelConversationSummary]:
+    stmt = build_room_conversation_projection_stmt(
+        current_user_id=current_user_id,
+        room_type=(ChatType.GROUP, ChatType.CHANNEL),
+    )
+    result = await db.execute(stmt)
+    return [
+        _build_room_conversation_summary(row)
+        for row in result.all()
+    ]
+
+
 async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelMemberSummary]:
     """List active members of one optional channel for admin-side management."""
     stmt = (

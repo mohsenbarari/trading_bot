@@ -1234,7 +1234,7 @@ async function waitForDocumentBubbleState(page, documentBubble, matcher, timeout
   while (Date.now() < deadline) {
     lastState = await getDocumentBubbleTransferState(documentBubble).catch(() => 'idle')
     if (matcher(lastState)) return lastState
-    await page.waitForTimeout(200).catch(() => null)
+    await page.waitForTimeout(50).catch(() => null)
   }
   return lastState
 }
