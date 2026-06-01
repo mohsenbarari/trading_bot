@@ -256,6 +256,34 @@ describe('useChatWebSocket', () => {
     expect(conversations.value[0].last_message_content).toBe('پیام حذف شد')
   })
 
+  it('coalesces inactive conversation bursts into one conversation patch with accumulated unread count', async () => {
+    conversations.value = [{ other_user_id: 45, unread_count: 1, last_message_at: null, last_message_type: null, last_message_content: null }]
+    mountHarness()
+
+    emit('chat:message', {
+      id: 703,
+      sender_id: 45,
+      created_at: '2026-05-14T14:03:00Z',
+      message_type: 'text',
+      content: 'اول',
+    })
+    emit('chat:message', {
+      id: 704,
+      sender_id: 45,
+      created_at: '2026-05-14T14:03:01Z',
+      message_type: 'image',
+      content: '',
+    })
+    await Promise.resolve()
+
+    expect(conversations.value[0]).toMatchObject({
+      unread_count: 3,
+      last_message_at: '2026-05-14T14:03:01Z',
+      last_message_type: 'image',
+      last_message_content: 'تصویر',
+    })
+  })
+
   it('falls back to loadMessages for incomplete payloads and patches direct read receipts in place', async () => {
     messages.value = [
       { id: 1, receiver_id: 12, is_read: false },

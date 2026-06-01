@@ -64,6 +64,14 @@ function hasRealtimeMention(payload: ChatRealtimeNotificationPayload, currentUse
     return payload.mentions.some((mentionedUserId) => Number(mentionedUserId) === currentUserId)
 }
 
+function uniqueByKey<T>(items: T[], getKey: (item: T) => string | number) {
+    const nextByKey = new Map<string | number, T>()
+    for (const item of items) {
+        nextByKey.set(getKey(item), item)
+    }
+    return Array.from(nextByKey.values())
+}
+
 export function useNotificationRuntime({ connect, on, off, ensureSessionValidation }: NotificationRuntimeOptions) {
     const route = useRoute()
     const router = useRouter()
@@ -132,9 +140,10 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
         if (pendingAppMessages.length > 0) {
             const appPayloads = pendingAppMessages.splice(0, pendingAppMessages.length)
             const normalizedNotifications = addAppNotificationsBatch(appPayloads)
+            const uniqueNotifications = uniqueByKey(normalizedNotifications, (notification) => notification.id)
 
             if (route.path !== '/notifications') {
-                addToastsBatch(normalizedNotifications.map((notification) => {
+                addToastsBatch(uniqueNotifications.map((notification) => {
                     const title = notification.title || 'اعلان جدید'
                     const body = notification.body || ''
                     const targetRoute = typeof notification.route === 'string' && notification.route.trim()
@@ -161,7 +170,8 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
             const chatPayloads = pendingChatMessages.splice(0, pendingChatMessages.length)
             const unreadConversationKeys: number[] = []
             const mentionConversationKeys: number[] = []
-            const toastBatch: Parameters<typeof notificationStore.addToast>[0][] = []
+            const toastByConversation = new Map<number, Parameters<typeof notificationStore.addToast>[0]>()
+            const browserNotificationByConversation = new Map<number, { title: string; body: string; route: string }>()
 
             for (const payload of chatPayloads) {
                 const conversationKey = resolveRealtimeConversationKey(payload)
@@ -194,7 +204,7 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
                 const body = buildChatNotificationBody(payload)
                 const routePath = buildChatNotificationRoute(conversationKey, senderName)
 
-                toastBatch.push({
+                toastByConversation.set(conversationKey, {
                     title: senderName,
                     body,
                     route: routePath,
@@ -202,13 +212,20 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
                 })
 
                 if (document.hidden && payload.room_kind !== 'channel') {
-                    showBrowserNotification(senderName, body, { route: routePath })
+                    browserNotificationByConversation.set(conversationKey, {
+                        title: senderName,
+                        body,
+                        route: routePath,
+                    })
                 }
             }
 
             incrementChatUnreadBatch(unreadConversationKeys)
             incrementMentionUnreadBatch(mentionConversationKeys)
-            addToastsBatch(toastBatch)
+            addToastsBatch(Array.from(toastByConversation.values()))
+            browserNotificationByConversation.forEach((notification) => {
+                showBrowserNotification(notification.title, notification.body, { route: notification.route })
+            })
         }
     }
 

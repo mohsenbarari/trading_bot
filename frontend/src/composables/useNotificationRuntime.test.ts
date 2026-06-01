@@ -425,4 +425,41 @@ describe('useNotificationRuntime', () => {
 
     wrapper.unmount()
   })
+
+  it('coalesces same-conversation chat bursts into one toast and browser notification per flush', async () => {
+    notificationRuntimeMocks.store.incrementChatUnreadBatch = vi.fn()
+    notificationRuntimeMocks.store.addToastsBatch = vi.fn()
+
+    const wrapper = mountRuntime()
+
+    setRoute('/dashboard')
+    setDocumentHidden(true)
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 42,
+      sender_name: 'علی',
+      message_type: 'text',
+      content: 'اول',
+    })
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 42,
+      sender_name: 'علی',
+      message_type: 'image',
+      content: '',
+    })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.store.incrementChatUnreadBatch).toHaveBeenCalledWith([42, 42])
+    expect(notificationRuntimeMocks.store.addToastsBatch).toHaveBeenCalledWith([{
+      title: 'علی',
+      body: 'تصویر',
+      route: '/chat?user_id=42&user_name=%D8%B9%D9%84%DB%8C',
+      kind: 'chat',
+    }])
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.showBrowserNotification).toHaveBeenCalledWith('علی', 'تصویر', {
+      route: '/chat?user_id=42&user_name=%D8%B9%D9%84%DB%8C',
+    })
+
+    wrapper.unmount()
+  })
 })
