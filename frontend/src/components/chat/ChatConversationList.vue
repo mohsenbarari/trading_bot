@@ -874,8 +874,13 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  content-visibility: auto;
-  contain-intrinsic-size: var(--messenger-list-row-contain-intrinsic-size, 76px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation-card {
+    content-visibility: auto;
+    contain-intrinsic-size: var(--messenger-list-row-contain-intrinsic-size, 76px);
+  }
 }
 
 .conversation-window-more {
