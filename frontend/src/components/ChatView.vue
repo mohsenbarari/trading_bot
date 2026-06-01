@@ -29,6 +29,7 @@ import { useChatScroll } from '../composables/chat/useChatScroll'
 import { useNotificationStore } from '../stores/notifications'
 import {
   ensureFileCached,
+  canShareFiles,
   shareMultipleFiles,
   shareFile as cachedShareFileGlobal,
 } from '../composables/chat/useChatFileHandler'
@@ -70,6 +71,10 @@ import {
   type MessengerOverlayAction,
   type MessengerOverlayState,
 } from '../utils/messengerStage5ComposerOverlay'
+import {
+  buildMessengerContextMenuModel,
+  getMessengerContextMenuStyle,
+} from '../utils/messengerStage6ContextMenu'
 
 // Props
 const props = defineProps<{
@@ -143,10 +148,19 @@ const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
 const isMobile = ref(false)
-const contextMenu = ref<{ visible: boolean; x: number; y: number; message: Message | null; messageIds: number[] }>({ visible: false, x: 0, y: 0, message: null, messageIds: [] })
+const contextMenu = ref<{
+  visible: boolean
+  x: number
+  y: number
+  message: Message | null
+  messageIds: number[]
+  style: Record<string, string> | null
+}>({ visible: false, x: 0, y: 0, message: null, messageIds: [], style: null })
 const AVAILABLE_MESSAGE_REACTIONS = [...MESSAGE_REACTION_CATALOG] as const
+const CONTEXT_MENU_SUPPORTS_FILE_SHARE = canShareFiles()
 const pendingReactionMutationVersion = new Map<number, number>()
 let reactionMutationVersion = 0
+let contextMenuSnapshotVersion = 0
 
 // Input
 const messageInput = ref('')
@@ -729,17 +743,44 @@ const canManagePinnedMessages = computed(() => {
   return selectedConversation.value?.member_role === 'admin'
 })
 
-const isContextMessagePinned = computed(() => {
-  return Boolean(pinnedMessage.value && contextMenu.value.message && pinnedMessage.value.id === contextMenu.value.message.id)
-})
+function isPinnedMessageInContext(msg?: Message | null) {
+  return Boolean(pinnedMessage.value && msg && pinnedMessage.value.id === msg.id)
+}
 
-const canPinContextMessage = computed(() => {
-  const msg = contextMenu.value.message
+function canPinMessageInContext(msg?: Message | null, messageIds: number[] = []) {
   if (!msg) return false
-  if (contextMenu.value.messageIds.length !== 1) return false
+  if (messageIds.length !== 1) return false
   if (msg.is_deleted) return false
   if (!isPersistedMessageId(msg.id)) return false
   return canManagePinnedMessages.value
+}
+
+function canEditMessageInContext(msg?: Message | null, messageIds: number[] = []) {
+  if (!msg) return false
+  if (messageIds.length !== 1) return false
+  if (msg.sender_id !== props.currentUserId) return false
+  if (msg.message_type !== 'text') return false
+  if ((msg as any).forwarded_from_id || (msg as any).forwarded_from_name) return false
+  const msgTime = new Date(msg.created_at).getTime()
+  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
+}
+
+function canDeleteMessageIdsInContext(messageIds: number[]) {
+  const normalizedMessageIds = normalizeMessageIds(messageIds)
+  if (normalizedMessageIds.length === 0) return false
+
+  return normalizedMessageIds.every((messageId) => {
+    const msg = messages.value.find(message => message.id === messageId)
+    return isDeletableMessage(msg)
+  })
+}
+
+const isContextMessagePinned = computed(() => {
+  return isPinnedMessageInContext(contextMenu.value.message)
+})
+
+const canPinContextMessage = computed(() => {
+  return canPinMessageInContext(contextMenu.value.message, contextMenu.value.messageIds)
 })
 
 const selectedRoomStatusText = computed(() => {
@@ -970,24 +1011,11 @@ function resetSelectionContext() {
 }
 
 const canEdit = computed(() => {
-  const msg = contextMenu.value.message
-  if (!msg) return false
-  if (contextMenu.value.messageIds.length !== 1) return false
-  if (msg.sender_id !== props.currentUserId) return false
-  if (msg.message_type !== 'text') return false
-  if ((msg as any).forwarded_from_id || (msg as any).forwarded_from_name) return false
-  const msgTime = new Date(msg.created_at).getTime()
-  return (Date.now() - msgTime) <= 48 * 60 * 60 * 1000
+  return canEditMessageInContext(contextMenu.value.message, contextMenu.value.messageIds)
 })
 
 const canDelete = computed(() => {
-  const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
-  if (messageIds.length === 0) return false
-
-  return messageIds.every((messageId) => {
-    const msg = messages.value.find(message => message.id === messageId)
-    return isDeletableMessage(msg)
-  })
+  return canDeleteMessageIdsInContext(contextMenu.value.messageIds)
 })
 
 const canDeleteSelected = computed(() => {
@@ -1800,53 +1828,96 @@ const showContextMenu = (event: Event, msg: Message) => {
 
   const messageIds = getContextMenuMessageIds(msg)
 
-  let clientX = 0, clientY = 0;
+  let clientX = 0
+  let clientY = 0
   if (event instanceof MouseEvent) {
-    event.preventDefault();
-    clientX = event.clientX;
-    clientY = event.clientY;
+    event.preventDefault()
+    clientX = event.clientX
+    clientY = event.clientY
   } else if (event instanceof TouchEvent && event.touches.length > 0) {
-    const touch = event.touches[0];
+    const touch = event.touches[0]
     if (touch) {
-      clientX = touch.clientX;
-      clientY = touch.clientY;
+      clientX = touch.clientX
+      clientY = touch.clientY
     }
   }
 
-  const menuWidth = 220;
-  const menuHeight = messageIds.length > 1 ? 320 : 300;
-  const padding = 10;
+  const menuModel = buildMessengerContextMenuModel({
+    messageType: msg.message_type,
+    isAlbumSelection: messageIds.length > 1,
+    supportsFileShare: CONTEXT_MENU_SUPPORTS_FILE_SHARE,
+    canEdit: canEditMessageInContext(msg, messageIds),
+    canDelete: canDeleteMessageIdsInContext(messageIds),
+    canPin: canPinMessageInContext(msg, messageIds),
+    isPinnedMessage: isPinnedMessageInContext(msg),
+    showReactionRow: !msg.is_deleted && AVAILABLE_MESSAGE_REACTIONS.length > 0,
+    hasOverflowReactions: AVAILABLE_MESSAGE_REACTIONS.length > 6,
+    isReactionPickerExpanded: false,
+  })
+  const style = getMessengerContextMenuStyle({
+    x: clientX,
+    y: clientY,
+    menuWidth: menuModel.menuWidth,
+    menuHeight: menuModel.menuHeight,
+    viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 400,
+    viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+  })
 
-  if (clientX + menuWidth > window.innerWidth) clientX = window.innerWidth - menuWidth - padding;
-  if (clientX < padding) clientX = padding;
-  if (clientY + menuHeight > window.innerHeight - padding) {
-    clientY = clientY - menuHeight - padding;
-    if (clientY < padding) clientY = padding;
-  }
+  const expectedMessageId = msg.id
+  const snapshotVersion = ++contextMenuSnapshotVersion
 
   contextMenu.value = {
     visible: true,
-    x: clientX,
-    y: clientY,
+    x: Number.parseFloat(style.left) || clientX,
+    y: Number.parseFloat(style.top) || clientY,
     message: msg,
     messageIds,
+    style,
   }
   markMessengerPerformance('message-context-menu-open')
+
   nextTick(() => {
-    const root = typeof document !== 'undefined'
-      ? document.querySelector('.chat-view') || document.body
-      : null
-    if (root) {
-      recordMessengerDomSnapshot('message-context-menu-open', root, {
-        selectedUserId: selectedUserId.value,
-        messageCount: messages.value.length,
-      })
+    const runSnapshot = () => {
+      if (
+        snapshotVersion !== contextMenuSnapshotVersion
+        || !contextMenu.value.visible
+        || contextMenu.value.message?.id !== expectedMessageId
+      ) {
+        return
+      }
+
+      const root = typeof document !== 'undefined'
+        ? document.querySelector('.chat-view') || document.body
+        : null
+      if (root) {
+        recordMessengerDomSnapshot('message-context-menu-open', root, {
+          selectedUserId: selectedUserId.value,
+          messageCount: messages.value.length,
+        })
+      }
     }
+
+    const requestIdle = typeof window !== 'undefined'
+      ? (window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback
+      : undefined
+
+    if (requestIdle) {
+      requestIdle(runSnapshot, { timeout: 250 })
+      return
+    }
+
+    if (typeof window !== 'undefined') {
+      window.setTimeout(runSnapshot, 32)
+      return
+    }
+
+    runSnapshot()
   })
-};
+}
 
 function closeContextMenu() {
-  contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [] }
+  contextMenuSnapshotVersion += 1
+  contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [], style: null }
 }
 
 function closeCurrentOverlayThen(closeCurrent: () => void, openNext: () => void) {

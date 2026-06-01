@@ -170,6 +170,7 @@ vi.mock('../composables/chat/useChatScroll', async () => {
 })
 
 vi.mock('../composables/chat/useChatFileHandler', () => ({
+  canShareFiles: () => true,
   seedFileCache: chatViewMocks.seedFileCacheMock,
   ensureFileCached: chatViewMocks.ensureFileCachedMock,
   shareMultipleFiles: chatViewMocks.shareMultipleFilesMock,
@@ -178,6 +179,16 @@ vi.mock('../composables/chat/useChatFileHandler', () => ({
 
 vi.mock('../utils/messageReactions', () => ({
   MESSAGE_REACTION_CATALOG: ['🔥', '👍'],
+  buildQuickMessageReactions: (availableReactions: string[], currentUserReactionEmoji?: string) => {
+    if (!currentUserReactionEmoji) {
+      return availableReactions.slice(0, 6)
+    }
+
+    return [
+      currentUserReactionEmoji,
+      ...availableReactions.filter((emoji) => emoji !== currentUserReactionEmoji),
+    ].slice(0, 6)
+  },
   recordRecentMessageReaction: vi.fn(),
 }))
 

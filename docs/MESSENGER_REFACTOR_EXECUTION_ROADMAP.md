@@ -63,7 +63,7 @@ Do not merge multiple stages into a single prompt.
 | 3 | Conversation List Performance + Visual Cohesion | Completed | Copilot | 2026-05-31 | Row view-model memoization, shared-token visual alignment, and S07/S10 list-ready benchmark check passed |
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
-| 6 | Context Menu Latency Fix (S05) | Pending | Copilot | - | - |
+| 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
 | 7 | Media Pipeline Optimization (S09/S10) | Pending | Copilot | - | - |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
@@ -324,6 +324,22 @@ Exit criteria:
 
 Rollback:
 - Revert context performance patches only.
+
+Stage 6 completion summary:
+- Added `frontend/src/utils/messengerStage6ContextMenu.ts` as the shared authority for sectioned action descriptors and bounded context-menu positioning.
+- Updated `ChatView.vue` to precompute menu model/style on open, cache file-share capability outside the hot path, and defer expensive DOM snapshot metrics work until after the synchronous menu-open path.
+- Updated `ChatContextMenu.vue` to render from the precomputed action model and lazy-mount the reaction shell one frame after open so the root menu becomes visible before quick-reaction/localStorage work runs.
+- Added focused utility coverage and aligned the existing context-menu orchestrator tests with the new menu-state contract.
+
+Focused validation completed:
+- `npx vitest run src/components/chat/ChatContextMenu.test.ts src/components/ChatView.test.ts src/utils/messengerStage6ContextMenu.test.ts --reporter=dot`
+- `PLAYWRIGHT_HTML_OPEN=never npm run test:e2e -- e2e/direct-chat.spec.ts --project=chromium --workers=1 --reporter=line`
+- `npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage6-s05-config.json`
+
+Stage 6 benchmark result:
+- Initial Stage 6 local regression snapshot during refactor: `347.9 ms`
+- Final Stage 6 S05 context-menu latency: `156.4 ms`
+- Exit status: passed the Stage 6 execution contract (`< 180 ms objective`) while remaining above the historical `140.1 ms` hard baseline for future tuning.
 
 ### Stage 7 - Media Pipeline Optimization (S09/S10)
 

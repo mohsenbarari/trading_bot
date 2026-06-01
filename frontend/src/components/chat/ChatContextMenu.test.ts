@@ -9,6 +9,10 @@ vi.mock('../../utils/messageReactions', () => ({
   buildQuickMessageReactions: (availableReactions: string[]) => availableReactions.slice(0, 6),
 }))
 
+async function waitForReactionShell() {
+  await new Promise<void>((resolve) => setTimeout(() => resolve(), 25))
+}
+
 describe('ChatContextMenu.vue', () => {
   it('renders reaction and text actions, then emits reaction and copy events', async () => {
     const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
@@ -44,6 +48,8 @@ describe('ChatContextMenu.vue', () => {
         },
       },
     })
+
+    await waitForReactionShell()
 
     expect(wrapper.text()).toContain('کپی کردن')
     expect(wrapper.text()).toContain('سنجاق کردن پیام')
@@ -142,6 +148,8 @@ describe('ChatContextMenu.vue', () => {
       },
     })
 
+    await waitForReactionShell()
+
     expect(wrapper.find('.reaction-dropdown-toggle').exists()).toBe(true)
     expect(wrapper.find('.reaction-dropdown-list').exists()).toBe(false)
 
@@ -181,6 +189,7 @@ describe('ChatContextMenu.vue', () => {
         messageIds: [3],
       },
     })
+    await waitForReactionShell()
 
     expect(wrapper.find('.reaction-dropdown-list').exists()).toBe(false)
   })
