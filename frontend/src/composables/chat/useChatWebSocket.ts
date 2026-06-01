@@ -236,12 +236,63 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         return getConversationPreviewText(data?.message_type, data?.content)
     }
 
-    function applyNewMessageEvent(
+    function normalizeReactionList(reactions: any) {
+        return Array.isArray(reactions)
+            ? reactions
+                .map((reaction: any) => ({
+                    emoji: typeof reaction?.emoji === 'string' ? reaction.emoji : '',
+                    user_id: Number(reaction?.user_id),
+                }))
+                .filter((reaction: any) => reaction.emoji && Number.isFinite(reaction.user_id))
+            : []
+    }
+
+    function queueConversationPatch(
+        conversationPatches: Map<number, {
+            last_message_at?: string
+            last_message_type?: string
+            last_message_content?: string
+            unreadDelta: number
+            resetUnread: boolean
+        }>,
+        conversationKey: number,
+        patch: Partial<{
+            last_message_at: string
+            last_message_type: string
+            last_message_content: string
+            unreadDelta: number
+            resetUnread: boolean
+        }>
+    ) {
+        const currentPatch = conversationPatches.get(conversationKey) || {
+            unreadDelta: 0,
+            resetUnread: false,
+        }
+
+        conversationPatches.set(conversationKey, {
+            ...currentPatch,
+            ...patch,
+            unreadDelta: currentPatch.unreadDelta + (patch.unreadDelta || 0),
+            resetUnread: currentPatch.resetUnread || patch.resetUnread === true,
+        })
+    }
+
+    function collectNewMessageEvent(
         data: any,
         flushState: {
             shouldScrollToBottom: boolean
             shouldMarkAsRead: boolean
             shouldReloadSelectedMessages: boolean
+            appendedMessages: any[]
+            knownMessageIds: Set<number>
+            conversationPatches: Map<number, {
+                last_message_at?: string
+                last_message_type?: string
+                last_message_content?: string
+                unreadDelta: number
+                resetUnread: boolean
+            }>
+            shouldReloadConversations: boolean
         }
     ) {
         const senderId = Number(data?.sender_id)
@@ -254,10 +305,10 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null
 
         if (currentSelected !== null && arrivingConversationKey === currentSelected && data && typeof data.id === 'number') {
-            const list = messages.value
-            const alreadyExists = list.some((m: any) => m && m.id === data.id)
+            const alreadyExists = flushState.knownMessageIds.has(data.id)
             if (!alreadyExists) {
-                list.push(data)
+                flushState.knownMessageIds.add(data.id)
+                flushState.appendedMessages.push(data)
                 flushState.shouldScrollToBottom = flushState.shouldScrollToBottom || !!isUserAtBottom?.value
             }
             flushState.shouldMarkAsRead = true
@@ -269,67 +320,54 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         if (arrivingConversationKey !== null) {
             const conv = conversations.value.find((c: any) => c && c.other_user_id === arrivingConversationKey)
             if (conv) {
-                if (data?.created_at) conv.last_message_at = data.created_at
-                if (data?.message_type) conv.last_message_type = data.message_type
-                conv.last_message_content = getConversationPreviewContent(data)
-                if (!(currentSelected !== null && arrivingConversationKey === currentSelected)) {
-                    conv.unread_count = (conv.unread_count || 0) + 1
-                }
+                queueConversationPatch(flushState.conversationPatches, arrivingConversationKey, {
+                    last_message_at: data?.created_at,
+                    last_message_type: data?.message_type,
+                    last_message_content: getConversationPreviewContent(data),
+                    unreadDelta: !(currentSelected !== null && arrivingConversationKey === currentSelected) ? 1 : 0,
+                })
             } else {
                 shouldReloadConversations = true
             }
         }
 
         if (shouldReloadConversations) {
-            scheduleConversationsReload()
+            flushState.shouldReloadConversations = true
         }
     }
 
-    function applyReadEvent(data: any) {
+    function collectReadEvent(
+        data: any,
+        flushState: {
+            directReaderIdsToMark: Set<number>
+            conversationPatches: Map<number, {
+                last_message_at?: string
+                last_message_type?: string
+                last_message_content?: string
+                unreadDelta: number
+                resetUnread: boolean
+            }>
+        }
+    ) {
         const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
         if (roomConversationKey !== null) {
             const conversationKey = roomConversationKey
             if (selectedUserId.value === conversationKey) {
-                const conv = conversations.value.find((item: any) => item && item.other_user_id === conversationKey)
-                if (conv) {
-                    conv.unread_count = 0
-                }
+                queueConversationPatch(flushState.conversationPatches, conversationKey, { resetUnread: true })
             }
             return
         }
 
         if (selectedUserId.value && (data.reader_id === selectedUserId.value)) {
-            const readerId = Number(data.reader_id)
-            messages.value.forEach((m: any) => {
-                if (m && m.receiver_id === readerId && !m.is_read) {
-                    m.is_read = true
-                }
-            })
+            flushState.directReaderIdsToMark.add(Number(data.reader_id))
         }
     }
 
-    function applyReactionEvent(data: any) {
+    function collectReactionEvent(data: any, reactionUpdates: Map<number, any[]>) {
         if (!data || typeof data.id !== 'number') {
             return
         }
-
-        const messageIndex = messages.value.findIndex((message: any) => message && message.id === data.id)
-        if (messageIndex === -1) {
-            return
-        }
-
-        const existingMessage = messages.value[messageIndex]
-        messages.value[messageIndex] = {
-            ...existingMessage,
-            reactions: Array.isArray(data.reactions)
-                ? data.reactions
-                    .map((reaction: any) => ({
-                        emoji: typeof reaction?.emoji === 'string' ? reaction.emoji : '',
-                        user_id: Number(reaction?.user_id),
-                    }))
-                    .filter((reaction: any) => reaction.emoji && Number.isFinite(reaction.user_id))
-                : [],
-        }
+        reactionUpdates.set(data.id, normalizeReactionList(data.reactions))
     }
 
     function flushRealtimeEvents() {
@@ -344,18 +382,82 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             shouldScrollToBottom: false,
             shouldMarkAsRead: false,
             shouldReloadSelectedMessages: false,
+            appendedMessages: [] as any[],
+            knownMessageIds: new Set(messages.value.map((message: any) => message?.id).filter((id: any) => typeof id === 'number')),
+            conversationPatches: new Map<number, {
+                last_message_at?: string
+                last_message_type?: string
+                last_message_content?: string
+                unreadDelta: number
+                resetUnread: boolean
+            }>(),
+            directReaderIdsToMark: new Set<number>(),
+            reactionUpdates: new Map<number, any[]>(),
+            shouldReloadConversations: false,
         }
 
         for (const event of events) {
             if (event.kind === 'message') {
-                applyNewMessageEvent(event.data, flushState)
+                collectNewMessageEvent(event.data, flushState)
                 continue
             }
             if (event.kind === 'read') {
-                applyReadEvent(event.data)
+                collectReadEvent(event.data, flushState)
                 continue
             }
-            applyReactionEvent(event.data)
+            collectReactionEvent(event.data, flushState.reactionUpdates)
+        }
+
+        if (flushState.appendedMessages.length > 0) {
+            messages.value = [...messages.value, ...flushState.appendedMessages]
+        }
+
+        if (flushState.directReaderIdsToMark.size > 0 || flushState.reactionUpdates.size > 0) {
+            messages.value = messages.value.map((message: any) => {
+                if (!message) return message
+
+                let nextMessage = message
+                if (
+                    flushState.directReaderIdsToMark.size > 0
+                    && Number.isFinite(Number(message.receiver_id))
+                    && flushState.directReaderIdsToMark.has(Number(message.receiver_id))
+                    && !message.is_read
+                ) {
+                    nextMessage = { ...nextMessage, is_read: true }
+                }
+
+                const nextReactions = flushState.reactionUpdates.get(message.id)
+                if (nextReactions) {
+                    nextMessage = { ...nextMessage, reactions: nextReactions }
+                }
+
+                return nextMessage
+            })
+        }
+
+        if (flushState.conversationPatches.size > 0) {
+            conversations.value = conversations.value.map((conversation: any) => {
+                if (!conversation) return conversation
+                const conversationKey = Number(conversation.other_user_id)
+                const patch = flushState.conversationPatches.get(conversationKey)
+                if (!patch) return conversation
+
+                const nextUnreadCount = patch.resetUnread
+                    ? 0
+                    : Math.max(0, Number(conversation.unread_count || 0) + patch.unreadDelta)
+
+                return {
+                    ...conversation,
+                    last_message_at: patch.last_message_at ?? conversation.last_message_at,
+                    last_message_type: patch.last_message_type ?? conversation.last_message_type,
+                    last_message_content: patch.last_message_content ?? conversation.last_message_content,
+                    unread_count: nextUnreadCount,
+                }
+            })
+        }
+
+        if (flushState.shouldReloadConversations) {
+            scheduleConversationsReload()
         }
 
         const currentSelected = selectedUserId.value ? Number(selectedUserId.value) : null

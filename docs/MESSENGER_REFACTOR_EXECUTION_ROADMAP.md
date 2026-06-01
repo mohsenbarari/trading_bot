@@ -473,6 +473,10 @@ Stage 8 progress:
 - `frontend/src/stores/notifications.ts` now exposes batch helpers for unread counters, app notification ingestion, and toast creation so high-frequency realtime bursts can collapse into single store assignments while preserving optimistic history/delete behavior.
 - `frontend/src/composables/useNotificationRuntime.ts` now batches app/chat websocket notifications per microtask and falls back to the legacy single-item store API when a mock or older caller does not expose the new batch helpers.
 - `frontend/src/composables/chat/useChatWebSocket.ts` now coalesces `chat:message`, `chat:read`, and `chat:reaction` bursts per microtask, reducing repeated scroll/read follow-up work on active chats without changing typing/upload activity timing.
+- Stage 8 coalescing follow-up:
+	- App-notification flushes now suppress duplicate toast/browser fanout for the same notification id inside one microtask burst.
+	- Chat notification flushes now collapse same-conversation bursts to the newest toast/browser payload while still preserving unread and mention accumulation for the whole burst.
+	- `useChatWebSocket.ts` now applies message appends, read-receipt patches, reaction updates, and conversation preview/unread deltas as collected flush-time patches instead of mutating the reactive arrays once per event.
 - Focused validation: `npm run test:unit:run -- src/stores/notifications.test.ts src/composables/useNotificationRuntime.test.ts src/composables/chat/useChatWebSocket.test.ts`, `npm run build`.
 
 ### Stage 9 - UI System Enforcement Pass
