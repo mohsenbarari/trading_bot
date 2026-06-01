@@ -1,20 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MessengerLoadingScreen from './chat/MessengerLoadingScreen.vue'
-import ChatAlbumLayout from './chat/ChatAlbumLayout.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import ChatInputBar from './chat/ChatInputBar.vue'
 import ChatMessageItem from './chat/ChatMessageItem.vue'
-import ChatContextMenu from './chat/ChatContextMenu.vue'
-import ChatSearchGlobalList from './chat/ChatSearchGlobalList.vue'
 import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
-import ChatNewConversationModal from './chat/ChatNewConversationModal.vue'
-import ChatGroupManagerModal from './chat/ChatGroupManagerModal.vue'
-import CreateChannelView from './CreateChannelView.vue'
-import AdminBroadcastModal from './AdminBroadcastModal.vue'
-import AttachmentMenu from './chat/AttachmentMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -44,7 +36,7 @@ import { resolveConversationProfileTarget } from '../utils/accountantChatIdentit
 import { isAdminRole } from '../utils/currentUser'
 import { isUserOnline } from '../utils/userPresence'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
-import { recordMessengerDomSnapshot, recordMessengerMetric } from '../utils/messengerStage2Metrics'
+import { recordMessengerDomSnapshot, recordMessengerMetric, scheduleMessengerDiagnosticTask } from '../utils/messengerStage2Metrics'
 import {
   buildMessengerConversationQuery,
   clearMessengerTimelineCache,
@@ -75,6 +67,32 @@ import {
   buildMessengerContextMenuModel,
   getMessengerContextMenuStyle,
 } from '../utils/messengerStage6ContextMenu'
+
+const loadChatContextMenu = () => import('./chat/ChatContextMenu.vue')
+const loadChatSearchGlobalList = () => import('./chat/ChatSearchGlobalList.vue')
+
+const ChatContextMenu = defineAsyncComponent(loadChatContextMenu)
+const ChatSearchGlobalList = defineAsyncComponent(loadChatSearchGlobalList)
+const ChatNewConversationModal = defineAsyncComponent(() => import('./chat/ChatNewConversationModal.vue'))
+const ChatGroupManagerModal = defineAsyncComponent(() => import('./chat/ChatGroupManagerModal.vue'))
+const CreateChannelView = defineAsyncComponent(() => import('./CreateChannelView.vue'))
+const AdminBroadcastModal = defineAsyncComponent(() => import('./AdminBroadcastModal.vue'))
+const AttachmentMenu = defineAsyncComponent(() => import('./chat/AttachmentMenu.vue'))
+const ChatForwardModal = defineAsyncComponent(() => import('./chat/ChatForwardModal.vue'))
+const ChatLightbox = defineAsyncComponent(() => import('./chat/ChatLightbox.vue'))
+const ChatLocationModal = defineAsyncComponent(() => import('./chat/ChatLocationModal.vue'))
+const ChatSearchBottomBar = defineAsyncComponent(() => import('./chat/ChatSearchBottomBar.vue'))
+const keepInactiveMessengerSurfacesMounted = Boolean(import.meta.env.VITEST)
+
+let interactionChunksWarmed = false
+function warmMessengerInteractionChunks() {
+  if (interactionChunksWarmed) return
+  interactionChunksWarmed = true
+  scheduleMessengerDiagnosticTask(() => {
+    void loadChatContextMenu().catch(() => null)
+    void loadChatSearchGlobalList().catch(() => null)
+  }, { timeoutMs: 900, fallbackDelayMs: 160 })
+}
 
 // Props
 const props = defineProps<{
@@ -1481,6 +1499,7 @@ const selectConversation = (conv: Conversation) => {
   selectedUserId.value = conv.other_user_id
   selectedUserName.value = conv.other_user_name
   messagePanelError.value = ''
+  warmMessengerInteractionChunks()
   loadMessages(conv.other_user_id)
   pushBackState(() => {
     selectedUserId.value = null
@@ -1506,6 +1525,7 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
   selectedUserId.value = targetId
   selectedUserName.value = resolvedName
   messagePanelError.value = ''
+  warmMessengerInteractionChunks()
   void loadMessages(targetId)
   pushBackState(() => {
     selectedUserId.value = null
@@ -1533,6 +1553,7 @@ const startNewChat = (userId: number, userName: string) => {
   selectedUserId.value = userId
   selectedUserName.value = userName
   messagePanelError.value = ''
+  warmMessengerInteractionChunks()
   loadMessages(userId)
   pushBackState(() => {
     selectedUserId.value = null
@@ -3193,12 +3214,6 @@ defineExpose({
     handleTouchEnd,
   },
 })
-
-
-import ChatForwardModal from './chat/ChatForwardModal.vue'
-import ChatLightbox from './chat/ChatLightbox.vue'
-import ChatLocationModal from './chat/ChatLocationModal.vue'
-import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 </script>
 
 
@@ -3519,6 +3534,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
       <!-- Attachment Bottom Sheet -->
       <AttachmentMenu
+        v-if="showAttachmentMenu || keepInactiveMessengerSurfacesMounted"
         v-model="showAttachmentMenu"
         :allowLocation="selectedRoomKind === 'direct'"
         @select-media="handleAttachmentMediaSelection"
@@ -3528,6 +3544,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
       <!-- Forward Target Modal -->
       <ChatForwardModal
+        v-if="showForwardModal || keepInactiveMessengerSurfacesMounted"
         :showForwardModal="showForwardModal"
         :sortedConversations="sortedConversations"
         :includeChannels="true"
@@ -3538,6 +3555,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <!-- Context Menu -->
     <ChatContextMenu
+      v-if="contextMenu.visible || keepInactiveMessengerSurfacesMounted"
       :menuState="contextMenu"
       :isAlbumSelection="contextMenu.messageIds.length > 1"
       :currentUserId="props.currentUserId"
@@ -3562,6 +3580,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <!-- Lightbox Overlay -->
     <ChatLightbox 
+      v-if="lightboxMedia || keepInactiveMessengerSurfacesMounted"
       :lightboxMedia="lightboxMedia" 
       :currentUserId="props.currentUserId"
       @close="closeLightbox" 
@@ -3574,6 +3593,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <!-- Location Modal Overlay -->
     <ChatLocationModal
+      v-if="selectedLocation || keepInactiveMessengerSurfacesMounted"
       :location="selectedLocation"
       @close="closeLocationModal"
     />
@@ -3582,6 +3602,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
 
     <!-- New Conversation Search Modal (outside v-if/v-else chain so it's always available) -->
     <ChatNewConversationModal
+      v-if="showNewChatModal || keepInactiveMessengerSurfacesMounted"
       :show="showNewChatModal"
       :canStartDirectChat="canStartNewConversation"
       :canCreateGroup="canCreateGroup"
@@ -3591,6 +3612,7 @@ import ChatSearchBottomBar from './chat/ChatSearchBottomBar.vue'
     />
 
     <ChatGroupManagerModal
+      v-if="showGroupManagerModal || keepInactiveMessengerSurfacesMounted"
       :show="showGroupManagerModal"
       :groupId="groupManagerChatId"
       :currentUserId="props.currentUserId"

@@ -147,6 +147,10 @@ interface ServiceConfig {
     getAuthToken: () => string | null
 }
 
+interface InitChatUploadBackgroundOptions {
+    restoreStored?: boolean
+}
+
 interface AlbumBatchState {
     albumId: string
     userId: number
@@ -2358,7 +2362,10 @@ async function markFailed(upload: PendingUpload, errorMessage: string) {
 // Public API
 // -----------------------------------------------------------------------------
 
-export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
+export function initChatUploadBackground(
+    cfg: ServiceConfig,
+    options: InitChatUploadBackgroundOptions = {},
+): Promise<void> {
     config = cfg
 
     if (initialized) {
@@ -2371,6 +2378,9 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
 
     resumePromise = (async () => {
         try {
+            if (options.restoreStored === false) {
+                return
+            }
             await waitForNonCriticalResumeSlot()
             const stored = (await idbGetAll()).sort(comparePendingUploadsForTimeline)
             if (!stored.length) {
@@ -2378,6 +2388,9 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
             }
             for (const [index, record] of stored.entries()) {
                 await yieldUploadRestoreLoop(index)
+                if (pendingUploads.has(record.id)) {
+                    continue
+                }
                 // Reset transient XHR state; progress is preserved from last write
                 pendingUploads.set(record.id, record)
                 refreshUploadResumeHintFromState()
@@ -2461,7 +2474,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
     const serviceConfig = getOrCreateServiceConfig()
 
     if (!initialized) {
-        await initChatUploadBackground(serviceConfig)
+        void initChatUploadBackground(serviceConfig, { restoreStored: false })
     }
 
     const handoffStartMark = `upload-handoff-${params.optimisticId}-start`

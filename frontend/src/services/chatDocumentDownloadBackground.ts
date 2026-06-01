@@ -67,6 +67,10 @@ interface ServiceConfig {
     getAuthToken: () => string | null
 }
 
+interface InitChatDocumentDownloadBackgroundOptions {
+    restoreStored?: boolean
+}
+
 interface StartDocumentDownloadParams {
     messageId: number
     userId: number
@@ -531,7 +535,7 @@ export async function startDocumentDownload(params: StartDocumentDownloadParams)
     const serviceConfig = getOrCreateServiceConfig()
 
     if (!initialized) {
-        await initChatDocumentDownloadBackground(serviceConfig)
+        void initChatDocumentDownloadBackground(serviceConfig, { restoreStored: false })
     }
 
     const existing = pendingDownloads.get(params.messageId)
@@ -573,7 +577,10 @@ export async function startDocumentDownload(params: StartDocumentDownloadParams)
     enqueueDownload(download)
 }
 
-export function initChatDocumentDownloadBackground(cfg: ServiceConfig): Promise<void> {
+export function initChatDocumentDownloadBackground(
+    cfg: ServiceConfig,
+    options: InitChatDocumentDownloadBackgroundOptions = {},
+): Promise<void> {
     config = cfg
 
     if (initialized) {
@@ -583,6 +590,9 @@ export function initChatDocumentDownloadBackground(cfg: ServiceConfig): Promise<
 
     resumePromise = (async () => {
         try {
+            if (options.restoreStored === false) {
+                return
+            }
             await waitForNonCriticalResumeSlot()
             const stored = await idbGetAll()
             if (!stored.length) {
@@ -590,6 +600,9 @@ export function initChatDocumentDownloadBackground(cfg: ServiceConfig): Promise<
             }
             for (const [index, record] of stored.entries()) {
                 await yieldDocumentRestoreLoop(index)
+                if (pendingDownloads.has(record.messageId)) {
+                    continue
+                }
                 if (record.phase === 'completed' || record.phase === 'cancelled' || record.phase === 'failed') {
                     await deletePersistedDocumentDownload(record.messageId)
                     continue

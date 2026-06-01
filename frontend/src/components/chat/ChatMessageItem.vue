@@ -427,7 +427,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAudioStore } from '../../stores/audio'
 import type { Message, MessageReaction, RecoveryAction, UserMentionDetail } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
@@ -691,7 +691,11 @@ const docFileUrl = computed(() => {
   const token = localStorage.getItem('auth_token') || ''
   return `${baseUrl}/api/chat/files/${fileId}?token=${token}`
 })
-const isCachedDownloading = computed(() => Boolean(docFileId.value && cachedDownloadingFiles[docFileId.value!]))
+const documentIntentBusy = ref(false)
+const isCachedDownloading = computed(() => Boolean(
+  documentIntentBusy.value
+  || (docFileId.value && cachedDownloadingFiles[docFileId.value!]),
+))
 const documentTransferState = computed(() => getChatMessageTransferState({
   isSending: props.msg.is_sending,
   isDownloading: props.msg.is_downloading,
@@ -731,11 +735,15 @@ async function handleDocumentOpenClick() {
     emit('download', props.msg)
     return
   }
+  documentIntentBusy.value = true
+  await nextTick()
   try {
     await cachedFileClick(fileId, url, docFileName.value)
   } catch {
     // Fallback to legacy download path on any failure (network, quota, etc.).
     emit('download', props.msg)
+  } finally {
+    documentIntentBusy.value = false
   }
 }
 

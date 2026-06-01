@@ -130,6 +130,30 @@ describe('useChatFileHandler.ts', () => {
     expect(anchorClickSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('marks uncached files as downloading before IndexedDB cache lookup completes', async () => {
+    const fileHandler = await import('./useChatFileHandler')
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    let resolveCacheRead: ((value: unknown) => void) | null = null
+    localforageInstance.getItem.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveCacheRead = resolve
+    }))
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob(['remote'], { type: 'application/pdf' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const openPromise = fileHandler.handleFileClick('slow-cache', '/api/chat/files/slow-cache', 'slow.pdf')
+
+    expect(fileHandler.useChatFileHandler().downloadingFiles['slow-cache']).toBe(true)
+
+    resolveCacheRead?.(null)
+    await openPromise
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fileHandler.useChatFileHandler().downloadingFiles['slow-cache']).toBeUndefined()
+  })
+
   it('shares multiple cached files through the native share sheet payload', async () => {
     const fileHandler = await import('./useChatFileHandler')
     const shareMock = navigator.share as ReturnType<typeof vi.fn>

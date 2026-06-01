@@ -92,6 +92,17 @@ function readMemoryEntry(fileId: string): CachedFileEntry | null {
     return memoryCache.get(fileId) || null
 }
 
+function beginVisibleCacheLoad(fileId: string): () => void {
+    if (!fileId || memoryCache.has(fileId) || cachedFileIds[fileId]) {
+        return () => {}
+    }
+
+    downloadingFiles[fileId] = true
+    return () => {
+        delete downloadingFiles[fileId]
+    }
+}
+
 function revokeCachedObjectUrl(fileId: string): void {
     const existingUrl = cachedObjectUrls.get(fileId)
     if (!existingUrl) return
@@ -489,6 +500,7 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
         return
     }
 
+    const endVisibleCacheLoad = beginVisibleCacheLoad(fileId)
     try {
         const entry = await ensureFileCached(fileId, fileName, { fileUrl })
         if (!entry) throw new Error('File unavailable')
@@ -496,6 +508,8 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
     } catch (err) {
         console.error('[useChatFileHandler] file download failed', err)
         throw err
+    } finally {
+        endVisibleCacheLoad()
     }
 }
 
@@ -504,9 +518,14 @@ export async function handleFileClick(fileId: string, fileUrl: string, fileName:
  */
 export async function downloadFileToDisk(fileId: string, fileUrl: string, fileName: string): Promise<void> {
     if (!fileId) return
-    const entry = await ensureFileCached(fileId, fileName, { fileUrl })
-    if (!entry) return
-    await presentCachedFile(entry, entry.fileName, 'download')
+    const endVisibleCacheLoad = beginVisibleCacheLoad(fileId)
+    try {
+        const entry = await ensureFileCached(fileId, fileName, { fileUrl })
+        if (!entry) return
+        await presentCachedFile(entry, entry.fileName, 'download')
+    } finally {
+        endVisibleCacheLoad()
+    }
 }
 
 /**
@@ -531,11 +550,14 @@ export async function shareFile(fileId: string, fileName: string, mimeType: stri
     }
 
     let entry: CachedFileEntry | null = null
+    const endVisibleCacheLoad = fileUrl ? beginVisibleCacheLoad(fileId) : () => {}
     try {
         entry = await ensureFileCached(fileId, fileName, { fileUrl, mimeType })
     } catch (err) {
         console.warn('[useChatFileHandler] share pre-fetch failed', err)
         return false
+    } finally {
+        endVisibleCacheLoad()
     }
     if (!entry) return false
 

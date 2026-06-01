@@ -550,6 +550,25 @@ describe('ChatMessageItem.vue', () => {
     expect(chatMessageItemMocks.handleFileClickMock).toHaveBeenCalledTimes(2)
   })
 
+  it('shows document busy state before the shared file handler settles', async () => {
+    let resolveOpen: (() => void) | null = null
+    chatMessageItemMocks.handleFileClickMock.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveOpen = resolve
+    }))
+    const wrapper = mountDocumentMessage()
+
+    await wrapper.get('.msg-document').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.msg-document').classes()).toContain('is-busy')
+    expect(wrapper.find('.doc-icon.doc-uploading').exists()).toBe(true)
+
+    resolveOpen?.()
+    await flushPromises()
+
+    expect(wrapper.find('.msg-document').classes()).not.toContain('is-busy')
+  })
+
   it('formats document variants, busy progress text, and missing file ids', async () => {
     const noExtensionWrapper = mountDocumentMessage({
       content: JSON.stringify({ file_id: 'doc-json', file_name: 'payload', mime_type: 'application/json', size: 4096 }),
