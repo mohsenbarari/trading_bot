@@ -1,80 +1,78 @@
 <template>
   <Teleport to="body">
     <!-- Radix-based accessible context menu overlay -->
-    <Transition name="zoom-fade">
-      <div
-        v-if="menuState.visible"
-        class="context-menu"
-        :class="{ 'has-reactions': showReactionRow }"
-        :style="menuStyle"
-        role="menu"
-        aria-label="Message actions"
-      >
-        <div v-if="showReactionRow" class="reaction-picker-shell telegram-panel telegram-menu-shadow">
-          <div class="reaction-top-grid">
+    <div
+      v-if="menuState.visible"
+      class="context-menu"
+      :class="{ 'has-reactions': showReactionRow }"
+      :style="menuStyle"
+      role="menu"
+      aria-label="Message actions"
+    >
+      <div v-if="showReactionRow" class="reaction-picker-shell telegram-panel telegram-menu-shadow">
+        <div class="reaction-top-grid">
+          <button
+            v-for="emoji in quickReactions"
+            :key="emoji"
+            type="button"
+            class="reaction-btn"
+            :class="{ 'is-active': emoji === currentUserReactionEmoji }"
+            @click.stop="$emit('react', emoji)"
+          >
+            {{ emoji }}
+          </button>
+        </div>
+        <button
+          v-if="hasOverflowReactions"
+          type="button"
+          class="reaction-dropdown-toggle"
+          :class="{ 'is-open': isReactionPickerExpanded }"
+          @click.stop="isReactionPickerExpanded = !isReactionPickerExpanded"
+        >
+          <span>واکنش‌های بیشتر</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <Transition name="reaction-dropdown">
+          <div v-if="isReactionPickerExpanded" class="reaction-dropdown-list">
             <button
-              v-for="emoji in quickReactions"
+              v-for="emoji in overflowReactions"
               :key="emoji"
               type="button"
-              class="reaction-btn"
+              class="reaction-btn is-secondary"
               :class="{ 'is-active': emoji === currentUserReactionEmoji }"
               @click.stop="$emit('react', emoji)"
             >
               {{ emoji }}
             </button>
           </div>
-          <button
-            v-if="hasOverflowReactions"
-            type="button"
-            class="reaction-dropdown-toggle"
-            :class="{ 'is-open': isReactionPickerExpanded }"
-            @click.stop="isReactionPickerExpanded = !isReactionPickerExpanded"
-          >
-            <span>واکنش‌های بیشتر</span>
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-          <Transition name="reaction-dropdown">
-            <div v-if="isReactionPickerExpanded" class="reaction-dropdown-list">
-              <button
-                v-for="emoji in overflowReactions"
-                :key="emoji"
-                type="button"
-                class="reaction-btn is-secondary"
-                :class="{ 'is-active': emoji === currentUserReactionEmoji }"
-                @click.stop="$emit('react', emoji)"
-              >
-                {{ emoji }}
-              </button>
-            </div>
-          </Transition>
-        </div>
-        <div class="menu-actions-panel telegram-panel telegram-menu-shadow">
-          <template v-for="(section, sectionIndex) in menuModel.sections" :key="section.key">
-            <div v-if="sectionIndex > 0" class="menu-divider"></div>
-            <div class="menu-section-label" :class="{ 'is-danger': section.tone === 'danger' }">
-              {{ section.label }}
-            </div>
-            <div
-              v-for="item in section.items"
-              :key="item.key"
-              class="menu-item"
-              :class="{
-                'is-warning': item.tone === 'warning',
-                'is-danger': item.tone === 'danger',
-              }"
-              v-ripple
-              role="menuitem"
-              @click="emitAction(item.key)"
-            >
-              <span class="menu-item-icon" aria-hidden="true" v-html="ACTION_ICON_SVG[item.key]"></span>
-              <span class="menu-item-label">{{ item.label }}</span>
-            </div>
-          </template>
-        </div>
+        </Transition>
       </div>
-    </Transition>
+      <div class="menu-actions-panel telegram-panel telegram-menu-shadow">
+        <template v-for="(section, sectionIndex) in menuModel.sections" :key="section.key">
+          <div v-if="sectionIndex > 0" class="menu-divider"></div>
+          <div class="menu-section-label" :class="{ 'is-danger': section.tone === 'danger' }">
+            {{ section.label }}
+          </div>
+          <div
+            v-for="item in section.items"
+            :key="item.key"
+            class="menu-item"
+            :class="{
+              'is-warning': item.tone === 'warning',
+              'is-danger': item.tone === 'danger',
+            }"
+            v-ripple
+            role="menuitem"
+            @click="emitAction(item.key)"
+          >
+            <span class="menu-item-icon" aria-hidden="true" v-html="ACTION_ICON_SVG[item.key]"></span>
+            <span class="menu-item-label">{{ item.label }}</span>
+          </div>
+        </template>
+      </div>
+    </div>
 
     <!-- Click outside to close -->
     <div v-if="menuState.visible" class="context-overlay" @click="$emit('close')"></div>
@@ -272,12 +270,12 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   overflow-x: hidden;
   overflow-y: auto;
   max-height: calc(100vh - 16px);
-  backdrop-filter: blur(16px);
-  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #fff;
 }
 
 .telegram-menu-shadow {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12), 0 1px 4px rgba(15, 23, 42, 0.08);
   transform-origin: top left;
 }
 

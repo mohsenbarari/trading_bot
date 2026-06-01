@@ -59,6 +59,10 @@ vi.mock('../../composables/chat/useChatFileHandler', async () => {
 
 let nextPlayShouldReject = false
 
+function flushDocumentDownloadEmit() {
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
+
 class FakeAudio extends EventTarget {
   static instances: FakeAudio[] = []
   src: string
@@ -526,6 +530,7 @@ describe('ChatMessageItem.vue', () => {
     expect(chatMessageItemMocks.prewarmFileCacheMock).toHaveBeenCalledWith('doc-91')
 
     await wrapper.get('.msg-document').trigger('click')
+    await flushDocumentDownloadEmit()
     await flushPromises()
     expect(wrapper.emitted('download')).toHaveLength(1)
     expect(chatMessageItemMocks.handleFileClickMock).not.toHaveBeenCalled()

@@ -416,7 +416,6 @@ async function runDownload(download: PendingDocumentDownload) {
             triggerBrowserDownload(objectUrl, download.fileName)
             await cacheCompletedDocumentDownload(download, blob, contentType)
             pendingDownloads.delete(download.messageId)
-            await deletePersistedDocumentDownload(download.messageId)
             emit({
                 type: 'completed',
                 userId: download.userId,
@@ -425,6 +424,7 @@ async function runDownload(download: PendingDocumentDownload) {
                 objectUrl,
                 fileName: download.fileName,
             })
+            deletePersistedDocumentDownloadSoon(download.messageId)
             return
         }
 
@@ -462,7 +462,6 @@ async function runDownload(download: PendingDocumentDownload) {
         triggerBrowserDownload(objectUrl, download.fileName)
         await cacheCompletedDocumentDownload(download, blob, contentType)
         pendingDownloads.delete(download.messageId)
-        await deletePersistedDocumentDownload(download.messageId)
         emit({
             type: 'completed',
             userId: download.userId,
@@ -471,6 +470,7 @@ async function runDownload(download: PendingDocumentDownload) {
             objectUrl,
             fileName: download.fileName,
         })
+        deletePersistedDocumentDownloadSoon(download.messageId)
     } catch (error) {
         if (abortFlags.has(download.messageId)) {
             pendingDownloads.delete(download.messageId)

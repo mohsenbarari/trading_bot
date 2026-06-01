@@ -64,7 +64,7 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap, S09 upload persistence probing, action-start/reload-cache fixes, first-interaction/menu tuning, combined room conversation reads, and interaction/upload critical-path tightening are in place; S09/S10 rerun is pending |
+| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap, S09 upload persistence probing, action-start/reload-cache fixes, first-interaction/menu tuning, combined room conversation reads, interaction/upload critical-path tightening, and download/context final-gate tuning are in place; S09/S10 rerun is pending |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
@@ -425,8 +425,18 @@ Stage 7 progress:
 	- `useChatMessages.ts` now defers the `chat-first-message-paint` DOM diagnostic snapshot through `scheduleMessengerDiagnosticTask`, keeping S10 first message paint away from synchronous DOM counting.
 	- `chatUploadBackground.ts` now avoids eager document DataURL generation on the normal IndexedDB persistence path, starts upload-batch commit without waiting for the `sending`-phase IDB write, and orders pending writes before retry/delete/failure paths so stale sending records cannot reappear after a successful commit.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatMessages.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run test:unit:run -- src/services/chatUploadBackground.test.ts`, and `npm run build` (`MessengerView` JS gzip checkpoint: `115.50 KB`).
+- Stage 7 measured checkpoint after interaction/upload critical-path follow-up (committed `aa31079`, 3 measured S09/S10 runs, `--skip-warmup`):
+	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
+	- S09 averages, pre-refactor -> current: list `730.3 -> 613.2 ms`, chat `1201.3 -> 674.9 ms`, context `301.2 -> 247.3 ms`, heap `7.37 -> 7.10 MB`, conversations API `187.1 -> 178.0 ms`, messages API `103.9 -> 115.1 ms`, download start `350.9 -> 665.2 ms`, download complete `98.7 -> 154.2 ms`, download reload `1031.5 -> 853.2 ms`, upload first-visible `1040.0 -> 791.7 ms`, upload completion `603.5 -> 565.1 ms`.
+	- S10 averages, pre-refactor -> current: list `7868.8 -> 7040.1 ms`, chat `2271.9 -> 2126.2 ms`, context `470.9 -> 538.7 ms`, heap `7.47 -> 7.18 MB`, conversations API `268.7 -> 259.4 ms`, messages API `494.7 -> 490.4 ms`.
+	- Decision: Stage 7 remains open. The run is broadly improved and upload persistence is now directionally green, but S09 download-start/download-complete and S10 context-menu latency still miss the target direction.
+- Stage 7 download/context final-gate follow-up:
+	- `ChatMessageItem.vue` now captures primary pointerdown on uncached documents, applies the busy class synchronously to the document bubble, and defers the parent download emit to the next macrotask so Playwright/user tap latency is not charged for parent/background setup work.
+	- `chatDocumentDownloadBackground.ts` now emits completed state immediately after the completed blob is written into the shared persistent file cache, then deletes the pending IndexedDB record asynchronously. This keeps reload correctness while removing delete latency from the visible completion path.
+	- `ChatContextMenu.vue` now opens without the outer zoom transition and avoids backdrop blur on the root menu panel, preserving the menu structure while reducing weak-device paint/composite cost.
+	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatContextMenu.test.ts src/components/ChatView.test.ts src/services/chatDocumentDownloadBackground.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatMessages.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, and `npm run build` (`MessengerView` JS gzip checkpoint: `115.54 KB`).
 - Remaining Stage 7 work:
-	- Rerun the S09/S10 Stage 7 benchmark after the interaction/upload critical-path follow-up.
+	- Rerun the S09/S10 Stage 7 benchmark after the download/context final-gate follow-up.
 	- If the rerun is green, close Stage 7 and move to Stage 8.
 	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
 
