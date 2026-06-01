@@ -2,11 +2,11 @@
   <Teleport to="body">
     <!-- Radix-based accessible context menu overlay -->
     <Transition name="zoom-fade">
-      <div 
-        v-if="menuState.visible" 
+      <div
+        v-if="menuState.visible"
         class="context-menu"
         :class="{ 'has-reactions': showReactionRow }"
-        :style="menuPosition"
+        :style="menuStyle"
         role="menu"
         aria-label="Message actions"
       >
@@ -51,107 +51,31 @@
           </Transition>
         </div>
         <div class="menu-actions-panel telegram-panel telegram-menu-shadow">
-          <div class="menu-section-label">اقدام اصلی</div>
-          <div class="menu-item" v-ripple @click="$emit('reply')" role="menuitem">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
-            <span style="flex:1;">پاسخ</span>
-          </div>
-          <div class="menu-item" v-ripple @click="$emit('forward')" role="menuitem">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>
-            <span style="flex:1;">{{ isAlbumSelection ? 'هدایت آلبوم' : 'هدایت پیام' }}</span>
-          </div>
-
-          <template v-if="hasRoomFileSection">
-            <div class="menu-divider"></div>
-            <div class="menu-section-label">رسانه و فایل</div>
-            <template v-if="isAlbumSelection">
-              <div class="menu-item" v-ripple @click="$emit('save-album')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span style="flex:1;">دانلود آلبوم</span>
-              </div>
-              <div v-if="supportsFileShare" class="menu-item" v-ripple @click="$emit('share-album')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="18" cy="5" r="3"></circle>
-                  <circle cx="6" cy="12" r="3"></circle>
-                  <circle cx="18" cy="19" r="3"></circle>
-                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-                </svg>
-                <span style="flex:1;">اشتراک‌گذاری آلبوم</span>
-              </div>
-            </template>
-
-            <template v-if="!isAlbumSelection && (menuState.message?.message_type === 'image' || menuState.message?.message_type === 'video')">
-              <div class="menu-item" v-ripple @click="$emit('save-media')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span style="flex:1;">ذخیره در گالری</span>
-              </div>
-            </template>
-
-            <template v-if="supportsFileShare && !isAlbumSelection && shareableType">
-              <div class="menu-item" v-ripple @click="$emit('share')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="18" cy="5" r="3"></circle>
-                  <circle cx="6" cy="12" r="3"></circle>
-                  <circle cx="18" cy="19" r="3"></circle>
-                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-                </svg>
-                <span style="flex:1;">اشتراک‌گذاری</span>
-              </div>
-            </template>
-          </template>
-
-          <template v-if="hasCommunicationSection">
-            <div class="menu-divider"></div>
-            <div class="menu-section-label">ارتباط و پیام</div>
-            <template v-if="menuState.message?.message_type === 'text'">
-              <div class="menu-item" v-ripple @click="$emit('copy')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-                <span style="flex:1;">کپی کردن</span>
-              </div>
-            </template>
-            <template v-if="canEdit">
-              <div class="menu-item" v-ripple @click="$emit('edit')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-                <span style="flex:1;">ویرایش</span>
-              </div>
-            </template>
-            <template v-if="canPin && !isAlbumSelection">
-              <div class="menu-item is-warning" v-ripple @click="$emit('pin-message')" role="menuitem">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 17v5"></path>
-                  <path d="M5 7V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path>
-                  <path d="M4 7h16l-3 6H7z"></path>
-                </svg>
-                <span style="flex:1;">{{ isPinnedMessage ? 'برداشتن پیام سنجاق‌شده' : 'سنجاق کردن پیام' }}</span>
-              </div>
-            </template>
-          </template>
-
-          <template v-if="canDelete">
-            <div class="menu-divider"></div>
-            <div class="menu-section-label is-danger">اقدام حساس</div>
-            <div class="menu-item is-danger" v-ripple @click="$emit('delete')" role="menuitem">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-              <span style="flex:1;">حذف</span>
+          <template v-for="(section, sectionIndex) in menuModel.sections" :key="section.key">
+            <div v-if="sectionIndex > 0" class="menu-divider"></div>
+            <div class="menu-section-label" :class="{ 'is-danger': section.tone === 'danger' }">
+              {{ section.label }}
+            </div>
+            <div
+              v-for="item in section.items"
+              :key="item.key"
+              class="menu-item"
+              :class="{
+                'is-warning': item.tone === 'warning',
+                'is-danger': item.tone === 'danger',
+              }"
+              v-ripple
+              role="menuitem"
+              @click="emitAction(item.key)"
+            >
+              <span class="menu-item-icon" aria-hidden="true" v-html="ACTION_ICON_SVG[item.key]"></span>
+              <span class="menu-item-label">{{ item.label }}</span>
             </div>
           </template>
         </div>
       </div>
     </Transition>
-    
+
     <!-- Click outside to close -->
     <div v-if="menuState.visible" class="context-overlay" @click="$emit('close')"></div>
   </Teleport>
@@ -161,8 +85,26 @@
 import { computed, ref, watch } from 'vue'
 import { canShareFiles } from '../../composables/chat/useChatFileHandler'
 import { buildQuickMessageReactions } from '../../utils/messageReactions'
+import {
+  buildMessengerContextMenuModel,
+  getMessengerContextMenuStyle,
+  type MessengerContextMenuActionKey,
+} from '../../utils/messengerStage6ContextMenu'
 
 const supportsFileShare = canShareFiles()
+
+const ACTION_ICON_SVG: Record<MessengerContextMenuActionKey, string> = {
+  reply: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>',
+  forward: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline><path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></svg>',
+  'save-media': '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
+  'save-album': '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
+  share: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>',
+  'share-album': '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
+  edit: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>',
+  'pin-message': '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"></path><path d="M5 7V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M4 7h16l-3 6H7z"></path></svg>',
+  delete: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>',
+}
 
 const props = defineProps<{
   menuState: {
@@ -171,6 +113,7 @@ const props = defineProps<{
     visible: boolean
     message: any | null
     messageIds?: number[]
+    style?: Record<string, string> | null
   }
   isAlbumSelection: boolean
   currentUserId: number | null
@@ -181,7 +124,7 @@ const props = defineProps<{
   availableReactions: string[]
 }>()
 
-const _emit = defineEmits<{
+const emit = defineEmits<{
   (e: 'react', emoji: string): void
   (e: 'reply'): void
   (e: 'forward'): void
@@ -196,26 +139,12 @@ const _emit = defineEmits<{
   (e: 'share-album'): void
 }>()
 
-const shareableType = computed(() => {
-  const t = props.menuState.message?.message_type
-  return t === 'image' || t === 'video' || t === 'voice' || t === 'document'
-})
-
-const hasRoomFileSection = computed(() => {
-  if (props.isAlbumSelection) return true
-  if (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video') return true
-  return Boolean(supportsFileShare && !props.isAlbumSelection && shareableType.value)
-})
-
-const hasCommunicationSection = computed(() => {
-  return Boolean(props.menuState.message?.message_type === 'text' || props.canEdit || (props.canPin && !props.isAlbumSelection))
-})
-
 const currentUserReactionEmoji = computed(() => {
   const reactions = Array.isArray(props.menuState.message?.reactions) ? props.menuState.message.reactions : []
   const match = reactions.find((reaction: any) => Number(reaction?.user_id) === Number(props.currentUserId))
   return typeof match?.emoji === 'string' ? match.emoji : ''
 })
+const isReactionRowMounted = ref(false)
 const isReactionPickerExpanded = ref(false)
 const quickReactions = computed(() => buildQuickMessageReactions(props.availableReactions, currentUserReactionEmoji.value))
 const overflowReactions = computed(() => {
@@ -224,8 +153,38 @@ const overflowReactions = computed(() => {
 })
 const hasOverflowReactions = computed(() => overflowReactions.value.length > 0)
 
-const showReactionRow = computed(() => {
+const canShowReactionRow = computed(() => {
   return Boolean(props.menuState.message && !props.menuState.message?.is_deleted && props.availableReactions.length > 0)
+})
+
+const showReactionRow = computed(() => canShowReactionRow.value && isReactionRowMounted.value)
+
+const menuModel = computed(() => buildMessengerContextMenuModel({
+  messageType: props.menuState.message?.message_type,
+  isAlbumSelection: props.isAlbumSelection,
+  supportsFileShare,
+  canEdit: props.canEdit,
+  canDelete: props.canDelete,
+  canPin: props.canPin,
+  isPinnedMessage: props.isPinnedMessage,
+  showReactionRow: showReactionRow.value,
+  hasOverflowReactions: hasOverflowReactions.value,
+  isReactionPickerExpanded: isReactionPickerExpanded.value,
+}))
+
+const menuStyle = computed(() => {
+  if (props.menuState.style) {
+    return props.menuState.style
+  }
+
+  return getMessengerContextMenuStyle({
+    x: props.menuState.x,
+    y: props.menuState.y,
+    menuWidth: menuModel.value.menuWidth,
+    menuHeight: menuModel.value.menuHeight,
+    viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 400,
+    viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+  })
 })
 
 watch(
@@ -233,61 +192,62 @@ watch(
   (visible) => {
     if (!visible) {
       isReactionPickerExpanded.value = false
+      isReactionRowMounted.value = false
+      return
     }
+
+    const mountReactionRow = () => {
+      if (props.menuState.visible && canShowReactionRow.value) {
+        isReactionRowMounted.value = true
+      }
+    }
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        mountReactionRow()
+      })
+      return
+    }
+
+    mountReactionRow()
   },
+  { immediate: true },
 )
 
-// Smart positioning: keep menu within viewport bounds
-const menuPosition = computed(() => {
-  const reactionPanelW = 296
-  const actionPanelW = 220
-  const actionCount = [
-    true,
-    true,
-    hasRoomFileSection.value && props.isAlbumSelection,
-    hasRoomFileSection.value && props.isAlbumSelection && supportsFileShare,
-    props.menuState.message?.message_type === 'text',
-    hasRoomFileSection.value && !props.isAlbumSelection && (props.menuState.message?.message_type === 'image' || props.menuState.message?.message_type === 'video'),
-    hasRoomFileSection.value && supportsFileShare && !props.isAlbumSelection && shareableType.value,
-    props.canEdit,
-    hasCommunicationSection.value && props.canPin && !props.isAlbumSelection,
-    props.canDelete,
-  ].filter(Boolean).length
-  const sectionCount = 1
-    + (hasRoomFileSection.value ? 1 : 0)
-    + (hasCommunicationSection.value ? 1 : 0)
-    + (props.canDelete ? 1 : 0)
-  const dividerCount = Math.max(sectionCount - 1, 0)
-  const menuW = showReactionRow.value ? reactionPanelW : actionPanelW
-  const actionPanelH = actionCount * 44 + sectionCount * 22 + dividerCount * 9 + 16
-  const reactionSectionHeight = showReactionRow.value
-    ? hasOverflowReactions.value
-      ? (isReactionPickerExpanded.value ? 232 : 102)
-      : 72
-    : 0
-  const vw = typeof window !== 'undefined' ? window.innerWidth : 400
-  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-  const boundedMenuW = Math.min(menuW, vw - 16)
-  const menuH = actionPanelH + (showReactionRow.value ? reactionSectionHeight + 6 : 0)
-  
-  let x = props.menuState.x
-  let y = props.menuState.y
-  
-  // Prevent overflow right
-  if (x + boundedMenuW > vw - 8) x = vw - boundedMenuW - 8
-  // Prevent overflow left
-  if (x < 8) x = 8
-  // Prevent overflow bottom
-  if (y + menuH > vh - 8) y = vh - menuH - 8
-  // Prevent overflow top
-  if (y < 8) y = 8
-  
-  return {
-    top: y + 'px',
-    left: x + 'px',
-    width: boundedMenuW + 'px'
+function emitAction(actionKey: MessengerContextMenuActionKey) {
+  switch (actionKey) {
+    case 'reply':
+      emit('reply')
+      return
+    case 'forward':
+      emit('forward')
+      return
+    case 'save-media':
+      emit('save-media')
+      return
+    case 'save-album':
+      emit('save-album')
+      return
+    case 'share':
+      emit('share')
+      return
+    case 'share-album':
+      emit('share-album')
+      return
+    case 'copy':
+      emit('copy')
+      return
+    case 'edit':
+      emit('edit')
+      return
+    case 'pin-message':
+      emit('pin-message')
+      return
+    case 'delete':
+      emit('delete')
+      return
   }
-})
+}
 </script>
 
 <style scoped>
@@ -344,6 +304,16 @@ const menuPosition = computed(() => {
   font-size: 14px;
   color: #111827;
   transition: background 0.1s;
+}
+
+.menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-item-label {
+  flex: 1;
 }
 
 .menu-item:active {
