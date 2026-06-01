@@ -2,6 +2,7 @@ import {
     hasPendingDocumentDownloadResumeHint as hasStoredDocumentDownloadResumeHint,
     setDocumentDownloadResumeHint,
 } from './chatTransferResumeHints'
+import { seedFileCache } from '../composables/chat/useChatFileHandler'
 
 export type DocumentDownloadPhase = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
 
@@ -222,6 +223,18 @@ function triggerBrowserDownload(url: string, fileName: string) {
     document.body.removeChild(anchor)
 }
 
+async function cacheCompletedDocumentDownload(
+    download: PendingDocumentDownload,
+    blob: Blob,
+    mimeType: string,
+): Promise<void> {
+    try {
+        await seedFileCache(download.fileId, blob, download.fileName, mimeType || download.mimeType)
+    } catch (error) {
+        console.warn('[documentDownloadService] completed cache write failed:', error)
+    }
+}
+
 function isTransientDownloadError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error)
     if (!message) return false
@@ -401,6 +414,7 @@ async function runDownload(download: PendingDocumentDownload) {
             }
             completedDownloadUrls.set(download.fileId, objectUrl)
             triggerBrowserDownload(objectUrl, download.fileName)
+            await cacheCompletedDocumentDownload(download, blob, contentType)
             pendingDownloads.delete(download.messageId)
             await deletePersistedDocumentDownload(download.messageId)
             emit({
@@ -446,6 +460,7 @@ async function runDownload(download: PendingDocumentDownload) {
         }
         completedDownloadUrls.set(download.fileId, objectUrl)
         triggerBrowserDownload(objectUrl, download.fileName)
+        await cacheCompletedDocumentDownload(download, blob, contentType)
         pendingDownloads.delete(download.messageId)
         await deletePersistedDocumentDownload(download.messageId)
         emit({

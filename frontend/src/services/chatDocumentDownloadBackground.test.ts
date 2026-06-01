@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const documentDownloadMocks = vi.hoisted(() => ({
+  seedFileCache: vi.fn(async () => {}),
+}))
+
+vi.mock('../composables/chat/useChatFileHandler', () => ({
+  seedFileCache: documentDownloadMocks.seedFileCache,
+}))
+
 type IndexedDbRecord = Record<string, any>
 
 class AbortAwareResponse {
@@ -195,6 +203,7 @@ describe('chatDocumentDownloadBackground', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     localStorage.clear()
+    documentDownloadMocks.seedFileCache.mockClear()
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('indexedDB', {
@@ -254,6 +263,12 @@ describe('chatDocumentDownloadBackground', () => {
 
     expect(events.map((event) => event.type)).toEqual(['added', 'completed'])
     expect(service.getCompletedDocumentDownloadUrl('file-10')).toBe('blob:downloaded-doc')
+    expect(documentDownloadMocks.seedFileCache).toHaveBeenCalledWith(
+      'file-10',
+      expect.any(Blob),
+      'doc.pdf',
+      'application/pdf',
+    )
     expect(service.getPendingDocumentDownloadsForUser(7)).toEqual([])
     expect(fetchMock).toHaveBeenCalledWith('https://coin.test/api/chat/files/file-10?token=jwt', expect.any(Object))
 
@@ -402,6 +417,12 @@ describe('chatDocumentDownloadBackground', () => {
     expect(events.some((event) => event.type === 'progress' && event.progress === 50)).toBe(true)
     expect(events.some((event) => event.type === 'progress' && event.progress === 100)).toBe(true)
     expect(events.some((event) => event.type === 'completed' && event.messageId === 14)).toBe(true)
+    expect(documentDownloadMocks.seedFileCache).toHaveBeenCalledWith(
+      'file-14',
+      expect.any(Blob),
+      'retry.pdf',
+      'application/pdf',
+    )
   })
 
   it('resumes queued downloads from indexeddb, cleans terminal records, and reuses the initialized resume promise', async () => {
