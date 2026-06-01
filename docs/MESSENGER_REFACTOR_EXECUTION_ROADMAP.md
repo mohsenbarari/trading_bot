@@ -67,7 +67,7 @@ Do not merge multiple stages into a single prompt.
 | 7 | Media Pipeline Optimization (S09/S10) | Completed | Copilot | 2026-06-01 | Corrected benchmark timing confirmed S09/S10 list/chat gains versus the old baseline; Stage 7 closed and handed off to Stage 8 |
 | 8 | Realtime/Notification Coalescing (S07) | Completed | Copilot | 2026-06-01 | S07 benchmark passed the list/chat exit gate after realtime/notification coalescing; unread refresh also improved |
 | 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
-| 10 | Group/Channel/Direct Manager Standardization | In Progress | Copilot | 2026-06-01 | Entered after Stage 9 closure; manager IA and role-aware action placement audit is next |
+| 10 | Group/Channel/Direct Manager Standardization | In Progress | Copilot | 2026-06-01 | First manager IA slice applied to group/channel overview surfaces with role strips, grouped actions, and focused unit/build validation |
 | 11 | Weak-Device and Motion Final Pass | Pending | Copilot | - | - |
 | 12 | Final Benchmark + Release Closure | Pending | Copilot | - | - |
 
@@ -536,6 +536,12 @@ Exit criteria:
 
 Rollback:
 - Revert manager-specific view changes.
+
+Stage 10 progress:
+- `CreateChannelView.vue` now exposes the current channel role consistently in the overview and groups channel actions into members/access, settings, and exit/delete sections so destructive actions are separated from routine management.
+- `ChatGroupManagerModal.vue` now mirrors the same role strip and action grouping pattern for group overview, keeping admin-only management actions under the access/settings groups and the leave action in a dedicated danger group.
+- Focused regression coverage now asserts the role strip and grouped manager sections in `CreateChannelView.test.ts` and `ChatGroupManagerModal.test.ts`.
+- Focused validation: `npm run test:unit:run -- src/components/CreateChannelView.test.ts src/components/chat/ChatGroupManagerModal.test.ts`, `npm run build`, and `git diff --check`.
 
 ### Stage 11 - Weak-Device and Motion Final Pass
 

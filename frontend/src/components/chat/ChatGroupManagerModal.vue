@@ -105,6 +105,11 @@ const overviewDescription = computed(() => {
 })
 const groupAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value))
 const canEditOverviewAvatar = computed(() => !isCreateMode.value && isAdmin.value)
+const currentGroupRoleLabel = computed(() => {
+  if (isCreateMode.value) return 'سازنده گروه'
+  if (isAdmin.value) return 'ادمین گروه'
+  return 'عضو گروه'
+})
 
 const availableCandidates = computed(() => {
   return candidates.value.filter((user) => user.id !== props.currentUserId && !memberIds.value.has(user.id))
@@ -708,52 +713,70 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   </div>
                 </section>
 
-                <section class="telegram-list nav-list">
-                  <button type="button" class="telegram-row nav" @click="setPage('members')">
-                    <div class="row-icon soft"><UsersRound :size="18" /></div>
-                    <div class="row-copy">
-                      <div class="row-title">اعضای گروه</div>
-                      <div class="row-subtitle">فهرست کامل اعضا و وضعیت نقش‌ها</div>
-                    </div>
-                    <div class="row-meta">{{ (group?.member_count || 0).toLocaleString('fa-IR') }}</div>
-                    <ChevronLeft :size="18" class="row-chevron" />
-                  </button>
+                <div class="manager-role-strip">
+                  <span>نقش شما</span>
+                  <strong>{{ currentGroupRoleLabel }}</strong>
+                </div>
 
-                  <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('admins')">
-                    <div class="row-icon amber"><Shield :size="18" /></div>
-                    <div class="row-copy">
-                      <div class="row-title">مدیریت ادمین‌ها</div>
-                      <div class="row-subtitle">تعیین، تغییر و حذف دسترسی ادمین‌ها</div>
-                    </div>
-                    <div class="row-meta">{{ activeAdminCount.toLocaleString('fa-IR') }}</div>
-                    <ChevronLeft :size="18" class="row-chevron" />
-                  </button>
+                <section class="section-shell manager-action-group">
+                  <div class="section-heading">اعضا و دسترسی‌ها</div>
+                  <div class="telegram-list nav-list">
+                    <button type="button" class="telegram-row nav" @click="setPage('members')">
+                      <div class="row-icon soft"><UsersRound :size="18" /></div>
+                      <div class="row-copy">
+                        <div class="row-title">اعضای گروه</div>
+                        <div class="row-subtitle">فهرست کامل اعضا و وضعیت نقش‌ها</div>
+                      </div>
+                      <div class="row-meta">{{ (group?.member_count || 0).toLocaleString('fa-IR') }}</div>
+                      <ChevronLeft :size="18" class="row-chevron" />
+                    </button>
 
-                  <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('add-members')">
-                    <div class="row-icon blue"><UserPlus :size="18" /></div>
-                    <div class="row-copy">
-                      <div class="row-title">افزودن عضو</div>
-                      <div class="row-subtitle">کاربران پروژه را به گروه دعوت کنید</div>
-                    </div>
-                    <ChevronLeft :size="18" class="row-chevron" />
-                  </button>
+                    <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('admins')">
+                      <div class="row-icon amber"><Shield :size="18" /></div>
+                      <div class="row-copy">
+                        <div class="row-title">مدیریت ادمین‌ها</div>
+                        <div class="row-subtitle">تعیین، تغییر و حذف دسترسی ادمین‌ها</div>
+                      </div>
+                      <div class="row-meta">{{ activeAdminCount.toLocaleString('fa-IR') }}</div>
+                      <ChevronLeft :size="18" class="row-chevron" />
+                    </button>
 
-                  <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('edit')">
-                    <div class="row-icon muted"><PencilLine :size="18" /></div>
-                    <div class="row-copy">
-                      <div class="row-title">تنظیمات گروه</div>
-                      <div class="row-subtitle">نام و توضیحات گروه را ویرایش کنید</div>
-                    </div>
-                    <ChevronLeft :size="18" class="row-chevron" />
-                  </button>
+                    <button v-if="isAdmin" type="button" class="telegram-row nav" @click="setPage('add-members')">
+                      <div class="row-icon blue"><UserPlus :size="18" /></div>
+                      <div class="row-copy">
+                        <div class="row-title">افزودن عضو</div>
+                        <div class="row-subtitle">کاربران پروژه را به گروه دعوت کنید</div>
+                      </div>
+                      <ChevronLeft :size="18" class="row-chevron" />
+                    </button>
+                  </div>
+                </section>
 
-                  <button type="button" class="telegram-row nav danger" :disabled="isSaving" @click="leaveGroup">
-                    <div class="row-icon danger"><LogOut :size="18" /></div>
-                    <div class="row-copy">
-                      <div class="row-title">خروج از گروه</div>
-                      <div class="row-subtitle">از این گفتگو خارج شوید</div>
-                    </div>
-                  </button>
+                <section v-if="isAdmin" class="section-shell manager-action-group">
+                  <div class="section-heading">تنظیمات</div>
+                  <div class="telegram-list nav-list">
+                    <button type="button" class="telegram-row nav" @click="setPage('edit')">
+                      <div class="row-icon muted"><PencilLine :size="18" /></div>
+                      <div class="row-copy">
+                        <div class="row-title">تنظیمات گروه</div>
+                        <div class="row-subtitle">نام و توضیحات گروه را ویرایش کنید</div>
+                      </div>
+                      <ChevronLeft :size="18" class="row-chevron" />
+                    </button>
+                  </div>
+                </section>
+
+                <section class="section-shell manager-action-group danger-zone">
+                  <div class="section-heading">خروج</div>
+                  <div class="telegram-list nav-list">
+                    <button type="button" class="telegram-row nav danger" :disabled="isSaving" @click="leaveGroup">
+                      <div class="row-icon danger"><LogOut :size="18" /></div>
+                      <div class="row-copy">
+                        <div class="row-title">خروج از گروه</div>
+                        <div class="row-subtitle">از این گفتگو خارج شوید</div>
+                      </div>
+                    </button>
+                  </div>
                 </section>
               </template>
             </template>
@@ -1049,6 +1072,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 .flash-box,
 .state-box,
 .selection-banner,
+.manager-role-strip,
 .info-strip {
   border-radius: 18px;
   padding: 12px 14px;
@@ -1132,6 +1156,20 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   border: 1px solid rgba(51, 144, 236, 0.16);
   color: #0f172a;
   font-weight: 800;
+}
+
+.manager-role-strip {
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.manager-role-strip strong {
+  color: #0f172a;
+  font-size: 0.86rem;
 }
 
 .primary-chip,
@@ -1455,6 +1493,15 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.manager-action-group {
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.manager-action-group.danger-zone {
+  border-color: rgba(239, 68, 68, 0.14);
 }
 
 .field-label,

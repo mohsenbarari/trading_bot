@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Info,
   Loader2,
+  LogOut,
   PencilLine,
   Shield,
   UserPlus,
@@ -152,6 +153,13 @@ const currentChannelExitSubtitle = computed(() => {
     return 'با این کار کانال برای همه اعضا حذف می‌شود.'
   }
   return 'از این کانال خارج شوید'
+})
+const currentChannelRoleLabel = computed(() => {
+  if (isMembershipManagementLocked.value) return 'کانال سیستمی'
+  if (!currentUserMembership.value) return 'عضو نیستید'
+  if (isCurrentUserChannelCreator.value) return 'سازنده کانال'
+  if (currentUserMembership.value.role === 'admin') return 'ادمین کانال'
+  return 'عضو کانال'
 })
 
 function normalizeSearch(value: string) {
@@ -781,6 +789,7 @@ defineExpose({
   canEditOverviewAvatar,
   currentChannelExitLabel,
   currentChannelExitSubtitle,
+  currentChannelRoleLabel,
   filteredMembers,
   filteredAdmins,
   promotableMembers,
@@ -983,53 +992,70 @@ onBeforeUnmount(() => {
         <div v-if="typeof currentUserId === 'number' && !currentUserMembership" class="flash-box warning">شما عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در فهرست گفتگوهای شما دیده نمی‌شود.</div>
         <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="flash-box info">شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.</div>
         <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && currentUserCanPostInCurrentChannel" class="flash-box info">شما ادمین این کانال هستید و می‌توانید مستقیماً از پیام‌رسان در آن پست بگذارید.</div>
+        <div class="manager-role-strip">
+          <span>نقش شما</span>
+          <strong>{{ currentChannelRoleLabel }}</strong>
+        </div>
 
-        <section class="telegram-list nav-list">
-          <button type="button" class="telegram-row nav" @click="setPage('members')">
-            <div class="row-icon soft"><UsersRound :size="18" /></div>
-            <div class="row-copy">
-              <div class="row-title">اعضای کانال</div>
-              <div class="row-subtitle">فهرست کامل اعضا و نقش‌ها</div>
-            </div>
-            <div class="row-meta">{{ activeChannel.member_count.toLocaleString('fa-IR') }}</div>
-            <ChevronLeft :size="18" class="row-chevron" />
-          </button>
+        <section class="section-shell manager-action-group">
+          <div class="section-heading">اعضا و دسترسی‌ها</div>
+          <div class="telegram-list nav-list">
+            <button type="button" class="telegram-row nav" @click="setPage('members')">
+              <div class="row-icon soft"><UsersRound :size="18" /></div>
+              <div class="row-copy">
+                <div class="row-title">اعضای کانال</div>
+                <div class="row-subtitle">فهرست کامل اعضا و نقش‌ها</div>
+              </div>
+              <div class="row-meta">{{ activeChannel.member_count.toLocaleString('fa-IR') }}</div>
+              <ChevronLeft :size="18" class="row-chevron" />
+            </button>
 
-          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('admins')">
-            <div class="row-icon amber"><Shield :size="18" /></div>
-            <div class="row-copy">
-              <div class="row-title">مدیریت ادمین‌ها</div>
-              <div class="row-subtitle">تعیین و تغییر ادمین‌های کانال</div>
-            </div>
-            <div class="row-meta">{{ activeAdminCount.toLocaleString('fa-IR') }}</div>
-            <ChevronLeft :size="18" class="row-chevron" />
-          </button>
+            <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('admins')">
+              <div class="row-icon amber"><Shield :size="18" /></div>
+              <div class="row-copy">
+                <div class="row-title">مدیریت ادمین‌ها</div>
+                <div class="row-subtitle">تعیین و تغییر ادمین‌های کانال</div>
+              </div>
+              <div class="row-meta">{{ activeAdminCount.toLocaleString('fa-IR') }}</div>
+              <ChevronLeft :size="18" class="row-chevron" />
+            </button>
 
-          <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('add-members')">
-            <div class="row-icon blue"><UserPlus :size="18" /></div>
-            <div class="row-copy">
-              <div class="row-title">افزودن عضو</div>
-              <div class="row-subtitle">دعوت اعضای جدید به کانال</div>
-            </div>
-            <ChevronLeft :size="18" class="row-chevron" />
-          </button>
+            <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('add-members')">
+              <div class="row-icon blue"><UserPlus :size="18" /></div>
+              <div class="row-copy">
+                <div class="row-title">افزودن عضو</div>
+                <div class="row-subtitle">دعوت اعضای جدید به کانال</div>
+              </div>
+              <ChevronLeft :size="18" class="row-chevron" />
+            </button>
+          </div>
+        </section>
 
-          <button type="button" class="telegram-row nav" @click="setPage('edit')">
-            <div class="row-icon muted"><PencilLine :size="18" /></div>
-            <div class="row-copy">
-              <div class="row-title">تنظیمات کانال</div>
-              <div class="row-subtitle">نام و توضیحات کانال را ویرایش کنید</div>
-            </div>
-            <ChevronLeft :size="18" class="row-chevron" />
-          </button>
+        <section class="section-shell manager-action-group">
+          <div class="section-heading">تنظیمات</div>
+          <div class="telegram-list nav-list">
+            <button type="button" class="telegram-row nav" @click="setPage('edit')">
+              <div class="row-icon muted"><PencilLine :size="18" /></div>
+              <div class="row-copy">
+                <div class="row-title">تنظیمات کانال</div>
+                <div class="row-subtitle">نام و توضیحات کانال را ویرایش کنید</div>
+              </div>
+              <ChevronLeft :size="18" class="row-chevron" />
+            </button>
+          </div>
+        </section>
 
-          <button v-if="currentUserMembership && !isMembershipManagementLocked" type="button" class="telegram-row nav danger" :disabled="isSaving" @click="unfollowCurrentChannel">
-            <div class="row-icon danger"><Info :size="18" /></div>
-            <div class="row-copy">
-              <div class="row-title">{{ currentChannelExitLabel }}</div>
-              <div class="row-subtitle">{{ currentChannelExitSubtitle }}</div>
-            </div>
-          </button>
+        <section v-if="currentUserMembership && !isMembershipManagementLocked" class="section-shell manager-action-group danger-zone">
+          <div class="section-heading">خروج و حذف</div>
+          <div class="telegram-list nav-list">
+            <button type="button" class="telegram-row nav danger" :disabled="isSaving" @click="unfollowCurrentChannel">
+              <div class="row-icon danger"><LogOut :size="18" /></div>
+              <div class="row-copy">
+                <div class="row-title">{{ currentChannelExitLabel }}</div>
+                <div class="row-subtitle">{{ currentChannelExitSubtitle }}</div>
+              </div>
+            </button>
+          </div>
         </section>
       </template>
 
@@ -1315,6 +1341,7 @@ onBeforeUnmount(() => {
 .flash-box,
 .state-box,
 .selection-banner,
+.manager-role-strip,
 .info-strip,
 .select-all-toggle {
   border-radius: 18px;
@@ -1412,6 +1439,20 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(51, 144, 236, 0.16);
   color: #0f172a;
   font-weight: 800;
+}
+
+.manager-role-strip {
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.manager-role-strip strong {
+  color: #0f172a;
+  font-size: 0.86rem;
 }
 
 .select-all-toggle {
@@ -1771,6 +1812,15 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.manager-action-group {
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.manager-action-group.danger-zone {
+  border-color: rgba(239, 68, 68, 0.14);
 }
 
 .field-label,
