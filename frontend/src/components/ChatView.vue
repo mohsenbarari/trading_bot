@@ -3932,7 +3932,7 @@ defineExpose({
 }
 
 .typing-dots span {
-  animation: typing-dot 1.4s infinite ease-in-out both;
+  animation: typing-dot calc(var(--messenger-motion-standard, 180ms) * 8) infinite ease-in-out both;
   display: inline-block;
 }
 
@@ -4033,7 +4033,7 @@ defineExpose({
   height: 10px;
   border-radius: 50%;
   background: linear-gradient(135deg, #f59e0b, #3390ec);
-  animation: history-loading-pulse 1.2s ease-in-out infinite;
+  animation: history-loading-pulse calc(var(--messenger-motion-standard, 180ms) * 7) ease-in-out infinite;
 }
 
 @keyframes history-loading-pulse {
@@ -4076,7 +4076,7 @@ defineExpose({
   color: #8e8e93; /* Telegram neutral gray */
   z-index: 1; /* Below the sliding message bubble */
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--messenger-motion-standard, 180ms);
 }
 
 .swipe-reply-icon.visible {
@@ -4112,9 +4112,9 @@ defineExpose({
   word-wrap: break-word;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   /* Snappier Telegram animation curve */
-  animation: slideIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: slideIn var(--messenger-motion-overlay, 220ms) cubic-bezier(0.175, 0.885, 0.32, 1.275);
   /* Smooth transition for swipe/returning */
-  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: transform var(--messenger-motion-overlay, 220ms) cubic-bezier(0.25, 0.8, 0.25, 1);
   
   /* Prevent native text selection on long press */
   -webkit-touch-callout: none;
@@ -4213,7 +4213,7 @@ defineExpose({
   max-height: 200px;
   border-radius: 8px;
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: opacity var(--messenger-motion-standard, 180ms);
 }
 
 .msg-image:hover {
@@ -4261,7 +4261,7 @@ defineExpose({
   border-radius: 20px;
   padding: 8px 4px;
   min-height: 44px;
-  transition: background 0.2s;
+  transition: background var(--messenger-motion-standard, 180ms);
 }
 
 .input-container:focus-within {
@@ -4347,7 +4347,7 @@ defineExpose({
 /* Sticker Picker */
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1), opacity 0.3s;
+  transition: transform var(--messenger-motion-overlay, 220ms) cubic-bezier(0.2, 0, 0, 1), opacity var(--messenger-motion-overlay, 220ms);
 }
 
 .slide-up-enter-from,
@@ -4393,7 +4393,7 @@ defineExpose({
   padding: 8px;
   font-size: 20px;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: transform var(--messenger-motion-standard, 180ms);
 }
 
 .sticker-item:hover {
@@ -4416,7 +4416,7 @@ defineExpose({
   cursor: pointer;
   color: #8E8E93;
   z-index: 999;
-  transition: all 0.2s;
+  transition: transform var(--messenger-motion-standard, 180ms), box-shadow var(--messenger-motion-standard, 180ms), background var(--messenger-motion-standard, 180ms);
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
@@ -4455,7 +4455,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  animation: pulse-mention 2s infinite;
+  animation: pulse-mention calc(var(--messenger-motion-standard, 180ms) * 11) infinite;
 }
 
 .scroll-bottom-btn.has-mention {
@@ -4549,7 +4549,7 @@ defineExpose({
 /* Telegram Zoom-fade animation classes */
 .zoom-fade-enter-active,
 .zoom-fade-leave-active {
-  transition: opacity 0.15s cubic-bezier(0.2, 0, 0, 1), transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+  transition: opacity var(--messenger-motion-fast, 120ms) cubic-bezier(0.2, 0, 0, 1), transform var(--messenger-motion-fast, 120ms) cubic-bezier(0.2, 0, 0, 1);
 }
 
 .zoom-fade-enter-from,
@@ -4566,7 +4566,7 @@ defineExpose({
   gap: 12px;
   font-size: 14px;
   color: var(--text-color);
-  transition: background 0.1s; /* Faster hover transition */
+  transition: background var(--messenger-motion-fast, 120ms);
 }
 
 /* Base Ripple Setup */
@@ -4580,7 +4580,7 @@ defineExpose({
   border-radius: 50%;
   background-color: rgba(0, 0, 0, 0.1); /* Default Telegram light-theme ripple */
   transform: scale(0);
-  animation: ripple 0.6s linear;
+  animation: ripple calc(var(--messenger-motion-overlay, 220ms) * 3) linear;
   pointer-events: none; /* Let clicks pass through */
 }
 
@@ -4668,7 +4668,7 @@ defineExpose({
   background: #FFFFFF;
   padding: 8px 16px 8px 12px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  animation: slideUp 0.15s ease-out;
+  animation: slideUp var(--messenger-motion-fast, 120ms) ease-out;
   min-height: 46px;
   gap: 12px;
 }
@@ -4722,7 +4722,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: background var(--messenger-motion-standard, 180ms);
 }
 
 .close-reply:hover {
@@ -4732,7 +4732,7 @@ defineExpose({
 
 /* Highlight Animation */
 .highlight-message {
-  animation: highlight 3s ease-in-out;
+  animation: highlight calc(var(--messenger-motion-overlay, 220ms) * 14) ease-in-out;
 }
 
 @keyframes highlight {
@@ -4976,7 +4976,7 @@ defineExpose({
   padding: 6px 16px;
   border-radius: 8px;
   cursor: pointer;
-  transition: opacity 0.2s, background 0.2s;
+  transition: opacity var(--messenger-motion-standard, 180ms), background var(--messenger-motion-standard, 180ms);
 }
 
 .selection-action-btn:hover {
@@ -5089,7 +5089,7 @@ defineExpose({
   stroke: white;
   stroke-width: 3;
   stroke-linecap: round;
-  transition: stroke-dasharray 0.3s ease;
+  transition: stroke-dasharray var(--messenger-motion-overlay, 220ms) ease;
 }
 .progress-text {
   color: white;
@@ -5107,7 +5107,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background var(--messenger-motion-standard, 180ms);
 }
 .download-btn:hover {
   background: rgba(0,0,0,0.7);
