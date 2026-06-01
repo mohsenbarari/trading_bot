@@ -125,7 +125,7 @@
               <div class="header-menu-section-label">مدیریت اتاق</div>
             </template>
             <div v-if="!isManagementRoom" class="header-menu-item" @click="handleMenuManageRoom">
-              <span>{{ selectedRoomKind === 'group' ? 'مدیریت گروه' : 'تنظیمات کانال' }}</span>
+              <span>{{ selectedRoomManageLabel }}</span>
               <UsersRound :size="18" />
             </div>
           </div>
@@ -256,6 +256,10 @@ const roomMemberCountText = computed(() => {
 const hasActivityStatusText = computed(() => Boolean(props.activityStatusText && props.activityStatusText.trim()))
 
 const isManagementRoom = computed(() => props.selectedRoomKind === 'group' && props.isRoomSystem === true)
+
+const selectedRoomManageLabel = computed(() => (
+  props.selectedRoomKind === 'group' ? 'مدیریت گروه' : 'مدیریت کانال'
+))
 
 const headerAvatarUrl = computed(() => buildChatFileUrl(props.selectedAvatarFileId ?? null, props.apiBaseUrl ?? ''))
 

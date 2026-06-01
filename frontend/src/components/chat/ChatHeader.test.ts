@@ -128,6 +128,20 @@ describe('ChatHeader.vue', () => {
 
     await manageItem!.trigger('click')
     expect(wrapper.emitted('manage-room')).toHaveLength(2)
+
+    await wrapper.setProps({
+      selectedUserId: -22,
+      selectedUserName: 'Channel Alpha',
+      selectedRoomKind: 'channel',
+      targetUserStatus: '۱۲ عضو',
+      activityStatusText: '',
+      roomMemberCount: 12,
+    })
+    await wrapper.find('.header-menu-container .header-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('مدیریت کانال')
+    expect(wrapper.text()).not.toContain('تنظیمات کانال')
   })
 
   it('handles conversation-list actions and channel creation gating', async () => {
