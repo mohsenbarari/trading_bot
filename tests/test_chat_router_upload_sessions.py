@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from models.upload_session import UploadBatchStatus, UploadSessionStatus
 from api.routers.chat_schemas import MessageRead
 from api.routers.chat import (
@@ -264,6 +264,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(id="sess-2", batch_id="batch-9"),
         ]
 
+        background_tasks = BackgroundTasks()
         with patch("api.routers.chat.get_upload_batch_for_current_user", new=AsyncMock(return_value=batch)), patch(
             "api.routers.chat.commit_upload_batch",
             new=AsyncMock(return_value=direct_result),
@@ -280,11 +281,20 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat._publish_upload_session_runtime_event",
             new=AsyncMock(),
         ) as publish_runtime_mock:
-            result = await commit_upload_batch_endpoint(batch_id="batch-9", current_user=current_user, db=db)
+            result = await commit_upload_batch_endpoint(
+                batch_id="batch-9",
+                background_tasks=background_tasks,
+                current_user=current_user,
+                db=db,
+            )
 
-        commit_mock.assert_awaited_once_with(db, batch=batch, current_user=current_user)
-        self.assertEqual(direct_publish_mock.await_count, 2)
-        self.assertEqual(publish_runtime_mock.await_count, 2)
+            commit_mock.assert_awaited_once_with(db, batch=batch, current_user=current_user)
+            self.assertEqual(direct_publish_mock.await_count, 0)
+            self.assertEqual(publish_runtime_mock.await_count, 0)
+            self.assertEqual(len(background_tasks.tasks), 2)
+            await background_tasks.tasks[0]()
+            self.assertEqual(direct_publish_mock.await_count, 2)
+            self.assertEqual(publish_runtime_mock.await_count, 0)
         self.assertEqual(result.committed_items, 2)
 
         group_result = SimpleNamespace(
@@ -292,6 +302,7 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             target=SimpleNamespace(target_id=70, receiver=None, chat=SimpleNamespace(id=70)),
             messages=[SimpleNamespace(id=201)],
         )
+        background_tasks = BackgroundTasks()
         with patch("api.routers.chat.get_upload_batch_for_current_user", new=AsyncMock(return_value=batch)), patch(
             "api.routers.chat.commit_upload_batch",
             new=AsyncMock(return_value=group_result),
@@ -321,11 +332,20 @@ class ChatRouterUploadSessionEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat._publish_upload_session_runtime_event",
             new=AsyncMock(),
         ) as publish_runtime_mock:
-            result = await commit_upload_batch_endpoint(batch_id="batch-10", current_user=current_user, db=db)
+            result = await commit_upload_batch_endpoint(
+                batch_id="batch-10",
+                background_tasks=background_tasks,
+                current_user=current_user,
+                db=db,
+            )
 
-        users_mock.assert_awaited_once_with(db, chat_id=70)
-        group_publish_mock.assert_awaited_once()
-        publish_runtime_mock.assert_awaited_once()
+            users_mock.assert_awaited_once_with(db, chat_id=70)
+            self.assertEqual(group_publish_mock.await_count, 0)
+            self.assertEqual(publish_runtime_mock.await_count, 0)
+            self.assertEqual(len(background_tasks.tasks), 2)
+            await background_tasks.tasks[0]()
+            group_publish_mock.assert_awaited_once()
+            publish_runtime_mock.assert_not_awaited()
         self.assertEqual(result.batch_id, "batch-10")
 
     async def test_cancel_upload_batch_delegates(self):

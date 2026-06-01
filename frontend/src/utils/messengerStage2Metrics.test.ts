@@ -5,6 +5,7 @@ import {
   getMessengerMetricEntries,
   recordMessengerDomSnapshot,
   recordMessengerMetric,
+  scheduleMessengerDiagnosticTask,
   startMessengerFrameBudgetProbe,
 } from './messengerStage2Metrics'
 
@@ -18,6 +19,7 @@ describe('messengerStage2Metrics', () => {
     clearMessengerMetricEntries()
     document.body.innerHTML = ''
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('records bounded numeric metric entries without affecting runtime callers', () => {
@@ -65,5 +67,34 @@ describe('messengerStage2Metrics', () => {
     const metricNames = getMessengerMetricEntries().map(entry => entry.name)
     expect(metricNames).toContain('messenger-scroll:frame-average')
     expect(metricNames).toContain('messenger-scroll:frame-janky')
+  })
+
+  it('schedules diagnostic tasks during idle when the browser supports it', () => {
+    const callback = vi.fn()
+    const requestIdleCallback = vi.fn((runner: () => void) => {
+      expect(callback).not.toHaveBeenCalled()
+      runner()
+      return 1
+    })
+    vi.stubGlobal('requestIdleCallback', requestIdleCallback)
+
+    expect(scheduleMessengerDiagnosticTask(callback, { timeoutMs: 250 })).toBe(true)
+
+    expect(requestIdleCallback).toHaveBeenCalledWith(expect.any(Function), { timeout: 250 })
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to a short timeout for diagnostic tasks without idle callback', () => {
+    vi.useFakeTimers()
+    const callback = vi.fn()
+
+    expect(scheduleMessengerDiagnosticTask(callback, { fallbackDelayMs: 32 })).toBe(true)
+    expect(callback).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(31)
+    expect(callback).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(callback).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
   })
 })

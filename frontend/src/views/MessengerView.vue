@@ -13,6 +13,7 @@ import { getMessengerRolloutSurface } from '../utils/messengerStage7Rollout'
 import {
   measureMessengerStage2,
   recordMessengerDomSnapshot,
+  scheduleMessengerDiagnosticTask,
   startMessengerFrameBudgetProbe,
 } from '../utils/messengerStage2Metrics'
 
@@ -56,15 +57,17 @@ watch([loading, user, messengerUiVersion], () => {
   messengerSurfaceMarked = true
   markMessengerPerformance(`${messengerUiVersion.value}-surface-ready`)
   nextTick(() => {
-    const root = typeof document !== 'undefined'
-      ? document.querySelector('.messenger-page') || document.body
-      : null
-    if (root) {
-      recordMessengerDomSnapshot(`${messengerUiVersion.value}-surface-ready`, root, {
-        uiVersion: messengerUiVersion.value,
-      })
-    }
-    startMessengerFrameBudgetProbe(`${messengerUiVersion.value}-surface-ready`, { frameCount: 30 })
+    scheduleMessengerDiagnosticTask(() => {
+      const root = typeof document !== 'undefined'
+        ? document.querySelector('.messenger-page') || document.body
+        : null
+      if (root) {
+        recordMessengerDomSnapshot(`${messengerUiVersion.value}-surface-ready`, root, {
+          uiVersion: messengerUiVersion.value,
+        })
+      }
+      startMessengerFrameBudgetProbe(`${messengerUiVersion.value}-surface-ready`, { frameCount: 30 })
+    }, { timeoutMs: 750, fallbackDelayMs: 120 })
   })
 })
 
