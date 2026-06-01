@@ -407,8 +407,13 @@ Stage 7 progress:
 	- Root cause: uncached document body taps could start a component-local shared-file fetch. If the user left/reopened the conversation while the benchmark held `/api/chat/files/**`, that component-owned fetch could lose the durable download handoff, leaving the reopened bubble idle instead of completed.
 	- `ChatMessageItem.vue` now routes uncached document taps through the parent/background document-download service, keeps only cached documents on the direct shared-file open path, treats `local_blob_url` documents as completed for the download icon state, and retains the immediate local busy affordance until the background state arrives.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`, and `git diff --check`.
+- Stage 7 document-download reload-cache hardening:
+	- The S09/S10 rerun completed against `083f9f9`; S09 completion was fixed across measured runs, but reload still failed because the reopened document bubble returned to `idle` and hit the benchmark's `15s` reload timeout.
+	- Root cause: completed background downloads were retained as in-memory object URLs only. After a full page reload, `useChatFileHandler` had no persistent cached blob for that `fileId`, so the document action rendered as idle even though the transfer had completed before reload.
+	- `chatDocumentDownloadBackground.ts` now seeds completed document blobs into the shared persistent file cache before emitting `completed`, for both non-streaming and streaming download paths. This keeps the background service and visible document bubble aligned after reload.
+	- Focused validation: `npm run test:unit:run -- src/services/chatDocumentDownloadBackground.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`, and `git diff --check`.
 - Remaining Stage 7 work:
-	- Rerun the S09/S10 Stage 7 benchmark after the document-download persistence hardening.
+	- Rerun the S09/S10 Stage 7 benchmark after the document-download reload-cache hardening.
 	- If the rerun is green, close Stage 7 and move to Stage 8.
 	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
 
