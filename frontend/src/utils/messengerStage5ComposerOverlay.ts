@@ -45,7 +45,10 @@ export type MessengerOverlayAction =
   | { type: 'close_sticker' }
   | { type: 'open_forward' }
   | { type: 'close_forward' }
+  | { type: 'enter_reply' }
+  | { type: 'enter_editing' }
   | { type: 'enter_selection' }
+  | { type: 'enter_conversation' }
   | { type: 'enter_search' }
   | { type: 'close_search' }
   | { type: 'close_composer_overlays' }
@@ -148,14 +151,17 @@ export function reduceMessengerOverlayState(
       return { ...state, forwardOpen: true, attachmentOpen: false, stickerOpen: false }
     case 'close_forward':
       return { ...state, forwardOpen: false }
+    case 'enter_reply':
+    case 'enter_editing':
     case 'enter_selection':
+    case 'enter_conversation':
       return { ...state, attachmentOpen: false, stickerOpen: false, forwardOpen: false }
     case 'enter_search':
       return { ...state, searchActive: true, inChatSearchList: false, attachmentOpen: false, stickerOpen: false, forwardOpen: false }
     case 'close_search':
       return { ...state, searchActive: false, inChatSearchList: false }
     case 'close_composer_overlays':
-      return { ...state, attachmentOpen: false, stickerOpen: false }
+      return { ...state, attachmentOpen: false, stickerOpen: false, forwardOpen: false }
     default:
       return state
   }

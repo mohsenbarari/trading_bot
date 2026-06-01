@@ -62,7 +62,7 @@ Do not merge multiple stages into a single prompt.
 | 2 | Menu IA Normalization | In Progress | Copilot | 2026-05-31 | IA sectioning applied in header/context menus + focused Vitest/Playwright green |
 | 3 | Conversation List Performance + Visual Cohesion | Completed | Copilot | 2026-05-31 | Row view-model memoization, shared-token visual alignment, and S07/S10 list-ready benchmark check passed |
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
-| 5 | Composer/Overlay State Machine Stabilization | Pending | Copilot | - | - |
+| 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Pending | Copilot | - | - |
 | 7 | Media Pipeline Optimization (S09/S10) | Pending | Copilot | - | - |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
@@ -280,7 +280,7 @@ Goal:
 Files expected:
 - frontend/src/components/chat/ChatInputBar.vue
 - frontend/src/utils/messengerStage5ComposerOverlay.ts
-- frontend/src/views/ChatView.vue
+- frontend/src/components/ChatView.vue
 
 Tests/commands:
 - Composer-focused Vitest
@@ -291,6 +291,16 @@ Exit criteria:
 
 Rollback:
 - Revert state-machine adapter and input wiring.
+
+Stage 5 completion:
+- Extended `messengerStage5ComposerOverlay.ts` with explicit reply/edit/conversation entry transitions so composer overlays now close from one reducer seam instead of scattered local mutations.
+- Updated `ChatView.vue` to reset draft/edit/reply state and close composer overlays/context menus consistently when entering reply/edit flows and when switching into another direct/group/channel conversation.
+- Updated `ChatInputBar.vue` so starting voice recording force-closes the sticker picker and clears pending picker/keyboard swap state before entering recording mode.
+- Hardened edit-mode focus handoff in `ChatView.vue` by treating `ChatInputBar` exposed methods as optional, which keeps lightweight test/runtime stubs safe.
+
+Focused validation completed:
+- `npm run test:unit:run -- src/utils/messengerStage5ComposerOverlay.test.ts src/components/chat/ChatInputBar.test.ts src/components/ChatView.test.ts`
+- `npm run test:e2e -- e2e/messenger-direct-room-ux.spec.ts --project=chromium --reporter=line`
 
 ### Stage 6 - Context Menu Latency Fix (S05 Critical)
 

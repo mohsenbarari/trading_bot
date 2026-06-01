@@ -1219,6 +1219,14 @@ const startVoiceRecording = async () => {
   try {
     // navigator.mediaDevices.getUserMedia removed here to prevent open microphone leak
     await recorder.start()
+    pendingPickerOpenAfterKeyboardClose.value = false
+    pendingKeyboardReturn.value = false
+    lockedComposerInsetHeight.value = 0
+    disablePickerTransition.value = false
+    clearPendingPickerTimer()
+    if (isStickerPickerOpen.value) {
+      setStickerPickerOpen(false)
+    }
     isRecording.value = true
   } catch (err) {
     console.error('Failed to start mic', err)

@@ -119,11 +119,37 @@ describe('messengerStage5ComposerOverlay', () => {
       forwardOpen: false,
     })
 
+    expect(reduceMessengerOverlayState(overlayState({ attachmentOpen: true, stickerOpen: true, forwardOpen: true, searchActive: true, inChatSearchList: true }), { type: 'enter_reply' })).toMatchObject({
+      attachmentOpen: false,
+      stickerOpen: false,
+      forwardOpen: false,
+      searchActive: true,
+      inChatSearchList: true,
+    })
+
+    expect(reduceMessengerOverlayState(overlayState({ attachmentOpen: true, stickerOpen: true, forwardOpen: true }), { type: 'enter_editing' })).toMatchObject({
+      attachmentOpen: false,
+      stickerOpen: false,
+      forwardOpen: false,
+    })
+
+    expect(reduceMessengerOverlayState(overlayState({ attachmentOpen: true, stickerOpen: true, forwardOpen: true, searchActive: true, inChatSearchList: true }), { type: 'enter_conversation' })).toMatchObject({
+      attachmentOpen: false,
+      stickerOpen: false,
+      forwardOpen: false,
+    })
+
     expect(reduceMessengerOverlayState(overlayState({ attachmentOpen: true, stickerOpen: true, inChatSearchList: true }), { type: 'enter_search' })).toMatchObject({
       attachmentOpen: false,
       stickerOpen: false,
       searchActive: true,
       inChatSearchList: false,
+    })
+
+    expect(reduceMessengerOverlayState(overlayState({ attachmentOpen: true, stickerOpen: true, forwardOpen: true }), { type: 'close_composer_overlays' })).toMatchObject({
+      attachmentOpen: false,
+      stickerOpen: false,
+      forwardOpen: false,
     })
 
     const blocked = overlayState({ stickerOpen: true })

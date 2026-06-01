@@ -273,6 +273,46 @@ function applyComposerOverlayAction(action: MessengerOverlayAction) {
   return nextState
 }
 
+function resetComposerDraftState() {
+  editingMessage.value = null
+  replyingToMessage.value = null
+  messageInput.value = ''
+  if (isMobile.value) {
+    swipedMessageId.value = null
+  }
+}
+
+function prepareConversationTransition() {
+  applyComposerOverlayAction({ type: 'enter_conversation' })
+  closeContextMenu()
+  resetComposerDraftState()
+}
+
+function beginReplyTransition(msg: Message) {
+  applyComposerOverlayAction({ type: 'enter_reply' })
+  editingMessage.value = null
+  if (isMobile.value) {
+    swipedMessageId.value = null
+  }
+  handleReply(msg)
+  closeContextMenu()
+}
+
+function beginEditTransition(msg: Message) {
+  applyComposerOverlayAction({ type: 'enter_editing' })
+  replyingToMessage.value = null
+  if (isMobile.value) {
+    swipedMessageId.value = null
+  }
+  editingMessage.value = msg
+  messageInput.value = msg.content
+  closeContextMenu()
+  nextTick(() => {
+    chatInputBarRef.value?.adjustTextareaHeight?.()
+    chatInputBarRef.value?.focusInput?.({ cursorToEnd: true })
+  })
+}
+
 const {
   isViewingReply: scrollIsViewingReply,
   scrollToBottom,
@@ -1409,17 +1449,11 @@ const clearSelection = () => {
 }
 
 const selectConversation = (conv: Conversation) => {
+  prepareConversationTransition()
   selectedUserId.value = conv.other_user_id
   selectedUserName.value = conv.other_user_name
   messagePanelError.value = ''
-  if (conv.room_kind === 'channel') {
-    showAttachmentMenu.value = false
-    showStickerPicker.value = false
-  }
   loadMessages(conv.other_user_id)
-  contextMenu.value.visible = false;
-  editingMessage.value = null;
-  messageInput.value = '';
   pushBackState(() => {
     selectedUserId.value = null
     selectedUserName.value = ''
@@ -1440,6 +1474,7 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
     return
   }
 
+  prepareConversationTransition()
   selectedUserId.value = targetId
   selectedUserName.value = resolvedName
   messagePanelError.value = ''
@@ -1453,6 +1488,7 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
 }
 
 const startNewChat = (userId: number, userName: string) => {
+  prepareConversationTransition()
   const existingConversation = conversations.value.find((conversation) => conversation.other_user_id === userId)
   if (!existingConversation) {
     conversations.value.unshift({
@@ -1552,14 +1588,15 @@ function closeChannelManager() {
 }
 
 function clearActiveConversationState() {
+  resetComposerDraftState()
   selectedUserId.value = null
   selectedUserName.value = ''
   messages.value = []
   error.value = ''
   messagePanelError.value = ''
   unreadNewMessagesCount.value = 0
-  showAttachmentMenu.value = false
-  showStickerPicker.value = false
+  applyComposerOverlayAction({ type: 'close_composer_overlays' })
+  closeContextMenu()
 }
 
 function clearMissingNamedRoomSelection() {
@@ -1591,11 +1628,10 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
     return
   }
 
+  prepareConversationTransition()
   selectedUserId.value = conversationKey
   selectedUserName.value = payload.title
   messagePanelError.value = ''
-  showAttachmentMenu.value = false
-  showStickerPicker.value = false
   void loadMessages(conversationKey)
 }
 
@@ -1628,11 +1664,10 @@ async function handleGroupCreated(group: { id: number; title: string }) {
   groupManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
   await loadConversations()
+  prepareConversationTransition()
   selectedUserId.value = conversationKey
   selectedUserName.value = group.title
   messagePanelError.value = ''
-  showAttachmentMenu.value = false
-  showStickerPicker.value = false
   void loadMessages(conversationKey)
   pushBackState(() => {
     selectedUserId.value = null
@@ -1810,9 +1845,9 @@ const showContextMenu = (event: Event, msg: Message) => {
   })
 };
 
-const closeContextMenu = () => {
+function closeContextMenu() {
   contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [] }
-};
+}
 
 function closeCurrentOverlayThen(closeCurrent: () => void, openNext: () => void) {
   closeCurrent()
@@ -1885,17 +1920,7 @@ const handleMediaInteraction = (msg: Message) => {
 const handleEditMessage = () => {
   const msg = contextMenu.value.message;
   if (!msg) return;
-  replyingToMessage.value = null;
-  if (isMobile.value) {
-    swipedMessageId.value = null;
-  }
-  editingMessage.value = msg;
-  messageInput.value = msg.content;
-  closeContextMenu();
-  nextTick(() => {
-    chatInputBarRef.value?.adjustTextareaHeight();
-    chatInputBarRef.value?.focusInput({ cursorToEnd: true });
-  });
+  beginEditTransition(msg)
 };
 
 const handleDeleteMessage = async () => {
@@ -2473,8 +2498,7 @@ function handleRecoveryRealtimeUpdate(payload: { user_id?: number | string }) {
 const handleReplyMessage = () => {
   const msg = contextMenu.value.message
   if (!msg) return
-  handleReply(msg)
-  closeContextMenu()
+  beginReplyTransition(msg)
 }
 
 const handleForwardMessage = () => {
@@ -2508,7 +2532,7 @@ function handleForwardSelectedAlbumMessages() {
 }
 
 function handleAlbumReplyItem(msg: Message) {
-  handleReply(msg)
+  beginReplyTransition(msg)
 }
 
 function handleAlbumForwardItem(msg: Message) {
@@ -2528,7 +2552,7 @@ function handleLightboxReply(msgId: number) {
   if (!msg) return
 
   closeCurrentOverlayThen(closeLightbox, () => {
-    handleReply(msg)
+    beginReplyTransition(msg)
   })
 }
 
@@ -2985,6 +3009,9 @@ defineExpose({
       currentSearchIndex,
       showInChatSearchList,
       longPressTimer,
+      messageInput,
+      editingMessage,
+      replyingToMessage,
       pendingSelectionAnchor: () => pendingSelectionAnchor,
       timelineRenderBudget,
     },
@@ -3074,6 +3101,8 @@ defineExpose({
     handleDeleteSelected,
     handleCopySelected,
     handleReplySelected,
+    handleReplyMessage,
+    handleEditMessage,
     handleForwardMessage,
     handleForwardSelectedAlbumMessages,
     handleAlbumReplyItem,
