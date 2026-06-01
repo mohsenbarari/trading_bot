@@ -1,6 +1,6 @@
 # Messenger Resilience Report
 
-- Generated at: 2026-05-31T19:13:12.625848+00:00
+- Generated at: 2026-06-01T16:09:19.494135+00:00
 - Manifest version: 2026-05-31.v2
 - Scope: L5 resilience, recovery, and failure-artifact coverage for M01-M14.
 

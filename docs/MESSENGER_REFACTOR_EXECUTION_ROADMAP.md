@@ -609,6 +609,16 @@ Exit criteria:
 Rollback:
 - Keep legacy path as fallback until explicit final acceptance.
 
+Stage 12 progress:
+- Full official benchmark gate:
+	- Command: `make messenger-benchmark-all`
+	- Artifacts: `tmp/messenger-benchmark/comparison-summary.{md,json}`, `tmp/messenger-benchmark/performance-results.json`, `tmp/messenger-benchmark/surface-status.json`, and regenerated acceptance/resilience/surface reports.
+	- Summary generated at `2026-06-01T16:09:19.492644+00:00` with manifest `2026-05-31.v2`, `25` catalog suites, `24` performance samples, and all `14` messenger surfaces marked `ready` with `0` missing items.
+	- Critical benchmark readout: S10 list/chat/heap improved (`-119.4 ms`, `-309.8 ms`, `-0.28 MB`) while context remained a small watch item (`+11.9 ms`); S09 chat/upload/heap improved (`-1421.9 ms`, `-106.2 ms`, `-0.25 MB`) but list/context/download-start regressed (`+48.3 ms`, `+45.5 ms`, `+11.2 ms`); S07 chat/heap improved (`-69.8 ms`, `-0.17 MB`) but list/context regressed (`+119.8 ms`, `+6.8 ms`).
+	- Decision: Stage 12 remains open. Surface readiness is green, but the final success contract needs one more performance tightening pass for S07/S09 list/context and S09 download-start before release closure.
+- Stage 12 list-containment follow-up:
+	- `ChatConversationList.vue` now keeps `content-visibility: auto` behind `prefers-reduced-motion: reduce` so the weak-device S10 path keeps stable intrinsic row sizing while normal-motion S07/S09 first-list paint avoids the containment overhead observed in the full benchmark.
+
 ## Prompt Template (Operational)
 
 Use this message pattern for each stage:
