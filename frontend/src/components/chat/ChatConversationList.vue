@@ -874,6 +874,8 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  content-visibility: auto;
+  contain-intrinsic-size: var(--messenger-list-row-contain-intrinsic-size, 76px);
 }
 
 .conversation-window-more {
@@ -1158,7 +1160,7 @@ onBeforeUnmount(() => {
   background: #7c3aed !important;
   color: #fff !important;
   box-shadow: 0 4px 10px rgba(124, 58, 237, 0.3) !important;
-  animation: pulse-mention 2s infinite;
+  animation: pulse-mention calc(var(--messenger-motion-standard, 180ms) * 11) infinite;
 }
 
 @keyframes pulse-mention {
@@ -1279,7 +1281,7 @@ onBeforeUnmount(() => {
   text-align: right;
   font: inherit;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background var(--messenger-motion-fast, 120ms) ease;
 }
 
 .menu-action:active {
@@ -1350,12 +1352,12 @@ onBeforeUnmount(() => {
 
 .zoom-fade-enter-active,
 .zoom-fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--messenger-motion-standard, 180ms) ease;
 }
 
 .zoom-fade-enter-active .conversation-menu-popover,
 .zoom-fade-leave-active .conversation-menu-popover {
-  transition: transform 0.16s cubic-bezier(0.2, 0, 0, 1), opacity 0.16s cubic-bezier(0.2, 0, 0, 1);
+  transition: transform var(--messenger-motion-fast, 120ms) cubic-bezier(0.2, 0, 0, 1), opacity var(--messenger-motion-fast, 120ms) cubic-bezier(0.2, 0, 0, 1);
 }
 
 .zoom-fade-enter-from,
