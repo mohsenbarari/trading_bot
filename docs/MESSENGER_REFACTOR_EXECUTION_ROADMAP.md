@@ -64,7 +64,7 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap optimized and S09 persistence benchmark now covers true document upload resume in addition to document download recovery |
+| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap optimized, S09 persistence benchmark now covers true document upload resume, and latest checkpoint leaves upload-completion/S10-list gates open |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
@@ -374,9 +374,17 @@ Stage 7 progress:
 	- `scripts/run_messenger_benchmark.mjs` now adds a true S09 document-upload persistence probe that holds the first upload chunk/legacy media request, leaves and reopens the active conversation, then records upload first-visible, resume, completion, transport, and hold-state metrics under `persistence.upload`.
 	- `scripts/messenger_benchmark_config.json` defines `upload_probe_size_bytes` for S09 so the upload path is large enough to exercise resumable transfer behavior.
 	- `scripts/build_messenger_benchmark_report.py` now includes context-menu, download-start, and upload-completion deltas in the generated performance report.
+- Transfer memory cleanup:
+	- Document uploads now drop their local `blob:` preview URL after the final server message is committed, while image/video uploads still retain local URLs for instant preview reuse.
+	- The benchmark heap counter now runs `HeapProfiler.collectGarbage` before reading `Performance.getMetrics`, reducing noise from short-lived upload/download objects and making heap deltas closer to retained memory.
+- Stage 7 measured checkpoint (working-tree, 3 measured S09/S10 runs, `--skip-warmup`):
+	- Command: `npm run benchmark:messenger -- --config tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
+	- S09 averages, pre-refactor -> current: list `658.2 -> 686.2 ms`, chat `873.9 -> 807.1 ms`, context `217.5 -> 149.3 ms`, heap `7.36 -> 7.54 MB`, download reload `828.0 -> 952.2 ms`, upload completion `465.2 -> 779.6 ms`.
+	- S10 averages, pre-refactor -> current: list `7987.7 -> 8446.7 ms`, chat `2423.2 -> 2376.9 ms`, context `525.2 -> 523.2 ms`, heap `7.47 -> 7.58 MB`.
+	- Decision: Stage 7 is improved in chat/context/retained heap stability, but not closed because S09 upload completion/download reload and S10 list-ready remain outside the target direction.
 - Remaining Stage 7 work:
-	- Rerun S09/S10 with at least 3 measured runs and publish the subset comparison summary before closing the stage.
-	- If S09 upload completion or restore still regresses after the measured run, optimize the media/cache service path before moving to Stage 8.
+	- Reduce S09 upload completion and post-download room-return/reload latency, then rerun the 3-measured-run S09 gate.
+	- Recover S10 weak-device list-ready before moving to Stage 8.
 
 ### Stage 8 - Realtime/Notification Coalescing (S07 Critical)
 

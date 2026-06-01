@@ -1003,6 +1003,7 @@ function findAssetMetrics(distDir, prefix, suffix) {
 }
 
 async function collectBrowserCounters(client) {
+  await client.send('HeapProfiler.collectGarbage').catch(() => null)
   const metrics = await client.send('Performance.getMetrics').catch(() => ({ metrics: [] }))
   const map = new Map(metrics.metrics.map((item) => [item.name, item.value]))
   return {
