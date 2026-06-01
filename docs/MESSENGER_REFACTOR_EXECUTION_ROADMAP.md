@@ -575,6 +575,10 @@ Stage 11 progress:
 - `ChatConversationList.vue` now applies `content-visibility: auto` with a stable intrinsic row size to conversation cards and resolves menu/mention motion durations through messenger tokens.
 - `ChatInputBar.vue` now scopes composer/reply/selection layout work with containment and resolves pulse, reply, active-button, and selection-bar motion through messenger tokens.
 - Focused validation: `npm run test:unit:run -- src/components/chat/ChatConversationList.test.ts src/components/chat/ChatInputBar.test.ts`, `npm run build`, and `git diff --check`.
+- Stage 11 ChatView motion follow-up:
+	- `ChatView.vue` now resolves typing/history pulses, message entrance/swipe transitions, sticker/scroll/context/ripple/reply/highlight motion, media progress transitions, and selection actions through messenger motion tokens instead of hardcoded durations.
+	- Added `tmp/messenger-benchmark/stage11-s10-config.json` for the 3-run S10 weak-device benchmark gate.
+	- Focused validation: `npm run test:unit:run -- src/components/ChatView.test.ts src/components/chat/ChatConversationList.test.ts src/components/chat/ChatInputBar.test.ts`, `npm run build`, and `git diff --check`.
 
 ### Stage 12 - Final Benchmark + Release Closure
 
