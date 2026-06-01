@@ -65,8 +65,8 @@ Do not merge multiple stages into a single prompt.
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
 | 7 | Media Pipeline Optimization (S09/S10) | Completed | Copilot | 2026-06-01 | Corrected benchmark timing confirmed S09/S10 list/chat gains versus the old baseline; Stage 7 closed and handed off to Stage 8 |
-| 8 | Realtime/Notification Coalescing (S07) | In Progress | Copilot | 2026-06-01 | Microtask coalescing is in place for notification store/runtime writes and chat websocket burst handling; focused Vitest and build are green |
-| 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
+| 8 | Realtime/Notification Coalescing (S07) | Completed | Copilot | 2026-06-01 | S07 benchmark passed the list/chat exit gate after realtime/notification coalescing; unread refresh also improved |
+| 9 | UI System Enforcement Pass | In Progress | Copilot | 2026-06-01 | Entered after Stage 8 closure; design-token drift audit is next |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
 | 11 | Weak-Device and Motion Final Pass | Pending | Copilot | - | - |
 | 12 | Final Benchmark + Release Closure | Pending | Copilot | - | - |
@@ -478,6 +478,11 @@ Stage 8 progress:
 	- Chat notification flushes now collapse same-conversation bursts to the newest toast/browser payload while still preserving unread and mention accumulation for the whole burst.
 	- `useChatWebSocket.ts` now applies message appends, read-receipt patches, reaction updates, and conversation preview/unread deltas as collected flush-time patches instead of mutating the reactive arrays once per event.
 - Focused validation: `npm run test:unit:run -- src/stores/notifications.test.ts src/composables/useNotificationRuntime.test.ts src/composables/chat/useChatWebSocket.test.ts`, `npm run build`.
+- Stage 8 benchmark closure (committed `cda5604`, 3 measured S07 runs, `--skip-warmup`):
+	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage8-s07-config.json --skip-warmup`
+	- S07 averages, pre-refactor -> current: list `1153.6 -> 939.0 ms`, chat `1437.9 -> 1240.2 ms`, context `113.6 -> 108.7 ms`, heap `7.92 -> 7.67 MB`, unread refresh `19.2 -> 12.1 ms`, messages API `141.4 -> 122.8 ms`, Messenger JS gzip `138.3 -> 113.4 KB`.
+	- Non-gating watch item: S07 conversations API average moved `197.8 -> 200.7 ms`; keep this under observation in the final benchmark, but Stage 8 exit criteria are satisfied.
+	- Decision: Stage 8 is closed and Stage 9 starts.
 
 ### Stage 9 - UI System Enforcement Pass
 
