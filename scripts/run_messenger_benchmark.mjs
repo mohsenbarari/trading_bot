@@ -1049,12 +1049,28 @@ async function runScrollProbe(page) {
 
 async function runContextMenuProbe(page) {
   const target = page.locator('.message-row, .message-bubble').first()
-  const start = performance.now()
-  await target.click({ button: 'right', timeout: 30000 }).catch(async () => {
-    await target.dispatchEvent('contextmenu')
+  await target.waitFor({ timeout: 30000 })
+  const start = await page.evaluate(() => performance.now())
+  await target.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const clientX = rect.left + Math.min(24, Math.max(1, rect.width / 2))
+    const clientY = rect.top + Math.min(24, Math.max(1, rect.height / 2))
+    element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      button: 2,
+      buttons: 2,
+    }))
   })
-  await page.locator('.context-menu, .chat-context-menu, [role="menu"]').first().waitFor({ timeout: 30000 })
-  return performance.now() - start
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('.context-menu, .chat-context-menu, [role="menu"]')),
+    null,
+    { timeout: 30000 },
+  )
+  const elapsed = await page.evaluate((startedAt) => performance.now() - startedAt, start)
+  return elapsed
 }
 
 function summarizeApiTimings(timings, matcher) {
@@ -1239,6 +1255,35 @@ async function waitForDocumentBubbleState(page, documentBubble, matcher, timeout
   return lastState
 }
 
+async function dispatchDocumentBubbleClickAndWaitForState(page, documentBubble, matcher, timeoutMs = 30000) {
+  await documentBubble.waitFor({ timeout: 30000 })
+  const start = await page.evaluate(() => performance.now())
+  await documentBubble.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const clientX = rect.left + Math.min(24, Math.max(1, rect.width / 2))
+    const clientY = rect.top + Math.min(24, Math.max(1, rect.height / 2))
+    const pointerBase = {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      button: 0,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+    }
+    const PointerCtor = window.PointerEvent || window.MouseEvent
+    element.dispatchEvent(new PointerCtor('pointerdown', { ...pointerBase, buttons: 1 }))
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX, clientY, button: 0, buttons: 1 }))
+    element.dispatchEvent(new PointerCtor('pointerup', { ...pointerBase, buttons: 0 }))
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX, clientY, button: 0, buttons: 0 }))
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY, button: 0, buttons: 0 }))
+  })
+  const state = await waitForDocumentBubbleState(page, documentBubble, matcher, timeoutMs)
+  const elapsed = await page.evaluate((startedAt) => performance.now() - startedAt, start)
+  return { state, elapsed }
+}
+
 async function waitForFlag(page, predicate, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -1421,10 +1466,14 @@ async function runUploadPersistenceProbe(page, seeded, baseUrl, scenario) {
     const documentBubble = page.locator('.messages-container .msg-document').filter({ hasText: documentFileName }).first()
     const visible = await documentBubble.waitFor({ timeout: 30000 }).then(() => true).catch(() => false)
     if (!visible) return null
-    const downloadStart = performance.now()
-    await documentBubble.click({ timeout: 30000 }).catch(() => null)
-    const initialState = await waitForDocumentBubbleState(page, documentBubble, (state) => state !== 'idle', 30000)
-    const downloadStartMs = performance.now() - downloadStart
+    const downloadStartProbe = await dispatchDocumentBubbleClickAndWaitForState(
+      page,
+      documentBubble,
+      (state) => state !== 'idle',
+      30000,
+    )
+    const initialState = downloadStartProbe.state
+    const downloadStartMs = downloadStartProbe.elapsed
 
     const leaveStart = performance.now()
     await backToConversationList(page, baseUrl).catch(() => null)

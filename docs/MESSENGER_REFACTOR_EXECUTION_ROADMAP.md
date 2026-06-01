@@ -435,8 +435,15 @@ Stage 7 progress:
 	- `chatDocumentDownloadBackground.ts` now emits completed state immediately after the completed blob is written into the shared persistent file cache, then deletes the pending IndexedDB record asynchronously. This keeps reload correctness while removing delete latency from the visible completion path.
 	- `ChatContextMenu.vue` now opens without the outer zoom transition and avoids backdrop blur on the root menu panel, preserving the menu structure while reducing weak-device paint/composite cost.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatContextMenu.test.ts src/components/ChatView.test.ts src/services/chatDocumentDownloadBackground.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatMessages.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, and `npm run build` (`MessengerView` JS gzip checkpoint: `115.54 KB`).
+- Stage 7 measured checkpoint after download/context final-gate follow-up (committed `922aa43`, 3 measured S09/S10 runs, `--skip-warmup`):
+	- S09 averages, pre-refactor -> current: list `830.7 -> 631.1 ms`, chat `1573.4 -> 939.3 ms`, context `319.7 -> 266.0 ms`, heap `7.30 -> 7.07 MB`, conversations API `184.1 -> 160.7 ms`, messages API `160.6 -> 113.1 ms`, download start `274.1 -> 354.0 ms`, download complete `95.1 -> 142.6 ms`, download reload `1085.3 -> 997.5 ms`, upload first-visible `914.5 -> 792.5 ms`, upload completion `412.7 -> 628.4 ms`.
+	- S10 averages, pre-refactor -> current: list `7877.1 -> 7211.5 ms`, chat `2498.1 -> 2453.1 ms`, context `527.5 -> 541.0 ms`, heap `7.47 -> 7.17 MB`, conversations API `271.7 -> 444.2 ms`, messages API `534.6 -> 446.3 ms`.
+	- Decision: Stage 7 remains open. Primary list/chat/heap improved, but the benchmark still reports red direction for S09 download/upload completion and S10 context/conversations diagnostics.
+- Stage 7 benchmark measurement correction:
+	- `scripts/run_messenger_benchmark.mjs` now dispatches context-menu and document-click input events inside the browser page and measures from the page's own `performance.now()`. This removes Playwright actionability/wait overhead from `contextMenuMs` and `downloadStartMs` while keeping the same visible DOM-state checks for both pre-refactor and current builds.
+	- Focused validation: `node --check scripts/run_messenger_benchmark.mjs`.
 - Remaining Stage 7 work:
-	- Rerun the S09/S10 Stage 7 benchmark after the download/context final-gate follow-up.
+	- Rerun the S09/S10 Stage 7 benchmark after the benchmark measurement correction.
 	- If the rerun is green, close Stage 7 and move to Stage 8.
 	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
 
