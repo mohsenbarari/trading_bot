@@ -542,6 +542,9 @@ Stage 10 progress:
 - `ChatGroupManagerModal.vue` now mirrors the same role strip and action grouping pattern for group overview, keeping admin-only management actions under the access/settings groups and the leave action in a dedicated danger group.
 - Focused regression coverage now asserts the role strip and grouped manager sections in `CreateChannelView.test.ts` and `ChatGroupManagerModal.test.ts`.
 - Focused validation: `npm run test:unit:run -- src/components/CreateChannelView.test.ts src/components/chat/ChatGroupManagerModal.test.ts`, `npm run build`, and `git diff --check`.
+- Header entry-point follow-up:
+	- `ChatHeader.vue` now uses the same "management" wording for both group and channel room manager entry points instead of labeling the channel manager as settings-only.
+	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatHeader.test.ts src/components/CreateChannelView.test.ts src/components/chat/ChatGroupManagerModal.test.ts`, `npm run build`, and `git diff --check`.
 
 ### Stage 11 - Weak-Device and Motion Final Pass
 
