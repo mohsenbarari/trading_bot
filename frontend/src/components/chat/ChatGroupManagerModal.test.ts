@@ -619,6 +619,10 @@ describe('ChatGroupManagerModal.vue', () => {
     expect(wrapperVm.pageTitle).toBe('مدیریت گروه')
     expect(wrapperVm.pageSubtitle).toContain('۳ عضو')
     expect(wrapperVm.canGoBack).toBe(false)
+    expect(wrapper.text()).toContain('نقش شما')
+    expect(wrapper.text()).toContain('ادمین گروه')
+    expect(wrapper.text()).toContain('اعضا و دسترسی‌ها')
+    expect(wrapper.text()).toContain('خروج')
 
     wrapperVm.page = 'edit'
     await nextTick()

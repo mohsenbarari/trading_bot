@@ -133,6 +133,11 @@ describe('CreateChannelView.vue', () => {
     await flushPromises()
     await flushPromises()
 
+    expect(wrapper.text()).toContain('نقش شما')
+    expect(wrapper.text()).toContain('سازنده کانال')
+    expect(wrapper.text()).toContain('اعضا و دسترسی‌ها')
+    expect(wrapper.text()).toContain('خروج و حذف')
+
     const openChannelButton = wrapper.findAll('button').find((button) => button.text().includes('باز کردن در پیام‌رسان'))
     expect(openChannelButton).toBeTruthy()
     await openChannelButton!.trigger('click')
