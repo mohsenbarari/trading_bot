@@ -414,11 +414,11 @@ const layout = computed(() => buildLayout(props.items))
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-radius: 14px;
+  border-radius: var(--messenger-radius-control, 8px);
   overflow: hidden;
   max-width: 100%;
   cursor: pointer;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--messenger-overlay-faint, rgba(0, 0, 0, 0.04));
 }
 
 .album-row {
@@ -431,7 +431,7 @@ const layout = computed(() => buildLayout(props.items))
   position: relative;
   overflow: hidden;
   flex: none;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--messenger-overlay-muted, rgba(0, 0, 0, 0.06));
 }
 
 .album-item.download-selection-mode {
@@ -448,11 +448,11 @@ const layout = computed(() => buildLayout(props.items))
 }
 
 .album-item.download-selected::before {
-  background: rgba(77, 163, 255, 0.18);
+  background: color-mix(in srgb, var(--messenger-chat-link, #3390ec) 22%, transparent);
 }
 
 .album-item.download-unselected::before {
-  background: rgba(5, 10, 18, 0.34);
+  background: var(--messenger-overlay-medium, rgba(0, 0, 0, 0.34));
 }
 
 .album-item.highlight-message::after {
@@ -471,7 +471,7 @@ const layout = computed(() => buildLayout(props.items))
     background: transparent;
   }
   15% {
-    box-shadow: inset 0 0 0 3px rgba(255, 200, 0, 0.92), 0 0 0 2px rgba(255, 200, 0, 0.35);
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--messenger-accent, #f59e0b) 92%, transparent), 0 0 0 2px color-mix(in srgb, var(--messenger-accent, #f59e0b) 35%, transparent);
     background: rgba(255, 200, 0, 0.12);
   }
   100% {
@@ -505,15 +505,15 @@ const layout = computed(() => buildLayout(props.items))
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.28);
-  color: #fff;
+  background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0, 0, 0, 0.6)) 47%, transparent);
+  color: var(--messenger-overlay-text, #ffffff);
   cursor: pointer;
   z-index: 3;
   backdrop-filter: blur(4px);
 }
 
 .album-download-btn:hover {
-  background: rgba(0, 0, 0, 0.36);
+  background: var(--messenger-overlay-medium, rgba(0, 0, 0, 0.36));
 }
 
 .album-download-btn svg,
@@ -538,7 +538,7 @@ const layout = computed(() => buildLayout(props.items))
   width: 54px;
   height: 54px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.34);
+  background: var(--messenger-overlay-medium, rgba(0, 0, 0, 0.34));
   backdrop-filter: blur(6px);
 }
 
@@ -549,7 +549,7 @@ const layout = computed(() => buildLayout(props.items))
 }
 
 .album-download-progress-overlay {
-  background: rgba(0, 0, 0, 0.24);
+  background: var(--messenger-overlay-soft, rgba(0, 0, 0, 0.24));
   backdrop-filter: blur(4px);
 }
 
@@ -572,7 +572,7 @@ const layout = computed(() => buildLayout(props.items))
 .album-download-progress-text {
   position: relative;
   z-index: 1;
-  color: #fff;
+  color: var(--messenger-overlay-text, #ffffff);
   font-size: 12px;
   font-weight: 700;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
@@ -595,13 +595,13 @@ const layout = computed(() => buildLayout(props.items))
   justify-content: center;
   border: 2px solid rgba(255, 255, 255, 0.92);
   background: rgba(0, 0, 0, 0.24);
-  color: white;
+  color: var(--messenger-overlay-text, #ffffff);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .album-selection-circle.selected {
-  background: #3390ec;
-  border-color: #ffffff;
+  background: var(--messenger-chat-link, #3390ec);
+  border-color: var(--messenger-overlay-text, #ffffff);
 }
 
 .album-upload-overlay {
@@ -612,9 +612,9 @@ const layout = computed(() => buildLayout(props.items))
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: rgba(0, 0, 0, 0.34);
+  background: var(--messenger-overlay-medium, rgba(0, 0, 0, 0.34));
   backdrop-filter: blur(6px);
-  color: #fff;
+  color: var(--messenger-overlay-text, #ffffff);
   cursor: pointer;
 }
 
@@ -622,7 +622,7 @@ const layout = computed(() => buildLayout(props.items))
   max-width: calc(100% - 18px);
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.38);
+  background: var(--messenger-overlay-control, rgba(0, 0, 0, 0.38));
   font-size: 11px;
   line-height: 1.3;
   text-align: center;
@@ -653,13 +653,13 @@ const layout = computed(() => buildLayout(props.items))
 
 .ring-bg {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.28);
+  stroke: color-mix(in srgb, var(--messenger-overlay-text, #ffffff) 28%, transparent);
   stroke-width: 3;
 }
 
 .ring-fg {
   fill: none;
-  stroke: #ffffff;
+  stroke: var(--messenger-overlay-text, #ffffff);
   stroke-width: 3;
   transform: rotate(-90deg);
   transform-origin: center;

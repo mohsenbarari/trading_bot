@@ -10,6 +10,13 @@
   --messenger-text-muted: #64748b;
   --messenger-chat-link: #3390ec;
   --messenger-chat-success: #43a047;
+  --messenger-overlay-faint: rgba(0, 0, 0, 0.04);
+  --messenger-overlay-muted: rgba(0, 0, 0, 0.06);
+  --messenger-overlay-strong: rgba(0, 0, 0, 0.6);
+  --messenger-overlay-medium: rgba(0, 0, 0, 0.34);
+  --messenger-overlay-control: rgba(0, 0, 0, 0.38);
+  --messenger-overlay-soft: rgba(0, 0, 0, 0.24);
+  --messenger-overlay-text: #ffffff;
   --messenger-accent: #f59e0b;
   --messenger-accent-strong: #b45309;
   --messenger-danger: #dc2626;
