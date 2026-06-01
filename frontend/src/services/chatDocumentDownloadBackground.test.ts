@@ -194,6 +194,7 @@ describe('chatDocumentDownloadBackground', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    localStorage.clear()
     fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('indexedDB', {
@@ -216,6 +217,7 @@ describe('chatDocumentDownloadBackground', () => {
   })
 
   afterEach(() => {
+    localStorage.clear()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     if (originalCreateObjectURL) {
@@ -302,19 +304,11 @@ describe('chatDocumentDownloadBackground', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('throws before initialization, ignores duplicate in-flight starts, and cancels active downloads', async () => {
+  it('auto-initializes on first download, ignores duplicate in-flight starts, and cancels active downloads', async () => {
     const service = await importFreshModule()
     const events: any[] = []
     service.subscribeToDocumentDownloads((event) => events.push(event))
-
-    await expect(service.startDocumentDownload({
-      messageId: 49,
-      userId: 2,
-      fileId: 'missing-init',
-      fileName: 'missing.pdf',
-    })).rejects.toThrow('[documentDownloadService] not initialized')
-
-    await service.initChatDocumentDownloadBackground({ apiBaseUrl: 'https://coin.test', getAuthToken: () => 'jwt' })
+    localStorage.setItem('auth_token', 'jwt')
 
     fetchMock.mockImplementation((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
       const signal = options.signal as AbortSignal
@@ -325,11 +319,14 @@ describe('chatDocumentDownloadBackground', () => {
     await service.startDocumentDownload({ messageId: 50, userId: 3, fileId: 'file-50', fileName: 'hold.pdf' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat/files/file-50?token=jwt', expect.any(Object))
+    expect(service.hasPendingDocumentDownloadResumeHint()).toBe(true)
     service.cancelDocumentDownload(50)
     await vi.runAllTimersAsync()
 
     expect(events.some((event) => event.type === 'cancelled' && event.messageId === 50)).toBe(true)
     expect(service.getPendingDocumentDownloadsForUser(3)).toEqual([])
+    expect(service.hasPendingDocumentDownloadResumeHint()).toBe(false)
   })
 
   it('cancels queued downloads and emits the cancelled event', async () => {

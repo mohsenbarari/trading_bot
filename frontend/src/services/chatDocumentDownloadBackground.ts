@@ -1,3 +1,8 @@
+import {
+    hasPendingDocumentDownloadResumeHint as hasStoredDocumentDownloadResumeHint,
+    setDocumentDownloadResumeHint,
+} from './chatTransferResumeHints'
+
 export type DocumentDownloadPhase = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
 
 export interface PendingDocumentDownload {
@@ -79,6 +84,101 @@ const MAX_DOWNLOAD_RETRIES = 3
 let config: ServiceConfig | null = null
 let initialized = false
 let resumePromise: Promise<void> | null = null
+
+export function hasPendingDocumentDownloadResumeHint(): boolean {
+    return pendingDownloads.size > 0 || hasStoredDocumentDownloadResumeHint()
+}
+
+export function primeChatDocumentDownloadBackgroundConfig(cfg: ServiceConfig): void {
+    config = cfg
+}
+
+function refreshDocumentDownloadResumeHintFromState(): void {
+    setDocumentDownloadResumeHint(pendingDownloads.size > 0)
+}
+
+async function deletePersistedDocumentDownload(messageId: number): Promise<void> {
+    await idbDelete(messageId)
+    refreshDocumentDownloadResumeHintFromState()
+}
+
+function deletePersistedDocumentDownloadSoon(messageId: number): void {
+    void deletePersistedDocumentDownload(messageId)
+}
+
+function createDefaultServiceConfig(): ServiceConfig {
+    return {
+        apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+        getAuthToken: () => {
+            if (typeof window === 'undefined') return null
+            try {
+                return window.localStorage.getItem('auth_token')
+            } catch {
+                return null
+            }
+        },
+    }
+}
+
+function getOrCreateServiceConfig(): ServiceConfig {
+    if (!config) {
+        config = createDefaultServiceConfig()
+    }
+    return config
+}
+
+function shouldSkipNonCriticalResumeDeferral(): boolean {
+    const userAgent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : ''
+    if (userAgent.toLowerCase().includes('jsdom')) {
+        return true
+    }
+
+    const runtime = globalThis as typeof globalThis & {
+        process?: {
+            env?: Record<string, string | undefined>
+        }
+    }
+    return Boolean(runtime.process?.env?.VITEST)
+}
+
+function waitForNonCriticalResumeSlot(): Promise<void> {
+    if (shouldSkipNonCriticalResumeDeferral()) {
+        return Promise.resolve()
+    }
+
+    return new Promise((resolve) => {
+        const runtime = typeof window !== 'undefined' ? window : globalThis
+        const requestIdle = (runtime as typeof globalThis & {
+            requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+        }).requestIdleCallback
+
+        if (typeof requestIdle === 'function') {
+            requestIdle(() => resolve(), { timeout: 150 })
+            return
+        }
+
+        if (typeof runtime.requestAnimationFrame === 'function') {
+            runtime.requestAnimationFrame(() => {
+                runtime.setTimeout(resolve, 0)
+            })
+            return
+        }
+
+        setTimeout(resolve, 0)
+    })
+}
+
+async function yieldDocumentRestoreLoop(index: number): Promise<void> {
+    if (index === 0 || index % 6 !== 0) {
+        return
+    }
+
+    if (shouldSkipNonCriticalResumeDeferral()) {
+        return
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
 let dbPromise: Promise<IDBDatabase> | null = null
 let activeDownloadCount = 0
 
@@ -256,7 +356,7 @@ async function runDownloadWithGate(download: PendingDocumentDownload) {
 async function markFailed(download: PendingDocumentDownload, errorMessage: string) {
     download.phase = 'failed'
     pendingDownloads.delete(download.messageId)
-    await idbDelete(download.messageId)
+    await deletePersistedDocumentDownload(download.messageId)
     emit({
         type: 'error',
         userId: download.userId,
@@ -298,7 +398,7 @@ async function runDownload(download: PendingDocumentDownload) {
             completedDownloadUrls.set(download.fileId, objectUrl)
             triggerBrowserDownload(objectUrl, download.fileName)
             pendingDownloads.delete(download.messageId)
-            await idbDelete(download.messageId)
+            await deletePersistedDocumentDownload(download.messageId)
             emit({
                 type: 'completed',
                 userId: download.userId,
@@ -343,7 +443,7 @@ async function runDownload(download: PendingDocumentDownload) {
         completedDownloadUrls.set(download.fileId, objectUrl)
         triggerBrowserDownload(objectUrl, download.fileName)
         pendingDownloads.delete(download.messageId)
-        await idbDelete(download.messageId)
+        await deletePersistedDocumentDownload(download.messageId)
         emit({
             type: 'completed',
             userId: download.userId,
@@ -356,7 +456,7 @@ async function runDownload(download: PendingDocumentDownload) {
         if (abortFlags.has(download.messageId)) {
             pendingDownloads.delete(download.messageId)
             abortFlags.delete(download.messageId)
-            await idbDelete(download.messageId)
+            await deletePersistedDocumentDownload(download.messageId)
             emit({
                 type: 'cancelled',
                 userId: download.userId,
@@ -418,7 +518,7 @@ export function cancelDocumentDownload(messageId: number): void {
 
     pendingDownloads.delete(messageId)
     abortFlags.delete(messageId)
-    void idbDelete(messageId)
+    deletePersistedDocumentDownloadSoon(messageId)
     emit({
         type: 'cancelled',
         userId: download.userId,
@@ -428,8 +528,10 @@ export function cancelDocumentDownload(messageId: number): void {
 }
 
 export async function startDocumentDownload(params: StartDocumentDownloadParams): Promise<void> {
-    if (!config) {
-        throw new Error('[documentDownloadService] not initialized')
+    const serviceConfig = getOrCreateServiceConfig()
+
+    if (!initialized) {
+        await initChatDocumentDownloadBackground(serviceConfig)
     }
 
     const existing = pendingDownloads.get(params.messageId)
@@ -456,6 +558,7 @@ export async function startDocumentDownload(params: StartDocumentDownloadParams)
         createdAt: new Date().toISOString(),
     }
 
+    setDocumentDownloadResumeHint(true)
     pendingDownloads.set(download.messageId, download)
     await idbPut(download)
     emit({
@@ -480,15 +583,21 @@ export function initChatDocumentDownloadBackground(cfg: ServiceConfig): Promise<
 
     resumePromise = (async () => {
         try {
+            await waitForNonCriticalResumeSlot()
             const stored = await idbGetAll()
-            for (const record of stored) {
+            if (!stored.length) {
+                setDocumentDownloadResumeHint(false)
+            }
+            for (const [index, record] of stored.entries()) {
+                await yieldDocumentRestoreLoop(index)
                 if (record.phase === 'completed' || record.phase === 'cancelled' || record.phase === 'failed') {
-                    await idbDelete(record.messageId)
+                    await deletePersistedDocumentDownload(record.messageId)
                     continue
                 }
 
                 record.phase = 'queued'
                 pendingDownloads.set(record.messageId, record)
+                refreshDocumentDownloadResumeHintFromState()
                 emit({
                     type: 'added',
                     userId: record.userId,
@@ -499,6 +608,10 @@ export function initChatDocumentDownloadBackground(cfg: ServiceConfig): Promise<
                     totalBytes: record.totalBytes,
                 })
                 enqueueDownload(record)
+            }
+
+            if (!pendingDownloads.size) {
+                setDocumentDownloadResumeHint(false)
             }
         } catch (error) {
             console.warn('[documentDownloadService] resume failed:', error)

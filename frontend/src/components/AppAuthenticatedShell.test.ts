@@ -7,7 +7,9 @@ const shellMocks = vi.hoisted(() => ({
   connect: vi.fn(),
   useNotificationRuntime: vi.fn(),
   initChatUploadBackground: vi.fn(async () => {}),
+  hasPendingUploadResumeHint: vi.fn(() => false),
   initChatDocumentDownloadBackground: vi.fn(async () => {}),
+  hasPendingDocumentDownloadResumeHint: vi.fn(() => false),
   initChatFileDebugOverlay: vi.fn(),
   setupExpiryTimer: vi.fn(),
   apiFetch: vi.fn(async () => ({})),
@@ -19,6 +21,11 @@ vi.mock('../composables/useWebSocket', () => ({
 
 vi.mock('../composables/useNotificationRuntime', () => ({
   useNotificationRuntime: shellMocks.useNotificationRuntime,
+}))
+
+vi.mock('../services/chatTransferResumeHints', () => ({
+  hasPendingDocumentDownloadResumeHint: shellMocks.hasPendingDocumentDownloadResumeHint,
+  hasPendingUploadResumeHint: shellMocks.hasPendingUploadResumeHint,
 }))
 
 vi.mock('../services/chatUploadBackground', () => ({
@@ -47,7 +54,11 @@ describe('AppAuthenticatedShell.vue', () => {
     shellMocks.connect.mockReset()
     shellMocks.useNotificationRuntime.mockReset()
     shellMocks.initChatUploadBackground.mockClear()
+    shellMocks.hasPendingUploadResumeHint.mockReset()
+    shellMocks.hasPendingUploadResumeHint.mockReturnValue(false)
     shellMocks.initChatDocumentDownloadBackground.mockClear()
+    shellMocks.hasPendingDocumentDownloadResumeHint.mockReset()
+    shellMocks.hasPendingDocumentDownloadResumeHint.mockReturnValue(false)
     shellMocks.initChatFileDebugOverlay.mockClear()
     shellMocks.setupExpiryTimer.mockClear()
     shellMocks.apiFetch.mockReset()
@@ -61,7 +72,7 @@ describe('AppAuthenticatedShell.vue', () => {
     delete (window as any).deferredPrompt
   })
 
-  it('boots background runtimes, forwards ensureSessionValidation, and handles the install prompt', async () => {
+  it('skips eager background recovery when no pending transfer hint exists, forwards ensureSessionValidation, and handles the install prompt', async () => {
     localStorage.setItem('auth_token', 'jwt')
     localStorage.setItem('refresh_token', 'refresh-token')
     shellMocks.useNotificationRuntime.mockImplementation(({ ensureSessionValidation }) => {
@@ -79,8 +90,8 @@ describe('AppAuthenticatedShell.vue', () => {
       },
     })
 
-    expect(shellMocks.initChatUploadBackground).toHaveBeenCalled()
-    expect(shellMocks.initChatDocumentDownloadBackground).toHaveBeenCalled()
+    expect(shellMocks.initChatUploadBackground).not.toHaveBeenCalled()
+    expect(shellMocks.initChatDocumentDownloadBackground).not.toHaveBeenCalled()
     expect(shellMocks.useNotificationRuntime).toHaveBeenCalledWith({
       connect: shellMocks.connect,
       on: shellMocks.on,
@@ -108,6 +119,27 @@ describe('AppAuthenticatedShell.vue', () => {
     expect(preventDefault).toHaveBeenCalled()
     expect((window as any).deferredPrompt).toBe(event)
     expect(readyListener).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts background recovery immediately when a pending transfer hint exists', async () => {
+    shellMocks.hasPendingUploadResumeHint.mockReturnValue(true)
+    shellMocks.hasPendingDocumentDownloadResumeHint.mockReturnValue(true)
+
+    const AppAuthenticatedShell = (await import('./AppAuthenticatedShell.vue')).default
+    mount(AppAuthenticatedShell, {
+      global: {
+        stubs: {
+          BottomNav: true,
+          SessionApprovalModal: true,
+          AppToasts: true,
+        },
+      },
+    })
+
+    await vi.waitFor(() => {
+      expect(shellMocks.initChatUploadBackground).toHaveBeenCalledTimes(1)
+      expect(shellMocks.initChatDocumentDownloadBackground).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('skips session verification without a refresh token and swallows verification failures', async () => {

@@ -181,6 +181,7 @@ describe('chatUploadBackground', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    localStorage.clear()
     MockXHR.reset()
     vi.spyOn(globalThis, 'setInterval').mockImplementation(() => 1 as any)
     vi.spyOn(globalThis, 'clearInterval').mockImplementation(() => undefined)
@@ -230,6 +231,7 @@ describe('chatUploadBackground', () => {
   })
 
   afterEach(() => {
+    localStorage.clear()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.runOnlyPendingTimers()
@@ -1301,10 +1303,32 @@ describe('chatUploadBackground', () => {
     expect(hooks.state.serviceWorkerOwnedUploads.has(-992)).toBe(true)
   })
 
-  it('rejects submitUpload before the background service is initialized', async () => {
+  it('auto-initializes on first submitUpload using the default same-origin config', async () => {
     const service = await importFreshModule()
+    const events: any[] = []
+    service.subscribeToUploads((event) => events.push(event))
+    localStorage.setItem('auth_token', 'jwt')
 
-    await expect(service.submitUpload(makeBaseSubmitParams())).rejects.toThrow('[uploadService] not initialized')
+    MockXHR.enqueueScenario((xhr) => {
+      xhr.upload.onprogress?.({ lengthComputable: true, loaded: 5, total: 10 } as any)
+      xhr.status = 200
+      xhr.responseText = JSON.stringify({
+        file_id: 'chat-file-auto',
+        file_name: 'server-image.png',
+        mime_type: 'image/png',
+        thumbnail: 'server-thumb',
+        width: 640,
+        height: 480,
+      })
+      xhr.onload?.()
+    })
+
+    await service.submitUpload(makeBaseSubmitParams())
+    await vi.runAllTimersAsync()
+
+    expect(MockXHR.instances[0]?.url).toBe('/api/chat/upload-media')
+    expect(events.map((event) => event.type)).toEqual(['added', 'progress', 'uploaded', 'sent'])
+    expect(service.hasPendingUploadResumeHint()).toBe(false)
   })
 
   it('submits a legacy channel upload, emits progress/uploaded/sent events, and clears the pending entry', async () => {

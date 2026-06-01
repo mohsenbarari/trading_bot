@@ -64,7 +64,7 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | Pending | Copilot | - | - |
+| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap optimized: upload/download workers now lazy-start from resume hints instead of eager shell boot, with focused unit coverage and production build green |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
@@ -361,6 +361,18 @@ Exit criteria:
 
 Rollback:
 - Revert media/cache service patches.
+
+Stage 7 progress:
+- Closed transfer-runtime boot cleanup slice:
+	- `AppAuthenticatedShell.vue` no longer eagerly imports/starts upload and document-download background workers on every authenticated boot.
+	- `chatTransferResumeHints.ts` stores lightweight local resume hints so only pending transfers trigger immediate recovery on shell mount.
+	- `chatUploadBackground.ts` and `chatDocumentDownloadBackground.ts` can self-initialize on first submit/download action using the same same-origin config contract, defer non-critical restore work to idle/frame slots, and clear hints when queues drain.
+- Validation completed:
+	- `npm run test:unit:run -- src/services/chatUploadBackground.test.ts src/services/chatDocumentDownloadBackground.test.ts src/components/AppAuthenticatedShell.test.ts`
+	- `npm run build`
+- Remaining Stage 7 work:
+	- Add a true upload-resume action probe to S09; the current benchmark persistence probe is primarily document-download route leave/reload recovery.
+	- Rerun S09/S10 with at least 3 measured runs and publish the subset comparison summary before closing the stage.
 
 ### Stage 8 - Realtime/Notification Coalescing (S07 Critical)
 

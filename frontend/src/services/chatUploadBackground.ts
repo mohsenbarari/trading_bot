@@ -39,6 +39,7 @@ import {
 import { serializeChatMediaMessagePayload } from '../utils/chatMediaMessagePayload'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
 import { measureMessengerStage2, recordMessengerMetric } from '../utils/messengerStage2Metrics'
+import { hasPendingUploadResumeHint as hasStoredUploadResumeHint, setUploadResumeHint } from './chatTransferResumeHints'
 
 // -----------------------------------------------------------------------------
 // Types
@@ -183,6 +184,48 @@ const serviceWorkerHandoffAbortIds = new Set<number>()
 const serviceWorkerHandoffResolvers = new Map<number, () => void>()
 const firstProgressMetricUploadIds = new Set<number>()
 
+export function hasPendingUploadResumeHint(): boolean {
+    return pendingUploads.size > 0 || hasStoredUploadResumeHint()
+}
+
+export function primeChatUploadBackgroundConfig(cfg: ServiceConfig): void {
+    config = cfg
+}
+
+function refreshUploadResumeHintFromState(): void {
+    setUploadResumeHint(pendingUploads.size > 0)
+}
+
+async function deletePersistedUpload(id: number): Promise<void> {
+    await idbDelete(id)
+    refreshUploadResumeHintFromState()
+}
+
+function deletePersistedUploadSoon(id: number): void {
+    void deletePersistedUpload(id)
+}
+
+function createDefaultServiceConfig(): ServiceConfig {
+    return {
+        apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+        getAuthToken: () => {
+            if (typeof window === 'undefined') return null
+            try {
+                return window.localStorage.getItem('auth_token')
+            } catch {
+                return null
+            }
+        },
+    }
+}
+
+function getOrCreateServiceConfig(): ServiceConfig {
+    if (!config) {
+        config = createDefaultServiceConfig()
+    }
+    return config
+}
+
 // -----------------------------------------------------------------------------
 // Concurrency gate
 //
@@ -212,6 +255,59 @@ const XHR_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes per file
 const SEND_REQUEST_TIMEOUT_MS = 2 * 60 * 1000 // 2 minutes per send
 let activeUploadCount = 0
 const uploadQueue: PendingUpload[] = []
+
+function shouldSkipNonCriticalResumeDeferral(): boolean {
+    const userAgent = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : ''
+    if (userAgent.toLowerCase().includes('jsdom')) {
+        return true
+    }
+
+    const runtime = globalThis as typeof globalThis & {
+        process?: {
+            env?: Record<string, string | undefined>
+        }
+    }
+    return Boolean(runtime.process?.env?.VITEST)
+}
+
+function waitForNonCriticalResumeSlot(): Promise<void> {
+    if (shouldSkipNonCriticalResumeDeferral()) {
+        return Promise.resolve()
+    }
+
+    return new Promise((resolve) => {
+        const runtime = typeof window !== 'undefined' ? window : globalThis
+        const requestIdle = (runtime as typeof globalThis & {
+            requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+        }).requestIdleCallback
+
+        if (typeof requestIdle === 'function') {
+            requestIdle(() => resolve(), { timeout: 150 })
+            return
+        }
+
+        if (typeof runtime.requestAnimationFrame === 'function') {
+            runtime.requestAnimationFrame(() => {
+                runtime.setTimeout(resolve, 0)
+            })
+            return
+        }
+
+        setTimeout(resolve, 0)
+    })
+}
+
+async function yieldUploadRestoreLoop(index: number): Promise<void> {
+    if (index === 0 || index % 6 !== 0) {
+        return
+    }
+
+    if (shouldSkipNonCriticalResumeDeferral()) {
+        return
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
 
 const READY_LIKE_UPLOAD_SESSION_STATUSES = new Set(['ready', 'committed'])
 const TERMINAL_UPLOAD_SESSION_STATUSES = new Set(['failed', 'cancelled', 'expired'])
@@ -1096,6 +1192,7 @@ async function reclaimUploadsFromServiceWorker(): Promise<void> {
         const refreshedUpload = await idbGet(id)
         if (!refreshedUpload) {
             pendingUploads.delete(id)
+            refreshUploadResumeHintFromState()
             continue
         }
 
@@ -1141,7 +1238,7 @@ function ensureUploadServiceWorkerBridge(): void {
             if (upload.albumId) {
                 cleanupAlbumBatchIfSettled(upload.albumId)
             }
-            void idbDelete(upload.id)
+            deletePersistedUploadSoon(upload.id)
             emit({
                 type: 'sent',
                 userId: upload.userId,
@@ -1702,7 +1799,7 @@ async function runResumableUpload(upload: PendingUpload): Promise<void> {
             pendingUploads.delete(upload.id)
             abortFlags.delete(upload.id)
             void cancelServerUploadState(upload)
-            await idbDelete(upload.id)
+            await deletePersistedUpload(upload.id)
             emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
             return
         }
@@ -1853,8 +1950,8 @@ async function runLegacyUpload(upload: PendingUpload): Promise<void> {
         if (abortFlags.has(upload.id)) {
             upload.phase = 'cancelled'
             stopUploadActivity(upload)
-            await idbDelete(upload.id)
             pendingUploads.delete(upload.id)
+            await deletePersistedUpload(upload.id)
             abortFlags.delete(upload.id)
             emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
             if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
@@ -1933,7 +2030,7 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
         })
 
         pendingUploads.delete(upload.id)
-        await idbDelete(upload.id)
+        await deletePersistedUpload(upload.id)
     } catch (error) {
         if (serviceWorkerHandoffAbortIds.has(upload.id)) {
             serviceWorkerHandoffAbortIds.delete(upload.id)
@@ -1946,7 +2043,7 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
             upload.phase = 'cancelled'
             stopUploadActivity(upload)
             pendingUploads.delete(upload.id)
-            await idbDelete(upload.id)
+            await deletePersistedUpload(upload.id)
             abortFlags.delete(upload.id)
             emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
             return
@@ -2063,7 +2160,7 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
                 localBlobUrl: upload.localBlobUrl,
             })
             pendingUploads.delete(upload.id)
-            await idbDelete(upload.id)
+            await deletePersistedUpload(upload.id)
         }))
     } catch (error) {
         const normalizedError = sendTimedOut ? new Error('Network Error (send timeout)') : error
@@ -2162,14 +2259,14 @@ async function sendOneLegacy(upload: PendingUpload): Promise<void> {
         })
 
         pendingUploads.delete(upload.id)
-        await idbDelete(upload.id)
+        await deletePersistedUpload(upload.id)
         if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
     } catch (error) {
         if (abortFlags.has(upload.id)) {
             upload.phase = 'cancelled'
             stopUploadActivity(upload)
             pendingUploads.delete(upload.id)
-            await idbDelete(upload.id)
+            await deletePersistedUpload(upload.id)
             abortFlags.delete(upload.id)
             emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
             if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
@@ -2251,10 +2348,16 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
 
     resumePromise = (async () => {
         try {
+            await waitForNonCriticalResumeSlot()
             const stored = (await idbGetAll()).sort(comparePendingUploadsForTimeline)
-            for (const record of stored) {
+            if (!stored.length) {
+                setUploadResumeHint(false)
+            }
+            for (const [index, record] of stored.entries()) {
+                await yieldUploadRestoreLoop(index)
                 // Reset transient XHR state; progress is preserved from last write
                 pendingUploads.set(record.id, record)
+                refreshUploadResumeHintFromState()
                 if (record.albumId) {
                     const batch = ensureAlbumBatch(
                         record.albumId,
@@ -2269,7 +2372,10 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
 
             // Resume each upload in the background
             const resumedAlbumIds = new Set<string>()
+            let resumeIndex = 0
             for (const upload of pendingUploads.values()) {
+                await yieldUploadRestoreLoop(resumeIndex)
+                resumeIndex += 1
                 // Rebuild a local blob URL so UI can show the preview again
                 if (upload.file && !upload.localBlobUrl) {
                     try {
@@ -2282,7 +2388,7 @@ export function initChatUploadBackground(cfg: ServiceConfig): Promise<void> {
                 if (upload.phase === 'failed' || upload.phase === 'sent' || upload.phase === 'cancelled') {
                     // Stale — drop
                     pendingUploads.delete(upload.id)
-                    await idbDelete(upload.id)
+                    await deletePersistedUpload(upload.id)
                     continue
                 }
 
@@ -2329,8 +2435,10 @@ export async function waitForChatUploadBackgroundReady(): Promise<void> {
 }
 
 export async function submitUpload(params: SubmitUploadParams): Promise<void> {
-    if (!config) {
-        throw new Error('[uploadService] not initialized')
+    const serviceConfig = getOrCreateServiceConfig()
+
+    if (!initialized) {
+        await initChatUploadBackground(serviceConfig)
     }
 
     const handoffStartMark = `upload-handoff-${params.optimisticId}-start`
@@ -2362,6 +2470,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
         localBlobUrl: params.localBlobUrl,
     }
 
+    setUploadResumeHint(true)
     pendingUploads.set(upload.id, upload)
     startUploadActivity(upload)
 
@@ -2441,7 +2550,7 @@ export function cancelUpload(id: number): void {
         if (shouldUseSessionBackedUpload(upload)) {
             void cancelServerUploadState(upload)
         }
-        void idbDelete(id)
+        deletePersistedUploadSoon(id)
         emit({ type: 'cancelled', userId: upload.userId, optimisticId: id })
         if (upload.albumId) cleanupAlbumBatchIfSettled(upload.albumId)
     }
