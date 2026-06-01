@@ -219,6 +219,7 @@ describe('useChatWebSocket', () => {
       content: 'سلام',
     })
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(messages.value).toHaveLength(1)
     expect(messages.value?.map((message) => message.id)).toEqual([701])
@@ -231,6 +232,7 @@ describe('useChatWebSocket', () => {
     emit('chat:message', { sender_id: 99, message_type: 'text', content: 'new chat' })
     expect(loadConversationsMock).not.toHaveBeenCalled()
 
+    await Promise.resolve()
     vi.advanceTimersByTime(400)
     await Promise.resolve()
     expect(loadConversationsMock).toHaveBeenCalledTimes(1)
@@ -248,6 +250,7 @@ describe('useChatWebSocket', () => {
       content: 'gone',
       is_deleted: true,
     })
+    await Promise.resolve()
 
     expect(conversations.value[0].unread_count).toBe(2)
     expect(conversations.value[0].last_message_content).toBe('پیام حذف شد')
@@ -266,22 +269,25 @@ describe('useChatWebSocket', () => {
       content: 'fallback payload',
     })
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(loadMessagesMock).toHaveBeenCalledWith(12, true)
     expect(markAsReadMock).toHaveBeenCalledTimes(1)
 
     emit('chat:read', { reader_id: 12 })
+    await Promise.resolve()
     expect(messages.value[0].is_read).toBe(true)
     expect(messages.value[1].is_read).toBe(false)
   })
 
-  it('clears room unread counts and normalizes reaction payloads', () => {
+  it('clears room unread counts and normalizes reaction payloads', async () => {
     selectedUserId.value = -9
     messages.value = [{ id: 88, reactions: [] }]
     conversations.value = [{ other_user_id: -9, unread_count: 4 }]
     mountHarness()
 
     emit('chat:read', { room_kind: 'channel', chat_id: 9 })
+    await Promise.resolve()
     expect(conversations.value[0].unread_count).toBe(0)
 
     emit('chat:reaction', {
@@ -292,6 +298,7 @@ describe('useChatWebSocket', () => {
         { emoji: '👍', user_id: 'NaN' },
       ],
     })
+    await Promise.resolve()
 
     expect(messages.value[0].reactions).toEqual([
       { emoji: '🔥', user_id: 5 },
@@ -309,9 +316,37 @@ describe('useChatWebSocket', () => {
     messages.value = [{ id: 91, reactions: [{ emoji: '🙂', user_id: 2 }] }]
     emit('chat:reaction', { foo: 'bar' })
     emit('chat:reaction', { id: 404, reactions: [{ emoji: '🔥', user_id: 1 }] })
+    await Promise.resolve()
     expect(messages.value[0].reactions).toEqual([{ emoji: '🙂', user_id: 2 }])
 
     typingErrorSpy.mockRestore()
+  })
+
+  it('coalesces open-chat message bursts into one read+scroll follow-up', async () => {
+    conversations.value = [{ other_user_id: 12, unread_count: 0, last_message_at: null, last_message_type: null, last_message_content: null }]
+    mountHarness()
+
+    emit('chat:message', {
+      id: 801,
+      sender_id: 12,
+      created_at: '2026-05-14T14:00:00Z',
+      message_type: 'text',
+      content: 'اول',
+    })
+    emit('chat:message', {
+      id: 802,
+      sender_id: 12,
+      created_at: '2026-05-14T14:00:01Z',
+      message_type: 'text',
+      content: 'دوم',
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(messages.value.map((message) => message.id)).toEqual([801, 802])
+    expect(markAsReadMock).toHaveBeenCalledTimes(1)
+    expect(scrollToBottomMock).toHaveBeenCalledTimes(1)
   })
 
   it('clears active typing timeouts during unmount teardown', () => {

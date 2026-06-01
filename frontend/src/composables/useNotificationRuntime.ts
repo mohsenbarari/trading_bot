@@ -70,6 +70,153 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     const notificationStore = useNotificationStore()
     let hasBootstrappedAuthenticatedRuntime = false
     let skipNextReconnectCountsFetch = false
+    let flushScheduled = false
+    let isUnmounted = false
+    const pendingAppMessages: AppRealtimeNotificationPayload[] = []
+    const pendingChatMessages: ChatRealtimeNotificationPayload[] = []
+
+    const addAppNotificationsBatch = (payloads: AppRealtimeNotificationPayload[]) => {
+        const batchAdd = (notificationStore as {
+            addAppNotificationsBatch?: (items: AppRealtimeNotificationPayload[]) => ReturnType<typeof notificationStore.addAppNotification>[]
+        }).addAppNotificationsBatch
+        if (typeof batchAdd === 'function') {
+            return batchAdd(payloads)
+        }
+        return payloads.map((payload) => notificationStore.addAppNotification(payload))
+    }
+
+    const addToastsBatch = (toasts: Parameters<typeof notificationStore.addToast>[0][]) => {
+        if (toasts.length === 0) return
+        const batchAdd = (notificationStore as {
+            addToastsBatch?: (items: Parameters<typeof notificationStore.addToast>[0][]) => void
+        }).addToastsBatch
+        if (typeof batchAdd === 'function') {
+            batchAdd(toasts)
+            return
+        }
+        toasts.forEach((toast) => notificationStore.addToast(toast))
+    }
+
+    const incrementChatUnreadBatch = (conversationKeys: number[]) => {
+        if (conversationKeys.length === 0) return
+        const batchIncrement = (notificationStore as {
+            incrementChatUnreadBatch?: (items: number[]) => void
+        }).incrementChatUnreadBatch
+        if (typeof batchIncrement === 'function') {
+            batchIncrement(conversationKeys)
+            return
+        }
+        conversationKeys.forEach((conversationKey) => notificationStore.incrementChatUnread(conversationKey))
+    }
+
+    const incrementMentionUnreadBatch = (conversationKeys: number[]) => {
+        if (conversationKeys.length === 0) return
+        const batchIncrement = (notificationStore as {
+            incrementMentionUnreadBatch?: (items: number[]) => void
+        }).incrementMentionUnreadBatch
+        if (typeof batchIncrement === 'function') {
+            batchIncrement(conversationKeys)
+            return
+        }
+        conversationKeys.forEach((conversationKey) => notificationStore.incrementMentionUnread(conversationKey))
+    }
+
+    const flushPendingNotifications = () => {
+        flushScheduled = false
+        if (isUnmounted) {
+            pendingAppMessages.length = 0
+            pendingChatMessages.length = 0
+            return
+        }
+
+        if (pendingAppMessages.length > 0) {
+            const appPayloads = pendingAppMessages.splice(0, pendingAppMessages.length)
+            const normalizedNotifications = addAppNotificationsBatch(appPayloads)
+
+            if (route.path !== '/notifications') {
+                addToastsBatch(normalizedNotifications.map((notification) => {
+                    const title = notification.title || 'اعلان جدید'
+                    const body = notification.body || ''
+                    const targetRoute = typeof notification.route === 'string' && notification.route.trim()
+                        ? notification.route
+                        : '/notifications'
+
+                    if (document.hidden) {
+                        showBrowserNotification(title, body, { route: targetRoute })
+                    }
+
+                    return {
+                        title,
+                        body,
+                        route: targetRoute,
+                        kind: 'app' as const,
+                        level: notification.level,
+                        category: notification.category,
+                    }
+                }))
+            }
+        }
+
+        if (pendingChatMessages.length > 0) {
+            const chatPayloads = pendingChatMessages.splice(0, pendingChatMessages.length)
+            const unreadConversationKeys: number[] = []
+            const mentionConversationKeys: number[] = []
+            const toastBatch: Parameters<typeof notificationStore.addToast>[0][] = []
+
+            for (const payload of chatPayloads) {
+                const conversationKey = resolveRealtimeConversationKey(payload)
+                if (conversationKey === null) continue
+
+                const isChatOpen = route.path === '/chat'
+                const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
+                const isViewingSameChat = isChatOpen
+                    && currentChatId !== null
+                    && currentChatId === conversationKey
+                    && !document.hidden
+                const shouldTreatAsUnread = !isViewingSameChat
+                const isMutedConversation = notificationStore.isConversationMuted(conversationKey)
+
+                const currentUserId = currentUserSummary.value?.id
+                const isMentioned = hasRealtimeMention(payload, currentUserId)
+
+                if (shouldTreatAsUnread) {
+                    unreadConversationKeys.push(conversationKey)
+                    if (isMentioned) {
+                        mentionConversationKeys.push(conversationKey)
+                    }
+                }
+
+                if (!shouldTreatAsUnread || (isMutedConversation && !isMentioned)) {
+                    continue
+                }
+
+                const senderName = buildRealtimeConversationLabel(payload)
+                const body = buildChatNotificationBody(payload)
+                const routePath = buildChatNotificationRoute(conversationKey, senderName)
+
+                toastBatch.push({
+                    title: senderName,
+                    body,
+                    route: routePath,
+                    kind: 'chat',
+                })
+
+                if (document.hidden && payload.room_kind !== 'channel') {
+                    showBrowserNotification(senderName, body, { route: routePath })
+                }
+            }
+
+            incrementChatUnreadBatch(unreadConversationKeys)
+            incrementMentionUnreadBatch(mentionConversationKeys)
+            addToastsBatch(toastBatch)
+        }
+    }
+
+    const scheduleNotificationFlush = () => {
+        if (flushScheduled) return
+        flushScheduled = true
+        Promise.resolve().then(flushPendingNotifications)
+    }
 
     const handleBrowserNotificationClick = (event: Event) => {
         const targetRoute = (event as CustomEvent<BrowserNotificationClickDetail>).detail?.route
@@ -117,66 +264,13 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     }
 
     const handleAppMessage = (payload: AppRealtimeNotificationPayload) => {
-        const normalizedNotification = notificationStore.addAppNotification(payload)
-        if (route.path === '/notifications') return
-
-        const title = normalizedNotification.title || 'اعلان جدید'
-        const body = normalizedNotification.body || ''
-        const targetRoute = typeof normalizedNotification.route === 'string' && normalizedNotification.route.trim()
-            ? normalizedNotification.route
-            : '/notifications'
-
-        notificationStore.addToast({
-            title,
-            body,
-            route: targetRoute,
-            kind: 'app',
-            level: normalizedNotification.level,
-            category: normalizedNotification.category,
-        })
-
-        if (document.hidden) {
-            showBrowserNotification(title, body, { route: targetRoute })
-        }
+        pendingAppMessages.push(payload)
+        scheduleNotificationFlush()
     }
 
     const handleChatMessage = (payload: ChatRealtimeNotificationPayload) => {
-        const conversationKey = resolveRealtimeConversationKey(payload)
-        if (conversationKey === null) return
-
-        const isChatOpen = route.path === '/chat'
-        const currentChatId = route.query.user_id ? Number(route.query.user_id) : null
-        const isViewingSameChat = isChatOpen && currentChatId !== null && currentChatId === conversationKey && !document.hidden
-        const shouldTreatAsUnread = !isViewingSameChat
-        const isMutedConversation = notificationStore.isConversationMuted(conversationKey)
-
-        const currentUserId = currentUserSummary.value?.id
-        const isMentioned = hasRealtimeMention(payload, currentUserId)
-
-        if (shouldTreatAsUnread) {
-            notificationStore.incrementChatUnread(conversationKey)
-            if (isMentioned) {
-                notificationStore.incrementMentionUnread(conversationKey)
-            }
-        }
-
-        if (!shouldTreatAsUnread || (isMutedConversation && !isMentioned)) return
-
-        const senderName = buildRealtimeConversationLabel(payload)
-        const body = buildChatNotificationBody(payload)
-        const routePath = buildChatNotificationRoute(conversationKey, senderName)
-
-        notificationStore.addToast({
-            title: senderName,
-            body,
-            route: routePath,
-            kind: 'chat',
-        })
-
-        const shouldShowBrowserNotification = document.hidden && payload.room_kind !== 'channel'
-        if (shouldShowBrowserNotification) {
-            showBrowserNotification(senderName, body, { route: routePath })
-        }
+        pendingChatMessages.push(payload)
+        scheduleNotificationFlush()
     }
 
     onMounted(() => {
@@ -197,6 +291,10 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     })
 
     onBeforeUnmount(() => {
+        isUnmounted = true
+        flushScheduled = false
+        pendingAppMessages.length = 0
+        pendingChatMessages.length = 0
         off(WS_NOTIFICATION_EVENTS.sessionRevoked, handleSessionRevoked)
         off(WS_NOTIFICATION_EVENTS.wsReconnect, handleReconnect)
         off(WS_NOTIFICATION_EVENTS.appMessage, handleAppMessage)

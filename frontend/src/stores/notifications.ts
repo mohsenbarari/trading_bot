@@ -12,7 +12,6 @@ import {
     type ToastNotification,
 } from '../types/notifications'
 
-
 export const useNotificationStore = defineStore('notifications', () => {
     const chatUnreadCount = ref(0)
     const unreadChatUserIds = ref<number[]>([])
@@ -24,6 +23,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     const isLoadingHistory = ref(false)
     const MAX_IN_MEMORY_NOTIFICATIONS = 100
     const TOAST_LIFETIME_MS = 5000
+    let clientReceivedAtCursor = 0
 
     const normalizeConversationKey = (value: unknown): number | null => {
         const conversationKey = Number(value)
@@ -31,12 +31,29 @@ export const useNotificationStore = defineStore('notifications', () => {
         return conversationKey
     }
 
+    const mergeConversationKeys = (current: number[], incoming: Array<unknown>) => {
+        const merged = new Set(current)
+        for (const value of incoming) {
+            const conversationKey = normalizeConversationKey(value)
+            if (conversationKey !== null) {
+                merged.add(conversationKey)
+            }
+        }
+        return Array.from(merged)
+    }
+
     const trimNotificationList = (notifications: NormalizedAppNotification[]) =>
         notifications.slice(0, MAX_IN_MEMORY_NOTIFICATIONS)
 
+    const reserveClientReceivedAt = () => {
+        const now = Date.now()
+        clientReceivedAtCursor = Math.max(clientReceivedAtCursor + 1, now)
+        return clientReceivedAtCursor
+    }
+
     const withClientReceivedAt = (
         notification: AppRealtimeNotificationPayload,
-        fallbackTimestamp = Date.now(),
+        fallbackTimestamp = reserveClientReceivedAt(),
         existingNotification?: NormalizedAppNotification
     ): NormalizedAppNotification => ({
         ...(existingNotification || {}),
@@ -45,6 +62,23 @@ export const useNotificationStore = defineStore('notifications', () => {
             existingNotification?.client_received_at
             ?? (typeof notification.client_received_at === 'number' ? notification.client_received_at : fallbackTimestamp),
     })
+
+    const sortNotificationsByRecency = (notifications: NormalizedAppNotification[]) =>
+        notifications.sort((left, right) => {
+            const leftReceivedAt = typeof left.client_received_at === 'number' ? left.client_received_at : 0
+            const rightReceivedAt = typeof right.client_received_at === 'number' ? right.client_received_at : 0
+            if (leftReceivedAt !== rightReceivedAt) {
+                return rightReceivedAt - leftReceivedAt
+            }
+
+            const leftNumericId = Number(left.id)
+            const rightNumericId = Number(right.id)
+            if (Number.isFinite(leftNumericId) && Number.isFinite(rightNumericId) && leftNumericId !== rightNumericId) {
+                return rightNumericId - leftNumericId
+            }
+
+            return String(right.id).localeCompare(String(left.id))
+        })
 
     const replaceHistoryPreservingConcurrentRealtime = (
         incomingNotifications: NormalizedAppNotification[],
@@ -133,8 +167,8 @@ export const useNotificationStore = defineStore('notifications', () => {
             : fallbackCount
 
         const nextMentionIds = conversations
-            .filter((c) => Number(c?.unread_mention_count || 0) > 0)
-            .map((c) => normalizeConversationKey(c?.user_id))
+            .filter((conversation) => Number(conversation?.unread_mention_count || 0) > 0)
+            .map((conversation) => normalizeConversationKey(conversation?.user_id))
             .filter((userId): userId is number => userId !== null)
 
         unreadMentionChats.value = nextMentionIds
@@ -171,13 +205,11 @@ export const useNotificationStore = defineStore('notifications', () => {
         return mutedConversationIds.value.includes(normalizedConversationId)
     }
 
-
     const fetchInitialCounts = async () => {
         const token = localStorage.getItem('auth_token')
         if (!token) return
 
         try {
-            // Get unread counts from chat poll endpoint
             const response = await apiFetch('/api/chat/poll')
             if (response.ok) {
                 const data = await response.json()
@@ -201,26 +233,39 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const incrementChatUnread = (userId?: number | null) => {
-        const normalizedConversationId = normalizeConversationKey(userId)
-        if (normalizedConversationId === null) {
+        incrementChatUnreadBatch([userId])
+    }
+
+    const incrementChatUnreadBatch = (conversationIds: Array<number | null | undefined>) => {
+        const validConversationIds = conversationIds.filter(
+            (conversationId): conversationId is number => normalizeConversationKey(conversationId) !== null
+        )
+        if (validConversationIds.length === 0) {
             void fetchInitialCounts()
             return
         }
 
-        if (!unreadChatUserIds.value.includes(normalizedConversationId)) {
-            unreadChatUserIds.value = [...unreadChatUserIds.value, normalizedConversationId]
-            chatUnreadCount.value = unreadChatUserIds.value.length
+        const nextIds = mergeConversationKeys(unreadChatUserIds.value, validConversationIds)
+        if (nextIds.length === unreadChatUserIds.value.length) {
+            return
         }
+
+        unreadChatUserIds.value = nextIds
+        chatUnreadCount.value = unreadChatUserIds.value.length
     }
 
     const incrementMentionUnread = (userId?: number | null) => {
-        const normalizedConversationId = normalizeConversationKey(userId)
-        if (normalizedConversationId === null) return
+        incrementMentionUnreadBatch([userId])
+    }
 
-        if (!unreadMentionChats.value.includes(normalizedConversationId)) {
-            unreadMentionChats.value = [...unreadMentionChats.value, normalizedConversationId]
-            unreadMentionCount.value = unreadMentionChats.value.length
+    const incrementMentionUnreadBatch = (conversationIds: Array<number | null | undefined>) => {
+        const nextIds = mergeConversationKeys(unreadMentionChats.value, conversationIds)
+        if (nextIds.length === unreadMentionChats.value.length) {
+            return
         }
+
+        unreadMentionChats.value = nextIds
+        unreadMentionCount.value = unreadMentionChats.value.length
     }
 
     const markChatAsRead = (userId?: number | null) => {
@@ -234,31 +279,39 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     const addAppNotification = (notification: AppRealtimeNotificationPayload) => {
-        const normalizedId = normalizeNotificationId(notification.id)
-        const existingIndex = appNotifications.value.findIndex(
-            (existingNotification) => existingNotification.id === normalizedId
-        )
-        const existingNotification = existingIndex >= 0 ? appNotifications.value[existingIndex] : undefined
-        const normalized = withClientReceivedAt(notification, Date.now(), existingNotification)
+        return addAppNotificationsBatch([notification])[0]!
+    }
 
-        if (existingIndex >= 0) {
-            appNotifications.value[existingIndex] = normalized
-        } else {
-            appNotifications.value = trimNotificationList([normalized, ...appNotifications.value])
+    const addAppNotificationsBatch = (notifications: AppRealtimeNotificationPayload[]) => {
+        if (notifications.length === 0) return [] as NormalizedAppNotification[]
+
+        const existingById = new Map(
+            appNotifications.value.map((notification) => [notification.id, notification] as const)
+        )
+        const nextById = new Map(existingById)
+        const normalizedBatch: NormalizedAppNotification[] = []
+
+        for (const notification of notifications) {
+            const normalizedId = normalizeNotificationId(notification.id)
+            const existingNotification = nextById.get(normalizedId)
+            const normalized = withClientReceivedAt(notification, reserveClientReceivedAt(), existingNotification)
+            nextById.set(normalizedId, normalized)
+            normalizedBatch.push(normalized)
         }
 
-        return normalized
+        appNotifications.value = trimNotificationList(sortNotificationsByRecency(Array.from(nextById.values())))
+        return normalizedBatch
     }
 
     const fetchHistory = async () => {
         isLoadingHistory.value = true
         const fetchStartedAt = Date.now()
         try {
-            const res = await apiFetch('/api/notifications/')
-            if (res.ok) {
-                const data = await res.json()
+            const response = await apiFetch('/api/notifications/')
+            if (response.ok) {
+                const data = await response.json()
                 const existingById = new Map(
-                    appNotifications.value.map((notification) => [notification.id, notification])
+                    appNotifications.value.map((notification) => [notification.id, notification] as const)
                 )
                 const normalizedHistory = data.map((notification: AppRealtimeNotificationPayload) => {
                     const normalized = normalizeAppNotificationPayload(notification)
@@ -270,8 +323,8 @@ export const useNotificationStore = defineStore('notifications', () => {
                 })
                 replaceHistoryPreservingConcurrentRealtime(normalizedHistory, fetchStartedAt)
             }
-        } catch (e) {
-            console.error('Failed to fetch notifications history:', e)
+        } catch (error) {
+            console.error('Failed to fetch notifications history:', error)
         } finally {
             isLoadingHistory.value = false
         }
@@ -284,29 +337,30 @@ export const useNotificationStore = defineStore('notifications', () => {
 
     const markAllAsRead = async () => {
         try {
-             await apiFetch('/api/notifications/mark-all-read', { method: 'POST' })
-             appNotifications.value = appNotifications.value.map(n => ({ ...n, is_read: true }))
-        } catch (e) {
-             console.error('Failed to mark all as read:', e)
+            const response = await apiFetch('/api/notifications/mark-all-read', { method: 'POST' })
+            if (!response.ok) throw new Error()
+            appNotifications.value = appNotifications.value.map((notification) => ({ ...notification, is_read: true }))
+        } catch (error) {
+            console.error('Failed to mark all as read:', error)
         }
     }
 
     const toggleReadStatus = async (id: number | string, isRead: boolean) => {
-        const notification = appNotifications.value.find(n => n.id === id)
+        const notification = appNotifications.value.find((item) => item.id === id)
         if (!notification) return
 
         const originalState = notification.is_read
         notification.is_read = isRead
 
         try {
-            const res = await apiFetch(`/api/notifications/${id}/read`, {
+            const response = await apiFetch(`/api/notifications/${id}/read`, {
                 method: 'PATCH',
-                body: JSON.stringify({ is_read: isRead })
+                body: JSON.stringify({ is_read: isRead }),
             })
-            if (!res.ok) throw new Error()
-        } catch (e) {
+            if (!response.ok) throw new Error()
+        } catch (error) {
             notification.is_read = originalState
-            console.error('Failed to toggle read status:', e)
+            console.error('Failed to toggle read status:', error)
         }
     }
 
@@ -315,11 +369,11 @@ export const useNotificationStore = defineStore('notifications', () => {
         appNotifications.value = []
 
         try {
-            const res = await apiFetch('/api/notifications/', { method: 'DELETE' })
-            if (!res.ok) throw new Error()
-        } catch (e) {
+            const response = await apiFetch('/api/notifications/', { method: 'DELETE' })
+            if (!response.ok) throw new Error()
+        } catch (error) {
             restoreClearedNotifications(originalList)
-            console.error('Clear all notifications failed:', e)
+            console.error('Clear all notifications failed:', error)
         }
     }
 
@@ -329,27 +383,33 @@ export const useNotificationStore = defineStore('notifications', () => {
         if (!removedNotification) return
 
         appNotifications.value = appNotifications.value.filter((notification) => notification.id !== id)
-        
+
         try {
-            const res = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' })
-            if (!res.ok) throw new Error()
-        } catch (e) {
+            const response = await apiFetch(`/api/notifications/${id}`, { method: 'DELETE' })
+            if (!response.ok) throw new Error()
+        } catch (error) {
             restoreDeletedNotification(originalList, removedNotification)
-            console.error('Delete failed:', e)
+            console.error('Delete failed:', error)
         }
     }
 
     const addToast = (toast: ToastInput) => {
-        const nextToast = createToastNotification(toast)
-        activeToasts.value.push(nextToast)
-        
-        // Play notification sound
+        addToastsBatch([toast])
+    }
+
+    const addToastsBatch = (toasts: ToastInput[]) => {
+        if (toasts.length === 0) return
+
+        const nextToasts = toasts.map((toast) => createToastNotification(toast))
+        activeToasts.value = [...activeToasts.value, ...nextToasts]
+
         playNotificationSound()
 
-        // Auto remove after 5 seconds
-        setTimeout(() => {
-            removeToast(nextToast.id)
-        }, TOAST_LIFETIME_MS)
+        for (const toast of nextToasts) {
+            window.setTimeout(() => {
+                removeToast(toast.id)
+            }, TOAST_LIFETIME_MS)
+        }
     }
 
     const removeToast = (id: number) => {
@@ -362,19 +422,23 @@ export const useNotificationStore = defineStore('notifications', () => {
         unreadMentionCount,
         unreadMentionChats,
         incrementMentionUnread,
+        incrementMentionUnreadBatch,
         mutedConversationIds,
         appNotifications,
         activeToasts,
         fetchInitialCounts,
         setChatUnreadCount,
         incrementChatUnread,
+        incrementChatUnreadBatch,
         markChatAsRead,
         syncUnreadChatIds,
         syncMutedConversationIds,
         setConversationMuted,
         isConversationMuted,
         addAppNotification,
+        addAppNotificationsBatch,
         addToast,
+        addToastsBatch,
         removeToast,
         isLoadingHistory,
         fetchHistory,
@@ -382,6 +446,6 @@ export const useNotificationStore = defineStore('notifications', () => {
         markAllAsRead,
         clearAllNotifications,
         deleteNotification,
-        toggleReadStatus
+        toggleReadStatus,
     }
 })
