@@ -6,21 +6,13 @@ import AppToasts from './AppToasts.vue'
 import { setupExpiryTimer, apiFetch } from '../utils/auth'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useNotificationRuntime } from '../composables/useNotificationRuntime'
-import { initChatUploadBackground } from '../services/chatUploadBackground'
-import { initChatDocumentDownloadBackground } from '../services/chatDocumentDownloadBackground'
+import {
+  hasPendingDocumentDownloadResumeHint,
+  hasPendingUploadResumeHint,
+} from '../services/chatTransferResumeHints'
 import { initChatFileDebugOverlay } from '../composables/chat/useChatFileHandler'
 
 const { on, off, connect } = useWebSocket()
-
-void initChatUploadBackground({
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-  getAuthToken: () => localStorage.getItem('auth_token'),
-})
-
-void initChatDocumentDownloadBackground({
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
-  getAuthToken: () => localStorage.getItem('auth_token'),
-})
 
 const ensureSessionValidation = async () => {
   const refreshToken = localStorage.getItem('refresh_token')
@@ -38,6 +30,24 @@ const ensureSessionValidation = async () => {
 
 onMounted(() => {
   setupExpiryTimer()
+
+  if (hasPendingUploadResumeHint()) {
+    void import('../services/chatUploadBackground').then(({ initChatUploadBackground }) =>
+      initChatUploadBackground({
+        apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+        getAuthToken: () => localStorage.getItem('auth_token'),
+      }),
+    )
+  }
+
+  if (hasPendingDocumentDownloadResumeHint()) {
+    void import('../services/chatDocumentDownloadBackground').then(({ initChatDocumentDownloadBackground }) =>
+      initChatDocumentDownloadBackground({
+        apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',
+        getAuthToken: () => localStorage.getItem('auth_token'),
+      }),
+    )
+  }
 
   initChatFileDebugOverlay()
 
