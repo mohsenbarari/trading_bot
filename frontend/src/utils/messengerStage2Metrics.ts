@@ -29,6 +29,11 @@ export interface MessengerFrameBudgetOptions {
   jankThresholdMs?: number
 }
 
+export interface MessengerDiagnosticTaskOptions {
+  timeoutMs?: number
+  fallbackDelayMs?: number
+}
+
 declare global {
   interface Window {
     __messengerStage2Metrics?: MessengerMetricEntry[]
@@ -60,6 +65,41 @@ function trimMetricStore(store: MessengerMetricEntry[]) {
   }
 
   store.splice(0, store.length - MAX_METRIC_ENTRIES)
+}
+
+function runDiagnosticTask(callback: () => void) {
+  try {
+    callback()
+  } catch {
+    // Diagnostics only; scheduled probes must never affect Messenger runtime.
+  }
+}
+
+export function scheduleMessengerDiagnosticTask(
+  callback: () => void,
+  options: MessengerDiagnosticTaskOptions = {},
+) {
+  if (typeof window === 'undefined') {
+    runDiagnosticTask(callback)
+    return false
+  }
+
+  const win = window as Window & {
+    requestIdleCallback?: (
+      callback: () => void,
+      options?: { timeout?: number },
+    ) => number
+  }
+
+  if (typeof win.requestIdleCallback === 'function') {
+    win.requestIdleCallback(() => runDiagnosticTask(callback), {
+      timeout: options.timeoutMs ?? 750,
+    })
+    return true
+  }
+
+  window.setTimeout(() => runDiagnosticTask(callback), options.fallbackDelayMs ?? 96)
+  return true
 }
 
 export function recordMessengerMetric(

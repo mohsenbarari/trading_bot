@@ -377,14 +377,19 @@ Stage 7 progress:
 - Transfer memory cleanup:
 	- Document uploads now drop their local `blob:` preview URL after the final server message is committed, while image/video uploads still retain local URLs for instant preview reuse.
 	- The benchmark heap counter now runs `HeapProfiler.collectGarbage` before reading `Performance.getMetrics`, reducing noise from short-lived upload/download objects and making heap deltas closer to retained memory.
-- Stage 7 measured checkpoint (working-tree, 3 measured S09/S10 runs, `--skip-warmup`):
-	- Command: `npm run benchmark:messenger -- --config tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
-	- S09 averages, pre-refactor -> current: list `658.2 -> 686.2 ms`, chat `873.9 -> 807.1 ms`, context `217.5 -> 149.3 ms`, heap `7.36 -> 7.54 MB`, download reload `828.0 -> 952.2 ms`, upload completion `465.2 -> 779.6 ms`.
-	- S10 averages, pre-refactor -> current: list `7987.7 -> 8446.7 ms`, chat `2423.2 -> 2376.9 ms`, context `525.2 -> 523.2 ms`, heap `7.47 -> 7.58 MB`.
-	- Decision: Stage 7 is improved in chat/context/retained heap stability, but not closed because S09 upload completion/download reload and S10 list-ready remain outside the target direction.
+- Stage 7 latency follow-up:
+	- Added an idle/timeout scheduler for Messenger diagnostic probes so DOM snapshots and frame-budget sampling no longer compete with first list/surface paint on weak devices.
+	- `MessengerView.vue` and `ChatConversationList.vue` now keep their performance marks synchronous but defer non-critical DOM counting/frame probes until idle, including the conversation-menu diagnostic snapshot.
+	- `commit_upload_batch_endpoint` now keeps the authoritative upload commit, message reload, and response serialization on the request path, then schedules realtime message fanout and upload-session committed runtime events after the HTTP response to reduce sender-visible upload completion latency.
+	- Focused validation: `npm run test:unit:run -- src/utils/messengerStage2Metrics.test.ts`, `python3 -m unittest tests.test_chat_router_upload_sessions.ChatRouterUploadSessionEndpointTests.test_commit_upload_batch_publishes_direct_and_group_branches`, `python3 -m unittest tests.test_chat_router_remaining_paths.ChatRouterRemainingPathTests.test_room_mute_channel_avatar_toggle_pin_and_commit_fallback_paths`, `python3 -m unittest tests.test_chat_router_upload_sessions`, `python3 -m py_compile api/routers/chat.py`, `npm run build`, and `git diff --check`.
+- Stage 7 measured checkpoint after latency follow-up (working-tree, 3 measured S09/S10 runs, `--skip-warmup`):
+	- Command: `cd frontend && npm run benchmark:messenger -- --config /root/trading-bot/trading_bot/tmp/messenger-benchmark/stage7-s09-s10-upload-probe-config.json --skip-warmup`
+	- S09 averages, pre-refactor -> current: list `748.0 -> 637.6 ms`, chat `1116.6 -> 1008.1 ms`, context `246.3 -> 217.5 ms`, heap `7.40 -> 7.50 MB`, download start `255.3 -> 527.9 ms`, download reload `1069.5 -> 954.3 ms`, upload first-visible `969.7 -> 1023.9 ms`, upload completion `680.6 -> 470.7 ms`.
+	- S10 averages, pre-refactor -> current: list `8005.6 -> 8121.6 ms`, chat `2610.4 -> 2221.7 ms`, context `483.0 -> 514.4 ms`, heap `7.47 -> 8.14 MB`, conversations API `266.7 -> 268.1 ms`, messages API `551.8 -> 460.5 ms`.
+	- Decision: Stage 7 now closes the S09 upload-completion regression and improves S09 list/chat/context plus S09 download reload, but remains open because S09 download start/upload first-visible and S10 list/context/heap are still outside the target direction.
 - Remaining Stage 7 work:
-	- Reduce S09 upload completion and post-download room-return/reload latency, then rerun the 3-measured-run S09 gate.
-	- Recover S10 weak-device list-ready before moving to Stage 8.
+	- Stabilize S09 download-start and upload first-visible variability while keeping the upload-completion fix green.
+	- Recover S10 weak-device list-ready/context/heap before moving to Stage 8.
 
 ### Stage 8 - Realtime/Notification Coalescing (S07 Critical)
 

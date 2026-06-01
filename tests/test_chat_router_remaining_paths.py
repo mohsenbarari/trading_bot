@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from jose import JWTError
 
 from api.routers.chat import (
@@ -509,6 +509,7 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             published.append(serializer(message))
             published_sender_names.append(_kwargs.get('sender_name'))
 
+        background_tasks = BackgroundTasks()
         with patch('api.routers.chat.get_upload_batch_for_current_user', new=AsyncMock(return_value=batch)), patch(
             'api.routers.chat.commit_upload_batch',
             new=AsyncMock(return_value=commit_result),
@@ -529,9 +530,17 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             'from_orm_with_forwarding',
             return_value=fallback_message,
         ) as fallback_mock:
-            result = await commit_upload_batch_endpoint(batch_id='batch-1', current_user=current_user, db=object())
+            result = await commit_upload_batch_endpoint(
+                batch_id='batch-1',
+                background_tasks=background_tasks,
+                current_user=current_user,
+                db=object(),
+            )
 
-        fallback_mock.assert_called_once_with(commit_result.messages[1])
+            self.assertEqual(published, [])
+            self.assertEqual(len(background_tasks.tasks), 2)
+            await background_tasks.tasks[0]()
+            fallback_mock.assert_called_once_with(commit_result.messages[1])
         self.assertEqual([message.id for message in published], [101, 102])
         self.assertEqual(published_sender_names, ['owner', 'owner'])
         self.assertEqual(result.batch_id, 'batch-1')

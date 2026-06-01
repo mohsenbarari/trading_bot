@@ -3,7 +3,7 @@
 API endpoints for in-app messaging system
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -15,7 +15,7 @@ import aiofiles
 import magic
 from jose import jwt, JWTError
 
-from core.db import get_db
+from core.db import AsyncSessionLocal, get_db
 from core.config import settings
 from models.chat import Chat
 from models.message import Message
@@ -370,6 +370,77 @@ async def _list_batch_upload_sessions(db: AsyncSession, *, batch_id: str) -> lis
         .order_by(UploadSession.id.asc())
     )
     return list(result.scalars().all())
+
+
+async def _publish_upload_batch_commit_message_events(
+    *,
+    target: object,
+    messages: list[Message],
+    serialized_messages: list[MessageRead],
+    sender_name: str | None,
+    group_member_user_ids: list[int] | None = None,
+) -> None:
+    try:
+        serialized_by_id = {message.id: message for message in serialized_messages}
+
+        def _serializer(message: Message) -> MessageRead:
+            serialized = serialized_by_id.get(message.id)
+            if serialized is None:
+                return MessageRead.from_orm_with_forwarding(message)
+            return serialized
+
+        receiver = getattr(target, "receiver", None)
+        if receiver is not None:
+            receiver_id = getattr(receiver, "id", None)
+            if receiver_id is None:
+                return
+            for message in messages:
+                await publish_direct_message_event(
+                    receiver_id=int(receiver_id),
+                    message=message,
+                    serializer=_serializer,
+                    publisher=publish_user_event,
+                    sender_name=sender_name,
+                )
+            return
+
+        chat = getattr(target, "chat", None)
+        if chat is None or group_member_user_ids is None:
+            return
+
+        for message in messages:
+            await publish_group_message_event(
+                chat=chat,
+                message=message,
+                member_user_ids=group_member_user_ids,
+                serializer=_serializer,
+                publisher=publish_user_event,
+            )
+    except Exception:
+        logger.warning("chat upload batch commit message fanout skipped", exc_info=True)
+
+
+async def _publish_upload_batch_commit_runtime_events(
+    *,
+    batch_id: str,
+    current_user_id: int,
+    batch_status: object,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as db:
+            current_user = await db.get(User, current_user_id)
+            if current_user is None:
+                return
+            for session in await _list_batch_upload_sessions(db, batch_id=batch_id):
+                await _publish_upload_session_runtime_event(
+                    db=db,
+                    current_user=current_user,
+                    session=session,
+                    event_name="committed",
+                    batch_status=batch_status,
+                )
+    except Exception:
+        logger.warning("chat upload batch commit runtime fanout skipped", exc_info=True)
 
 
 async def _serialize_pinned_message_state(
@@ -2229,6 +2300,7 @@ async def finalize_upload_session_endpoint(
 @router.post("/upload-batches/{batch_id}/commit", response_model=UploadBatchCommitResponse)
 async def commit_upload_batch_endpoint(
     batch_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2247,43 +2319,26 @@ async def commit_upload_batch_endpoint(
         commit_result.messages,
         viewer_user_id=current_user.id,
     )
-    serialized_by_id = {message.id: message for message in serialized_messages}
     sender_name = await resolve_direct_sender_display_name(db, user=current_user)
+    group_member_user_ids = None
 
-    def _serializer(message: Message) -> MessageRead:
-        serialized = serialized_by_id.get(message.id)
-        if serialized is None:
-            return MessageRead.from_orm_with_forwarding(message)
-        return serialized
+    if commit_result.target.receiver is None:
+        group_member_user_ids = await list_active_room_member_user_ids(db, chat_id=commit_result.target.target_id)
 
-    if commit_result.target.receiver is not None:
-        for message in commit_result.messages:
-            await publish_direct_message_event(
-                receiver_id=commit_result.target.receiver.id,
-                message=message,
-                serializer=_serializer,
-                publisher=publish_user_event,
-                sender_name=sender_name,
-            )
-    else:
-        member_user_ids = await list_active_room_member_user_ids(db, chat_id=commit_result.target.target_id)
-        for message in commit_result.messages:
-            await publish_group_message_event(
-                chat=commit_result.target.chat,
-                message=message,
-                member_user_ids=member_user_ids,
-                serializer=_serializer,
-                publisher=publish_user_event,
-            )
-
-    for session in await _list_batch_upload_sessions(db, batch_id=commit_result.batch.id):
-        await _publish_upload_session_runtime_event(
-            db=db,
-            current_user=current_user,
-            session=session,
-            event_name="committed",
-            batch_status=commit_result.batch.status,
-        )
+    background_tasks.add_task(
+        _publish_upload_batch_commit_message_events,
+        target=commit_result.target,
+        messages=commit_result.messages,
+        serialized_messages=serialized_messages,
+        sender_name=sender_name,
+        group_member_user_ids=group_member_user_ids,
+    )
+    background_tasks.add_task(
+        _publish_upload_batch_commit_runtime_events,
+        batch_id=commit_result.batch.id,
+        current_user_id=current_user.id,
+        batch_status=commit_result.batch.status,
+    )
 
     return UploadBatchCommitResponse(
         batch_id=commit_result.batch.id,
@@ -2372,5 +2427,3 @@ async def get_chat_file(
         media_type=chat_file.mime_type,
         filename=chat_file.file_name or f"{file_id}"
     )
-
-

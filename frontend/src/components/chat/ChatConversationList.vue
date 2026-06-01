@@ -9,7 +9,7 @@ import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import { isUserOnline } from '../../utils/userPresence'
 import { formatIranTime } from '../../utils/iranTime'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
-import { recordMessengerDomSnapshot } from '../../utils/messengerStage2Metrics'
+import { recordMessengerDomSnapshot, scheduleMessengerDiagnosticTask } from '../../utils/messengerStage2Metrics'
 import {
   MESSENGER_CONVERSATION_INITIAL_WINDOW,
   MESSENGER_CONVERSATION_WINDOW_BATCH,
@@ -252,24 +252,27 @@ watch(() => props.conversations.length, (rowCount) => {
   conversationWindowLimit.value = Math.min(Math.max(conversationWindowLimit.value, MESSENGER_CONVERSATION_INITIAL_WINDOW), rowCount)
 })
 
-watch(() => displayedConversations.value.length, async (rowCount) => {
+watch(() => displayedConversations.value.length, (rowCount) => {
   if (conversationListFirstRenderMarked) {
     return
   }
 
   conversationListFirstRenderMarked = true
   markMessengerPerformance('conversation-list-first-render')
-  await nextTick()
-  const root = typeof document !== 'undefined'
-    ? document.querySelector('.conversation-list-wrapper') || document.body
-    : null
-  if (root) {
-    recordMessengerDomSnapshot('conversation-list-first-render', root, {
-      rowCount,
-      totalRowCount: props.conversations.length,
-      windowed: conversationWindow.value.hasMore,
-    })
-  }
+  nextTick(() => {
+    scheduleMessengerDiagnosticTask(() => {
+      const root = typeof document !== 'undefined'
+        ? document.querySelector('.conversation-list-wrapper') || document.body
+        : null
+      if (root) {
+        recordMessengerDomSnapshot('conversation-list-first-render', root, {
+          rowCount,
+          totalRowCount: props.conversations.length,
+          windowed: conversationWindow.value.hasMore,
+        })
+      }
+    }, { timeoutMs: 750, fallbackDelayMs: 120 })
+  })
 }, { immediate: true, flush: 'post' })
 
 function cancelLongPress() {
@@ -285,12 +288,14 @@ function openConversationMenu(conv: Conversation) {
   menuConversation.value = conv
   markMessengerPerformance('conversation-menu-open')
   nextTick(() => {
-    const root = typeof document !== 'undefined'
-      ? document.querySelector('.conversation-list-wrapper') || document.body
-      : null
-    if (root) {
-      recordMessengerDomSnapshot('conversation-menu-open', root, { conversationId: conv.id })
-    }
+    scheduleMessengerDiagnosticTask(() => {
+      const root = typeof document !== 'undefined'
+        ? document.querySelector('.conversation-list-wrapper') || document.body
+        : null
+      if (root) {
+        recordMessengerDomSnapshot('conversation-menu-open', root, { conversationId: conv.id })
+      }
+    }, { timeoutMs: 750, fallbackDelayMs: 120 })
   })
   try { navigator.vibrate?.(10) } catch { /* noop */ }
 }
