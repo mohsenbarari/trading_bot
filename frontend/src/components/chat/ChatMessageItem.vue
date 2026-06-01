@@ -296,7 +296,7 @@
         <div
           class="msg-document"
           :class="{ 'is-busy': isDocumentBusy }"
-          @pointerdown="handleDocumentPointerDown"
+          @pointerdown.capture="handleDocumentPointerDown"
           @click.stop="handleDocumentOpenClick"
         >
           <div v-if="isDocumentBusy" class="doc-icon doc-uploading" @click.stop="handleDocumentBusyClick">
@@ -753,7 +753,16 @@ function canPrimeDocumentIntentBusy() {
 function handleDocumentPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
   if (!canPrimeDocumentIntentBusy()) return
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.classList.add('is-busy')
+  }
   beginDocumentIntentBusy()
+}
+
+function emitDocumentDownloadSoon() {
+  window.setTimeout(() => {
+    emit('download', props.msg)
+  }, 0)
 }
 
 function handleDocumentBusyClick() {
@@ -785,7 +794,7 @@ async function handleDocumentOpenClick() {
     if (!documentIntentBusy.value) {
       beginDocumentIntentBusy()
     }
-    emit('download', props.msg)
+    emitDocumentDownloadSoon()
     return
   }
   beginDocumentIntentBusy()
