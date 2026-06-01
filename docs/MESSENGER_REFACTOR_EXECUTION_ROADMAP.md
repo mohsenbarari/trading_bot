@@ -545,6 +545,10 @@ Stage 10 progress:
 - Header entry-point follow-up:
 	- `ChatHeader.vue` now uses the same "management" wording for both group and channel room manager entry points instead of labeling the channel manager as settings-only.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatHeader.test.ts src/components/CreateChannelView.test.ts src/components/chat/ChatGroupManagerModal.test.ts`, `npm run build`, and `git diff --check`.
+- Browser manager/profile gate:
+	- `frontend/e2e/messenger-room-manager-profile.spec.ts` now asserts the Stage 10 manager role strip, grouped access/settings/danger sections, and header menu manager labels while preserving the existing group/channel/profile mutation coverage.
+	- Focused validation: `npm run test:e2e -- e2e/messenger-room-manager-profile.spec.ts --workers=1 --reporter=line` passed in Chromium (`6 passed`).
+	- Cross-browser validation: `npm run test:e2e:matrix -- e2e/messenger-room-manager-profile.spec.ts --reporter=line` passed in Chromium, Firefox, and WebKit (`18 passed`).
 
 ### Stage 11 - Weak-Device and Motion Final Pass
 

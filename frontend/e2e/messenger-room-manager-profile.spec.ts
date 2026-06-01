@@ -243,6 +243,19 @@ async function openConversationListMenu(page: Page) {
   await expect(page.locator('.header-dropdown-menu')).toBeVisible({ timeout: 15000 })
 }
 
+async function openRoomHeaderMenu(page: Page) {
+  await page.locator('.chat-header .header-menu-container .header-btn').last().click()
+  await expect(page.locator('.header-dropdown-menu')).toBeVisible({ timeout: 15000 })
+}
+
+async function expectManagerOverviewIA(managerRoot: Locator, expectedRole: string, destructiveSection: string) {
+  await expect(managerRoot.locator('.manager-role-strip')).toContainText('نقش شما', { timeout: 30000 })
+  await expect(managerRoot.locator('.manager-role-strip')).toContainText(expectedRole, { timeout: 30000 })
+  await expect(managerRoot.locator('.section-heading').filter({ hasText: 'اعضا و دسترسی‌ها' })).toBeVisible({ timeout: 30000 })
+  await expect(managerRoot.locator('.section-heading').filter({ hasText: 'تنظیمات' })).toBeVisible({ timeout: 30000 })
+  await expect(managerRoot.locator('.section-heading').filter({ hasText: destructiveSection })).toBeVisible({ timeout: 30000 })
+}
+
 async function openChannelSettingsPanel(managerRoot: Locator) {
   const settingsRow = managerRoot.locator('.telegram-row').filter({ hasText: 'تنظیمات کانال' })
   const titleInput = managerRoot.locator('#edit-channel-title')
@@ -482,8 +495,12 @@ test.describe('Messenger room manager and public profile flows', () => {
     const groupId = Math.abs(selectedRoomIdFromUrl(page))
     await expect(page.locator('.chat-header .header-name').last()).toHaveText(initialTitle, { timeout: 30000 })
 
-    await page.locator('.chat-header .header-user-info').last().click()
+    await openRoomHeaderMenu(page)
+    const manageGroupItem = page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'مدیریت گروه' })
+    await expect(manageGroupItem).toBeVisible({ timeout: 15000 })
+    await manageGroupItem.click()
     await expect(groupManager).toBeVisible({ timeout: 30000 })
+    await expectManagerOverviewIA(groupManager, 'ادمین گروه', 'خروج')
 
     const groupAvatarUploadResponse = page.waitForResponse((response) => {
       return response.request().method() === 'POST' && response.url().includes('/api/chat/upload-media')
@@ -551,9 +568,14 @@ test.describe('Messenger room manager and public profile flows', () => {
     const channelId = Math.abs(selectedRoomIdFromUrl(page))
     await expect(page.locator('.chat-header .header-name').last()).toHaveText(initialTitle, { timeout: 30000 })
 
-    await page.locator('.chat-header .header-user-info').last().click()
+    await openRoomHeaderMenu(page)
+    const manageChannelItem = page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'مدیریت کانال' })
+    await expect(manageChannelItem).toBeVisible({ timeout: 15000 })
+    await expect(page.locator('.header-dropdown-menu')).not.toContainText('تنظیمات کانال')
+    await manageChannelItem.click()
     await expect(channelManager).toBeVisible({ timeout: 30000 })
     const reopenedChannelManager = page.locator('.channel-manager-root:visible').last()
+    await expectManagerOverviewIA(reopenedChannelManager, 'سازنده کانال', 'خروج و حذف')
 
     await openChannelSettingsPanel(reopenedChannelManager)
 
