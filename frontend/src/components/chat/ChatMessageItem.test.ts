@@ -520,12 +520,19 @@ describe('ChatMessageItem.vue', () => {
     expect(fallbackLocationWrapper.find('.location-preview.fallback').exists()).toBe(true)
   })
 
-  it('opens document messages through the shared file handler and falls back to legacy download when needed', async () => {
+  it('routes uncached documents through the persistent download flow and opens cached files directly', async () => {
     const wrapper = mountDocumentMessage()
 
     expect(chatMessageItemMocks.prewarmFileCacheMock).toHaveBeenCalledWith('doc-91')
 
     await wrapper.get('.msg-document').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('download')).toHaveLength(1)
+    expect(chatMessageItemMocks.handleFileClickMock).not.toHaveBeenCalled()
+
+    chatMessageItemMocks.cachedFileRegistry['doc-91'] = true
+    const cachedWrapper = mountDocumentMessage()
+    await cachedWrapper.get('.msg-document').trigger('click')
     expect(chatMessageItemMocks.handleFileClickMock).toHaveBeenCalledWith(
       'doc-91',
       expect.stringContaining('/api/chat/files/doc-91?token=test-token'),
@@ -533,8 +540,8 @@ describe('ChatMessageItem.vue', () => {
     )
 
     chatMessageItemMocks.handleFileClickMock.mockRejectedValueOnce(new Error('open failed'))
-    await wrapper.get('.msg-document').trigger('click')
-    expect(wrapper.emitted('download')).toHaveLength(1)
+    await cachedWrapper.get('.msg-document').trigger('click')
+    expect(cachedWrapper.emitted('download')).toHaveLength(1)
 
     const legacyWrapper = mountDocumentMessage({
       content: JSON.stringify({ file_name: 'legacy.pdf', mime_type: 'application/pdf' }),
@@ -550,11 +557,7 @@ describe('ChatMessageItem.vue', () => {
     expect(chatMessageItemMocks.handleFileClickMock).toHaveBeenCalledTimes(2)
   })
 
-  it('shows document busy state before the shared file handler settles', async () => {
-    let resolveOpen: (() => void) | null = null
-    chatMessageItemMocks.handleFileClickMock.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      resolveOpen = resolve
-    }))
+  it('shows document busy state before persistent download state arrives', async () => {
     const wrapper = mountDocumentMessage()
 
     await wrapper.get('.msg-document').trigger('click')
@@ -562,11 +565,6 @@ describe('ChatMessageItem.vue', () => {
 
     expect(wrapper.find('.msg-document').classes()).toContain('is-busy')
     expect(wrapper.find('.doc-icon.doc-uploading').exists()).toBe(true)
-
-    resolveOpen?.()
-    await flushPromises()
-
-    expect(wrapper.find('.msg-document').classes()).not.toContain('is-busy')
   })
 
   it('formats document variants, busy progress text, and missing file ids', async () => {

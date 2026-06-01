@@ -402,8 +402,13 @@ Stage 7 progress:
 	- `ChatMessageItem.vue` now sets a component-local document intent busy flag and flushes the DOM before the shared file handler starts async cache/network work, making tap-to-download visible immediately even when IndexedDB or network setup is delayed.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`.
 	- Build checkpoint: the Messenger route chunk reported by Vite dropped to `113.69 KB gzip` after splitting inactive surfaces out of the initial Messenger bundle; benchmark rerun is pending.
+- Stage 7 document-download persistence hardening:
+	- The latest S09/S10 benchmark completed against `8fec096`; S10 list/context/heap and Messenger bundle size were directionally green, but S09 document download persistence still failed one run with `completedState=idle`, a `60s` completion timeout, and a `15.9s` reload timeout.
+	- Root cause: uncached document body taps could start a component-local shared-file fetch. If the user left/reopened the conversation while the benchmark held `/api/chat/files/**`, that component-owned fetch could lose the durable download handoff, leaving the reopened bubble idle instead of completed.
+	- `ChatMessageItem.vue` now routes uncached document taps through the parent/background document-download service, keeps only cached documents on the direct shared-file open path, treats `local_blob_url` documents as completed for the download icon state, and retains the immediate local busy affordance until the background state arrives.
+	- Focused validation: `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`, and `git diff --check`.
 - Remaining Stage 7 work:
-	- Rerun the S09/S10 Stage 7 benchmark after the bundle/start responsiveness follow-up.
+	- Rerun the S09/S10 Stage 7 benchmark after the document-download persistence hardening.
 	- If the rerun is green, close Stage 7 and move to Stage 8.
 	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
 

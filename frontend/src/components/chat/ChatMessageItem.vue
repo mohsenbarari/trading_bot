@@ -692,6 +692,7 @@ const docFileUrl = computed(() => {
   return `${baseUrl}/api/chat/files/${fileId}?token=${token}`
 })
 const documentIntentBusy = ref(false)
+let documentIntentBusyTimer: ReturnType<typeof window.setTimeout> | null = null
 const isCachedDownloading = computed(() => Boolean(
   documentIntentBusy.value
   || (docFileId.value && cachedDownloadingFiles[docFileId.value!]),
@@ -706,13 +707,36 @@ const documentTransferState = computed(() => getChatMessageTransferState({
 const isDocumentBusy = computed(() => documentTransferState.value.isBusy)
 const docTransferProgress = computed(() => documentTransferState.value.progress)
 const showDocumentShare = computed(() => supportsFileShare && !isDocumentBusy.value)
+const hasDocumentLocalBlobUrl = computed(() => {
+  return typeof props.msg.local_blob_url === 'string' && props.msg.local_blob_url.length > 0
+})
 const isDocumentCached = computed(() => {
   const id = docFileId.value
+  if (hasDocumentLocalBlobUrl.value) return true
   if (!id) return false
   // Touch the reactive registry so this computed re-runs on cache changes.
   void cachedFileRegistry[id]
   return isFileCached(id)
 })
+
+function clearDocumentIntentBusy() {
+  if (documentIntentBusyTimer !== null) {
+    window.clearTimeout(documentIntentBusyTimer)
+    documentIntentBusyTimer = null
+  }
+  documentIntentBusy.value = false
+}
+
+function beginDocumentIntentBusy() {
+  if (documentIntentBusyTimer !== null) {
+    window.clearTimeout(documentIntentBusyTimer)
+  }
+  documentIntentBusy.value = true
+  documentIntentBusyTimer = window.setTimeout(() => {
+    documentIntentBusy.value = false
+    documentIntentBusyTimer = null
+  }, 1200)
+}
 
 function handleDocumentBusyClick() {
   if (documentTransferState.value.cancelAction === 'send') {
@@ -735,7 +759,17 @@ async function handleDocumentOpenClick() {
     emit('download', props.msg)
     return
   }
-  documentIntentBusy.value = true
+  if (hasDocumentLocalBlobUrl.value) {
+    emit('download', props.msg)
+    return
+  }
+  if (!isDocumentCached.value) {
+    beginDocumentIntentBusy()
+    await nextTick()
+    emit('download', props.msg)
+    return
+  }
+  beginDocumentIntentBusy()
   await nextTick()
   try {
     await cachedFileClick(fileId, url, docFileName.value)
@@ -743,7 +777,7 @@ async function handleDocumentOpenClick() {
     // Fallback to legacy download path on any failure (network, quota, etc.).
     emit('download', props.msg)
   } finally {
-    documentIntentBusy.value = false
+    clearDocumentIntentBusy()
   }
 }
 
@@ -1141,6 +1175,7 @@ watch(audioUrl, (newUrl, oldUrl) => {
 onUnmounted(() => {
   cleanupVisibilityObserver()
   teardownVoiceAudio()
+  clearDocumentIntentBusy()
 })
 
 const voiceWaveBars = computed(() => {
