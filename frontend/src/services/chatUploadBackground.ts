@@ -773,26 +773,19 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 async function idbPut(upload: PendingUpload) {
+    const record: PersistedPendingUpload = { ...upload }
+    // Do not persist UI-only fields
+    delete record.localBlobUrl
+
     try {
         const db = await openDB()
-        const record: PersistedPendingUpload = { ...upload }
-        // Do not persist UI-only fields
-        delete record.localBlobUrl
-
-        if (upload.msgType === 'document') {
-            try {
-                record.fileDataUrl = await blobToDataUrl(upload.file)
-            } catch {
-                // Non-fatal. Blob/byte persistence below may still succeed.
-            }
-        }
 
         // Prefer persisting the original Blob/File directly. WebKit proved
         // unreliable when resuming document uploads from ArrayBuffer-first
         // records after a full reload, producing a corrupted payload that the
         // backend rejected with 400. Blob cloning through IndexedDB is the
-        // more faithful path here; only fall back to bytes if the browser
-        // refuses to store the Blob record.
+        // more faithful path here. Only compute expensive document byte/data
+        // fallbacks if the browser refuses to store the Blob record.
         record.file = upload.file
         delete record.fileBytes
 
@@ -800,7 +793,14 @@ async function idbPut(upload: PendingUpload) {
         if (storedBlob) return
 
         try {
-            record.fileBytes = await upload.file.arrayBuffer()
+            if (record.msgType === 'document') {
+                try {
+                    record.fileDataUrl = await blobToDataUrl(record.file)
+                } catch {
+                    // Non-fatal. ArrayBuffer fallback below may still work.
+                }
+            }
+            record.fileBytes = await record.file.arrayBuffer()
             delete record.file
             await putRecord(db, record)
         } catch {
@@ -809,6 +809,10 @@ async function idbPut(upload: PendingUpload) {
     } catch (e) {
         console.warn('[uploadService] idbPut open failed:', e)
     }
+}
+
+function idbPutSoon(upload: PendingUpload): Promise<void> {
+    return idbPut(upload)
 }
 
 async function idbDelete(id: number) {
@@ -2024,7 +2028,7 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
     }
 
     upload.phase = 'sending'
-    await idbPut(upload)
+    const sendingPersistPromise = idbPutSoon(upload)
 
     const sendController = new AbortController()
     sendControllers.set(upload.id, sendController)
@@ -2057,11 +2061,13 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
         })
 
         pendingUploads.delete(upload.id)
+        await sendingPersistPromise
         await deletePersistedUpload(upload.id)
     } catch (error) {
         if (serviceWorkerHandoffAbortIds.has(upload.id)) {
             serviceWorkerHandoffAbortIds.delete(upload.id)
             upload.phase = 'uploaded'
+            await sendingPersistPromise
             await idbPut(upload)
             resolveServiceWorkerHandoff(upload.id)
             return
@@ -2070,6 +2076,7 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
             upload.phase = 'cancelled'
             stopUploadActivity(upload)
             pendingUploads.delete(upload.id)
+            await sendingPersistPromise
             await deletePersistedUpload(upload.id)
             abortFlags.delete(upload.id)
             emit({ type: 'cancelled', userId: upload.userId, optimisticId: upload.id })
@@ -2086,6 +2093,7 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
             const attempt = (upload.sendRetryCount ?? 0) + 1
             upload.sendRetryCount = attempt
             upload.phase = 'uploaded'
+            await sendingPersistPromise
             await idbPut(upload)
             const delay = computeSendRetryDelayMs(attempt - 1)
             console.warn(
@@ -2139,10 +2147,11 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
         return
     }
 
-    await Promise.all(sendableUploads.map(async (upload) => {
+    const sendingPersistPromises = new Map<number, Promise<void>>()
+    sendableUploads.forEach((upload) => {
         upload.phase = 'sending'
-        await idbPut(upload)
-    }))
+        sendingPersistPromises.set(upload.id, idbPutSoon(upload))
+    })
 
     const controller = new AbortController()
     let sendTimedOut = false
@@ -2187,6 +2196,7 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
                 localBlobUrl: getSentLocalBlobUrl(upload),
             })
             pendingUploads.delete(upload.id)
+            await sendingPersistPromises.get(upload.id)
             await deletePersistedUpload(upload.id)
         }))
     } catch (error) {
@@ -2202,6 +2212,7 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
             await Promise.all(sendableUploads.map(async (upload) => {
                 upload.phase = 'uploaded'
                 upload.sendRetryCount = attempt
+                await sendingPersistPromises.get(upload.id)
                 await idbPut(upload)
             }))
             const delay = computeSendRetryDelayMs(attempt - 1)
@@ -2217,6 +2228,7 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
         }
 
         await Promise.all(sendableUploads.map(async (upload) => {
+            await sendingPersistPromises.get(upload.id)
             await markFailed(
                 upload,
                 normalizedError instanceof Error ? normalizedError.message : String(normalizedError),

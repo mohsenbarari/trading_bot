@@ -469,4 +469,21 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   bottom: 0;
   z-index: 1999;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .zoom-fade-enter-active,
+  .zoom-fade-leave-active,
+  .reaction-dropdown-enter-active,
+  .reaction-dropdown-leave-active {
+    transition: none;
+  }
+
+  .zoom-fade-enter-from,
+  .zoom-fade-leave-to,
+  .reaction-dropdown-enter-from,
+  .reaction-dropdown-leave-to {
+    opacity: 1;
+    transform: none;
+  }
+}
 </style>

@@ -3553,7 +3553,6 @@ defineExpose({
 
     <!-- Context Menu -->
     <ChatContextMenu
-      v-if="contextMenu.visible || keepInactiveMessengerSurfacesMounted"
       :menuState="contextMenu"
       :isAlbumSelection="contextMenu.messageIds.length > 1"
       :currentUserId="props.currentUserId"
