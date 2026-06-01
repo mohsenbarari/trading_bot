@@ -94,6 +94,7 @@ from core.services.chat_room_service import (
     list_group_members,
     list_group_messages,
     list_groups_for_user,
+    list_room_conversations,
     list_active_room_member_user_ids,
     list_channel_conversations,
     list_active_channel_member_user_ids,
@@ -518,7 +519,7 @@ async def get_conversations(
         direct_conversations = [
             row for row in direct_conversations if row.other_user_id in allowed_direct_target_ids
         ]
-    group_conversations = [
+    room_conversations = [
         ConversationRead(
             id=row.id,
             other_user_id=row.other_user_id,
@@ -544,37 +545,9 @@ async def get_conversations(
             pin_order=getattr(row, "pin_order", None),
             unread_mention_count=getattr(row, "unread_mention_count", 0),
         )
-        for row in await list_group_conversations(db, current_user_id=current_user.id)
+        for row in await list_room_conversations(db, current_user_id=current_user.id)
     ]
-    channel_conversations = [
-        ConversationRead(
-            id=row.id,
-            other_user_id=row.other_user_id,
-            other_user_name=row.other_user_name,
-            avatar_file_id=getattr(row, "avatar_file_id", None),
-            other_user_is_deleted=row.other_user_is_deleted,
-            last_message_content=row.last_message_content,
-            last_message_type=row.last_message_type,
-            last_message_at=row.last_message_at,
-            unread_count=row.unread_count,
-            other_user_last_seen_at=row.other_user_last_seen_at,
-            room_kind=row.room_kind,
-            chat_id=row.chat_id,
-            can_send=row.can_send,
-            member_role=row.member_role,
-            member_count=row.member_count,
-            max_members=row.max_members,
-            is_system=row.is_system,
-            is_mandatory=row.is_mandatory,
-            is_muted=getattr(row, "is_muted", False),
-            is_pinned=getattr(row, "is_pinned", False),
-            pinned_at=getattr(row, "pinned_at", None),
-            pin_order=getattr(row, "pin_order", None),
-            unread_mention_count=getattr(row, "unread_mention_count", 0),
-        )
-        for row in await list_channel_conversations(db, current_user_id=current_user.id)
-    ]
-    conversations = [*direct_conversations, *group_conversations, *channel_conversations]
+    conversations = [*direct_conversations, *room_conversations]
     conversations.sort(
         key=lambda item: item.last_message_at.isoformat() if item.last_message_at else "",
         reverse=True,

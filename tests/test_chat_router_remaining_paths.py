@@ -686,7 +686,10 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
                 'other_user_is_deleted': False,
             },
         ])])
-        with patch('api.routers.chat.build_direct_conversation_list_stmt', return_value=object()), patch(
+        with patch(
+            'api.routers.chat.get_active_customer_relation_for_customer',
+            new=AsyncMock(return_value=None),
+        ), patch('api.routers.chat.build_direct_conversation_list_stmt', return_value=object()), patch(
             'api.routers.chat.list_group_conversations',
             new=AsyncMock(return_value=[SimpleNamespace(other_user_id=-10, other_user_name='Desk', unread_count=1, is_muted=False, other_user_is_deleted=False)]),
         ), patch(

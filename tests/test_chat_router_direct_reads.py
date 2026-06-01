@@ -134,17 +134,13 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
-            "api.routers.chat.list_group_conversations",
-            new=AsyncMock(return_value=[group_row]),
-        ) as groups_mock, patch(
-            "api.routers.chat.list_channel_conversations",
-            new=AsyncMock(return_value=[channel_row]),
-        ) as channels_mock:
+            "api.routers.chat.list_room_conversations",
+            new=AsyncMock(return_value=[group_row, channel_row]),
+        ) as rooms_mock:
             result = await get_conversations(current_user=current_user, db=db)
 
         stmt_mock.assert_called_once_with(5)
-        groups_mock.assert_awaited_once_with(db, current_user_id=5)
-        channels_mock.assert_awaited_once_with(db, current_user_id=5)
+        rooms_mock.assert_awaited_once_with(db, current_user_id=5)
         self.assertEqual([item.other_user_name for item in result], ["Channel", "Group", "دفتر مستقیم"])
         self.assertEqual(result[2].profile_user_id, 90)
         self.assertEqual(result[2].profile_account_name, "owner-90")
@@ -200,10 +196,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.chat.build_allowed_customer_chat_targets",
             new=AsyncMock(return_value=[20, 44]),
         ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt"), patch(
-            "api.routers.chat.list_group_conversations",
-            new=AsyncMock(return_value=[]),
-        ), patch(
-            "api.routers.chat.list_channel_conversations",
+            "api.routers.chat.list_room_conversations",
             new=AsyncMock(return_value=[]),
         ):
             result = await get_conversations(current_user=current_user, db=db)

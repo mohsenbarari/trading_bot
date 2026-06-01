@@ -7,6 +7,7 @@ import ChatInputBar from './chat/ChatInputBar.vue'
 import ChatMessageItem from './chat/ChatMessageItem.vue'
 import ChatEmptyState from './chat/ChatEmptyState.vue'
 import ChatConversationList from './chat/ChatConversationList.vue'
+import ChatContextMenu from './chat/ChatContextMenu.vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -68,10 +69,8 @@ import {
   getMessengerContextMenuStyle,
 } from '../utils/messengerStage6ContextMenu'
 
-const loadChatContextMenu = () => import('./chat/ChatContextMenu.vue')
 const loadChatSearchGlobalList = () => import('./chat/ChatSearchGlobalList.vue')
 
-const ChatContextMenu = defineAsyncComponent(loadChatContextMenu)
 const ChatSearchGlobalList = defineAsyncComponent(loadChatSearchGlobalList)
 const ChatNewConversationModal = defineAsyncComponent(() => import('./chat/ChatNewConversationModal.vue'))
 const ChatGroupManagerModal = defineAsyncComponent(() => import('./chat/ChatGroupManagerModal.vue'))
@@ -89,7 +88,6 @@ function warmMessengerInteractionChunks() {
   if (interactionChunksWarmed) return
   interactionChunksWarmed = true
   scheduleMessengerDiagnosticTask(() => {
-    void loadChatContextMenu().catch(() => null)
     void loadChatSearchGlobalList().catch(() => null)
   }, { timeoutMs: 900, fallbackDelayMs: 160 })
 }

@@ -64,7 +64,7 @@ Do not merge multiple stages into a single prompt.
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
 | 6 | Context Menu Latency Fix (S05) | Completed | Copilot | 2026-06-01 | Precomputed menu state, deferred snapshot work, and lazy reaction-shell mount reduced S05 context latency to `156.4 ms` and cleared the `< 180 ms` stage gate |
-| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap, S09 upload persistence probing, action-start responsiveness, and inactive-surface bundle splitting are in place; S09/S10 rerun is pending |
+| 7 | Media Pipeline Optimization (S09/S10) | In Progress | Copilot | 2026-06-01 | Transfer recovery bootstrap, S09 upload persistence probing, action-start/reload-cache fixes, first-interaction/menu tuning, and combined room conversation reads are in place; S09/S10 rerun is pending |
 | 8 | Realtime/Notification Coalescing (S07) | Pending | Copilot | - | - |
 | 9 | UI System Enforcement Pass | Pending | Copilot | - | - |
 | 10 | Group/Channel/Direct Manager Standardization | Pending | Copilot | - | - |
@@ -412,8 +412,14 @@ Stage 7 progress:
 	- Root cause: completed background downloads were retained as in-memory object URLs only. After a full page reload, `useChatFileHandler` had no persistent cached blob for that `fileId`, so the document action rendered as idle even though the transfer had completed before reload.
 	- `chatDocumentDownloadBackground.ts` now seeds completed document blobs into the shared persistent file cache before emitting `completed`, for both non-streaming and streaming download paths. This keeps the background service and visible document bubble aligned after reload.
 	- Focused validation: `npm run test:unit:run -- src/services/chatDocumentDownloadBackground.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, `npm run build`, and `git diff --check`.
+- Stage 7 final-latency follow-up:
+	- The S09/S10 rerun completed against `b6b03f1`; document download persistence was functionally fixed (`busy -> busy -> completed -> completed` in all S09 runs), but Stage 7 stayed open because S09 context/download-start latency and S10 conversations API timing still missed target direction.
+	- `ChatContextMenu.vue` is back on the main Messenger chunk to remove the first-open async chunk cost from right-click/long-press interactions. The Messenger JS gzip checkpoint is now `115.41 KB`, still materially below the pre-refactor `138.3 KB` baseline while trading a small bundle increase for interaction latency.
+	- `/api/chat/conversations` now uses one combined group/channel room projection through `list_room_conversations`, removing one backend query from the conversation-list read path. Existing group-only/channel-only service APIs remain for other callers.
+	- `scripts/run_messenger_benchmark.mjs` now checks document bubble transfer state every `50ms` instead of `200ms`, reducing measurement noise for tap-to-busy/download-start without changing the probed UI state.
+	- Focused validation: `python3 -m py_compile core/services/chat_room_service.py api/routers/chat.py`, `python3 -m unittest tests.test_chat_room_service_room_read_models tests.test_chat_router_direct_reads tests.test_chat_router_remaining_paths`, `node --check scripts/run_messenger_benchmark.mjs`, `npm run test:unit:run -- src/components/ChatView.test.ts`, `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatDocumentDownloadBackground.test.ts src/services/chatUploadBackground.test.ts`, and `npm run build`.
 - Remaining Stage 7 work:
-	- Rerun the S09/S10 Stage 7 benchmark after the document-download reload-cache hardening.
+	- Rerun the S09/S10 Stage 7 benchmark after the final-latency follow-up.
 	- If the rerun is green, close Stage 7 and move to Stage 8.
 	- If not green, stabilize any remaining S09 download/upload variability and recover S10 weak-device list/context/heap before moving to Stage 8.
 
