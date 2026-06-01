@@ -223,6 +223,11 @@ describe('chatUploadBackground', () => {
       writable: true,
       value: vi.fn(() => 'blob:restored-upload'),
     })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: vi.fn(),
+    })
     Object.defineProperty(navigator, 'serviceWorker', {
       configurable: true,
       writable: true,
@@ -2247,7 +2252,8 @@ describe('chatUploadBackground', () => {
 
     expect(events.map((event) => event.type)).toEqual(['added', 'sent'])
     expect(events[0]).toMatchObject({ type: 'added', optimisticId: -501, userId: 77 })
-    expect(events[1]).toMatchObject({ type: 'sent', optimisticId: -501 })
+    expect(events[1]).toMatchObject({ type: 'sent', optimisticId: -501, localBlobUrl: undefined })
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:restored-upload')
     expect(service.getPendingForUser(77)).toEqual([])
   })
 
@@ -3204,8 +3210,9 @@ describe('chatUploadBackground', () => {
     expect(events[1]).toMatchObject({
       type: 'sent',
       optimisticId: -702,
-      localBlobUrl: 'blob:restored-upload',
+      localBlobUrl: undefined,
     })
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:restored-upload')
     expect(service.getPendingForUser(77)).toEqual([])
   })
 

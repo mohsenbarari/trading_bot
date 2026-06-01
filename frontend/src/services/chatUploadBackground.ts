@@ -624,6 +624,29 @@ function stopUploadActivity(upload: PendingUpload) {
     uploadActivityCounts.set(upload.userId, currentCount - 1)
 }
 
+function revokeObjectUrlSoon(objectUrl: string | undefined): void {
+    if (!objectUrl?.startsWith('blob:')) return
+
+    setTimeout(() => {
+        try {
+            URL.revokeObjectURL(objectUrl)
+        } catch {
+            /* ignore revoke failures */
+        }
+    }, 0)
+}
+
+function getSentLocalBlobUrl(upload: PendingUpload): string | undefined {
+    if (upload.msgType !== 'document') {
+        return upload.localBlobUrl
+    }
+
+    const localBlobUrl = upload.localBlobUrl
+    upload.localBlobUrl = undefined
+    revokeObjectUrlSoon(localBlobUrl)
+    return undefined
+}
+
 // -----------------------------------------------------------------------------
 // IndexedDB
 // -----------------------------------------------------------------------------
@@ -1244,7 +1267,7 @@ function ensureUploadServiceWorkerBridge(): void {
                 userId: upload.userId,
                 optimisticId: upload.id,
                 serverMessage: data.serverMessage,
-                localBlobUrl: upload.localBlobUrl,
+                localBlobUrl: getSentLocalBlobUrl(upload),
             })
             return
         }
@@ -2026,7 +2049,7 @@ async function commitSingleUploadBatch(upload: PendingUpload): Promise<void> {
             userId: upload.userId,
             optimisticId: upload.id,
             serverMessage,
-            localBlobUrl: upload.localBlobUrl,
+            localBlobUrl: getSentLocalBlobUrl(upload),
         })
 
         pendingUploads.delete(upload.id)
@@ -2157,7 +2180,7 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
                 userId: upload.userId,
                 optimisticId: upload.id,
                 serverMessage,
-                localBlobUrl: upload.localBlobUrl,
+                localBlobUrl: getSentLocalBlobUrl(upload),
             })
             pendingUploads.delete(upload.id)
             await deletePersistedUpload(upload.id)
@@ -2255,7 +2278,7 @@ async function sendOneLegacy(upload: PendingUpload): Promise<void> {
             userId: upload.userId,
             optimisticId: upload.id,
             serverMessage,
-            localBlobUrl: upload.localBlobUrl,
+            localBlobUrl: getSentLocalBlobUrl(upload),
         })
 
         pendingUploads.delete(upload.id)
