@@ -1648,8 +1648,9 @@ async function applyScenarioEmulation(client, scenario) {
   }
 }
 
-async function runScenario(browser, version, scenario, fixture, browserConfig, backendConfig) {
+async function runScenario(browser, version, scenario, fixture, browserConfig, backendConfig, options = {}) {
   const seeded = fixture[scenario.runner_key]
+  const isWarmup = options.phase === 'warmup'
   const baseUrl = `http://127.0.0.1:${version.port}`
   const timings = []
   const requestStarts = new Map()
@@ -1716,17 +1717,23 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
   console.log(`[benchmark] ${version.key}/${scenario.id}: context probe done`)
   const identity = await runIdentityMatrixProbe(page, seeded)
   console.log(`[benchmark] ${version.key}/${scenario.id}: identity probe done`)
-  console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe start`)
-  const realtime = await triggerRealtimeBurst(page, seeded, backendConfig, baseUrl)
-  console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe done`)
-  if (realtime) {
-    await openConversationFromList(page, baseUrl, {
-      routeUserId: seeded.activeTargetId,
-      title: seeded.activeTargetName,
-    }).catch(() => null)
+  const realtime = isWarmup ? null : await (async () => {
+    console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe start`)
+    const realtimeResult = await triggerRealtimeBurst(page, seeded, backendConfig, baseUrl)
+    console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe done`)
+    if (realtimeResult) {
+      await openConversationFromList(page, baseUrl, {
+        routeUserId: seeded.activeTargetId,
+        title: seeded.activeTargetName,
+      }).catch(() => null)
+    }
+    return realtimeResult
+  })()
+  if (isWarmup) {
+    console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe skipped for warmup`)
   }
-  const persistence = await runUploadPersistenceProbe(page, seeded, baseUrl, scenario)
-  console.log(`[benchmark] ${version.key}/${scenario.id}: persistence probe done`)
+  const persistence = isWarmup ? null : await runUploadPersistenceProbe(page, seeded, baseUrl, scenario)
+  console.log(`[benchmark] ${version.key}/${scenario.id}: persistence probe ${isWarmup ? 'skipped for warmup' : 'done'}`)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe start`)
   const longSession = await runLongSessionProbe(page, seeded, baseUrl, scenario)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe done`)
@@ -1830,7 +1837,9 @@ async function main() {
         for (const version of versions) {
           for (const scenario of performance.scenarios) {
             console.log(`Warming ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.warmup_runs})...`)
-            await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend)
+            await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'warmup' }).catch((error) => {
+              console.log(`[benchmark] warmup skipped after failure for ${version.key}/${scenario.id}: ${error?.message ?? error}`)
+            })
           }
         }
       }
@@ -1839,7 +1848,7 @@ async function main() {
       for (const version of versions) {
         for (const scenario of performance.scenarios) {
           console.log(`Running ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.measured_runs})...`)
-          results.push(await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend))
+          results.push(await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'measured' }))
         }
       }
     }
