@@ -16,6 +16,8 @@ const BENCHMARK_POST_TIMEOUT_MS = 15000
 const BENCHMARK_WARMUP_READY_TIMEOUT_MS = 15000
 const BENCHMARK_MEASURED_READY_TIMEOUT_MS = 60000
 const BENCHMARK_MAX_WARMUP_READINESS_FAILURES = 3
+const REALTIME_PROBE_SCENARIO_TYPES = new Set(['group_matrix', 'channel_matrix', 'realtime_stress', 'identity_matrix', 'long_session'])
+const PERSISTENCE_PROBE_SCENARIO_TYPES = new Set(['upload_persistence'])
 
 function parseArgs(argv) {
   const options = {
@@ -1694,6 +1696,18 @@ async function triggerRealtimeBurst(page, seeded, backendConfig, baseUrl) {
   }
 }
 
+function scenarioType(scenario) {
+  return scenario.scenario_type ?? scenario.scenarioType ?? 'direct'
+}
+
+function shouldRunRealtimeProbe(scenario, seeded) {
+  return Boolean(seeded.realtimeBurst) && REALTIME_PROBE_SCENARIO_TYPES.has(scenarioType(scenario))
+}
+
+function shouldRunPersistenceProbe(scenario, seeded) {
+  return Boolean(seeded.persistenceProbe?.documentFileName) && PERSISTENCE_PROBE_SCENARIO_TYPES.has(scenarioType(scenario))
+}
+
 async function runLongSessionProbe(page, seeded, baseUrl, scenario) {
   const targets = Array.isArray(seeded.switchTargets) ? seeded.switchTargets : []
   if (!targets.length) return null
@@ -1851,7 +1865,7 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
   console.log(`[benchmark] ${version.key}/${scenario.id}: context probe done`)
   const identity = await runIdentityMatrixProbe(page, seeded)
   console.log(`[benchmark] ${version.key}/${scenario.id}: identity probe done`)
-  const realtime = isWarmup ? null : await (async () => {
+  const realtime = !isWarmup && shouldRunRealtimeProbe(scenario, seeded) ? await (async () => {
     console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe start`)
     const realtimeResult = await triggerRealtimeBurst(page, seeded, backendConfig, baseUrl)
     console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe done`)
@@ -1862,12 +1876,14 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
       }).catch(() => null)
     }
     return realtimeResult
-  })()
-  if (isWarmup) {
-    console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe skipped for warmup`)
+  })() : null
+  if (isWarmup || !shouldRunRealtimeProbe(scenario, seeded)) {
+    console.log(`[benchmark] ${version.key}/${scenario.id}: realtime probe skipped for ${isWarmup ? 'warmup' : scenarioType(scenario)}`)
   }
-  const persistence = isWarmup ? null : await runUploadPersistenceProbe(page, seeded, baseUrl, scenario)
-  console.log(`[benchmark] ${version.key}/${scenario.id}: persistence probe ${isWarmup ? 'skipped for warmup' : 'done'}`)
+  const persistence = !isWarmup && shouldRunPersistenceProbe(scenario, seeded)
+    ? await runUploadPersistenceProbe(page, seeded, baseUrl, scenario)
+    : null
+  console.log(`[benchmark] ${version.key}/${scenario.id}: persistence probe ${isWarmup ? 'skipped for warmup' : shouldRunPersistenceProbe(scenario, seeded) ? 'done' : `skipped for ${scenarioType(scenario)}`}`)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe start`)
   const longSession = await runLongSessionProbe(page, seeded, baseUrl, scenario)
   console.log(`[benchmark] ${version.key}/${scenario.id}: long-session probe done`)
@@ -1965,42 +1981,45 @@ async function main() {
       console.log(`Serving ${version.key} on http://127.0.0.1:${version.port}`)
     }
 
-    const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] })
     const results = []
-    if (!options.skipWarmup) {
-      let warmupReadinessFailures = 0
-      let skipRemainingWarmup = false
-      for (let runIndex = 0; runIndex < performance.warmup_runs; runIndex += 1) {
-        if (skipRemainingWarmup) break
-        for (const version of versions) {
+    const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] })
+    try {
+      if (!options.skipWarmup) {
+        let warmupReadinessFailures = 0
+        let skipRemainingWarmup = false
+        for (let runIndex = 0; runIndex < performance.warmup_runs; runIndex += 1) {
           if (skipRemainingWarmup) break
-          for (const scenario of performance.scenarios) {
+          for (const version of versions) {
             if (skipRemainingWarmup) break
-            console.log(`Warming ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.warmup_runs})...`)
-            await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'warmup' }).catch((error) => {
-              const message = error?.message ?? String(error)
-              console.log(`[benchmark] warmup skipped after failure for ${version.key}/${scenario.id}: ${message}`)
-              if (message.includes('conversation list not ready')) {
-                warmupReadinessFailures += 1
-                if (warmupReadinessFailures >= BENCHMARK_MAX_WARMUP_READINESS_FAILURES) {
-                  skipRemainingWarmup = true
-                  console.log(`[benchmark] skipping remaining warmup after ${warmupReadinessFailures} readiness failures`)
+            for (const scenario of performance.scenarios) {
+              if (skipRemainingWarmup) break
+              console.log(`Warming ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.warmup_runs})...`)
+              await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'warmup' }).catch((error) => {
+                const message = error?.message ?? String(error)
+                console.log(`[benchmark] warmup skipped after failure for ${version.key}/${scenario.id}: ${message}`)
+                if (message.includes('conversation list not ready')) {
+                  warmupReadinessFailures += 1
+                  if (warmupReadinessFailures >= BENCHMARK_MAX_WARMUP_READINESS_FAILURES) {
+                    skipRemainingWarmup = true
+                    console.log(`[benchmark] skipping remaining warmup after ${warmupReadinessFailures} readiness failures`)
+                  }
                 }
-              }
-            })
+              })
+            }
           }
         }
       }
-    }
-    for (let runIndex = 0; runIndex < performance.measured_runs; runIndex += 1) {
-      for (const version of versions) {
-        for (const scenario of performance.scenarios) {
-          console.log(`Running ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.measured_runs})...`)
-          results.push(await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'measured' }))
+      for (let runIndex = 0; runIndex < performance.measured_runs; runIndex += 1) {
+        for (const version of versions) {
+          for (const scenario of performance.scenarios) {
+            console.log(`Running ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.measured_runs})...`)
+            results.push(await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'measured' }))
+          }
         }
       }
+    } finally {
+      await browser.close().catch(() => null)
     }
-    await browser.close()
 
     const buildMetrics = {}
     for (const version of versions) {
