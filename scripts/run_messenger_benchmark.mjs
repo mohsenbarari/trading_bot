@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, '..')
 const frontendRequire = createRequire(path.join(repoRoot, 'frontend', 'package.json'))
 const { chromium } = frontendRequire('@playwright/test')
+const BENCHMARK_POST_TIMEOUT_MS = 15000
 
 function parseArgs(argv) {
   const options = {
@@ -1081,23 +1082,35 @@ function summarizeApiTimings(timings, matcher) {
 }
 
 async function postJson(url, token, body) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`${response.status} ${text}`)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), BENCHMARK_POST_TIMEOUT_MS)
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`${response.status} ${text}`)
+    }
+    const responseContentType = response.headers.get('content-type') ?? ''
+    if (responseContentType.includes('application/json')) {
+      return response.json()
+    }
+    return response.text()
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`POST timeout after ${BENCHMARK_POST_TIMEOUT_MS}ms: ${url}`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
   }
-  const responseContentType = response.headers.get('content-type') ?? ''
-  if (responseContentType.includes('application/json')) {
-    return response.json()
-  }
-  return response.text()
 }
 
 async function waitForConversationList(page) {
@@ -1558,17 +1571,28 @@ async function triggerRealtimeBurst(page, seeded, backendConfig, baseUrl) {
   if (!burstRequests.length) return null
 
   console.log('[benchmark] realtime burst: posting events')
-  await Promise.all(burstRequests)
+  const burstResults = await Promise.allSettled(burstRequests)
+  const failedBurstRequests = burstResults.filter((result) => result.status === 'rejected')
+  if (failedBurstRequests.length) {
+    console.log(`[benchmark] realtime burst: ${failedBurstRequests.length}/${burstRequests.length} requests failed`)
+    for (const result of failedBurstRequests) {
+      console.log(`[benchmark] realtime burst failure: ${result.reason?.message ?? result.reason}`)
+    }
+  }
   console.log('[benchmark] realtime burst: events posted')
   const directAppendMs = null
   await backToConversationList(page, baseUrl).catch(() => null)
   const unreadStart = performance.now()
-  await waitForUnreadBadges(page, Math.min(2, burstRequests.length)).catch(() => null)
+  const successfulBurstCount = burstResults.filter((result) => result.status === 'fulfilled').length
+  if (successfulBurstCount > 0) {
+    await waitForUnreadBadges(page, Math.min(2, successfulBurstCount)).catch(() => null)
+  }
   const unreadBadgeCount = await page.locator('.conversation-card .unread-badge, .conversation-item .unread-badge').count().catch(() => 0)
   return {
     directAppendMs: directAppendMs !== null ? Number(directAppendMs.toFixed(1)) : null,
     unreadRefreshMs: Number((performance.now() - unreadStart).toFixed(1)),
     unreadBadgeCount,
+    realtimePostFailures: failedBurstRequests.length,
   }
 }
 
