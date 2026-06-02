@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-31  
-> Status: Post-Stage-7 reset in progress; Phase 8 overlay/action standardization now has a second production slice in `ChatView.vue`, the official benchmark runner now executes `S00`/`S03`/`S04`/`S05`/`S06`/`S07`/`S08`/`S09`/`S10`/`S11`, the official L5 resilience and L6 manual-acceptance artifacts are wired into the benchmark report flow, all `M01`-`M14` surfaces are now measured, legacy Messenger remains the default, and the next execution focus returns to refactor Phases 9-12 rather than more benchmark-tooling closure.
+> Status: Stage 12 benchmark closure is complete on the valid `f8312e3` 72-sample median run: all `M01`-`M14` surfaces are measured with `0` blocked surfaces, every chat-ready scenario is green, S10 weak-device list/chat/context is green, heap and DOM are lower across all scenarios, and legacy Messenger remains available for rollback while the project enters the release-acceptance and legacy-retirement window.
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
@@ -119,8 +119,8 @@ The post-Stage-7 program is done only when all of the following are true:
 
 - No Severity 1 or Severity 2 parity gaps remain across `M01`-`M14`.
 - The refactor default path passes the complete version-comparison plan.
-- Median Chromium runs show a real win on heavy scenarios, not only isolated light-room improvements.
-- Conversation list and heavy-room performance are both at least back to pre-refactor baseline and measurably better than Stage 7.
+- Median Chromium runs show a real win on heavy scenarios, not only isolated light-room improvements. **Closed for Stage 12 on `2026-06-02T17:58:14Z`: S02/S03/S06/S07/S10/S11 chat-ready are all green.**
+- Conversation list and heavy-room performance are both at least back to pre-refactor baseline and measurably better than Stage 7. **Closed for critical chat/open/heap/DOM metrics; small list/context deltas remain acceptance-window watch items.**
 - Messenger JS/CSS payload growth is justified and controlled.
 - Browser matrix is green on Chromium, Firefox, and WebKit.
 - Manual UX review confirms the UI feels unified rather than a mix of legacy and new interaction models.
