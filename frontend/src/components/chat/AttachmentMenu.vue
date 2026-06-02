@@ -5,7 +5,7 @@
 
     <!-- Backdrop -->
     <transition name="fade">
-      <div v-if="modelValue && !showCameraCapture" class="attachment-backdrop" @click="close"></div>
+      <div v-if="modelValue && !showCameraCapture && !isGalleryReviewStageOpen" class="attachment-backdrop" @click="close"></div>
     </transition>
 
     <transition name="fade">
@@ -192,7 +192,7 @@
     <!-- Bottom Sheet -->
     <transition name="slide-up">
       <div
-        v-if="modelValue && !showCameraCapture"
+        v-if="modelValue && !showCameraCapture && !isGalleryReviewStageOpen"
         ref="sheetRef"
         :class="['attachment-sheet', { 'full-screen-sheet': activeTab === 'location' }]"
         @touchstart="onTouchStart"
@@ -219,7 +219,15 @@
         <div class="sheet-content">
           <!-- Gallery Tab -->
           <div v-if="activeTab === 'gallery'" class="tab-panel gallery-panel">
-            <input ref="galleryInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onGalleryFile" />
+            <input
+              ref="galleryInput"
+              data-testid="attachment-gallery-input"
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              style="display:none"
+              @change="onGalleryFile"
+            />
 
             <button class="action-card" @click="openCameraCapture()">
               <div class="action-icon camera-icon">
@@ -245,7 +253,15 @@
 
           <!-- File Tab -->
           <div v-if="activeTab === 'file'" class="tab-panel file-panel">
-            <input ref="fileInput" type="file" accept="*" multiple style="display:none" @change="onFileSelected" />
+            <input
+              ref="fileInput"
+              data-testid="attachment-file-input"
+              type="file"
+              accept="*"
+              multiple
+              style="display:none"
+              @change="onFileSelected"
+            />
 
             <button class="action-card" @click="fileInput?.click()">
               <div class="action-icon file-icon">
@@ -492,6 +508,7 @@ const singleEditorKey = ref<number>(0)
 // multiPreviewFiles: holds the multi-image gallery pick while the user
 // reviews/edits/removes items before dispatch. Null = preview closed.
 const multiPreviewFiles = ref<File[] | null>(null)
+const isGalleryReviewStageOpen = computed(() => Boolean(editingFile.value || multiPreviewFiles.value))
 
 // cameraEditingItemId: id of the camera-queue photo currently in the
 // per-item editor. Null = editor closed.
@@ -1450,10 +1467,6 @@ async function onGalleryFile(e: Event) {
       /\.(heic|heif)$/i.test(onlyFile.name))
 
   if (onlyOne && isImage && !isHeic && onlyFile) {
-    close()
-    // Wait for sheet close animation before mounting editor to avoid a
-    // visible overlap flash.
-    await new Promise<void>((resolve) => setTimeout(resolve, 180))
     singleEditorKey.value += 1
     editingFile.value = onlyFile
     return
@@ -1462,39 +1475,37 @@ async function onGalleryFile(e: Event) {
   // Phase B: multi-file gallery picks go through the preview sheet so the
   // user can edit, remove, or reorder before the album is dispatched.
   if (files.length > 1) {
-    close()
-    await new Promise<void>((resolve) => setTimeout(resolve, 180))
     multiPreviewFiles.value = files
     return
   }
 
-  // Single non-image pick (video or HEIC) → emit directly.
-  close()
-  await new Promise<void>((resolve) => {
-    if (typeof requestAnimationFrame !== 'function') {
-      setTimeout(resolve, 0)
-      return
-    }
-    requestAnimationFrame(() => resolve())
-  })
+  // Single non-image pick (video or HEIC) -> emit before closing. The parent
+  // lazily unmounts this surface when the sheet closes, so close-first can
+  // drop the selection event before it reaches ChatView.
   files.forEach((file, index) => {
     emit('select-media', file, null, index, files.length)
   })
+  close()
 }
 
 function onMultiPreviewConfirm(finalFiles: File[]) {
   multiPreviewFiles.value = null
-  if (!finalFiles.length) return
+  if (!finalFiles.length) {
+    close()
+    return
+  }
   const albumId = finalFiles.length > 1
     ? (globalThis.crypto?.randomUUID?.() ?? `album_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`)
     : null
   finalFiles.forEach((file, index) => {
     emit('select-media', file, albumId, index, finalFiles.length)
   })
+  close()
 }
 
 function onMultiPreviewCancel() {
   multiPreviewFiles.value = null
+  close()
 }
 
 // --- Camera queue per-item edit (Phase B) ---
@@ -1536,11 +1547,13 @@ function onEditorConfirm(editedFile: File) {
   // it as a standalone message.
   editingFile.value = null
   emit('select-media', editedFile, null, 0, 1)
+  close()
 }
 
 function onEditorCancel() {
   // User dismissed the editor entirely → do not send anything.
   editingFile.value = null
+  close()
 }
 
 // File handler (no compression)

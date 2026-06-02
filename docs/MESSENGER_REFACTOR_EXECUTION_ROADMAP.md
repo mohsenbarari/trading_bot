@@ -739,6 +739,12 @@ Post-Stage 12 progress:
 	- Command: `npm run test:unit:run -- src/views/MessengerView.test.ts src/components/ChatView.test.ts src/components/chat/ChatConversationList.test.ts src/components/chat/ChatInputBar.test.ts src/components/chat/ChatContextMenu.test.ts src/components/chat/ChatMessageItem.test.ts src/components/chat/AttachmentMenu.test.ts src/composables/chat/useChatMessages.test.ts src/composables/chat/useChatWebSocket.test.ts src/composables/chat/useChatScroll.test.ts src/composables/chat/useChatMedia.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatUploadBackground.test.ts src/services/chatDocumentDownloadBackground.test.ts`
 	- Result: passed at `2026-06-02T18:02:59Z`, `14` test files and `376` tests green.
 	- Notes: stderr output is expected branch coverage for mocked upload, media, camera, and failure paths; no failed tests.
+- Browser-matrix media hardening:
+	- The first Chromium `channel-media.spec.ts` matrix slice exposed a lazy-mount regression in `AttachmentMenu`: gallery preview/editor and single-video selections could be lost because the sheet emitted `update:modelValue=false` before forwarding the selected files.
+	- `AttachmentMenu.vue` now keeps gallery review/editor stages mounted until confirm/cancel, emits single video/HEIC selections before closing, and exposes stable `attachment-gallery-input` / `attachment-file-input` test ids.
+	- `channel-media.spec.ts` now logs gallery/document injection milestones and opens forward context actions from the non-media `.msg-meta` target, matching the current media click guard behavior.
+	- Focused validation: `npm run test:unit:run -- src/components/chat/AttachmentMenu.test.ts` passed (`38` tests), the first failing channel album test passed, the two gallery resend/caption tests passed in the known-failure subset, and `channel admin can forward a video message into the channel` passed independently on Chromium.
+	- Production/deploy validation: `npm run build` passed at `2026-06-02T18:39Z`; `make foreign` then completed successfully with `app` and `bot` healthy. The existing Vite chunk-size warning remains non-blocking.
 
 ## Prompt Template (Operational)
 

@@ -696,8 +696,7 @@ describe('AttachmentMenu.vue', () => {
     vi.useRealTimers()
   })
 
-  it('routes a single standard gallery image into the editor flow after closing the sheet', async () => {
-    vi.useFakeTimers()
+  it('routes a single standard gallery image into the editor flow without unmounting the sheet owner', async () => {
     const wrapper = mountAttachmentMenu()
     const vm = wrapper.vm as unknown as {
       editingFile: File | null
@@ -706,22 +705,18 @@ describe('AttachmentMenu.vue', () => {
     }
     const imageFile = new File(['img'], 'photo.jpg', { type: 'image/jpeg' })
 
-    const galleryPromise = vm.onGalleryFile({
+    await vm.onGalleryFile({
       target: {
         files: [imageFile],
         value: 'picked',
       },
     } as unknown as Event)
-    await vi.advanceTimersByTimeAsync(180)
-    await galleryPromise
     await nextTick()
 
-    expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     expect(vm.editingFile).toBe(imageFile)
     expect(vm.singleEditorKey).toBe(1)
     expect(wrapper.emitted('select-media')).toBeUndefined()
-
-    vi.useRealTimers()
   })
 
   it('emits a single HEIC gallery file directly instead of opening the editor', async () => {
