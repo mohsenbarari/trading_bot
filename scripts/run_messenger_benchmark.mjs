@@ -902,6 +902,7 @@ function seedBenchmarkFixture(scenarios) {
     '',
     'async def main():',
     '    async with AsyncSessionLocal() as session:',
+    '        await session.connection(execution_options={"is_sync": True})',
     "        result = {'runId': run_id}",
     '        for index, (key, scenario) in enumerate(fixture.items(), start=1):',
     '            result[key] = await seed_scenario(session, key, scenario, index * 1000)',

@@ -646,6 +646,11 @@ Stage 12 progress:
 	- `scripts/run_messenger_benchmark.mjs` now captures page console errors, page errors, failed API requests, failed API responses, DOM selector counts, localStorage auth state, and a same-origin `/api/auth/me` probe when the conversation list is not ready.
 	- Warmup list readiness timeout is reduced to `15s`, measured readiness stays at `60s`, browser contexts are closed on scenario failure, and remaining warmups are skipped after three conversation-list readiness failures so token lifetime and browser resources are not consumed by invalid warmup loops.
 	- Decision: Stage 12 remains open until the next debug benchmark either produces a valid 3-sample median summary or exposes a concrete auth/bootstrap failure from the new diagnostics.
+- Stage 12 benchmark seed sync isolation follow-up:
+	- The next diagnostic run showed the concrete backend blocker: same-origin `/api/auth/me`, `/api/chat/poll`, `/api/sessions/verify`, and recovery endpoints returned `502 socket hang up`, while app logs showed `[Errno 24] Too many open files` in direct sync push and Redis publish paths.
+	- Root cause: benchmark fixture seeding creates many ORM rows and was still allowing SQLAlchemy sync event listeners to enqueue cross-server sync/direct-push work, which is invalid noise for a local performance benchmark and can exhaust app file descriptors while Iran sync is unavailable.
+	- `scripts/run_messenger_benchmark.mjs` now opens the benchmark seed session connection with `execution_options={"is_sync": True}` so existing event-listener guards skip change-log/direct-sync fan-out for benchmark fixture rows.
+	- Follow-up action: restart the app container to clear exhausted file descriptors, then rerun the debug full benchmark.
 
 ## Prompt Template (Operational)
 
