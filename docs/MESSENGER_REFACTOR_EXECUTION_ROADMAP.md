@@ -69,7 +69,7 @@ Do not merge multiple stages into a single prompt.
 | 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
 | 10 | Group/Channel/Direct Manager Standardization | Completed | Copilot | 2026-06-01 | Manager IA, role-aware action placement, header entry labels, and manager/profile browser matrix are complete |
 | 11 | Weak-Device and Motion Final Pass | Completed | Copilot | 2026-06-01 | S10 weak-device benchmark passed practical responsiveness gate: list/chat/heap/API/bundle improved with zero scroll jank |
-| 12 | Final Benchmark + Release Closure | In Progress | Copilot | 2026-06-02 | Latest valid 72-sample run closes S07/S09 chat-ready and leaves only a small S10 weak-device chat gap; current slice uses a compact reduced-motion chat loading state to reduce weak-device pre-paint work. |
+| 12 | Final Benchmark + Release Closure | Completed | Codex | 2026-06-02 | Closed on the valid `f8312e3` 72-sample median benchmark: `14/14` surfaces measured, `0` blocked, all chat-ready deltas green, S10 list/chat/context green, heap and DOM lower across every scenario. |
 
 ## Detailed Stage Plan
 
@@ -697,6 +697,48 @@ Stage 12 progress:
 	- `ChatView.vue` now opens route targets immediately, starts message loading before/background-with conversation-list sync, preserves direct and named-room placeholders during the route sync window, and avoids starting direct status polling for negative room ids before room metadata is available.
 	- Expected KPI movement: reduce S03/S06/S02 chat-ready variance by removing conversation-list blocking from deep-link first-message paint while preserving list hydration and room cleanup semantics.
 	- Validation: `npm run test:unit:run -- src/components/ChatView.test.ts` and `npm run build` passed.
+- Stage 12 release closure:
+	- Final Stage 12 benchmark completed at `2026-06-02T17:58:14Z` against `f8312e3` with `72` measured rows, `3` samples per version/scenario, all `14` messenger surfaces measured, and `0` blocked surfaces.
+	- Release decision: Stage 12 is closed. The current Messenger is meaningfully better than the historical pre-refactor baseline across the user-visible critical path.
+	- Critical green metrics: every scenario has a negative `chatReadyDeltaMs`; S10 weak-device list/chat/context is green (`-641.2 ms`, `-243.6 ms`, `-97.5 ms`); S02/S03/S06 blockers are green (`-642.2 ms`, `-185.3 ms`, `-538.8 ms`); heap is lower in every scenario; DOM nodes are lower in every scenario.
+	- Non-blocking watch items: context menu still has positive median deltas in some normal scenarios, especially S04 (`+84.2 ms`), S07 (`+74.4 ms`), S00 (`+47.4 ms`), and S05 (`+40.0 ms`). These remain acceptance-window observations, not Stage 12 blockers, because context stays usable, S10 context is green, and the core list/chat/heap/DOM contract is satisfied.
+	- Generated release artifacts are current: `tmp/messenger-benchmark/comparison-summary.{md,json}`, `tmp/messenger-benchmark/performance-results.json`, `tmp/messenger-benchmark/surface-status.json`, `docs/MESSENGER_RESILIENCE_REPORT.md`, `docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md`, and `docs/messenger-surface-report.md`.
+
+### Post-Stage 12 - Release Acceptance + Legacy Retirement Window
+
+Goal:
+- Start the final acceptance path without removing the legacy rollback surface.
+
+Files expected:
+- docs/MESSENGER_REFACTORING_ROADMAP.md
+- docs/MESSENGER_REFACTOR_EXECUTION_ROADMAP.md
+- docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md
+- docs/MESSENGER_RESILIENCE_REPORT.md
+- docs/messenger-surface-report.md
+
+Tests/commands:
+- Focused Messenger unit suite.
+- Messenger Playwright browser matrix.
+- Frontend production build.
+- Manual mobile acceptance checklist.
+
+Exit criteria:
+- Focused unit and browser gates are green.
+- Manual acceptance is explicit.
+- Legacy rollback remains available for at least one accepted release window.
+
+Rollback:
+- Keep `messenger_ui_version=legacy` available.
+- Do not remove legacy code until explicit retirement approval.
+
+Post-Stage 12 progress:
+- Release acceptance kickoff:
+	- Stage 12 is closed on the `f8312e3` benchmark package.
+	- Next validation starts with the focused Messenger unit suite, then moves to browser matrix/manual acceptance.
+- Focused Messenger unit gate:
+	- Command: `npm run test:unit:run -- src/views/MessengerView.test.ts src/components/ChatView.test.ts src/components/chat/ChatConversationList.test.ts src/components/chat/ChatInputBar.test.ts src/components/chat/ChatContextMenu.test.ts src/components/chat/ChatMessageItem.test.ts src/components/chat/AttachmentMenu.test.ts src/composables/chat/useChatMessages.test.ts src/composables/chat/useChatWebSocket.test.ts src/composables/chat/useChatScroll.test.ts src/composables/chat/useChatMedia.test.ts src/composables/chat/useChatFileHandler.test.ts src/services/chatUploadBackground.test.ts src/services/chatDocumentDownloadBackground.test.ts`
+	- Result: passed at `2026-06-02T18:02:59Z`, `14` test files and `376` tests green.
+	- Notes: stderr output is expected branch coverage for mocked upload, media, camera, and failure paths; no failed tests.
 
 ## Prompt Template (Operational)
 
