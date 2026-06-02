@@ -634,6 +634,10 @@ Stage 12 progress:
 	- Raw timing showed one-sample volatility, including current-version conversations API spikes in S03/S04 (`490.3 ms` and `462.2 ms`) despite stable DOM/heap. Decision: do not close Stage 12 and do not move to the next phase yet.
 	- `scripts/messenger_benchmark_config.json` now runs `3` measured samples for the official full benchmark.
 	- `scripts/build_messenger_benchmark_report.py` now aggregates performance deltas by per-scenario/per-version median instead of overwriting repeated runs with the last sample, and the markdown/JSON summary records the median aggregation policy.
+- Stage 12 realtime-burst timeout follow-up:
+	- The first 3-sample full benchmark attempt against `2f18e52` hung for more than 30 minutes at `current-legacy/S11` after `[benchmark] realtime burst: posting events`; the generated performance/report artifacts were still the previous single-sample run (`24` results, `sampleCount=1`), so the attempt is invalid for release decision.
+	- Root cause: `triggerRealtimeBurst` used `Promise.all` over backend `fetch` POSTs with no timeout, so one stalled realtime-send request could block the entire benchmark indefinitely.
+	- `scripts/run_messenger_benchmark.mjs` now applies a `15s` abort timeout to benchmark POST requests, uses `Promise.allSettled` for realtime bursts, logs failed burst requests, records `realtimePostFailures`, and continues the benchmark/report pipeline with the successful burst count.
 
 ## Prompt Template (Operational)
 
