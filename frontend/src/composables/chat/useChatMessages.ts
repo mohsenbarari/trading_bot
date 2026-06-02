@@ -101,7 +101,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const MAX_CACHED_CHAT_SNAPSHOTS = 12
     const INITIAL_CHAT_OPEN_LIMIT = 48
     const FAST_CHAT_OPEN_LIMIT = 16
-    const BACKGROUND_HYDRATION_DELAY_MS = 900
+    const BACKGROUND_HYDRATION_DELAY_MS = 3200
     const SEARCH_CONTEXT_LIMIT = 50
     const OLDER_MESSAGES_PAGE_LIMIT = 60
     const hasOlderMessages = ref(true)
@@ -267,6 +267,14 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         backgroundHydrationTimers.set(userId, timerId)
     }
 
+    function shouldPreferFullInitialOpen() {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+            return false
+        }
+
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    }
+
     function cancelBackgroundHydration(userId: number) {
         const timerId = backgroundHydrationTimers.get(userId)
         if (timerId !== undefined) {
@@ -392,7 +400,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
         try {
             const cachedSnapshot = (!aroundId && !silent) ? getMessageSnapshot(userId) : null
-            const shouldUseFastOpen = !aroundId && !silent && !cachedSnapshot
+            const shouldUseFastOpen = !aroundId && !silent && !cachedSnapshot && !shouldPreferFullInitialOpen()
             const openLimit = shouldUseFastOpen ? FAST_CHAT_OPEN_LIMIT : INITIAL_CHAT_OPEN_LIMIT
             let shouldHydrateAfterFastOpen = shouldUseFastOpen
             let url = buildMessagesEndpoint(userId, `limit=${openLimit}&_t=${Date.now()}`)
