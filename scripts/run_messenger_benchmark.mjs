@@ -13,6 +13,9 @@ const repoRoot = path.resolve(__dirname, '..')
 const frontendRequire = createRequire(path.join(repoRoot, 'frontend', 'package.json'))
 const { chromium } = frontendRequire('@playwright/test')
 const BENCHMARK_POST_TIMEOUT_MS = 15000
+const BENCHMARK_WARMUP_READY_TIMEOUT_MS = 15000
+const BENCHMARK_MEASURED_READY_TIMEOUT_MS = 60000
+const BENCHMARK_MAX_WARMUP_READINESS_FAILURES = 3
 
 function parseArgs(argv) {
   const options = {
@@ -1024,6 +1027,75 @@ async function collectDomSnapshot(page) {
   }))
 }
 
+async function collectReadinessDiagnostics(page, browserEvents = {}) {
+  const dom = await page.evaluate(() => {
+    const readTokenExp = (key) => {
+      const token = localStorage.getItem(key)
+      if (!token) return null
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/') ?? ''))
+        return payload?.exp ?? null
+      } catch {
+        return 'unreadable'
+      }
+    }
+    const bodyText = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim()
+    return {
+      url: location.href,
+      title: document.title,
+      readyState: document.readyState,
+      bodyClass: document.body?.className ?? '',
+      bodyText: bodyText.slice(0, 500),
+      authTokenPresent: Boolean(localStorage.getItem('auth_token')),
+      refreshTokenPresent: Boolean(localStorage.getItem('refresh_token')),
+      authTokenExp: readTokenExp('auth_token'),
+      refreshTokenExp: readTokenExp('refresh_token'),
+      messengerUiVersion: localStorage.getItem('messenger_ui_version'),
+      currentUserSummaryPresent: Boolean(localStorage.getItem('current_user_summary')),
+      selectors: {
+        messengerPage: document.querySelectorAll('.messenger-page').length,
+        chatWrapper: document.querySelectorAll('.chat-wrapper').length,
+        loadingContainer: document.querySelectorAll('.loading-container').length,
+        loadingState: document.querySelectorAll('.loading-state').length,
+        errorState: document.querySelectorAll('.error-state').length,
+        conversationWrapper: document.querySelectorAll('.conversation-list-wrapper').length,
+        conversationItems: document.querySelectorAll('.conversation-card, .conversation-item').length,
+        messagesContainer: document.querySelectorAll('.messages-container').length,
+        messageRows: document.querySelectorAll('.message-bubble, .message-row').length,
+      },
+    }
+  }).catch((error) => ({ evaluateError: error?.message ?? String(error), url: page.url() }))
+
+  const authMe = await page.evaluate(async () => {
+    try {
+      const token = localStorage.getItem('auth_token')
+      const response = await fetch('/api/auth/me', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      const text = await response.text()
+      return {
+        status: response.status,
+        ok: response.ok,
+        text: text.slice(0, 500),
+      }
+    } catch (error) {
+      return { error: error?.message ?? String(error) }
+    }
+  }).catch((error) => ({ error: error?.message ?? String(error) }))
+
+  return {
+    dom,
+    authMe,
+    console: (browserEvents.console ?? []).slice(-8),
+    requestFailures: (browserEvents.requestFailures ?? []).slice(-8),
+    responseFailures: (browserEvents.responseFailures ?? []).slice(-8),
+  }
+}
+
+function formatReadinessDiagnostics(diagnostics) {
+  return JSON.stringify(diagnostics, null, 2)
+}
+
 async function runScrollProbe(page) {
   return page.evaluate(async () => {
     const container = document.querySelector('.messages-container')
@@ -1113,9 +1185,20 @@ async function postJson(url, token, body) {
   }
 }
 
-async function waitForConversationList(page) {
-  await page.locator('.conversation-list-wrapper').waitFor({ timeout: 60000 })
-  await page.locator('.conversation-card, .conversation-item').first().waitFor({ timeout: 60000 })
+async function waitForConversationList(page, options = {}) {
+  const timeout = options.timeoutMs ?? BENCHMARK_MEASURED_READY_TIMEOUT_MS
+  const browserEvents = options.browserEvents ?? {}
+  try {
+    await page.locator('.conversation-list-wrapper').waitFor({ timeout })
+    await page.locator('.conversation-card, .conversation-item').first().waitFor({ timeout })
+  } catch (error) {
+    const diagnostics = await collectReadinessDiagnostics(page, browserEvents)
+    throw new Error([
+      `conversation list not ready after ${timeout}ms`,
+      `original error: ${error?.message ?? error}`,
+      `diagnostics: ${formatReadinessDiagnostics(diagnostics)}`,
+    ].join('\n'))
+  }
 }
 
 async function waitForConversationListReady(page, timeoutMs = 15000) {
@@ -1651,9 +1734,15 @@ async function applyScenarioEmulation(client, scenario) {
 async function runScenario(browser, version, scenario, fixture, browserConfig, backendConfig, options = {}) {
   const seeded = fixture[scenario.runner_key]
   const isWarmup = options.phase === 'warmup'
+  const readinessTimeoutMs = isWarmup ? BENCHMARK_WARMUP_READY_TIMEOUT_MS : BENCHMARK_MEASURED_READY_TIMEOUT_MS
   const baseUrl = `http://127.0.0.1:${version.port}`
   const timings = []
   const requestStarts = new Map()
+  const browserEvents = {
+    console: [],
+    requestFailures: [],
+    responseFailures: [],
+  }
   const context = await browser.newContext({
     viewport: browserConfig.viewport,
     locale: browserConfig.locale,
@@ -1665,6 +1754,20 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
   await client.send('Performance.enable').catch(() => null)
   await applyScenarioEmulation(client, scenario)
 
+  page.on('console', (message) => {
+    if (browserEvents.console.length >= 40) browserEvents.console.shift()
+    browserEvents.console.push({
+      type: message.type(),
+      text: message.text().slice(0, 500),
+    })
+  })
+  page.on('pageerror', (error) => {
+    if (browserEvents.console.length >= 40) browserEvents.console.shift()
+    browserEvents.console.push({
+      type: 'pageerror',
+      text: (error?.message ?? String(error)).slice(0, 500),
+    })
+  })
   page.on('request', (request) => {
     if (request.url().includes('/api/')) requestStarts.set(request, performance.now())
   })
@@ -1676,7 +1779,22 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
     }
   })
   page.on('requestfailed', (request) => {
+    if (browserEvents.requestFailures.length >= 40) browserEvents.requestFailures.shift()
+    browserEvents.requestFailures.push({
+      method: request.method(),
+      url: request.url(),
+      failure: request.failure()?.errorText ?? null,
+    })
     requestStarts.delete(request)
+  })
+  page.on('response', (response) => {
+    if (!response.url().includes('/api/')) return
+    if (response.status() < 400) return
+    if (browserEvents.responseFailures.length >= 40) browserEvents.responseFailures.shift()
+    browserEvents.responseFailures.push({
+      status: response.status(),
+      url: response.url(),
+    })
   })
 
   await page.addInitScript(({ actor, uiVersion }) => {
@@ -1695,9 +1813,10 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
     localStorage.removeItem('suspended_refresh_token')
   }, { actor: seeded.actor, uiVersion: version.ui_version })
 
+  try {
   const listStart = performance.now()
   await page.goto(`${baseUrl}/chat`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await waitForConversationList(page)
+  await waitForConversationList(page, { timeoutMs: readinessTimeoutMs, browserEvents })
   const listReadyMs = performance.now() - listStart
   await page.waitForTimeout(700)
   const listSnapshot = await collectDomSnapshot(page)
@@ -1740,8 +1859,6 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
   const counters = await collectBrowserCounters(client)
   const finalUrl = page.url()
 
-  await context.close()
-
   return {
     version: version.key,
     versionLabel: version.label,
@@ -1773,6 +1890,9 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
     },
     stage2MetricCount: chatSnapshot.metrics.length,
     finalUrl,
+  }
+  } finally {
+    await context.close().catch(() => null)
   }
 }
 
@@ -1833,12 +1953,25 @@ async function main() {
     const browser = await chromium.launch({ headless: true, args: ['--disable-dev-shm-usage'] })
     const results = []
     if (!options.skipWarmup) {
+      let warmupReadinessFailures = 0
+      let skipRemainingWarmup = false
       for (let runIndex = 0; runIndex < performance.warmup_runs; runIndex += 1) {
+        if (skipRemainingWarmup) break
         for (const version of versions) {
+          if (skipRemainingWarmup) break
           for (const scenario of performance.scenarios) {
+            if (skipRemainingWarmup) break
             console.log(`Warming ${version.key} / ${scenario.id} (${runIndex + 1}/${performance.warmup_runs})...`)
             await runScenario(browser, version, scenario, fixture, performance.browser, performance.backend, { phase: 'warmup' }).catch((error) => {
-              console.log(`[benchmark] warmup skipped after failure for ${version.key}/${scenario.id}: ${error?.message ?? error}`)
+              const message = error?.message ?? String(error)
+              console.log(`[benchmark] warmup skipped after failure for ${version.key}/${scenario.id}: ${message}`)
+              if (message.includes('conversation list not ready')) {
+                warmupReadinessFailures += 1
+                if (warmupReadinessFailures >= BENCHMARK_MAX_WARMUP_READINESS_FAILURES) {
+                  skipRemainingWarmup = true
+                  console.log(`[benchmark] skipping remaining warmup after ${warmupReadinessFailures} readiness failures`)
+                }
+              }
             })
           }
         }
