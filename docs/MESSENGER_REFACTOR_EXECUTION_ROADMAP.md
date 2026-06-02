@@ -641,6 +641,11 @@ Stage 12 progress:
 - Stage 12 warmup isolation follow-up:
 	- The first rerun after the realtime timeout guard failed during warmup at `pre-refactor/S09` after realtime POST failures in prior warmup scenarios; the official artifacts still showed the previous single-sample payload (`24` results), so the run remains invalid.
 	- `scripts/run_messenger_benchmark.mjs` now treats warmup as non-mutating: realtime burst and upload/download persistence probes are skipped during warmup, and warmup scenario failures are logged and skipped instead of aborting the measured benchmark pipeline.
+- Stage 12 benchmark readiness diagnostics follow-up:
+	- The debug full-benchmark rerun failed before producing new official artifacts: after all warmup scenarios timed out on `.conversation-list-wrapper`, measured `pre-refactor/S00` also timed out waiting for the conversation list.
+	- `scripts/run_messenger_benchmark.mjs` now captures page console errors, page errors, failed API requests, failed API responses, DOM selector counts, localStorage auth state, and a same-origin `/api/auth/me` probe when the conversation list is not ready.
+	- Warmup list readiness timeout is reduced to `15s`, measured readiness stays at `60s`, browser contexts are closed on scenario failure, and remaining warmups are skipped after three conversation-list readiness failures so token lifetime and browser resources are not consumed by invalid warmup loops.
+	- Decision: Stage 12 remains open until the next debug benchmark either produces a valid 3-sample median summary or exposes a concrete auth/bootstrap failure from the new diagnostics.
 
 ## Prompt Template (Operational)
 
