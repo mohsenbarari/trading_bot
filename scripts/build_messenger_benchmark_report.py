@@ -5,6 +5,7 @@ import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import median
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +122,25 @@ def optional_delta(current: dict[str, object], previous: dict[str, object], *pat
     return round(current_value - previous_value, 1)
 
 
+def median_nested_number(items: list[dict[str, object]], *path: str) -> float | None:
+    values = [value for item in items if (value := nested_number(item, *path)) is not None]
+    if not values:
+        return None
+    return float(median(values))
+
+
+def median_delta(
+    current_items: list[dict[str, object]],
+    previous_items: list[dict[str, object]],
+    *path: str,
+) -> float | None:
+    current_value = median_nested_number(current_items, *path)
+    previous_value = median_nested_number(previous_items, *path)
+    if current_value is None or previous_value is None:
+        return None
+    return round(current_value - previous_value, 1)
+
+
 def format_optional_ms(value: object) -> str:
     if value is None:
         return 'n/a'
@@ -165,11 +185,11 @@ def build_scenario_catalog(config: dict[str, object], manifest: dict[str, object
 
 
 def summarize_deltas(results: list[dict[str, object]], versions: list[dict[str, object]]) -> list[dict[str, object]]:
-    pairs: dict[str, dict[str, dict[str, object]]] = defaultdict(dict)
+    pairs: dict[str, dict[str, list[dict[str, object]]]] = defaultdict(lambda: defaultdict(list))
     for item in results:
         scenario_id = str(item.get('scenarioId', ''))
-        version = str(item.get('version', ''))
-        pairs[scenario_id][version] = item
+        version = normalize_version_key(item.get('version'), versions)
+        pairs[scenario_id][version].append(item)
 
     summaries: list[dict[str, object]] = []
     if len(versions) < 2:
@@ -177,8 +197,8 @@ def summarize_deltas(results: list[dict[str, object]], versions: list[dict[str, 
     baseline_key = str(versions[0].get('key', 'pre-refactor'))
     compare_key = str(versions[1].get('key', 'current-legacy'))
     for scenario_id, by_version in sorted(pairs.items()):
-        previous = None
-        current = None
+        previous: list[dict[str, object]] = []
+        current: list[dict[str, object]] = []
         for alias in result_version_aliases(baseline_key):
             if alias in by_version:
                 previous = by_version[alias]
@@ -189,21 +209,21 @@ def summarize_deltas(results: list[dict[str, object]], versions: list[dict[str, 
                 break
         if not previous or not current:
             continue
+        previous_sample = previous[-1]
+        current_sample = current[-1]
         summaries.append(
             {
                 'scenarioId': scenario_id,
-                'scenarioLabel': current.get('scenarioLabel') or previous.get('scenarioLabel'),
-                'listReadyDeltaMs': round(float(current.get('listReadyMs', 0)) - float(previous.get('listReadyMs', 0)), 1),
-                'chatReadyDeltaMs': round(float(current.get('chatReadyMs', 0)) - float(previous.get('chatReadyMs', 0)), 1),
-                'contextMenuDeltaMs': optional_delta(current, previous, 'contextMenuMs'),
-                'downloadStartDeltaMs': optional_delta(current, previous, 'persistence', 'downloadStartMs'),
-                'uploadCompletionDeltaMs': optional_delta(current, previous, 'persistence', 'upload', 'completionMs'),
-                'domNodeDelta': int(current.get('chatDomNodes', 0)) - int(previous.get('chatDomNodes', 0)),
-                'heapDeltaMb': round(
-                    float(current.get('counters', {}).get('jsHeapUsedMb', 0))
-                    - float(previous.get('counters', {}).get('jsHeapUsedMb', 0)),
-                    2,
-                ),
+                'scenarioLabel': current_sample.get('scenarioLabel') or previous_sample.get('scenarioLabel'),
+                'sampleCount': min(len(current), len(previous)),
+                'aggregation': 'median',
+                'listReadyDeltaMs': median_delta(current, previous, 'listReadyMs'),
+                'chatReadyDeltaMs': median_delta(current, previous, 'chatReadyMs'),
+                'contextMenuDeltaMs': median_delta(current, previous, 'contextMenuMs'),
+                'downloadStartDeltaMs': median_delta(current, previous, 'persistence', 'downloadStartMs'),
+                'uploadCompletionDeltaMs': median_delta(current, previous, 'persistence', 'upload', 'completionMs'),
+                'domNodeDelta': round(median_delta(current, previous, 'chatDomNodes') or 0),
+                'heapDeltaMb': round(median_delta(current, previous, 'counters', 'jsHeapUsedMb') or 0, 2),
             }
         )
     return summaries
@@ -344,6 +364,7 @@ def render_markdown(
         f"- Manifest version: {manifest.get('manifest_version', 'unknown')}",
         f"- Suite catalog size: {len(config.get('suite_catalog', []))}",
         f'- Performance samples: {len(results)}',
+        '- Performance delta aggregation: median per scenario/version',
         '',
         '## Performance Deltas',
         '',
@@ -584,6 +605,7 @@ def main() -> int:
         'instrumentedSurfaceCount': sum(1 for item in statuses if item['benchmark_readiness'] == 'instrumented'),
         'definedSurfaceCount': sum(1 for item in statuses if item['benchmark_readiness'] == 'defined'),
         'blockedSurfaceCount': sum(1 for item in statuses if item['release_gate_status'] == 'blocked'),
+        'performanceDeltaAggregation': 'median',
         'performanceDeltas': deltas,
     }
 

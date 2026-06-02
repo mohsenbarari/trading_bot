@@ -16,7 +16,7 @@
     },
     "output_file": "tmp/messenger-benchmark/performance-results.json",
     "warmup_runs": 1,
-    "measured_runs": 1,
+    "measured_runs": 3,
     "browser": {
       "engine": "chromium",
       "locale": "fa-IR",

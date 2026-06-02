@@ -629,6 +629,11 @@ Stage 12 progress:
 - Stage 12 diagnostic scheduling follow-up:
 	- `scheduleMessengerDiagnosticTask` now supports `deferMs` so diagnostics can be delayed before idle scheduling rather than only relying on idle timeout.
 	- `ChatConversationList.vue`, `useChatMessages.ts`, and `ChatView.vue` now keep performance marks immediate while deferring DOM snapshots and non-critical search chunk warming outside first-ready/context-menu windows.
+- Stage 12 benchmark hardening follow-up:
+	- The official `5513f0a` full benchmark generated at `2026-06-02T06:28:37.286992+00:00` kept all `14` messenger surfaces ready but did not satisfy release closure: S07 list/context improved while chat stayed `+159.9 ms`; S09 context improved while list/chat/download-start stayed positive (`+39.4 ms`, `+531.3 ms`, `+18.1 ms`); S10 list/chat/heap stayed green with a small context watch item (`+17.4 ms`).
+	- Raw timing showed one-sample volatility, including current-version conversations API spikes in S03/S04 (`490.3 ms` and `462.2 ms`) despite stable DOM/heap. Decision: do not close Stage 12 and do not move to the next phase yet.
+	- `scripts/messenger_benchmark_config.json` now runs `3` measured samples for the official full benchmark.
+	- `scripts/build_messenger_benchmark_report.py` now aggregates performance deltas by per-scenario/per-version median instead of overwriting repeated runs with the last sample, and the markdown/JSON summary records the median aggregation policy.
 
 ## Prompt Template (Operational)
 
