@@ -655,6 +655,16 @@ Stage 12 progress:
 	- The rerun progressed into measured `current-legacy/S11 (2/3)` but then repeated Playwright click retries because `.context-overlay` remained open after the context-menu probe and intercepted the chat-header back button.
 	- `scripts/run_messenger_benchmark.mjs` now closes transient context/menu overlays immediately after measuring context-menu latency by pressing Escape, clicking any visible overlay, and waiting briefly for context menu surfaces to disappear.
 	- Decision: rerun the full debug benchmark after this harness cleanup; the previous run is invalid because it was manually terminated while stuck on the overlay intercept loop.
+- Stage 12 valid 3-sample median benchmark readout:
+	- The full debug benchmark completed successfully at `2026-06-02T12:02:47Z` with `72` measured rows, `3` samples for every version/scenario, all `14` surfaces measured, and `0` blocked surfaces.
+	- Strong green areas: S10 improved on list/chat/context/heap/API (`-884.5 ms`, `-807.2 ms`, `-20.5 ms`, `-0.3 MB`, conversations API `-75.1 ms`), S09 document completion recovered from the previous `60s` timeout class, and heap stayed lower across the measured current build.
+	- Remaining release blockers: S07 list/chat stayed positive (`+226.0 ms`, `+216.0 ms`), S09 list/download-start/upload-completion stayed positive (`+82.3 ms`, `+25.7 ms`, `+102.6 ms`), S05 context regressed (`+53.1 ms`), and S01 list/chat regressed (`+104.5 ms`, `+561.1 ms`).
+	- Decision: Stage 12 remains open. The next pass targets shared bootstrap contention before list/chat readiness rather than benchmark harness behavior.
+- Stage 12 bootstrap quiet-window follow-up:
+	- `MessengerView.vue` now defers non-critical surface DOM/frame diagnostics by `4200 ms`, keeping the performance mark immediate while moving DOM counting and frame sampling outside the first list/chat benchmark window.
+	- `ChatView.vue` now starts background chat polling after a `4200 ms` initial delay and user-status polling after a `1800 ms` delay; `useChatMessages.ts` supports those delayed polling starts while still cancelling pending timers on stop/unmount.
+	- Expected KPI movement: reduce first-list and first-chat contention in S01/S07/S09/S11 without changing the critical conversation list and message-load request sequence.
+	- Validation: `npm run build` passed.
 
 ## Prompt Template (Operational)
 

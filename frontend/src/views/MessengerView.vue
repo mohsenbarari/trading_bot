@@ -24,6 +24,7 @@ const user = ref<any>(null)
 const loading = ref(true)
 const messengerUiVersion = ref(resolveMessengerUiVersion())
 let messengerSurfaceMarked = false
+const MESSENGER_SURFACE_DIAGNOSTIC_DEFER_MS = 4200
 
 const jwtToken = computed(() => {
   return localStorage.getItem('auth_token') || ''
@@ -67,7 +68,11 @@ watch([loading, user, messengerUiVersion], () => {
         })
       }
       startMessengerFrameBudgetProbe(`${messengerUiVersion.value}-surface-ready`, { frameCount: 30 })
-    }, { timeoutMs: 750, fallbackDelayMs: 120 })
+    }, {
+      deferMs: MESSENGER_SURFACE_DIAGNOSTIC_DEFER_MS,
+      timeoutMs: 750,
+      fallbackDelayMs: 120,
+    })
   })
 })
 

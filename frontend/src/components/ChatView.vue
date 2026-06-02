@@ -84,6 +84,8 @@ const ChatSearchBottomBar = defineAsyncComponent(() => import('./chat/ChatSearch
 const keepInactiveMessengerSurfacesMounted = Boolean(import.meta.env.VITEST)
 const MESSENGER_INTERACTION_WARM_DEFER_MS = 3200
 const MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS = 2600
+const MESSENGER_INITIAL_POLL_DEFER_MS = 4200
+const MESSENGER_STATUS_POLL_DEFER_MS = 1800
 
 let interactionChunksWarmed = false
 function warmMessengerInteractionChunks() {
@@ -2808,7 +2810,7 @@ watch(selectedUserId, (newVal) => {
     pinnedMessageState.value = null
     void loadPinnedMessageState()
     if (selectedRoomKind.value === 'direct') {
-      startStatusPolling(newVal)
+      startStatusPolling(newVal, { initialDelayMs: MESSENGER_STATUS_POLL_DEFER_MS })
     } else {
       stopStatusPolling()
     }
@@ -2844,7 +2846,7 @@ onMounted(async () => {
   }
   
   onGlobalWs(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryRealtimeUpdate)
-  startPolling()
+  startPolling({ initialDelayMs: MESSENGER_INITIAL_POLL_DEFER_MS })
   updateIsMobile()
   window.addEventListener('resize', updateIsMobile)
   nextTick(() => {

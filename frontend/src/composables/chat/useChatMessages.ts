@@ -282,8 +282,10 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     }
 
     let pollTimer: number | null = null
+    let pollStartTimer: number | null = null
     const POLL_INTERVAL = 30000
     let statusPollTimer: number | null = null
+    let statusPollStartTimer: number | null = null
 
     async function apiFetch(endpoint: string, fetchOptions: RequestInit = {}, errorContext: ErrorPolicyContext = {}) {
         return await apiFetchJson(`/api${endpoint}`, fetchOptions, errorContext)
@@ -793,25 +795,55 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
     }
 
-    function startPolling() {
+    function startPolling(options: { initialDelayMs?: number } = {}) {
         stopPolling()
+        const initialDelayMs = Number(options.initialDelayMs ?? 0)
+        if (initialDelayMs > 0) {
+            pollStartTimer = window.setTimeout(() => {
+                pollStartTimer = null
+                pollTimer = window.setInterval(poll, POLL_INTERVAL)
+            }, initialDelayMs)
+            return
+        }
+
         pollTimer = window.setInterval(poll, POLL_INTERVAL)
     }
 
     function stopPolling() {
+        if (pollStartTimer) {
+            clearTimeout(pollStartTimer)
+            pollStartTimer = null
+        }
         if (pollTimer) {
             clearInterval(pollTimer)
             pollTimer = null
         }
     }
 
-    function startStatusPolling(userId: number) {
+    function startStatusPolling(userId: number, options: { initialDelayMs?: number } = {}) {
         stopStatusPolling()
-        fetchTargetUserStatus(userId)
-        statusPollTimer = window.setInterval(() => fetchTargetUserStatus(userId), 30000)
+        const initialDelayMs = Number(options.initialDelayMs ?? 0)
+        const start = () => {
+            void fetchTargetUserStatus(userId)
+            statusPollTimer = window.setInterval(() => fetchTargetUserStatus(userId), 30000)
+        }
+
+        if (initialDelayMs > 0) {
+            statusPollStartTimer = window.setTimeout(() => {
+                statusPollStartTimer = null
+                start()
+            }, initialDelayMs)
+            return
+        }
+
+        start()
     }
 
     function stopStatusPolling() {
+        if (statusPollStartTimer) {
+            clearTimeout(statusPollStartTimer)
+            statusPollStartTimer = null
+        }
         if (statusPollTimer) {
             clearInterval(statusPollTimer)
             statusPollTimer = null
