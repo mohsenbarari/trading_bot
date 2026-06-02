@@ -109,6 +109,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const pendingBackgroundHydrationUsers = new Set<number>()
     let latestLoadRequestId = 0
     let chatLoadMetricSequence = 0
+    let mutedConversationSyncSequence = 0
 
     function cloneMessage(message: Message): Message {
         return {
@@ -338,11 +339,18 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             })
             conversations.value = Array.isArray(loadedConversations) ? loadedConversations : []
             error.value = ''
-            notificationStore.syncMutedConversationIds(
-                conversations.value
-                    .filter((conversation) => conversation.is_muted)
-                    .map((conversation) => conversation.other_user_id)
-            )
+            const mutedSyncId = ++mutedConversationSyncSequence
+            const loadedConversationSnapshot = conversations.value
+            window.setTimeout(() => {
+                if (mutedSyncId !== mutedConversationSyncSequence) {
+                    return
+                }
+                notificationStore.syncMutedConversationIds(
+                    loadedConversationSnapshot
+                        .filter((conversation) => conversation.is_muted)
+                        .map((conversation) => conversation.other_user_id)
+                )
+            }, 0)
         } catch (e: any) {
             error.value = getUserFacingErrorMessage(e, {
                 surface: 'messenger',

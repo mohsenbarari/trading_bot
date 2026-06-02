@@ -152,6 +152,8 @@ describe('useChatMessages', () => {
     await subject.loadConversations()
 
     expect(conversations.value).toHaveLength(2)
+    expect(messageMocks.syncMutedConversationIds).not.toHaveBeenCalled()
+    vi.runOnlyPendingTimers()
     expect(messageMocks.syncMutedConversationIds).toHaveBeenCalledWith([12])
 
     messageMocks.apiFetchJson.mockRejectedValueOnce(new Error('load failed'))

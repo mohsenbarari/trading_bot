@@ -69,7 +69,7 @@ Do not merge multiple stages into a single prompt.
 | 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
 | 10 | Group/Channel/Direct Manager Standardization | Completed | Copilot | 2026-06-01 | Manager IA, role-aware action placement, header entry labels, and manager/profile browser matrix are complete |
 | 11 | Weak-Device and Motion Final Pass | Completed | Copilot | 2026-06-01 | S10 weak-device benchmark passed practical responsiveness gate: list/chat/heap/API/bundle improved with zero scroll jank |
-| 12 | Final Benchmark + Release Closure | In Progress | Copilot | 2026-06-02 | Full benchmark hardening in progress; runner now closes Chromium on failure, scopes heavy probes to relevant scenarios, and app containers have higher `nofile` limits after `[Errno 24] Too many open files` failure |
+| 12 | Final Benchmark + Release Closure | In Progress | Copilot | 2026-06-02 | Full benchmark hardening produced a valid 72-sample run; S09/S10 are improved, but S07 and several list-ready medians still need closure. Latest slice defers muted-conversation store sync after first list data assignment. |
 
 ## Detailed Stage Plan
 
