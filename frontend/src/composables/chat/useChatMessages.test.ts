@@ -200,6 +200,9 @@ describe('useChatMessages', () => {
 
     expect(messageMocks.waitForChatUploadBackgroundReady).toHaveBeenCalledTimes(1)
     expect(messages.value!.map((message) => message.id)).toEqual([1, -99])
+    expect(scrollToUnreadOrBottomMock).not.toHaveBeenCalled()
+    vi.runOnlyPendingTimers()
+    await flushPromises()
     expect(scrollToUnreadOrBottomMock).toHaveBeenCalledTimes(1)
     expect(messageMocks.markChatAsRead).toHaveBeenCalledWith(12)
     expect(isLoadingMessages.value).toBe(false)

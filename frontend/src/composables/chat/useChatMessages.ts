@@ -521,8 +521,13 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 }
                 await nextTick()
                 markFirstMessagePaint('server')
-                scrollToUnreadOrBottom()
-                void markAsRead()
+                window.setTimeout(() => {
+                    if (!isActiveLoadRequest(requestId, userId)) {
+                        return
+                    }
+                    scrollToUnreadOrBottom()
+                    void markAsRead()
+                }, 0)
 
                 // Don't block first paint waiting for upload service restore.
                 // Reconcile resumed pending uploads after initial render.
