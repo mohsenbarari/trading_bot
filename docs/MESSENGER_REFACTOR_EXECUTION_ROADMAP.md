@@ -665,6 +665,15 @@ Stage 12 progress:
 	- `ChatView.vue` now starts background chat polling after a `4200 ms` initial delay and user-status polling after a `1800 ms` delay; `useChatMessages.ts` supports those delayed polling starts while still cancelling pending timers on stop/unmount.
 	- Expected KPI movement: reduce first-list and first-chat contention in S01/S07/S09/S11 without changing the critical conversation list and message-load request sequence.
 	- Validation: `npm run build` passed.
+- Stage 12 benchmark after bootstrap quiet-window:
+	- The full benchmark completed at `2026-06-02T12:39:16Z` against `787c477` with `72` measured rows, `3` samples per version/scenario, all `14` surfaces ready, and `0` blocked surfaces.
+	- Improvements versus the previous valid run: S01 list is effectively neutral (`-1.6 ms`) and chat is far lower than before though still positive (`+86.2 ms`); S09 list and upload-completion are now green (`-33.0 ms`, `-61.2 ms`); S05 chat is green (`-67.6 ms`); S10 remains strongly green (`-713.0 ms` list, `-598.2 ms` chat, `-38.5 ms` context).
+	- Remaining release blockers: S07 chat remains positive (`+254.0 ms`), S09 chat/download-start/context remain positive (`+134.2 ms`, `+43.6 ms`, `+18.8 ms`), S05 context remains positive (`+60.5 ms`), and S00 first-list remains positive (`+223.3 ms`).
+	- Decision: Stage 12 remains open. Next pass tightens the first message path by reducing the fast-open payload and delaying non-critical background hydration until after first paint.
+- Stage 12 fast-open hydration follow-up:
+	- `useChatMessages.ts` now lowers `FAST_CHAT_OPEN_LIMIT` from `24` to `16` messages and delays full background hydration by `900 ms` with cancellable per-conversation timers.
+	- Expected KPI movement: reduce S07/S09 first chat-ready latency and keep hydration from competing with the immediate context/search measurement window after first paint.
+	- Validation: `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts` and `npm run build` passed.
 
 ## Prompt Template (Operational)
 
