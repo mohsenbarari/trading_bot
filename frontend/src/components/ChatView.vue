@@ -168,6 +168,7 @@ const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
 const isMobile = ref(false)
+const prefersReducedMotion = ref(false)
 const contextMenu = ref<{
   visible: boolean
   x: number
@@ -258,6 +259,10 @@ async function syncSelectedConversationRoute(userId: number | null, userName = '
 
 function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
+}
+
+function updateReducedMotionPreference() {
+  prefersReducedMotion.value = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
 function bindOverlayBackState(source: () => boolean, onBack: () => void) {
@@ -2838,6 +2843,7 @@ watch(() => timelineRenderBudget.value.itemCount, (itemCount) => {
 
 onMounted(async () => {
   isLoading.value = true
+  updateReducedMotionPreference()
   await loadConversations()
   isLoading.value = false
   
@@ -3331,7 +3337,12 @@ defineExpose({
       
       <div v-else class="chat-content">
         <div v-if="isLoadingMessages" class="loading-state">
+          <div v-if="prefersReducedMotion" class="compact-chat-loading" role="status">
+            <span class="loading-spinner compact-spinner"></span>
+            <span>در حال باز کردن گفتگو</span>
+          </div>
           <MessengerLoadingScreen
+            v-else
             mode="chat"
             title="در حال باز کردن گفتگو"
             subtitle="آخرین پیام‌ها با یک بارگذاری سبک و سریع آماده می‌شوند."
@@ -4481,6 +4492,20 @@ defineExpose({
   flex-direction: column;
   justify-content: center;
   align-items: center;
+}
+
+.compact-chat-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  color: var(--messenger-text-secondary);
+  font-size: 0.92rem;
+}
+
+.compact-spinner {
+  width: 18px;
+  height: 18px;
 }
 
 .chat-panel-error {
