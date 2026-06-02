@@ -97,9 +97,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const notificationStore = useNotificationStore()
     const textSendControllers = new Map<number, AbortController>()
     const messageSnapshotCache = new Map<number, Message[]>()
+    const backgroundHydrationTimers = new Map<number, number>()
     const MAX_CACHED_CHAT_SNAPSHOTS = 12
     const INITIAL_CHAT_OPEN_LIMIT = 48
-    const FAST_CHAT_OPEN_LIMIT = 24
+    const FAST_CHAT_OPEN_LIMIT = 16
+    const BACKGROUND_HYDRATION_DELAY_MS = 900
     const SEARCH_CONTEXT_LIMIT = 50
     const OLDER_MESSAGES_PAGE_LIMIT = 60
     const hasOlderMessages = ref(true)
@@ -251,7 +253,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
 
         pendingBackgroundHydrationUsers.add(userId)
-        queueMicrotask(async () => {
+        const timerId = window.setTimeout(async () => {
+            backgroundHydrationTimers.delete(userId)
             try {
                 if (selectedUserId.value !== userId) {
                     return
@@ -260,12 +263,23 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             } finally {
                 pendingBackgroundHydrationUsers.delete(userId)
             }
-        })
+        }, BACKGROUND_HYDRATION_DELAY_MS)
+        backgroundHydrationTimers.set(userId, timerId)
+    }
+
+    function cancelBackgroundHydration(userId: number) {
+        const timerId = backgroundHydrationTimers.get(userId)
+        if (timerId !== undefined) {
+            window.clearTimeout(timerId)
+            backgroundHydrationTimers.delete(userId)
+        }
+        pendingBackgroundHydrationUsers.delete(userId)
     }
 
     watch(selectedUserId, (nextUserId, previousUserId) => {
         if (typeof previousUserId === 'number' && previousUserId !== nextUserId) {
             storeMessageSnapshot(previousUserId, messages.value)
+            cancelBackgroundHydration(previousUserId)
         }
     })
 
