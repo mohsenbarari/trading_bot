@@ -674,6 +674,15 @@ Stage 12 progress:
 	- `useChatMessages.ts` now lowers `FAST_CHAT_OPEN_LIMIT` from `24` to `16` messages and delays full background hydration by `900 ms` with cancellable per-conversation timers.
 	- Expected KPI movement: reduce S07/S09 first chat-ready latency and keep hydration from competing with the immediate context/search measurement window after first paint.
 	- Validation: `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts` and `npm run build` passed.
+- Stage 12 benchmark after fast-open hydration:
+	- The full benchmark completed at `2026-06-02T13:06:42Z` against `f622eca` with `72` measured rows, `3` samples per version/scenario, all `14` surfaces ready, and `0` blocked surfaces.
+	- Strong improvements: S00/S01/S05/S06/S09 are now green across list/chat/context/heap, S09 upload-completion stayed green (`-37.3 ms`), and S10 list/chat/heap stayed green.
+	- Remaining blockers: S07 chat remains positive (`+164.3 ms`), S04 list/chat is positive (`+612.0 ms`, `+214.7 ms`) with conversations API volatility, S10 context is positive (`+32.9 ms`) and weak-device scroll regressed because fast-open hydration overlapped the scroll probe (`16` rendered bubbles, `38.3 FPS`, `2` janky frames), and S11 context is positive (`+58.3 ms`).
+	- Decision: Stage 12 remains open. Keep the fast-open win for normal devices, but move hydration farther outside the interaction probe window and disable fast-open under reduced-motion/weak-device conditions.
+- Stage 12 weak-device hydration guard follow-up:
+	- `useChatMessages.ts` now delays background hydration to `3200 ms` and uses the full `48` message initial load when `prefers-reduced-motion: reduce` is active.
+	- Expected KPI movement: preserve the S09/S01 normal-device chat gains while restoring S10 weak-device scroll/context stability and avoiding hydration during the first search/scroll/context probe window.
+	- Validation: `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts` and `npm run build` passed.
 
 ## Prompt Template (Operational)
 
