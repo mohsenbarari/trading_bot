@@ -226,6 +226,7 @@ const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
 let messagesContainerResizeObserver: ResizeObserver | null = null
 let previousMessagesContainerMetrics: MessagesContainerMetrics | null = null
 let pendingSelectionAnchor: PendingSelectionAnchor | null = null
+let suppressMissingRoomCleanupDuringRouteSync = false
 
 // Status
 const targetUserStatus = ref('آخرین بازدید اخیراً')
@@ -1587,6 +1588,44 @@ const startNewChat = (userId: number, userName: string) => {
   })
 }
 
+function ensureRouteConversationPlaceholder(targetId: number, fallbackName = '') {
+  if (conversations.value.some((conversation) => conversation.other_user_id === targetId)) {
+    return
+  }
+
+  if (targetId <= 0 && !fallbackName) {
+    return
+  }
+
+  const isNamedRoom = targetId < 0
+  conversations.value.unshift({
+    id: isNamedRoom ? Math.abs(targetId) : targetId,
+    other_user_id: targetId,
+    other_user_name: fallbackName || selectedUserName.value || 'گفتگوی جدید',
+    last_message_content: null,
+    last_message_type: null,
+    last_message_at: null,
+    unread_count: 0,
+    room_kind: isNamedRoom ? 'group' : 'direct',
+    chat_id: isNamedRoom ? Math.abs(targetId) : undefined,
+  })
+}
+
+async function loadConversationsAfterRouteOpen(targetId: number, fallbackName = '') {
+  suppressMissingRoomCleanupDuringRouteSync = true
+  try {
+    await loadConversations()
+    if (selectedUserId.value !== targetId) {
+      return
+    }
+
+    ensureRouteConversationPlaceholder(targetId, fallbackName)
+    selectedUserName.value = resolveSelectedConversationName(targetId, selectedUserName.value || fallbackName)
+  } finally {
+    suppressMissingRoomCleanupDuringRouteSync = false
+  }
+}
+
 const showNewChatModal = ref(false)
 const showGroupManagerModal = ref(false)
 const showChannelManagerModal = ref(false)
@@ -1673,6 +1712,10 @@ function clearActiveConversationState() {
 }
 
 function clearMissingNamedRoomSelection() {
+  if (suppressMissingRoomCleanupDuringRouteSync) {
+    return
+  }
+
   const activeConversationId = selectedUserId.value
   if (!activeConversationId || activeConversationId >= 0) {
     return
@@ -2831,7 +2874,7 @@ watch(selectedUserId, (newVal) => {
   if (newVal) {
     pinnedMessageState.value = null
     schedulePinnedMessageStateLoad(newVal)
-    if (selectedRoomKind.value === 'direct') {
+    if (newVal > 0 && selectedRoomKind.value === 'direct') {
       startStatusPolling(newVal, { initialDelayMs: MESSENGER_STATUS_POLL_DEFER_MS })
     } else {
       stopStatusPolling()
@@ -2862,13 +2905,16 @@ watch(() => timelineRenderBudget.value.itemCount, (itemCount) => {
 onMounted(async () => {
   isLoading.value = true
   updateReducedMotionPreference()
-  await loadConversations()
-  isLoading.value = false
-  
+
   if (props.targetUserId) {
+    isLoading.value = false
     openConversationFromRoute(props.targetUserId, props.targetUserName || '')
+    void loadConversationsAfterRouteOpen(props.targetUserId, props.targetUserName || '')
+  } else {
+    await loadConversations()
+    isLoading.value = false
   }
-  
+
   onGlobalWs(WS_NOTIFICATION_EVENTS.sessionRecoveryUpdate, handleRecoveryRealtimeUpdate)
   startPolling({ initialDelayMs: MESSENGER_INITIAL_POLL_DEFER_MS })
   updateIsMobile()
