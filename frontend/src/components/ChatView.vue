@@ -86,6 +86,7 @@ const MESSENGER_INTERACTION_WARM_DEFER_MS = 3200
 const MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS = 2600
 const MESSENGER_INITIAL_POLL_DEFER_MS = 4200
 const MESSENGER_STATUS_POLL_DEFER_MS = 1800
+const MESSENGER_PINNED_MESSAGE_DEFER_MS = 900
 
 let interactionChunksWarmed = false
 function warmMessengerInteractionChunks() {
@@ -882,6 +883,22 @@ const pinnedMessageMetaText = computed(() => {
 })
 
 let pinnedMessageRequestId = 0
+let pinnedMessageLoadTimer: ReturnType<typeof window.setTimeout> | null = null
+
+function cancelScheduledPinnedMessageLoad() {
+  if (pinnedMessageLoadTimer == null) return
+  window.clearTimeout(pinnedMessageLoadTimer)
+  pinnedMessageLoadTimer = null
+}
+
+function schedulePinnedMessageStateLoad(conversationKey: number) {
+  cancelScheduledPinnedMessageLoad()
+  pinnedMessageLoadTimer = window.setTimeout(() => {
+    pinnedMessageLoadTimer = null
+    if (selectedUserId.value !== conversationKey) return
+    void loadPinnedMessageState()
+  }, MESSENGER_PINNED_MESSAGE_DEFER_MS)
+}
 
 async function loadPinnedMessageState() {
   const conversation = selectedConversation.value
@@ -2813,7 +2830,7 @@ watch(selectedUserId, (newVal) => {
   dateSeparatorLabelCache.clear()
   if (newVal) {
     pinnedMessageState.value = null
-    void loadPinnedMessageState()
+    schedulePinnedMessageStateLoad(newVal)
     if (selectedRoomKind.value === 'direct') {
       startStatusPolling(newVal, { initialDelayMs: MESSENGER_STATUS_POLL_DEFER_MS })
     } else {
@@ -2823,6 +2840,7 @@ watch(selectedUserId, (newVal) => {
       syncMessagesContainerMetrics()
     })
   } else {
+    cancelScheduledPinnedMessageLoad()
     stopStatusPolling()
     previousMessagesContainerMetrics = null
     pinnedMessageState.value = null
@@ -3055,6 +3073,7 @@ async function handleAttachmentFileSelection(file: File) {
 }
 
 onUnmounted(() => {
+  cancelScheduledPinnedMessageLoad()
   messagesContainerResizeObserver?.disconnect()
   messagesContainerResizeObserver = null
   window.removeEventListener('resize', updateIsMobile)

@@ -701,6 +701,7 @@ describe('ChatView.vue', () => {
   })
 
   it('renders pinned document previews and unpins from the banner', async () => {
+    vi.useFakeTimers()
     const pinnedDoc = buildCurrentUserMessage(81, JSON.stringify({ file_name: 'invoice.pdf' }))
     pinnedDoc.message_type = 'document'
     chatViewMocks.conversationsSeed = [
@@ -724,6 +725,8 @@ describe('ChatView.vue', () => {
       targetUserName: 'Target User',
     })
     await flushPromises()
+    await vi.runOnlyPendingTimersAsync()
+    await flushPromises()
 
     expect(wrapper.get('.pinned-message-meta').text()).toBe('برای رفتن به پیام ضربه بزنید')
     expect(wrapper.get('.pinned-message-preview').text()).toBe('invoice.pdf')
@@ -738,6 +741,7 @@ describe('ChatView.vue', () => {
     expect(wrapper.find('.pinned-message-banner').exists()).toBe(false)
 
     wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('registers manager and admin overlays on the back stack and closes them from the back callback', async () => {
