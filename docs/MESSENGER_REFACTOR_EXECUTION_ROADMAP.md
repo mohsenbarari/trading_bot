@@ -638,6 +638,9 @@ Stage 12 progress:
 	- The first 3-sample full benchmark attempt against `2f18e52` hung for more than 30 minutes at `current-legacy/S11` after `[benchmark] realtime burst: posting events`; the generated performance/report artifacts were still the previous single-sample run (`24` results, `sampleCount=1`), so the attempt is invalid for release decision.
 	- Root cause: `triggerRealtimeBurst` used `Promise.all` over backend `fetch` POSTs with no timeout, so one stalled realtime-send request could block the entire benchmark indefinitely.
 	- `scripts/run_messenger_benchmark.mjs` now applies a `15s` abort timeout to benchmark POST requests, uses `Promise.allSettled` for realtime bursts, logs failed burst requests, records `realtimePostFailures`, and continues the benchmark/report pipeline with the successful burst count.
+- Stage 12 warmup isolation follow-up:
+	- The first rerun after the realtime timeout guard failed during warmup at `pre-refactor/S09` after realtime POST failures in prior warmup scenarios; the official artifacts still showed the previous single-sample payload (`24` results), so the run remains invalid.
+	- `scripts/run_messenger_benchmark.mjs` now treats warmup as non-mutating: realtime burst and upload/download persistence probes are skipped during warmup, and warmup scenario failures are logged and skipped instead of aborting the measured benchmark pipeline.
 
 ## Prompt Template (Operational)
 
