@@ -97,4 +97,25 @@ describe('messengerStage2Metrics', () => {
     expect(callback).toHaveBeenCalledTimes(1)
     vi.useRealTimers()
   })
+
+  it('defers diagnostic tasks before idle scheduling when requested', () => {
+    vi.useFakeTimers()
+    const callback = vi.fn()
+    const requestIdleCallback = vi.fn((runner: () => void) => {
+      runner()
+      return 1
+    })
+    vi.stubGlobal('requestIdleCallback', requestIdleCallback)
+
+    expect(scheduleMessengerDiagnosticTask(callback, { deferMs: 120, timeoutMs: 250 })).toBe(true)
+    expect(requestIdleCallback).not.toHaveBeenCalled()
+    expect(callback).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(119)
+    expect(requestIdleCallback).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(requestIdleCallback).toHaveBeenCalledWith(expect.any(Function), { timeout: 250 })
+    expect(callback).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
 })

@@ -618,6 +618,17 @@ Stage 12 progress:
 	- Decision: Stage 12 remains open. Surface readiness is green, but the final success contract needs one more performance tightening pass for S07/S09 list/context and S09 download-start before release closure.
 - Stage 12 list-containment follow-up:
 	- `ChatConversationList.vue` now keeps `content-visibility: auto` behind `prefers-reduced-motion: reduce` so the weak-device S10 path keeps stable intrinsic row sizing while normal-motion S07/S09 first-list paint avoids the containment overhead observed in the full benchmark.
+- Stage 12 rerun after list-containment follow-up:
+	- Command: `make messenger-benchmark-all`
+	- Artifact: `tmp/messenger-benchmark/comparison-summary.json` generated at `2026-06-01T16:55:34.230984+00:00` against current commit `02fd08e`.
+	- Surface readiness stayed fully green: all `14` messenger surfaces are `ready`, `0` blocked surfaces, and `0` missing items.
+	- S10 is now green across the practical weak-device metrics: list `-835.0 ms`, chat `-354.7 ms`, context `-120.8 ms`, heap `-0.29 MB`.
+	- S09 improved on list/chat/upload/heap (`-25.6 ms`, `-34.3 ms`, `-145.1 ms`, `-0.27 MB`) but still has small context/download-start regressions (`+21.3 ms`, `+13.6 ms`).
+	- S07 and S05 remain open watch/fix targets in the official one-sample run: S07 list/chat/context moved `+40.3 ms`, `+233.7 ms`, `+17.0 ms`; S05 list/chat moved `+882.1 ms`, `+140.0 ms` while context improved to `109.0 ms`.
+	- Decision: Stage 12 remains open. The next tightening pass defers non-critical messenger diagnostic snapshots and search chunk warming away from first-list, first-chat, and context-menu benchmark windows.
+- Stage 12 diagnostic scheduling follow-up:
+	- `scheduleMessengerDiagnosticTask` now supports `deferMs` so diagnostics can be delayed before idle scheduling rather than only relying on idle timeout.
+	- `ChatConversationList.vue`, `useChatMessages.ts`, and `ChatView.vue` now keep performance marks immediate while deferring DOM snapshots and non-critical search chunk warming outside first-ready/context-menu windows.
 
 ## Prompt Template (Operational)
 

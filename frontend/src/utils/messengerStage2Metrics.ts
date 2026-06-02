@@ -32,6 +32,7 @@ export interface MessengerFrameBudgetOptions {
 export interface MessengerDiagnosticTaskOptions {
   timeoutMs?: number
   fallbackDelayMs?: number
+  deferMs?: number
 }
 
 declare global {
@@ -82,6 +83,17 @@ export function scheduleMessengerDiagnosticTask(
   if (typeof window === 'undefined') {
     runDiagnosticTask(callback)
     return false
+  }
+
+  const deferMs = Number(options.deferMs ?? 0)
+  if (deferMs > 0) {
+    window.setTimeout(() => {
+      scheduleMessengerDiagnosticTask(callback, {
+        ...options,
+        deferMs: 0,
+      })
+    }, deferMs)
+    return true
   }
 
   const win = window as Window & {
