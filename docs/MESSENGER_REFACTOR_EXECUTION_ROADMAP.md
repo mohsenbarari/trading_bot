@@ -689,6 +689,14 @@ Stage 12 progress:
 	- Remaining release blockers are normal-path chat readiness regressions, especially S05 (`+751.6 ms`), S07 (`+290.7 ms`), S08 (`+268.3 ms`), S04 (`+247.1 ms`), and S11 (`+105.4 ms`).
 	- `ChatView.vue` now defers the selected-conversation pinned-message fetch by `900 ms` with cancellation and stale-selection guards, moving this non-critical request outside the first chat-ready paint window while preserving the banner shortly after open.
 	- Expected KPI movement: reduce S05/S07/S08/S11 first-chat contention and keep context-menu measurement less exposed to pinned-message request variance.
+- Stage 12 route-first chat open follow-up:
+	- The benchmark after pinned-message deferral completed at `2026-06-02T17:29:24Z` against `7a75ff9` with `72` measured rows, `14` measured surfaces, and `0` blocked surfaces.
+	- Major wins: S05 list/chat/context turned green (`-21.0 ms`, `-222.9 ms`, `-7.0 ms`), S07 chat turned strongly green (`-429.5 ms`), S09 list/chat/upload stayed green (`-160.4 ms`, `-638.1 ms`, `-131.7 ms`), S10 stayed green (`-851.1 ms` list, `-93.0 ms` chat, `-44.1 ms` context), and S11 chat turned green (`-565.2 ms`).
+	- Remaining release blockers: S03 chat (`+367.9 ms`), S06 chat (`+262.7 ms`), S02 chat/context (`+108.1 ms`, `+31.9 ms`), plus small S07/S08/S11 context positives.
+	- Root cause follow-up: `ChatView.vue` previously awaited `loadConversations()` before opening any route target, so direct `/chat?user_id=...` deep links inherited conversations API variance into the chat-ready metric.
+	- `ChatView.vue` now opens route targets immediately, starts message loading before/background-with conversation-list sync, preserves direct and named-room placeholders during the route sync window, and avoids starting direct status polling for negative room ids before room metadata is available.
+	- Expected KPI movement: reduce S03/S06/S02 chat-ready variance by removing conversation-list blocking from deep-link first-message paint while preserving list hydration and room cleanup semantics.
+	- Validation: `npm run test:unit:run -- src/components/ChatView.test.ts` and `npm run build` passed.
 
 ## Prompt Template (Operational)
 
