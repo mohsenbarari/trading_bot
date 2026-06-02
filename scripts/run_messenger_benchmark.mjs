@@ -1144,7 +1144,21 @@ async function runContextMenuProbe(page) {
     { timeout: 30000 },
   )
   const elapsed = await page.evaluate((startedAt) => performance.now() - startedAt, start)
+  await closeTransientMenus(page)
   return elapsed
+}
+
+async function closeTransientMenus(page) {
+  await page.keyboard.press('Escape').catch(() => null)
+  const overlay = page.locator('.context-overlay, .menu-overlay').first()
+  if (await overlay.count().catch(() => 0)) {
+    await overlay.click({ timeout: 1500 }).catch(() => null)
+  }
+  await page.waitForFunction(
+    () => !document.querySelector('.context-menu, .chat-context-menu, .context-overlay, [role="menu"]'),
+    null,
+    { timeout: 5000 },
+  ).catch(() => null)
 }
 
 function summarizeApiTimings(timings, matcher) {

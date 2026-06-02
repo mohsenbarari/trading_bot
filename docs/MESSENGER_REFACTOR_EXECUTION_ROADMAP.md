@@ -651,6 +651,10 @@ Stage 12 progress:
 	- Root cause: benchmark fixture seeding creates many ORM rows and was still allowing SQLAlchemy sync event listeners to enqueue cross-server sync/direct-push work, which is invalid noise for a local performance benchmark and can exhaust app file descriptors while Iran sync is unavailable.
 	- `scripts/run_messenger_benchmark.mjs` now opens the benchmark seed session connection with `execution_options={"is_sync": True}` so existing event-listener guards skip change-log/direct-sync fan-out for benchmark fixture rows.
 	- Follow-up action: restart the app container to clear exhausted file descriptors, then rerun the debug full benchmark.
+- Stage 12 context-overlay cleanup follow-up:
+	- The rerun progressed into measured `current-legacy/S11 (2/3)` but then repeated Playwright click retries because `.context-overlay` remained open after the context-menu probe and intercepted the chat-header back button.
+	- `scripts/run_messenger_benchmark.mjs` now closes transient context/menu overlays immediately after measuring context-menu latency by pressing Escape, clicking any visible overlay, and waiting briefly for context menu surfaces to disappear.
+	- Decision: rerun the full debug benchmark after this harness cleanup; the previous run is invalid because it was manually terminated while stuck on the overlay intercept loop.
 
 ## Prompt Template (Operational)
 
