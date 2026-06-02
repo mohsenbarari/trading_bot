@@ -580,6 +580,13 @@ async function forwardToTargets(page: Page, targets: Array<string | Locator>) {
   await expect(modal).toBeHidden({ timeout: 30000 })
 }
 
+async function openMessageContextMenu(page: Page, messageBubble: Locator) {
+  const metaTarget = messageBubble.locator('.msg-meta').last()
+  await expect(metaTarget).toBeVisible({ timeout: 30000 })
+  await metaTarget.click()
+  await expect(page.locator('.context-menu')).toBeVisible()
+}
+
 async function seedBootstrapChannelMessage(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -999,29 +1006,35 @@ async function seedShareReceivePayload(page: Page, payload: {
 }
 
 async function injectGalleryVideo(page: Page, fileName: string) {
-  const input = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="image/*,video/*"]').last()
+  console.log(`[channel-media] injecting gallery video: ${fileName}`)
+  const input = page.getByTestId('attachment-gallery-input').last()
   await expect(input).toBeAttached({ timeout: 30000 })
   await input.setInputFiles([
     createPlaywrightBinaryFile(fileName, 'video/webm', GENERATED_WEBM_BASE64),
   ])
+  console.log(`[channel-media] gallery video input accepted: ${fileName}`)
 }
 
 async function injectGalleryImage(page: Page, fileName: string) {
-  const input = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="image/*,video/*"]').last()
+  console.log(`[channel-media] injecting gallery image: ${fileName}`)
+  const input = page.getByTestId('attachment-gallery-input').last()
   await expect(input).toBeAttached({ timeout: 30000 })
   await input.setInputFiles([
     createPlaywrightBinaryFile(fileName, 'image/png', TINY_PNG_BASE64),
   ])
+  console.log(`[channel-media] gallery image input accepted: ${fileName}`)
 }
 
 async function injectGalleryImageAndVideo(page: Page) {
   const suffix = Date.now()
-  const input = page.locator('.attachment-sheet').last().locator('input[type="file"][accept="image/*,video/*"]').last()
+  console.log(`[channel-media] injecting gallery album: ${suffix}`)
+  const input = page.getByTestId('attachment-gallery-input').last()
   await expect(input).toBeAttached({ timeout: 30000 })
   await input.setInputFiles([
     createPlaywrightBinaryFile(`pw-channel-${suffix}.png`, 'image/png', TINY_PNG_BASE64),
     createPlaywrightBinaryFile(`pw-channel-${suffix}.webm`, 'video/webm', GENERATED_WEBM_BASE64),
   ])
+  console.log(`[channel-media] gallery album input accepted: ${suffix}`)
 }
 
 async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
@@ -1031,7 +1044,8 @@ async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
     ? Math.max(1, Math.ceil(sizeBytes / Buffer.byteLength(baseContent, 'utf8')))
     : 1
   const fileName = `${prefix}-${suffix}.txt`
-  await page.locator('input[type="file"][accept="*"]').setInputFiles([
+  console.log(`[channel-media] injecting document: ${fileName}, size=${sizeBytes}`)
+  await page.getByTestId('attachment-file-input').last().setInputFiles([
     {
       name: fileName,
       mimeType: 'text/plain',
@@ -1212,8 +1226,7 @@ test.describe('Channel media regressions', () => {
     const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
     await expect(sourceMessageBubble.getByText(fileName)).toBeVisible()
 
-    await sourceMessageBubble.dispatchEvent('click')
-    await expect(page.locator('.context-menu')).toBeVisible()
+    await openMessageContextMenu(page, sourceMessageBubble)
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
     await forwardToTargets(page, [fixture.channelTitle])
@@ -1275,8 +1288,7 @@ test.describe('Channel media regressions', () => {
     const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
     await expect(sourceMessageBubble.getByText(sourceContent)).toBeVisible()
 
-    await sourceMessageBubble.dispatchEvent('click')
-    await expect(page.locator('.context-menu')).toBeVisible()
+    await openMessageContextMenu(page, sourceMessageBubble)
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
     await forwardToTargets(page, [groupTitle])
@@ -1708,8 +1720,7 @@ test.describe('Channel media regressions', () => {
     const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
     await expect(sourceMessageBubble.locator('.msg-media-link')).toBeVisible()
 
-    await sourceMessageBubble.dispatchEvent('click')
-    await expect(page.locator('.context-menu')).toBeVisible()
+    await openMessageContextMenu(page, sourceMessageBubble)
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
     await forwardToTargets(page, [fixture.channelTitle])
@@ -1759,8 +1770,7 @@ test.describe('Channel media regressions', () => {
     const sourceMessageBubble = page.locator('.messages-container [id^="msg-"]:has(.msg-media-link)').last()
     await expect(sourceMessageBubble).toBeVisible({ timeout: 30000 })
 
-    await sourceMessageBubble.dispatchEvent('click')
-    await expect(page.locator('.context-menu')).toBeVisible()
+    await openMessageContextMenu(page, sourceMessageBubble)
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
 
     await forwardToTargets(page, [fixture.channelTitle])
