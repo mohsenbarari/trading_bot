@@ -683,6 +683,12 @@ Stage 12 progress:
 	- `useChatMessages.ts` now delays background hydration to `3200 ms` and uses the full `48` message initial load when `prefers-reduced-motion: reduce` is active.
 	- Expected KPI movement: preserve the S09/S01 normal-device chat gains while restoring S10 weak-device scroll/context stability and avoiding hydration during the first search/scroll/context probe window.
 	- Validation: `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts` and `npm run build` passed.
+- Stage 12 pinned-message quiet-window follow-up:
+	- The latest valid 3-sample full benchmark completed at `2026-06-02T16:59:06Z` against `f1ec05d` with `72` measured rows, `14` measured surfaces, and `0` blocked surfaces.
+	- S10 is no longer the release blocker: list/chat/heap improved (`-470.5 ms`, `-142.8 ms`, `-0.3 MB`) and context is effectively flat (`+0.5 ms`).
+	- Remaining release blockers are normal-path chat readiness regressions, especially S05 (`+751.6 ms`), S07 (`+290.7 ms`), S08 (`+268.3 ms`), S04 (`+247.1 ms`), and S11 (`+105.4 ms`).
+	- `ChatView.vue` now defers the selected-conversation pinned-message fetch by `900 ms` with cancellation and stale-selection guards, moving this non-critical request outside the first chat-ready paint window while preserving the banner shortly after open.
+	- Expected KPI movement: reduce S05/S07/S08/S11 first-chat contention and keep context-menu measurement less exposed to pinned-message request variance.
 
 ## Prompt Template (Operational)
 
