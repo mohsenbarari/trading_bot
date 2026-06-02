@@ -32,6 +32,8 @@ import {
   UsersRound,
 } from 'lucide-vue-next'
 
+const MESSENGER_LIST_DIAGNOSTIC_DEFER_MS = 2200
+
 type ConversationListAction = 'pin' | 'unpin' | 'move-pin-up' | 'move-pin-down' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
 type MenuActionTone = 'accent' | 'danger' | 'warning'
 
@@ -271,7 +273,7 @@ watch(() => displayedConversations.value.length, (rowCount) => {
           windowed: conversationWindow.value.hasMore,
         })
       }
-    }, { timeoutMs: 750, fallbackDelayMs: 120 })
+    }, { deferMs: MESSENGER_LIST_DIAGNOSTIC_DEFER_MS, timeoutMs: 1200, fallbackDelayMs: 240 })
   })
 }, { immediate: true, flush: 'post' })
 
@@ -295,7 +297,7 @@ function openConversationMenu(conv: Conversation) {
       if (root) {
         recordMessengerDomSnapshot('conversation-menu-open', root, { conversationId: conv.id })
       }
-    }, { timeoutMs: 750, fallbackDelayMs: 120 })
+    }, { deferMs: MESSENGER_LIST_DIAGNOSTIC_DEFER_MS, timeoutMs: 1200, fallbackDelayMs: 240 })
   })
   try { navigator.vibrate?.(10) } catch { /* noop */ }
 }

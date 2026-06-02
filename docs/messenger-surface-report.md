@@ -1,6 +1,6 @@
 # Messenger Surface Report
 
-- Generated at: 2026-06-01T15:40:19.379384+00:00
+- Generated at: 2026-06-01T16:26:34.971092+00:00
 - Manifest: docs/messenger-surface-manifest.json
 - Surface count: 14
 - Manifest status: benchmark-complete

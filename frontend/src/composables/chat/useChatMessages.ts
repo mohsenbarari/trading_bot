@@ -31,6 +31,8 @@ import {
 } from '../../services/chatUploadBackground'
 import { formatLastSeenStatus } from '../../utils/userPresence'
 
+const MESSENGER_CHAT_DIAGNOSTIC_DEFER_MS = 2600
+
 export interface UseChatMessagesOptions {
     apiBaseUrl: string
     jwtToken: string | null
@@ -362,7 +364,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                         source,
                         messageCount: messages.value.length,
                     })
-                }, { timeoutMs: 900, fallbackDelayMs: 120 })
+                }, { deferMs: MESSENGER_CHAT_DIAGNOSTIC_DEFER_MS, timeoutMs: 1200, fallbackDelayMs: 240 })
             }
         }
 

@@ -82,6 +82,8 @@ const ChatLightbox = defineAsyncComponent(() => import('./chat/ChatLightbox.vue'
 const ChatLocationModal = defineAsyncComponent(() => import('./chat/ChatLocationModal.vue'))
 const ChatSearchBottomBar = defineAsyncComponent(() => import('./chat/ChatSearchBottomBar.vue'))
 const keepInactiveMessengerSurfacesMounted = Boolean(import.meta.env.VITEST)
+const MESSENGER_INTERACTION_WARM_DEFER_MS = 3200
+const MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS = 2600
 
 let interactionChunksWarmed = false
 function warmMessengerInteractionChunks() {
@@ -89,7 +91,7 @@ function warmMessengerInteractionChunks() {
   interactionChunksWarmed = true
   scheduleMessengerDiagnosticTask(() => {
     void loadChatSearchGlobalList().catch(() => null)
-  }, { timeoutMs: 900, fallbackDelayMs: 160 })
+  }, { deferMs: MESSENGER_INTERACTION_WARM_DEFER_MS, timeoutMs: 1200, fallbackDelayMs: 240 })
 }
 
 // Props
@@ -1916,21 +1918,11 @@ const showContextMenu = (event: Event, msg: Message) => {
       }
     }
 
-    const requestIdle = typeof window !== 'undefined'
-      ? (window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback
-      : undefined
-
-    if (requestIdle) {
-      requestIdle(runSnapshot, { timeout: 250 })
-      return
-    }
-
-    if (typeof window !== 'undefined') {
-      window.setTimeout(runSnapshot, 32)
-      return
-    }
-
-    runSnapshot()
+    scheduleMessengerDiagnosticTask(runSnapshot, {
+      deferMs: MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS,
+      timeoutMs: 1200,
+      fallbackDelayMs: 240,
+    })
   })
 }
 
