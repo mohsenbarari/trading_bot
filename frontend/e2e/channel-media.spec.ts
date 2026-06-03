@@ -1153,7 +1153,7 @@ test.describe('Channel media regressions', () => {
 
     await loginWithSeededSession(page, fixture)
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     await openRoomFromConversationList(page, fixture.channelTitle)
 
     await expectRoomHeaderStatus(page, 'کانال')
@@ -1604,24 +1604,24 @@ test.describe('Channel media regressions', () => {
     const imageCaption = `PW GROUP IMG CAP ${Date.now()}`
     const videoCaption = `PW GROUP VID CAP ${Date.now()}`
 
-    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+    const createResponse = await retryApiRequest(() => request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
       headers: authHeaders(sender.accessToken),
       data: {
         title: groupTitle,
         member_ids: [receiver.userId],
       },
-    })
+    }))
     expect(createResponse.ok()).toBeTruthy()
     const createPayload = await createResponse.json() as { group: { id: number } }
     const groupId = Number(createPayload.group.id)
 
-    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+    const bootstrapResponse = await retryApiRequest(() => request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
       headers: authHeaders(sender.accessToken),
       data: {
         content: bootstrapContent,
         message_type: 'text',
       },
-    })
+    }))
     expect(bootstrapResponse.ok()).toBeTruthy()
 
     let batchCreateHits = 0
@@ -1708,7 +1708,7 @@ test.describe('Channel media regressions', () => {
       .toEqual(expect.arrayContaining(['video']))
 
     if (browserName === 'webkit') {
-      await page.goto('/chat')
+      await gotoWithWebKitRetry(page, '/chat')
       const refreshedGroupRow = page.locator('.conversation-item').filter({ hasText: groupTitle }).first()
       await expect(refreshedGroupRow).toContainText('ویدئو', { timeout: 30000 })
       await refreshedGroupRow.click()
@@ -1724,7 +1724,7 @@ test.describe('Channel media regressions', () => {
       await expect(videoBubble.locator('video')).toHaveCount(1)
     }
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     await expect(page.locator('.conversation-item').filter({ hasText: groupTitle }).first()).toContainText('ویدئو', {
       timeout: 30000,
     })

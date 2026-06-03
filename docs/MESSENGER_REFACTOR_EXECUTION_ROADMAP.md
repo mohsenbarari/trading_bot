@@ -779,6 +779,14 @@ Post-Stage 12 progress:
 		- `npm run test:e2e -- e2e/channel-media.spec.ts --grep="group member can forward a direct text message into the group|group activity shows sender names and resumable album upload finishes after sender leaves messenger for market" --project=webkit --reporter=line` (`4/4`).
 		- `npm run test:e2e -- e2e/lot-suggestion.spec.ts --grep="409 suggestion modal keeps server payload" --project=firefox --reporter=line` (`2/2`).
 		- `npm run test:e2e -- e2e/trade-history-accountant.spec.ts --grep="public profile presence renders online" --reporter=line` (`1/1`).
+- Acceptance matrix near-green follow-up:
+	- The `acceptance-matrix-20260603T082158Z.log` run completed with `337` passed, `3` skipped, and `2` failed.
+	- Remaining failures were both WebKit-only harness issues: a transient `socket hang up` during `group single image and single video` setup POST, and `notifications.spec.ts` dev-login navigation waiting for full `load` even though the login page had rendered.
+	- `channel-media.spec.ts` now wraps that group create/bootstrap setup in `retryApiRequest`; `notifications.spec.ts` now uses the existing `gotoWithWebKitRetry`/`domcontentloaded` login path for developer login.
+	- Follow-up hardening: the same channel-media scenario now uses `gotoWithWebKitRetry` for preview-refresh `/chat` navigations after WebKit exposed another full-load timeout deeper in the flow.
+	- Focused validation passed:
+		- `npm run test:e2e -- e2e/channel-media.spec.ts --grep="group single image and single video preserve captions and update room previews" --project=webkit --reporter=line` (`2/2`, Chromium + WebKit due the project script default).
+		- `npm run test:e2e -- e2e/notifications.spec.ts --grep="websocket heartbeat pong does not emit JSON parse errors" --project=webkit --reporter=line` (`2/2`, Chromium + WebKit due the project script default).
 
 ## Prompt Template (Operational)
 
