@@ -753,6 +753,11 @@ Post-Stage 12 progress:
 	- `messenger-direct-room-ux.spec.ts`, `channel-media.spec.ts`, `direct-chat.spec.ts`, and `mandatory-channel.spec.ts` now scope active composer/header/message controls to visible chat surfaces so route transition clones cannot trigger Playwright strict-mode failures.
 	- Room-message polling in `channel-media.spec.ts` now retries short-lived request exceptions, covering observed `socket hang up` drops without hiding failed HTTP responses.
 	- The group single-image/single-video route assertion now treats backend message delivery, visible captions/media, and zero legacy `/upload-media` hits as the authoritative contract, while requiring at least one observed resumable upload route hit instead of assuming Playwright will count every upload request under matrix load.
+- Non-Messenger matrix blocker cleanup:
+	- `market-offers.spec.ts` failed because the Tier 1 sell-offer regression used quantity `6` while the seeded commodity enforced a minimum of `7`; the regression now uses quantity `7` and preserves the raw/projected price assertions.
+	- `trade-history-accountant.spec.ts` failed because the public-profile history UI had migrated from raw date inputs to `JalaliDatePicker`; the browser regression now selects dates through stable picker test ids and compares preset export query state from the actual preset response URL.
+	- `PublicProfile.vue` now merges commodities from the currently loaded trade-history rows into the commodity filter select so the user can filter by a visible history commodity even when `/api/commodities/` pagination/ordering does not include that freshly seeded commodity.
+	- Focused validation passed: targeted market-offers regression (`1/1`), targeted public-profile history export regressions (`2/2`), and `npm run test:unit:run -- src/components/PublicProfile.test.ts` (`38/38`).
 
 ## Prompt Template (Operational)
 

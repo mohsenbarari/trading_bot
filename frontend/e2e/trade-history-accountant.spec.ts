@@ -1,11 +1,13 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import moment from 'moment-jalaali'
 
 import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+const PERSIAN_DIGITS = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹']
 
 interface SessionUser {
   userId: number
@@ -775,6 +777,46 @@ async function loginWithSeededSession(page: Page, session: SessionUser) {
   await primeAuthSession(page, session.accessToken, session.refreshToken)
 }
 
+function toPersianDigits(value: string | number) {
+  return String(value).replace(/\d/g, (digit) => PERSIAN_DIGITS[Number(digit)] ?? digit)
+}
+
+async function setHistoryDatePicker(page: Page, triggerTestId: string, gregorianDate: string) {
+  const parsed = moment(gregorianDate, 'YYYY-MM-DD', true)
+  expect(parsed.isValid()).toBeTruthy()
+
+  await page.getByTestId(triggerTestId).click()
+  const picker = page.locator('.jalali-date-picker').filter({ has: page.getByTestId(triggerTestId) }).first()
+  await expect(picker.locator('.jalali-calendar-panel')).toBeVisible({ timeout: 30000 })
+  await picker.locator('.jalali-calendar-select').first().selectOption(String(parsed.jMonth()))
+  await picker.locator('.jalali-calendar-select.year-select').selectOption(String(parsed.jYear()))
+  await picker
+    .locator('.jalali-calendar-day:not(.is-empty)')
+    .filter({ hasText: toPersianDigits(parsed.jDate()) })
+    .first()
+    .click()
+  await expect(page.getByTestId(triggerTestId)).toHaveClass(/has-value/)
+}
+
+async function selectOptionByText(locator: Locator, optionText: string) {
+  await expect(locator).toBeVisible({ timeout: 30000 })
+  await expect
+    .poll(async () => locator.evaluate((select, text) => {
+      return Array.from((select as HTMLSelectElement).options).some((option) => option.textContent?.trim() === text)
+    }, optionText), { timeout: 30000 })
+    .toBe(true)
+
+  await locator.evaluate((select, text) => {
+    const element = select as HTMLSelectElement
+    const option = Array.from(element.options).find((entry) => entry.textContent?.trim() === text)
+    if (!option) {
+      throw new Error(`Could not find select option: ${text}`)
+    }
+    element.value = option.value
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  }, optionText)
+}
+
 async function executeTrade(request: APIRequestContext, accessToken: string, offerId: number, quantity: number) {
   const response = await request.post(`${BACKEND_BASE_URL}/api/trades/`, {
     headers: {
@@ -896,13 +938,11 @@ test.describe('Trade history accountant context', () => {
     await expect(profileView).toContainText(`#${fixture.mediumMutualTradeNumber}`)
     await expect(profileView).toContainText(`#${fixture.oldMutualTradeNumber}`)
 
-    const fromInput = page.locator('.history-filter-field').filter({ hasText: 'از تاریخ' }).locator('input')
-    const toInput = page.locator('.history-filter-field').filter({ hasText: 'تا تاریخ' }).locator('input')
-    const commodityInput = page.locator('.history-filter-field').filter({ hasText: 'کالا' }).locator('input')
+    const commodityInput = page.locator('.history-filter-field').filter({ hasText: 'کالا' }).locator('select')
 
-    await fromInput.fill(fixture.narrowFromDate)
-    await toInput.fill(fixture.narrowToDate)
-    await commodityInput.fill(fixture.goldCommodityName)
+    await setHistoryDatePicker(page, 'history-from-date', fixture.narrowFromDate)
+    await setHistoryDatePicker(page, 'history-to-date', fixture.narrowToDate)
+    await selectOptionByText(commodityInput, fixture.goldCommodityName)
 
     const filteredResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
@@ -956,15 +996,11 @@ test.describe('Trade history accountant context', () => {
       return url.pathname === '/api/trades/my' && Boolean(url.searchParams.get('from_date')) && Boolean(url.searchParams.get('to_date'))
     })
     await page.locator('.history-chip').filter({ hasText: '۳ ماه' }).click()
-    await presetResponsePromise
+    const presetResponse = await presetResponsePromise
+    const presetUrl = new URL(presetResponse.url())
 
     await expect.poll(async () => page.locator('.mini-trade-card').count(), { timeout: 30000 }).toBe(3)
     await expect(profileView).not.toContainText(`#${fixture.oldMutualTradeNumber}`)
-
-    const fromInput = page.locator('.history-filter-field').filter({ hasText: 'از تاریخ' }).locator('input')
-    const toInput = page.locator('.history-filter-field').filter({ hasText: 'تا تاریخ' }).locator('input')
-    const presetFromDate = await fromInput.inputValue()
-    const presetToDate = await toInput.inputValue()
 
     const presetExportPromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
@@ -974,11 +1010,11 @@ test.describe('Trade history accountant context', () => {
     await page.locator('.history-action-btn').filter({ hasText: 'خروجی Excel' }).click()
     const presetExportResponse = await presetExportPromise
     const presetExportUrl = new URL(presetExportResponse.url())
-    expect(presetExportUrl.searchParams.get('from_date')).toBe(presetFromDate)
-    expect(presetExportUrl.searchParams.get('to_date')).toBe(presetToDate)
+    expect(presetExportUrl.searchParams.get('from_date')).toBe(presetUrl.searchParams.get('from_date'))
+    expect(presetExportUrl.searchParams.get('to_date')).toBe(presetUrl.searchParams.get('to_date'))
 
-    await fromInput.fill(fixture.wideFromDate)
-    await toInput.fill(fixture.wideToDate)
+    await setHistoryDatePicker(page, 'history-from-date', fixture.wideFromDate)
+    await setHistoryDatePicker(page, 'history-to-date', fixture.wideToDate)
     const customResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
       const url = new URL(response.url())

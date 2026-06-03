@@ -287,6 +287,24 @@ const historyCommoditySuggestions = computed(() => {
   });
   return Array.from(uniqueSuggestions);
 });
+const historyCommoditySelectOptions = computed(() => {
+  const options = new Map<string, CommodityFilterOption>();
+
+  historyCommodityOptions.value.forEach((option) => {
+    options.set(option.name, option);
+  });
+  mutualTrades.value.forEach((trade, index) => {
+    const name = typeof trade.commodity_name === 'string' ? trade.commodity_name.trim() : '';
+    if (!name || options.has(name)) return;
+    options.set(name, {
+      id: -1 - index,
+      name,
+      suggestions: [name],
+    });
+  });
+
+  return Array.from(options.values());
+});
 const historyFilterSummary = computed(() => {
   const parts: string[] = [];
   if (historyFromDate.value || historyToDate.value) {
@@ -1633,7 +1651,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                     @focus="loadHistoryCommodityOptions"
                   >
                     <option value="">همه کالاها</option>
-                    <option v-for="option in historyCommodityOptions" :key="option.id" :value="option.name">
+                    <option v-for="option in historyCommoditySelectOptions" :key="`${option.id}:${option.name}`" :value="option.name">
                       {{ option.name }}
                     </option>
                   </select>
@@ -2762,5 +2780,4 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   }
 }
 </style>
-
 
