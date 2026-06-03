@@ -282,14 +282,8 @@ async function openConversationMenuByLongPress(page: Page, row: Locator) {
     throw new Error('Conversation row has no bounding box')
   }
 
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await page.mouse.down()
-  await page.waitForTimeout(520)
-  await page.mouse.up()
   const popover = page.locator('.conversation-menu-popover')
   try {
-    await expect(popover).toBeVisible({ timeout: 2000 })
-  } catch {
     await row.dispatchEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
@@ -297,7 +291,13 @@ async function openConversationMenuByLongPress(page: Page, row: Locator) {
       clientY: box.y + box.height / 2,
       button: 2,
     })
-    await expect(popover).toBeVisible({ timeout: 15000 })
+    await expect(popover).toBeVisible({ timeout: 2000 })
+  } catch {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(520)
+    await page.mouse.up()
+    await expect(popover).toBeVisible({ timeout: 2000 })
   }
 }
 
