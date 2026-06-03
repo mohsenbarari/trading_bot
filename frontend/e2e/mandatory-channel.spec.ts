@@ -227,7 +227,7 @@ test.describe('Mandatory channel smoke', () => {
     await conversationRow.click()
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
-    await expect(page.locator('.chat-header').getByText(fixture.channelTitle)).toBeVisible()
+    await expect(page.locator('.chat-header:visible .header-name').first()).toContainText(fixture.channelTitle)
     await expect(page.getByText(fixture.seedMessage)).toBeVisible()
   })
 
@@ -274,6 +274,6 @@ test.describe('Mandatory channel smoke', () => {
     await conversationRow.click()
 
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain('/chat?user_id=-')
-    await expect(page.locator('.chat-header').getByText(mandatoryTitlePattern)).toBeVisible()
+    await expect(page.locator('.chat-header:visible .header-name').first()).toContainText(mandatoryTitlePattern)
   })
 })

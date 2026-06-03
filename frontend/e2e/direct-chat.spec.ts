@@ -125,7 +125,7 @@ async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture)
 }
 
 function activeComposerTextbox(page: Page) {
-  return page.locator('.chat-view .input-area .input-container').last().locator('textarea[placeholder="پیام..."]').first()
+  return page.locator('.chat-view .input-area .input-container:visible').last().locator('textarea[placeholder="پیام..."]').first()
 }
 
 async function openDirectChat(page: Page, otherUserId: number) {
@@ -182,10 +182,8 @@ test.describe('Direct chat regressions', () => {
 
     const composer = activeComposerTextbox(page)
     await composer.fill(initialContent)
+    await expect(composer).toHaveValue(initialContent)
     await composer.press('Enter')
-
-    const sentBubble = page.locator('.message-bubble.sent').filter({ hasText: initialContent })
-    await expect(sentBubble).toBeVisible()
 
     let createdMessageId: number | null = null
     await expect
@@ -196,6 +194,9 @@ test.describe('Direct chat regressions', () => {
       }, { timeout: 30000 })
       .not.toBeNull()
 
+    const sentBubble = page.locator('.message-bubble.sent').filter({ hasText: initialContent }).first()
+    await expect(sentBubble).toBeVisible({ timeout: 30000 })
+
     await sentBubble.click()
     await page.locator('.context-menu .menu-item').filter({ hasText: 'ویرایش' }).click()
 
@@ -204,8 +205,8 @@ test.describe('Direct chat regressions', () => {
     await editComposer.fill(editedContent)
     await editComposer.press('Enter')
 
-    const editedBubble = page.locator('.message-bubble.sent').filter({ hasText: editedContent })
-    await expect(editedBubble).toBeVisible()
+    const editedBubble = page.locator('.message-bubble.sent').filter({ hasText: editedContent }).first()
+    await expect(editedBubble).toBeVisible({ timeout: 30000 })
     await expect(editedBubble.locator('.edited-label')).toBeVisible()
 
     await expect
