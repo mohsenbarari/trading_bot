@@ -767,6 +767,18 @@ Post-Stage 12 progress:
 	- Remaining failures were concentrated in transition-duplicate `.chat-header .header-name` locators, non-scoped `.forwarded-banner` locators, direct-chat composer send timing, and a channel-manager browser-history return assertion.
 	- `customer-chat-privacy.spec.ts`, `messenger-direct-room-ux.spec.ts`, `direct-chat.spec.ts`, `channel-media.spec.ts`, and `messenger-room-manager-profile.spec.ts` now scope active headers/banners/composers and tolerate list-return after channel settings close.
 	- Focused Chromium validation passed for the affected customer privacy, direct chat, direct-room download, channel forward, and channel-manager regressions.
+- Acceptance matrix residual hardening:
+	- The `acceptance-matrix-20260603T065038Z.log` run completed with `332` passed, `3` skipped, and `7` failed; the previous market-offers and public-history export blockers remained resolved.
+	- Residual failures are now narrow: duplicated transition panes in direct/group forwarded-text locators, stale selected channel header naming after channel-manager refresh, WebKit album leave-before-persist timing, Firefox market modal raw DOM wait timing, and a public-profile presence navigation timeout.
+	- Runtime fix: `ChatView.vue` now resolves the selected conversation name from the freshly loaded conversation list before falling back to a stale route/header name, so channel settings saves can refresh the active header without a reload.
+	- Test harness fixes: direct/group text assertions now target message bubbles instead of global text, lot suggestion modal interactions use Playwright role locators, public-profile presence navigation waits for `domcontentloaded`, and the WebKit album leave-flow now waits for the resumable upload handoff before leaving Messenger.
+	- Focused validation passed:
+		- `npm run test:unit:run -- src/components/ChatView.test.ts` (`97/97`).
+		- `npm run test:e2e -- e2e/direct-chat.spec.ts --grep="direct chat composer sends and edits an own text message" --project=firefox --reporter=line` (`2/2`, Chromium + Firefox due the project script default).
+		- `npm run test:e2e -- e2e/messenger-room-manager-profile.spec.ts --grep="channel manager supports messenger-header create, member add, and header-open settings save" --project=firefox --project=webkit --reporter=line` (`3/3`).
+		- `npm run test:e2e -- e2e/channel-media.spec.ts --grep="group member can forward a direct text message into the group|group activity shows sender names and resumable album upload finishes after sender leaves messenger for market" --project=webkit --reporter=line` (`4/4`).
+		- `npm run test:e2e -- e2e/lot-suggestion.spec.ts --grep="409 suggestion modal keeps server payload" --project=firefox --reporter=line` (`2/2`).
+		- `npm run test:e2e -- e2e/trade-history-accountant.spec.ts --grep="public profile presence renders online" --reporter=line` (`1/1`).
 
 ## Prompt Template (Operational)
 

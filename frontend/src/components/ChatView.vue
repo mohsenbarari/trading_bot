@@ -236,12 +236,17 @@ function resolveSelectedConversationName(userId: number | null, fallback = '') {
     return ''
   }
 
+  const conversationName = conversations.value.find((conversation) => conversation.other_user_id === userId)?.other_user_name
+  if (conversationName) {
+    return conversationName
+  }
+
   const normalizedFallback = fallback.trim()
   if (normalizedFallback) {
     return normalizedFallback
   }
 
-  return conversations.value.find((conversation) => conversation.other_user_id === userId)?.other_user_name || ''
+  return ''
 }
 
 async function syncSelectedConversationRoute(userId: number | null, userName = '') {

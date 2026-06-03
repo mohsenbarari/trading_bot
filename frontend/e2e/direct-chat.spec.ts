@@ -192,7 +192,9 @@ test.describe('Direct chat regressions', () => {
 
     await loginWithSeededSession(page, actor)
     await openDirectChat(page, peer.userId)
-    await expect(page.getByText(bootstrapContent)).toBeVisible()
+    await expect(page.locator('.message-bubble.received').filter({ hasText: bootstrapContent }).first()).toBeVisible({
+      timeout: 30000,
+    })
 
     await sendActiveComposerMessage(page, initialContent)
 
@@ -248,9 +250,11 @@ test.describe('Direct chat regressions', () => {
 
     await loginWithSeededSession(page, actor)
     await openDirectChat(page, peer.userId)
-    await expect(page.getByText(incomingContent)).toBeVisible()
+    await expect(page.locator('.message-bubble.received').filter({ hasText: incomingContent }).first()).toBeVisible({
+      timeout: 30000,
+    })
 
-    const incomingBubble = page.locator('.message-bubble.received').filter({ hasText: incomingContent })
+    const incomingBubble = page.locator('.message-bubble.received').filter({ hasText: incomingContent }).first()
     await incomingBubble.click()
     await page.locator('.context-menu .reaction-btn').filter({ hasText: '👍' }).first().click()
 

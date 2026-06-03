@@ -1081,10 +1081,14 @@ async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
   return fileName
 }
 
-async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileName: string, expectedConversationKey?: number) {
+async function waitForPersistedPendingUpload(
+  page: Page,
+  expected: { fileName?: string; messageTypes?: string[] },
+  expectedConversationKey?: number,
+) {
   await expect
     .poll(async () => {
-      return await page.evaluate(async ({ expectedFileName: fileName, expectedConversationKey: conversationKey }) => {
+      return await page.evaluate(async ({ expectedFileName: fileName, expectedMessageTypes: messageTypes, expectedConversationKey: conversationKey }) => {
         return await new Promise<boolean>((resolve) => {
           try {
             const openRequest = indexedDB.open('chat_upload_queue')
@@ -1103,14 +1107,17 @@ async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileNam
                 getAllRequest.onerror = () => resolve(false)
                 getAllRequest.onsuccess = () => {
                   const rows = Array.isArray(getAllRequest.result) ? getAllRequest.result : []
-                  resolve(
-                    rows.some((row) => (
-                      row?.msgType === 'document' &&
-                      row?.fileName === fileName &&
+                  const rowMatches = (row: any, msgType?: string) => (
+                    (fileName == null || row?.fileName === fileName) &&
+                      (msgType == null || row?.msgType === msgType) &&
                       (conversationKey == null || Number(row?.userId) === Number(conversationKey)) &&
                       typeof row?.phase === 'string' &&
                       !['sent', 'cancelled', 'failed'].includes(row.phase)
-                    )),
+                  )
+                  resolve(
+                    Array.isArray(messageTypes) && messageTypes.length > 0
+                      ? messageTypes.every((msgType) => rows.some((row) => rowMatches(row, msgType)))
+                      : rows.some((row) => rowMatches(row)),
                   )
                 }
               } catch {
@@ -1122,11 +1129,16 @@ async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileNam
           }
         })
       }, {
-        expectedFileName,
+        expectedFileName: expected.fileName ?? null,
+        expectedMessageTypes: expected.messageTypes ?? [],
         expectedConversationKey: expectedConversationKey ?? null,
       })
     }, { timeout: 15000 })
     .toBe(true)
+}
+
+async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileName: string, expectedConversationKey?: number) {
+  await waitForPersistedPendingUpload(page, { fileName: expectedFileName, messageTypes: ['document'] }, expectedConversationKey)
 }
 
 test.describe('Channel media regressions', () => {
@@ -1311,7 +1323,7 @@ test.describe('Channel media regressions', () => {
     await directConversationRow.click()
 
     const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
-    await expect(sourceMessageBubble.getByText(sourceContent)).toBeVisible()
+    await expect(sourceMessageBubble.getByText(sourceContent)).toBeVisible({ timeout: 30000 })
 
     await openMessageContextMenu(page, sourceMessageBubble)
     await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
@@ -1321,7 +1333,9 @@ test.describe('Channel media regressions', () => {
     await expect(forwardedBanner(page, fixture.creatorAccountName)).toContainText(`از ${fixture.creatorAccountName}`, {
       timeout: 30000,
     })
-    await expect(page.locator('.messages-container').getByText(sourceContent)).toBeVisible()
+    await expect(page.locator('.message-bubble').filter({ hasText: sourceContent }).first()).toBeVisible({
+      timeout: 30000,
+    })
 
     await expect
       .poll(async () => fetchLatestRoomMessageTypesByChatId(request, fixture.accessToken, groupId), { timeout: 30000 })
@@ -1429,6 +1443,7 @@ test.describe('Channel media regressions', () => {
       } else {
         await expect(senderPage.locator('.messages-container [data-media-msg-id]').first()).toBeVisible({ timeout: 30000 })
       }
+      await expect.poll(() => sawBatchCreate && sawSessionCreate, { timeout: 30000 }).toBe(true)
 
       await navigateFromMessengerToMarket(senderPage)
 
