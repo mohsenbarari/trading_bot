@@ -240,7 +240,9 @@ test.describe('Lot suggestion regressions', () => {
     await loginWithSeededSession(page, fixture.viewer)
     await page.goto('/market', { waitUntil: 'domcontentloaded' })
 
-    const publicOfferCard = page.locator('.offer-card-wrap').filter({ hasText: fixture.publicOfferNote }).first()
+    const publicOfferCard = page.locator('.offer-card-wrap').filter({
+      has: page.locator('p').filter({ hasText: `توضیحات: ${fixture.publicOfferNote}` }),
+    }).first()
     await expect(publicOfferCard).toBeVisible()
     await expect(page.getByText(fixture.ownerAccountName)).toHaveCount(0)
 
