@@ -1189,7 +1189,7 @@ test.describe('Channel media regressions', () => {
 
     await loginWithSeededSession(page, fixture)
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     await openRoomFromConversationList(page, fixture.channelTitle)
 
     await expectRoomHeaderStatus(page, 'کانال')
@@ -1223,7 +1223,7 @@ test.describe('Channel media regressions', () => {
     await seedBootstrapChannelMessage(request, fixture, bootstrapContent)
     await loginWithSeededSession(page, fixture)
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     await expect(conversationRow).toBeVisible()
     await conversationRow.click()
 
@@ -1255,7 +1255,7 @@ test.describe('Channel media regressions', () => {
 
     await loginWithSeededSession(page, fixture)
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     const directConversationRow = page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName }).first()
     await expect(directConversationRow).toBeVisible({ timeout: 30000 })
     await directConversationRow.click()
@@ -1317,7 +1317,7 @@ test.describe('Channel media regressions', () => {
 
     await loginWithSeededSession(page, fixture)
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     const directConversationRow = page.locator('.conversation-item').filter({ hasText: fixture.creatorAccountName }).first()
     await expect(directConversationRow).toBeVisible({ timeout: 30000 })
     await directConversationRow.click()
@@ -1658,7 +1658,7 @@ test.describe('Channel media regressions', () => {
     })
 
     await loginWithSeededSession(page, sender)
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     const groupRow = page.locator('.conversation-item').filter({ hasText: groupTitle }).first()
     await expect(groupRow).toBeVisible({ timeout: 30000 })
     await groupRow.click()
@@ -1680,13 +1680,14 @@ test.describe('Channel media regressions', () => {
     await expect
       .poll(async () => fetchLatestRoomMessageTypesByChatId(request, sender.accessToken, groupId), { timeout: 60000 })
       .toEqual(expect.arrayContaining(['image']))
+    const commitHitsAfterImage = commitHits
 
     const imageBubble = page.locator('.message-bubble').filter({ hasText: imageCaption }).first()
     await expect(imageBubble).toBeVisible({ timeout: 30000 })
     await expect(imageBubble.locator('.media-caption')).toHaveText(imageCaption)
     await expect(imageBubble.locator('img[data-media-msg-id]')).toHaveCount(1)
 
-    await page.goto('/chat')
+    await gotoWithWebKitRetry(page, '/chat')
     await expect(page.locator('.conversation-item').filter({ hasText: groupTitle }).first()).toContainText('تصویر', {
       timeout: 30000,
     })
@@ -1700,8 +1701,8 @@ test.describe('Channel media regressions', () => {
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await injectGalleryVideo(page, `pw-group-single-${Date.now()}.webm`)
     if (browserName !== 'webkit') {
-      await expect(page.locator('.attachment-sheet')).toHaveCount(0, { timeout: 30000 })
-      await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(1)
+      await expect.poll(() => chunkAppendHits, { timeout: 30000 }).toBeGreaterThanOrEqual(2)
+      await expect.poll(() => commitHits, { timeout: 60000 }).toBeGreaterThan(commitHitsAfterImage)
     }
 
     await expect

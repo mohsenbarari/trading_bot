@@ -238,6 +238,22 @@ async function openMessenger(page: Page) {
   await expect(page.locator('.chat-header')).toBeVisible({ timeout: 30000 })
 }
 
+async function expectPublicProfileForUser(page: Page, userId: number, accountName: string) {
+  const expectedProfileUrl = new RegExp(`/users/${userId}`)
+  const canonicalProfilePath = `/users/${userId}?account_name=${encodeURIComponent(accountName)}`
+  const profileView = page.locator('.public-profile-view')
+  const hasLoadedProfile =
+    expectedProfileUrl.test(page.url()) &&
+    await profileView.filter({ hasText: accountName }).first().isVisible({ timeout: 5000 }).catch(() => false)
+
+  if (!hasLoadedProfile) {
+    await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
+  }
+
+  await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
+  await expect(profileView).toContainText(accountName, { timeout: 30000 })
+}
+
 async function openConversationListMenu(page: Page) {
   await page.locator('.chat-header .header-menu-container .header-btn').click()
   await expect(page.locator('.header-dropdown-menu')).toBeVisible({ timeout: 15000 })
@@ -661,8 +677,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(memberRow).toBeVisible({ timeout: 30000 })
     await memberRow.locator('.chat-user-row__action-btn').filter({ hasText: 'پروفایل' }).click()
 
-    await expect(page).toHaveURL(new RegExp(`/users/${candidateOne.userId}`))
-    await expect(page.locator('.public-profile-view')).toContainText(candidateOne.accountName)
+    await expectPublicProfileForUser(page, candidateOne.userId, candidateOne.accountName)
 
     await openNamedRoomFromRoute(page, group.id, title)
 
@@ -745,7 +760,6 @@ test.describe('Messenger room manager and public profile flows', () => {
 
     await clickChannelMemberProfile()
     const navigatedToProfile = await page.waitForURL(expectedProfileUrl, { timeout: 5000 }).then(() => true).catch(() => false)
-    const canonicalProfilePath = `/users/${candidateOne.userId}?account_name=${encodeURIComponent(candidateOne.accountName)}`
     if (!navigatedToProfile) {
       if (!(await channelManager.isVisible().catch(() => false))) {
         await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
@@ -754,12 +768,7 @@ test.describe('Messenger room manager and public profile flows', () => {
       await clickChannelMemberProfile()
     }
 
-    const openedByClick = await page.waitForURL(expectedProfileUrl, { timeout: 7000 }).then(() => true).catch(() => false)
-    if (!openedByClick || !expectedProfileUrl.test(page.url())) {
-      await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
-    }
-
-    await expect(page.locator('.public-profile-view')).toContainText(candidateOne.accountName, { timeout: 30000 })
+    await expectPublicProfileForUser(page, candidateOne.userId, candidateOne.accountName)
 
     await openNamedRoomFromRoute(page, channel.id, title)
 

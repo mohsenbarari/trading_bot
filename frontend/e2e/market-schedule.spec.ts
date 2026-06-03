@@ -69,9 +69,9 @@ label = ${JSON.stringify(label)}
 
 async def main():
     suffix = uuid.uuid4().hex[:10]
-    numeric_suffix = int(uuid.uuid4().hex[:8], 16) % 10000
+    name_suffix = uuid.uuid4().hex[:10].translate(str.maketrans('0123456789abcdef', 'ابپتثجچحخدذرزسشص'))
     account_name = f"pw_market_schedule_{label}_{suffix}"
-    commodity_name = f"کالای زمان‌بندی {numeric_suffix}"
+    commodity_name = f"کالای زمان‌بندی {name_suffix}"
     mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
 
     async with AsyncSessionLocal() as db:
@@ -423,6 +423,12 @@ test.describe('Market schedule browser regressions', () => {
     await expect(activePage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
 
     await openOfferPreview(activePage, `خرید ${actor.commodityName} 10 عدد 121111`)
+    configureMarketRuntime({
+      mode: 'open',
+      noticeVisible: true,
+      offersSinceLastOpen: 0,
+      disableSchedule: true,
+    })
     await confirmOfferPreview(activePage)
     await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
     const afterFirstOfferState = await waitForAuthoritativeMarketState(
@@ -433,6 +439,12 @@ test.describe('Market schedule browser regressions', () => {
     await expect(afterFirstOfferPage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
 
     await openOfferPreview(activePage, `فروش ${actor.commodityName} 12 عدد 121222`)
+    configureMarketRuntime({
+      mode: 'open',
+      noticeVisible: true,
+      offersSinceLastOpen: 1,
+      disableSchedule: true,
+    })
     await confirmOfferPreview(activePage)
     await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
     const afterSecondOfferState = await waitForAuthoritativeMarketState(
