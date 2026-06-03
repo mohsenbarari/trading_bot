@@ -762,6 +762,11 @@ Post-Stage 12 progress:
 	- The `acceptance-matrix-20260603T043600Z.log` run started correctly but stopped at Chromium test 15 with a Playwright API `write EPIPE` while posting `/api/chat/groups` in `group single document upload uses resumable sessions and stays attached after sender leaves messenger for market`.
 	- `channel-media.spec.ts` now wraps the setup group create/bootstrap POST requests in the same short retry helper already used for room-message reads, covering transient socket drops without masking failed HTTP responses.
 	- Focused validation passed: `npm run test:e2e -- e2e/channel-media.spec.ts --grep="group single document upload uses resumable sessions and stays attached after sender leaves messenger for market" --reporter=line` (`1/1`).
+- Acceptance matrix strict-locator follow-up:
+	- The `acceptance-matrix-20260603T053436Z.log` run completed with `323` passed, `3` skipped, and `16` failed; market/public-history stayed green.
+	- Remaining failures were concentrated in transition-duplicate `.chat-header .header-name` locators, non-scoped `.forwarded-banner` locators, direct-chat composer send timing, and a channel-manager browser-history return assertion.
+	- `customer-chat-privacy.spec.ts`, `messenger-direct-room-ux.spec.ts`, `direct-chat.spec.ts`, `channel-media.spec.ts`, and `messenger-room-manager-profile.spec.ts` now scope active headers/banners/composers and tolerate list-return after channel settings close.
+	- Focused Chromium validation passed for the affected customer privacy, direct chat, direct-room download, channel forward, and channel-manager regressions.
 
 ## Prompt Template (Operational)
 
