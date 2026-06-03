@@ -592,18 +592,18 @@ test.describe('Messenger room manager and public profile flows', () => {
       })
     await page.goBack()
     await expect(page.locator('.channel-manager-root')).toHaveCount(0)
-    const stillInChannel = await expect
-      .poll(() => selectedRoomIdFromUrl(page), { timeout: 5000 })
-      .toBe(-channelId)
+    const updatedHeader = page.locator('.chat-header:visible .header-name').first()
+    const headerAlreadyUpdated = await expect(updatedHeader)
+      .toHaveText(updatedTitle, { timeout: 5000 })
       .then(() => true)
       .catch(() => false)
-    if (!stillInChannel) {
+    if (!headerAlreadyUpdated) {
       const updatedChannelRow = conversationRow(page, updatedTitle)
       await expect(updatedChannelRow).toBeVisible({ timeout: 30000 })
-      await updatedChannelRow.click()
+      await updatedChannelRow.click({ force: true })
       await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(-channelId)
+      await expect(updatedHeader).toHaveText(updatedTitle, { timeout: 30000 })
     }
-    await expect(page.locator('.chat-header:visible .header-name').first()).toHaveText(updatedTitle, { timeout: 30000 })
   })
 
   test('group manager supports member-row profiles, admin mutations, member removal, and creator leave', async ({ page, request }) => {

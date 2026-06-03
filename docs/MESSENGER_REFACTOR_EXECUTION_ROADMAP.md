@@ -794,6 +794,10 @@ Post-Stage 12 progress:
 	- Focused validation passed:
 		- `npm run test:e2e -- e2e/lot-suggestion.spec.ts --grep="409 suggestion modal keeps server payload" --project=firefox --reporter=line` (`2/2`, Chromium + Firefox due the project script default).
 		- `npm run test:e2e -- e2e/admin-smoke.spec.ts --grep="admin user search finds a seeded user and opens the profile view" --project=webkit --workers=1 --reporter=line` (`2/2`, Chromium + WebKit sequentially, matching the full matrix worker model).
+- Acceptance matrix second interrupted-run follow-up:
+	- The `acceptance-matrix-20260603T102711Z.log` run progressed to Firefox `209/342` and then stopped without a Playwright summary.
+	- The latest error context showed the channel-manager settings-save scenario returning to the conversation list with the updated channel row visible while the URL could still look like the selected room; the test now checks for a real visible updated header first, then reopens the updated row when the UI is actually on the list.
+	- Focused validation passed: `npm run test:e2e -- e2e/messenger-room-manager-profile.spec.ts --grep="channel manager supports messenger-header create, member add, and header-open settings save" --project=firefox --project=webkit --workers=1 --reporter=line` (`3/3`).
 
 ## Prompt Template (Operational)
 
