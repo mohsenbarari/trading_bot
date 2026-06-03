@@ -1,9 +1,11 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
 
 import { primeAuthSession } from './helpers/auth'
+
+const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
 interface SeededMarketSession {
   userId: number
@@ -48,7 +50,7 @@ function runPythonInApp<T>(script: string): T {
   return JSON.parse(lastLine) as T
 }
 
-function seedIsolatedMarketSession(label: string): SeededMarketSession {
+function seedIsolatedMarketSession(label: string, role: 'standard' | 'super_admin' = 'standard'): SeededMarketSession {
   return runPythonInApp<SeededMarketSession>(`
 import asyncio
 import json
@@ -66,6 +68,7 @@ from models.session import Platform, UserSession
 from models.user import User
 
 label = ${JSON.stringify(label)}
+role_name = ${JSON.stringify(role)}
 
 async def main():
     suffix = uuid.uuid4().hex[:10]
@@ -84,7 +87,7 @@ async def main():
             mobile_number=f"09{mobile_seed:09d}",
             full_name=account_name,
             address='Playwright Market Schedule',
-            role=UserRole.STANDARD,
+            role=UserRole.SUPER_ADMIN if role_name == 'super_admin' else UserRole.STANDARD,
             has_bot_access=True,
             max_sessions=1,
         )
@@ -131,6 +134,13 @@ asyncio.run(main())
 
 function toPythonBool(value: boolean) {
   return value ? 'True' : 'False'
+}
+
+function authHeaders(accessToken: string) {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  }
 }
 
 function configureMarketRuntime(options: MarketRuntimeSeedOptions) {
@@ -200,6 +210,24 @@ async def main():
 
 asyncio.run(main())
 `)
+}
+
+async function refreshMarketScheduleSettingsInApp(
+  request: APIRequestContext,
+  accessToken: string,
+  disableSchedule: boolean,
+) {
+  const response = await request.put(`${BACKEND_BASE_URL}/api/trading-settings/`, {
+    headers: authHeaders(accessToken),
+    data: {
+      market_schedule_enabled: !disableSchedule,
+      market_timezone: 'Asia/Tehran',
+      market_open_time_local: disableSchedule ? '09:00' : '00:00',
+      market_close_time_local: disableSchedule ? '18:00' : '23:59',
+      market_closed_weekdays: [],
+    },
+  })
+  expect(response.ok()).toBeTruthy()
 }
 
 async function setSeededSession(page: Page, fixture: SeededMarketSession) {
@@ -400,7 +428,7 @@ test.describe('Market schedule browser regressions', () => {
     await reopenedContext.close()
   })
 
-  test('start notice hides after the second accepted offer after market open', async ({ browser, browserName }) => {
+  test('start notice hides after the second accepted offer after market open', async ({ browser, browserName, request }) => {
     test.setTimeout(120000)
     if (browserName === 'webkit') {
       test.slow()
@@ -413,7 +441,8 @@ test.describe('Market schedule browser regressions', () => {
       disableSchedule: true,
     })
 
-    const actor = seedIsolatedMarketSession('second_offer_notice')
+    const actor = seedIsolatedMarketSession('second_offer_notice', 'super_admin')
+    await refreshMarketScheduleSettingsInApp(request, actor.accessToken, true)
     const openedMarketState = await waitForAuthoritativeMarketState(
       (state) => state.is_open && state.active_web_notice_visible && state.offers_since_last_open === 0,
       'opened state with visible start notice before offers',
@@ -429,6 +458,7 @@ test.describe('Market schedule browser regressions', () => {
       offersSinceLastOpen: 0,
       disableSchedule: true,
     })
+    await refreshMarketScheduleSettingsInApp(request, actor.accessToken, true)
     await confirmOfferPreview(activePage)
     await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
     const afterFirstOfferState = await waitForAuthoritativeMarketState(
@@ -445,6 +475,7 @@ test.describe('Market schedule browser regressions', () => {
       offersSinceLastOpen: 1,
       disableSchedule: true,
     })
+    await refreshMarketScheduleSettingsInApp(request, actor.accessToken, true)
     await confirmOfferPreview(activePage)
     await expect(activePage.locator('.offer-preview-card')).toHaveCount(0)
     const afterSecondOfferState = await waitForAuthoritativeMarketState(

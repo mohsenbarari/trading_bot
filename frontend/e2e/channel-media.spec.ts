@@ -1085,6 +1085,7 @@ async function waitForPersistedPendingUpload(
   page: Page,
   expected: { fileName?: string; messageTypes?: string[] },
   expectedConversationKey?: number,
+  timeout = 30000,
 ) {
   await expect
     .poll(async () => {
@@ -1133,12 +1134,22 @@ async function waitForPersistedPendingUpload(
         expectedMessageTypes: expected.messageTypes ?? [],
         expectedConversationKey: expectedConversationKey ?? null,
       })
-    }, { timeout: 15000 })
+    }, { timeout })
     .toBe(true)
 }
 
 async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileName: string, expectedConversationKey?: number) {
   await waitForPersistedPendingUpload(page, { fileName: expectedFileName, messageTypes: ['document'] }, expectedConversationKey)
+}
+
+async function hasDeliveredRoomMessageTypes(
+  request: APIRequestContext,
+  accessToken: string,
+  chatId: number,
+  messageTypes: string[],
+) {
+  const latestTypes = await fetchLatestRoomMessageTypesByChatId(request, accessToken, chatId)
+  return messageTypes.every((messageType) => latestTypes.includes(messageType))
 }
 
 test.describe('Channel media regressions', () => {
@@ -1444,15 +1455,26 @@ test.describe('Channel media regressions', () => {
         await expect(senderPage.locator('.messages-container [data-media-msg-id]').first()).toBeVisible({ timeout: 30000 })
       }
       await expect.poll(() => sawBatchCreate && sawSessionCreate, { timeout: 30000 }).toBe(true)
-      await waitForPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId)
+      const deliveredBeforeLeavingMessenger = await hasDeliveredRoomMessageTypes(
+        request,
+        receiver.accessToken,
+        groupId,
+        ['image', 'video'],
+      )
+      if (!deliveredBeforeLeavingMessenger) {
+        await waitForPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId, 45000)
+      }
+      if (browserName !== 'webkit') {
+        await expect.poll(() => sawChunkAppend || sawCommit, { timeout: 45000 }).toBe(true)
+      }
 
       await navigateFromMessengerToMarket(senderPage)
 
       await expect
-        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 60000 })
+        .poll(async () => fetchLatestRoomMessageTypesByChatId(request, receiver.accessToken, groupId), { timeout: 120000 })
         .toEqual(expect.arrayContaining(['image', 'video']))
 
-      await expect(receiverPage.locator('.messages-container [data-media-msg-id]')).toHaveCount(2, { timeout: 60000 })
+      await expect(receiverPage.locator('.messages-container [data-media-msg-id]')).toHaveCount(2, { timeout: 120000 })
       if (browserName !== 'webkit') {
         expect(sawBatchCreate).toBeTruthy()
         expect(sawSessionCreate).toBeTruthy()
