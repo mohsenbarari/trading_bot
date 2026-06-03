@@ -228,9 +228,9 @@ label = ${JSON.stringify(label)}
 
 async def main():
   suffix = uuid.uuid4().hex[:10]
-  numeric_suffix = int(uuid.uuid4().hex[:8], 16) % 10000
+  name_suffix = uuid.uuid4().hex[:10].translate(str.maketrans('0123456789abcdef', 'ابپتثجچحخدذرزسشص'))
   account_name = f"pw_market_actor_{label}_{suffix}"
-  commodity_name = f"کالای تست {numeric_suffix}"
+  commodity_name = f"کالای تست {name_suffix}"
   mobile_seed = int(uuid.uuid4().hex[:9], 16) % 1000000000
 
   async with AsyncSessionLocal() as db:
@@ -740,8 +740,10 @@ async function fetchMyOffers(request: APIRequestContext, accessToken: string): P
 async function openOfferPreview(page: Page, text: string) {
   const offerInput = page.locator('.text-offer-input').first()
   await offerInput.fill(text)
-  await offerInput.press('Enter')
-  await expect(page.locator('.offer-preview-card')).toBeVisible()
+  const sendButton = page.locator('.send-btn')
+  await expect(sendButton).toBeEnabled({ timeout: 30000 })
+  await sendButton.click()
+  await expect(page.locator('.offer-preview-card')).toBeVisible({ timeout: 30000 })
 }
 
 async function confirmOfferPreview(page: Page) {

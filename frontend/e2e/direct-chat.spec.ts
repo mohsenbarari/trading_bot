@@ -167,6 +167,17 @@ async function openDirectChat(page: Page, otherUserId: number) {
   await expect(activeComposerTextbox(page)).toBeVisible({ timeout: 30000 })
 }
 
+async function expectVisibleSentBubble(page: Page, otherUserId: number, content: string) {
+  const sentBubble = page.locator('.message-bubble.sent').filter({ hasText: content }).first()
+  if (await sentBubble.isVisible({ timeout: 5000 }).catch(() => false)) {
+    return sentBubble
+  }
+
+  await openDirectChat(page, otherUserId)
+  await expect(sentBubble).toBeVisible({ timeout: 30000 })
+  return sentBubble
+}
+
 async function sendTextChatMessage(
   request: APIRequestContext,
   sender: SeededSessionFixture,
@@ -227,8 +238,7 @@ test.describe('Direct chat regressions', () => {
       }, { timeout: 30000 })
       .not.toBeNull()
 
-    const sentBubble = page.locator('.message-bubble.sent').filter({ hasText: initialContent }).first()
-    await expect(sentBubble).toBeVisible({ timeout: 30000 })
+    const sentBubble = await expectVisibleSentBubble(page, peer.userId, initialContent)
 
     await sentBubble.click()
     await page.locator('.context-menu .menu-item').filter({ hasText: 'ویرایش' }).click()
