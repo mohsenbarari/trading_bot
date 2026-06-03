@@ -842,7 +842,7 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, fixture.tier1Customer)
     await page.goto('/market')
 
-    await openOfferPreview(page, `فروش ${fixture.commodityName} 6 عدد ${sellPrice}: ${uniqueNote}`)
+    await openOfferPreview(page, `فروش ${fixture.commodityName} 7 عدد ${sellPrice}: ${uniqueNote}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
     await expect(page.locator('.offer-preview-card')).toHaveCount(0)
@@ -853,7 +853,7 @@ test.describe('Market offer creation regressions', () => {
         userId: fixture.tier1Customer.userId,
         offerType: 'sell',
         price: sellPrice,
-        quantity: 6,
+        quantity: 7,
       })
 
     await setSeededSession(page, fixture.owner)
