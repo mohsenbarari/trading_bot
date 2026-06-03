@@ -281,7 +281,37 @@ async function openOfferPreview(page: Page, text: string) {
 }
 
 async function confirmOfferPreview(page: Page) {
-  await page.locator('.offer-preview-confirm').click()
+  const card = page.locator('.offer-preview-card')
+  const confirmButton = card.locator('.offer-preview-confirm')
+  const warning = card.locator('.offer-preview-warning')
+  const error = card.locator('.offer-preview-error')
+  const waitForPreviewOutcome = async () => Promise.race([
+    card.waitFor({ state: 'detached', timeout: 30000 }).then(() => 'closed' as const),
+    warning.waitFor({ state: 'visible', timeout: 30000 }).then(() => 'warning' as const),
+    error.waitFor({ state: 'visible', timeout: 30000 }).then(() => 'error' as const),
+  ]).catch(() => 'timeout' as const)
+
+  await expect(confirmButton).toBeEnabled({ timeout: 15000 })
+  await confirmButton.click()
+
+  const firstOutcome = await waitForPreviewOutcome()
+  if (firstOutcome === 'error') {
+    throw new Error(`Offer preview error after confirm: ${(await error.textContent())?.trim() || 'unknown error'}`)
+  }
+  if (firstOutcome === 'warning') {
+    await expect(confirmButton).toBeEnabled({ timeout: 15000 })
+    await confirmButton.click()
+
+    const secondOutcome = await waitForPreviewOutcome()
+    if (secondOutcome === 'error') {
+      throw new Error(`Offer preview error after warning acknowledgement: ${(await error.textContent())?.trim() || 'unknown error'}`)
+    }
+    if (secondOutcome === 'warning') {
+      throw new Error(`Offer preview warning persisted after acknowledgement: ${(await warning.textContent())?.trim() || 'unknown warning'}`)
+    }
+  }
+
+  await expect(card).toHaveCount(0, { timeout: 30000 })
 }
 
 test.describe('Market schedule browser regressions', () => {
@@ -380,7 +410,7 @@ test.describe('Market schedule browser regressions', () => {
       mode: 'open',
       noticeVisible: true,
       offersSinceLastOpen: 0,
-      disableSchedule: false,
+      disableSchedule: true,
     })
 
     const actor = seedIsolatedMarketSession('second_offer_notice')
