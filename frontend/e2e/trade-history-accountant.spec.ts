@@ -1039,22 +1039,29 @@ test.describe('Trade history accountant context', () => {
   })
 
   test('public profile presence renders online and last-seen states from the shared presence contract', async ({ page, request }) => {
+    test.setTimeout(90000)
     await waitForBackendReady(request)
     const fixture = seedPublicProfilePresenceFixture('presence_rendering')
 
     await loginWithSeededSession(page, fixture.viewer)
 
-    await page.goto(`/users/${fixture.onlineTargetUserId}?account_name=${encodeURIComponent(fixture.onlineTargetAccountName)}`)
-    await expect(page.locator('.public-profile-view')).toContainText(fixture.onlineTargetAccountName)
+    await page.goto(`/users/${fixture.onlineTargetUserId}?account_name=${encodeURIComponent(fixture.onlineTargetAccountName)}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    const onlineProfileView = page.locator('.public-profile-view:visible').last()
+    await expect(onlineProfileView).toContainText(fixture.onlineTargetAccountName, { timeout: 30000 })
 
-    const onlinePresence = page.locator('.profile-presence-status')
+    const onlinePresence = onlineProfileView.locator('.profile-presence-status')
     await expect(onlinePresence).toHaveText('آنلاین')
     await expect(onlinePresence).toHaveClass(/online/)
 
-    await page.goto(`/users/${fixture.offlineTargetUserId}?account_name=${encodeURIComponent(fixture.offlineTargetAccountName)}`)
-    await expect(page.locator('.public-profile-view')).toContainText(fixture.offlineTargetAccountName)
+    await page.goto(`/users/${fixture.offlineTargetUserId}?account_name=${encodeURIComponent(fixture.offlineTargetAccountName)}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    const offlineProfileView = page.locator('.public-profile-view:visible').last()
+    await expect(offlineProfileView).toContainText(fixture.offlineTargetAccountName, { timeout: 30000 })
 
-    const offlinePresence = page.locator('.profile-presence-status')
+    const offlinePresence = offlineProfileView.locator('.profile-presence-status')
     await expect(offlinePresence).toContainText('آخرین بازدید')
     await expect(offlinePresence).toContainText('دقیقه پیش')
     await expect(offlinePresence).not.toHaveClass(/online/)

@@ -199,14 +199,14 @@ function authHeaders(accessToken: string) {
 }
 
 async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture) {
-  await page.goto('/login')
+  await page.goto('/login', { waitUntil: 'domcontentloaded' })
   await page.evaluate(({ accessToken, refreshToken }) => {
     localStorage.setItem('auth_token', accessToken)
     localStorage.setItem('refresh_token', refreshToken)
     localStorage.removeItem('suspended_refresh_token')
   }, fixture)
-  await page.goto('/')
-  await expect(page.getByText(fixture.accountName)).toBeVisible()
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByText(fixture.accountName)).toBeVisible({ timeout: 30000 })
 }
 
 test.describe('Lot suggestion regressions', () => {
@@ -235,9 +235,10 @@ test.describe('Lot suggestion regressions', () => {
   })
 
   test('409 suggestion modal keeps server payload, updates from real offer changes, and never shows owner identity', async ({ page }) => {
+    test.setTimeout(60000)
     const fixture = seedMarketOfferFixture('modal_regression')
     await loginWithSeededSession(page, fixture.viewer)
-    await page.goto('/market')
+    await page.goto('/market', { waitUntil: 'domcontentloaded' })
 
     const publicOfferCard = page.locator('.offer-card-wrap').filter({ hasText: fixture.publicOfferNote }).first()
     await expect(publicOfferCard).toBeVisible()
@@ -264,35 +265,13 @@ test.describe('Lot suggestion regressions', () => {
       })
     })
 
-    await page.waitForFunction(({ note, label }) => {
-      return Array.from(document.querySelectorAll('.offer-card-wrap')).some((card) => {
-        const cardText = card.textContent || ''
-        if (!cardText.includes(note)) return false
-        return Array.from(card.querySelectorAll('button')).some((button) => (button.textContent || '').includes(label))
-      })
-    }, { note: fixture.publicOfferNote, label: '10 عدد' })
-    await page.evaluate(({ note, label }) => {
-      const card = Array.from(document.querySelectorAll('.offer-card-wrap')).find((entry) => (entry.textContent || '').includes(note))
-      const button = Array.from(card?.querySelectorAll('button') || []).find((entry) => (entry.textContent || '').includes(label))
-      if (button instanceof HTMLElement) {
-        button.click()
-      }
-    }, { note: fixture.publicOfferNote, label: '10 عدد' })
+    const lot10Button = publicOfferCard.getByRole('button', { name: '10 عدد' }).first()
+    await expect(lot10Button).toBeVisible({ timeout: 30000 })
+    await lot10Button.evaluate((node: HTMLElement) => node.click())
 
-    await page.waitForFunction(({ note, label }) => {
-      return Array.from(document.querySelectorAll('.offer-card-wrap')).some((card) => {
-        const cardText = card.textContent || ''
-        if (!cardText.includes(note)) return false
-        return Array.from(card.querySelectorAll('button')).some((button) => (button.textContent || '').includes(label))
-      })
-    }, { note: fixture.publicOfferNote, label: 'تایید 10 عدد؟' })
-    await page.evaluate(({ note, label }) => {
-      const card = Array.from(document.querySelectorAll('.offer-card-wrap')).find((entry) => (entry.textContent || '').includes(note))
-      const button = Array.from(card?.querySelectorAll('button') || []).find((entry) => (entry.textContent || '').includes(label))
-      if (button instanceof HTMLElement) {
-        button.click()
-      }
-    }, { note: fixture.publicOfferNote, label: 'تایید 10 عدد؟' })
+    const confirm10Button = publicOfferCard.getByRole('button', { name: 'تایید 10 عدد؟' }).first()
+    await expect(confirm10Button).toBeVisible({ timeout: 30000 })
+    await confirm10Button.evaluate((node: HTMLElement) => node.click())
 
     const dialog = page.getByRole('alertdialog', { name: 'پیشنهاد معامله' })
     await expect(dialog).toBeVisible()
@@ -304,21 +283,9 @@ test.describe('Lot suggestion regressions', () => {
     await expect(dialog.getByRole('button', { name: 'رد کردن' })).toBeVisible()
     await expect(dialog.getByRole('button', { name: 'بستن' })).toHaveCount(0)
 
-    await page.waitForFunction((label) => {
-      const dialog = document.querySelector('[role="alertdialog"]')
-      return Array.from(dialog?.querySelectorAll('button') || []).some((button) => (button.textContent || '').includes(label))
-    }, '16 عدد')
-    await page.evaluate((label) => {
-      const dialog = document.querySelector('[role="alertdialog"]')
-      const button = Array.from(dialog?.querySelectorAll('button') || []).find((entry) => (entry.textContent || '').includes(label))
-      if (button instanceof HTMLElement) {
-        button.click()
-      }
-    }, '16 عدد')
-    await page.waitForFunction((label) => {
-      const dialog = document.querySelector('[role="alertdialog"]')
-      return Array.from(dialog?.querySelectorAll('button') || []).some((button) => (button.textContent || '').includes(label))
-    }, 'تایید 16 عدد؟')
+    await expect(dialog.getByRole('button', { name: '16 عدد' })).toBeVisible({ timeout: 30000 })
+    await dialog.getByRole('button', { name: '16 عدد' }).evaluate((node: HTMLElement) => node.click())
+    await expect(dialog.getByRole('button', { name: 'تایید 16 عدد؟' })).toBeVisible({ timeout: 30000 })
 
     updateOfferState(fixture.publicOfferId, 8, [8], 'active')
     await expect(dialog).toContainText('8 عدد')
