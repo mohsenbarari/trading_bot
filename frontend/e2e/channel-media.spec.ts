@@ -1344,24 +1344,24 @@ test.describe('Channel media regressions', () => {
     let sawCommit = false
     let legacyUploadHits = 0
 
-    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+    const createResponse = await retryApiRequest(() => request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
       headers: authHeaders(sender.accessToken),
       data: {
         title: groupTitle,
         member_ids: [receiver.userId],
       },
-    })
+    }))
     expect(createResponse.ok()).toBeTruthy()
     const createPayload = await createResponse.json() as { group: { id: number } }
     const groupId = Number(createPayload.group.id)
 
-    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+    const bootstrapResponse = await retryApiRequest(() => request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
       headers: authHeaders(sender.accessToken),
       data: {
         content: bootstrapContent,
         message_type: 'text',
       },
-    })
+    }))
     expect(bootstrapResponse.ok()).toBeTruthy()
 
     const senderContext = await browser.newContext()
@@ -1467,24 +1467,24 @@ test.describe('Channel media regressions', () => {
     // WebKit is more sensitive to large synthetic document payloads in this leave-mid-upload flow.
     const largeDocumentSizeBytes = browserName === 'webkit' ? 4 * 1024 * 1024 : 12 * 1024 * 1024
 
-    const createResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
+    const createResponse = await retryApiRequest(() => request.post(`${BACKEND_BASE_URL}/api/chat/groups`, {
       headers: authHeaders(sender.accessToken),
       data: {
         title: groupTitle,
         member_ids: [receiver.userId],
       },
-    })
+    }))
     expect(createResponse.ok()).toBeTruthy()
     const createPayload = await createResponse.json() as { group: { id: number } }
     const groupId = Number(createPayload.group.id)
 
-    const bootstrapResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
+    const bootstrapResponse = await retryApiRequest(() => request.post(`${BACKEND_BASE_URL}/api/chat/rooms/${groupId}/send`, {
       headers: authHeaders(sender.accessToken),
       data: {
         content: bootstrapContent,
         message_type: 'text',
       },
-    })
+    }))
     expect(bootstrapResponse.ok()).toBeTruthy()
 
     const senderContext = await browser.newContext()
