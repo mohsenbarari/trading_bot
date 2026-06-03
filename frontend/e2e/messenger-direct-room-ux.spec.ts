@@ -854,7 +854,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     const releaseUploadAbort = releaseInitialUploadAbort ?? (() => {})
     releaseUploadAbort()
 
-    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+    await expect(activeHeaderName(page)).toContainText(peer.accountName, { timeout: 30000 })
 
     await expect
       .poll(async () => {
@@ -1094,7 +1094,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await waitForBackendReady(request)
     await seedDirectDocumentMessage(request, peer, actor.userId, fileName, `Playwright document body ${suffix}`)
-  await sendDirectTextMessage(request, otherPeer, actor.userId, `PW DIRECT DOWNLOAD SWITCH ${suffix}`)
+    await sendDirectTextMessage(request, otherPeer, actor.userId, `PW DIRECT DOWNLOAD SWITCH ${suffix}`)
 
     await loginWithSeededSession(page, actor)
     await page.goto('/chat')
@@ -1103,7 +1103,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(initialPeerConversation).toBeVisible({ timeout: 30000 })
     await expect(initialOtherConversation).toBeVisible({ timeout: 30000 })
     await initialPeerConversation.click()
-    await expect(page.locator('.chat-header .header-name')).toContainText(peer.accountName, { timeout: 30000 })
+    await expect(activeHeaderName(page)).toContainText(peer.accountName, { timeout: 30000 })
 
     let releaseDocumentDownload: (() => void) | null = null
     const holdDocumentDownload = new Promise<void>((resolve) => {

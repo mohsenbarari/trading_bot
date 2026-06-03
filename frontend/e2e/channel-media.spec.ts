@@ -420,6 +420,10 @@ function activeComposerTextbox(page: Page) {
   return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
 }
 
+function forwardedBanner(page: Page, senderName: string) {
+  return page.locator('.messages-container .forwarded-banner').filter({ hasText: `از ${senderName}` }).first()
+}
+
 async function fillComposerCaption(page: Page, caption: string): Promise<Locator> {
   const container = activeComposerContainer(page)
   const composer = activeComposerTextbox(page).first()
@@ -1253,7 +1257,7 @@ test.describe('Channel media regressions', () => {
     await forwardToTargets(page, [fixture.channelTitle])
     await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
     await expect(page.locator('.messages-container .msg-document').getByText(fileName).first()).toBeVisible({ timeout: 30000 })
-    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`, {
+    await expect(forwardedBanner(page, fixture.creatorAccountName)).toContainText(`از ${fixture.creatorAccountName}`, {
       timeout: 30000,
     })
 
@@ -1314,7 +1318,7 @@ test.describe('Channel media regressions', () => {
 
     await forwardToTargets(page, [groupTitle])
     await expectRoomOpen(page, groupId, groupTitle, 'گروه')
-    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`, {
+    await expect(forwardedBanner(page, fixture.creatorAccountName)).toContainText(`از ${fixture.creatorAccountName}`, {
       timeout: 30000,
     })
     await expect(page.locator('.messages-container').getByText(sourceContent)).toBeVisible()
@@ -1746,7 +1750,7 @@ test.describe('Channel media regressions', () => {
 
     await forwardToTargets(page, [fixture.channelTitle])
     await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
-    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.creatorAccountName}`, {
+    await expect(forwardedBanner(page, fixture.creatorAccountName)).toContainText(`از ${fixture.creatorAccountName}`, {
       timeout: 30000,
     })
     await expect(page.locator('.messages-container .msg-media-link').first()).toBeVisible()
@@ -1796,7 +1800,7 @@ test.describe('Channel media regressions', () => {
 
     await forwardToTargets(page, [fixture.channelTitle])
     await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
-    await expect(page.locator('.messages-container .forwarded-banner')).toContainText(`از ${fixture.accountName}`, {
+    await expect(forwardedBanner(page, fixture.accountName)).toContainText(`از ${fixture.accountName}`, {
       timeout: 30000,
     })
     await expect(page.locator('.messages-container .msg-media-link').first()).toBeVisible({ timeout: 30000 })

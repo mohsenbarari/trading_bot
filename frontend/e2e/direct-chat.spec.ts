@@ -128,6 +128,20 @@ function activeComposerTextbox(page: Page) {
   return page.locator('.chat-view .input-area .input-container:visible').last().locator('textarea[placeholder="پیام..."]').first()
 }
 
+async function sendActiveComposerMessage(page: Page, content: string) {
+  const container = page.locator('.chat-view .input-area .input-container:visible').last()
+  const composer = container.locator('textarea[placeholder="پیام..."]').first()
+  await expect(composer).toBeVisible({ timeout: 30000 })
+  await composer.click()
+  await composer.fill('')
+  await composer.pressSequentially(content)
+  await expect(composer).toHaveValue(content, { timeout: 30000 })
+
+  const sendButton = container.locator('.send-btn-inline')
+  await expect(sendButton).toBeVisible({ timeout: 30000 })
+  await sendButton.click()
+}
+
 async function openDirectChat(page: Page, otherUserId: number) {
   await page.goto(`/chat?user_id=${otherUserId}`)
   await expect(activeComposerTextbox(page)).toBeVisible({ timeout: 30000 })
@@ -180,10 +194,7 @@ test.describe('Direct chat regressions', () => {
     await openDirectChat(page, peer.userId)
     await expect(page.getByText(bootstrapContent)).toBeVisible()
 
-    const composer = activeComposerTextbox(page)
-    await composer.fill(initialContent)
-    await expect(composer).toHaveValue(initialContent)
-    await composer.press('Enter')
+    await sendActiveComposerMessage(page, initialContent)
 
     let createdMessageId: number | null = null
     await expect
@@ -254,9 +265,7 @@ test.describe('Direct chat regressions', () => {
         expect.objectContaining({ emoji: '👍', user_id: actor.userId }),
       ]))
 
-    const composer = activeComposerTextbox(page)
-    await composer.fill(deleteContent)
-    await composer.press('Enter')
+    await sendActiveComposerMessage(page, deleteContent)
 
     const deleteBubble = page.locator('.message-bubble.sent').filter({ hasText: deleteContent })
     await expect(deleteBubble).toBeVisible()

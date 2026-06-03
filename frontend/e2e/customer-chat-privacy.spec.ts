@@ -223,38 +223,35 @@ async function openMessenger(page: Page) {
   await expect(page.locator('.chat-header')).toBeVisible({ timeout: 30000 })
 }
 
+function activeHeaderName(page: Page) {
+  return page.locator('.chat-header:visible .header-name').first()
+}
+
 async function openConversationListMenu(page: Page) {
   await page.locator('.chat-header .header-menu-container .header-btn').click()
   await expect(page.locator('.header-dropdown-menu')).toBeVisible({ timeout: 15000 })
 }
 
+async function waitForStableChatTransition(page: Page) {
+  await page.locator('.messenger-page.fade-enter-active, .messenger-page.fade-leave-active')
+    .waitFor({ state: 'detached', timeout: 30000 })
+    .catch(() => undefined)
+}
+
 async function sendComposerMessage(page: Page, text: string) {
-  const composerContainers = page.locator('.chat-view .input-area .input-container')
-  const containerCount = await composerContainers.count()
+  await waitForStableChatTransition(page)
+  const composerContainer = page.locator('.chat-view .input-area .input-container:visible').last()
+  const composer = composerContainer.locator('textarea[placeholder="پیام..."]').first()
 
-  for (let index = containerCount - 1; index >= 0; index -= 1) {
-    const composerContainer = composerContainers.nth(index)
-    const composer = composerContainer.locator('textarea[placeholder="پیام..."]')
-    if (!(await composer.isVisible().catch(() => false))) {
-      continue
-    }
+  await expect(composer).toBeVisible({ timeout: 30000 })
+  await composer.click()
+  await composer.fill('')
+  await composer.pressSequentially(text)
+  await expect(composer).toHaveValue(text, { timeout: 30000 })
 
-    await composer.click()
-    await composer.fill('')
-    await composer.pressSequentially(text)
-
-    const sendButton = composerContainer.locator('.send-btn-inline')
-    if (!(await sendButton.count())) {
-      continue
-    }
-
-    await expect(composer).toHaveValue(text)
-    await expect(sendButton).toBeVisible({ timeout: 30000 })
-    await sendButton.click()
-    return
-  }
-
-  throw new Error('No reactive composer container became send-ready for the customer privacy message flow')
+  const sendButton = composerContainer.locator('.send-btn-inline')
+  await expect(sendButton).toBeVisible({ timeout: 30000 })
+  await sendButton.click()
 }
 
 async function fetchDirectMessages(
@@ -293,7 +290,8 @@ test.describe('Customer chat privacy regressions', () => {
     await expect(ownerRow).toBeVisible({ timeout: 30000 })
     await ownerRow.click()
 
-    await expect(page.locator('.chat-header .header-name')).toContainText(fixture.owner.fullName, { timeout: 30000 })
+    await expect(activeHeaderName(page)).toContainText(fixture.owner.fullName, { timeout: 30000 })
+    await waitForStableChatTransition(page)
     await sendComposerMessage(page, message)
     await expect(page.locator('.message-bubble.sent').filter({ hasText: message })).toBeVisible({ timeout: 30000 })
 
