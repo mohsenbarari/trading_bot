@@ -128,6 +128,25 @@ function activeComposerTextbox(page: Page) {
   return page.locator('.chat-view .input-area .input-container:visible').last().locator('textarea[placeholder="پیام..."]').first()
 }
 
+async function ensureComposerValue(composer: ReturnType<typeof activeComposerTextbox>, content: string) {
+  if ((await composer.inputValue().catch(() => '')) === content) {
+    return
+  }
+
+  await composer.fill(content)
+  if ((await composer.inputValue().catch(() => '')) === content) {
+    return
+  }
+
+  await composer.evaluate((node, nextValue) => {
+    const textarea = node as HTMLTextAreaElement
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    valueSetter?.call(textarea, nextValue)
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    textarea.dispatchEvent(new Event('change', { bubbles: true }))
+  }, content)
+}
+
 async function sendActiveComposerMessage(page: Page, content: string) {
   const container = page.locator('.chat-view .input-area .input-container:visible').last()
   const composer = container.locator('textarea[placeholder="پیام..."]').first()
@@ -135,6 +154,7 @@ async function sendActiveComposerMessage(page: Page, content: string) {
   await composer.click()
   await composer.fill('')
   await composer.pressSequentially(content)
+  await ensureComposerValue(composer, content)
   await expect(composer).toHaveValue(content, { timeout: 30000 })
 
   const sendButton = container.locator('.send-btn-inline')

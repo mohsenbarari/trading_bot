@@ -2895,6 +2895,13 @@ watch(selectedUserId, (newVal) => {
   }
 })
 
+watch(selectedConversation, (conversation) => {
+  const conversationKey = selectedUserId.value
+  if (!conversation || !conversationKey) return
+  pinnedMessageState.value = null
+  schedulePinnedMessageStateLoad(conversationKey)
+})
+
 watch(messagesContainer, (container) => {
   attachMessagesContainerResizeObserver(container)
 })

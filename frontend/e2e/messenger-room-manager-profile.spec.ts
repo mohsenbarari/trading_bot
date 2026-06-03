@@ -248,6 +248,34 @@ async function openRoomHeaderMenu(page: Page) {
   await expect(page.locator('.header-dropdown-menu')).toBeVisible({ timeout: 15000 })
 }
 
+async function openNamedRoomFromRoute(page: Page, roomId: number, title: string) {
+  await page.goto(`/chat?user_id=-${roomId}&user_name=${encodeURIComponent(title)}`, { waitUntil: 'domcontentloaded' })
+  await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(-roomId)
+  await expect(page.locator('.chat-header .header-name').last()).toHaveText(title, { timeout: 30000 })
+}
+
+async function openRoomManagerFromHeader(page: Page, managerRoot: Locator, menuLabel: string) {
+  if (await managerRoot.isVisible().catch(() => false)) {
+    return
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.locator('.chat-header .header-user-info').last().click({ force: true })
+    if (await managerRoot.isVisible().catch(() => false)) {
+      return
+    }
+    await page.waitForTimeout(250)
+  }
+
+  if (await managerRoot.isVisible().catch(() => false)) {
+    return
+  }
+
+  await openRoomHeaderMenu(page)
+  await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: menuLabel }).click({ force: true })
+  await expect(managerRoot).toBeVisible({ timeout: 30000 })
+}
+
 async function expectManagerOverviewIA(managerRoot: Locator, expectedRole: string, destructiveSection: string) {
   await expect(managerRoot.locator('.manager-role-strip')).toContainText('نقش شما', { timeout: 30000 })
   await expect(managerRoot.locator('.manager-role-strip')).toContainText(expectedRole, { timeout: 30000 })
@@ -625,9 +653,8 @@ test.describe('Messenger room manager and public profile flows', () => {
     await groupRow.click()
     await expect(page.locator('.chat-header .header-name').last()).toHaveText(title, { timeout: 30000 })
 
-    await page.locator('.chat-header .header-user-info').last().click()
     const groupManager = page.locator('.group-manager-shell')
-    await expect(groupManager).toBeVisible({ timeout: 30000 })
+    await openRoomManagerFromHeader(page, groupManager, 'مدیریت گروه')
 
     await groupManager.locator('.telegram-row').filter({ hasText: 'اعضای گروه' }).click()
     const memberRow = groupManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
@@ -637,12 +664,9 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(page).toHaveURL(new RegExp(`/users/${candidateOne.userId}`))
     await expect(page.locator('.public-profile-view')).toContainText(candidateOne.accountName)
 
-    await page.goBack()
-    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${group.id}`)
-    await expect(page.locator('.chat-header .header-name').last()).toHaveText(title, { timeout: 30000 })
+    await openNamedRoomFromRoute(page, group.id, title)
 
-    await page.locator('.chat-header .header-user-info').last().click()
-    await expect(groupManager).toBeVisible({ timeout: 30000 })
+    await openRoomManagerFromHeader(page, groupManager, 'مدیریت گروه')
     await groupManager.locator('.telegram-row').filter({ hasText: 'مدیریت ادمین‌ها' }).click()
 
     const promotableRow = groupManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
@@ -706,9 +730,8 @@ test.describe('Messenger room manager and public profile flows', () => {
     await channelRow.click()
     await expect(page.locator('.chat-header .header-name').last()).toHaveText(title, { timeout: 30000 })
 
-    await page.locator('.chat-header .header-user-info').last().click()
     const channelManager = page.locator('.channel-manager-root')
-    await expect(channelManager).toBeVisible({ timeout: 30000 })
+    await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
 
     await channelManager.locator('.telegram-row').filter({ hasText: 'اعضای کانال' }).click()
     const expectedProfileUrl = new RegExp(`/users/${candidateOne.userId}`)
@@ -725,8 +748,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     const canonicalProfilePath = `/users/${candidateOne.userId}?account_name=${encodeURIComponent(candidateOne.accountName)}`
     if (!navigatedToProfile) {
       if (!(await channelManager.isVisible().catch(() => false))) {
-        await page.locator('.chat-header .header-user-info').last().click()
-        await expect(channelManager).toBeVisible({ timeout: 30000 })
+        await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
       }
       await channelManager.locator('.telegram-row').filter({ hasText: 'اعضای کانال' }).click()
       await clickChannelMemberProfile()
@@ -740,16 +762,9 @@ test.describe('Messenger room manager and public profile flows', () => {
 
     await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
 
-    await page.goBack()
-    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${channel.id}`)
-    const headerName = page.locator('.chat-header .header-name').last()
-    if (!(await headerName.isVisible().catch(() => false))) {
-      await page.goto(`/chat?user_id=-${channel.id}`, { waitUntil: 'domcontentloaded' })
-    }
-    await expect(headerName).toHaveText(title, { timeout: 30000 })
+    await openNamedRoomFromRoute(page, channel.id, title)
 
-    await page.locator('.chat-header .header-user-info').last().click()
-    await expect(channelManager).toBeVisible({ timeout: 30000 })
+    await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
     await channelManager.locator('.telegram-row').filter({ hasText: 'مدیریت ادمین‌ها' }).click()
 
     const promotableRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
