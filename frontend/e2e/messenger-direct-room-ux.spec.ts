@@ -209,6 +209,18 @@ function activeHeaderName(page: Page) {
   return page.locator('.chat-header .header-name:visible').first()
 }
 
+function activeComposerContainer(page: Page) {
+  return page.locator('.chat-view .input-area .input-container:visible').last()
+}
+
+function activeAttachButton(page: Page) {
+  return activeComposerContainer(page).locator('button.attach-btn')
+}
+
+function activeComposerTextbox(page: Page) {
+  return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
+}
+
 async function clickVisibleChatBackButton(page: Page) {
   await page.evaluate(() => {
     const currentState = window.history.state
@@ -230,29 +242,18 @@ async function openConversationFromList(page: Page, userName: string) {
 }
 
 async function fillComposerCaption(page: Page, caption: string): Promise<Locator> {
-  const composers = page.locator('textarea[placeholder="پیام..."]')
-  const composerCount = await composers.count()
+  const container = activeComposerContainer(page)
+  const composer = activeComposerTextbox(page).first()
 
-  for (let index = composerCount - 1; index >= 0; index -= 1) {
-    const composer = composers.nth(index)
-    if (!(await composer.isVisible().catch(() => false))) {
-      continue
-    }
+  await expect(composer).toBeVisible({ timeout: 30000 })
+  await composer.click()
+  await composer.fill('')
+  await composer.pressSequentially(caption)
+  await expect(composer).toHaveValue(caption)
 
-    const container = composer.locator('xpath=ancestor::div[contains(@class, "input-container")][1]')
-    await composer.click()
-    await composer.fill('')
-    await composer.pressSequentially(caption)
-    await expect(composer).toHaveValue(caption)
-
-    const sendButton = container.locator('.send-btn-inline')
-    if (await sendButton.count()) {
-      await expect(sendButton).toBeVisible({ timeout: 30000 })
-      return container
-    }
-  }
-
-  throw new Error('Unable to find an active direct-room composer container for captioned media input')
+  const sendButton = container.locator('.send-btn-inline')
+  await expect(sendButton).toBeVisible({ timeout: 30000 })
+  return container
 }
 
 async function navigateFromMessengerToMarket(page: Page) {
@@ -645,7 +646,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await expect(activeHeaderName(page)).toContainText(peer.accountName, { timeout: 30000 })
     await expect(page).toHaveURL(new RegExp(`/chat\\?user_id=${peer.userId}(?:&user_name=.*)?$`))
 
-    await page.locator('button.attach-btn').click()
+    await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await page.getByRole('button', { name: 'فایل' }).first().click()
     await injectDocument(page)
@@ -695,7 +696,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await senderPage.locator('textarea[placeholder="پیام..."]').fill(`PW DIRECT ACTIVITY ${Date.now()}`)
       await expect(receiverPage.locator('.chat-header:visible').last()).toContainText('در حال نوشتن', { timeout: 30000 })
 
-      await senderPage.locator('button.attach-btn').click()
+      await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
       await injectDocument(senderPage, { sizeBytes: largeDocumentSizeBytes })
@@ -766,7 +767,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         await route.continue()
       })
 
-      await senderPage.locator('button.attach-btn').click()
+      await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
       await senderPage.getByRole('button', { name: 'فایل' }).first().click()
       await injectDocument(senderPage)
@@ -839,7 +840,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       await route.continue()
     })
 
-    await page.locator('button.attach-btn').click()
+    await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
     await page.getByRole('button', { name: 'فایل' }).first().click()
     await injectDocument(page)

@@ -745,6 +745,14 @@ Post-Stage 12 progress:
 	- `channel-media.spec.ts` now logs gallery/document injection milestones and opens forward context actions from the non-media `.msg-meta` target, matching the current media click guard behavior.
 	- Focused validation: `npm run test:unit:run -- src/components/chat/AttachmentMenu.test.ts` passed (`38` tests), the first failing channel album test passed, the two gallery resend/caption tests passed in the known-failure subset, and `channel admin can forward a video message into the channel` passed independently on Chromium.
 	- Production/deploy validation: `npm run build` passed at `2026-06-02T18:39Z`; `make foreign` then completed successfully with `app` and `bot` healthy. The existing Vite chunk-size warning remains non-blocking.
+- Full browser-matrix review:
+	- The full `npm run test:e2e:matrix -- --reporter=line` pass logged at `tmp/e2e-logs/messenger-matrix-20260602T184628Z.log` completed with `303` passed, `3` skipped, and `36` failed across `342` tests.
+	- Messenger-related failures were concentrated in transition-duplicate DOM strictness, stale/non-specific message locators, transient room-message API socket drops during the heavy matrix, and an over-specific single-media upload route-counter assertion where UI and backend delivery had already succeeded.
+	- Non-Messenger failures remain separate acceptance risks: `market-offers.spec.ts` and `trade-history-accountant.spec.ts` failed across multiple browsers and should be handled under their own roadmap/gate instead of being folded into Messenger refactor closure.
+- Browser-matrix selector/counter hardening:
+	- `messenger-direct-room-ux.spec.ts`, `channel-media.spec.ts`, `direct-chat.spec.ts`, and `mandatory-channel.spec.ts` now scope active composer/header/message controls to visible chat surfaces so route transition clones cannot trigger Playwright strict-mode failures.
+	- Room-message polling in `channel-media.spec.ts` now retries short-lived request exceptions, covering observed `socket hang up` drops without hiding failed HTTP responses.
+	- The group single-image/single-video route assertion now treats backend message delivery, visible captions/media, and zero legacy `/upload-media` hits as the authoritative contract, while requiring at least one observed resumable upload route hit instead of assuming Playwright will count every upload request under matrix load.
 
 ## Prompt Template (Operational)
 
