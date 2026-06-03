@@ -1444,6 +1444,7 @@ test.describe('Channel media regressions', () => {
         await expect(senderPage.locator('.messages-container [data-media-msg-id]').first()).toBeVisible({ timeout: 30000 })
       }
       await expect.poll(() => sawBatchCreate && sawSessionCreate, { timeout: 30000 }).toBe(true)
+      await waitForPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId)
 
       await navigateFromMessengerToMarket(senderPage)
 
