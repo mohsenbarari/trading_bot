@@ -242,12 +242,21 @@ async function expectPublicProfileForUser(page: Page, userId: number, accountNam
   const expectedProfileUrl = new RegExp(`/users/${userId}`)
   const canonicalProfilePath = `/users/${userId}?account_name=${encodeURIComponent(accountName)}`
   const profileView = page.locator('.public-profile-view')
-  const hasLoadedProfile =
-    expectedProfileUrl.test(page.url()) &&
+  await page.waitForURL(expectedProfileUrl, { timeout: 7000 }).catch(() => {})
+
+  const hasLoadedProfile = expectedProfileUrl.test(page.url()) &&
     await profileView.filter({ hasText: accountName }).first().isVisible({ timeout: 5000 }).catch(() => false)
 
   if (!hasLoadedProfile) {
-    await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
+    try {
+      await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/ERR_ABORTED|interrupted by another navigation/i.test(message)) {
+        throw error
+      }
+      await page.waitForURL(expectedProfileUrl, { timeout: 15000 }).catch(() => {})
+    }
   }
 
   await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
