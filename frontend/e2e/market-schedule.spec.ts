@@ -143,9 +143,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete
 
 from core.db import AsyncSessionLocal
+from core.services.market_transition_service import get_market_runtime_view
 from core.trading_settings import save_trading_settings_async
 from models.market_runtime_state import MarketRuntimeState
-from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
+from models.market_schedule_override import MarketScheduleOverride
 
 mode = ${JSON.stringify(options.mode)}
 notice_visible = ${toPythonBool(options.noticeVisible)}
@@ -153,33 +154,20 @@ offers_since_last_open = ${options.offersSinceLastOpen}
 disable_schedule = ${toPythonBool(!!options.disableSchedule)}
 
 async def main():
-    tehran_today = datetime.now(ZoneInfo('Asia/Tehran')).date()
+    tehran_now = datetime.now(ZoneInfo('Asia/Tehran'))
+    tehran_today = tehran_now.date()
 
     settings_payload = {
         'market_schedule_enabled': not disable_schedule,
         'market_timezone': 'Asia/Tehran',
-        'market_open_time_local': '09:00',
-        'market_close_time_local': '18:00',
-        'market_closed_weekdays': [],
+        'market_open_time_local': '00:00' if not disable_schedule else '09:00',
+        'market_close_time_local': '23:59' if not disable_schedule else '18:00',
+        'market_closed_weekdays': [tehran_today.weekday()] if (not disable_schedule and mode == 'closed') else [],
     }
     await save_trading_settings_async(settings_payload)
 
     async with AsyncSessionLocal() as db:
         await db.execute(delete(MarketScheduleOverride))
-
-        if not disable_schedule:
-            override = MarketScheduleOverride(
-                date=tehran_today,
-                override_type=(
-                    MarketScheduleOverrideType.OPEN_ALL_DAY
-                    if mode == 'open'
-                    else MarketScheduleOverrideType.CLOSED_ALL_DAY
-                ),
-              open_time_local=None,
-              close_time_local=None,
-                note='Playwright market schedule override',
-            )
-            db.add(override)
 
         state = await db.get(MarketRuntimeState, 1)
         if state is None:
@@ -192,6 +180,21 @@ async def main():
         state.last_transition_at = datetime.now(timezone.utc)
 
         await db.commit()
+
+        deadline = datetime.now(timezone.utc).timestamp() + 10
+        while datetime.now(timezone.utc).timestamp() < deadline:
+            runtime_view = await get_market_runtime_view(db)
+            if runtime_view.is_open == (mode == 'open' or disable_schedule):
+                break
+            await asyncio.sleep(0.25)
+            await db.rollback()
+        else:
+            runtime_view = await get_market_runtime_view(db)
+            raise RuntimeError(
+                f"Market runtime seed did not converge: mode={mode} disable_schedule={disable_schedule} "
+                f"view_open={runtime_view.is_open} notice={runtime_view.active_web_notice_visible} "
+                f"offers={runtime_view.offers_since_last_open}"
+            )
 
     print(json.dumps({'ok': True}))
 

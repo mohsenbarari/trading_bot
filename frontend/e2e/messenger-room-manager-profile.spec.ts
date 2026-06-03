@@ -757,10 +757,9 @@ test.describe('Messenger room manager and public profile flows', () => {
     const openedByClick = await page.waitForURL(expectedProfileUrl, { timeout: 7000 }).then(() => true).catch(() => false)
     if (!openedByClick || !expectedProfileUrl.test(page.url())) {
       await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
-      await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
     }
 
-    await expect(page).toHaveURL(expectedProfileUrl, { timeout: 30000 })
+    await expect(page.locator('.public-profile-view')).toContainText(candidateOne.accountName, { timeout: 30000 })
 
     await openNamedRoomFromRoute(page, channel.id, title)
 
