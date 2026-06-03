@@ -787,6 +787,13 @@ Post-Stage 12 progress:
 	- Focused validation passed:
 		- `npm run test:e2e -- e2e/channel-media.spec.ts --grep="group single image and single video preserve captions and update room previews" --project=webkit --reporter=line` (`2/2`, Chromium + WebKit due the project script default).
 		- `npm run test:e2e -- e2e/notifications.spec.ts --grep="websocket heartbeat pong does not emit JSON parse errors" --project=webkit --reporter=line` (`2/2`, Chromium + WebKit due the project script default).
+- Acceptance matrix interrupted-run follow-up:
+	- The `acceptance-matrix-20260603T093917Z.log` run progressed to `229/342` and then stopped without a Playwright summary; the last persisted error contexts were Firefox `lot-suggestion` and a WebKit `admin-smoke` `Channel closed`.
+	- `lot-suggestion.spec.ts` now selects the public offer card by the exact description paragraph instead of a substring that also matched the `own-pw-offer...` card and hid the `10 عدد` trade button.
+	- `admin-smoke.spec.ts` now primes auth through the shared `primeAuthSession` helper and opens `/admin` with `domcontentloaded`, matching the stable auth setup used by newer specs.
+	- Focused validation passed:
+		- `npm run test:e2e -- e2e/lot-suggestion.spec.ts --grep="409 suggestion modal keeps server payload" --project=firefox --reporter=line` (`2/2`, Chromium + Firefox due the project script default).
+		- `npm run test:e2e -- e2e/admin-smoke.spec.ts --grep="admin user search finds a seeded user and opens the profile view" --project=webkit --workers=1 --reporter=line` (`2/2`, Chromium + WebKit sequentially, matching the full matrix worker model).
 
 ## Prompt Template (Operational)
 
