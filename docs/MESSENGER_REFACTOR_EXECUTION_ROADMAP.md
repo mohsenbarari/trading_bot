@@ -758,6 +758,10 @@ Post-Stage 12 progress:
 	- `trade-history-accountant.spec.ts` failed because the public-profile history UI had migrated from raw date inputs to `JalaliDatePicker`; the browser regression now selects dates through stable picker test ids and compares preset export query state from the actual preset response URL.
 	- `PublicProfile.vue` now merges commodities from the currently loaded trade-history rows into the commodity filter select so the user can filter by a visible history commodity even when `/api/commodities/` pagination/ordering does not include that freshly seeded commodity.
 	- Focused validation passed: targeted market-offers regression (`1/1`), targeted public-profile history export regressions (`2/2`), and `npm run test:unit:run -- src/components/PublicProfile.test.ts` (`38/38`).
+- Acceptance matrix rerun interruption:
+	- The `acceptance-matrix-20260603T043600Z.log` run started correctly but stopped at Chromium test 15 with a Playwright API `write EPIPE` while posting `/api/chat/groups` in `group single document upload uses resumable sessions and stays attached after sender leaves messenger for market`.
+	- `channel-media.spec.ts` now wraps the setup group create/bootstrap POST requests in the same short retry helper already used for room-message reads, covering transient socket drops without masking failed HTTP responses.
+	- Focused validation passed: `npm run test:e2e -- e2e/channel-media.spec.ts --grep="group single document upload uses resumable sessions and stays attached after sender leaves messenger for market" --reporter=line` (`1/1`).
 
 ## Prompt Template (Operational)
 
