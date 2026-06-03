@@ -123,6 +123,7 @@ The post-Stage-7 program is done only when all of the following are true:
 - Conversation list and heavy-room performance are both at least back to pre-refactor baseline and measurably better than Stage 7. **Closed for critical chat/open/heap/DOM metrics; small list/context deltas remain acceptance-window watch items.**
 - Messenger JS/CSS payload growth is justified and controlled.
 - Browser matrix is green on Chromium, Firefox, and WebKit.
+  - 2026-06-03 acceptance rerun `acceptance-matrix-20260603T111112Z.log` reached `335 passed`, `3 skipped`, `4 failed`. The remaining gate is focused on cross-browser stability for direct composer input, room manager profile return/header-open flows, and pinned-message reload hydration.
 - Manual UX review confirms the UI feels unified rather than a mix of legacy and new interaction models.
 - The user explicitly approves the legacy-retirement decision.
 
