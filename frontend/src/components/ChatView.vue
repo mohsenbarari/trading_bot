@@ -3239,6 +3239,7 @@ const chatRoomContainerState = computed(() => ({
   messagePanelError: messagePanelError.value,
   messages: messages.value,
   groupedMessages: groupedMessages.value,
+  timelineRenderBudget: timelineRenderBudget.value,
   isSelectionMode: isSelectionMode.value,
   activeAlbumSelectionId: activeAlbumSelectionId.value,
   selectionMemoKey: selectionMemoKey.value,

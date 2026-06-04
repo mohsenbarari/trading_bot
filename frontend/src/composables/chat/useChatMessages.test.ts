@@ -156,6 +156,7 @@ describe('useChatMessages', () => {
     consoleErrorSpy.mockRestore()
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
+    vi.unstubAllEnvs()
   })
 
   it('loads conversations, syncs muted ids, and stores fetch errors', async () => {
@@ -222,6 +223,38 @@ describe('useChatMessages', () => {
     expect(scrollToUnreadOrBottomMock).toHaveBeenCalledTimes(1)
     expect(messageMocks.markChatAsRead).toHaveBeenCalledWith(12)
     expect(isLoadingMessages.value).toBe(false)
+  })
+
+  it('requests the virtual timeline open limit only when the stage E flag is enabled', async () => {
+    createSubject()
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/read/12') return {}
+      return []
+    })
+
+    await subject.loadMessages(12)
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=16&/),
+      {},
+      expect.any(Object),
+    )
+
+    scope?.stop()
+    messages.value = []
+    vi.stubEnv('VITE_MESSENGER_VIRTUAL_TIMELINE', 'true')
+    createSubject()
+    messageMocks.apiFetchJson.mockClear()
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/read/12') return {}
+      return []
+    })
+
+    await subject.loadMessages(12)
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=180&/),
+      {},
+      expect.any(Object),
+    )
   })
 
   it('reuses the snapshot warm path before the fresh server load resolves', async () => {
