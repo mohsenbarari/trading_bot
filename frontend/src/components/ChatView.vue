@@ -165,6 +165,7 @@ const searchDebounceTimeout = ref<any>(null)
 // UI State
 const isLoadingMessages = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
+const virtualTimelineRef = ref<{ scrollToMessage: (messageId: number) => boolean } | null>(null)
 const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
@@ -365,7 +366,7 @@ const {
   forceScrollToBottom,
   handleScroll,
   scrollToUnreadOrBottom,
-  scrollToMessage
+  scrollToMessage: scrollToMessageInDom
 } = useChatScroll({
   messagesContainer,
   messages,
@@ -377,6 +378,18 @@ const {
 })
 
 watch(scrollIsViewingReply, (val) => { isViewingReply.value = val })
+
+function scrollToMessage(msgId: number) {
+  if (virtualTimelineRef.value?.scrollToMessage(msgId)) {
+    isViewingReply.value = true
+    window.setTimeout(() => {
+      isViewingReply.value = false
+    }, 3000)
+    return
+  }
+
+  scrollToMessageInDom(msgId)
+}
 
 const unreadMentionMessages = computed(() => {
   if (!props.currentUserId) return []
@@ -3270,6 +3283,11 @@ const chatRoomContainerState = computed(() => ({
 const chatRoomContainerHandlers = {
   setMessagesContainer: (element: Element | null) => {
     messagesContainer.value = element instanceof HTMLElement ? element : null
+  },
+  setVirtualTimelineRef: (component: any) => {
+    virtualTimelineRef.value = component && typeof component.scrollToMessage === 'function'
+      ? component
+      : null
   },
   setChatInputBarRef: (component: any) => {
     chatInputBarRef.value = component

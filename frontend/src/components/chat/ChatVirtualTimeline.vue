@@ -4,22 +4,16 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 
 import ChatMessageItem from './ChatMessageItem.vue'
 import MessageRenderBoundary from './messages/MessageRenderBoundary.vue'
-import type { ChatTimelineGroup, ChatTimelineItem, Message } from '../../types/chat'
-import { normalizeTimelineMediaDimensions, resolveMessageMediaDimensions } from '../../utils/chatMediaDimensions'
-
-type VirtualDateRow = {
-  type: 'date'
-  key: string
-  group: ChatTimelineGroup
-}
-
-type VirtualMessageRow = {
-  type: 'message'
-  key: string
-  item: ChatTimelineItem
-}
-
-type VirtualTimelineRow = VirtualDateRow | VirtualMessageRow
+import type { ChatTimelineGroup } from '../../types/chat'
+import { normalizeTimelineMediaDimensions } from '../../utils/chatMediaDimensions'
+import {
+  buildVirtualTimelineRows,
+  estimateVirtualTimelineRowSize,
+  findVirtualTimelineMessageRowIndex,
+  type VirtualDateRow,
+  type VirtualMessageRow,
+  type VirtualTimelineRow,
+} from '../../utils/chatVirtualTimeline'
 
 const props = defineProps<{
   groups: ChatTimelineGroup[]
@@ -32,53 +26,10 @@ const measuredRowHeights = new Map<string, number>()
 
 const normalizedGroups = computed(() => normalizeTimelineMediaDimensions(props.groups || []))
 
-const rows = computed<VirtualTimelineRow[]>(() => {
-  const flattened: VirtualTimelineRow[] = []
-  for (const group of normalizedGroups.value) {
-    flattened.push({
-      type: 'date',
-      key: `date:${group.label}`,
-      group,
-    })
-    for (const item of group.items) {
-      flattened.push({
-        type: 'message',
-        key: `message:${item.id}`,
-        item,
-      })
-    }
-  }
-  return flattened
-})
-
-function estimateMessageSize(item: ChatTimelineItem) {
-  if ('messages' in item) {
-    const count = item.messages.length
-    if (count <= 1) return 270
-    if (count <= 3) return 250
-    return 330
-  }
-
-  const message = item as Message
-  if (message.message_type === 'image' || message.message_type === 'video') {
-    const dimensions = resolveMessageMediaDimensions(message)
-    return Math.min(452, Math.max(210, Math.round(320 / dimensions.aspectRatio) + 64))
-  }
-  if (message.message_type === 'voice') return 88
-  if (message.message_type === 'document') return 112
-  if (message.message_type === 'location') return 230
-
-  const textLength = typeof message.content === 'string' ? message.content.length : 0
-  const lines = Math.ceil(textLength / 42)
-  return Math.min(220, Math.max(58, 44 + lines * 24))
-}
+const rows = computed<VirtualTimelineRow[]>(() => buildVirtualTimelineRows(normalizedGroups.value))
 
 function estimateRowSize(index: number) {
-  const row = rows.value[index]
-  if (!row) return 72
-  const measured = measuredRowHeights.get(row.key)
-  if (measured) return measured
-  return row.type === 'date' ? 38 : estimateMessageSize(row.item)
+  return estimateVirtualTimelineRowSize(rows.value, index, measuredRowHeights)
 }
 
 const virtualizer = useVirtualizer({
@@ -100,6 +51,37 @@ function setMeasuredRowRef(key: string, element: Element | null) {
     measuredRowHeights.set(key, height)
   }
 }
+
+function highlightRenderedMessage(messageId: number) {
+  const element = document.getElementById(`msg-${messageId}`) || document.getElementById(`album-item-${messageId}`)
+  if (!element) return false
+
+  element.classList.remove('highlight-message')
+  void (element as HTMLElement).offsetWidth
+  element.classList.add('highlight-message')
+  window.setTimeout(() => {
+    element.classList.remove('highlight-message')
+  }, 3000)
+  return true
+}
+
+function scrollToMessage(messageId: number) {
+  const rowIndex = findVirtualTimelineMessageRowIndex(rows.value, messageId)
+  if (rowIndex < 0) return false
+
+  virtualizer.value.scrollToIndex(rowIndex, { align: 'center' })
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      highlightRenderedMessage(messageId)
+      virtualizer.value.measure()
+    })
+  })
+  return true
+}
+
+defineExpose({
+  scrollToMessage,
+})
 </script>
 
 <template>

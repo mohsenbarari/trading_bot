@@ -80,6 +80,7 @@ const useVirtualTimeline = computed(() => {
 
       <ChatVirtualTimeline
         v-if="useVirtualTimeline"
+        :ref="handlers.setVirtualTimelineRef"
         :groups="state.groupedMessages"
         :state="state"
         :handlers="handlers"

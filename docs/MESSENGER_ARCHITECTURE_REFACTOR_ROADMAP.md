@@ -438,9 +438,17 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
 - Validation passed for this slice:
   - `npm run test:unit:run -- src/utils/chatMediaDimensions.test.ts src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatAlbumLayout.test.ts src/components/ChatView.test.ts`
   - `npm run build`
+- Continued on 2026-06-04 with virtual timeline hardening:
+  - extracted `chatVirtualTimeline.ts` for stable row flattening, row-size estimation, measured-height fallback, and direct/album child message row lookup.
+  - added focused tests for date/message row keys, known-media estimates, fallback-media estimates, measured row-height cache, and album-child jump lookup.
+  - exposed `ChatVirtualTimeline.scrollToMessage(messageId)` and connected it to `ChatView` through `ChatRoomContainer`, so search/reply/pinned jumps can ask the virtual timeline to render offscreen rows before falling back to legacy DOM scrolling.
+  - kept the virtual path behind `VITE_MESSENGER_VIRTUAL_TIMELINE=true`; default production scrolling still uses the existing DOM path.
+- Validation passed for the hardening slice:
+  - `npm run test:unit:run -- src/utils/chatMediaDimensions.test.ts src/utils/chatVirtualTimeline.test.ts src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatAlbumLayout.test.ts src/components/ChatView.test.ts`
+  - `npm run build`
 - Remaining before Stage E can close:
-  - add virtual timeline unit tests for row estimation, measured row cache, and known/fallback media ratios.
-  - complete two-phase scroll adjustment for search/reply/pinned/unread jumps while the virtual timeline is enabled.
+  - run a browser-level virtual timeline flag check for search/reply/pinned/unread jumps and older-message prepend anchoring.
+  - complete any browser-observed two-phase scroll correction gaps that are not visible in unit tests.
   - verify older-message prepend anchor preservation in the virtual path.
   - run the Stage E benchmark subset: S02 heavy direct, S03 media-heavy, S04 search/viewer, S10 weak-device.
   - only then decide whether `VITE_MESSENGER_VIRTUAL_TIMELINE=true` is safe for broader rollout.
