@@ -44,6 +44,11 @@ const virtualizer = useVirtualizer(computed(() => ({
 const virtualItems = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
+type VirtualScrollToMessageOptions = {
+  align?: 'start' | 'center' | 'end' | 'auto'
+  highlight?: boolean
+}
+
 function setMeasuredRowRef(key: string, element: Element | null) {
   if (!(element instanceof HTMLElement)) return
   virtualizer.value.measureElement(element)
@@ -54,7 +59,7 @@ function setMeasuredRowRef(key: string, element: Element | null) {
 }
 
 function highlightRenderedMessage(messageId: number) {
-  const element = document.getElementById(`msg-${messageId}`) || document.getElementById(`album-item-${messageId}`)
+  const element = getRenderedMessageElement(messageId)
   if (!element) return false
 
   element.classList.remove('highlight-message')
@@ -66,17 +71,57 @@ function highlightRenderedMessage(messageId: number) {
   return true
 }
 
-function scrollToMessage(messageId: number) {
+function getRenderedMessageElement(messageId: number) {
+  return document.getElementById(`msg-${messageId}`) || document.getElementById(`album-item-${messageId}`)
+}
+
+function isRenderedMessageAligned(messageId: number, align: VirtualScrollToMessageOptions['align']) {
+  const element = getRenderedMessageElement(messageId)
+  const scrollElement = rootRef.value?.parentElement
+  if (!(element instanceof HTMLElement) || !(scrollElement instanceof HTMLElement)) {
+    return false
+  }
+
+  if (align !== 'start') {
+    return true
+  }
+
+  const elementRect = element.getBoundingClientRect()
+  const scrollRect = scrollElement.getBoundingClientRect()
+  return Math.abs(elementRect.top - scrollRect.top) <= 24
+}
+
+function findFirstUnreadMessageId(currentUserId: number) {
+  for (const row of rows.value) {
+    if (row.type !== 'message') continue
+    if ('messages' in row.item) {
+      const unreadAlbumItem = row.item.messages.find(message => message.receiver_id === currentUserId && !message.is_read)
+      if (unreadAlbumItem) return unreadAlbumItem.id
+      continue
+    }
+
+    if (row.item.receiver_id === currentUserId && !row.item.is_read) {
+      return row.item.id
+    }
+  }
+
+  return null
+}
+
+function scrollToMessage(messageId: number, options: VirtualScrollToMessageOptions = {}) {
   const rowIndex = findVirtualTimelineMessageRowIndex(rows.value, messageId)
   if (rowIndex < 0) return false
 
   let attempt = 0
+  const align = options.align ?? 'center'
+  const shouldHighlight = options.highlight ?? true
   const adjustAndHighlight = () => {
-    virtualizer.value.scrollToIndex(rowIndex, { align: 'center' })
+    virtualizer.value.scrollToIndex(rowIndex, { align })
     requestAnimationFrame(() => {
       void nextTick(() => {
         virtualizer.value.measure()
-        if (highlightRenderedMessage(messageId)) return
+        if (shouldHighlight && highlightRenderedMessage(messageId)) return
+        if (!shouldHighlight && isRenderedMessageAligned(messageId, align)) return
 
         attempt += 1
         if (attempt < MAX_SCROLL_ADJUSTMENT_ATTEMPTS) {
@@ -90,8 +135,30 @@ function scrollToMessage(messageId: number) {
   return true
 }
 
+function scrollToBottom() {
+  if (rows.value.length === 0) return false
+  virtualizer.value.scrollToIndex(rows.value.length - 1, { align: 'end' })
+  return true
+}
+
+function scrollToUnreadOrBottom(currentUserId: number) {
+  const unreadMessageId = findFirstUnreadMessageId(currentUserId)
+  if (unreadMessageId !== null) {
+    return scrollToMessage(unreadMessageId, { align: 'start', highlight: false })
+  }
+
+  return scrollToBottom()
+}
+
+function preservePrependAnchor(messageId: number) {
+  return scrollToMessage(messageId, { align: 'start', highlight: false })
+}
+
 defineExpose({
   scrollToMessage,
+  scrollToBottom,
+  scrollToUnreadOrBottom,
+  preservePrependAnchor,
 })
 </script>
 
