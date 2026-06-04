@@ -446,8 +446,16 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
 - Validation passed for the hardening slice:
   - `npm run test:unit:run -- src/utils/chatMediaDimensions.test.ts src/utils/chatVirtualTimeline.test.ts src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatAlbumLayout.test.ts src/components/ChatView.test.ts`
   - `npm run build`
+- Continued on 2026-06-04 with the browser flag gate scaffold:
+  - added `frontend/e2e/messenger-virtual-timeline.spec.ts`.
+  - the spec seeds a heavy direct room, requires `VITE_MESSENGER_VIRTUAL_TIMELINE=true`, asserts `.virtual-timeline` is active, checks rendered bubble count remains below the full room size, and verifies in-chat search can highlight an offscreen virtual row.
+  - attempted command: `VITE_MESSENGER_VIRTUAL_TIMELINE=true npm run test:e2e -- e2e/messenger-virtual-timeline.spec.ts --project=chromium --reporter=line`.
+  - execution did not reach app assertions because the local environment lacks the Playwright Chromium executable at `/root/.cache/ms-playwright/chromium_headless_shell-1217/...`.
+  - `npm run test:unit:run -- src/utils/chatMediaDimensions.test.ts src/utils/chatVirtualTimeline.test.ts src/components/ChatView.test.ts` passed.
+  - `npm run build` passed.
 - Remaining before Stage E can close:
-  - run a browser-level virtual timeline flag check for search/reply/pinned/unread jumps and older-message prepend anchoring.
+  - install/provide a Playwright Chromium executable or run the browser gate on a host that already has it, then rerun `messenger-virtual-timeline.spec.ts`.
+  - extend the browser-level virtual timeline flag check from search jump to reply/pinned/unread jumps and older-message prepend anchoring.
   - complete any browser-observed two-phase scroll correction gaps that are not visible in unit tests.
   - verify older-message prepend anchor preservation in the virtual path.
   - run the Stage E benchmark subset: S02 heavy direct, S03 media-heavy, S04 search/viewer, S10 weak-device.
