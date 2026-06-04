@@ -2180,12 +2180,34 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
               })
             : []
 
-        if (committedMessages.length < sendableUploads.length) {
+        const committedByAlbumIndex = new Map<number, Message>()
+        committedMessages.forEach((message) => {
+            const albumIndex = getCommittedAlbumMessageIndex(message)
+            if (albumIndex !== Number.MAX_SAFE_INTEGER && !committedByAlbumIndex.has(albumIndex)) {
+                committedByAlbumIndex.set(albumIndex, message)
+            }
+        })
+        const fallbackCommittedMessages = [...committedMessages]
+        const matchedUploads: Array<{ upload: PendingUpload; serverMessage: Message }> = []
+        const missingUploads: PendingUpload[] = []
+
+        const canMatchByAlbumIndex = committedByAlbumIndex.size > 0
+
+        sendableUploads.forEach((upload, index) => {
+            const indexedMessage = committedByAlbumIndex.get(upload.albumIndex)
+            const serverMessage = indexedMessage ?? (canMatchByAlbumIndex ? undefined : fallbackCommittedMessages[index])
+            if (!serverMessage) {
+                missingUploads.push(upload)
+                return
+            }
+            matchedUploads.push({ upload, serverMessage })
+        })
+
+        if (matchedUploads.length === 0) {
             throw new Error('همه پیام های آلبوم از سرور دریافت نشد')
         }
 
-        await Promise.all(sendableUploads.map(async (upload, index) => {
-            const serverMessage = committedMessages[index]!
+        await Promise.all(matchedUploads.map(async ({ upload, serverMessage }) => {
             upload.phase = 'sent'
             stopUploadActivity(upload)
             emit({
@@ -2199,6 +2221,34 @@ async function commitAlbumBatch(batch: AlbumBatchState, uploads: PendingUpload[]
             await sendingPersistPromises.get(upload.id)
             await deletePersistedUpload(upload.id)
         }))
+
+        if (missingUploads.length > 0) {
+            const attempt = (batch.commitRetryCount ?? 0) + 1
+            if (attempt > MAX_SEND_RETRIES) {
+                await Promise.all(missingUploads.map(async (upload) => {
+                    await sendingPersistPromises.get(upload.id)
+                    await markFailed(upload, 'همه پیام های آلبوم از سرور دریافت نشد')
+                }))
+                return
+            }
+
+            batch.commitRetryCount = attempt
+            await Promise.all(missingUploads.map(async (upload) => {
+                upload.phase = 'uploaded'
+                upload.sendRetryCount = attempt
+                await sendingPersistPromises.get(upload.id)
+                await idbPut(upload)
+            }))
+            const delay = computeSendRetryDelayMs(attempt - 1)
+            console.warn(
+                `[uploadService] album commit returned ${matchedUploads.length}/${sendableUploads.length} messages; ` +
+                    `retrying ${missingUploads.length} missing item(s) in ${delay}ms.`,
+            )
+            setTimeout(() => {
+                if (!albumBatches.has(batch.albumId)) return
+                void flushAlbumBatchIfReady(batch.albumId)
+            }, delay)
+        }
     } catch (error) {
         const normalizedError = sendTimedOut ? new Error('Network Error (send timeout)') : error
         const shouldRetry =

@@ -1111,6 +1111,54 @@ describe('chatUploadBackground', () => {
     await hooks.commitAlbumBatch(failingBatch, [failingUpload])
     expect(failingUpload.phase).toBe('failed')
     expect(events.some((event) => event.type === 'error' && event.optimisticId === -984)).toBe(true)
+
+    let partialCommitAttempts = 0
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/chat/upload-batches/album-partial-batch/commit')) {
+        partialCommitAttempts += 1
+        if (partialCommitAttempts === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              messages: [
+                { id: 9991, sender_id: 15, receiver_id: 77, content: JSON.stringify({ album_index: 0 }), message_type: 'image', is_read: false, created_at: '2026-05-14T00:32:00Z' },
+              ],
+            }),
+          } as Response
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            messages: [
+              { id: 9992, sender_id: 15, receiver_id: 77, content: JSON.stringify({ album_index: 1 }), message_type: 'image', is_read: false, created_at: '2026-05-14T00:32:01Z' },
+            ],
+          }),
+        } as Response
+      }
+      throw new Error(`Unexpected fetch ${url}`)
+    })
+    const partialBatch = hooks.ensureAlbumBatch('album-partial', 77, 2, 'group', 'album-partial-batch')
+    const partialFirst = { ...makeAlbumUpload(-985, 0), albumId: 'album-partial', batchId: 'album-partial-batch' }
+    const partialSecond = { ...makeAlbumUpload(-986, 1), albumId: 'album-partial', batchId: 'album-partial-batch' }
+    hooks.state.pendingUploads.set(-985, partialFirst)
+    hooks.state.pendingUploads.set(-986, partialSecond)
+    partialBatch.optimisticIds.add(-985)
+    partialBatch.optimisticIds.add(-986)
+    await hooks.commitAlbumBatch(partialBatch, [partialFirst, partialSecond])
+
+    expect(partialFirst.phase).toBe('sent')
+    expect(hooks.state.pendingUploads.has(-985)).toBe(false)
+    expect(partialSecond.phase).toBe('uploaded')
+    expect(hooks.state.pendingUploads.has(-986)).toBe(true)
+
+    await vi.runAllTimersAsync()
+    expect(partialCommitAttempts).toBe(2)
+    expect(events.filter((event) => event.type === 'sent').map((event) => event.optimisticId)).toEqual(
+      expect.arrayContaining([-985, -986]),
+    )
   })
 
   it('covers IndexedDB open, upgrade, and failed transaction branches', async () => {
