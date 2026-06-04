@@ -6,7 +6,11 @@ import type { ChatForwardTarget, Conversation } from '../../types/chat'
 type ForwardUser = {
   id: number
   account_name: string
+  full_name?: string | null
   mobile_number: string
+  avatar_file_id?: string | null
+  resolved_from_accountant_id?: number | null
+  highlight_accountant_relation_display_name?: string | null
 }
 
 type ForwardTargetCandidate = ChatForwardTarget & {
@@ -55,6 +59,11 @@ function buildSearchText(parts: Array<string | null | undefined>) {
   return normalizeSearchValue(parts.filter(Boolean).join(' '))
 }
 
+function getForwardUserTitle(user: ForwardUser) {
+  const fullName = (user.full_name || '').trim()
+  return fullName || user.account_name
+}
+
 function getTargetBadge(target: ForwardTargetCandidate) {
   if (target.kind === 'channel') return 'کانال'
   if (target.kind === 'group') return 'گروه'
@@ -80,7 +89,10 @@ async function loadForwardUsers() {
   loadError.value = ''
 
   try {
-    const users = await apiFetchJson(`/api/users-public/search?limit=${USER_FETCH_LIMIT}`) as ForwardUser[]
+    const params = new URLSearchParams()
+    params.set('limit', String(USER_FETCH_LIMIT))
+    params.set('chat_targets', 'true')
+    const users = await apiFetchJson(`/api/users-public/search?${params.toString()}`) as ForwardUser[]
     if (requestId !== fetchSequence) return
     allUsers.value = Array.isArray(users) ? users : []
   } catch (error) {
@@ -93,24 +105,28 @@ async function loadForwardUsers() {
   }
 }
 
-watch(() => props.showForwardModal, (visible) => {
-  if (visible) {
+watch(
+  () => props.showForwardModal,
+  (visible) => {
+    if (visible) {
+      searchQuery.value = ''
+      selectedTargets.value = new Map()
+      limitFlash.value = false
+      void loadForwardUsers()
+      return
+    }
+
     searchQuery.value = ''
+    loadError.value = ''
     selectedTargets.value = new Map()
     limitFlash.value = false
-    void loadForwardUsers()
-    return
-  }
-
-  searchQuery.value = ''
-  loadError.value = ''
-  selectedTargets.value = new Map()
-  limitFlash.value = false
-  if (limitFlashTimer) {
-    clearTimeout(limitFlashTimer)
-    limitFlashTimer = null
-  }
-})
+    if (limitFlashTimer) {
+      clearTimeout(limitFlashTimer)
+      limitFlashTimer = null
+    }
+  },
+  { immediate: true },
+)
 
 const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
   const targets: ForwardTargetCandidate[] = []
@@ -154,7 +170,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
     if (conversation.other_user_is_deleted) return
 
     const user = userMap.get(conversation.other_user_id)
-    const title = user?.account_name || conversation.other_user_name
+    const title = user ? getForwardUserTitle(user) : conversation.other_user_name
     const subtitle = user?.mobile_number || null
 
     targets.push({
@@ -165,7 +181,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
       subtitle,
       isConversation: true,
       conversationIndex: index,
-      searchText: buildSearchText([title, subtitle]),
+      searchText: buildSearchText([title, user?.account_name, subtitle]),
     })
 
     seenIds.add(conversation.other_user_id)
@@ -176,15 +192,16 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
     .sort((left, right) => left.account_name.localeCompare(right.account_name, 'fa'))
 
   remainingUsers.forEach((user) => {
+    const title = getForwardUserTitle(user)
     targets.push({
       key: `user-${user.id}`,
       kind: 'user',
       id: user.id,
-      title: user.account_name,
+      title,
       subtitle: user.mobile_number,
       isConversation: false,
       conversationIndex: null,
-      searchText: buildSearchText([user.account_name, user.mobile_number]),
+      searchText: buildSearchText([title, user.account_name, user.mobile_number]),
     })
   })
 

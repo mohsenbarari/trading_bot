@@ -295,6 +295,7 @@ async def _resolve_public_search_rows(
     rows: list[User],
     *,
     current_user: User,
+    preserve_chat_target_identity: bool = False,
 ) -> list[schemas.PublicUserSearchResult]:
     user_ids = [user.id for user in rows if getattr(user, "id", None) is not None]
     if not user_ids:
@@ -339,6 +340,13 @@ async def _resolve_public_search_rows(
     for user in rows:
         relation = relation_by_accountant_id.get(user.id)
         if relation and relation.owner_user and not relation.owner_user.is_deleted:
+            if preserve_chat_target_identity:
+                if user.id == current_user.id or user.id in seen_user_ids:
+                    continue
+                serialized_rows.append(_serialize_public_search_result(user))
+                seen_user_ids.add(user.id)
+                continue
+
             owner_user = relation.owner_user
             if owner_user.id == current_user.id or owner_user.id in seen_user_ids:
                 continue
@@ -386,6 +394,7 @@ async def _resolve_public_search_rows(
 async def search_public_users(
     q: Optional[str] = Query(None, min_length=1),
     limit: int = 50,
+    chat_targets: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -415,7 +424,12 @@ async def search_public_users(
     query = query.order_by(User.id.desc()).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    return await _resolve_public_search_rows(db, users, current_user=current_user)
+    return await _resolve_public_search_rows(
+        db,
+        users,
+        current_user=current_user,
+        preserve_chat_target_identity=chat_targets,
+    )
 
 
 @router.get("/{user_id}/project-users", response_model=List[schemas.ProjectUserDirectoryEntry])

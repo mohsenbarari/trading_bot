@@ -160,6 +160,31 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("role", result[0].model_dump())
         self.assertNotIn("address", result[0].model_dump())
 
+    async def test_search_public_users_preserves_accountant_identity_for_chat_targets(self):
+        current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)
+        owner_user = make_user(id=20, account_name="owner20")
+        accountant = make_user(id=7, account_name="acct7")
+        db = FakeDB([
+            FakeExecuteResult([accountant]),
+            FakeExecuteResult([
+                make_relation(accountant_user_id=7, owner_user=owner_user, relation_display_name="حسابدار فروش"),
+            ]),
+            FakeExecuteResult([]),
+        ])
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await search_public_users(q="acct", limit=10, chat_targets=True, db=db, current_user=current_user)
+
+        self.assertEqual([item.id for item in result], [7])
+        self.assertEqual(result[0].account_name, "acct7")
+        self.assertIsNone(result[0].resolved_from_accountant_id)
+
     async def test_search_public_users_skips_owner_resolved_to_current_user(self):
         current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)
         current_owner = make_user(id=5, account_name="owner5")
