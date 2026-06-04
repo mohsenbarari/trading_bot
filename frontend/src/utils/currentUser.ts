@@ -79,17 +79,20 @@ export function clearCurrentUserSummary() {
 }
 
 let currentUserRequest: Promise<CurrentUserSummary | null> | null = null
+let currentUserRequestAuthToken: string | null = null
 
 export async function primeCurrentUserSummary(force = false): Promise<CurrentUserSummary | null> {
   if (!force && currentUserSummary.value?.role) {
     return currentUserSummary.value
   }
 
-  if (currentUserRequest) {
+  const requestAuthToken = hasStorage() ? localStorage.getItem('auth_token') : null
+
+  if (currentUserRequest && currentUserRequestAuthToken === requestAuthToken) {
     return currentUserRequest
   }
 
-  currentUserRequest = (async () => {
+  const request = (async () => {
     try {
       const response = await apiFetch('/api/auth/me')
       if (!response.ok) {
@@ -99,14 +102,23 @@ export async function primeCurrentUserSummary(force = false): Promise<CurrentUse
         return currentUserSummary.value
       }
 
+      if ((hasStorage() ? localStorage.getItem('auth_token') : null) !== requestAuthToken) {
+        return currentUserSummary.value
+      }
+
       return cacheCurrentUserSummary(await response.json())
     } catch {
       return currentUserSummary.value
     } finally {
-      currentUserRequest = null
+      if (currentUserRequest === request) {
+        currentUserRequest = null
+        currentUserRequestAuthToken = null
+      }
     }
   })()
 
+  currentUserRequest = request
+  currentUserRequestAuthToken = requestAuthToken
   return currentUserRequest
 }
 
