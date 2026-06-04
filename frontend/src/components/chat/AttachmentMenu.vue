@@ -1044,7 +1044,6 @@ async function sendCapturedMediaQueue() {
   const albumId = queuedItems.length > 1 ? createCameraAlbumId() : null
 
   cleanupCamera(true, true)
-  emit('update:modelValue', false)
 
   await new Promise<void>((resolve) => {
     if (typeof requestAnimationFrame !== 'function') {
@@ -1058,6 +1057,9 @@ async function sendCapturedMediaQueue() {
   queuedItems.forEach((item, index) => {
     emit('select-media', item.file, albumId, index, queuedItems.length)
   })
+
+  await nextTick()
+  emit('update:modelValue', false)
 }
 
 async function capturePhoto() {

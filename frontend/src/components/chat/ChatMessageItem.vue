@@ -1819,7 +1819,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .swipe-reply-icon.received-side { left: 16px; }
 
 .message-bubble {
-  max-width: 100%; padding: 8px 12px; border-radius: var(--messenger-radius-control, 8px); position: relative; font-size: 15px; line-height: 1.5;
+  max-width: min(100%, 344px); padding: 8px 12px; border-radius: var(--messenger-radius-control, 8px); position: relative; font-size: 15px; line-height: 1.5;
   white-space: pre-wrap; word-wrap: break-word; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
   animation: slideIn var(--messenger-motion-overlay, 220ms) cubic-bezier(0.175, 0.885, 0.32, 1.275);
   will-change: transform;
@@ -1859,6 +1859,10 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   font-weight: 950;
 }
 .message-bubble p { margin: 0; }
+.msg-media-link {
+  width: min(320px, calc(100vw - 72px)) !important;
+  max-width: 100%;
+}
 .media-caption {
   margin-top: 8px;
   font-size: 14px;
