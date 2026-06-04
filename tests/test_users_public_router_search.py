@@ -317,6 +317,45 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("address", result[0].model_dump())
         self.assertNotIn("last_seen_at", result[0].model_dump())
 
+    async def test_search_public_users_chat_targets_include_same_owner_customers_for_accountant_viewer(self):
+        current_user = SimpleNamespace(id=44, role=UserRole.STANDARD)
+        customer = make_user(id=91, account_name="customer91")
+        owner_user = make_user(id=20, account_name="owner20")
+        db = FakeDB([
+            FakeExecuteResult([customer]),
+            FakeExecuteResult([]),
+            FakeExecuteResult([
+                SimpleNamespace(
+                    customer_user_id=91,
+                    owner_user_id=20,
+                    owner_user=owner_user,
+                    management_name="مشتری ویژه",
+                    customer_tier=CustomerTier.TIER_1,
+                )
+            ]),
+        ])
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=20)),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await search_public_users(
+                q="customer",
+                limit=10,
+                chat_targets=True,
+                db=db,
+                current_user=current_user,
+            )
+
+        self.assertEqual([item.id for item in result], [91])
+        self.assertEqual(result[0].customer_owner_user_id, 20)
+        stmt_text = str(db.stmts[0]).lower()
+        self.assertIn("accountant_relations", stmt_text)
+        self.assertIn("owner_user_id", stmt_text)
+
     async def test_search_public_users_owner_resolves_shared_group_accountant_for_customer_viewer(self):
         current_user = SimpleNamespace(id=91, role=UserRole.STANDARD)
         owner_user = make_user(id=20, account_name="owner20")
