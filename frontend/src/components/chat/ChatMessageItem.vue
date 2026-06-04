@@ -32,16 +32,19 @@
       :id="'msg-' + msg.id"
       ref="messageBubbleRef"
       class="message-bubble"
-      :class="{ 
-        'sent': isSent, 
-        'received': !isSent,
-        'sending': isSending,
-        'error': isError,
-        'selected-message': isSelected,
-        'album-bubble': props.isAlbum,
-        'full-width-bubble': isFullWidthBubble,
-        'management-message': props.isManagementMessage
-      }"
+      :class="[
+        messageTypeClass,
+        {
+          'sent': isSent,
+          'received': !isSent,
+          'sending': isSending,
+          'error': isError,
+          'selected-message': isSelected,
+          'album-bubble': props.isAlbum,
+          'full-width-bubble': isFullWidthBubble,
+          'management-message': props.isManagementMessage
+        }
+      ]"
       @touchstart="handleTouchStart($event)"
       @touchmove="handleTouchMove($event)"
       @touchend="handleTouchEnd()"
@@ -928,10 +931,11 @@ const voiceUploadStatusText = computed(() => {
   return mediaUploadStatusText.value
 })
 
+const messageTypeClass = computed(() => `type-${String(props.msg.message_type || 'unknown').replace(/[^a-z0-9_-]/gi, '-')}`)
+
 const isFullWidthBubble = computed(() => (
   !props.isAlbum
-  && props.msg.message_type !== 'image'
-  && props.msg.message_type !== 'video'
+  && props.msg.message_type === 'system'
 ))
 
 const showMediaShare = computed(() => (
@@ -1819,7 +1823,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .swipe-reply-icon.received-side { left: 16px; }
 
 .message-bubble {
-  max-width: min(100%, 344px); padding: 8px 12px; border-radius: var(--messenger-radius-control, 8px); position: relative; font-size: 15px; line-height: 1.5;
+  width: fit-content; max-width: min(78vw, 344px); padding: 8px 12px; border-radius: var(--messenger-radius-control, 8px); position: relative; font-size: 15px; line-height: 1.5;
   white-space: pre-wrap; word-wrap: break-word; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
   animation: slideIn var(--messenger-motion-overlay, 220ms) cubic-bezier(0.175, 0.885, 0.32, 1.275);
   will-change: transform;
@@ -1833,7 +1837,19 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .message-bubble.album-bubble {
   padding: 4px 4px 6px;
   width: fit-content;
-  max-width: min(100%, 336px);
+  max-width: min(78vw, 336px);
+}
+.message-bubble.type-image,
+.message-bubble.type-video {
+  padding: 4px 4px 6px;
+  max-width: min(78vw, 328px);
+}
+.message-bubble.type-voice {
+  padding: 6px 8px;
+  max-width: min(78vw, 288px);
+}
+.message-bubble.type-text {
+  min-width: 58px;
 }
 .message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #eeffde); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-control, 8px) var(--messenger-radius-control, 8px) 4px var(--messenger-radius-control, 8px); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15); }
 .message-bubble.received { align-self: flex-end; background: var(--messenger-bubble-received, #ffffff); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-control, 8px) var(--messenger-radius-control, 8px) var(--messenger-radius-control, 8px) 4px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15); }
@@ -1860,7 +1876,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .message-bubble p { margin: 0; }
 .msg-media-link {
-  width: min(320px, calc(100vw - 72px)) !important;
+  width: min(320px, calc(100vw - 88px)) !important;
   max-width: 100%;
 }
 .media-caption {
@@ -1962,7 +1978,10 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 
 .msg-time { font-size: 11px; color: rgba(0, 0, 0, 0.4); }
 .message-bubble.received .msg-time { color: var(--messenger-text-muted, #64748b); }
-.msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; }
+.msg-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; min-width: 50px; }
+.message-bubble.type-voice .msg-meta,
+.message-bubble.type-image .msg-meta,
+.message-bubble.type-video .msg-meta { margin-top: 5px; padding: 0 2px; }
 .message-bubble.album-bubble .msg-meta { padding: 0 4px 0 2px; margin-top: 5px; }
 .msg-status { display: flex; align-items: center; }
 .icon-read { fill: var(--messenger-chat-success, #43a047); }
@@ -2371,15 +2390,15 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   --voice-track-top: rgba(255, 255, 255, 0.76);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.42), transparent 55%),
     linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.04));
   border: 1px solid rgba(255,255,255,0.28);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-  border-radius: 16px;
-  padding: 10px 12px;
-  width: 250px;
+  border-radius: 14px;
+  padding: 8px 10px;
+  width: min(236px, calc(100vw - 116px));
   direction: ltr; /* Force LTR for audio player */
 }
 .msg-voice.is-sent {
@@ -2389,8 +2408,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   --voice-track-top: rgba(255, 255, 255, 0.62);
 }
 .voice-play-btn {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: none;
   background: linear-gradient(180deg, var(--voice-accent-top), var(--voice-accent));
@@ -2416,8 +2435,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   background: linear-gradient(180deg, #ff9b9b, #ea5455);
 }
 .voice-play-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   fill: currentColor;
 }
 
@@ -2425,15 +2444,15 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   display: flex;
   flex-direction: column;
   flex-grow: 1;
-  gap: 6px;
+  gap: 5px;
   justify-content: center;
   min-width: 0;
 }
 .voice-waveform {
   width: 100%;
   max-width: 100%;
-  min-height: 30px;
-  border-radius: 12px;
+  min-height: 26px;
+  border-radius: 10px;
   cursor: default;
   position: relative;
   padding: 4px 0;
@@ -2449,7 +2468,7 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   gap: 2px;
   width: 100%;
   max-width: 100%;
-  height: 22px;
+  height: 20px;
   min-width: 0;
   overflow: hidden;
 }
