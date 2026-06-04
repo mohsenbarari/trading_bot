@@ -218,6 +218,7 @@ describe('ChatNewConversationModal.vue', () => {
     expect(String(url)).toContain('/api/users-public/search')
     expect(String(url)).toContain('q=ali')
     expect(String(url)).toContain('limit=50')
+    expect(String(url)).toContain('chat_targets=true')
     expect(options).toEqual(expect.objectContaining({
       headers: expect.objectContaining({
         Authorization: 'Bearer jwt-token',
@@ -276,6 +277,7 @@ describe('ChatNewConversationModal.vue', () => {
     expect((wrapper.get('.new-chat-search-input').element as HTMLInputElement).value).toBe('')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/users-public/search?limit=50')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('chat_targets=true')
     expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('q=ali')
   })
 
@@ -309,6 +311,7 @@ describe('ChatNewConversationModal.vue', () => {
     await flushPromises()
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/users-public/search?limit=50')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('chat_targets=true')
   })
 
   it('cancels a pending debounced search when the modal closes', async () => {

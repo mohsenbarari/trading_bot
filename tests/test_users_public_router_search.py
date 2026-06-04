@@ -184,6 +184,9 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.id for item in result], [7])
         self.assertEqual(result[0].account_name, "acct7")
         self.assertIsNone(result[0].resolved_from_accountant_id)
+        stmt_text = str(db.stmts[0]).lower()
+        self.assertIn("customer_relations", stmt_text)
+        self.assertIn("owner_user_id", stmt_text)
 
     async def test_search_public_users_skips_owner_resolved_to_current_user(self):
         current_user = SimpleNamespace(id=5, role=UserRole.STANDARD)

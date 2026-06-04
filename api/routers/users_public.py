@@ -206,6 +206,36 @@ def _build_customer_public_visibility_filter(current_user: User):
     )
 
 
+def _build_direct_chat_target_visibility_filter(current_user: User):
+    target_customer_rel = aliased(CustomerRelation)
+    target_owned_customer_rel = aliased(CustomerRelation)
+
+    target_customer_exists = (
+        select(target_customer_rel.id)
+        .where(
+            target_customer_rel.customer_user_id == User.id,
+            target_customer_rel.status == CustomerRelationStatus.ACTIVE,
+            target_customer_rel.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    target_owned_customer_exists = (
+        select(target_owned_customer_rel.id)
+        .where(
+            target_owned_customer_rel.customer_user_id == User.id,
+            target_owned_customer_rel.owner_user_id == current_user.id,
+            target_owned_customer_rel.status == CustomerRelationStatus.ACTIVE,
+            target_owned_customer_rel.deleted_at.is_(None),
+        )
+        .exists()
+    )
+
+    return or_(
+        ~target_customer_exists,
+        target_owned_customer_exists,
+    )
+
+
 async def _ensure_customer_viewer_can_access_public_user(
     db: AsyncSession,
     current_user: User,
@@ -399,6 +429,7 @@ async def search_public_users(
     current_user: User = Depends(get_current_user)
 ):
     """جستجوی عمومی بین کاربران سیستم بر اساس نام، نام کاربری یا شماره فیلتر شده"""
+    direct_chat_targets = chat_targets is True
     current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
 
     query = select(User).where(User.is_deleted == False, User.id != current_user.id)
@@ -407,6 +438,8 @@ async def search_public_users(
         if not allowed_target_ids:
             return []
         query = query.where(User.id.in_(allowed_target_ids))
+    elif direct_chat_targets:
+        query = query.where(_build_direct_chat_target_visibility_filter(current_user))
     else:
         query = query.where(_build_customer_public_visibility_filter(current_user))
 
@@ -428,7 +461,7 @@ async def search_public_users(
         db,
         users,
         current_user=current_user,
-        preserve_chat_target_identity=chat_targets,
+        preserve_chat_target_identity=direct_chat_targets,
     )
 
 
