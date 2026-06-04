@@ -460,10 +460,17 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
 - Validation passed for the browser gate closure:
   - `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts src/utils/chatVirtualTimeline.test.ts src/utils/chatMediaDimensions.test.ts`
   - `VITE_MESSENGER_VIRTUAL_TIMELINE=true npm run test:e2e -- e2e/messenger-virtual-timeline.spec.ts --project=chromium --reporter=line`
+- Continued on 2026-06-04 with virtual jump/prepend coverage:
+  - added virtual timeline bridge methods for `scrollToBottom`, `scrollToUnreadOrBottom(currentUserId)`, and `preservePrependAnchor(messageId)`.
+  - routed initial unread scrolling and scroll-button bottom behavior through the virtual bridge when the feature flag is active.
+  - changed older-message prepend anchoring to capture the current viewport message instead of the first message in the loaded array, then preserve it through the virtualizer after older rows are inserted.
+  - kept the virtual unread jump resilient to lifecycle timing by retrying briefly while `currentUserId` and the async virtual timeline ref become available.
+  - extended the browser gate to cover reply-preview jumps, pinned-banner jumps, initial unread jumps, and older-message prepend anchoring.
+- Validation passed for the virtual jump/prepend slice:
+  - `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts src/utils/chatVirtualTimeline.test.ts src/utils/chatMediaDimensions.test.ts src/components/ChatView.test.ts`
+  - `VITE_MESSENGER_VIRTUAL_TIMELINE=true npm run test:e2e -- e2e/messenger-virtual-timeline.spec.ts --project=chromium --reporter=line`
+  - `npm run build`
 - Remaining before Stage E can close:
-  - extend the browser-level virtual timeline flag check from search jump to reply/pinned/unread jumps and older-message prepend anchoring.
-  - complete any browser-observed two-phase scroll correction gaps that are not visible in unit tests.
-  - verify older-message prepend anchor preservation in the virtual path.
   - run the Stage E benchmark subset: S02 heavy direct, S03 media-heavy, S04 search/viewer, S10 weak-device.
   - only then decide whether `VITE_MESSENGER_VIRTUAL_TIMELINE=true` is safe for broader rollout.
 - No scroll jump when images/videos/albums hydrate.
@@ -655,4 +662,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage E. The media dimension contract, flagged virtual timeline prototype, scroll-jump bridge, and first browser gate are in place and passing. The next slice is reply/pinned/unread jump coverage, older-message prepend anchoring in the virtual path, and the Stage E benchmark subset before this stage can close.
+Continue Stage E. The media dimension contract, flagged virtual timeline prototype, browser jump gates, and older-message prepend anchoring are in place and passing. The next slice is the Stage E benchmark subset before deciding whether the virtual timeline flag is safe for broader rollout.

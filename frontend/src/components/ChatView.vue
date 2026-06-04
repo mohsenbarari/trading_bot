@@ -165,7 +165,12 @@ const searchDebounceTimeout = ref<any>(null)
 // UI State
 const isLoadingMessages = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
-const virtualTimelineRef = ref<{ scrollToMessage: (messageId: number) => boolean } | null>(null)
+const virtualTimelineRef = ref<{
+  scrollToMessage: (messageId: number) => boolean
+  scrollToBottom?: () => boolean
+  scrollToUnreadOrBottom?: (currentUserId: number) => boolean
+  preservePrependAnchor?: (messageId: number) => boolean
+} | null>(null)
 const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
 const showScrollButton = ref(false)
@@ -391,6 +396,43 @@ function scrollToMessage(msgId: number) {
   scrollToMessageInDom(msgId)
 }
 
+function scrollToBottomForActiveTimeline() {
+  if (virtualTimelineRef.value?.scrollToBottom?.()) {
+    return
+  }
+
+  scrollToBottom()
+}
+
+function scrollToUnreadOrBottomForActiveTimeline() {
+  if (props.currentUserId && virtualTimelineRef.value?.scrollToUnreadOrBottom?.(props.currentUserId)) {
+    return
+  }
+
+  if (
+    import.meta.env.VITE_MESSENGER_VIRTUAL_TIMELINE === 'true'
+    && selectedRoomKind.value === 'direct'
+    && timelineRenderBudget.value.virtualizationCandidate
+  ) {
+    let attempt = 0
+    const retryVirtualUnreadScroll = () => {
+      attempt += 1
+      if (props.currentUserId && virtualTimelineRef.value?.scrollToUnreadOrBottom?.(props.currentUserId)) {
+        return
+      }
+      if (attempt < 10) {
+        window.setTimeout(retryVirtualUnreadScroll, 80)
+        return
+      }
+      scrollToUnreadOrBottom()
+    }
+    window.setTimeout(retryVirtualUnreadScroll, 80)
+    return
+  }
+
+  scrollToUnreadOrBottom()
+}
+
 const unreadMentionMessages = computed(() => {
   if (!props.currentUserId) return []
   return messages.value.filter((m) => {
@@ -405,12 +447,12 @@ function handleScrollButtonClick() {
   if (unreadMentionMessages.value.length > 0) {
     const oldestMention = unreadMentionMessages.value[0]
     if (!oldestMention) {
-      scrollToBottom()
+      scrollToBottomForActiveTimeline()
       return
     }
     scrollToMessage(oldestMention.id)
   } else {
-    scrollToBottom()
+    scrollToBottomForActiveTimeline()
   }
 }
 
@@ -440,8 +482,8 @@ const messagesLogic = useChatMessages({
   swipedMessageId,
   isMobile,
   showStickerPicker,
-  scrollToBottom,
-  scrollToUnreadOrBottom,
+  scrollToBottom: scrollToBottomForActiveTimeline,
+  scrollToUnreadOrBottom: scrollToUnreadOrBottomForActiveTimeline,
   forceScrollToBottom,
   focusMessageInput: (options?: { cursorToEnd?: boolean }) => {
     chatInputBarRef.value?.focusInput(options)
@@ -722,6 +764,26 @@ function attachMessagesContainerResizeObserver(container: HTMLElement | null) {
   messagesContainerResizeObserver.observe(container)
 }
 
+function getViewportAnchorMessageId(container: HTMLElement) {
+  const containerRect = container.getBoundingClientRect()
+  const candidates = Array.from(container.querySelectorAll<HTMLElement>('.message-bubble[id^="msg-"]'))
+    .map((element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        element,
+        rect,
+        distance: Math.abs(rect.top - containerRect.top),
+      }
+    })
+    .filter(({ rect }) => rect.bottom > containerRect.top && rect.top < containerRect.bottom)
+    .sort((left, right) => left.distance - right.distance)
+
+  const anchorElement = candidates[0]?.element
+  if (!anchorElement) return null
+  const id = Number(anchorElement.id.replace(/^msg-/, ''))
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
 const handleMessagesScroll = async () => {
   handleScroll()
 
@@ -736,6 +798,9 @@ const handleMessagesScroll = async () => {
     return
   }
 
+  const prependAnchorMessageId = getViewportAnchorMessageId(container)
+    ?? messages.value.find(message => message.id > 0)?.id
+    ?? null
   const previousHeight = container.scrollHeight
   const previousTop = container.scrollTop
   const loadedCount = await loadOlderMessages(userId)
@@ -747,8 +812,14 @@ const handleMessagesScroll = async () => {
   await nextTick()
   const restoredSelectionAnchor = restorePendingSelectionAnchor(container, userId)
   if (!restoredSelectionAnchor) {
-    const newHeight = container.scrollHeight
-    container.scrollTop = previousTop + (newHeight - previousHeight)
+    const preservedVirtualAnchor = prependAnchorMessageId !== null
+      ? virtualTimelineRef.value?.preservePrependAnchor?.(prependAnchorMessageId) === true
+      : false
+
+    if (!preservedVirtualAnchor) {
+      const newHeight = container.scrollHeight
+      container.scrollTop = previousTop + (newHeight - previousHeight)
+    }
   }
   syncMessagesContainerMetrics(container)
 }
