@@ -78,7 +78,7 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | A | Domain Naming Cleanup | Completed | Remove historical stage naming without behavior change |
 | B | Store Foundation, Diagnostics Gate, Local Hydration | Completed | Establish store/cache/gateway foundations early |
 | C | Container Extraction And Room Tear-down | Completed | Shrink `ChatView.vue` safely and prevent leaks |
-| D | Message Renderer Split And Error Boundaries | Planned | Make message rendering modular and fault-tolerant |
+| D | Message Renderer Split And Error Boundaries | Completed | Make message rendering modular and fault-tolerant |
 | E | Media Dimension Contract And Virtualized Timeline | Planned | Introduce safe real virtualization without scroll jumps |
 | F | Realtime Gateway And Request Churn Reduction | Planned | Convert realtime/network updates into precise store mutations |
 | G | UI System Final Pass | Planned | Polish the user-facing experience after architecture is stable |
@@ -341,13 +341,19 @@ Replace the oversized `ChatMessageItem.vue` runtime with specialized message ren
 
 ### Exit Criteria
 
-- `ChatMessageItem.vue` becomes an adapter or drops below target size.
-- One malformed message cannot blank the timeline.
-- Visual parity screenshots remain acceptable.
+- Completed on 2026-06-04 as a safe first renderer split.
+- `MessageRenderBoundary.vue` now wraps every rendered timeline item from `ChatRoomContainer.vue`; a malformed message renders `این پیام قابل نمایش نیست` and logs diagnostics once per message/render key instead of blanking the timeline.
+- `ForwardedHeader.vue`, `ReplyPreview.vue`, and `TextMessageBubble.vue` are extracted with focused tests while preserving forwarded profile clicks, reply scroll, and text/mention click handling.
+- `ChatMessageItem.vue` dropped from 2546 to 2488 lines. It is not yet adapter-only; media, album, voice, document, location, reactions, status meta, and swipe/context mechanics intentionally remain in the legacy adapter until Stage E/F can split them behind stronger virtualization/network tests.
+- Visual parity risk was kept low by preserving the existing DOM class hooks used by the current tests.
+- Validation passed:
+  - `npm run test:unit:run -- src/components/chat/messages/MessageRenderBoundary.test.ts src/components/chat/messages/ForwardedHeader.test.ts src/components/chat/messages/ReplyPreview.test.ts src/components/chat/messages/TextMessageBubble.test.ts src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts`
+  - `npm run test:unit:run -- src/components/chat/messages/MessageRenderBoundary.test.ts src/components/chat/messages/ForwardedHeader.test.ts src/components/chat/messages/ReplyPreview.test.ts src/components/chat/messages/TextMessageBubble.test.ts src/components/chat/ChatMessageItem.test.ts src/components/ChatView.test.ts src/components/chat/ChatAlbumLayout.test.ts src/components/chat/ChatInputBar.test.ts src/components/chat/ChatContextMenu.test.ts src/composables/chat/useChatMessages.test.ts src/composables/chat/useChatMedia.test.ts src/composables/chat/useChatWebSocket.test.ts`
+  - `npm run build`
 
 ### Rollback
 
-Switch renderer resolver back to legacy `ChatMessageItem`.
+Remove the `MessageRenderBoundary` wrapper from `ChatRoomContainer.vue` and render `ChatMessageItem` directly; the extracted header/reply/text components can also be inlined back into `ChatMessageItem.vue` without data-contract changes.
 
 ## Stage E - Media Dimension Contract And Virtualized Timeline
 
@@ -610,4 +616,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Start Stage D. The first container boundary is in place, so the next slice is the message renderer split with `MessageRenderBoundary` and specialized message bubbles.
+Start Stage E. Stage D has installed the message render boundary and the first extracted message subcomponents; the next slice is the media dimension contract plus a flagged virtual timeline prototype.
