@@ -38,6 +38,8 @@ const dragOffsetY = ref(0)
 const stageSceneRef = ref<HTMLElement | null>(null)
 const suppressThumbClick = ref(false)
 let suppressThumbClickTimer: number | null = null
+const lightboxVideoRefs = new Map<number, HTMLVideoElement>()
+const playingVideoIds = ref<Set<number>>(new Set())
 
 const mediaZoomScale = ref(1)
 const mediaZoomX = ref(0)
@@ -163,6 +165,47 @@ function resetMediaZoom() {
   mediaZoomX.value = 0
   mediaZoomY.value = 0
   lastStageTap = null
+}
+
+function setLightboxVideoRef(msgId: number, element: Element | null) {
+  if (element instanceof HTMLVideoElement) {
+    lightboxVideoRefs.set(msgId, element)
+    return
+  }
+
+  lightboxVideoRefs.delete(msgId)
+}
+
+function isLightboxVideoPlaying(msgId: number) {
+  return playingVideoIds.value.has(msgId)
+}
+
+function setLightboxVideoPlaying(msgId: number, playing: boolean) {
+  const nextPlayingVideoIds = new Set(playingVideoIds.value)
+  if (playing) {
+    nextPlayingVideoIds.add(msgId)
+  } else {
+    nextPlayingVideoIds.delete(msgId)
+  }
+  playingVideoIds.value = nextPlayingVideoIds
+}
+
+async function playLightboxVideo(msgId: number) {
+  const video = lightboxVideoRefs.get(msgId)
+  if (!video) return
+
+  try {
+    await video.play()
+  } catch (error) {
+    console.warn('Lightbox video playback failed:', error)
+  }
+}
+
+function shouldShowVideoPlayOverlay(item: LightboxItem, index: number) {
+  return item.type === 'video'
+    && index === (props.lightboxMedia?.currentIndex ?? -1)
+    && !isCurrentMediaZoomed.value
+    && !isLightboxVideoPlaying(item.msgId)
 }
 
 function getTouchDistance(touches: TouchList) {
@@ -810,17 +853,36 @@ function handleTouchEnd(event: TouchEvent) {
                           @click.stop="handleMediaTap"
                           @dblclick.stop="handleMediaDoubleClick($event, item, index)"
                         />
-                        <video
+                        <div
                           v-else
-                          :src="item.url"
-                          :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
+                          class="lightbox-video-wrap"
                           :style="getActiveMediaStyle(item, index)"
-                          :controls="index === lightboxMedia.currentIndex && !isCurrentMediaZoomed"
-                          :autoplay="index === lightboxMedia.currentIndex"
-                          :muted="index !== lightboxMedia.currentIndex"
-                          playsinline
-                          @click.stop="handleMediaTap"
-                        ></video>
+                        >
+                          <video
+                            :ref="(element) => setLightboxVideoRef(item.msgId, element)"
+                            :src="item.url"
+                            :class="['lightbox-media', { 'is-zoomable': index === lightboxMedia.currentIndex, 'is-zoomed': index === lightboxMedia.currentIndex && isCurrentMediaZoomed }]"
+                            :controls="index === lightboxMedia.currentIndex && !isCurrentMediaZoomed && isLightboxVideoPlaying(item.msgId)"
+                            :autoplay="index === lightboxMedia.currentIndex"
+                            :muted="index !== lightboxMedia.currentIndex"
+                            playsinline
+                            @play="setLightboxVideoPlaying(item.msgId, true)"
+                            @pause="setLightboxVideoPlaying(item.msgId, false)"
+                            @ended="setLightboxVideoPlaying(item.msgId, false)"
+                            @click.stop="handleMediaTap"
+                          ></video>
+                          <button
+                            v-if="shouldShowVideoPlayOverlay(item, index)"
+                            type="button"
+                            class="lightbox-video-play-btn"
+                            aria-label="پخش ویدئو"
+                            @click.stop="playLightboxVideo(item.msgId)"
+                          >
+                            <svg viewBox="0 0 24 24" width="34" height="34" fill="currentColor" aria-hidden="true">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                   </div>
                 </div>
@@ -1209,6 +1271,53 @@ function handleTouchEnd(event: TouchEvent) {
 
 .lightbox-media.is-zoomed:active {
   cursor: grabbing;
+}
+
+.lightbox-video-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lightbox-video-wrap .lightbox-media {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.lightbox-video-play-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  width: 84px;
+  height: 84px;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.lightbox-video-play-btn svg {
+  margin-left: 4px;
+}
+
+.lightbox-video-play-btn:active {
+  transform: translate(-50%, -50%) scale(0.96);
 }
 
 .lightbox-strip-slot {
