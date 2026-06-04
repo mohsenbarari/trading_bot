@@ -1,7 +1,7 @@
 import { ref, type Ref, nextTick } from 'vue'
 import type { Message } from '../../types/chat'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
-import { measureMessengerStage2, recordMessengerMetric } from '../../utils/messengerStage2Metrics'
+import { measureMessengerDiagnostic, recordMessengerMetric } from '../../utils/messengerDiagnosticsMetrics'
 
 export interface UseChatScrollOptions {
     messagesContainer: Ref<HTMLElement | null>
@@ -173,7 +173,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
                     requestAnimationFrame(step)
                 } else {
                     markMessengerPerformance(endMark)
-                    measureMessengerStage2('scroll-to-message', startMark, endMark, { msgId })
+                    measureMessengerDiagnostic('scroll-to-message', startMark, endMark, { msgId })
                 }
             }
 

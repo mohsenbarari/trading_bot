@@ -154,7 +154,7 @@ Verified during the planning review:
 
 ## Stage 2 Baseline Contract
 
-The Stage 2 instrumentation is intentionally additive and removable. It stores bounded runtime entries on `window.__messengerStage2Metrics` and keeps the legacy Messenger path as the default UI. Current instrumented surfaces:
+The Stage 2 instrumentation is intentionally additive and removable. It stores bounded runtime entries on `window.__messengerDiagnosticsMetrics` and keeps the legacy Messenger path as the default UI. Current instrumented surfaces:
 
 - Route/current-user bootstrap: `MessengerView.vue` measures authenticated current-user fetches, records a route-ready DOM snapshot, and starts a short frame-budget probe after the Messenger surface is ready.
 - Conversation list: first rendered list count, DOM snapshot, and conversation long-press/menu open marks.
@@ -174,7 +174,7 @@ The Stage 2 design budget is also local to Messenger:
 
 The Stage 3 slice reduces `ChatView.vue` without changing rendering behavior or the production route default. Current controller seams:
 
-- `frontend/src/utils/messengerStage3Controllers.ts` owns pure route-query normalization, conversation-query rebuilding, message-id normalization, selection-batch toggling, album metadata parsing, album context-menu id resolution, and timeline grouping.
+- `frontend/src/utils/chatTimelineController.ts` owns pure route-query normalization, conversation-query rebuilding, message-id normalization, selection-batch toggling, album metadata parsing, album context-menu id resolution, and timeline grouping.
 - `frontend/src/types/chat.ts` now exposes typed timeline contracts: `ChatSelectionPurpose`, `ChatAlbumTimelineItem`, `ChatTimelineItem`, and `ChatTimelineGroup`.
 - `ChatView.vue` delegates grouped timeline construction to `groupMessengerMessages(...)` and clears the extracted timeline cache through `clearMessengerTimelineCache(...)` on room switch.
 - The extracted timeline helper preserves the previous stable album-wrapper and stable day-group reference behavior, so the existing `v-memo`/album rendering optimizations remain intact.
@@ -186,11 +186,11 @@ Rollback remains local: revert the Stage 3 utility/tests and the small `ChatView
 
 The Stage 4 executive slice targets the list/timeline performance boundary without enabling high-risk message virtualization by default. It intentionally does not perform the later roadmap Phase 4 message-renderer split.
 
-- `frontend/src/utils/messengerStage4Performance.ts` owns pure conversation ordering, mandatory/pinned detection, next pin-order calculation, progressive conversation-window selection, near-bottom expansion detection, and timeline render-budget summarization.
+- `frontend/src/utils/conversationListModel.ts` owns pure conversation ordering, mandatory/pinned detection, next pin-order calculation, progressive conversation-window selection, near-bottom expansion detection, and timeline render-budget summarization.
 - `ChatView.vue` delegates conversation sorting and pin-order helper behavior to the Stage 4 utility while preserving the existing `sortedConversations` contract for conversation list, search, forward modal, and room managers.
 - `ChatConversationList.vue` now renders large conversation lists through an initial bounded window and progressively expands as the user scrolls or taps the explicit load-more affordance. The active row is kept visible even when it would otherwise fall outside the initial window.
 - `ChatView.vue` records a timeline render-budget metric for loaded message groups, media items, and virtualization-candidate status. This gives the next stages a measurable gate without breaking sticky dates, scroll-to-message, album highlighting, selection anchors, or deferred media hydration.
-- Focused coverage lives in `messengerStage4Performance.test.ts`, `ChatConversationList.test.ts`, and the existing `ChatView.test.ts` wiring suite.
+- Focused coverage lives in `conversationListModel.test.ts`, `ChatConversationList.test.ts`, and the existing `ChatView.test.ts` wiring suite.
 
 Rollback remains local: revert the Stage 4 utility/tests plus the small `ChatView.vue` and `ChatConversationList.vue` wiring patches. No backend, API, schema, or feature-flag default changed.
 
@@ -198,11 +198,11 @@ Rollback remains local: revert the Stage 4 utility/tests plus the small `ChatVie
 
 The Stage 5 executive slice makes composer and overlay state explicit without rewriting the visual composer, keyboard logic, attachment sheet, or media pipeline.
 
-- `frontend/src/utils/messengerStage5ComposerOverlay.ts` owns pure composer surface decisions for selection mode, disabled/read-only state, recording state, editing state, text submit state, voice availability, attachment availability, emoji visibility, and send-button enablement.
+- `frontend/src/utils/composerOverlayState.ts` owns pure composer surface decisions for selection mode, disabled/read-only state, recording state, editing state, text submit state, voice availability, attachment availability, emoji visibility, and send-button enablement.
 - The same helper owns mutually exclusive overlay arbitration for sticker picker, attachment sheet, forward modal, selection mode, and search mode. Opening attachment now always closes sticker state through the shared transition helper; opening search or selection closes composer overlays predictably.
 - `ChatInputBar.vue` now consumes the composer surface state for button/banner visibility while preserving the existing keyboard/sticker `env(keyboard-inset-height)` implementation, edit prefill, reply banner, voice recording, sticker insertion, and read-only channel behavior.
 - `ChatView.vue` now applies overlay transitions through a small adapter around existing refs. This keeps the current back-stack and modal components intact while making the transition policy testable and reversible.
-- Focused coverage lives in `messengerStage5ComposerOverlay.test.ts`, `ChatInputBar.test.ts`, and the existing `ChatView.test.ts` wiring suite.
+- Focused coverage lives in `composerOverlayState.test.ts`, `ChatInputBar.test.ts`, and the existing `ChatView.test.ts` wiring suite.
 
 Rollback remains local: revert the Stage 5 utility/test plus the small `ChatInputBar.vue` and `ChatView.vue` wiring patches. No backend, API, schema, heavy attachment editor, map, cropper, or upload pipeline changed.
 
@@ -210,10 +210,10 @@ Rollback remains local: revert the Stage 5 utility/test plus the small `ChatInpu
 
 The Stage 6 executive slice makes media progress state and realtime activity policy explicit without rewriting the advanced upload/cache/lightbox stack or backend realtime contracts.
 
-- `frontend/src/utils/messengerStage6MediaRealtime.ts` owns pure realtime conversation-key resolution, activity payload normalization, direct-vs-room activity label formatting, visible-conversation runtime event guards, and normalized media download progress patches.
+- `frontend/src/utils/chatRealtimeMediaPolicy.ts` owns pure realtime conversation-key resolution, activity payload normalization, direct-vs-room activity label formatting, visible-conversation runtime event guards, and normalized media download progress patches.
 - `useChatWebSocket.ts` now delegates typing/upload activity payload parsing and label generation to the Stage 6 helper while preserving existing direct/group/channel websocket subscriptions, read-receipt handling, reaction patching, and debounced conversation reload behavior.
 - `useChatMedia.ts` now delegates document/media download state patches and visible-conversation upload/download event guards to the Stage 6 helper while preserving the existing EXIF-safe image path, edited-image passthrough, background/resumable upload ownership, document cache, media cache, cancellation, and lazy hydration behavior.
-- Focused coverage lives in `messengerStage6MediaRealtime.test.ts`, `useChatWebSocket.test.ts`, and `useChatMedia.test.ts`.
+- Focused coverage lives in `chatRealtimeMediaPolicy.test.ts`, `useChatWebSocket.test.ts`, and `useChatMedia.test.ts`.
 
 Rollback remains local: revert the Stage 6 utility/test plus the small `useChatWebSocket.ts` and `useChatMedia.ts` wiring patches. No backend, API, schema, lightbox component, attachment editor, map, cropper, upload session, cache schema, or notification runtime contract changed.
 
@@ -221,10 +221,10 @@ Rollback remains local: revert the Stage 6 utility/test plus the small `useChatW
 
 The Stage 7 executive slice closes the seven-step refactor track by making rollout state explicit and testable. It does not retire the legacy Messenger, because the roadmap's full Definition of Done still requires measured improvement on target devices and explicit user acceptance before legacy removal.
 
-- `frontend/src/utils/messengerStage7Rollout.ts` owns the rollout surface contract for `legacy-default` versus `refactor-preview`, including the guaranteed rollback target of `legacy`.
+- `frontend/src/utils/messengerRolloutPolicy.ts` owns the rollout surface contract for `legacy-default` versus `refactor-preview`, including the guaranteed rollback target of `legacy`.
 - The same helper evaluates the roadmap gates separately: technical rollout readiness can pass while legacy retirement remains blocked by missing measured-improvement evidence or missing manual acceptance.
 - `MessengerView.vue` now exposes `data-messenger-ui-version` and `data-messenger-rollout-mode` on the Messenger root, giving unit/browser smoke tests a stable old/new version assertion point without changing the visual UI.
-- Focused coverage lives in `messengerStage7Rollout.test.ts`, `messengerRefactor.test.ts`, and `MessengerView.test.ts`. The final Stage 7 old/new test result is:
+- Focused coverage lives in `messengerRolloutPolicy.test.ts`, `messengerRefactor.test.ts`, and `MessengerView.test.ts`. The final Stage 7 old/new test result is:
   - old version: `legacy` remains the default and mounts the existing `ChatView.vue` path.
   - new version: explicit `messenger_ui_version=refactor` mounts the reversible `MessengerRefactorShell` preview path.
 

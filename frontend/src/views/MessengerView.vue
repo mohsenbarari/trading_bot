@@ -9,13 +9,13 @@ import {
   markMessengerPerformance,
   resolveMessengerUiVersion,
 } from '../utils/messengerRefactor'
-import { getMessengerRolloutSurface } from '../utils/messengerStage7Rollout'
+import { getMessengerRolloutSurface } from '../utils/messengerRolloutPolicy'
 import {
-  measureMessengerStage2,
+  measureMessengerDiagnostic,
   recordMessengerDomSnapshot,
   scheduleMessengerDiagnosticTask,
   startMessengerFrameBudgetProbe,
-} from '../utils/messengerStage2Metrics'
+} from '../utils/messengerDiagnosticsMetrics'
 
 const router = useRouter()
 const route = useRoute()
@@ -87,7 +87,7 @@ async function fetchUser() {
     console.error(e)
   } finally {
     markMessengerPerformance('current-user-fetch-end')
-    measureMessengerStage2('current-user-fetch', 'current-user-fetch-start', 'current-user-fetch-end', {
+    measureMessengerDiagnostic('current-user-fetch', 'current-user-fetch-start', 'current-user-fetch-end', {
       uiVersion: messengerUiVersion.value,
     })
     loading.value = false

@@ -6,9 +6,9 @@ import {
   isMessengerRuntimeEventForConversation,
   normalizeMessengerRealtimeActivityPayload,
   resolveMessengerRealtimeConversationKey,
-} from './messengerStage6MediaRealtime'
+} from './chatRealtimeMediaPolicy'
 
-describe('messengerStage6MediaRealtime', () => {
+describe('chatRealtimeMediaPolicy', () => {
   it('resolves direct and room conversation keys from realtime payloads', () => {
     expect(resolveMessengerRealtimeConversationKey({ sender_id: '42' })).toBe(42)
     expect(resolveMessengerRealtimeConversationKey({ room_kind: 'group', chat_id: '17', sender_id: 42 })).toBe(-17)

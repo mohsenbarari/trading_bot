@@ -19,11 +19,11 @@ import {
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
 import {
-    measureMessengerStage2,
+    measureMessengerDiagnostic,
     recordMessengerDomSnapshot,
     recordMessengerMetric,
     scheduleMessengerDiagnosticTask,
-} from '../../utils/messengerStage2Metrics'
+} from '../../utils/messengerDiagnosticsMetrics'
 import {
     getPendingForUser as backgroundGetPendingForUser,
     buildOptimisticMessageFromUpload,
@@ -381,7 +381,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             firstMessagePaintMarked = true
             const paintMark = `chat-open-${metricId}-first-message-paint`
             markMessengerPerformance(paintMark)
-            measureMessengerStage2('chat-open-to-first-message-paint', chatOpenStartMark, paintMark, {
+            measureMessengerDiagnostic('chat-open-to-first-message-paint', chatOpenStartMark, paintMark, {
                 userId,
                 source,
                 messageCount: messages.value.length,
@@ -447,7 +447,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             })
             if (shouldMeasureChatOpen) {
                 markMessengerPerformance(chatOpenResponseMark)
-                measureMessengerStage2('chat-open-request', chatOpenStartMark, chatOpenResponseMark, {
+                measureMessengerDiagnostic('chat-open-request', chatOpenStartMark, chatOpenResponseMark, {
                     userId,
                     resultCount: Array.isArray(loadedMessages) ? loadedMessages.length : 0,
                 })

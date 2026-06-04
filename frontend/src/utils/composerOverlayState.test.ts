@@ -4,7 +4,7 @@ import {
   reduceMessengerOverlayState,
   type MessengerComposerSurfaceInput,
   type MessengerOverlayState,
-} from './messengerStage5ComposerOverlay'
+} from './composerOverlayState'
 
 function composerInput(overrides: Partial<MessengerComposerSurfaceInput> = {}): MessengerComposerSurfaceInput {
   return {
@@ -35,7 +35,7 @@ function overlayState(overrides: Partial<MessengerOverlayState> = {}): Messenger
   }
 }
 
-describe('messengerStage5ComposerOverlay', () => {
+describe('composerOverlayState', () => {
   it('resolves composer surface modes without component state', () => {
     expect(getMessengerComposerSurface(composerInput({
       isSelectionMode: true,

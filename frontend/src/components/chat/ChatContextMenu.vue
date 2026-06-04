@@ -87,7 +87,7 @@ import {
   buildMessengerContextMenuModel,
   getMessengerContextMenuStyle,
   type MessengerContextMenuActionKey,
-} from '../../utils/messengerStage6ContextMenu'
+} from '../../utils/messageContextMenuModel'
 
 const supportsFileShare = canShareFiles()
 

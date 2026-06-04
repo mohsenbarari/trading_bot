@@ -1919,7 +1919,7 @@ async function runScenario(browser, version, scenario, fixture, browserConfig, b
       messagesMs: summarizeApiTimings(timings, (url) => url.includes(seeded.activeMessagesApiPath)),
       totalRequests: timings.length,
     },
-    stage2MetricCount: chatSnapshot.metrics.length,
+    diagnosticMetricCount: chatSnapshot.metrics.length,
     finalUrl,
   }
   } finally {

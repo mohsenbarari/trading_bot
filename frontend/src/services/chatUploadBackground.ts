@@ -38,7 +38,7 @@ import {
 } from '../utils/chatRoomRouting'
 import { serializeChatMediaMessagePayload } from '../utils/chatMediaMessagePayload'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
-import { measureMessengerStage2, recordMessengerMetric } from '../utils/messengerStage2Metrics'
+import { measureMessengerDiagnostic, recordMessengerMetric } from '../utils/messengerDiagnosticsMetrics'
 import { hasPendingUploadResumeHint as hasStoredUploadResumeHint, setUploadResumeHint } from './chatTransferResumeHints'
 
 // -----------------------------------------------------------------------------
@@ -901,7 +901,7 @@ function emit(event: UploadEvent) {
         firstProgressMetricUploadIds.add(event.optimisticId)
         const firstProgressMark = `upload-handoff-${event.optimisticId}-first-progress`
         markMessengerPerformance(firstProgressMark)
-        measureMessengerStage2('upload-handoff-to-first-progress', `upload-handoff-${event.optimisticId}-start`, firstProgressMark, {
+        measureMessengerDiagnostic('upload-handoff-to-first-progress', `upload-handoff-${event.optimisticId}-start`, firstProgressMark, {
             userId: event.userId,
             optimisticId: event.optimisticId,
         })
@@ -2585,7 +2585,7 @@ export async function submitUpload(params: SubmitUploadParams): Promise<void> {
 
     await idbPut(upload)
     markMessengerPerformance(handoffQueuedMark)
-    measureMessengerStage2('upload-handoff-to-persisted', handoffStartMark, handoffQueuedMark, {
+    measureMessengerDiagnostic('upload-handoff-to-persisted', handoffStartMark, handoffQueuedMark, {
         userId: upload.userId,
         optimisticId: upload.id,
         roomKind: upload.roomKind,

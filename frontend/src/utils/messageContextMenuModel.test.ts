@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildMessengerContextMenuModel,
   getMessengerContextMenuStyle,
-} from './messengerStage6ContextMenu'
+} from './messageContextMenuModel'
 
-describe('messengerStage6ContextMenu', () => {
+describe('messageContextMenuModel', () => {
   it('builds the expected text-message sections', () => {
     const model = buildMessengerContextMenuModel({
       messageType: 'text',

@@ -10,7 +10,7 @@ import {
     buildMessengerActivityLabel,
     normalizeMessengerRealtimeActivityPayload,
     resolveMessengerRealtimeConversationKey,
-} from '../../utils/messengerStage6MediaRealtime'
+} from '../../utils/chatRealtimeMediaPolicy'
 
 export interface UseChatWebSocketOptions {
     selectedUserId: Ref<number | null>

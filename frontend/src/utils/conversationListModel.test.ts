@@ -9,7 +9,7 @@ import {
   shouldExpandConversationWindow,
   sortMessengerConversations,
   summarizeTimelineRenderBudget,
-} from './messengerStage4Performance'
+} from './conversationListModel'
 
 function conversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -51,7 +51,7 @@ function message(overrides: Partial<Message> = {}): Message {
   }
 }
 
-describe('messengerStage4Performance', () => {
+describe('conversationListModel', () => {
   it('sorts mandatory, pinned, and recent conversations with stable pure helpers', () => {
     const recent = conversation({ id: 1, other_user_id: 1, other_user_name: 'recent', last_message_at: '2026-05-30T10:00:00' })
     const stale = conversation({ id: 2, other_user_id: 2, other_user_name: 'stale', last_message_at: '2026-05-29T10:00:00' })

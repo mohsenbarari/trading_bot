@@ -9,7 +9,7 @@ import {
   groupMessengerMessages,
   sortMessageIdsByMessageOrder,
   toggleMessageSelectionBatch,
-} from './messengerStage3Controllers'
+} from './chatTimelineController'
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -28,7 +28,7 @@ function albumContent(albumId: string, albumIndex: number) {
   return JSON.stringify({ file_id: `file-${albumIndex}`, album_id: albumId, album_index: albumIndex })
 }
 
-describe('messengerStage3Controllers', () => {
+describe('chatTimelineController', () => {
   it('normalizes route query values and preserves unrelated query params', () => {
     expect(getRouteQueryValue(['42', '43'])).toBe('42')
     expect(getRouteQueryValue(null)).toBe('')

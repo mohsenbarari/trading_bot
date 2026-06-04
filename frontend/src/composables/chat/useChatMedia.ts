@@ -3,11 +3,11 @@ import type { Message } from '../../types/chat'
 import { canUseImagePreprocessWorker, getRecommendedImagePreprocessParallelism, processImageInWorker } from '../../utils/imagePreprocessClient'
 import { primeMediaPreprocessTelemetry, recordMediaPreprocessTelemetry } from '../../utils/chatMediaTelemetry'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
-import { measureMessengerStage2, recordMessengerDomSnapshot } from '../../utils/messengerStage2Metrics'
+import { measureMessengerDiagnostic, recordMessengerDomSnapshot } from '../../utils/messengerDiagnosticsMetrics'
 import {
     getMessengerMediaDownloadPatch,
     isMessengerRuntimeEventForConversation,
-} from '../../utils/messengerStage6MediaRealtime'
+} from '../../utils/chatRealtimeMediaPolicy'
 import { serializeChatMediaMessagePayload } from '../../utils/chatMediaMessagePayload'
 import {
     submitUpload as backgroundSubmitUpload,
@@ -1319,7 +1319,7 @@ export function useChatMedia(options: UseChatMediaOptions) {
         }
         void nextTick().then(() => {
             markMessengerPerformance(lightboxEndMark)
-            measureMessengerStage2('lightbox-open', lightboxStartMark, lightboxEndMark, {
+            measureMessengerDiagnostic('lightbox-open', lightboxStartMark, lightboxEndMark, {
                 messageType: msg.message_type,
                 itemCount: items.length,
             })
