@@ -104,7 +104,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const MAX_CACHED_CHAT_SNAPSHOTS = 12
     const INITIAL_CHAT_OPEN_LIMIT = 48
     const FAST_CHAT_OPEN_LIMIT = 16
-    const VIRTUAL_TIMELINE_OPEN_LIMIT = 180
+    const VIRTUAL_TIMELINE_OPEN_LIMIT = 128
     const BACKGROUND_HYDRATION_DELAY_MS = 3200
     const SEARCH_CONTEXT_LIMIT = 50
     const OLDER_MESSAGES_PAGE_LIMIT = 60

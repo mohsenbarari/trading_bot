@@ -147,6 +147,6 @@ export function summarizeTimelineRenderBudget(groups: ChatTimelineGroup[]): Mess
     itemCount,
     albumWrapperCount,
     mediaItemCount,
-    virtualizationCandidate: itemCount >= 160 || mediaItemCount >= 80,
+    virtualizationCandidate: itemCount >= 96 || mediaItemCount >= 48,
   }
 }

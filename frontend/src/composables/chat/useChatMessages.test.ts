@@ -251,7 +251,7 @@ describe('useChatMessages', () => {
 
     await subject.loadMessages(12)
     expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
-      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=180&/),
+      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=128&/),
       {},
       expect.any(Object),
     )
