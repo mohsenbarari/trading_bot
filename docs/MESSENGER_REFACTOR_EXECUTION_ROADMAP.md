@@ -59,7 +59,7 @@ Do not merge multiple stages into a single prompt.
 | Stage | Name | Status | Owner | Last Run | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Baseline Lock + Perf Budget | Completed | Copilot | 2026-05-31 | Baseline locked from `tmp/messenger-benchmark/comparison-summary.json` (`generatedAt=2026-05-31T19:13:12Z`) |
-| 2 | Menu IA Normalization | In Progress | Copilot | 2026-05-31 | IA sectioning applied in header/context menus + focused Vitest/Playwright green |
+| 2 | Menu IA Normalization | Completed | Copilot | 2026-05-31 | IA sectioning applied in header/context menus + focused Vitest/Playwright green |
 | 3 | Conversation List Performance + Visual Cohesion | Completed | Copilot | 2026-05-31 | Row view-model memoization, shared-token visual alignment, and S07/S10 list-ready benchmark check passed |
 | 4 | Chat Open Pipeline (Heavy/Search/Identity) | Completed | Copilot | 2026-05-31 | Non-blocking open-path hydration finalized; S02/S04/S08 Stage3-vs-Stage4 benchmark checkpoint passed |
 | 5 | Composer/Overlay State Machine Stabilization | Completed | Copilot | 2026-06-01 | Reducer-backed composer resets now govern reply/edit/conversation transitions; focused Vitest and direct-room Playwright green |
@@ -69,7 +69,7 @@ Do not merge multiple stages into a single prompt.
 | 9 | UI System Enforcement Pass | Completed | Copilot | 2026-06-01 | Header, message bubble, album/media overlay, and transfer-control token enforcement completed; remaining hardcoded colors are semantic media/file/voice/map/highlight states |
 | 10 | Group/Channel/Direct Manager Standardization | Completed | Copilot | 2026-06-01 | Manager IA, role-aware action placement, header entry labels, and manager/profile browser matrix are complete |
 | 11 | Weak-Device and Motion Final Pass | Completed | Copilot | 2026-06-01 | S10 weak-device benchmark passed practical responsiveness gate: list/chat/heap/API/bundle improved with zero scroll jank |
-| 12 | Final Benchmark + Release Closure | Completed | Codex | 2026-06-02 | Closed on the valid `f8312e3` 72-sample median benchmark: `14/14` surfaces measured, `0` blocked, all chat-ready deltas green, S10 list/chat/context green, heap and DOM lower across every scenario. |
+| 12 | Final Benchmark + Release Closure | Completed | Codex | 2026-06-04 | Closed on the valid `f8312e3` 72-sample median benchmark plus final release gates: `14/14` surfaces measured, `0` blocked, all chat-ready deltas green, S10 list/chat/context green, heap and DOM lower across every scenario, final browser matrix `339 passed`, `3 skipped`, `0 failed`, and both `npm run build` plus `make foreign` completed successfully. |
 
 ## Detailed Stage Plan
 

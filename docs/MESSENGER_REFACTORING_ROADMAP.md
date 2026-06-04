@@ -1,7 +1,7 @@
 # Messenger Refactoring Roadmap
 
 > Date: 2026-05-31  
-> Status: Stage 12 benchmark closure is complete on the valid `f8312e3` 72-sample median run: all `M01`-`M14` surfaces are measured with `0` blocked surfaces, every chat-ready scenario is green, S10 weak-device list/chat/context is green, heap and DOM are lower across all scenarios, and legacy Messenger remains available for rollback while the project enters the release-acceptance and legacy-retirement window.
+> Status: Stage 12 release closure is complete: the valid `f8312e3` 72-sample median benchmark measured all `M01`-`M14` surfaces with `0` blocked surfaces, every chat-ready scenario green, S10 weak-device list/chat/context green, and heap/DOM lower across all scenarios; the final browser acceptance matrix `acceptance-matrix-20260603T200250Z.log` passed with `339 passed`, `3 skipped`, and `0 failed`; `npm run build` and `make foreign` completed successfully on 2026-06-04. Legacy Messenger remains available for rollback through the accepted release window.
 > Scope: In-app Messenger frontend and the minimum backend/runtime seams needed to make it fast, stable, standard, dynamic, and user-friendly.
 
 ## Goal
