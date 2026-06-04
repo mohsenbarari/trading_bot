@@ -266,7 +266,7 @@ import {
   MAX_STICKERS_PER_MESSAGE,
   splitTextGraphemes,
 } from '../../utils/emojiStickerCatalog'
-import { getMessengerComposerSurface } from '../../utils/messengerStage5ComposerOverlay'
+import { getMessengerComposerSurface } from '../../utils/composerOverlayState'
 import EmojiStickerPicker from './EmojiStickerPicker.vue'
 
 const props = defineProps<{

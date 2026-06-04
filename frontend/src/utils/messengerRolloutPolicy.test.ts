@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   evaluateMessengerRolloutGate,
   getMessengerRolloutSurface,
-} from './messengerStage7Rollout'
+} from './messengerRolloutPolicy'
 
-describe('messengerStage7Rollout', () => {
+describe('messengerRolloutPolicy', () => {
   it('keeps legacy as the rollback surface and enables refactor only for explicit preview', () => {
     expect(getMessengerRolloutSurface('legacy')).toEqual({
       uiVersion: 'legacy',

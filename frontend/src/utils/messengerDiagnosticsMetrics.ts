@@ -37,7 +37,7 @@ export interface MessengerDiagnosticTaskOptions {
 
 declare global {
   interface Window {
-    __messengerStage2Metrics?: MessengerMetricEntry[]
+    __messengerDiagnosticsMetrics?: MessengerMetricEntry[]
   }
 }
 
@@ -56,8 +56,8 @@ function getMetricStore() {
     return null
   }
 
-  window.__messengerStage2Metrics ||= []
-  return window.__messengerStage2Metrics
+  window.__messengerDiagnosticsMetrics ||= []
+  return window.__messengerDiagnosticsMetrics
 }
 
 function trimMetricStore(store: MessengerMetricEntry[]) {
@@ -137,7 +137,7 @@ export function recordMessengerMetric(
     store.push(entry)
     trimMetricStore(store)
     try {
-      window.dispatchEvent(new CustomEvent('messenger:stage2-metric', { detail: entry }))
+      window.dispatchEvent(new CustomEvent('messenger:diagnostic-metric', { detail: entry }))
     } catch {
       // Diagnostics only; metric dispatch must never affect Messenger runtime.
     }
@@ -157,12 +157,12 @@ export function clearMessengerMetricEntries() {
   }
 }
 
-export function markMessengerStage2(name: string) {
+export function markMessengerDiagnostic(name: string) {
   markMessengerPerformance(name)
   recordMessengerMetric(`${name}:mark`, now(), 'ms')
 }
 
-export function measureMessengerStage2(
+export function measureMessengerDiagnostic(
   name: string,
   startMark: string,
   endMark: string,

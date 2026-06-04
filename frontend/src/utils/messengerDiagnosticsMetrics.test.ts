@@ -7,9 +7,9 @@ import {
   recordMessengerMetric,
   scheduleMessengerDiagnosticTask,
   startMessengerFrameBudgetProbe,
-} from './messengerStage2Metrics'
+} from './messengerDiagnosticsMetrics'
 
-describe('messengerStage2Metrics', () => {
+describe('messengerDiagnosticsMetrics', () => {
   beforeEach(() => {
     clearMessengerMetricEntries()
     document.body.innerHTML = ''

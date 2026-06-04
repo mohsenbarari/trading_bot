@@ -75,7 +75,7 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 
 | Stage | Name | Status | Primary Goal |
 | --- | --- | --- | --- |
-| A | Domain Naming Cleanup | Planned | Remove historical stage naming without behavior change |
+| A | Domain Naming Cleanup | Completed | Remove historical stage naming without behavior change |
 | B | Store Foundation, Diagnostics Gate, Local Hydration | Planned | Establish store/cache/gateway foundations early |
 | C | Container Extraction And Room Tear-down | Planned | Shrink `ChatView.vue` safely and prevent leaks |
 | D | Message Renderer Split And Error Boundaries | Planned | Make message rendering modular and fault-tolerant |
@@ -93,18 +93,18 @@ Remove stage-based code smell and make helper ownership understandable by domain
 ### Changes
 
 - Rename historical helper files to domain names:
-  - `messengerStage3Controllers.ts` -> `chatTimelineController.ts`
-  - `messengerStage4Performance.ts` -> `conversationListModel.ts`
-  - `messengerStage5ComposerOverlay.ts` -> `composerOverlayState.ts`
-  - `messengerStage6MediaRealtime.ts` -> `chatRealtimeMediaPolicy.ts`
-  - `messengerStage6ContextMenu.ts` -> `messageContextMenuModel.ts`
-  - `messengerStage7Rollout.ts` -> `messengerRolloutPolicy.ts`
+  - controller helpers -> `chatTimelineController.ts`
+  - conversation/timeline performance helpers -> `conversationListModel.ts`
+  - composer/overlay helpers -> `composerOverlayState.ts`
+  - media/realtime helpers -> `chatRealtimeMediaPolicy.ts`
+  - context-menu helpers -> `messageContextMenuModel.ts`
+  - rollout helpers -> `messengerRolloutPolicy.ts`
 - Rename matching test files.
 - Update imports only.
 - Keep all public function behavior unchanged.
 - Add a short compatibility note in the old roadmap explaining the rename.
 - Run a repo-wide reference audit before closing the stage:
-  - search the whole repository for `messengerStage`.
+  - search the whole repository for historical stage-helper names.
   - update tracked benchmark scripts, e2e specs, tests, docs, and config references.
   - do not treat generated `tmp` artifacts as authoritative unless they are the active benchmark runner or are tracked.
 
@@ -113,7 +113,7 @@ Remove stage-based code smell and make helper ownership understandable by domain
 - `frontend/src/utils/*`
 - `frontend/src/components/ChatView.vue`
 - relevant tests under `frontend/src/utils/*.test.ts`
-- tracked benchmark/e2e/scripts/docs references that mention `messengerStage*`
+- tracked benchmark/e2e/scripts/docs references that mention historical stage-helper names
 - docs only for roadmap sync
 
 ### Tests
@@ -124,9 +124,10 @@ Remove stage-based code smell and make helper ownership understandable by domain
 
 ### Exit Criteria
 
-- No `frontend/src` import references a `messengerStage*` helper.
-- Tests pass.
-- `git diff` shows rename/import changes only.
+- Completed on 2026-06-04.
+- No active `frontend/src` import references a historical stage-named Messenger helper.
+- Focused Stage A tests passed.
+- `git diff` shows rename/import/documentation changes only.
 
 ### Rollback
 
@@ -187,7 +188,7 @@ Create the store/service foundation before further extraction so later changes h
 - `frontend/src/components/ChatView.vue`
 - `frontend/src/composables/chat/useChatMessages.ts`
 - `frontend/src/composables/chat/useChatWebSocket.ts`
-- `frontend/src/utils/messengerStage2Metrics.ts` or renamed diagnostics utility
+- `frontend/src/utils/messengerDiagnosticsMetrics.ts`
 
 ### Tests
 
@@ -601,4 +602,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Start with Stage A. It is low risk, makes the architecture understandable, and creates the naming baseline required before store and container extraction begin.
+Start Stage B. The naming baseline is complete, so the next slice is the store/service foundation, diagnostics gate, local hydration, cache reconciliation, and websocket gateway skeleton.

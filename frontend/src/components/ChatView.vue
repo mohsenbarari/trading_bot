@@ -37,7 +37,7 @@ import { resolveConversationProfileTarget } from '../utils/accountantChatIdentit
 import { isAdminRole } from '../utils/currentUser'
 import { isUserOnline } from '../utils/userPresence'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
-import { recordMessengerDomSnapshot, recordMessengerMetric, scheduleMessengerDiagnosticTask } from '../utils/messengerStage2Metrics'
+import { recordMessengerDomSnapshot, recordMessengerMetric, scheduleMessengerDiagnosticTask } from '../utils/messengerDiagnosticsMetrics'
 import {
   buildMessengerConversationQuery,
   clearMessengerTimelineCache,
@@ -50,24 +50,24 @@ import {
   normalizeMessageIds,
   sortMessageIdsByMessageOrder,
   toggleMessageSelectionBatch,
-} from '../utils/messengerStage3Controllers'
+} from '../utils/chatTimelineController'
 import {
   compareMessengerConversationActivity,
   getNextPinnedConversationOrder,
-  isMandatoryPinnedConversation as isMandatoryPinnedConversationFromStage4,
+  isMandatoryPinnedConversation as isMandatoryPinnedConversationFromModel,
   isMessengerConversationPinned,
   sortMessengerConversations,
   summarizeTimelineRenderBudget,
-} from '../utils/messengerStage4Performance'
+} from '../utils/conversationListModel'
 import {
   reduceMessengerOverlayState,
   type MessengerOverlayAction,
   type MessengerOverlayState,
-} from '../utils/messengerStage5ComposerOverlay'
+} from '../utils/composerOverlayState'
 import {
   buildMessengerContextMenuModel,
   getMessengerContextMenuStyle,
-} from '../utils/messengerStage6ContextMenu'
+} from '../utils/messageContextMenuModel'
 
 const loadChatSearchGlobalList = () => import('./chat/ChatSearchGlobalList.vue')
 
@@ -829,7 +829,7 @@ const selectedConversationActivityText = computed(() => {
 })
 
 function isMandatoryPinnedConversation(conv: Conversation) {
-  return isMandatoryPinnedConversationFromStage4(conv)
+  return isMandatoryPinnedConversationFromModel(conv)
 }
 
 function isConversationPinned(conv: Conversation) {

@@ -9,13 +9,13 @@ import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import { isUserOnline } from '../../utils/userPresence'
 import { formatIranTime } from '../../utils/iranTime'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
-import { recordMessengerDomSnapshot, scheduleMessengerDiagnosticTask } from '../../utils/messengerStage2Metrics'
+import { recordMessengerDomSnapshot, scheduleMessengerDiagnosticTask } from '../../utils/messengerDiagnosticsMetrics'
 import {
   MESSENGER_CONVERSATION_INITIAL_WINDOW,
   MESSENGER_CONVERSATION_WINDOW_BATCH,
   selectConversationWindow,
   shouldExpandConversationWindow,
-} from '../../utils/messengerStage4Performance'
+} from '../../utils/conversationListModel'
 import {
   ArrowDown,
   ArrowUp,
