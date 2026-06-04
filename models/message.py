@@ -26,6 +26,7 @@ class Message(Base):
     
     # Forward support
     forwarded_from_id = Column(Integer, ForeignKey("users.id", name="fk_messages_forwarded_from"), nullable=True)
+    forwarded_from_name_override = Column(String(255), nullable=True)
     forwarded_from = relationship("User", foreign_keys=[forwarded_from_id])
     
     # محتوای پیام: متن برای پیام‌های متنی، URL برای تصاویر، ID استیکر برای استیکرها

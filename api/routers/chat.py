@@ -1666,6 +1666,7 @@ async def send_room_message(
             message_type=data.message_type,
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
+            forwarded_from_name_override=data.forwarded_from_name_override,
             mentions=room_mentions,
             mention_all=room_mention_all,
         )
@@ -1709,6 +1710,7 @@ async def send_room_message(
             message_type=data.message_type,
             reply_to_message_id=data.reply_to_message_id,
             forwarded_from_id=data.forwarded_from_id,
+            forwarded_from_name_override=data.forwarded_from_name_override,
             mentions=room_mentions,
             mention_all=room_mention_all,
         )
@@ -1802,6 +1804,7 @@ async def send_message(
         message_type=data.message_type,
         reply_to_message_id=data.reply_to_message_id,
         forwarded_from_id=data.forwarded_from_id,
+        forwarded_from_name_override=data.forwarded_from_name_override,
     )
     if message is None:
         raise HTTPException(status_code=500, detail="Failed to persist message")

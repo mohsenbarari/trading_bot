@@ -158,6 +158,12 @@ def apply_accountant_identity_to_message_payload(
     enriched_payload = dict(payload)
 
     def apply_identity(field_prefix: str, id_field: str, name_field: str) -> None:
+        if field_prefix == "forwarded_from":
+            forwarded_name_override = (enriched_payload.get("forwarded_from_name_override") or "").strip()
+            if forwarded_name_override:
+                enriched_payload[name_field] = forwarded_name_override
+                return
+
         raw_user_id = _coerce_positive_int(enriched_payload.get(id_field))
         fallback_name = (enriched_payload.get(name_field) or "").strip()
         if raw_user_id is None:

@@ -1179,6 +1179,48 @@ function buildForwardContent(message: Message, forwardedAlbumId: string | null, 
   }
 }
 
+function normalizeForwardedSourceName(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function resolveForwardSource(message: Message) {
+  const existingForwardName = normalizeForwardedSourceName((message as any).forwarded_from_name_override)
+    || normalizeForwardedSourceName((message as any).forwarded_from_name)
+  const existingForwardedFromRaw = (message as any).forwarded_from_id
+  const existingForwardedFromId = typeof existingForwardedFromRaw === 'number' && existingForwardedFromRaw > 0
+    ? existingForwardedFromRaw
+    : null
+
+  if (existingForwardName) {
+    return {
+      forwardedFromId: existingForwardedFromId,
+      forwardedFromNameOverride: existingForwardName,
+    }
+  }
+
+  const messageRoomKind = (message as any).room_kind
+  const messageChatId = (message as any).chat_id
+  const isCurrentChannelMessage = selectedRoomKind.value === 'channel'
+    && (!messageChatId || messageChatId === selectedConversation.value?.chat_id)
+  const isChannelMessage = messageRoomKind === 'channel' || isCurrentChannelMessage
+
+  if (isChannelMessage) {
+    const channelName = normalizeForwardedSourceName(selectedConversation.value?.other_user_name)
+      || normalizeForwardedSourceName(selectedUserName.value)
+    if (channelName) {
+      return {
+        forwardedFromId: null,
+        forwardedFromNameOverride: channelName,
+      }
+    }
+  }
+
+  return {
+    forwardedFromId: message.sender_id,
+    forwardedFromNameOverride: null,
+  }
+}
+
 function prepareForwardBatch(messageIds: number[]) {
   const orderedIds = sortMessageIdsByChatOrder(messageIds)
   const selectedSet = new Set(orderedIds)
@@ -1214,16 +1256,21 @@ function prepareForwardBatch(messageIds: number[]) {
       if (!message) return null
 
       const albumAssignment = albumAssignments.get(message.id)
-      const forwardedFromRaw = (message as any).forwarded_from_id
-      const forwardedFromId = typeof forwardedFromRaw === 'number' ? forwardedFromRaw : message.sender_id
+      const forwardSource = resolveForwardSource(message)
 
       return {
         message,
         content: buildForwardContent(message, albumAssignment?.albumId ?? null, albumAssignment?.albumIndex),
-        forwardedFromId,
+        forwardedFromId: forwardSource.forwardedFromId,
+        forwardedFromNameOverride: forwardSource.forwardedFromNameOverride,
       }
     })
-    .filter((item): item is { message: Message, content: string, forwardedFromId: number } => Boolean(item))
+    .filter((item): item is {
+      message: Message
+      content: string
+      forwardedFromId: number | null
+      forwardedFromNameOverride: string | null
+    } => Boolean(item))
 }
 
 async function deleteMessagesByIds(messageIds: number[], confirmMessage: string) {
@@ -2538,7 +2585,12 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
           content: task.item.content,
           message_type: task.item.message.message_type,
         })
-        payload.forwarded_from_id = task.item.forwardedFromId
+        if (task.item.forwardedFromId !== null) {
+          payload.forwarded_from_id = task.item.forwardedFromId
+        }
+        if (task.item.forwardedFromNameOverride) {
+          payload.forwarded_from_name_override = task.item.forwardedFromNameOverride
+        }
 
         await messagesLogic.apiFetch(endpoint, {
           method: 'POST',

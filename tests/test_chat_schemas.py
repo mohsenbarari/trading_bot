@@ -31,6 +31,7 @@ class ChatSchemasTests(unittest.TestCase):
             reply_to_message=deleted_reply,
             reactions=[{'emoji': '🔥', 'user_id': 7}],
             forwarded_from_id=4,
+            forwarded_from_name_override=None,
             forwarded_from=SimpleNamespace(account_name='origin'),
             sender=SimpleNamespace(account_name='sender-name'),
         )
@@ -41,6 +42,11 @@ class ChatSchemasTests(unittest.TestCase):
         self.assertEqual(parsed.sender_name, 'sender-name')
         self.assertIsNone(parsed.reply_to_message)
         self.assertEqual(parsed.reactions[0].emoji, '🔥')
+
+        message.forwarded_from_name_override = 'کانال قیمت طلا'
+        parsed_with_override = chat_schemas.MessageRead.from_orm_with_forwarding(message)
+        self.assertEqual(parsed_with_override.forwarded_from_name, 'کانال قیمت طلا')
+        self.assertEqual(parsed_with_override.forwarded_from_name_override, 'کانال قیمت طلا')
 
         with_reply = chat_schemas.MessageRead(
             id=2,

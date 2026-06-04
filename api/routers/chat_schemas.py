@@ -89,6 +89,7 @@ class MessageRead(BaseModel):
     updated_at: Optional[datetime] = None
     created_at: datetime
     forwarded_from_id: Optional[int] = None
+    forwarded_from_name_override: Optional[str] = None
     forwarded_from_name: Optional[str] = None
     forwarded_from_profile_user_id: Optional[int] = None
     forwarded_from_profile_account_name: Optional[str] = None
@@ -113,6 +114,11 @@ class MessageRead(BaseModel):
 
     @classmethod
     def from_orm_with_forwarding(cls, obj: Message):
+        forwarded_from_name_override = getattr(obj, "forwarded_from_name_override", None)
+        forwarded_from_name = forwarded_from_name_override
+        if forwarded_from_name is None and getattr(obj, "forwarded_from", None):
+            forwarded_from_name = obj.forwarded_from.account_name
+
         data = {
             "id": obj.id,
             "sender_id": obj.sender_id,
@@ -126,9 +132,8 @@ class MessageRead(BaseModel):
             "reply_to_message": obj.reply_to_message,
             "reactions": normalize_message_reactions(getattr(obj, "reactions", [])),
             "forwarded_from_id": obj.forwarded_from_id,
-            "forwarded_from_name": obj.forwarded_from.account_name
-            if getattr(obj, "forwarded_from", None)
-            else None,
+            "forwarded_from_name_override": forwarded_from_name_override,
+            "forwarded_from_name": forwarded_from_name,
             "sender_name": obj.sender.account_name if getattr(obj, "sender", None) else None,
             "mentions": getattr(obj, "mentions", []),
             "mention_all": getattr(obj, "mention_all", False),
@@ -152,6 +157,7 @@ class MessageSend(BaseModel):
     message_type: MessageType = MessageType.TEXT
     reply_to_message_id: Optional[int] = None
     forwarded_from_id: Optional[int] = None
+    forwarded_from_name_override: Optional[str] = Field(None, max_length=255)
     mentions: List[int] = Field(default_factory=list)
     mention_all: bool = False
 
@@ -163,6 +169,7 @@ class RoomMessageSend(BaseModel):
     message_type: MessageType = MessageType.TEXT
     reply_to_message_id: Optional[int] = None
     forwarded_from_id: Optional[int] = None
+    forwarded_from_name_override: Optional[str] = Field(None, max_length=255)
     mentions: List[int] = Field(default_factory=list)
     mention_all: bool = False
 

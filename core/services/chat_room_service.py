@@ -2341,6 +2341,7 @@ async def send_channel_message(
     message_type: MessageType,
     reply_to_message_id: int | None = None,
     forwarded_from_id: int | None = None,
+    forwarded_from_name_override: str | None = None,
     mentions: list[int] | None = None,
     mention_all: bool = False,
 ) -> Message:
@@ -2371,6 +2372,7 @@ async def send_channel_message(
         message_type=message_type,
         reply_to_message_id=reply_to_message_id,
         forwarded_from_id=forwarded_from_id,
+        forwarded_from_name_override=forwarded_from_name_override,
         is_read=True,
         created_at=now,
         mentions=resolved_mentions,
@@ -2403,6 +2405,7 @@ async def send_group_message(
     message_type: MessageType,
     reply_to_message_id: int | None = None,
     forwarded_from_id: int | None = None,
+    forwarded_from_name_override: str | None = None,
     mentions: list[int] | None = None,
     mention_all: bool = False,
 ) -> Message:
@@ -2433,6 +2436,7 @@ async def send_group_message(
         message_type=message_type,
         reply_to_message_id=reply_to_message_id,
         forwarded_from_id=forwarded_from_id,
+        forwarded_from_name_override=forwarded_from_name_override,
         is_read=True,
         created_at=now,
         mentions=resolved_mentions,
