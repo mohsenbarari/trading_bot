@@ -21,7 +21,7 @@ from models.chat_member import ChatMember
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.message import Message
 from models.user import User, UserRole
-from core.services.chat_service import get_next_chat_member_pin_order
+from core.services.chat_service import get_next_chat_member_pin_order, prepare_direct_location_content
 from core.services.customer_relation_service import is_user_customer
 
 SerializedMessageT = TypeVar("SerializedMessageT")
@@ -2363,12 +2363,20 @@ async def send_channel_message(
         mention_all=mention_all,
     )
 
+    prepared_content = content
+    if message_type == MessageType.LOCATION:
+        prepared_content = await prepare_direct_location_content(
+            db,
+            uploader_id=sender.id,
+            content=content,
+        )
+
     now = _utcnow()
     message = Message(
         chat_id=chat.id,
         sender_id=sender.id,
         receiver_id=sender.id,
-        content=content,
+        content=prepared_content,
         message_type=message_type,
         reply_to_message_id=reply_to_message_id,
         forwarded_from_id=forwarded_from_id,
@@ -2427,12 +2435,20 @@ async def send_group_message(
         mention_all=mention_all,
     )
 
+    prepared_content = content
+    if message_type == MessageType.LOCATION:
+        prepared_content = await prepare_direct_location_content(
+            db,
+            uploader_id=sender.id,
+            content=content,
+        )
+
     now = _utcnow()
     message = Message(
         chat_id=chat.id,
         sender_id=sender.id,
         receiver_id=sender.id,
-        content=content,
+        content=prepared_content,
         message_type=message_type,
         reply_to_message_id=reply_to_message_id,
         forwarded_from_id=forwarded_from_id,
