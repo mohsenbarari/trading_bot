@@ -190,6 +190,33 @@ describe('ChatLightbox.vue', () => {
     expect(wrapper.text()).not.toContain('دانلود آلبوم')
   })
 
+  it('uses a centered custom play affordance for paused active videos before native controls appear', async () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const wrapper = mount(ChatLightbox, {
+      props: buildLightboxProps({ currentIndex: 1 }),
+      global: {
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    const video = wrapper.find('video')
+    expect(video.exists()).toBe(true)
+    expect(video.attributes('controls')).toBeUndefined()
+    expect(wrapper.find('.lightbox-video-play-btn').exists()).toBe(true)
+
+    await wrapper.find('.lightbox-video-play-btn').trigger('click')
+    expect(playSpy).toHaveBeenCalledTimes(1)
+
+    await video.trigger('play')
+    await flushPromises()
+
+    expect(wrapper.find('.lightbox-video-play-btn').exists()).toBe(false)
+    expect(wrapper.find('video').attributes('controls')).toBeDefined()
+  })
+
   it('closes the action menu and album sheet before closing the full overlay', async () => {
     const wrapper = mount(ChatLightbox, {
       props: buildLightboxProps(),
