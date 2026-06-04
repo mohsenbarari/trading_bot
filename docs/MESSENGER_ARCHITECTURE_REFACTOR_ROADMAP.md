@@ -77,7 +77,7 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | --- | --- | --- | --- |
 | A | Domain Naming Cleanup | Completed | Remove historical stage naming without behavior change |
 | B | Store Foundation, Diagnostics Gate, Local Hydration | Completed | Establish store/cache/gateway foundations early |
-| C | Container Extraction And Room Tear-down | Planned | Shrink `ChatView.vue` safely and prevent leaks |
+| C | Container Extraction And Room Tear-down | Completed | Shrink `ChatView.vue` safely and prevent leaks |
 | D | Message Renderer Split And Error Boundaries | Planned | Make message rendering modular and fault-tolerant |
 | E | Media Dimension Contract And Virtualized Timeline | Planned | Introduce safe real virtualization without scroll jumps |
 | F | Realtime Gateway And Request Churn Reduction | Planned | Convert realtime/network updates into precise store mutations |
@@ -270,10 +270,13 @@ Shrink `ChatView.vue` by extracting containers and add a formal room cleanup rou
 
 ### Exit Criteria
 
-- `ChatView.vue` line count reduced materially.
-- Room switching does not leak timers/object URLs/hydration jobs.
-- Background upload survives room switch.
-- Existing browser-back behavior still works.
+- Completed on 2026-06-04.
+- `ChatView.vue` now delegates shell/list/room rendering through extracted containers.
+- `ChatRoomContainer` owns room timeline/composer/room overlay rendering while legacy logic remains in `ChatView.vue`.
+- `ConversationListContainer` owns global search/list rendering.
+- Room switching now enters/leaves `chatRoomLifecycle`, closes room-scoped overlays, clears room UI/session runtime, and preserves background upload ownership.
+- Existing browser-back and legacy source-of-truth behavior remain active during the transition.
+- Focused ChatView/lifecycle/Messenger runtime tests and production build passed.
 
 ### Rollback
 
@@ -607,4 +610,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Start Stage C. Store/service foundations are now in place, so the next slice is container extraction and the formal room tear-down migration that starts reducing `ChatView.vue` without changing feature behavior.
+Start Stage D. The first container boundary is in place, so the next slice is the message renderer split with `MessageRenderBoundary` and specialized message bubbles.

@@ -3,12 +3,9 @@ import { ref, onMounted, computed, watch, onUnmounted, nextTick, defineAsyncComp
 import { useRoute, useRouter } from 'vue-router'
 import MessengerLoadingScreen from './chat/MessengerLoadingScreen.vue'
 import ChatHeader from './chat/ChatHeader.vue'
-import ChatInputBar from './chat/ChatInputBar.vue'
-import ChatMessageItem from './chat/ChatMessageItem.vue'
-import ChatEmptyState from './chat/ChatEmptyState.vue'
-import ChatConversationList from './chat/ChatConversationList.vue'
-import ChatContextMenu from './chat/ChatContextMenu.vue'
-import { vAutoAnimate } from '@formkit/auto-animate/vue'
+import ChatShell from './chat/containers/ChatShell.vue'
+import ConversationListContainer from './chat/containers/ConversationListContainer.vue'
+import ChatRoomContainer from './chat/containers/ChatRoomContainer.vue'
 import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
 
@@ -23,6 +20,7 @@ import { useNotificationStore } from '../stores/notifications'
 import { useChatSessionStore } from '../stores/chat/session'
 import { useMessagesStore } from '../stores/chat/messages'
 import { useChatUiStore } from '../stores/chat/ui'
+import { createChatRoomLifecycleRuntime } from '../services/chat/chatRoomLifecycle'
 import {
   ensureFileCached,
   canShareFiles,
@@ -74,16 +72,10 @@ import {
 
 const loadChatSearchGlobalList = () => import('./chat/ChatSearchGlobalList.vue')
 
-const ChatSearchGlobalList = defineAsyncComponent(loadChatSearchGlobalList)
 const ChatNewConversationModal = defineAsyncComponent(() => import('./chat/ChatNewConversationModal.vue'))
 const ChatGroupManagerModal = defineAsyncComponent(() => import('./chat/ChatGroupManagerModal.vue'))
 const CreateChannelView = defineAsyncComponent(() => import('./CreateChannelView.vue'))
 const AdminBroadcastModal = defineAsyncComponent(() => import('./AdminBroadcastModal.vue'))
-const AttachmentMenu = defineAsyncComponent(() => import('./chat/AttachmentMenu.vue'))
-const ChatForwardModal = defineAsyncComponent(() => import('./chat/ChatForwardModal.vue'))
-const ChatLightbox = defineAsyncComponent(() => import('./chat/ChatLightbox.vue'))
-const ChatLocationModal = defineAsyncComponent(() => import('./chat/ChatLocationModal.vue'))
-const ChatSearchBottomBar = defineAsyncComponent(() => import('./chat/ChatSearchBottomBar.vue'))
 const keepInactiveMessengerSurfacesMounted = Boolean(import.meta.env.VITEST)
 const MESSENGER_INTERACTION_WARM_DEFER_MS = 3200
 const MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS = 2600
@@ -118,6 +110,8 @@ const notificationStore = useNotificationStore()
 const chatSessionStore = useChatSessionStore()
 const chatMessagesStore = useMessagesStore()
 const chatUiStore = useChatUiStore()
+const chatRoomLifecycle = createChatRoomLifecycleRuntime()
+const registeredRoomLifecycleCleanups = new Set<number>()
 const { on: onGlobalWs, off: offGlobalWs } = useWebSocket()
 
 // Emits
@@ -2927,10 +2921,22 @@ const handleTouchEnd = (e: TouchEvent, msg: Message) => {
 }
 
 watch(selectedUserId, (newVal) => {
+  chatRoomLifecycle.enterRoom(newVal)
   pendingSelectionAnchor = null
   clearMessengerTimelineCache(timelineControllerCache)
   dateSeparatorLabelCache.clear()
   if (newVal) {
+    if (!registeredRoomLifecycleCleanups.has(newVal)) {
+      registeredRoomLifecycleCleanups.add(newVal)
+      chatRoomLifecycle.registerRoomCleanup(newVal, () => {
+        closeContextMenu()
+        closeLightbox()
+        closeLocationModal()
+        showInChatSearchList.value = false
+        chatUiStore.clearRoomOverlays()
+        chatSessionStore.clearRoomRuntime(newVal)
+      })
+    }
     pinnedMessageState.value = null
     schedulePinnedMessageStateLoad(newVal)
     if (newVal > 0 && selectedRoomKind.value === 'direct') {
@@ -3205,7 +3211,158 @@ async function handleAttachmentFileSelection(file: File) {
   })
 }
 
+const chatRoomContainerState = computed(() => ({
+  selectedUserId: selectedUserId.value,
+  isSearchActive: isSearchActive.value,
+  showInChatSearchList: showInChatSearchList.value,
+  searchResults: searchResults.value,
+  searchQuery: searchQuery.value,
+  sortedConversations: sortedConversations.value,
+  currentUserId: props.currentUserId,
+  isLoadingMessages: isLoadingMessages.value,
+  prefersReducedMotion: prefersReducedMotion.value,
+  pinnedMessage: pinnedMessage.value,
+  isLoadingOlderMessages: isLoadingOlderMessages.value,
+  messagePanelError: messagePanelError.value,
+  messages: messages.value,
+  groupedMessages: groupedMessages.value,
+  isSelectionMode: isSelectionMode.value,
+  activeAlbumSelectionId: activeAlbumSelectionId.value,
+  selectionMemoKey: selectionMemoKey.value,
+  selectedMessages: selectedMessages.value,
+  selectedUserName: selectedUserName.value,
+  imageCache: imageCache.value,
+  isSelectedManagementRoom: isSelectedManagementRoom.value,
+  showScrollButton: showScrollButton.value,
+  unreadMentionMessages: unreadMentionMessages.value,
+  unreadNewMessagesCount: unreadNewMessagesCount.value,
+  currentSearchIndex: currentSearchIndex.value,
+  isAlbumDownloadSelectionMode: isAlbumDownloadSelectionMode.value,
+  isAlbumForwardSelectionMode: isAlbumForwardSelectionMode.value,
+  isAlbumShareSelectionMode: isAlbumShareSelectionMode.value,
+  messageInput: messageInput.value,
+  showStickerPicker: showStickerPicker.value,
+  editingMessage: editingMessage.value,
+  replyingToMessage: replyingToMessage.value,
+  canDeleteSelected: canDeleteSelected.value,
+  canCopySelected: canCopySelected.value,
+  isSending: isSending.value,
+  isSelectedUserDeleted: isSelectedUserDeleted.value,
+  isSelectedRoomReadOnly: isSelectedRoomReadOnly.value,
+  readOnlyBannerText: isSelectedManagementRoom.value
+    ? 'این گفتگوی مدیریتی فقط برای اطلاع‌رسانی است.'
+    : (selectedRoomKind.value === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined),
+  selectedRoomKind: selectedRoomKind.value,
+  isUploading: isUploading.value,
+  showAttachmentMenu: showAttachmentMenu.value,
+  showForwardModal: showForwardModal.value,
+  keepInactiveMessengerSurfacesMounted,
+  contextMenu: contextMenu.value,
+  canEdit: canEdit.value,
+  canDelete: canDelete.value,
+  canPinContextMessage: canPinContextMessage.value,
+  isContextMessagePinned: isContextMessagePinned.value,
+  availableMessageReactions: [...AVAILABLE_MESSAGE_REACTIONS],
+  lightboxMedia: lightboxMedia.value,
+  selectedLocation: selectedLocation.value,
+}))
+
+const chatRoomContainerHandlers = {
+  setMessagesContainer: (element: Element | null) => {
+    messagesContainer.value = element instanceof HTMLElement ? element : null
+  },
+  setChatInputBarRef: (component: any) => {
+    chatInputBarRef.value = component
+  },
+  updateMessageInput: (value: string) => {
+    messageInput.value = value
+  },
+  updateStickerPickerOpen: (value: boolean) => {
+    showStickerPicker.value = value
+  },
+  updateAttachmentMenu: (value: boolean) => {
+    showAttachmentMenu.value = value
+  },
+  handleSendText: (text: string) => {
+    messageInput.value = text
+    sendMessage()
+  },
+  retryLoadMessages: () => {
+    messagePanelError.value = ''
+    if (selectedUserId.value) {
+      void loadMessages(selectedUserId.value)
+    }
+  },
+  handleMessagesScroll,
+  scrollToTimelineGroup,
+  getTimelineItemMessage,
+  isAlbumTimelineItem,
+  getTimelineItemAlbumItems,
+  isAlbumInDownloadSelection,
+  handleReply,
+  handleGroupedItemSelection,
+  handleMessageClick,
+  showContextMenu,
+  scrollToMessage,
+  handleMediaInteraction,
+  handleLocationClick,
+  downloadMedia,
+  handleCancelSend,
+  handleCancelDownload,
+  handleAlbumReplyItem,
+  handleAlbumForwardItem,
+  handleAlbumDeleteItem,
+  handleAlbumDownloadItemToggle,
+  handleMessageReactionToggle,
+  handleRecoveryAction,
+  openPublicProfile,
+  hydrateRenderedMedia,
+  handleScrollButtonClick,
+  nextSearchResult,
+  prevSearchResult,
+  handleToggleInChatList,
+  clearSelection,
+  handleDownloadSelectedAlbumMessages,
+  handleForwardSelectedAlbumMessages,
+  handleShareSelectedAlbumMessages,
+  cancelEdit,
+  cancelReply,
+  handleDeleteSelected,
+  handleReplySelected,
+  handleCopySelected,
+  openForwardModal,
+  handleToggleAttachment,
+  handleSendVoice,
+  handleTypingForCurrentRoom,
+  handleAttachmentMediaSelection,
+  handleAttachmentFileSelection,
+  handleSendLocation,
+  closeForwardModal,
+  forwardSelectedMessages,
+  handleContextMenuReaction,
+  handleReplyMessage,
+  handleForwardMessage,
+  handleCopyMessage,
+  handleEditMessage,
+  handleDeleteMessage,
+  handlePinMessage,
+  closeContextMenu,
+  handleSaveMedia,
+  handleSaveAlbum,
+  handleShareMessage,
+  handleShareAlbum,
+  closeLightbox,
+  handleLightboxNavigate,
+  handleLightboxReply,
+  handleLightboxForward,
+  handleLightboxShare,
+  handleLightboxDelete,
+  closeLocationModal,
+  handleSearchResultClick,
+}
+
 onUnmounted(() => {
+  chatRoomLifecycle.leaveRoom(selectedUserId.value)
   cancelScheduledPinnedMessageLoad()
   messagesContainerResizeObserver?.disconnect()
   messagesContainerResizeObserver = null
@@ -3368,7 +3525,7 @@ defineExpose({
 
 
 <template>
-  <div class="chat-view">
+  <ChatShell>
     <!-- Header - Telegram Style -->
     <ChatHeader
       :isSelectionMode="isSelectionMode"
@@ -3449,310 +3606,29 @@ defineExpose({
       <button @click="error = ''; loadConversations()">تلاش مجدد</button>
     </div>
 
-    <!-- Global Search Results -->
-    <ChatSearchGlobalList
-      v-else-if="isSearchActive && !selectedUserId"
+    <ConversationListContainer
+      v-else-if="!selectedUserId"
+      :isSearchActive="isSearchActive"
+      :selectedUserId="selectedUserId"
       :searchResults="searchResults"
       :searchQuery="searchQuery"
       :conversations="sortedConversations"
       :currentUserId="currentUserId"
-      @select-result="handleSearchResultClick"
-    />
-
-    <!-- Conversation List -->
-    <ChatConversationList
-      v-else-if="!selectedUserId && !isSearchActive"
-      :conversations="sortedConversations"
-      :selectedUserId="selectedUserId"
       :typingUsers="typingUsers"
       :activityTextByConversation="activityTextByConversation"
       :apiBaseUrl="apiBaseUrl"
       :canStartNewConversation="canStartNewConversation"
+      @select-result="handleSearchResultClick"
       @select-conversation="selectConversation"
       @conversation-action="handleConversationAction"
       @new-conversation="openNewConversation"
     />
 
-    <!-- Messages View -->
-    <template v-else>
-      <ChatEmptyState v-if="!selectedUserId" />
-      
-      <!-- In-Chat Search List -->
-      <ChatSearchGlobalList
-        v-if="isSearchActive && selectedUserId && showInChatSearchList"
-        :searchResults="searchResults"
-        :searchQuery="searchQuery"
-        :conversations="sortedConversations"
-        :currentUserId="currentUserId"
-        @select-result="handleSearchResultClick"
-      />
-      
-      <div v-else class="chat-content">
-        <div v-if="isLoadingMessages" class="loading-state">
-          <div v-if="prefersReducedMotion" class="compact-chat-loading" role="status">
-            <span class="loading-spinner compact-spinner"></span>
-            <span>در حال باز کردن گفتگو</span>
-          </div>
-          <MessengerLoadingScreen
-            v-else
-            mode="chat"
-            title="در حال باز کردن گفتگو"
-            subtitle="آخرین پیام‌ها با یک بارگذاری سبک و سریع آماده می‌شوند."
-          />
-        </div>
-        
-        <div v-else :class="['messages-container', { 'has-pinned-message': !!pinnedMessage }]" ref="messagesContainer" @scroll.passive="handleMessagesScroll">
-          <div v-if="isLoadingOlderMessages" class="history-loading-indicator">
-            <span class="history-loading-dot"></span>
-            <span>در حال بارگذاری پیام‌های قبلی...</span>
-          </div>
-
-          <div v-if="messagePanelError" class="chat-panel-error" role="status">
-            <div>
-              <strong>دریافت گفتگو انجام نشد</strong>
-              <p>{{ messagePanelError }}</p>
-            </div>
-            <button @click="messagePanelError = ''; selectedUserId && loadMessages(selectedUserId)">تلاش مجدد</button>
-          </div>
-
-          <div v-else-if="messages.length === 0" class="empty-state">
-            <span>💬</span>
-            <p>شروع گفتگو...</p>
-          </div>
-          
-          <div v-for="group in groupedMessages" :key="group.label" class="message-group" v-auto-animate v-memo="[group, searchQuery, isSelectionMode, activeAlbumSelectionId, selectionMemoKey]">
-            <div class="date-separator sticky-date">
-              <span @click="scrollToTimelineGroup(group)">{{ group.label }}</span>
-            </div>
-
-            <template v-for="(item, index) in group.items" :key="item.id">
-              <ChatMessageItem
-                v-memo="[item, searchQuery, isSelectionMode, isAlbumInDownloadSelection(item), selectionMemoKey]"
-                :msg="getTimelineItemMessage(item)"
-                :isAlbum="isAlbumTimelineItem(item)"
-                :albumItems="getTimelineItemAlbumItems(item)"
-                :isAlbumDownloadMode="isAlbumInDownloadSelection(item)"
-                :selectedAlbumDownloadMessageIds="selectedMessages"
-                :currentUserId="props.currentUserId"
-                :selectedUserName="selectedUserName"
-                :selectedMessages="selectedMessages"
-                :imageCache="imageCache"
-                :isSelectionMode="isSelectionMode"
-                :searchQuery="searchQuery"
-                :isManagementMessage="isSelectedManagementRoom"
-                @swipe-reply="handleReply"
-                @select="handleGroupedItemSelection(item)"
-                @click-message="handleMessageClick"
-                @context-menu="showContextMenu"
-                @scroll-to="scrollToMessage"
-                @media-click="handleMediaInteraction"
-                @location-click="handleLocationClick"
-                @download="downloadMedia"
-                @cancel-send="handleCancelSend"
-                @cancel-download="handleCancelDownload"
-                @reply-album-item="handleAlbumReplyItem"
-                @forward-album-item="handleAlbumForwardItem"
-                @delete-album-item="handleAlbumDeleteItem"
-                @toggle-album-download-item="handleAlbumDownloadItemToggle"
-                @toggle-reaction="handleMessageReactionToggle"
-                @recovery-action="handleRecoveryAction"
-                @open-public-profile="openPublicProfile"
-                :on-load="() => hydrateRenderedMedia(item)"
-              />
-            </template>
-          </div> <!-- End v-for="groupedMessages" message-group -->
-        
-        <!-- Scroll to Bottom Button -->
-        <button 
-          v-if="showScrollButton" 
-          class="scroll-bottom-btn" 
-          :class="{ 'has-mention': unreadMentionMessages.length > 0 }"
-          @click="handleScrollButtonClick"
-        >
-          <span v-if="unreadNewMessagesCount > 0" class="scroll-badge">{{ unreadNewMessagesCount }}</span>
-          <span v-if="unreadMentionMessages.length > 0" class="scroll-mention-badge">@</span>
-          <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-            <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/>
-          </svg>
-        </button>
-      </div> <!-- End .messages-container -->
-      </div> <!-- End .chat-content -->
-
-      <!-- In-Chat Search Navigation Bottom Bar -->
-      <ChatSearchBottomBar
-        v-if="selectedUserId && isSearchActive && searchResults.length > 0"
-        :currentSearchIndex="currentSearchIndex"
-        :totalResults="searchResults.length"
-        :showInChatSearchList="showInChatSearchList"
-        @next="nextSearchResult"
-        @prev="prevSearchResult"
-        @toggle-list="handleToggleInChatList"
-      />
-
-      <div v-else-if="selectedUserId && isAlbumDownloadSelectionMode" class="album-download-selection-bar">
-        <button class="selection-action-btn" @click="clearSelection">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-          <span>انصراف</span>
-        </button>
-        <div class="album-download-selection-summary">
-          {{ selectedMessages.length }} مدیا برای دانلود انتخاب شده
-        </div>
-        <button class="selection-action-btn primary" @click="handleDownloadSelectedAlbumMessages">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          <span>دانلود</span>
-        </button>
-      </div>
-
-      <div v-else-if="selectedUserId && isAlbumForwardSelectionMode" class="album-download-selection-bar">
-        <button class="selection-action-btn" @click="clearSelection">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-          <span>انصراف</span>
-        </button>
-        <div class="album-download-selection-summary">
-          {{ selectedMessages.length }} مدیا برای هدایت انتخاب شده
-        </div>
-        <button class="selection-action-btn primary" :disabled="selectedMessages.length === 0" @click="handleForwardSelectedAlbumMessages">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 14 20 9 15 4"></polyline>
-            <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
-          </svg>
-          <span>هدایت</span>
-        </button>
-      </div>
-
-      <div v-else-if="selectedUserId && isAlbumShareSelectionMode" class="album-download-selection-bar">
-        <button class="selection-action-btn" @click="clearSelection">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-          <span>انصراف</span>
-        </button>
-        <div class="album-download-selection-summary">
-          {{ selectedMessages.length }} مدیا برای اشتراک‌گذاری انتخاب شده
-        </div>
-        <button class="selection-action-btn primary" :disabled="selectedMessages.length === 0" @click="handleShareSelectedAlbumMessages">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="18" cy="5" r="3"></circle>
-            <circle cx="6" cy="12" r="3"></circle>
-            <circle cx="18" cy="19" r="3"></circle>
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-          </svg>
-          <span>اشتراک‌گذاری</span>
-        </button>
-      </div>
-
-      <!-- Input Area -->
-      <ChatInputBar
-        ref="chatInputBarRef"
-        v-else-if="selectedUserId"
-        v-model="messageInput"
-        v-model:stickerPickerOpen="showStickerPicker"
-        :editingMessage="editingMessage"
-        :isSelectionMode="isSelectionMode"
-        :replyingToMessage="replyingToMessage"
-        :selectedUserName="selectedUserName"
-        :currentUserId="props.currentUserId"
-        :selectedMessagesCount="selectedMessages.length"
-        :canDeleteSelected="canDeleteSelected"
-        :canCopySelected="canCopySelected"
-        :isSending="isSending"
-        :isDeleted="isSelectedUserDeleted"
-        :isReadOnly="isSelectedRoomReadOnly"
-        :readOnlyBannerText="isSelectedManagementRoom ? 'این گفتگوی مدیریتی فقط برای اطلاع‌رسانی است.' : (selectedRoomKind === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined)"
-        :disableRichComposer="isSelectedRoomReadOnly"
-        :allowVoiceRecording="selectedRoomKind === 'direct'"
-        :selectedMessages="selectedMessages"
-        :isUploading="isUploading"
-        @cancel-edit="cancelEdit"
-        @cancel-reply="cancelReply"
-        @delete-selected="handleDeleteSelected"
-        @reply-selected="handleReplySelected"
-        @copy-selected="handleCopySelected"
-        @forward-selected="openForwardModal"
-        @toggle-attachment="handleToggleAttachment"
-        @send-text="(text: string) => { messageInput = text; sendMessage(); }"
-        @send-voice="handleSendVoice"
-        @typing="handleTypingForCurrentRoom"
-      />
-
-      <!-- Attachment Bottom Sheet -->
-      <AttachmentMenu
-        v-if="showAttachmentMenu || keepInactiveMessengerSurfacesMounted"
-        v-model="showAttachmentMenu"
-        :allowLocation="!isSelectedRoomReadOnly"
-        @select-media="handleAttachmentMediaSelection"
-        @select-file="handleAttachmentFileSelection"
-        @select-location="handleSendLocation"
-      />
-
-      <!-- Forward Target Modal -->
-      <ChatForwardModal
-        v-if="showForwardModal || keepInactiveMessengerSurfacesMounted"
-        :showForwardModal="showForwardModal"
-        :sortedConversations="sortedConversations"
-        :includeChannels="true"
-        :includeGroups="true"
-        @close="closeForwardModal"
-        @forward-to="forwardSelectedMessages"
-      />
-
-    <!-- Context Menu -->
-    <ChatContextMenu
-      :menuState="contextMenu"
-      :isAlbumSelection="contextMenu.messageIds.length > 1"
-      :currentUserId="props.currentUserId"
-      :canEdit="canEdit"
-      :canDelete="canDelete"
-      :canPin="canPinContextMessage"
-      :isPinnedMessage="isContextMessagePinned"
-      :availableReactions="[...AVAILABLE_MESSAGE_REACTIONS]"
-      @react="handleContextMenuReaction"
-      @reply="handleReplyMessage"
-      @forward="handleForwardMessage"
-      @copy="handleCopyMessage"
-      @edit="handleEditMessage"
-      @delete="handleDeleteMessage"
-      @pin-message="handlePinMessage"
-      @close="closeContextMenu"
-      @save-media="handleSaveMedia"
-      @save-album="handleSaveAlbum"
-      @share="handleShareMessage"
-      @share-album="handleShareAlbum"
+    <ChatRoomContainer
+      v-else
+      :state="chatRoomContainerState"
+      :handlers="chatRoomContainerHandlers"
     />
-
-    <!-- Lightbox Overlay -->
-    <ChatLightbox 
-      v-if="lightboxMedia || keepInactiveMessengerSurfacesMounted"
-      :lightboxMedia="lightboxMedia" 
-      :currentUserId="props.currentUserId"
-      @close="closeLightbox" 
-      @navigate="handleLightboxNavigate"
-      @reply="handleLightboxReply"
-      @forward="handleLightboxForward"
-      @share="handleLightboxShare"
-      @delete="handleLightboxDelete"
-    />
-
-    <!-- Location Modal Overlay -->
-    <ChatLocationModal
-      v-if="selectedLocation || keepInactiveMessengerSurfacesMounted"
-      :location="selectedLocation"
-      @close="closeLocationModal"
-    />
-
-    </template>
 
     <!-- New Conversation Search Modal (outside v-if/v-else chain so it's always available) -->
     <ChatNewConversationModal
@@ -3798,7 +3674,7 @@ defineExpose({
       @close="closeAdminBroadcastModal"
       @sent="void loadConversations()"
     />
-    </div>
+    </ChatShell>
 </template>
 
 <style scoped>
