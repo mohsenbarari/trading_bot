@@ -70,6 +70,23 @@
               <button class="camera-error-btn" @click="startCameraStream">تلاش مجدد</button>
             </div>
 
+            <div
+              v-if="cameraCaptureFeedback"
+              class="camera-capture-feedback"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="camera-capture-feedback-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </div>
+              <div class="camera-capture-feedback-text">
+                <strong>{{ cameraCaptureFeedbackTitle }}</strong>
+                <span>{{ capturedMediaQueueLabel }}</span>
+              </div>
+            </div>
+
             <div v-if="hasCameraZoomControl" class="camera-zoom-panel">
               <button
                 type="button"
@@ -115,7 +132,7 @@
                 v-for="item in capturedCameraMedia"
                 :key="item.id"
                 class="camera-captured-item"
-                :class="{ editable: item.type === 'photo' }"
+                :class="{ editable: item.type === 'photo', latest: item.id === latestCapturedMediaId }"
                 :title="item.type === 'photo' ? 'ویرایش عکس' : 'پیش‌نمایش ویدئو'"
                 @click="item.type === 'photo' ? editCapturedMedia(item.id) : undefined"
               >
@@ -528,6 +545,8 @@ const cameraFallbackDetails = ref('')
 const isRecording = ref(false)
 const recordingDeciseconds = ref(0)
 const capturedCameraMedia = ref<CapturedCameraMediaItem[]>([])
+const latestCapturedMediaId = ref<string | null>(null)
+const cameraCaptureFeedback = ref<{ type: 'photo' | 'video'; count: number } | null>(null)
 const cameraZoomCapability = ref<CameraZoomCapability | null>(null)
 const cameraZoomValue = ref(1)
 
@@ -535,6 +554,7 @@ const cameraStream = ref<MediaStream | null>(null)
 let mediaRecorder: MediaRecorder | null = null
 let recordedChunks: BlobPart[] = []
 let recordingTimer: number | null = null
+let cameraCaptureFeedbackTimer: number | null = null
 const stageBackStateActive = ref(false)
 let closingStageFromBack = false
 
@@ -676,6 +696,13 @@ const preciseLocationGuideSteps = computed(() => {
 const capturedMediaQueueLabel = computed(() => {
   const count = capturedMediaCount.value
   return count === 1 ? '۱ مورد آماده ارسال' : `${count} مورد آماده ارسال`
+})
+const cameraCaptureFeedbackTitle = computed(() => {
+  const feedback = cameraCaptureFeedback.value
+  if (!feedback) return ''
+  return feedback.type === 'video'
+    ? 'ویدئو به صف ارسال اضافه شد'
+    : 'عکس به صف ارسال اضافه شد'
 })
 const hasCameraZoomControl = computed(() => {
   if (isUsingNativeCameraFallback.value) return false
@@ -864,27 +891,61 @@ function revokeCapturedMediaPreview(url?: string) {
   }
 }
 
+function clearCameraCaptureFeedback() {
+  if (cameraCaptureFeedbackTimer !== null) {
+    window.clearTimeout(cameraCaptureFeedbackTimer)
+    cameraCaptureFeedbackTimer = null
+  }
+  cameraCaptureFeedback.value = null
+}
+
+function showCameraCaptureQueuedFeedback(item: CapturedCameraMediaItem) {
+  latestCapturedMediaId.value = item.id
+  cameraCaptureFeedback.value = {
+    type: item.type,
+    count: capturedMediaCount.value,
+  }
+
+  if (cameraCaptureFeedbackTimer !== null) {
+    window.clearTimeout(cameraCaptureFeedbackTimer)
+  }
+  cameraCaptureFeedbackTimer = window.setTimeout(() => {
+    cameraCaptureFeedback.value = null
+    cameraCaptureFeedbackTimer = null
+  }, 2600)
+}
+
 function removeCapturedMedia(itemId: string) {
   const index = capturedCameraMedia.value.findIndex((item) => item.id === itemId)
   if (index === -1) return
 
   const [removedItem] = capturedCameraMedia.value.splice(index, 1)
   revokeCapturedMediaPreview(removedItem?.previewUrl)
+  if (latestCapturedMediaId.value === itemId) {
+    latestCapturedMediaId.value = capturedCameraMedia.value.at(-1)?.id ?? null
+  }
+  if (!hasCapturedMediaQueue.value) {
+    clearCameraCaptureFeedback()
+  }
 }
 
 function clearCapturedMediaQueue() {
   capturedCameraMedia.value.forEach((item) => revokeCapturedMediaPreview(item.previewUrl))
   capturedCameraMedia.value = []
+  latestCapturedMediaId.value = null
+  clearCameraCaptureFeedback()
 }
 
 function queueCapturedMedia(file: File) {
   const mediaType = file.type.startsWith('video/') ? 'video' : 'photo'
-  capturedCameraMedia.value.push({
+  const item: CapturedCameraMediaItem = {
     id: createCapturedMediaId(),
     file,
     previewUrl: URL.createObjectURL(file),
     type: mediaType,
-  })
+  }
+  capturedCameraMedia.value.push(item)
+  showCameraCaptureQueuedFeedback(item)
 }
 
 function stopCameraTracks() {
@@ -2466,6 +2527,72 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.camera-capture-feedback {
+  position: absolute;
+  left: 50%;
+  bottom: 126px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(88vw, 360px);
+  padding: 10px 14px 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 18px;
+  background: rgba(8, 17, 28, 0.78);
+  color: white;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px);
+  animation: camera-feedback-in 180ms ease-out;
+  pointer-events: none;
+}
+
+.camera-capture-feedback-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 8px 22px rgba(34, 197, 94, 0.32);
+}
+
+.camera-capture-feedback-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.camera-capture-feedback-text strong {
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.camera-capture-feedback-text span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+@keyframes camera-feedback-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
 .camera-zoom-panel {
   position: absolute;
   top: 16px;
@@ -2547,6 +2674,14 @@ onBeforeUnmount(() => {
   padding: 0;
   background: rgba(0, 0, 0, 0.38);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+}
+
+.camera-captured-item.latest {
+  outline: 3px solid rgba(34, 197, 94, 0.96);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 6px rgba(34, 197, 94, 0.2),
+    0 14px 30px rgba(0, 0, 0, 0.3);
 }
 
 .camera-captured-thumb,
