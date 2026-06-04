@@ -51,54 +51,25 @@
       @touchcancel="handleTouchCancel()"
       :style="getSwipeStyle()"
     >
-      <!-- Forwarded Banner -->
-      <div v-if="msg.forwarded_from_name" class="forwarded-banner">
-        <span class="forward-icon">
-           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="15 14 20 9 15 4"></polyline>
-              <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
-           </svg>
-        </span>
-        <div class="forward-content">
-          <span class="forward-title">پیام هدایت شده</span>
-          <button
-            v-if="canOpenForwardedProfile"
-            type="button"
-            class="forward-text forward-link"
-            data-context-ignore
-            data-swipe-ignore
-            @click.stop="handleForwardedProfileClick"
-          >
-            از {{ msg.forwarded_from_name }}
-          </button>
-          <span v-else class="forward-text">از {{ msg.forwarded_from_name }}</span>
-        </div>
-      </div>
+      <ForwardedHeader
+        v-if="msg.forwarded_from_name"
+        :name="msg.forwarded_from_name"
+        :canOpenProfile="canOpenForwardedProfile"
+        :isSent="isSent"
+        @open-profile="handleForwardedProfileClick"
+      />
       
-      <!-- Reply Context -->
-      <div 
-        v-if="msg.reply_to_message" 
-        class="reply-context"
-        @click.stop="$emit('scroll-to', msg.reply_to_message.id)"
-      >
-        <div class="reply-content">
-          <span class="reply-author">
-             {{ msg.reply_to_message.sender_id === currentUserId ? 'شما' : selectedUserName }}
-          </span>
-          <span class="reply-text">
-            <template v-if="msg.reply_to_message.message_type === 'image'">🖼️ تصویر</template>
-            <template v-else-if="msg.reply_to_message.message_type === 'video'">📹 ویدیو</template>
-            <template v-else-if="msg.reply_to_message.message_type === 'voice'">🎤 پیام صوتی</template>
-            <template v-else-if="msg.reply_to_message.message_type === 'sticker'">😊 استیکر</template>
-            <template v-else-if="msg.reply_to_message.message_type === 'location'">📍 موقعیت</template>
-            <template v-else>{{ msg.reply_to_message.content }}</template>
-          </span>
-        </div>
-      </div>
+      <ReplyPreview
+        v-if="msg.reply_to_message"
+        :reply="msg.reply_to_message"
+        :currentUserId="currentUserId"
+        :selectedUserName="selectedUserName"
+        :isSent="isSent"
+        @scroll-to="$emit('scroll-to', $event)"
+      />
       
-      <!-- Text -->
       <template v-if="msg.message_type === 'text'">
-        <p v-html="highlightedContent" @click="handleContentClick($event)"></p>
+        <TextMessageBubble :html="highlightedContent" @content-click="handleContentClick" />
       </template>
       
       <!-- Album -->
@@ -439,6 +410,9 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAudioStore } from '../../stores/audio'
 import type { Message, MessageReaction, RecoveryAction, UserMentionDetail } from '../../types/chat'
 import ChatAlbumLayout from './ChatAlbumLayout.vue'
+import ForwardedHeader from './messages/ForwardedHeader.vue'
+import ReplyPreview from './messages/ReplyPreview.vue'
+import TextMessageBubble from './messages/TextMessageBubble.vue'
 import { resolveForwardedProfileTarget } from '../../utils/accountantChatIdentity'
 import { getChatMessageTransferState } from '../../utils/chatMessageTransferState'
 import { observeVisibility } from '../../utils/sharedVisibilityObserver'
@@ -1986,38 +1960,6 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .msg-status { display: flex; align-items: center; }
 .icon-read { fill: var(--messenger-chat-success, #43a047); }
 .icon-unread { fill: rgba(0, 0, 0, 0.3); }
-
-/* Forward Styles */
-.forwarded-banner { font-size: 13px; color: var(--messenger-chat-success, #43a047); margin-bottom: 2px; display: flex; align-items: center; gap: 4px; }
-.message-bubble.received .forwarded-banner { color: var(--messenger-text-muted, #64748b); }
-.forward-icon { color: var(--messenger-chat-link, #3390ec); }
-.message-bubble.sent .forward-icon { color: var(--messenger-chat-success, #43a047); }
-.forward-content { display: flex; flex-direction: column; }
-.forward-title { font-size: 13px; font-weight: 500; color: var(--messenger-chat-link, #3390ec); line-height: 1.2; }
-.message-bubble.sent .forward-title { color: var(--messenger-chat-success, #43a047); }
-.forward-text { font-size: 13px; color: inherit; opacity: 0.8; line-height: 1.2; }
-.forward-link {
-  appearance: none;
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  text-align: right;
-  font: inherit;
-  cursor: pointer;
-}
-.forward-link:hover { opacity: 1; }
-
-/* Reply Context */
-.reply-context {
-  border-right: 2px solid var(--messenger-chat-link, #3390ec); background: rgba(51, 144, 236, 0.08); border-radius: 4px;
-  padding: 4px 8px; margin-bottom: 6px; cursor: pointer; display: flex; flex-direction: column; max-width: 100%; overflow: hidden;
-}
-.message-bubble.sent .reply-context { border-right: 2px solid var(--messenger-chat-success, #43a047); background: rgba(67, 160, 71, 0.1); }
-.reply-content { display: flex; flex-direction: column; overflow: hidden; }
-.reply-author { font-size: 13px; font-weight: 500; color: var(--messenger-chat-link, #3390ec); }
-.message-bubble.sent .reply-author { color: #2ea043; }
-.reply-text { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.8; display: block; max-width: 100%; }
 
 .msg-sticker { font-size: 48px; }
 .msg-location {

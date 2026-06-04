@@ -6,6 +6,7 @@ import ChatEmptyState from '../ChatEmptyState.vue'
 import ChatMessageItem from '../ChatMessageItem.vue'
 import ChatInputBar from '../ChatInputBar.vue'
 import ChatContextMenu from '../ChatContextMenu.vue'
+import MessageRenderBoundary from '../messages/MessageRenderBoundary.vue'
 
 const ChatSearchGlobalList = defineAsyncComponent(() => import('../ChatSearchGlobalList.vue'))
 const ChatSearchBottomBar = defineAsyncComponent(() => import('../ChatSearchBottomBar.vue'))
@@ -82,39 +83,44 @@ defineProps<{
         </div>
 
         <template v-for="item in group.items" :key="item.id">
-          <ChatMessageItem
-            v-memo="[item, state.searchQuery, state.isSelectionMode, handlers.isAlbumInDownloadSelection(item), state.selectionMemoKey]"
-            :msg="handlers.getTimelineItemMessage(item)"
-            :isAlbum="handlers.isAlbumTimelineItem(item)"
-            :albumItems="handlers.getTimelineItemAlbumItems(item)"
-            :isAlbumDownloadMode="handlers.isAlbumInDownloadSelection(item)"
-            :selectedAlbumDownloadMessageIds="state.selectedMessages"
-            :currentUserId="state.currentUserId"
-            :selectedUserName="state.selectedUserName"
-            :selectedMessages="state.selectedMessages"
-            :imageCache="state.imageCache"
-            :isSelectionMode="state.isSelectionMode"
-            :searchQuery="state.searchQuery"
-            :isManagementMessage="state.isSelectedManagementRoom"
-            @swipe-reply="handlers.handleReply"
-            @select="handlers.handleGroupedItemSelection(item)"
-            @click-message="handlers.handleMessageClick"
-            @context-menu="handlers.showContextMenu"
-            @scroll-to="handlers.scrollToMessage"
-            @media-click="handlers.handleMediaInteraction"
-            @location-click="handlers.handleLocationClick"
-            @download="handlers.downloadMedia"
-            @cancel-send="handlers.handleCancelSend"
-            @cancel-download="handlers.handleCancelDownload"
-            @reply-album-item="handlers.handleAlbumReplyItem"
-            @forward-album-item="handlers.handleAlbumForwardItem"
-            @delete-album-item="handlers.handleAlbumDeleteItem"
-            @toggle-album-download-item="handlers.handleAlbumDownloadItemToggle"
-            @toggle-reaction="handlers.handleMessageReactionToggle"
-            @recovery-action="handlers.handleRecoveryAction"
-            @open-public-profile="handlers.openPublicProfile"
-            :on-load="() => handlers.hydrateRenderedMedia(item)"
-          />
+          <MessageRenderBoundary
+            :messageId="item.id"
+            :renderKey="`${state.searchQuery}:${state.isSelectionMode}:${state.selectionMemoKey}`"
+          >
+            <ChatMessageItem
+              v-memo="[item, state.searchQuery, state.isSelectionMode, handlers.isAlbumInDownloadSelection(item), state.selectionMemoKey]"
+              :msg="handlers.getTimelineItemMessage(item)"
+              :isAlbum="handlers.isAlbumTimelineItem(item)"
+              :albumItems="handlers.getTimelineItemAlbumItems(item)"
+              :isAlbumDownloadMode="handlers.isAlbumInDownloadSelection(item)"
+              :selectedAlbumDownloadMessageIds="state.selectedMessages"
+              :currentUserId="state.currentUserId"
+              :selectedUserName="state.selectedUserName"
+              :selectedMessages="state.selectedMessages"
+              :imageCache="state.imageCache"
+              :isSelectionMode="state.isSelectionMode"
+              :searchQuery="state.searchQuery"
+              :isManagementMessage="state.isSelectedManagementRoom"
+              @swipe-reply="handlers.handleReply"
+              @select="handlers.handleGroupedItemSelection(item)"
+              @click-message="handlers.handleMessageClick"
+              @context-menu="handlers.showContextMenu"
+              @scroll-to="handlers.scrollToMessage"
+              @media-click="handlers.handleMediaInteraction"
+              @location-click="handlers.handleLocationClick"
+              @download="handlers.downloadMedia"
+              @cancel-send="handlers.handleCancelSend"
+              @cancel-download="handlers.handleCancelDownload"
+              @reply-album-item="handlers.handleAlbumReplyItem"
+              @forward-album-item="handlers.handleAlbumForwardItem"
+              @delete-album-item="handlers.handleAlbumDeleteItem"
+              @toggle-album-download-item="handlers.handleAlbumDownloadItemToggle"
+              @toggle-reaction="handlers.handleMessageReactionToggle"
+              @recovery-action="handlers.handleRecoveryAction"
+              @open-public-profile="handlers.openPublicProfile"
+              :on-load="() => handlers.hydrateRenderedMedia(item)"
+            />
+          </MessageRenderBoundary>
         </template>
       </div>
 
