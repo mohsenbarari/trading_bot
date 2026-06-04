@@ -207,8 +207,21 @@ def _build_customer_public_visibility_filter(current_user: User):
 
 
 def _build_direct_chat_target_visibility_filter(current_user: User):
+    viewer_accountant_rel = aliased(AccountantRelation)
     target_customer_rel = aliased(CustomerRelation)
     target_owned_customer_rel = aliased(CustomerRelation)
+    target_same_owner_customer_rel = aliased(CustomerRelation)
+
+    viewer_accountant_owner_id = (
+        select(viewer_accountant_rel.owner_user_id)
+        .where(
+            viewer_accountant_rel.accountant_user_id == current_user.id,
+            viewer_accountant_rel.status == AccountantRelationStatus.ACTIVE,
+            viewer_accountant_rel.deleted_at.is_(None),
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
 
     target_customer_exists = (
         select(target_customer_rel.id)
@@ -229,10 +242,21 @@ def _build_direct_chat_target_visibility_filter(current_user: User):
         )
         .exists()
     )
+    target_same_owner_customer_exists = (
+        select(target_same_owner_customer_rel.id)
+        .where(
+            target_same_owner_customer_rel.customer_user_id == User.id,
+            target_same_owner_customer_rel.owner_user_id == viewer_accountant_owner_id,
+            target_same_owner_customer_rel.status == CustomerRelationStatus.ACTIVE,
+            target_same_owner_customer_rel.deleted_at.is_(None),
+        )
+        .exists()
+    )
 
     return or_(
         ~target_customer_exists,
         target_owned_customer_exists,
+        target_same_owner_customer_exists,
     )
 
 
