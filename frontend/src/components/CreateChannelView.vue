@@ -271,18 +271,17 @@ async function handleAvatarSelected(event: Event) {
   const file = input?.files?.[0]
   if (!file) return
 
+  const previousAvatarFileId = avatarFileId.value
   avatarBusy.value = true
   clearFlashMessages()
   try {
     const uploaded = await uploadAvatarImage(file, props.apiBaseUrl)
     avatarFileId.value = uploaded.file_id
-    if (activeChannel.value) {
-      activeChannel.value = {
-        ...activeChannel.value,
-        avatar_file_id: uploaded.file_id,
-      }
+    if (activeChannel.value && page.value === 'overview') {
+      await persistActiveChannelAvatar(uploaded.file_id)
     }
   } catch (error) {
+    avatarFileId.value = previousAvatarFileId
     setError(error, 'آپلود آواتار کانال ناموفق بود')
   } finally {
     avatarBusy.value = false
@@ -290,14 +289,21 @@ async function handleAvatarSelected(event: Event) {
   }
 }
 
-function clearAvatar() {
+async function clearAvatar() {
   if (avatarBusy.value) return
+  const previousAvatarFileId = avatarFileId.value
   avatarFileId.value = null
-  if (activeChannel.value) {
-    activeChannel.value = {
-      ...activeChannel.value,
-      avatar_file_id: null,
-    }
+  if (!activeChannel.value || page.value !== 'overview') return
+
+  avatarBusy.value = true
+  clearFlashMessages()
+  try {
+    await persistActiveChannelAvatar(null)
+  } catch (error) {
+    avatarFileId.value = previousAvatarFileId
+    setError(error, 'حذف آواتار کانال ناموفق بود')
+  } finally {
+    avatarBusy.value = false
   }
 }
 
@@ -615,6 +621,29 @@ async function updateChannelDetails() {
   } finally {
     isSaving.value = false
   }
+}
+
+async function persistActiveChannelAvatar(nextAvatarFileId: string | null) {
+  if (!activeChannel.value || isMembershipManagementLocked.value || currentUserMembership.value?.role !== 'admin') return
+
+  const response = await apiFetch(`/api/chat/channels/${activeChannel.value.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      title: activeChannel.value.title,
+      description: activeChannel.value.description || undefined,
+      avatar_file_id: nextAvatarFileId,
+    }),
+  })
+  const data = await response.json() as ChannelRoom | { detail?: string }
+  if (!response.ok) {
+    throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره آواتار کانال')
+  }
+
+  activeChannel.value = data as ChannelRoom
+  avatarFileId.value = activeChannel.value.avatar_file_id || null
+  upsertExistingChannel(activeChannel.value)
+  emit('refresh-conversations')
+  successMessage.value = nextAvatarFileId ? 'عکس کانال ذخیره شد.' : 'عکس کانال حذف شد.'
 }
 
 async function submitMembers() {

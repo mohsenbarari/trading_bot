@@ -240,6 +240,90 @@ describe('ChatGroupManagerModal.vue', () => {
     ])
   })
 
+  it('persists an existing group avatar immediately from the overview', async () => {
+    let currentGroup = {
+      id: 7,
+      title: 'Group Seven',
+      description: 'Example group',
+      avatar_file_id: null as string | null,
+      member_count: 2,
+      max_members: 50,
+      current_user_role: 'admin' as const,
+    }
+
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/groups/7') {
+        return {
+          group: currentGroup,
+          members: [
+            {
+              user_id: 1,
+              account_name: 'owner1',
+              full_name: 'Owner One',
+              mobile_number: '09120000001',
+              avatar_file_id: null,
+              role: 'admin',
+              is_group_creator: true,
+            },
+          ],
+        }
+      }
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/chat/groups/7' && options?.method === 'PATCH') {
+        const body = JSON.parse(String(options?.body || '{}'))
+        expect(body).toEqual({
+          title: 'Group Seven',
+          description: 'Example group',
+          avatar_file_id: 'group-avatar-new',
+        })
+        currentGroup = { ...currentGroup, avatar_file_id: body.avatar_file_id }
+        return makeResponse(currentGroup)
+      }
+      throw new Error(`Unhandled apiFetch call: ${url}`)
+    })
+
+    uploadAvatarImageMock.mockResolvedValue({ file_id: 'group-avatar-new' })
+
+    const ChatGroupManagerModal = (await import('./ChatGroupManagerModal.vue')).default
+    const wrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: true,
+        groupId: 7,
+        currentUserId: 1,
+        apiBaseUrl: 'https://coin.test',
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const avatarInput = wrapper.get('input[type="file"]')
+    const file = new File(['avatar'], 'group.png', { type: 'image/png' })
+    Object.defineProperty(avatarInput.element, 'files', {
+      configurable: true,
+      value: [file],
+    })
+    await avatarInput.trigger('change')
+    await flushPromises()
+    await flushPromises()
+
+    expect(uploadAvatarImageMock).toHaveBeenCalledWith(file, 'https://coin.test')
+    expect(currentGroup.avatar_file_id).toBe('group-avatar-new')
+    expect(wrapper.emitted('updated')?.[0]).toEqual([currentGroup])
+  })
+
   it('updates group settings, manages admins, adds members, and removes members for an existing group', async () => {
     let currentGroup = {
       id: 7,
