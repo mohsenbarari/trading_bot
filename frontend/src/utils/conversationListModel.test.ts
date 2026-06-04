@@ -114,5 +114,15 @@ describe('conversationListModel', () => {
       mediaItemCount: 3,
       virtualizationCandidate: false,
     })
+
+    expect(summarizeTimelineRenderBudget([{
+      label: 'سنگین',
+      items: Array.from({ length: 96 }, (_, index) => message({ id: 1000 + index })),
+    }]).virtualizationCandidate).toBe(true)
+
+    expect(summarizeTimelineRenderBudget([{
+      label: 'مدیا',
+      items: Array.from({ length: 48 }, (_, index) => message({ id: 2000 + index, message_type: 'image' })),
+    }]).virtualizationCandidate).toBe(true)
   })
 })

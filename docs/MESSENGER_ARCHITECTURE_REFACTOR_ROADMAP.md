@@ -470,12 +470,17 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
   - `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts src/utils/chatVirtualTimeline.test.ts src/utils/chatMediaDimensions.test.ts src/components/ChatView.test.ts`
   - `VITE_MESSENGER_VIRTUAL_TIMELINE=true npm run test:e2e -- e2e/messenger-virtual-timeline.spec.ts --project=chromium --reporter=line`
   - `npm run build`
-- Remaining before Stage E can close:
-  - run the Stage E benchmark subset: S02 heavy direct, S03 media-heavy, S04 search/viewer, S10 weak-device.
-  - only then decide whether `VITE_MESSENGER_VIRTUAL_TIMELINE=true` is safe for broader rollout.
+- Stage E benchmark subset completed on 2026-06-04:
+  - config: `tmp/messenger-benchmark/stage-e-virtual-s02-s03-s04-s10-config-20260604T234214Z.json`
+  - results: `tmp/messenger-benchmark/stage-e-virtual-s02-s03-s04-s10-results-20260604T234214Z.json`
+  - benchmark tool fix: `runContextMenuProbe` now prefers the real `.message-wrapper` boundary, uses real Playwright right-click first, and falls back to synthetic `contextmenu` dispatch when legacy rows do not open a menu within the short compatibility window.
+  - weak-device tuning: virtual initial open limit was reduced from `180` to `128`, and virtualization candidacy now starts at `96` timeline items or `48` media items.
+  - `current-virtual` completed S02/S03/S04/S10 without benchmark errors.
+  - `current-virtual` kept heavy/search scroll stable in S02 and S04 (`~60 FPS`, `0` jank) and reduced rendered heavy-room DOM bubbles to `16`.
+  - S10 improved versus the failed/oversized virtual run but still trails the non-virtual path (`36.2 FPS`, `3` jank, `3264.9 ms` chat first paint), so the production default remains non-virtual and `VITE_MESSENGER_VIRTUAL_TIMELINE=true` is not approved for broad rollout yet.
 - No scroll jump when images/videos/albums hydrate.
 - DOM node count drops significantly in heavy rooms.
-- S10 weak-device list/chat responsiveness improves.
+- S10 weak-device list/chat responsiveness is measured and gated for Stage F/request-churn follow-up before rollout.
 - Heavy-room scroll remains stable.
 
 ### Rollback
