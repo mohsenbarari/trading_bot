@@ -56,6 +56,7 @@ const searchUsers = async (query: string = '') => {
       params.set('q', query)
     }
     params.set('limit', '50')
+    params.set('chat_targets', 'true')
 
     users.value = await apiFetchJson(`/api/users-public/search?${params.toString()}`)
   } catch (err) {

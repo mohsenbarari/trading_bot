@@ -252,7 +252,53 @@ class ChatServiceDirectInitiationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد")
 
-    async def test_prepare_direct_message_send_denies_super_admin_to_customer(self):
+    async def test_prepare_direct_message_send_allows_middle_manager_to_own_customer(self):
+        sender = SimpleNamespace(id=41, role=UserRole.MIDDLE_MANAGER)
+        receiver = SimpleNamespace(id=9, is_deleted=False)
+        db = SimpleNamespace(get=AsyncMock(return_value=receiver))
+
+        with patch(
+            "core.services.chat_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.chat_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=41)]),
+        ):
+            resolved_receiver, prepared = await chat_service.prepare_direct_message_send(
+                db,
+                sender=sender,
+                receiver_id=9,
+                content="hello",
+                message_type=MessageType.TEXT,
+            )
+
+        self.assertIs(resolved_receiver, receiver)
+        self.assertEqual(prepared, "hello")
+
+    async def test_prepare_direct_message_send_allows_super_admin_to_own_customer(self):
+        sender = SimpleNamespace(id=40, role=UserRole.SUPER_ADMIN)
+        receiver = SimpleNamespace(id=9, is_deleted=False)
+        db = SimpleNamespace(get=AsyncMock(return_value=receiver))
+
+        with patch(
+            "core.services.chat_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.chat_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[None, SimpleNamespace(owner_user_id=40)]),
+        ):
+            resolved_receiver, prepared = await chat_service.prepare_direct_message_send(
+                db,
+                sender=sender,
+                receiver_id=9,
+                content="hello",
+                message_type=MessageType.TEXT,
+            )
+
+        self.assertIs(resolved_receiver, receiver)
+        self.assertEqual(prepared, "hello")
+
+    async def test_prepare_direct_message_send_denies_super_admin_to_unowned_customer(self):
         sender = SimpleNamespace(id=40, role=UserRole.SUPER_ADMIN)
         receiver = SimpleNamespace(id=9, is_deleted=False)
         db = SimpleNamespace(get=AsyncMock(return_value=receiver))
@@ -276,7 +322,7 @@ class ChatServiceDirectInitiationPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "کاربر مشتری در این فاز اجازه شروع گفتگوی مستقیم با این کاربر را ندارد")
 
-    async def test_prepare_direct_message_send_denies_middle_manager_to_customer(self):
+    async def test_prepare_direct_message_send_denies_middle_manager_to_unowned_customer(self):
         sender = SimpleNamespace(id=41, role=UserRole.MIDDLE_MANAGER)
         receiver = SimpleNamespace(id=9, is_deleted=False)
         db = SimpleNamespace(get=AsyncMock(return_value=receiver))
