@@ -293,6 +293,21 @@ describe('ChatMessageItem.vue', () => {
     }
   })
 
+  it('keeps regular text and voice bubbles content-sized instead of full width', async () => {
+    const textWrapper = mountTextMessage({ content: 'سلام مامان' })
+    const voiceWrapper = mountVoiceMessage()
+
+    await flushPromises()
+
+    const textBubble = textWrapper.find('.message-bubble')
+    const voiceBubble = voiceWrapper.find('.message-bubble')
+
+    expect(textBubble.classes()).toContain('type-text')
+    expect(textBubble.classes()).not.toContain('full-width-bubble')
+    expect(voiceBubble.classes()).toContain('type-voice')
+    expect(voiceBubble.classes()).not.toContain('full-width-bubble')
+  })
+
   it('highlights recognized own and non-own mentions while ignoring unrelated handles', async () => {
     const wrapper = mountTextMessage({
       content: 'سلام @ali @reza @ghost @all',
