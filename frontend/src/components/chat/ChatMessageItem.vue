@@ -421,6 +421,7 @@ import {
   getMediaCaptionText,
   parseStructuredMessageContent as parseMessageContent,
 } from '../../utils/chatMessagePreview'
+import { resolveMessageMediaDimensions } from '../../utils/chatMediaDimensions'
 import {
   handleFileClick as cachedFileClick,
   shareFile as cachedShareFile,
@@ -601,16 +602,18 @@ const mediaStyle = computed(() => {
       return style
     }
 
-    const content = parsedContent.value
-    if (content?.width && content?.height) {
-      const boundedBox = getBoundedSingleMediaBox(Number(content.width), Number(content.height))
+    const dimensions = resolveMessageMediaDimensions(props.msg, parsedContent.value)
+    style.aspectRatio = dimensions.aspectRatioCss
+
+    if (dimensions.width && dimensions.height) {
+      const boundedBox = getBoundedSingleMediaBox(dimensions.width, dimensions.height)
       if (boundedBox) {
         style.width = `${boundedBox.width}px`
-        style.aspectRatio = `${content.width} / ${content.height}`
       } else {
         style.minHeight = '200px'
       }
     } else {
+      style.width = '280px'
       style.minHeight = '200px'
     }
   }
@@ -1349,6 +1352,7 @@ const highlightedMediaCaption = computed(() => highlightText(mediaCaption.value)
 const albumLayoutItems = computed(() => {
   return (props.albumItems || []).map((message: any) => {
     const parsedItemContent = parseMessageContent(message.content)
+    const dimensions = resolveMessageMediaDimensions(message, parsedItemContent)
     const fileId = getFileId(message.content, parsedItemContent)
     const cachedMediaUrl = fileId ? props.imageCache[fileId] : ''
     const resolvedMediaUrl = message.local_blob_url || cachedMediaUrl || ''
@@ -1360,8 +1364,9 @@ const albumLayoutItems = computed(() => {
       previewUrl,
       hasResolvedMedia: Boolean(resolvedMediaUrl),
       type: message.message_type,
-      width: parsedItemContent?.width,
-      height: parsedItemContent?.height
+      width: dimensions.width,
+      height: dimensions.height,
+      aspectRatio: dimensions.aspectRatio,
     }
   })
 })
