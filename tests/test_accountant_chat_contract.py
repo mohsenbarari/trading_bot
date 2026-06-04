@@ -200,6 +200,20 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enriched["forwarded_from_profile_user_id"], 502)
         self.assertEqual(enriched["forwarded_from_profile_account_name"], "owner-502")
 
+        channel_forward = apply_accountant_identity_to_message_payload(
+            {
+                "sender_id": 101,
+                "sender_name": "raw-sender",
+                "forwarded_from_id": 202,
+                "forwarded_from_name": "raw-forwarded",
+                "forwarded_from_name_override": "کانال قیمت طلا",
+            },
+            {101: sender_identity, 202: forwarded_identity},
+        )
+        self.assertEqual(channel_forward["sender_name"], "دفتر فرستنده")
+        self.assertEqual(channel_forward["forwarded_from_name"], "کانال قیمت طلا")
+        self.assertNotIn("forwarded_from_profile_user_id", channel_forward)
+
         fallback = apply_accountant_identity_to_message_payload(
             {
                 "sender_id": 9,

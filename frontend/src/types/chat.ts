@@ -76,6 +76,7 @@ export interface Message {
     updated_at?: string
     created_at: string
     forwarded_from_id?: number | null
+    forwarded_from_name_override?: string | null
     forwarded_from_name?: string | null
     forwarded_from_profile_user_id?: number | null
     forwarded_from_profile_account_name?: string | null

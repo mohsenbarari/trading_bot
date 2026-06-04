@@ -2067,6 +2067,51 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('uses the source channel title when forwarding a channel post', async () => {
+    chatViewMocks.messagesSeed = [
+      buildMessage({
+        id: 911,
+        sender_id: 55,
+        receiver_id: 55,
+        chat_id: 77,
+        content: 'channel post',
+      }),
+    ]
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 77,
+        other_user_id: -77,
+        chat_id: 77,
+        other_user_name: 'کانال قیمت طلا',
+        last_message_at: '2026-05-12T10:00:00Z',
+        unread_count: 0,
+        room_kind: 'channel',
+      },
+    ]
+
+    const wrapper = await mountChatView({ targetUserId: -77, targetUserName: 'کانال قیمت طلا' })
+    await flushPromises()
+    const hooks = getChatViewTestHooks(wrapper)
+
+    hooks.state.forwardMessageIds.value = [911]
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.apiFetchMock.mockResolvedValue({})
+    await hooks.forwardSelectedMessages({ kind: 'user', id: 66, title: 'Direct Target' })
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledTimes(1)
+    const body = JSON.parse((chatViewMocks.apiFetchMock.mock.calls as unknown as Array<[string, { body: string }]>)[0]![1].body)
+    expect(body).toMatchObject({
+      receiver_id: 66,
+      content: 'channel post',
+      message_type: 'text',
+      forwarded_from_name_override: 'کانال قیمت طلا',
+    })
+    expect(body.forwarded_from_id).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
   it('forwards a full image album to both direct and group targets with fresh album metadata', async () => {
     vi.stubGlobal('crypto', { randomUUID: () => 'forwarded-album-1' })
 
