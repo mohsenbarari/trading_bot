@@ -146,4 +146,48 @@ describe('currentUser utils', () => {
     apiFetchMock.mockRejectedValueOnce(new Error('offline'))
     await expect(primeCurrentUserSummary(true)).resolves.toMatchObject({ id: 7, account_name: 'fallback' })
   })
+
+  it('does not share or apply an in-flight profile request after the auth token changes', async () => {
+    let resolveOldProfile!: (response: unknown) => void
+    let resolveNewProfile!: (response: unknown) => void
+    apiFetchMock
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveOldProfile = resolve
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveNewProfile = resolve
+      }))
+
+    const { primeCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+
+    localStorage.setItem('auth_token', 'old-token')
+    const oldRequest = primeCurrentUserSummary(true)
+
+    localStorage.setItem('auth_token', 'new-token')
+    const newRequest = primeCurrentUserSummary(true)
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(2)
+
+    resolveOldProfile({
+      ok: true,
+      json: async () => ({ id: 1, role: 'عادی', account_name: 'old-user' }),
+    })
+    await expect(oldRequest).resolves.toBeNull()
+    expect(readCachedCurrentUserSummary()).toBeNull()
+
+    resolveNewProfile({
+      ok: true,
+      json: async () => ({ id: 2, role: 'مدیر ارشد', account_name: 'new-admin' }),
+    })
+    await expect(newRequest).resolves.toMatchObject({
+      id: 2,
+      role: 'مدیر ارشد',
+      account_name: 'new-admin',
+    })
+    expect(readCachedCurrentUserSummary()).toMatchObject({
+      id: 2,
+      role: 'مدیر ارشد',
+      account_name: 'new-admin',
+    })
+  })
 })

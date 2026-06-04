@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import type { RouteLocationNormalized, NavigationGuardNext } from 'vue-router';
 import { isAdminRoleValue, readCachedCurrentUserRole } from './adminAccess';
-import { cacheCurrentUserSummary, readCachedCurrentUserSummary } from './currentUser';
+import { cacheCurrentUserSummary, clearCurrentUserSummary, readCachedCurrentUserSummary } from './currentUser';
 import { createHttpErrorFromResponse, type ErrorPolicyContext } from './httpErrorPolicy';
 
 export const isAppConnecting = ref(false);
@@ -211,6 +211,7 @@ export function suspendSession() {
     }
     localStorage.removeItem('auth_token');
     localStorage.removeItem('refresh_token');
+    clearCurrentUserSummary();
     window.location.href = '/login';
 }
 
@@ -218,6 +219,7 @@ export function forceLogout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('suspended_refresh_token');
+    clearCurrentUserSummary();
     window.location.href = '/login';
 }
 
