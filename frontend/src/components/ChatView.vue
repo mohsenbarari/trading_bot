@@ -20,6 +20,9 @@ import { formatIranDate, formatIranTime, isTodayInIran, isYesterdayInIran } from
 import { useChatMessages } from '../composables/chat/useChatMessages'
 import { useChatScroll } from '../composables/chat/useChatScroll'
 import { useNotificationStore } from '../stores/notifications'
+import { useChatSessionStore } from '../stores/chat/session'
+import { useMessagesStore } from '../stores/chat/messages'
+import { useChatUiStore } from '../stores/chat/ui'
 import {
   ensureFileCached,
   canShareFiles,
@@ -112,6 +115,9 @@ const props = defineProps<{
 const router = useRouter()
 const route = useRoute()
 const notificationStore = useNotificationStore()
+const chatSessionStore = useChatSessionStore()
+const chatMessagesStore = useMessagesStore()
+const chatUiStore = useChatUiStore()
 const { on: onGlobalWs, off: offGlobalWs } = useWebSocket()
 
 // Emits
@@ -2940,15 +2946,36 @@ watch(selectedUserId, (newVal) => {
     stopStatusPolling()
     previousMessagesContainerMetrics = null
     pinnedMessageState.value = null
+    chatSessionStore.setActiveRoom(null)
   }
 })
 
 watch(selectedConversation, (conversation) => {
   const conversationKey = selectedUserId.value
   if (!conversation || !conversationKey) return
+  chatSessionStore.setActiveRoom(conversationKey, {
+    kind: selectedRoomKind.value,
+    title: conversation.other_user_name,
+    avatarFileId: conversation.avatar_file_id ?? null,
+    statusText: selectedConversationActivityText.value,
+  })
   pinnedMessageState.value = null
   schedulePinnedMessageStateLoad(conversationKey)
 })
+
+watch(messages, (nextMessages) => {
+  const conversationKey = selectedUserId.value
+  if (!conversationKey) return
+  chatMessagesStore.setMessages(conversationKey, nextMessages)
+}, { deep: false })
+
+watch([isSearchActive, searchQuery], () => {
+  chatUiStore.setSearch(isSearchActive.value, searchQuery.value)
+})
+
+watch([selectedMessages, selectionModePurpose], () => {
+  chatUiStore.setSelection(selectedMessages.value, selectionModePurpose.value)
+}, { deep: false })
 
 watch(messagesContainer, (container) => {
   attachMessagesContainerResizeObserver(container)

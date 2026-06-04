@@ -80,6 +80,25 @@ vi.mock('../stores/notifications', () => ({
   }),
 }))
 
+vi.mock('../stores/chat/session', () => ({
+  useChatSessionStore: () => ({
+    setActiveRoom: vi.fn(),
+  }),
+}))
+
+vi.mock('../stores/chat/messages', () => ({
+  useMessagesStore: () => ({
+    setMessages: vi.fn(),
+  }),
+}))
+
+vi.mock('../stores/chat/ui', () => ({
+  useChatUiStore: () => ({
+    setSearch: vi.fn(),
+    setSelection: vi.fn(),
+  }),
+}))
+
 vi.mock('../composables/chat/useChatMessages', () => ({
   useChatMessages: (options: any) => ({
     ...(chatViewMocks.messagesLogicOptions = options, {}),

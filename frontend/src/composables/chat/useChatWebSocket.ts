@@ -11,6 +11,10 @@ import {
     normalizeMessengerRealtimeActivityPayload,
     resolveMessengerRealtimeConversationKey,
 } from '../../utils/chatRealtimeMediaPolicy'
+import { createChatEventGateway } from '../../services/chat/chatEventGateway'
+import { useChatSessionStore } from '../../stores/chat/session'
+import { useConversationsStore } from '../../stores/chat/conversations'
+import { useMessagesStore } from '../../stores/chat/messages'
 
 export interface UseChatWebSocketOptions {
     selectedUserId: Ref<number | null>
@@ -39,6 +43,11 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     } = options
 
     const ws = useWebSocket()
+    const chatGateway = createChatEventGateway({
+        session: useChatSessionStore(),
+        conversations: useConversationsStore(),
+        messages: useMessagesStore(),
+    })
 
     const TYPING_THROTTLE = 2000
     const TYPING_ACTIVITY_TIMEOUT_MS = 5000
@@ -195,6 +204,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleTypingEvent(data: any) {
+        chatGateway.dispatch('chat:typing', data)
         handleActivityEvent({
             ...data,
             activity: 'typing',
@@ -203,6 +213,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleActivityEvent(data: any) {
+        chatGateway.dispatch('chat:activity', data)
         const activityPayload = normalizeMessengerRealtimeActivityPayload(data)
         if (!activityPayload) {
             return
@@ -484,14 +495,17 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function handleNewMessageEvent(data: any) {
+        chatGateway.dispatch('chat:message', data)
         enqueueRealtimeEvent({ kind: 'message', data })
     }
 
     function handleReadEvent(data: any) {
+        chatGateway.dispatch('chat:read', data)
         enqueueRealtimeEvent({ kind: 'read', data })
     }
 
     function handleReactionEvent(data: any) {
+        chatGateway.dispatch('chat:reaction', data)
         enqueueRealtimeEvent({ kind: 'reaction', data })
     }
 

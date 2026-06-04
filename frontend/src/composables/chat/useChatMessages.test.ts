@@ -10,6 +10,9 @@ const messageMocks = vi.hoisted(() => ({
   getPendingForUser: vi.fn(() => []),
   buildOptimisticMessageFromUpload: vi.fn((upload: any) => upload.message),
   waitForChatUploadBackgroundReady: vi.fn(async () => {}),
+  hydrateFromCache: vi.fn(async () => null),
+  replaceFromServer: vi.fn(async (_userId: number, conversations: any[]) => conversations),
+  setConversationStoreError: vi.fn(),
 }))
 
 vi.mock('../../utils/auth', () => ({
@@ -20,6 +23,14 @@ vi.mock('../../stores/notifications', () => ({
   useNotificationStore: () => ({
     syncMutedConversationIds: messageMocks.syncMutedConversationIds,
     markChatAsRead: messageMocks.markChatAsRead,
+  }),
+}))
+
+vi.mock('../../stores/chat/conversations', () => ({
+  useConversationsStore: () => ({
+    hydrateFromCache: messageMocks.hydrateFromCache,
+    replaceFromServer: messageMocks.replaceFromServer,
+    setError: messageMocks.setConversationStoreError,
   }),
 }))
 
@@ -104,6 +115,11 @@ describe('useChatMessages', () => {
     messageMocks.getPendingForUser.mockReturnValue([])
     messageMocks.buildOptimisticMessageFromUpload.mockClear()
     messageMocks.waitForChatUploadBackgroundReady.mockClear()
+    messageMocks.hydrateFromCache.mockReset()
+    messageMocks.hydrateFromCache.mockResolvedValue(null)
+    messageMocks.replaceFromServer.mockReset()
+    messageMocks.replaceFromServer.mockImplementation(async (_userId: number, nextConversations: any[]) => nextConversations)
+    messageMocks.setConversationStoreError.mockReset()
 
     selectedUserId = ref<number | null>(12)
     messages = ref<any[]>([])

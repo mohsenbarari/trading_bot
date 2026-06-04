@@ -22,6 +22,27 @@ vi.mock('../useWebSocket', () => ({
   }),
 }))
 
+vi.mock('../../stores/chat/session', () => ({
+  useChatSessionStore: () => ({
+    setUserTyping: vi.fn(),
+    setUserActivity: vi.fn(),
+  }),
+}))
+
+vi.mock('../../stores/chat/conversations', () => ({
+  useConversationsStore: () => ({
+    patchConversation: vi.fn(),
+  }),
+}))
+
+vi.mock('../../stores/chat/messages', () => ({
+  useMessagesStore: () => ({
+    appendOrReplaceMessage: vi.fn(),
+    patchReadState: vi.fn(),
+    patchReaction: vi.fn(),
+  }),
+}))
+
 import { useChatWebSocket, type UseChatWebSocketOptions } from './useChatWebSocket'
 
 describe('useChatWebSocket', () => {

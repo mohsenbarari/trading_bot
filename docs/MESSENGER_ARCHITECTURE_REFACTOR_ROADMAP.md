@@ -76,7 +76,7 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | Stage | Name | Status | Primary Goal |
 | --- | --- | --- | --- |
 | A | Domain Naming Cleanup | Completed | Remove historical stage naming without behavior change |
-| B | Store Foundation, Diagnostics Gate, Local Hydration | Planned | Establish store/cache/gateway foundations early |
+| B | Store Foundation, Diagnostics Gate, Local Hydration | Completed | Establish store/cache/gateway foundations early |
 | C | Container Extraction And Room Tear-down | Planned | Shrink `ChatView.vue` safely and prevent leaks |
 | D | Message Renderer Split And Error Boundaries | Planned | Make message rendering modular and fault-tolerant |
 | E | Media Dimension Contract And Virtualized Timeline | Planned | Introduce safe real virtualization without scroll jumps |
@@ -205,10 +205,15 @@ Create the store/service foundation before further extraction so later changes h
 
 ### Exit Criteria
 
-- Conversation list can paint from local cache before API completes.
-- Diagnostics-heavy work is disabled by default.
-- Initial store adoption does not change visible UX.
-- No feature behavior moves exclusively to the new stores until tests prove parity.
+- Completed on 2026-06-04.
+- Conversation list can hydrate from local cache before the API result is reconciled.
+- Cache keys are scoped by current user and schema version.
+- Server reconciliation preserves pending local mute/pin mutations instead of blindly overwriting them.
+- Diagnostics-heavy work remains scheduled/gated; Stage B did not add synchronous DOM probes.
+- Initial store adoption mirrors legacy state and does not change visible UX ownership.
+- `ChatEventGateway` normalizes websocket events into store actions while the legacy realtime convergence path remains active.
+- Room lifecycle cleanup foundation exists for Stage C.
+- Focused Store/Service/ChatView/WebSocket/Message tests and production build passed.
 
 ### Rollback
 
@@ -602,4 +607,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Start Stage B. The naming baseline is complete, so the next slice is the store/service foundation, diagnostics gate, local hydration, cache reconciliation, and websocket gateway skeleton.
+Start Stage C. Store/service foundations are now in place, so the next slice is container extraction and the formal room tear-down migration that starts reducing `ChatView.vue` without changing feature behavior.
