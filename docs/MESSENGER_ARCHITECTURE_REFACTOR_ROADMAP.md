@@ -103,12 +103,17 @@ Remove stage-based code smell and make helper ownership understandable by domain
 - Update imports only.
 - Keep all public function behavior unchanged.
 - Add a short compatibility note in the old roadmap explaining the rename.
+- Run a repo-wide reference audit before closing the stage:
+  - search the whole repository for `messengerStage`.
+  - update tracked benchmark scripts, e2e specs, tests, docs, and config references.
+  - do not treat generated `tmp` artifacts as authoritative unless they are the active benchmark runner or are tracked.
 
 ### Files Expected
 
 - `frontend/src/utils/*`
 - `frontend/src/components/ChatView.vue`
 - relevant tests under `frontend/src/utils/*.test.ts`
+- tracked benchmark/e2e/scripts/docs references that mention `messengerStage*`
 - docs only for roadmap sync
 
 ### Tests
@@ -160,6 +165,14 @@ Create the store/service foundation before further extraction so later changes h
   - UI paints cached list immediately with stale marker internal state.
   - API sync runs in background and reconciles ordering/unread/mute/pin state.
   - Cache writes are versioned and bounded.
+  - Cache keys include the current user and cache schema version so stale data cannot leak across users or incompatible app versions.
+  - Reconciliation must merge local pending state instead of blindly overwriting it with the server response.
+  - Pending local mutations are tracked in an outbox/mutation log until acknowledged or rejected:
+    - optimistic text/media messages.
+    - in-flight uploads and retries.
+    - local mute/pin/archive/read changes.
+    - room list ordering changes caused by optimistic sends.
+  - Server state is authoritative only for acknowledged entities; pending local entities remain visible with explicit pending/failed status.
 - Add `ChatEventGateway` skeleton:
   - raw websocket event enters one service.
   - service validates room key, event type, timestamp/id ordering.
@@ -182,6 +195,8 @@ Create the store/service foundation before further extraction so later changes h
   - cache hydration order
   - stale cache fallback
   - API reconciliation
+  - pending local mutation merge during reconciliation
+  - cache invalidation by user/schema version
   - event gateway normalization
 - `npm run test:unit:run -- src/stores/chat`
 - `npm run test:unit:run -- src/components/ChatView.test.ts src/views/MessengerView.test.ts`
@@ -223,7 +238,11 @@ Shrink `ChatView.vue` by extracting containers and add a formal room cleanup rou
   - clear pending reaction mutation versions for messages no longer in active room.
   - close room-scoped overlays and context menus.
   - keep background uploads alive because upload runtime owns them.
-- Keep behavior-compatible props/events during the transition; remove prop drilling only after store ownership is complete.
+- Enforce one visible source of truth per extracted container:
+  - during transition, a container may be legacy-prop-backed or Pinia-backed, but not both for the same visible state.
+  - compatibility props/events stay only at the adapter boundary.
+  - once a container reads a state slice from Pinia, parent visual props for that slice must be removed or ignored.
+  - avoid parent-prop plus child-store synchronization because it can create split-brain reactivity and visible desync.
 
 ### Files Expected
 
@@ -278,6 +297,12 @@ Replace the oversized `ChatMessageItem.vue` runtime with specialized message ren
 - Keep the existing visual output initially.
 - Move one message family at a time.
 - Wrap dynamic renderer resolution in `MessageRenderBoundary` using Vue `onErrorCaptured`.
+- `MessageRenderBoundary` implementation contract:
+  - keep local `hasError` state.
+  - set `hasError=true` inside `onErrorCaptured`.
+  - return `false` from `onErrorCaptured` so a bad message does not bubble into the full timeline.
+  - reset local error state when the message id/type/render key changes.
+  - emit diagnostics once per bad message payload.
 - If one message payload is invalid, render a small fallback bubble:
   - Persian copy: `این پیام قابل نمایش نیست`
   - include message id in diagnostics only, not user-facing copy.
@@ -350,6 +375,12 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
   - media lazy hydration
 - Add measured fallback:
   - if virtual timeline fails a critical invariant in tests, default remains non-virtual.
+- Add scroll adjustment for variable-height rows:
+  - keep a measured row-height cache keyed by stable message id/render key.
+  - use conservative estimated sizes for unmeasured text, reply, caption, album, and media rows.
+  - implement two-phase jump behavior for search/reply/pinned/unread jumps: first scroll to the estimate, then correct after rows are rendered and measured.
+  - cap correction attempts and timeouts so a bad estimate cannot create an infinite adjustment loop.
+  - preserve the user's anchor when older messages are prepended or media dimensions resolve.
 
 ### Files Expected
 
@@ -365,12 +396,14 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
 - Unit tests for media dimension extraction and fallback.
 - Virtual timeline tests for:
   - variable-height text
+  - variable-height reply/caption rows
   - image/video with known ratio
   - image/video with fallback ratio
   - album ratio reservation
   - prepend older messages without jump
   - scroll-to-message
   - search result jump
+  - jump to a far historical mixed-content message without layout drift
 - Benchmark subset:
   - S02 heavy direct
   - S03 media-heavy
