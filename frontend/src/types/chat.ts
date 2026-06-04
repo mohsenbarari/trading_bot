@@ -70,6 +70,9 @@ export interface Message {
     upload_total?: number
     download_progress?: number
     is_downloading?: boolean
+    media_width?: number | null
+    media_height?: number | null
+    media_aspect_ratio?: number | null
     local_blob_url?: string
     is_error?: boolean
     is_deleted?: boolean

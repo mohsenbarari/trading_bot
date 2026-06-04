@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { vAutoAnimate } from '@formkit/auto-animate/vue'
 import MessengerLoadingScreen from '../MessengerLoadingScreen.vue'
 import ChatEmptyState from '../ChatEmptyState.vue'
@@ -8,6 +8,7 @@ import ChatInputBar from '../ChatInputBar.vue'
 import ChatContextMenu from '../ChatContextMenu.vue'
 import MessageRenderBoundary from '../messages/MessageRenderBoundary.vue'
 
+const ChatVirtualTimeline = defineAsyncComponent(() => import('../ChatVirtualTimeline.vue'))
 const ChatSearchGlobalList = defineAsyncComponent(() => import('../ChatSearchGlobalList.vue'))
 const ChatSearchBottomBar = defineAsyncComponent(() => import('../ChatSearchBottomBar.vue'))
 const AttachmentMenu = defineAsyncComponent(() => import('../AttachmentMenu.vue'))
@@ -15,10 +16,16 @@ const ChatForwardModal = defineAsyncComponent(() => import('../ChatForwardModal.
 const ChatLightbox = defineAsyncComponent(() => import('../ChatLightbox.vue'))
 const ChatLocationModal = defineAsyncComponent(() => import('../ChatLocationModal.vue'))
 
-defineProps<{
+const props = defineProps<{
   state: any
   handlers: Record<string, any>
 }>()
+
+const useVirtualTimeline = computed(() => {
+  return import.meta.env.VITE_MESSENGER_VIRTUAL_TIMELINE === 'true'
+    && props.state?.selectedRoomKind === 'direct'
+    && props.state?.timelineRenderBudget?.virtualizationCandidate === true
+})
 </script>
 
 <template>
@@ -71,7 +78,15 @@ defineProps<{
         <p>شروع گفتگو...</p>
       </div>
 
+      <ChatVirtualTimeline
+        v-if="useVirtualTimeline"
+        :groups="state.groupedMessages"
+        :state="state"
+        :handlers="handlers"
+      />
+
       <div
+        v-else
         v-for="group in state.groupedMessages"
         :key="group.label"
         class="message-group"

@@ -79,7 +79,7 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | B | Store Foundation, Diagnostics Gate, Local Hydration | Completed | Establish store/cache/gateway foundations early |
 | C | Container Extraction And Room Tear-down | Completed | Shrink `ChatView.vue` safely and prevent leaks |
 | D | Message Renderer Split And Error Boundaries | Completed | Make message rendering modular and fault-tolerant |
-| E | Media Dimension Contract And Virtualized Timeline | Planned | Introduce safe real virtualization without scroll jumps |
+| E | Media Dimension Contract And Virtualized Timeline | In Progress | Introduce safe real virtualization without scroll jumps |
 | F | Realtime Gateway And Request Churn Reduction | Planned | Convert realtime/network updates into precise store mutations |
 | G | UI System Final Pass | Planned | Polish the user-facing experience after architecture is stable |
 | H | Full Release Gate And Legacy Retirement Decision | Planned | Prove feature parity, speed, stability, and UX acceptance |
@@ -427,6 +427,23 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
 
 ### Exit Criteria
 
+- Started on 2026-06-04 with the first safe Stage E slice:
+  - added additive frontend message fields: `media_width`, `media_height`, `media_aspect_ratio`.
+  - added `chatMediaDimensions.ts` to normalize dimensions from additive fields first, then legacy JSON `width`/`height`, then bounded fallback ratio `4 / 3`.
+  - wired single image/video bubbles to reserve `aspect-ratio` even when old messages lack dimensions.
+  - wired album items to use normalized dimensions/aspect-ratio so album layout has stable fallback sizing before media hydration.
+  - added async `ChatVirtualTimeline.vue` behind `VITE_MESSENGER_VIRTUAL_TIMELINE=true`, limited to direct rooms already marked as `timelineRenderBudget.virtualizationCandidate`.
+  - kept the default production path on the existing non-virtual timeline.
+  - code-split `ChatVirtualTimeline` so the disabled feature flag does not force the virtualizer into the main messenger path.
+- Validation passed for this slice:
+  - `npm run test:unit:run -- src/utils/chatMediaDimensions.test.ts src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatAlbumLayout.test.ts src/components/ChatView.test.ts`
+  - `npm run build`
+- Remaining before Stage E can close:
+  - add virtual timeline unit tests for row estimation, measured row cache, and known/fallback media ratios.
+  - complete two-phase scroll adjustment for search/reply/pinned/unread jumps while the virtual timeline is enabled.
+  - verify older-message prepend anchor preservation in the virtual path.
+  - run the Stage E benchmark subset: S02 heavy direct, S03 media-heavy, S04 search/viewer, S10 weak-device.
+  - only then decide whether `VITE_MESSENGER_VIRTUAL_TIMELINE=true` is safe for broader rollout.
 - No scroll jump when images/videos/albums hydrate.
 - DOM node count drops significantly in heavy rooms.
 - S10 weak-device list/chat responsiveness improves.
@@ -616,4 +633,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Start Stage E. Stage D has installed the message render boundary and the first extracted message subcomponents; the next slice is the media dimension contract plus a flagged virtual timeline prototype.
+Continue Stage E. The media dimension contract and flagged virtual timeline prototype are in place; the next slice is virtual timeline scroll-jump hardening, focused virtual tests, and the Stage E benchmark subset before this stage can close.

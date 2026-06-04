@@ -15,6 +15,7 @@ type AlbumItem = {
   type: 'image' | 'video'
   width?: number
   height?: number
+  aspectRatio?: number
 }
 
 type AlbumCell = {
@@ -143,7 +144,12 @@ function extractAspectRatio(item: AlbumItem) {
     return clamp(width / height, 0.66, 1.85)
   }
 
-  return 1
+  const aspectRatio = Number(item.aspectRatio)
+  if (Number.isFinite(aspectRatio) && aspectRatio > 0) {
+    return clamp(aspectRatio, 0.66, 1.85)
+  }
+
+  return 4 / 3
 }
 
 function getPreferredAlbumWidth(count: number, averageRatio: number) {
@@ -304,7 +310,7 @@ const layout = computed(() => buildLayout(props.items))
           'download-selected': props.isDownloadSelectionMode && isItemSelected(cell.item.msg.id),
           'download-unselected': props.isDownloadSelectionMode && !isItemSelected(cell.item.msg.id)
         }"
-        :style="{ width: `${cell.width}px`, height: `${cell.height}px` }"
+        :style="{ width: `${cell.width}px`, height: `${cell.height}px`, aspectRatio: `${extractAspectRatio(cell.item)}` }"
         @click.stop="handleCellClick(cell.item.msg)"
       >
         <img
