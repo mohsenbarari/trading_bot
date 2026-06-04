@@ -2456,24 +2456,20 @@ async function handleSendVoice(blob: Blob, durationMs: number) {
 
 async function handleSendLocation(lat: number, lng: number) {
   if (!selectedUserId.value) return
-  if (selectedRoomKind.value !== 'direct') {
-    alert(selectedRoomKind.value === 'group'
-      ? 'ارسال موقعیت در گروه در این فاز هنوز فعال نشده است.'
-      : 'ارسال موقعیت در کانال در این فاز هنوز فعال نشده است.')
-    return
-  }
+  if (isSelectedRoomReadOnly.value) return
   const normalized = normalizeLocationPayload({ lat, lng })
   if (!normalized) return
 
   const content = JSON.stringify(normalized)
   try {
-    const newMsg = await messagesLogic.apiFetch('/chat/send', {
+    const endpoint = buildChatSendEndpoint(selectedUserId.value)
+    const payload = buildChatSendBody(selectedUserId.value, {
+      content,
+      message_type: 'location',
+    })
+    const newMsg = await messagesLogic.apiFetch(endpoint, {
       method: 'POST',
-      body: JSON.stringify({
-        receiver_id: selectedUserId.value,
-        content,
-        message_type: 'location'
-      })
+      body: JSON.stringify(payload)
     })
     messages.value.push(newMsg)
     scrollToBottom()
@@ -3668,7 +3664,7 @@ defineExpose({
       <AttachmentMenu
         v-if="showAttachmentMenu || keepInactiveMessengerSurfacesMounted"
         v-model="showAttachmentMenu"
-        :allowLocation="selectedRoomKind === 'direct'"
+        :allowLocation="!isSelectedRoomReadOnly"
         @select-media="handleAttachmentMediaSelection"
         @select-file="handleAttachmentFileSelection"
         @select-location="handleSendLocation"

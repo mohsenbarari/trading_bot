@@ -3310,8 +3310,7 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
-  it('blocks group location sends with the phase-gate alert', async () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+  it('sends group locations through the room chat API', async () => {
     chatViewMocks.conversationsSeed = [
       {
         id: 88,
@@ -3337,13 +3336,77 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.apiFetchMock.mockResolvedValue(buildMessage({
+      id: 92,
+      sender_id: 7,
+      receiver_id: 7,
+      message_type: 'location',
+      content: JSON.stringify({ lat: 35.7, lng: 51.4 }),
+    }))
+
     await wrapper.get('.select-location-action').trigger('click')
     await flushPromises()
 
-    expect(alertSpy).toHaveBeenCalledWith('ارسال موقعیت در گروه در این فاز هنوز فعال نشده است.')
-    expect(chatViewMocks.apiFetchMock).not.toHaveBeenCalled()
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/rooms/88/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        content: JSON.stringify({ lat: 35.7, lng: 51.4 }),
+        message_type: 'location',
+      }),
+    })
 
-    alertSpy.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('sends writable channel locations through the room chat API', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 23,
+        other_user_id: -23,
+        other_user_name: 'کانال فعال',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 23,
+        can_send: true,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: -23,
+      targetUserName: 'کانال فعال',
+    }, {
+      AttachmentMenu: {
+        props: ['allowLocation'],
+        template: "<div><span class='allow-location-state'>{{ String(allowLocation) }}</span><button class='select-location-action' @click=\"$emit('select-location', 35.7, 51.4)\">location</button></div>",
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.allow-location-state').text()).toBe('true')
+
+    chatViewMocks.apiFetchMock.mockClear()
+    chatViewMocks.apiFetchMock.mockResolvedValue(buildMessage({
+      id: 93,
+      sender_id: 7,
+      receiver_id: 7,
+      message_type: 'location',
+      content: JSON.stringify({ lat: 35.7, lng: 51.4 }),
+    }))
+
+    await wrapper.get('.select-location-action').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/rooms/23/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        content: JSON.stringify({ lat: 35.7, lng: 51.4 }),
+        message_type: 'location',
+      }),
+    })
+
     wrapper.unmount()
   })
 

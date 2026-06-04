@@ -139,6 +139,39 @@ class ChatRoomServiceRoomIOTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         reload_mock.assert_awaited_once_with(db, 901)
 
+    async def test_send_channel_message_prepares_location_payload(self):
+        now = datetime(2026, 5, 8, 1, 42, 0)
+        member = SimpleNamespace(role=ChatMemberRole.ADMIN, last_read_message_id=None, last_read_at=None, updated_at=None)
+        chat = SimpleNamespace(id=50, last_message_id=None, last_message_at=None, updated_at=None)
+        sender = SimpleNamespace(id=7)
+        db = FakeDB()
+        reloaded = SimpleNamespace(id=901, chat_id=50)
+
+        with patch(
+            "core.services.chat_room_service.get_active_channel_member_or_403",
+            new=AsyncMock(return_value=member),
+        ), patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service.prepare_direct_location_content",
+            new=AsyncMock(return_value='{"lat":35.7,"lng":51.4,"snapshot_id":"snap"}'),
+        ) as prepare_location_mock, patch(
+            "core.services.chat_room_service._reload_channel_message",
+            new=AsyncMock(return_value=reloaded),
+        ):
+            await send_channel_message(
+                db,
+                chat=chat,
+                sender=sender,
+                content='{"lat":35.7,"lng":51.4}',
+                message_type=MessageType.LOCATION,
+            )
+
+        prepare_location_mock.assert_awaited_once_with(
+            db,
+            uploader_id=7,
+            content='{"lat":35.7,"lng":51.4}',
+        )
+        self.assertEqual(db.added[0].content, '{"lat":35.7,"lng":51.4,"snapshot_id":"snap"}')
+
     async def test_send_channel_message_raises_when_reload_fails(self):
         member = SimpleNamespace(role=ChatMemberRole.ADMIN, last_read_message_id=None, last_read_at=None, updated_at=None)
         chat = SimpleNamespace(id=50, last_message_id=None, last_message_at=None, updated_at=None)
@@ -208,6 +241,39 @@ class ChatRoomServiceRoomIOTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.last_message_id, 901)
         self.assertEqual(member.last_read_message_id, 901)
         reload_mock.assert_awaited_once_with(db, 901)
+
+    async def test_send_group_message_prepares_location_payload(self):
+        now = datetime(2026, 5, 8, 1, 46, 0)
+        member = SimpleNamespace(last_read_message_id=None, last_read_at=None, updated_at=None)
+        chat = SimpleNamespace(id=70, last_message_id=None, last_message_at=None, updated_at=None)
+        sender = SimpleNamespace(id=9)
+        db = FakeDB()
+        reloaded = SimpleNamespace(id=901, chat_id=70)
+
+        with patch(
+            "core.services.chat_room_service.get_active_group_member_or_403",
+            new=AsyncMock(return_value=member),
+        ), patch("core.services.chat_room_service._utcnow", return_value=now), patch(
+            "core.services.chat_room_service.prepare_direct_location_content",
+            new=AsyncMock(return_value='{"lat":35.7,"lng":51.4,"snapshot_id":"snap"}'),
+        ) as prepare_location_mock, patch(
+            "core.services.chat_room_service._reload_channel_message",
+            new=AsyncMock(return_value=reloaded),
+        ):
+            await send_group_message(
+                db,
+                chat=chat,
+                sender=sender,
+                content='{"lat":35.7,"lng":51.4}',
+                message_type=MessageType.LOCATION,
+            )
+
+        prepare_location_mock.assert_awaited_once_with(
+            db,
+            uploader_id=9,
+            content='{"lat":35.7,"lng":51.4}',
+        )
+        self.assertEqual(db.added[0].content, '{"lat":35.7,"lng":51.4,"snapshot_id":"snap"}')
 
     async def test_send_group_message_blocks_system_management_rooms(self):
         member = SimpleNamespace(last_read_message_id=None, last_read_at=None, updated_at=None)
