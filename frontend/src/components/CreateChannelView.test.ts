@@ -879,6 +879,18 @@ describe('CreateChannelView.vue', () => {
       throw new Error('channels unavailable')
     })
     apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/chat/channels/21' && options?.method === 'PATCH') {
+        const body = JSON.parse(String(options?.body || '{}'))
+        expect(body).toEqual({
+          title: 'Channel Twenty One',
+          description: 'Members',
+          avatar_file_id: 'avatar-21',
+        })
+        return makeResponse({
+          ...activeChannel,
+          avatar_file_id: 'avatar-21',
+        })
+      }
       if (url === '/api/chat/channels/21/members/bulk') {
         const body = JSON.parse(String(options?.body || '{}'))
         expect(body).toEqual({ select_all_active_users: true })

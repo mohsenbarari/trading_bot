@@ -57,6 +57,7 @@ const props = defineProps<{
   show: boolean
   groupId?: number | null
   currentUserId: number
+  apiBaseUrl?: string
 }>()
 
 const emit = defineEmits<{
@@ -103,7 +104,7 @@ const overviewDescription = computed(() => {
   const nextDescription = description.value.trim() || group.value?.description || ''
   return nextDescription || 'توضیحی برای این گروه ثبت نشده است.'
 })
-const groupAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value))
+const groupAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value, props.apiBaseUrl ?? ''))
 const canEditOverviewAvatar = computed(() => !isCreateMode.value && isAdmin.value)
 const currentGroupRoleLabel = computed(() => {
   if (isCreateMode.value) return 'سازنده گروه'
@@ -252,11 +253,17 @@ async function handleAvatarSelected(event: Event) {
   const file = input?.files?.[0]
   if (!file) return
 
+  const previousAvatarFileId = avatarFileId.value
   avatarBusy.value = true
+  clearFlashMessages()
   try {
-    const uploaded = await uploadAvatarImage(file)
+    const uploaded = await uploadAvatarImage(file, props.apiBaseUrl ?? '')
     avatarFileId.value = uploaded.file_id
+    if (!isCreateMode.value && page.value === 'overview') {
+      await persistExistingGroupAvatar(uploaded.file_id)
+    }
   } catch (error) {
+    avatarFileId.value = previousAvatarFileId
     setError(error, 'آپلود آواتار گروه ناموفق بود')
   } finally {
     avatarBusy.value = false
@@ -264,9 +271,22 @@ async function handleAvatarSelected(event: Event) {
   }
 }
 
-function clearAvatar() {
+async function clearAvatar() {
   if (avatarBusy.value) return
+  const previousAvatarFileId = avatarFileId.value
   avatarFileId.value = null
+  if (isCreateMode.value || page.value !== 'overview') return
+
+  avatarBusy.value = true
+  clearFlashMessages()
+  try {
+    await persistExistingGroupAvatar(null)
+  } catch (error) {
+    avatarFileId.value = previousAvatarFileId
+    setError(error, 'حذف آواتار گروه ناموفق بود')
+  } finally {
+    avatarBusy.value = false
+  }
 }
 
 function getPrimaryUserName(accountName: string, fullName?: string | null) {
@@ -480,6 +500,28 @@ async function updateGroupSettings() {
   } finally {
     isSaving.value = false
   }
+}
+
+async function persistExistingGroupAvatar(nextAvatarFileId: string | null) {
+  if (!props.groupId || !group.value || !isAdmin.value) return
+
+  const response = await apiFetch(`/api/chat/groups/${props.groupId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      title: group.value.title,
+      description: group.value.description || undefined,
+      avatar_file_id: nextAvatarFileId,
+    }),
+  })
+  const data = await response.json() as GroupRoom | { detail?: string }
+  if (!response.ok) {
+    throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره آواتار گروه')
+  }
+
+  group.value = data as GroupRoom
+  avatarFileId.value = group.value.avatar_file_id || null
+  successMessage.value = nextAvatarFileId ? 'عکس گروه ذخیره شد.' : 'عکس گروه حذف شد.'
+  emit('updated', group.value)
 }
 
 async function addSelectedMembers() {
