@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 
 import ChatMessageItem from './ChatMessageItem.vue'
@@ -23,6 +23,7 @@ const props = defineProps<{
 
 const rootRef = ref<HTMLElement | null>(null)
 const measuredRowHeights = new Map<string, number>()
+const MAX_SCROLL_ADJUSTMENT_ATTEMPTS = 10
 
 const normalizedGroups = computed(() => normalizeTimelineMediaDimensions(props.groups || []))
 
@@ -32,13 +33,13 @@ function estimateRowSize(index: number) {
   return estimateVirtualTimelineRowSize(rows.value, index, measuredRowHeights)
 }
 
-const virtualizer = useVirtualizer({
-  count: computed(() => rows.value.length),
+const virtualizer = useVirtualizer(computed(() => ({
+  count: rows.value.length,
   getScrollElement: () => rootRef.value?.parentElement ?? null,
   estimateSize: estimateRowSize,
   overscan: 8,
   getItemKey: index => rows.value[index]?.key ?? index,
-})
+})))
 
 const virtualItems = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
@@ -69,13 +70,23 @@ function scrollToMessage(messageId: number) {
   const rowIndex = findVirtualTimelineMessageRowIndex(rows.value, messageId)
   if (rowIndex < 0) return false
 
-  virtualizer.value.scrollToIndex(rowIndex, { align: 'center' })
-  requestAnimationFrame(() => {
+  let attempt = 0
+  const adjustAndHighlight = () => {
+    virtualizer.value.scrollToIndex(rowIndex, { align: 'center' })
     requestAnimationFrame(() => {
-      highlightRenderedMessage(messageId)
-      virtualizer.value.measure()
+      void nextTick(() => {
+        virtualizer.value.measure()
+        if (highlightRenderedMessage(messageId)) return
+
+        attempt += 1
+        if (attempt < MAX_SCROLL_ADJUSTMENT_ATTEMPTS) {
+          window.setTimeout(adjustAndHighlight, 40)
+        }
+      })
     })
-  })
+  }
+
+  adjustAndHighlight()
   return true
 }
 

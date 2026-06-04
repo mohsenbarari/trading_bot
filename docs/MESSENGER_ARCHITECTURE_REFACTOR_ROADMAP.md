@@ -449,12 +449,18 @@ Introduce true virtualization safely. Media dimensions must be reserved before v
 - Continued on 2026-06-04 with the browser flag gate scaffold:
   - added `frontend/e2e/messenger-virtual-timeline.spec.ts`.
   - the spec seeds a heavy direct room, requires `VITE_MESSENGER_VIRTUAL_TIMELINE=true`, asserts `.virtual-timeline` is active, checks rendered bubble count remains below the full room size, and verifies in-chat search can highlight an offscreen virtual row.
-  - attempted command: `VITE_MESSENGER_VIRTUAL_TIMELINE=true npm run test:e2e -- e2e/messenger-virtual-timeline.spec.ts --project=chromium --reporter=line`.
-  - execution did not reach app assertions because the local environment lacks the Playwright Chromium executable at `/root/.cache/ms-playwright/chromium_headless_shell-1217/...`.
   - `npm run test:unit:run -- src/utils/chatMediaDimensions.test.ts src/utils/chatVirtualTimeline.test.ts src/components/ChatView.test.ts` passed.
   - `npm run build` passed.
+- Continued on 2026-06-04 with the browser flag gate closure:
+  - installed/provided the local Playwright Chromium executable and reran the flagged browser gate.
+  - fixed the flagged open path so `VITE_MESSENGER_VIRTUAL_TIMELINE=true` requests enough direct-room tail messages (`180`) for the virtualization candidate threshold instead of staying capped at the normal `16/48` open limits.
+  - passed `timelineRenderBudget` into `ChatRoomContainer` state so the virtual timeline gate can observe the real grouped-message budget.
+  - corrected the TanStack virtualizer options shape so `count` is passed as a concrete number from a computed options object instead of a nested computed ref.
+  - hardened virtual `scrollToMessage(messageId)` with a short measure/adjust loop so search jumps can mount and highlight offscreen rows after variable-height estimates settle.
+- Validation passed for the browser gate closure:
+  - `npm run test:unit:run -- src/composables/chat/useChatMessages.test.ts src/utils/chatVirtualTimeline.test.ts src/utils/chatMediaDimensions.test.ts`
+  - `VITE_MESSENGER_VIRTUAL_TIMELINE=true npm run test:e2e -- e2e/messenger-virtual-timeline.spec.ts --project=chromium --reporter=line`
 - Remaining before Stage E can close:
-  - install/provide a Playwright Chromium executable or run the browser gate on a host that already has it, then rerun `messenger-virtual-timeline.spec.ts`.
   - extend the browser-level virtual timeline flag check from search jump to reply/pinned/unread jumps and older-message prepend anchoring.
   - complete any browser-observed two-phase scroll correction gaps that are not visible in unit tests.
   - verify older-message prepend anchor preservation in the virtual path.
@@ -649,4 +655,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage E. The media dimension contract and flagged virtual timeline prototype are in place; the next slice is virtual timeline scroll-jump hardening, focused virtual tests, and the Stage E benchmark subset before this stage can close.
+Continue Stage E. The media dimension contract, flagged virtual timeline prototype, scroll-jump bridge, and first browser gate are in place and passing. The next slice is reply/pinned/unread jump coverage, older-message prepend anchoring in the virtual path, and the Stage E benchmark subset before this stage can close.
