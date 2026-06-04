@@ -3,6 +3,8 @@ import { apiFetchJson } from '../../utils/auth'
 import { getUserFacingErrorMessage, type ErrorPolicyContext } from '../../utils/httpErrorPolicy'
 import type { Conversation, Message } from '../../types/chat'
 import { useNotificationStore } from '../../stores/notifications'
+import { useConversationsStore } from '../../stores/chat/conversations'
+import { fetchChatConversations } from '../../services/chat/chatApi'
 import {
     countEmojiStickerOccurrences,
     isEmojiStickerOnlyMessage,
@@ -95,6 +97,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     } = options
 
     const notificationStore = useNotificationStore()
+    const conversationsStore = useConversationsStore()
     const textSendControllers = new Map<number, AbortController>()
     const messageSnapshotCache = new Map<number, Message[]>()
     const backgroundHydrationTimers = new Map<number, number>()
@@ -329,15 +332,19 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     async function loadConversations() {
         const hasExistingConversations = Array.isArray(conversations.value) && conversations.value.length > 0
         try {
-            const loadedConversations = await apiFetch('/chat/conversations', {}, {
-                surface: 'messenger',
-                scope: 'list',
-                operation: 'load-list',
-                preserveExistingData: hasExistingConversations,
-                resourceLabel: 'لیست گفتگوها',
-                fallbackMessage: 'دریافت گفتگوها ممکن نشد.',
-            })
-            conversations.value = Array.isArray(loadedConversations) ? loadedConversations : []
+            if (!hasExistingConversations) {
+                const cached = await conversationsStore.hydrateFromCache(currentUserId)
+                if (cached?.conversations.length) {
+                    conversations.value = [...cached.conversations]
+                }
+            }
+
+            const loadedConversations = await fetchChatConversations(apiFetch)
+            const reconciledConversations = await conversationsStore.replaceFromServer(
+                currentUserId,
+                Array.isArray(loadedConversations) ? loadedConversations : [],
+            )
+            conversations.value = reconciledConversations
             error.value = ''
             const mutedSyncId = ++mutedConversationSyncSequence
             const loadedConversationSnapshot = conversations.value
@@ -352,7 +359,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 )
             }, 0)
         } catch (e: any) {
-            error.value = getUserFacingErrorMessage(e, {
+            const message = getUserFacingErrorMessage(e, {
                 surface: 'messenger',
                 scope: 'list',
                 operation: 'load-list',
@@ -360,6 +367,8 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 resourceLabel: 'لیست گفتگوها',
                 fallbackMessage: 'دریافت گفتگوها ممکن نشد.',
             })
+            conversationsStore.setError(message)
+            error.value = message
         }
     }
 
