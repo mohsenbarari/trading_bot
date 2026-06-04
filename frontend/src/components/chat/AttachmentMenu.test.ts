@@ -379,8 +379,10 @@ describe('AttachmentMenu.vue', () => {
   it('queues native camera files, restricts edit mode to photos, and replaces the edited capture', async () => {
     const wrapper = mountAttachmentMenu()
     const vm = wrapper.vm as unknown as {
+      showCameraCapture: boolean
       cameraEditingItemId: string | null
       capturedCameraMedia: Array<{ id: string; file: File; type: 'photo' | 'video'; previewUrl: string }>
+      latestCapturedMediaId: string | null
       onNativeCameraFile: (event: Event) => void
       editCapturedMedia: (itemId: string) => void
       onCameraEditCancel: () => void
@@ -393,11 +395,16 @@ describe('AttachmentMenu.vue', () => {
       value: 'picked',
     }
 
+    vm.showCameraCapture = true
     vm.onNativeCameraFile({ target: input } as unknown as Event)
     await nextTick()
 
     expect(vm.capturedCameraMedia).toHaveLength(2)
     expect(vm.capturedCameraMedia.map((item) => item.type)).toEqual(['photo', 'video'])
+    expect(vm.latestCapturedMediaId).toBe(vm.capturedCameraMedia[1]!.id)
+    expect(wrapper.text()).toContain('ویدئو به صف ارسال اضافه شد')
+    expect(wrapper.text()).toContain('2 مورد آماده ارسال')
+    expect(wrapper.findAll('.camera-captured-item').at(1)?.classes()).toContain('latest')
     expect(input.value).toBe('')
 
     const photoId = vm.capturedCameraMedia[0]!.id
