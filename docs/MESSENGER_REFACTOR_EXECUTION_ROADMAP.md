@@ -17,6 +17,7 @@ This roadmap converts strategy into an execution format that is easy to run in c
 This document is execution-focused and should be used together with:
 
 - docs/MESSENGER_REFACTORING_ROADMAP.md (strategic and historical context)
+- docs/MESSENGER_ARCHITECTURE_REFACTOR_ROADMAP.md (post-Stage-12 architecture and UX execution contract)
 - tmp/messenger-benchmark/comparison-summary.json (ground truth metrics)
 - tmp/messenger-benchmark/surface-status.json (coverage and release readiness)
 
