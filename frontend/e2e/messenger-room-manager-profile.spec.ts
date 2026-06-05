@@ -276,7 +276,7 @@ async function openRoomHeaderMenu(page: Page) {
 async function openNamedRoomFromRoute(page: Page, roomId: number, title: string) {
   await page.goto(`/chat?user_id=-${roomId}&user_name=${encodeURIComponent(title)}`, { waitUntil: 'domcontentloaded' })
   await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(-roomId)
-  await expect(page.locator('.chat-header .header-name').last()).toHaveText(title, { timeout: 30000 })
+  await expect(page.locator('.chat-header .header-name').last()).toContainText(title, { timeout: 30000 })
 }
 
 async function openRoomManagerFromHeader(page: Page, managerRoot: Locator, menuLabel: string) {

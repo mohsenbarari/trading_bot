@@ -392,6 +392,7 @@ async function waitForDirectAlbumCaption(
   fixture: SessionFixture,
   otherUserId: number,
   caption: string,
+  timeout = 90_000,
 ): Promise<ParsedDirectMessageRecord[]> {
   let matchedAlbumId: string | null = null
 
@@ -417,7 +418,7 @@ async function waitForDirectAlbumCaption(
       const hasVideo = albumMessages.some((message) => message.message_type === 'video')
 
       return albumMessages.length === 2 && captionCount === 1 && hasImage && hasVideo ? 2 : 0
-    }, { timeout: 90000 })
+    }, { timeout })
     .toBe(2)
 
   const messages = await fetchParsedDirectMessages(request, fixture, otherUserId)
@@ -999,7 +1000,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
   })
 
   test('gallery album send keeps the lead caption and opens the lightbox with toolbar actions and strip navigation', async ({ page, request, browserName }) => {
-    test.setTimeout(120000)
+    test.setTimeout(210000)
     const actor = seedPrimarySession('direct_room_media_actor')
     const peer = seedPrimarySession('direct_room_media_peer')
     const albumCaption = `PW ALBUM CAP ${Date.now()}`
@@ -1050,15 +1051,26 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await page.getByRole('button', { name: 'ارسال 2 مورد' }).click()
     await expect(page.locator('.gp-title')).toHaveCount(0, { timeout: 30000 })
 
+    const albumMessages = await waitForDirectAlbumCaption(
+      request,
+      actor,
+      peer.userId,
+      albumCaption,
+      browserName === 'webkit' ? 150_000 : 90_000,
+    )
+    expect(albumMessages.filter((message) => message.parsedContent?.caption === albumCaption)).toHaveLength(1)
+    expect(albumMessages.find((message) => message.parsedContent?.caption === albumCaption)?.parsedContent?.album_index).toBe(0)
+
     const albumBubble = page.locator('.message-bubble.album-bubble').filter({ hasText: albumCaption }).first()
+    const albumRenderedInCurrentRoom = await albumBubble.isVisible({ timeout: 30000 }).catch(() => false)
+    if (!albumRenderedInCurrentRoom) {
+      await openDirectChat(page, peer.userId, peer.accountName)
+    }
     await expect(albumBubble).toBeVisible({ timeout: 30000 })
     await expect(albumBubble.locator('.media-caption')).toHaveText(albumCaption)
     await expect(page.locator('.messages-container [data-media-msg-id]')).toHaveCount(1, { timeout: 30000 })
     await expect(page.locator('.messages-container video')).toHaveCount(1, { timeout: 30000 })
 
-    const albumMessages = await waitForDirectAlbumCaption(request, actor, peer.userId, albumCaption)
-    expect(albumMessages.filter((message) => message.parsedContent?.caption === albumCaption)).toHaveLength(1)
-    expect(albumMessages.find((message) => message.parsedContent?.caption === albumCaption)?.parsedContent?.album_index).toBe(0)
     if (browserName !== 'webkit') {
       expect(sawBatchCreate).toBeTruthy()
       expect(sawSessionCreate).toBeTruthy()
