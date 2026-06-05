@@ -709,6 +709,10 @@ Status: In Progress
   - The failed assertion was a realtime harness race: the API activity signal returned `204`, but the receiver header remained at the static room kind because the one-shot event could be published before the open chat page's realtime listener was ready under matrix pressure.
   - Added a bounded retry helper for explicit room activity signals in `channel-media.spec.ts`, so the test re-publishes the harmless active activity signal if the header has not observed it yet.
   - Focused Chromium validation passed for `group activity shows sender names and resumable album upload finishes after sender leaves messenger for market` (`1` passed in `36.1s`).
+- Reviewed the next full Stage H matrix result in `tmp/e2e-logs/stage-h-matrix-20260605T153039Z.log`: `338` passed, `12` skipped, `1` failed.
+  - The sole failure was again WebKit-only `messenger-conversation-actions.spec.ts`, caused by one oversized direct-conversation menu scenario reaching the whole-test timeout after the UI state had already reached the expected result.
+  - Split the oversized direct menu scenario into three focused tests for pin/reorder, mute/unmute, and unread/hide. This keeps the same feature coverage while giving WebKit shorter independent budgets and clearer failure ownership.
+  - Focused validation passed for the three split direct-conversation menu tests on Chromium/WebKit (`6` passed in `1.4m`).
 
 ### Goal
 
