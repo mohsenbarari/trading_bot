@@ -572,6 +572,14 @@ Route websocket handlers back to existing reload-based convergence path.
 
 ## Stage G - UI System Final Pass
 
+Status: In Progress
+
+### 2026-06-05 Start Slice
+
+- Started the final UI-system pass with a low-risk token adoption slice.
+- Standardized message bubble, media frame, voice player, document card, location card, and read-only composer sizing through `messenger-design-tokens.css`.
+- Removed practical inline hot-renderer styles from media/voice upload controls while preserving existing message behavior.
+
 ### Goal
 
 Make Messenger feel like one polished product, not a mix of legacy surfaces.

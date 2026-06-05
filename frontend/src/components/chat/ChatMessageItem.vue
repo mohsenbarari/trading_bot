@@ -93,7 +93,7 @@
 
       <!-- Media (Image/Video) -->
       <template v-else-if="msg.message_type === 'image' || msg.message_type === 'video'">
-        <div class="msg-media-link w-[280px] sm:w-[320px] max-w-full rounded-lg overflow-hidden relative"
+        <div class="msg-media-link"
              :style="mediaStyle"
              @click.stop="$emit('media-click', msg)">
           <button
@@ -130,16 +130,16 @@
               </div>
               
               <!-- Overlay for uploading state -->
-              <div v-if="mediaTransferState.isSendingBusy" class="msg-media-overlay cancelable-overlay" @click.stop="$emit('cancel-send', msg)" style="cursor:pointer;">
+              <div v-if="mediaTransferState.isSendingBusy" class="msg-media-overlay cancelable-overlay is-clickable" @click.stop="$emit('cancel-send', msg)">
                 <div v-if="mediaUploadStatusText" class="telegram-size-badge" :style="{ direction: mediaTransferState.isProcessing ? 'rtl' : 'ltr' }">
                   <span>{{ mediaUploadStatusText }}</span>
                 </div>
-                <div class="progress-container cancelable" style="background: rgba(0,0,0,0.5); border-radius: 50%; padding: 8px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
-                  <svg class="progress-ring" viewBox="0 0 36 36" style="position: absolute; width: 44px; height: 44px;">
+                <div class="progress-container cancelable media-upload-progress">
+                  <svg class="progress-ring" viewBox="0 0 36 36">
                     <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
                     <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
                   </svg>
-                  <div class="progress-cancel-icon" style="color: white; font-size: 18px; z-index: 2;">✕</div>
+                  <div class="progress-cancel-icon">✕</div>
                 </div>
               </div>
             </div>
@@ -184,7 +184,7 @@
             </svg>
           </button>
           
-          <div class="voice-body" style="min-width: 0; flex: 1;">
+          <div class="voice-body">
             <div
               ref="waveformRef"
               class="voice-waveform"
@@ -208,11 +208,10 @@
             </div>
           </div>
           
-          <div v-if="mediaTransferState.isSendingBusy" class="msg-voice-uploading" style="position: relative;" @click.stop="$emit('cancel-send', msg)">
+          <div v-if="mediaTransferState.isSendingBusy" class="msg-voice-uploading" @click.stop="$emit('cancel-send', msg)">
             <span
               v-if="voiceUploadStatusText"
               class="voice-upload-status"
-              style="position:absolute; inset-block-end: calc(100% + 6px); inset-inline-start:50%; transform:translateX(-50%); background:rgba(0,0,0,0.62); color:#fff; border-radius:999px; padding:2px 6px; font-size:10px; white-space:nowrap; line-height:1.2;"
             >
               {{ voiceUploadStatusText }}
             </span>
@@ -220,7 +219,7 @@
               <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
               <circle class="ring-fg" cx="18" cy="18" r="16" :stroke-dasharray="`${mediaTransferState.progress}, 100`"></circle>
             </svg>
-            <div class="voice-cancel-icon" style="position: absolute; top:50%; left:50%; transform: translate(-50%, -50%); font-size:12px; color:white;">✕</div>
+            <div class="voice-cancel-icon">✕</div>
           </div>
           <button
             v-if="showMediaShare && !mediaTransferState.isSendingBusy"
@@ -1802,8 +1801,16 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .swipe-reply-icon.received-side { left: 16px; }
 
 .message-bubble {
-  width: fit-content; max-width: min(78vw, 344px); padding: 8px 12px; border-radius: var(--messenger-radius-control, 8px); position: relative; font-size: 15px; line-height: 1.5;
-  white-space: pre-wrap; word-wrap: break-word; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+  width: fit-content;
+  max-width: min(78vw, var(--messenger-message-bubble-max-width, 328px));
+  padding: var(--messenger-message-padding-block, 8px) var(--messenger-message-padding-inline, 12px);
+  border-radius: var(--messenger-radius-bubble, 12px);
+  position: relative;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  box-shadow: var(--messenger-message-surface-shadow, 0 1px 2px rgba(15, 23, 42, 0.15));
   animation: slideIn var(--messenger-motion-overlay, 220ms) cubic-bezier(0.175, 0.885, 0.32, 1.275);
   will-change: transform;
   -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
@@ -1814,24 +1821,24 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .message-bubble.album-bubble {
-  padding: 4px 4px 6px;
+  padding: var(--messenger-message-media-padding, 4px) var(--messenger-message-media-padding, 4px) 6px;
   width: fit-content;
-  max-width: min(78vw, 336px);
+  max-width: min(78vw, calc(var(--messenger-message-media-width, 320px) + 8px));
 }
 .message-bubble.type-image,
 .message-bubble.type-video {
-  padding: 4px 4px 6px;
-  max-width: min(78vw, 328px);
+  padding: var(--messenger-message-media-padding, 4px) var(--messenger-message-media-padding, 4px) 6px;
+  max-width: min(78vw, calc(var(--messenger-message-media-width, 320px) + 8px));
 }
 .message-bubble.type-voice {
   padding: 6px 8px;
-  max-width: min(78vw, 288px);
+  max-width: min(78vw, calc(var(--messenger-message-compact-width, 252px) + 18px));
 }
 .message-bubble.type-text {
-  min-width: 58px;
+  min-width: var(--messenger-message-min-width, 58px);
 }
-.message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #eeffde); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-control, 8px) var(--messenger-radius-control, 8px) 4px var(--messenger-radius-control, 8px); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15); }
-.message-bubble.received { align-self: flex-end; background: var(--messenger-bubble-received, #ffffff); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-control, 8px) var(--messenger-radius-control, 8px) var(--messenger-radius-control, 8px) 4px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15); }
+.message-bubble.sent { align-self: flex-start; background: var(--messenger-bubble-sent, #eeffde); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble-tail, 5px) var(--messenger-radius-bubble, 12px); box-shadow: var(--messenger-message-surface-shadow, 0 1px 2px rgba(15, 23, 42, 0.15)); }
+.message-bubble.received { align-self: flex-end; background: var(--messenger-bubble-received, #ffffff); color: var(--messenger-text-strong, #1f2937); border-radius: var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble, 12px) var(--messenger-radius-bubble-tail, 5px); box-shadow: var(--messenger-message-surface-shadow, 0 1px 2px rgba(15, 23, 42, 0.15)); }
 .message-bubble.full-width-bubble { width: 100%; max-width: 100%; }
 .message-bubble.full-width-bubble.sent,
 .message-bubble.full-width-bubble.received { align-self: stretch; }
@@ -1855,8 +1862,11 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 }
 .message-bubble p { margin: 0; }
 .msg-media-link {
-  width: min(320px, calc(100vw - 88px)) !important;
+  position: relative;
+  overflow: hidden;
+  width: min(var(--messenger-message-media-width, 320px), calc(100vw - 88px)) !important;
   max-width: 100%;
+  border-radius: var(--messenger-radius-media, 10px);
 }
 .media-caption {
   margin-top: 8px;
@@ -1969,15 +1979,17 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 .msg-sticker { font-size: 48px; }
 .msg-location {
   cursor: pointer;
-  padding: 4px;
+  padding: 2px;
+  width: min(var(--messenger-message-media-width, 320px), calc(100vw - 88px));
+  max-width: 100%;
 }
 .location-snapshot {
   position: relative;
-  width: 250px;
-  height: 150px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
   background-size: cover;
   background-position: center;
-  border-radius: var(--messenger-radius-control, 8px);
+  border-radius: var(--messenger-radius-media, 10px);
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   display: flex;
@@ -2007,8 +2019,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   gap: 8px;
   padding: 12px 16px;
   background: rgba(220, 38, 38, 0.08);
-  border-radius: var(--messenger-radius-control, 8px);
+  border-radius: var(--messenger-radius-media, 10px);
   border: 1px solid rgba(220, 38, 38, 0.24);
+  min-height: 72px;
 }
 .location-label {
   font-size: 14px;
@@ -2023,7 +2036,11 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   gap: 12px;
   padding: 8px 12px;
   cursor: pointer;
-  min-width: 200px;
+  width: min(var(--messenger-message-media-width, 320px), calc(100vw - 88px));
+  min-width: min(220px, calc(100vw - 88px));
+  max-width: 100%;
+  border-radius: var(--messenger-radius-media, 10px);
+  background: var(--messenger-message-control-bg, rgba(255, 255, 255, 0.46));
 }
 .msg-document.is-busy {
   cursor: default;
@@ -2174,6 +2191,13 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   display: flex; align-items: center; justify-content: center;
 }
 .progress-container { position: relative; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
+.media-upload-progress {
+  width: var(--messenger-touch-target, 44px);
+  height: var(--messenger-touch-target, 44px);
+  padding: 8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0, 0, 0, 0.6)) 84%, transparent);
+}
 .progress-ring { position: absolute; width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring-bg { fill: none; stroke: color-mix(in srgb, var(--messenger-overlay-text, #ffffff) 20%, transparent); stroke-width: 3; }
 .ring-fg { fill: none; stroke: var(--messenger-overlay-text, #ffffff); stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray 0.3s ease; }
@@ -2183,6 +2207,15 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s;
 }
 .download-btn:hover { background: rgba(0,0,0,0.7); }
+.progress-cancel-icon {
+  color: var(--messenger-overlay-text, #ffffff);
+  font-size: 18px;
+  line-height: 1;
+  z-index: 2;
+}
+.cancelable-overlay.is-clickable {
+  cursor: pointer;
+}
 .media-type-badge { position: absolute; bottom: 8px; left: 8px; background: var(--messenger-overlay-strong, rgba(0,0,0,0.6)); color: var(--messenger-overlay-text, #ffffff); font-size: 10px; padding: 2px 6px; border-radius: var(--messenger-radius-control, 8px); display: flex; align-items: center; gap: 4px; }
 
 /* Highlight */
@@ -2247,6 +2280,10 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   justify-content: center;
 }
 .voice-cancel-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   background: rgba(0,0,0,0.5);
   border-radius: 50%;
   width: 16px;
@@ -2255,6 +2292,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  color: var(--messenger-overlay-text, #ffffff);
+  font-size: 12px;
+  line-height: 1;
 }
 .sending-status-wrapper {
   display: inline-flex;
@@ -2343,9 +2383,9 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
     linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.04));
   border: 1px solid rgba(255,255,255,0.28);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
-  border-radius: 14px;
+  border-radius: var(--messenger-radius-media, 10px);
   padding: 8px 10px;
-  width: min(236px, calc(100vw - 116px));
+  width: min(var(--messenger-message-compact-width, 252px), calc(100vw - 116px));
   direction: ltr; /* Force LTR for audio player */
 }
 .msg-voice.is-sent {
@@ -2355,8 +2395,8 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   --voice-track-top: rgba(255, 255, 255, 0.62);
 }
 .voice-play-btn {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   border: none;
   background: linear-gradient(180deg, var(--voice-accent-top), var(--voice-accent));
@@ -2464,8 +2504,29 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
 
 .voice-time {
   font-size: 0.75rem;
-  color: #666;
+  color: var(--messenger-text-muted, #64748b);
   line-height: 1;
+}
+
+.msg-voice-uploading {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.voice-upload-status {
+  position: absolute;
+  inset-block-end: calc(100% + 6px);
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--messenger-overlay-strong, rgba(0, 0, 0, 0.6)) 92%, transparent);
+  color: var(--messenger-overlay-text, #ffffff);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  white-space: nowrap;
+  line-height: 1.2;
 }
 
 @keyframes voice-bar-pulse {
