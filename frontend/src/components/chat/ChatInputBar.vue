@@ -1332,7 +1332,7 @@ const sendMessage = () => {
   flex-direction: column;
   align-items: stretch;
   padding: 8px 12px 12px 12px;
-  background: #ffffff;
+  background: var(--messenger-surface-panel, #ffffff);
   gap: 0;
   border-top: none;
   box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.05);
@@ -1420,14 +1420,14 @@ const sendMessage = () => {
   flex: 1;
   display: flex;
   align-items: flex-end;
-  background: #ffffff;
+  background: var(--messenger-bubble-received, #ffffff);
   border: none;
   border-radius: 20px;
   padding: 8px 4px;
-  min-height: 44px;
+  min-height: var(--messenger-touch-target, 44px);
   transition: background var(--messenger-motion-standard, 180ms);
 }
-.input-container:focus-within { background: #ffffff; }
+.input-container:focus-within { background: var(--messenger-bubble-received, #ffffff); }
 .input-container textarea {
   flex: 1; padding: 4px 8px; border: none; background: transparent; outline: none;
   font-size: 16px; color: #000000; resize: none; overflow-y: auto;
@@ -1446,11 +1446,16 @@ const sendMessage = () => {
 .disabled-banner {
   justify-content: center;
   align-items: center;
-  background: #f9fafb;
+  min-height: var(--messenger-touch-target, 44px);
+  border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
+  background: var(--messenger-surface-muted, #f8fafc);
+  border-radius: var(--messenger-radius-bubble, 12px);
 }
 .disabled-text {
-  color: #8E8E93;
+  color: var(--messenger-text-muted, #64748b);
   font-size: 14px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .emoji-btn, .attach-btn, .voice-btn, .cancel-voice-btn {
