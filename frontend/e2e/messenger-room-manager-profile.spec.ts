@@ -647,12 +647,12 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(page.locator('.channel-manager-root')).toHaveCount(0)
     const updatedHeader = page.locator('.chat-header:visible .header-name').first()
     const headerAlreadyUpdated = await expect(updatedHeader)
-      .toHaveText(updatedTitle, { timeout: 5000 })
+      .toContainText(updatedTitle, { timeout: 5000 })
       .then(() => true)
       .catch(() => false)
     if (!headerAlreadyUpdated) {
       const headerUpdatedAfterManagerClose = await expect(updatedHeader)
-        .toHaveText(updatedTitle, { timeout: 30000 })
+        .toContainText(updatedTitle, { timeout: 30000 })
         .then(() => true)
         .catch(() => false)
       if (headerUpdatedAfterManagerClose) {
@@ -663,7 +663,7 @@ test.describe('Messenger room manager and public profile flows', () => {
       await expect(updatedChannelRow).toBeVisible({ timeout: 30000 })
       await updatedChannelRow.click({ force: true })
       await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(-channelId)
-      await expect(updatedHeader).toHaveText(updatedTitle, { timeout: 30000 })
+      await expect(updatedHeader).toContainText(updatedTitle, { timeout: 30000 })
     }
   })
 

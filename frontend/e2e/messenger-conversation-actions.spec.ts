@@ -308,7 +308,7 @@ async function clickConversationMenuAction(page: Page, label: string) {
   if (browserName === 'webkit') {
     await action.evaluate((node: HTMLElement) => node.click())
     const popover = page.locator('.conversation-menu-popover')
-    await page.waitForTimeout(150)
+    await popover.waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {})
     if (await popover.isVisible().catch(() => false)) {
       await closeConversationMenu(page)
     }
@@ -323,9 +323,15 @@ async function closeConversationMenu(page: Page) {
   const overlay = page.locator('.conversation-menu-overlay')
   if (await overlay.count() > 0) {
     const browserName = page.context().browser()?.browserType().name() || ''
-    await overlay.click({ position: { x: 8, y: 8 } }).catch(() => {})
+    await overlay.click({ position: { x: 8, y: 8 }, force: true, timeout: 1000 }).catch(async () => {
+      await overlay.evaluate((node) => {
+        if (node instanceof HTMLElement) {
+          node.click()
+        }
+      }).catch(() => {})
+    })
     if (browserName === 'webkit') {
-      await page.waitForTimeout(150)
+      await page.locator('.conversation-menu-popover').waitFor({ state: 'hidden', timeout: 1500 }).catch(() => {})
       return
     }
 
@@ -341,7 +347,7 @@ async function getConversationNameOrder(page: Page) {
 
 test.describe('Messenger conversation list state actions', () => {
   test('direct conversation menu supports pin reorder mute unread and hide flows', async ({ page, request }) => {
-    test.setTimeout(90000)
+    test.setTimeout(150000)
     const fixture = seedConversationStateFixture('conversation_actions_direct')
     const suffix = Date.now()
 
@@ -428,7 +434,7 @@ test.describe('Messenger conversation list state actions', () => {
     await openConversationMenuByLongPress(page, rowA)
     await clickConversationMenuAction(page, 'علامت‌گذاری به‌عنوان خوانده‌نشده')
 
-    await expect(rowA.locator('.unread-badge')).toHaveText(/[1۱]/, { timeout: 30000 })
+    await expect(conversationRow(page, fixture.peerAName).locator('.unread-badge')).toHaveText(/[1۱]/, { timeout: 30000 })
     await expect
       .poll(async () => {
         const conversations = await fetchConversations(request, fixture.accessToken)

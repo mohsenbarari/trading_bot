@@ -301,7 +301,7 @@ test.describe('Direct chat regressions', () => {
 
     await sendActiveComposerMessage(page, deleteContent)
 
-    const deleteBubble = page.locator('.message-bubble.sent').filter({ hasText: deleteContent })
+    const deleteBubble = page.locator('.message-bubble.sent:not(.sending)').filter({ hasText: deleteContent }).first()
     await expect(deleteBubble).toBeVisible()
 
     let deleteMessageId: number | null = null
