@@ -1153,7 +1153,7 @@ async function hasDeliveredRoomMessageTypes(
 }
 
 test.describe('Channel media regressions', () => {
-  test('channel admin can open attachments without voice/location and send image+video album', async ({
+  test('channel admin can open attachments without voice and can send image+video album', async ({
     page,
     request,
   }) => {
@@ -1174,7 +1174,7 @@ test.describe('Channel media regressions', () => {
     await activeAttachButton(page).click()
     await expect(page.getByRole('button', { name: 'گالری' }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'فایل' }).first()).toBeVisible()
-    await expect(page.getByRole('button', { name: 'موقعیت' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'موقعیت' }).first()).toBeVisible()
 
     await injectGalleryImageAndVideo(page)
 

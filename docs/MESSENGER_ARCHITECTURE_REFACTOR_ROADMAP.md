@@ -648,6 +648,17 @@ Revert UI-only stage while keeping architecture stages.
 
 ## Stage H - Full Release Gate And Legacy Retirement Decision
 
+Status: In Progress
+
+### 2026-06-05 Gate Slice
+
+- Started Stage H after Stage G closure.
+- Updated the channel media Playwright contract to match the accepted product behavior that writable channels expose the location attachment action while voice remains hidden.
+- Validation passed:
+  - focused unit gate for stores/services/renderers/composables: `28` files, `381` tests passed.
+  - focused Chromium regression for the updated writable-channel attachment contract: `1` passed.
+  - Stage H Chromium messenger subset: `81` passed, `4` skipped, `0` failed; log `tmp/e2e-logs/stage-h-chromium-20260605T070222Z.log`.
+
 ### Goal
 
 Prove that the new architecture is faster, safer, and more pleasant before removing legacy fallback.
@@ -716,4 +727,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage E. The media dimension contract, flagged virtual timeline prototype, browser jump gates, and older-message prepend anchoring are in place and passing. The next slice is the Stage E benchmark subset before deciding whether the virtual timeline flag is safe for broader rollout.
+Continue Stage H with the full browser matrix, then run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review.
