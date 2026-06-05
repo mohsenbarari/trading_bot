@@ -705,6 +705,10 @@ Status: In Progress
   - Both remaining failures were WebKit-only harness stability issues, not confirmed product regressions: the conversation-actions snapshot already showed the expected unread badge but the long WebKit flow reached the whole-test timeout, and the notification failure was Playwright/WebKit's internal navigation error on `page.goto`.
   - Hardened only the affected harness paths: the direct conversation-actions flow now gets a WebKit-specific timeout budget, and group/channel room-activity notification tests use the existing `gotoWithWebKitRetry()` navigation helper instead of raw `page.goto`.
   - Full-matrix reruns are intentionally deferred until the two focused WebKit regressions pass, to avoid another long fix/rerun loop.
+- Started the final full Stage H matrix at `tmp/e2e-logs/stage-h-matrix-20260605T152111Z.log` and stopped it early after a Chromium `channel-media.spec.ts` failure in the group activity + resumable album test.
+  - The failed assertion was a realtime harness race: the API activity signal returned `204`, but the receiver header remained at the static room kind because the one-shot event could be published before the open chat page's realtime listener was ready under matrix pressure.
+  - Added a bounded retry helper for explicit room activity signals in `channel-media.spec.ts`, so the test re-publishes the harmless active activity signal if the header has not observed it yet.
+  - Focused Chromium validation passed for `group activity shows sender names and resumable album upload finishes after sender leaves messenger for market` (`1` passed in `36.1s`).
 
 ### Goal
 
@@ -774,4 +778,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage H with the two focused WebKit regressions from `stage-h-matrix-20260605T133701Z.log`. If those pass, run one final full browser matrix with detailed logging. If the final matrix is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new failures appear, classify them with targeted tests and database/log evidence before scheduling another full matrix run.
+Continue Stage H with one final full browser matrix using detailed logging. If the final matrix is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new failures appear, classify them with targeted tests and database/log evidence before scheduling another full matrix run.
