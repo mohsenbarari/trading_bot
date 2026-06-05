@@ -293,7 +293,7 @@ test.describe('Customer chat privacy regressions', () => {
     await expect(activeHeaderName(page)).toContainText(fixture.owner.fullName, { timeout: 30000 })
     await waitForStableChatTransition(page)
     await sendComposerMessage(page, message)
-    await expect(page.locator('.message-bubble.sent').filter({ hasText: message })).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.message-bubble.sent:not(.sending)').filter({ hasText: message }).first()).toBeVisible({ timeout: 30000 })
 
     await expect
       .poll(async () => {

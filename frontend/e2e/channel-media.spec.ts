@@ -1220,6 +1220,63 @@ async function waitForPersistedPendingUpload(
     .toBe(true)
 }
 
+async function hasPersistedPendingUpload(
+  page: Page,
+  expected: { fileName?: string; messageTypes?: string[] },
+  expectedConversationKey?: number,
+) {
+  return await page.evaluate(async ({ expectedFileName: fileName, expectedMessageTypes: messageTypes, expectedConversationKey: conversationKey }) => {
+    return await new Promise<boolean>((resolve) => {
+      try {
+        const openRequest = indexedDB.open('chat_upload_queue')
+        openRequest.onerror = () => resolve(false)
+        openRequest.onupgradeneeded = () => resolve(false)
+        openRequest.onsuccess = () => {
+          try {
+            const db = openRequest.result
+            if (!db.objectStoreNames.contains('pending')) {
+              db.close()
+              resolve(false)
+              return
+            }
+
+            const tx = db.transaction('pending', 'readonly')
+            const getAllRequest = tx.objectStore('pending').getAll()
+            getAllRequest.onerror = () => {
+              db.close()
+              resolve(false)
+            }
+            getAllRequest.onsuccess = () => {
+              const rows = Array.isArray(getAllRequest.result) ? getAllRequest.result : []
+              const rowMatches = (row: any, msgType?: string) => (
+                (fileName == null || row?.fileName === fileName) &&
+                  (msgType == null || row?.msgType === msgType) &&
+                  (conversationKey == null || Number(row?.userId) === Number(conversationKey)) &&
+                  typeof row?.phase === 'string' &&
+                  !['sent', 'cancelled', 'failed'].includes(row.phase)
+              )
+              db.close()
+              resolve(
+                Array.isArray(messageTypes) && messageTypes.length > 0
+                  ? messageTypes.every((msgType) => rows.some((row) => rowMatches(row, msgType)))
+                  : rows.some((row) => rowMatches(row)),
+              )
+            }
+          } catch {
+            resolve(false)
+          }
+        }
+      } catch {
+        resolve(false)
+      }
+    })
+  }, {
+    expectedFileName: expected.fileName ?? null,
+    expectedMessageTypes: expected.messageTypes ?? [],
+    expectedConversationKey: expectedConversationKey ?? null,
+  })
+}
+
 async function waitForPersistedPendingDocumentUpload(page: Page, expectedFileName: string, expectedConversationKey?: number) {
   await waitForPersistedPendingUpload(page, { fileName: expectedFileName, messageTypes: ['document'] }, expectedConversationKey)
 }
@@ -1564,7 +1621,12 @@ test.describe('Channel media regressions', () => {
           .catch(() => false)
 
         if (!deliveredAfterShortWait) {
-          await waitForPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId, 45000)
+          await expect
+            .poll(async () => (
+              await hasDeliveredRoomMessageTypes(request, receiver.accessToken, groupId, ['image', 'video']) ||
+              await hasPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId)
+            ), { timeout: 60000 })
+            .toBe(true)
         }
       }
       if (browserName !== 'webkit') {

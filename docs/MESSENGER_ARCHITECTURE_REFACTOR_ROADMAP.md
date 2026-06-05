@@ -713,6 +713,11 @@ Status: In Progress
   - The sole failure was again WebKit-only `messenger-conversation-actions.spec.ts`, caused by one oversized direct-conversation menu scenario reaching the whole-test timeout after the UI state had already reached the expected result.
   - Split the oversized direct menu scenario into three focused tests for pin/reorder, mute/unmute, and unread/hide. This keeps the same feature coverage while giving WebKit shorter independent budgets and clearer failure ownership.
   - Focused validation passed for the three split direct-conversation menu tests on Chromium/WebKit (`6` passed in `1.4m`).
+- Reviewed the final full Stage H matrix result in `tmp/e2e-logs/stage-h-final-matrix-20260605T172420Z.log`: `343` passed, `12` skipped, `2` failed.
+  - `channel-media.spec.ts` failed on Firefox in the group activity + resumable album test because the harness required an IndexedDB pending-upload row even when the album could advance to delivered/committed state before that transient row was observed under matrix pressure.
+  - `customer-chat-privacy.spec.ts` failed on WebKit because the sent-message locator matched both the optimistic `.sending` bubble and the persisted bubble, causing a strict locator violation despite the message being visible.
+  - Hardened both harness paths: the album check now accepts either delivered room media or a matching pending upload row, and the customer direct-chat assertion targets the persisted non-`.sending` bubble.
+  - Focused validation passed for the two failed surfaces across Chromium/Firefox/WebKit (`6` passed in `1.9m`).
 
 ### Goal
 
