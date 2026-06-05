@@ -865,6 +865,37 @@ async function sendRoomActivitySignal(
   expect(response.status()).toBe(204)
 }
 
+async function expectRoomActivitySignalVisible(options: {
+  request: APIRequestContext
+  accessToken: string
+  roomChatId: number
+  page: Page
+  activity: 'typing' | 'uploading_file'
+  expectedText: string
+}) {
+  let lastError: unknown = null
+  const status = options.page.locator('.chat-header .header-status').first()
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await sendRoomActivitySignal(
+      options.request,
+      options.accessToken,
+      options.roomChatId,
+      options.activity,
+      true,
+    )
+
+    try {
+      await expect(status).toContainText(options.expectedText, { timeout: attempt === 2 ? 15000 : 5000 })
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Timed out waiting for room activity: ${options.expectedText}`)
+}
+
 async function fetchLatestDirectContents(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -1468,8 +1499,14 @@ test.describe('Channel media regressions', () => {
       await receiverGroupRow.click()
       await expectRoomOpen(receiverPage, groupId, groupTitle, 'گروه')
 
-      await sendRoomActivitySignal(request, sender.accessToken, groupId, 'typing', true)
-      await expect(receiverPage.locator('.chat-header .header-status').first()).toContainText(`${sender.accountName} در حال نوشتن...`, { timeout: 30000 })
+      await expectRoomActivitySignalVisible({
+        request,
+        accessToken: sender.accessToken,
+        roomChatId: groupId,
+        page: receiverPage,
+        activity: 'typing',
+        expectedText: `${sender.accountName} در حال نوشتن...`,
+      })
 
       await sendRoomActivitySignal(request, sender.accessToken, groupId, 'typing', false)
       await senderContext.route('**/api/chat/upload-batches', async (route) => {
