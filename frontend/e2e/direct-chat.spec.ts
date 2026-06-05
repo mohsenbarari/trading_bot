@@ -148,8 +148,7 @@ async function ensureComposerValue(composer: ReturnType<typeof activeComposerTex
 }
 
 async function sendActiveComposerMessage(page: Page, content: string) {
-  const container = page.locator('.chat-view .input-area .input-container:visible').last()
-  const composer = container.locator('textarea[placeholder="پیام..."]').first()
+  const composer = activeComposerTextbox(page)
   await expect(composer).toBeVisible({ timeout: 30000 })
   await composer.click()
   await composer.fill('')
@@ -157,9 +156,16 @@ async function sendActiveComposerMessage(page: Page, content: string) {
   await ensureComposerValue(composer, content)
   await expect(composer).toHaveValue(content, { timeout: 30000 })
 
-  const sendButton = container.locator('.send-btn-inline')
-  await expect(sendButton).toBeVisible({ timeout: 30000 })
-  await sendButton.click()
+  await expect
+    .poll(async () => {
+      const sendButton = page.locator('.chat-view .input-area .input-container:visible').last().locator('.send-btn-inline').first()
+      if (!await sendButton.isVisible().catch(() => false)) {
+        return false
+      }
+      await sendButton.click({ timeout: 5000 }).catch(() => {})
+      return (await composer.inputValue().catch(() => '')) !== content
+    }, { timeout: 30000 })
+    .toBe(true)
 }
 
 async function openDirectChat(page: Page, otherUserId: number) {
@@ -213,6 +219,7 @@ async function fetchDirectMessages(
 
 test.describe('Direct chat regressions', () => {
   test('direct chat composer sends and edits an own text message', async ({ page, request }) => {
+    test.setTimeout(60000)
     const actor = seedPrimarySession('direct_actor_edit')
     const peer = seedPrimarySession('direct_peer_edit')
     const bootstrapContent = `PW DIRECT BOOTSTRAP ${Date.now()}`

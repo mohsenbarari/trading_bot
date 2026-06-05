@@ -686,6 +686,22 @@ Status: In Progress
   - focused mini-batch for the three failed Stage H surfaces on Chromium, Firefox, and WebKit: `9` passed in `2.1m`.
   - focused `AttachmentMenu.vue` Vitest suite: `38` passed.
 
+### 2026-06-05 Channel Share-Receive Matrix Wave Hardening Slice
+
+- Reviewed the next full Stage H browser matrix result in `tmp/e2e-logs/stage-h-matrix-20260605T111942Z.log`: `322` passed, `12` skipped, `17` failed.
+- Classified the failures before another full-matrix rerun:
+  - `1` Chromium direct-chat failure was a composer send-button detach/re-render race during click.
+  - `16` WebKit `channel-media` failures were concentrated in one family: share-receive target visibility/submit timing plus one group-album delivery detection helper.
+- Hardened the affected test seams:
+  - direct composer send now reacquires the active send button and retries the click against the live composer instead of holding a stale input-container reference.
+  - `channel-media` gets a matrix-safe timeout for share-receive target rows and the last single-target share tests now use the existing `forwardToTargets()` helper instead of duplicating target-click logic.
+  - group-album delivery detection is now case-insensitive for message types and no longer treats WebKit route interception as authoritative when backend delivery has already happened.
+  - `channel-media` has a file-level timeout suitable for heavy media/share flows so WebKit target loading does not collide with the global 30s default.
+- Validation passed without rerunning the full matrix:
+  - focused direct-chat Chromium regression: `1` passed.
+  - representative channel-media Chromium/WebKit batch covering group album, group+channel share, channel+direct share, and voice share: `8` passed.
+  - broad channel-media Chromium/WebKit subset covering group activity plus all `share receive can fan out` and shared-voice cases: `56` passed in `15.6m`.
+
 ### Goal
 
 Prove that the new architecture is faster, safer, and more pleasant before removing legacy fallback.
