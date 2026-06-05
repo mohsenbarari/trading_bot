@@ -7,6 +7,14 @@ import { apiFetch, apiFetchJson } from '../utils/auth'
 import { discardBackState, popBackState, pushBackState } from '../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
 import {
+  getChannelCandidatesCacheKey,
+  getChannelListCacheKey,
+  getChannelMembersCacheKey,
+  invalidateChatManagerCache,
+  readChatManagerCache,
+  writeChatManagerCache,
+} from '../services/chat/chatManagerCache'
+import {
   Check,
   ChevronLeft,
   ChevronRight,
@@ -97,7 +105,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'refresh-conversations'): void
+  (e: 'refresh-conversations', channel?: ChannelRoom | null): void
   (e: 'open-channel', payload: { chatId: number; title: string }): void
   (e: 'left', chatId: number): void
   (e: 'close'): void
@@ -512,10 +520,18 @@ async function openChannelById(channelId: number) {
 }
 
 async function loadExistingChannels() {
+  const cacheKey = getChannelListCacheKey()
+  const cached = readChatManagerCache<ChannelRoom[]>(cacheKey)
+  if (cached) {
+    existingChannels.value = cached
+    return
+  }
+
   isLoadingChannels.value = true
   try {
     const data = await apiFetchJson('/api/chat/channels') as ChannelRoom[]
     existingChannels.value = Array.isArray(data) ? data : []
+    writeChatManagerCache(cacheKey, existingChannels.value)
   } catch (error) {
     setError(error, 'خطا در دریافت فهرست کانال‌ها')
   } finally {
@@ -525,10 +541,18 @@ async function loadExistingChannels() {
 
 async function loadMembers() {
   if (!activeChannel.value) return
+  const cacheKey = getChannelMembersCacheKey(activeChannel.value.id)
+  const cached = readChatManagerCache<ChannelMember[]>(cacheKey)
+  if (cached) {
+    members.value = cached
+    return
+  }
+
   isLoadingMembers.value = true
   try {
     const data = await apiFetchJson(`/api/chat/channels/${activeChannel.value.id}/members`) as ChannelMember[]
     members.value = Array.isArray(data) ? data : []
+    writeChatManagerCache(cacheKey, members.value)
   } catch (error) {
     setError(error, 'خطا در دریافت اعضای کانال')
   } finally {
@@ -542,6 +566,14 @@ async function loadCandidates(query = '') {
     activeTotal.value = 0
     return
   }
+  const cacheKey = getChannelCandidatesCacheKey(activeChannel.value.id, query)
+  const cached = readChatManagerCache<ChannelInviteCandidateResponse>(cacheKey)
+  if (cached) {
+    candidates.value = Array.isArray(cached.items) ? cached.items : []
+    activeTotal.value = Number(cached.active_total || 0)
+    return
+  }
+
   isLoadingCandidates.value = true
   try {
     const params = new URLSearchParams({
@@ -553,6 +585,11 @@ async function loadCandidates(query = '') {
     const data = await apiFetchJson(`/api/chat/channels/invite-candidates?${params.toString()}`) as ChannelInviteCandidateResponse
     candidates.value = Array.isArray(data.items) ? data.items : []
     activeTotal.value = Number(data.active_total || 0)
+    writeChatManagerCache(cacheKey, {
+      ...data,
+      items: candidates.value,
+      active_total: activeTotal.value,
+    })
   } catch (error) {
     setError(error, 'خطا در دریافت کاربران فعال')
   } finally {
@@ -578,9 +615,10 @@ async function createChannel() {
       throw new Error((data as { detail?: string }).detail || 'خطا در ساخت کانال')
     }
     activeChannel.value = (data as ChannelCreateResponse).channel
+    invalidateChatManagerCache(getChannelListCacheKey())
     upsertExistingChannel(activeChannel.value)
     syncEditorWithActiveChannel(activeChannel.value)
-    emit('refresh-conversations')
+    emit('refresh-conversations', activeChannel.value)
     successMessage.value = 'کانال ساخته شد. حالا اعضا و ادمین‌ها را مدیریت کنید.'
     pageHistory.value = isMembershipManagementLocked.value ? ['home'] : ['home', 'overview']
     applyPage(isMembershipManagementLocked.value ? 'overview' : 'add-members')
@@ -611,9 +649,10 @@ async function updateChannelDetails() {
       throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره تنظیمات کانال')
     }
     activeChannel.value = data as ChannelRoom
+    invalidateChatManagerCache(getChannelListCacheKey())
     avatarFileId.value = activeChannel.value.avatar_file_id || null
     upsertExistingChannel(activeChannel.value)
-    emit('refresh-conversations')
+    emit('refresh-conversations', activeChannel.value)
     successMessage.value = 'تنظیمات کانال ذخیره شد.'
     setPageDirect('overview')
   } catch (error) {
@@ -640,9 +679,10 @@ async function persistActiveChannelAvatar(nextAvatarFileId: string | null) {
   }
 
   activeChannel.value = data as ChannelRoom
+  invalidateChatManagerCache(getChannelListCacheKey())
   avatarFileId.value = activeChannel.value.avatar_file_id || null
   upsertExistingChannel(activeChannel.value)
-  emit('refresh-conversations')
+  emit('refresh-conversations', activeChannel.value)
   successMessage.value = nextAvatarFileId ? 'عکس کانال ذخیره شد.' : 'عکس کانال حذف شد.'
 }
 
@@ -663,9 +703,12 @@ async function submitMembers() {
       throw new Error((data as { detail?: string }).detail || 'خطا در افزودن اعضا')
     }
     const summary = data as ChannelBulkMemberAddResponse
+    invalidateChatManagerCache(getChannelMembersCacheKey(activeChannel.value.id))
+    invalidateChatManagerCache(getChannelCandidatesCacheKey(activeChannel.value.id, ''))
+    invalidateChatManagerCache(`channel:${activeChannel.value.id}:candidates:`)
     activeChannel.value = { ...activeChannel.value, member_count: summary.member_count }
     upsertExistingChannel(activeChannel.value)
-    emit('refresh-conversations')
+    emit('refresh-conversations', activeChannel.value)
     successMessage.value = 'اعضای انتخاب‌شده به کانال اضافه شدند.'
     resetSelection()
     await Promise.all([loadMembers(), loadCandidates()])
@@ -691,9 +734,11 @@ async function mutateMember(member: ChannelMember, payload: { role?: 'admin' | '
       throw new Error((data as { detail?: string }).detail || 'خطا در تغییر عضو کانال')
     }
     const summary = data as ChannelMemberMutationResponse
+    invalidateChatManagerCache(getChannelMembersCacheKey(activeChannel.value.id))
+    invalidateChatManagerCache(`channel:${activeChannel.value.id}:candidates:`)
     activeChannel.value = { ...activeChannel.value, member_count: summary.member_count }
     upsertExistingChannel(activeChannel.value)
-    emit('refresh-conversations')
+    emit('refresh-conversations', activeChannel.value)
     successMessage.value = successText
     await Promise.all([loadMembers(), loadCandidates(candidateQuery.value)])
   } catch (error) {
@@ -715,7 +760,9 @@ async function unfollowCurrentChannel() {
     if (!response.ok) {
       throw new Error((data as { detail?: string }).detail || 'خطا در ترک کانال')
     }
-    emit('refresh-conversations')
+    invalidateChatManagerCache(getChannelListCacheKey())
+    invalidateChatManagerCache(getChannelMembersCacheKey(activeChannelId))
+    invalidateChatManagerCache(`channel:${activeChannelId}:candidates:`)
     emit('left', activeChannelId)
     if (props.showCloseButton) {
       return

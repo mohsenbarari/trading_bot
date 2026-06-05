@@ -15,6 +15,7 @@ import {
 import { unlockAudioContext } from '../utils/audio'
 import { resolveRoomConversationKey } from '../utils/chatRoomRouting'
 import { currentUserSummary } from '../utils/currentUser'
+import { useConversationsStore } from '../stores/chat/conversations'
 
 type WebSocketEventHandler<T = any> = (data: T) => void
 
@@ -56,6 +57,10 @@ function buildChatNotificationBody(payload: ChatRealtimeNotificationPayload): st
     return payload.content || 'فایل جدید'
 }
 
+function buildConversationPreviewContent(payload: ChatRealtimeNotificationPayload): string {
+    return buildChatNotificationBody(payload)
+}
+
 function hasRealtimeMention(payload: ChatRealtimeNotificationPayload, currentUserId: number | null | undefined): boolean {
     if (!currentUserId) return false
     if (payload.mention_all === true) return true
@@ -76,6 +81,7 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     const route = useRoute()
     const router = useRouter()
     const notificationStore = useNotificationStore()
+    const conversationsStore = useConversationsStore()
     let hasBootstrappedAuthenticatedRuntime = false
     let skipNextReconnectCountsFetch = false
     let flushScheduled = false
@@ -127,6 +133,25 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
             return
         }
         conversationKeys.forEach((conversationKey) => notificationStore.incrementMentionUnread(conversationKey))
+    }
+
+    const patchConversationFromChatNotification = (
+        payload: ChatRealtimeNotificationPayload,
+        conversationKey: number,
+        options: { unread: boolean }
+    ) => {
+        const currentConversation = conversationsStore.conversations.find((conversation) => conversation.other_user_id === conversationKey)
+        if (!currentConversation) return
+
+        const lastMessageAt = payload.created_at || payload.updated_at || new Date().toISOString()
+        conversationsStore.patchConversation(conversationKey, {
+            last_message_at: lastMessageAt,
+            last_message_type: typeof payload.message_type === 'string' ? payload.message_type : currentConversation.last_message_type,
+            last_message_content: buildConversationPreviewContent(payload),
+            unread_count: options.unread
+                ? Math.max(0, Number(currentConversation.unread_count || 0) + 1)
+                : currentConversation.unread_count,
+        })
     }
 
     const flushPendingNotifications = () => {
@@ -195,6 +220,10 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
                         mentionConversationKeys.push(conversationKey)
                     }
                 }
+
+                patchConversationFromChatNotification(payload, conversationKey, {
+                    unread: shouldTreatAsUnread,
+                })
 
                 if (!shouldTreatAsUnread || (isMutedConversation && !isMentioned)) {
                     continue

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { invalidateChatManagerCache } from '../services/chat/chatManagerCache'
 
 const apiFetchMock = vi.fn()
 const apiFetchJsonMock = vi.fn()
@@ -48,6 +49,7 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400) {
 
 describe('CreateChannelView.vue', () => {
   beforeEach(() => {
+    invalidateChatManagerCache()
     apiFetchMock.mockReset()
     apiFetchJsonMock.mockReset()
     pushBackStateMock.mockReset()
@@ -492,7 +494,7 @@ describe('CreateChannelView.vue', () => {
     await flushPromises()
 
     expect(wrapper.emitted('left')?.[0]).toEqual([7])
-    expect(wrapper.emitted('refresh-conversations')).toHaveLength(4)
+    expect(wrapper.emitted('refresh-conversations')).toHaveLength(3)
     expect(wrapper.text()).toContain('ساخت کانال جدید')
   })
 
@@ -730,7 +732,7 @@ describe('CreateChannelView.vue', () => {
     await vm.unfollowCurrentChannel()
     await flushPromises()
 
-    expect(wrapper.emitted('refresh-conversations')).toHaveLength(1)
+    expect(wrapper.emitted('refresh-conversations')).toBeUndefined()
     expect(wrapper.emitted('left')?.[0]).toEqual([15])
     expect(vm.activeChannel?.id).toBe(15)
 
