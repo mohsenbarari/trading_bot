@@ -1347,8 +1347,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   direction: rtl;
-  background: linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%);
-  border-radius: 28px;
+  background: var(--messenger-manager-shell-bg, linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%));
+  border-radius: var(--messenger-radius-sheet, 28px);
 }
 
 .manager-header {
@@ -1356,16 +1356,16 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
   backdrop-filter: blur(16px);
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .header-icon-btn {
-  width: 40px;
-  height: 40px;
+  width: var(--messenger-touch-target, 44px);
+  height: var(--messenger-touch-target, 44px);
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--messenger-radius-control, 8px);
   background: rgba(226, 232, 240, 0.72);
   color: #334155;
   display: inline-flex;
@@ -1479,8 +1479,8 @@ onBeforeUnmount(() => {
 .editor-textarea {
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92);
+  border-radius: var(--messenger-radius-panel, 18px);
+  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
   color: #0f172a;
   font: inherit;
@@ -1553,7 +1553,7 @@ onBeforeUnmount(() => {
 .secondary-btn,
 .ghost-action {
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--messenger-radius-panel, 18px);
   font: inherit;
   font-weight: 800;
   cursor: pointer;
@@ -1604,7 +1604,7 @@ onBeforeUnmount(() => {
 .hero-card,
 .editor-card,
 .section-shell {
-  border-radius: 28px;
+  border-radius: var(--messenger-radius-sheet, 28px);
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(148, 163, 184, 0.14);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
@@ -1768,7 +1768,7 @@ onBeforeUnmount(() => {
 .telegram-row {
   width: 100%;
   border: 0;
-  border-radius: 24px;
+  border-radius: var(--messenger-radius-panel, 18px);
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.12);
   padding: 12px 14px;
@@ -1973,6 +1973,12 @@ onBeforeUnmount(() => {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
   }
 }
 

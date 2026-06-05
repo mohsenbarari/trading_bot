@@ -4104,7 +4104,7 @@ defineExpose({
   position: fixed;
   inset: 0;
   z-index: 2200;
-  background: rgba(15, 23, 42, 0.42);
+  background: var(--messenger-overlay-medium, rgba(0, 0, 0, 0.34));
   backdrop-filter: blur(10px);
   display: flex;
   align-items: stretch;
@@ -4116,7 +4116,7 @@ defineExpose({
   width: min(100vw, 560px);
   height: 100vh;
   overflow: hidden;
-  background: linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%);
+  background: var(--messenger-manager-shell-bg, linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%));
 }
 
 @media (min-width: 700px) {
@@ -4127,8 +4127,8 @@ defineExpose({
 
   .channel-manager-sheet {
     height: min(94vh, 920px);
-    border-radius: 34px;
-    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+    border-radius: var(--messenger-radius-sheet, 28px);
+    box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
   }
 }
 
