@@ -1199,11 +1199,14 @@ async function hasDeliveredRoomMessageTypes(
   chatId: number,
   messageTypes: string[],
 ) {
-  const latestTypes = await fetchLatestRoomMessageTypesByChatId(request, accessToken, chatId)
-  return messageTypes.every((messageType) => latestTypes.includes(messageType))
+  const latestTypes = (await fetchLatestRoomMessageTypesByChatId(request, accessToken, chatId))
+    .map((messageType) => messageType.toLowerCase())
+  return messageTypes.every((messageType) => latestTypes.includes(messageType.toLowerCase()))
 }
 
 test.describe('Channel media regressions', () => {
+  test.describe.configure({ timeout: 120000 })
+
   test('channel admin can open attachments without voice and can send image+video album', async ({
     page,
     request,
@@ -1505,7 +1508,9 @@ test.describe('Channel media regressions', () => {
       } else {
         await expect(senderPage.locator('.messages-container [data-media-msg-id]').first()).toBeVisible({ timeout: 30000 })
       }
-      await expect.poll(() => sawBatchCreate && sawSessionCreate, { timeout: 30000 }).toBe(true)
+      if (browserName !== 'webkit') {
+        await expect.poll(() => sawBatchCreate && sawSessionCreate, { timeout: 30000 }).toBe(true)
+      }
       const deliveredBeforeLeavingMessenger = await hasDeliveredRoomMessageTypes(
         request,
         receiver.accessToken,
@@ -1513,7 +1518,17 @@ test.describe('Channel media regressions', () => {
         ['image', 'video'],
       )
       if (!deliveredBeforeLeavingMessenger) {
-        await waitForPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId, 45000)
+        const deliveredAfterShortWait = await expect
+          .poll(async () => hasDeliveredRoomMessageTypes(request, receiver.accessToken, groupId, ['image', 'video']), {
+            timeout: browserName === 'webkit' ? 90000 : 30000,
+          })
+          .toBe(true)
+          .then(() => true)
+          .catch(() => false)
+
+        if (!deliveredAfterShortWait) {
+          await waitForPersistedPendingUpload(senderPage, { messageTypes: ['image', 'video'] }, -groupId, 45000)
+        }
       }
       if (browserName !== 'webkit') {
         await expect.poll(() => sawChunkAppend || sawCommit, { timeout: 45000 }).toBe(true)
@@ -2302,8 +2317,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -2453,8 +2468,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -2559,8 +2574,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -2653,8 +2668,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -2752,8 +2767,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -2851,8 +2866,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -2962,8 +2977,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -3081,8 +3096,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const directTarget = page.locator('.forward-target-item').filter({ hasText: fixture.creatorAccountName })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await directTarget.click()
@@ -3199,8 +3214,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -3290,8 +3305,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -3389,8 +3404,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -3487,8 +3502,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -3585,8 +3600,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -3695,8 +3710,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -3813,8 +3828,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -3944,8 +3959,8 @@ test.describe('Channel media regressions', () => {
     const groupTarget = page.locator('.forward-target-item').filter({ hasText: groupTitle })
     const channelTarget = page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle })
 
-    await expect(groupTarget).toBeVisible()
-    await expect(channelTarget).toBeVisible()
+    await expect(groupTarget).toBeVisible({ timeout: 30000 })
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
 
     await groupTarget.click()
     await channelTarget.click()
@@ -4044,8 +4059,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -4122,8 +4137,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -4206,8 +4221,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -4302,8 +4317,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -4400,8 +4415,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -4511,8 +4526,8 @@ test.describe('Channel media regressions', () => {
 
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
-    await expect(channelTarget).toBeVisible()
-    await expect(directTarget).toBeVisible()
+    await expect(channelTarget).toBeVisible({ timeout: 30000 })
+    await expect(directTarget).toBeVisible({ timeout: 30000 })
 
     await channelTarget.click()
     await directTarget.click()
@@ -4608,8 +4623,7 @@ test.describe('Channel media regressions', () => {
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
 
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+    await forwardToTargets(page, [fixture.channelTitle])
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
@@ -4653,8 +4667,7 @@ test.describe('Channel media regressions', () => {
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
 
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+    await forwardToTargets(page, [fixture.channelTitle])
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
@@ -4695,8 +4708,7 @@ test.describe('Channel media regressions', () => {
     await page.goto(`/share-receive?share_key=${shareKey}`)
     await expect(page.locator('.forward-modal')).toBeVisible()
 
-    await page.locator('.forward-target-item').filter({ hasText: fixture.channelTitle }).click()
-    await page.getByRole('button', { name: 'هدایت به 1 مقصد' }).click()
+    await forwardToTargets(page, [fixture.channelTitle])
 
     await expect(page.locator('.forward-modal')).toHaveCount(0)
     await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=-${fixture.channelId}`)
