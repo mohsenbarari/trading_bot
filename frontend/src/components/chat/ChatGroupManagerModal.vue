@@ -5,6 +5,12 @@ import { apiFetch, apiFetchJson } from '../../utils/auth'
 import { popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../../utils/chatFiles'
 import {
+  getGroupDetailCacheKey,
+  invalidateChatManagerCache,
+  readChatManagerCache,
+  writeChatManagerCache,
+} from '../../services/chat/chatManagerCache'
+import {
   Check,
   ChevronLeft,
   ChevronRight,
@@ -432,9 +438,21 @@ async function loadUsers(query = '') {
 
 async function loadGroupDetail() {
   if (!props.groupId) return
+  const cacheKey = getGroupDetailCacheKey(props.groupId)
+  const cached = readChatManagerCache<GroupDetail>(cacheKey)
+  if (cached) {
+    group.value = cached.group
+    members.value = Array.isArray(cached.members) ? cached.members : []
+    title.value = cached.group.title || ''
+    description.value = cached.group.description || ''
+    avatarFileId.value = cached.group.avatar_file_id || null
+    return
+  }
+
   isLoadingDetail.value = true
   try {
     const data = await apiFetchJson(`/api/chat/groups/${props.groupId}`) as GroupDetail
+    writeChatManagerCache(cacheKey, data)
     group.value = data.group
     members.value = Array.isArray(data.members) ? data.members : []
     title.value = data.group.title || ''
@@ -490,6 +508,7 @@ async function updateGroupSettings() {
     if (!response.ok) {
       throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره اطلاعات گروه')
     }
+    invalidateChatManagerCache(getGroupDetailCacheKey(props.groupId))
     group.value = data as GroupRoom
     avatarFileId.value = group.value.avatar_file_id || null
     successMessage.value = 'اطلاعات گروه ذخیره شد.'
@@ -518,6 +537,7 @@ async function persistExistingGroupAvatar(nextAvatarFileId: string | null) {
     throw new Error((data as { detail?: string }).detail || 'خطا در ذخیره آواتار گروه')
   }
 
+  invalidateChatManagerCache(getGroupDetailCacheKey(props.groupId))
   group.value = data as GroupRoom
   avatarFileId.value = group.value.avatar_file_id || null
   successMessage.value = nextAvatarFileId ? 'عکس گروه ذخیره شد.' : 'عکس گروه حذف شد.'
@@ -541,6 +561,7 @@ async function addSelectedMembers() {
     }
     selectedUserIds.value = new Set()
     successMessage.value = 'اعضای انتخاب‌شده اضافه شدند.'
+    invalidateChatManagerCache(getGroupDetailCacheKey(props.groupId))
     await Promise.all([loadGroupDetail(), loadUsers(directoryQuery.value)])
     if (group.value) emit('updated', group.value)
     setPageDirect('members')
@@ -562,6 +583,7 @@ async function mutateMember(member: GroupMember, endpoint: string, method: strin
       throw new Error(data.detail || 'خطا در تغییر عضو')
     }
     successMessage.value = successText
+    invalidateChatManagerCache(getGroupDetailCacheKey(props.groupId))
     await Promise.all([loadGroupDetail(), loadUsers(directoryQuery.value)])
     if (group.value) emit('updated', group.value)
   } catch (error) {
@@ -593,6 +615,7 @@ async function leaveGroup() {
     if (!response.ok) {
       throw new Error(data.detail || 'خطا در خروج از گروه')
     }
+    invalidateChatManagerCache(getGroupDetailCacheKey(props.groupId))
     emit('left', props.groupId)
   } catch (error) {
     setError(error, 'خطا در خروج از گروه')

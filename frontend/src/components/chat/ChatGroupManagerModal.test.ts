@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { invalidateChatManagerCache } from '../../services/chat/chatManagerCache'
 
 const GROUP_CANDIDATE_BASE_URL = '/api/chat/groups/member-candidates?limit=100'
 
@@ -38,6 +39,7 @@ function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400) {
 
 describe('ChatGroupManagerModal.vue', () => {
   beforeEach(() => {
+    invalidateChatManagerCache()
     apiFetchMock.mockReset()
     apiFetchJsonMock.mockReset()
     pushBackStateMock.mockReset()
@@ -910,6 +912,7 @@ describe('ChatGroupManagerModal.vue', () => {
       mutatingUserId: number | null
     }
 
+    invalidateChatManagerCache()
     apiFetchJsonMock.mockRejectedValueOnce('detail unavailable')
     await vm.loadGroupDetail()
     expect(vm.errorMessage).toBe('خطا در دریافت گروه')

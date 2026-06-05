@@ -792,7 +792,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
     expect(hooks.state.showChannelManagerModal.value).toBe(false)
     expect(hooks.state.channelManagerChatId.value).toBeNull()
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     chatViewMocks.pushBackStateMock.mockClear()
     hooks.openAdminBroadcastModal()
@@ -1333,7 +1333,7 @@ describe('ChatView.vue', () => {
       body: JSON.stringify({ muted: true }),
     })
     expect(chatViewMocks.setConversationMutedMock).toHaveBeenCalledWith(55, true)
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
@@ -1370,7 +1370,7 @@ describe('ChatView.vue', () => {
       method: 'POST',
       body: JSON.stringify({ pinned: true }),
     })
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
@@ -1444,7 +1444,7 @@ describe('ChatView.vue', () => {
       method: 'POST',
       body: JSON.stringify({ unread: true }),
     })
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
@@ -1477,7 +1477,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/direct/55', { method: 'DELETE' })
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.find('.conversation-delete-action').exists()).toBe(true)
 
     wrapper.unmount()
@@ -1497,7 +1497,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/groups/88/leave', { method: 'POST' })
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     groupWrapper.unmount()
 
@@ -1514,7 +1514,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/channels/23/unfollow', { method: 'POST' })
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     channelWrapper.unmount()
   })
@@ -2578,7 +2578,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.group-created-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-88)
     expect(chatViewMocks.pushBackStateMock).toHaveBeenCalled()
 
@@ -2619,7 +2619,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.group-updated-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.get('.chat-header-name').text()).toContain('عنوان جدید')
 
     wrapper.unmount()
@@ -2640,7 +2640,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.group-left-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.find('.open-new-conversation').exists()).toBe(true)
 
     wrapper.unmount()
@@ -2682,7 +2682,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.open-channel-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-23)
 
     wrapper.unmount()
@@ -2724,7 +2724,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.open-channel-fallback-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-44)
 
     wrapper.unmount()
@@ -2754,7 +2754,7 @@ describe('ChatView.vue', () => {
         template: '<div><span class="chat-header-name">{{ selectedUserName }}</span><button class="open-room-manager" @click="$emit(\'manage-room\')">manage</button></div>',
       },
       CreateChannelView: {
-        template: '<button class="refresh-channel-action" @click="$emit(\'refresh-conversations\')">refresh</button>',
+        template: '<button class="refresh-channel-action" @click="$emit(\'refresh-conversations\', { id: 23, title: \'کانال به‌روزشده\' })">refresh</button>',
       },
     })
     await flushPromises()
@@ -2782,7 +2782,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.refresh-channel-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.get('.chat-header-name').text()).toContain('کانال به‌روزشده')
 
     wrapper.unmount()
@@ -2883,9 +2883,10 @@ describe('ChatView.vue', () => {
     expect(wrapper.find('.channel-manager-overlay').exists()).toBe(true)
     expect(wrapper.get('.channel-manager-id').text()).toBe('none')
 
+    chatViewMocks.loadConversationsMock.mockClear()
     await wrapper.get('.close-channel-manager').trigger('click')
     await flushPromises()
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.find('.channel-manager-overlay').exists()).toBe(false)
 
     await wrapper.get('.open-room-manager').trigger('click')
@@ -2910,9 +2911,9 @@ describe('ChatView.vue', () => {
     await wrapper.get('.close-channel-manager').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.find('.channel-manager-overlay').exists()).toBe(false)
-    expect(wrapper.get('.chat-header-name').text()).toContain('کانال به‌روزشده')
+    expect(wrapper.get('.chat-header-name').text()).toContain('کانال فعال')
 
     wrapper.unmount()
   })
@@ -2991,7 +2992,7 @@ describe('ChatView.vue', () => {
     await wrapper.get('.channel-left-action').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(wrapper.find('.open-new-conversation').exists()).toBe(true)
 
     wrapper.unmount()
@@ -4316,7 +4317,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.loadMessagesMock.mockClear()
     await hooks.handleChannelManagerOpenChannel({ chatId: 23, title: 'کانال فعال' })
     await flushPromises()
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-23)
     expect(hooks.state.selectedUserId.value).toBe(-23)
 
@@ -4330,7 +4331,7 @@ describe('ChatView.vue', () => {
     hooks.state.showStickerPicker.value = true
     await hooks.handleChannelManagerOpenChannel({ chatId: 77, title: 'کانال تازه' })
     await flushPromises()
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(-77)
     expect(hooks.state.selectedUserId.value).toBe(-77)
     expect(hooks.state.selectedUserName.value).toBe('کانال تازه')
@@ -4726,9 +4727,9 @@ describe('ChatView.vue', () => {
     chatViewMocks.loadConversationsMock.mockClear()
     hooks.state.selectedUserId.value = -23
     hooks.state.selectedUserName.value = 'قدیمی'
-    hooks.handleChannelManagerConversationRefresh()
+    hooks.handleChannelManagerConversationRefresh({ id: 23, title: 'کانال رفرش‌شده' })
     await flushPromises()
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(hooks.state.selectedUserName.value).toBe('کانال رفرش‌شده')
 
     chatViewMocks.loadConversationsMock.mockClear()
@@ -4736,7 +4737,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
     expect(hooks.state.showChannelManagerModal.value).toBe(false)
     expect(hooks.state.channelManagerChatId.value).toBeNull()
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
 
     chatViewMocks.loadConversationsMock.mockClear()
     chatViewMocks.loadMessagesMock.mockClear()
@@ -4779,7 +4780,7 @@ describe('ChatView.vue', () => {
     hooks.state.selectedUserId.value = -99
     hooks.state.selectedUserName.value = 'گروه قدیمی'
     await hooks.handleGroupUpdated({ id: 99, title: 'گروه به‌روز' })
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(hooks.state.selectedUserName.value).toBe('گروه به‌روز')
 
     chatViewMocks.loadConversationsMock.mockClear()
@@ -4793,7 +4794,7 @@ describe('ChatView.vue', () => {
       user_name: 'گروه به‌روز',
     }
     await hooks.handleGroupLeft(99)
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(hooks.state.selectedUserId.value).toBeNull()
     expect(hooks.state.selectedUserName.value).toBe('')
     expect(hooks.state.showAttachmentMenu.value).toBe(false)
@@ -4814,7 +4815,7 @@ describe('ChatView.vue', () => {
       user_name: 'کانال رفرش‌شده',
     }
     await hooks.handleChannelLeft(23)
-    expect(chatViewMocks.loadConversationsMock).toHaveBeenCalled()
+    expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(hooks.state.selectedUserId.value).toBeNull()
     expect(hooks.state.selectedUserName.value).toBe('')
     expect(hooks.state.showAttachmentMenu.value).toBe(false)

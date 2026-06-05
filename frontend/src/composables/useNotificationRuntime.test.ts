@@ -22,6 +22,10 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
     incrementMentionUnreadBatch: undefined as any,
     fetchInitialCounts: vi.fn(),
   },
+  conversationsStore: {
+    conversations: [] as any[],
+    patchConversation: vi.fn(),
+  },
   requestNotificationPermission: vi.fn(),
   showBrowserNotification: vi.fn(),
   unlockAudioContext: vi.fn(),
@@ -56,6 +60,10 @@ vi.mock('vue-router', async () => {
 
 vi.mock('../stores/notifications', () => ({
   useNotificationStore: () => notificationRuntimeMocks.store,
+}))
+
+vi.mock('../stores/chat/conversations', () => ({
+  useConversationsStore: () => notificationRuntimeMocks.conversationsStore,
 }))
 
 vi.mock('../utils/browserNotifications', () => ({
@@ -129,6 +137,8 @@ describe('useNotificationRuntime', () => {
     notificationRuntimeMocks.store.incrementMentionUnread.mockReset()
     notificationRuntimeMocks.store.incrementMentionUnreadBatch = undefined
     notificationRuntimeMocks.store.fetchInitialCounts.mockReset()
+    notificationRuntimeMocks.conversationsStore.conversations = []
+    notificationRuntimeMocks.conversationsStore.patchConversation.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReturnValue({
       title: 'اعلان جدید',
       body: 'متن اعلان',
@@ -422,6 +432,54 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.store.incrementChatUnread).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.store.incrementMentionUnread).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.store.addToast).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('patches conversation previews from chat notifications without requiring list reloads', async () => {
+    notificationRuntimeMocks.conversationsStore.conversations = [{
+      other_user_id: 42,
+      unread_count: 2,
+      last_message_at: '2026-06-04T10:00:00Z',
+      last_message_type: 'text',
+      last_message_content: 'قبلی',
+    }]
+    const wrapper = mountRuntime()
+
+    setRoute('/dashboard')
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 42,
+      sender_name: 'علی',
+      message_type: 'image',
+      content: '',
+      created_at: '2026-06-05T10:00:00Z',
+    })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.conversationsStore.patchConversation).toHaveBeenCalledWith(42, {
+      last_message_at: '2026-06-05T10:00:00Z',
+      last_message_type: 'image',
+      last_message_content: 'تصویر',
+      unread_count: 3,
+    })
+
+    notificationRuntimeMocks.conversationsStore.patchConversation.mockClear()
+    setRoute('/chat', '/chat?user_id=42', { user_id: '42' })
+    emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {
+      sender_id: 42,
+      sender_name: 'علی',
+      message_type: 'text',
+      content: 'در چت باز',
+      created_at: '2026-06-05T10:00:01Z',
+    })
+    await flushPromises()
+
+    expect(notificationRuntimeMocks.conversationsStore.patchConversation).toHaveBeenCalledWith(42, {
+      last_message_at: '2026-06-05T10:00:01Z',
+      last_message_type: 'text',
+      last_message_content: 'در چت باز',
+      unread_count: 2,
+    })
 
     wrapper.unmount()
   })

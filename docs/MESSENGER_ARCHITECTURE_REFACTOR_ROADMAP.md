@@ -79,8 +79,8 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | B | Store Foundation, Diagnostics Gate, Local Hydration | Completed | Establish store/cache/gateway foundations early |
 | C | Container Extraction And Room Tear-down | Completed | Shrink `ChatView.vue` safely and prevent leaks |
 | D | Message Renderer Split And Error Boundaries | Completed | Make message rendering modular and fault-tolerant |
-| E | Media Dimension Contract And Virtualized Timeline | In Progress | Introduce safe real virtualization without scroll jumps |
-| F | Realtime Gateway And Request Churn Reduction | Planned | Convert realtime/network updates into precise store mutations |
+| E | Media Dimension Contract And Virtualized Timeline | Completed | Introduce safe real virtualization without scroll jumps |
+| F | Realtime Gateway And Request Churn Reduction | In Progress | Convert realtime/network updates into precise store mutations |
 | G | UI System Final Pass | Planned | Polish the user-facing experience after architecture is stable |
 | H | Full Release Gate And Legacy Retirement Decision | Planned | Prove feature parity, speed, stability, and UX acceptance |
 
@@ -541,10 +541,15 @@ Reduce reload-driven behavior and route all realtime updates through precise sto
   - mirrored the conversation-preview ordering guard into the current `useChatWebSocket` batched legacy ref path, preserving unread accumulation while keeping preview fields pinned to the newest realtime message.
 - Validation passed for this slice:
   - `npm run test:unit:run -- src/services/chat/chatEventGateway.test.ts src/composables/chat/useChatWebSocket.test.ts`
+- Continued on 2026-06-05 with the second safe Stage F slice:
+  - replaced more manager and conversation-action `loadConversations()` convergence paths with targeted local conversation patches for create/update/open/leave/unfollow/delete/mark-unread/pin/mute flows.
+  - routed chat notification preview changes through `useConversationsStore.patchConversation()` so realtime notifications update conversation previews/unread counts without forcing a list reload.
+  - added a short-lived `chatManagerCache` service for group detail, channel list, channel members, and channel invite-candidate manager reads, with mutation invalidation after create/update/avatar/member/leave flows.
+  - converted post-forward conversation refresh into local preview patching for successful forward targets.
+- Validation passed for this slice:
+  - `npm run test:unit:run -- src/composables/useNotificationRuntime.test.ts src/services/chat/chatManagerCache.test.ts src/components/chat/ChatGroupManagerModal.test.ts src/components/CreateChannelView.test.ts src/components/ChatView.test.ts`
 - Remaining before Stage F can close:
-  - replace more `loadConversations()` calls with targeted patches where event payloads are complete.
-  - route notification-driven conversation changes through store patches instead of default list reloads.
-  - add manager capability/member cache and batch group/channel manager refreshes.
+  - audit any remaining reload fallback that lacks complete payload data and either keep it documented or add an explicit payload contract.
   - run Stage F benchmark subset: S05, S06, S07, S08, S09, S11.
 - Request count in S08/S09/S11 drops by at least 30% from the current benchmark.
 - No stale realtime update overwrites newer store state.

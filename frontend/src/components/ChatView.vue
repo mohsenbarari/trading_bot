@@ -943,6 +943,54 @@ function patchConversationState(target: Conversation, patch: Partial<Conversatio
   ))
 }
 
+function upsertConversationState(nextConversation: Conversation) {
+  const currentIndex = conversations.value.findIndex((conversation) => isSameConversation(conversation, nextConversation))
+  if (currentIndex === -1) {
+    conversations.value = [nextConversation, ...conversations.value]
+    return
+  }
+
+  conversations.value = conversations.value.map((conversation, index) => (
+    index === currentIndex
+      ? { ...conversation, ...nextConversation }
+      : conversation
+  ))
+}
+
+function removeConversationStateByKey(conversationKey: number) {
+  conversations.value = conversations.value.filter((conversation) => conversation.other_user_id !== conversationKey)
+}
+
+function upsertNamedRoomConversation(
+  roomKind: 'group' | 'channel',
+  chatId: number,
+  patch: Partial<Conversation> & { other_user_name?: string },
+) {
+  const conversationKey = resolveRoomConversationKey(roomKind, chatId) ?? -Math.abs(chatId)
+  const existing = conversations.value.find((conversation) => (
+    conversation.other_user_id === conversationKey
+    || (conversation.room_kind === roomKind && conversation.chat_id === chatId)
+  ))
+
+  upsertConversationState({
+    id: existing?.id ?? chatId,
+    other_user_name: patch.other_user_name || existing?.other_user_name || (roomKind === 'group' ? 'گروه' : 'کانال'),
+    last_message_content: existing?.last_message_content ?? null,
+    last_message_type: existing?.last_message_type ?? null,
+    last_message_at: existing?.last_message_at ?? null,
+    unread_count: existing?.unread_count ?? 0,
+    ...existing,
+    ...patch,
+    chat_id: chatId,
+    room_kind: roomKind,
+    other_user_id: conversationKey,
+  })
+
+  if (selectedUserId.value === conversationKey && patch.other_user_name) {
+    selectedUserName.value = patch.other_user_name
+  }
+}
+
 function getPinnedMessagePreview(msg: Message | null | undefined) {
   if (!msg) return ''
   if (msg.is_deleted) return 'پیام حذف شد'
@@ -1827,12 +1875,9 @@ function closeAdminBroadcastModal() {
 function closeChannelManager() {
   channelManagerChatId.value = null
   showChannelManagerModal.value = false
-  void (async () => {
-    await loadConversations()
-    if (selectedUserId.value != null) {
-      selectedUserName.value = resolveSelectedConversationName(selectedUserId.value)
-    }
-  })()
+  if (selectedUserId.value != null) {
+    selectedUserName.value = resolveSelectedConversationName(selectedUserId.value)
+  }
 }
 
 function clearActiveConversationState() {
@@ -1869,7 +1914,9 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
   channelManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('channel', payload.chatId) ?? -Math.abs(payload.chatId)
   showChannelManagerModal.value = false
-  await loadConversations()
+  upsertNamedRoomConversation('channel', payload.chatId, {
+    other_user_name: payload.title,
+  })
 
   const existingConversation = conversations.value.find((conversation) => (
     conversation.room_kind === 'channel' && conversation.chat_id === payload.chatId
@@ -1887,13 +1934,31 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
   void loadMessages(conversationKey)
 }
 
-function handleChannelManagerConversationRefresh() {
-  void (async () => {
-    await loadConversations()
-    if (selectedUserId.value != null) {
-      selectedUserName.value = resolveSelectedConversationName(selectedUserId.value)
-    }
-  })()
+function handleChannelManagerConversationRefresh(channel?: {
+  id: number
+  title: string
+  avatar_file_id?: string | null
+  member_count?: number
+  is_system?: boolean
+  is_mandatory?: boolean
+} | null) {
+  if (!channel) {
+    void (async () => {
+      await loadConversations()
+      if (selectedUserId.value != null) {
+        selectedUserName.value = resolveSelectedConversationName(selectedUserId.value, selectedUserName.value)
+      }
+    })()
+    return
+  }
+
+  upsertNamedRoomConversation('channel', channel.id, {
+    other_user_name: channel.title,
+    avatar_file_id: channel.avatar_file_id ?? null,
+    member_count: channel.member_count ?? null,
+    is_system: channel.is_system,
+    is_mandatory: channel.is_mandatory,
+  })
 }
 
 function openSelectedRoomManager() {
@@ -1915,7 +1980,9 @@ async function handleGroupCreated(group: { id: number; title: string }) {
   showGroupManagerModal.value = false
   groupManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
-  await loadConversations()
+  upsertNamedRoomConversation('group', group.id, {
+    other_user_name: group.title,
+  })
   prepareConversationTransition()
   selectedUserId.value = conversationKey
   selectedUserName.value = group.title
@@ -1932,10 +1999,9 @@ async function handleGroupCreated(group: { id: number; title: string }) {
 async function handleGroupUpdated(group: { id: number; title: string }) {
   const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
   const shouldRefreshSelectedTitle = selectedUserId.value === conversationKey
-  if (shouldRefreshSelectedTitle) {
-    selectedUserName.value = group.title
-  }
-  await loadConversations()
+  upsertNamedRoomConversation('group', group.id, {
+    other_user_name: group.title,
+  })
   if (shouldRefreshSelectedTitle) {
     selectedUserName.value = group.title
   }
@@ -1955,7 +2021,10 @@ async function handleGroupLeft(chatId: number) {
     clearActiveConversationState()
     await syncSelectedConversationRoute(null, '')
   }
-  await loadConversations()
+  const conversationKeyToRemove = explicitConversationKey ?? managedConversationKey
+  if (typeof conversationKeyToRemove === 'number') {
+    removeConversationStateByKey(conversationKeyToRemove)
+  }
 }
 
 async function handleChannelLeft(chatId: number) {
@@ -1972,7 +2041,10 @@ async function handleChannelLeft(chatId: number) {
     clearActiveConversationState()
     await syncSelectedConversationRoute(null, '')
   }
-  await loadConversations()
+  const conversationKeyToRemove = explicitConversationKey ?? managedConversationKey
+  if (typeof conversationKeyToRemove === 'number') {
+    removeConversationStateByKey(conversationKeyToRemove)
+  }
 }
 
 type ConversationListAction = 'pin' | 'unpin' | 'move-pin-up' | 'move-pin-down' | 'mute' | 'unmute' | 'mark-unread' | 'delete' | 'leave' | 'unfollow'
@@ -1984,6 +2056,7 @@ function clearSelectedConversationIfMatches(conv: Conversation) {
 
 async function handleConversationAction(payload: { action: ConversationListAction; conv: Conversation }) {
   const { action, conv } = payload
+  let shouldReloadConversations = false
 
   try {
     if (conv.room_kind !== 'direct' && !conv.chat_id) {
@@ -2011,6 +2084,7 @@ async function handleConversationAction(payload: { action: ConversationListActio
         method: 'POST',
         body: JSON.stringify({ direction: action === 'move-pin-up' ? 'up' : 'down' }),
       })
+      shouldReloadConversations = true
     } else if (action === 'mute' || action === 'unmute') {
       const endpoint = conv.room_kind === 'direct'
         ? `/chat/direct/${conv.other_user_id}/mute`
@@ -2029,18 +2103,25 @@ async function handleConversationAction(payload: { action: ConversationListActio
         method: 'POST',
         body: JSON.stringify({ unread: true }),
       })
+      patchConversationState(conv, { unread_count: Math.max(1, Number(conv.unread_count || 0)) })
+      notificationStore.incrementChatUnread(conv.other_user_id)
     } else if (action === 'delete') {
       await apiFetch(`/chat/direct/${conv.other_user_id}`, { method: 'DELETE' })
       clearSelectedConversationIfMatches(conv)
+      removeConversationStateByKey(conv.other_user_id)
     } else if (action === 'leave') {
       await apiFetch(`/chat/groups/${conv.chat_id}/leave`, { method: 'POST' })
       clearSelectedConversationIfMatches(conv)
+      removeConversationStateByKey(conv.other_user_id)
     } else if (action === 'unfollow') {
       await apiFetch(`/chat/channels/${conv.chat_id}/unfollow`, { method: 'POST' })
       clearSelectedConversationIfMatches(conv)
+      removeConversationStateByKey(conv.other_user_id)
     }
 
-    await loadConversations()
+    if (shouldReloadConversations) {
+      await loadConversations()
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'عملیات گفتگو انجام نشد'
     showInlineToast(message)
@@ -2613,6 +2694,42 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
       (conversation.room_kind === 'direct' || !conversation.room_kind) && conversation.other_user_id === target.id
     ))
   }
+  const previewSource = preparedBatch.at(-1)?.message
+  const getForwardPreviewText = (message: Message | undefined) => {
+    if (!message) return ''
+    if (message.message_type === 'image') return 'تصویر'
+    if (message.message_type === 'video') return 'ویدئو'
+    if (message.message_type === 'voice') return 'پیام صوتی'
+    if (message.message_type === 'location') return 'موقعیت مکانی'
+    return message.content || ''
+  }
+  const forwardedPreviewContent = preparedBatch.length > 1
+    ? `${preparedBatch.length} پیام هدایت شد`
+    : getForwardPreviewText(previewSource) || 'پیام هدایت شد'
+  const patchForwardedTargetConversation = (target: ChatForwardTarget) => {
+    const targetConversationId = getConversationIdForTarget(target)
+    const targetConversation = findConversationForTarget(target)
+    if (target.kind === 'user') {
+      if (targetConversation) {
+        patchConversationState(targetConversation, {
+          last_message_at: new Date().toISOString(),
+          last_message_type: previewSource?.message_type || targetConversation.last_message_type,
+          last_message_content: forwardedPreviewContent,
+        })
+      }
+      return
+    }
+
+    upsertNamedRoomConversation(target.kind, target.id, {
+      other_user_name: targetConversation?.other_user_name || target.title,
+      last_message_at: new Date().toISOString(),
+      last_message_type: previewSource?.message_type || targetConversation?.last_message_type || 'text',
+      last_message_content: forwardedPreviewContent,
+    })
+    if (selectedUserId.value === targetConversationId) {
+      selectedUserName.value = targetConversation?.other_user_name || target.title
+    }
+  }
 
   // Close modal and clear selection immediately so the UI unblocks.
   // Sending happens in parallel in the background.
@@ -2712,8 +2829,14 @@ async function forwardSelectedMessages(targets: ChatForwardTarget | ChatForwardT
       alert('برخی مقصدها هنوز برای هدایت پشتیبانی نمی‌شوند')
     }
 
-    // Fire conversation refresh in background; don't block UI.
-    void loadConversations()
+    supportedTargets.forEach((target) => {
+      const targetKey = getTargetKey(target)
+      const failed = failuresByTarget.get(targetKey) ?? 0
+      const total = totalByTarget.get(targetKey) ?? 0
+      if (failed < total) {
+        patchForwardedTargetConversation(target)
+      }
+    })
 
     // If only one target, open that chat (previous UX). For multi-target, stay on current chat.
     if (supportedTargets.length === 1) {
