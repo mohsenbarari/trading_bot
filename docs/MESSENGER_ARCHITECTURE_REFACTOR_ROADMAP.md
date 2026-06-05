@@ -659,6 +659,18 @@ Status: In Progress
   - focused Chromium regression for the updated writable-channel attachment contract: `1` passed.
   - Stage H Chromium messenger subset: `81` passed, `4` skipped, `0` failed; log `tmp/e2e-logs/stage-h-chromium-20260605T070222Z.log`.
 
+### 2026-06-05 Matrix Failure Hardening Slice
+
+- Reviewed the full Stage H browser matrix result in `tmp/e2e-logs/stage-h-matrix-20260605T074507Z.log`: `336` passed, `12` skipped, `3` failed.
+- Fixed the three failing surfaces without immediately rerunning the full matrix:
+  - `channel-media.spec.ts` forward-video regression now seeds the direct source video through the backend like the existing image-forward case, preserves explicit `width` / `height` metadata for the Stage E media-dimension contract, and uses a stable DOM click for transient message context-menu actions.
+  - `messenger-conversation-actions.spec.ts` now avoids unbounded WebKit overlay-click waits, waits deterministically for menu popover closure, refreshes the unread-badge row locator after reorder/action changes, and gives the intentionally long direct-state action flow a WebKit-safe timeout.
+  - Existing direct-delete and channel-header manager assertions stayed aligned with the current optimistic-send and header badge UI.
+- Validation passed:
+  - focused forward-video regression on Chromium + WebKit: `2` passed.
+  - focused direct conversation menu action regression on Chromium + WebKit: `2` passed.
+  - mini-batch covering all touched messenger E2E specs on Chromium + WebKit: `8` passed in `2.2m`.
+
 ### Goal
 
 Prove that the new architecture is faster, safer, and more pleasant before removing legacy fallback.
@@ -727,4 +739,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage H with the full browser matrix, then run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review.
+Continue Stage H with one full browser matrix rerun using detailed logging. If it is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new unrelated failures appear, classify them before scheduling another full matrix run.

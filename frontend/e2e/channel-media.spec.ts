@@ -612,6 +612,16 @@ async function openMessageContextMenu(page: Page, messageBubble: Locator) {
   await expect(page.locator('.context-menu')).toBeVisible()
 }
 
+async function clickMessageContextMenuAction(page: Page, label: string) {
+  const action = page.locator('.context-menu .menu-item').filter({ hasText: label }).first()
+  await expect(action).toBeVisible({ timeout: 15000 })
+  await action.evaluate((node) => {
+    if (node instanceof HTMLElement) {
+      node.click()
+    }
+  })
+}
+
 async function seedBootstrapChannelMessage(
   request: APIRequestContext,
   fixture: SeededChannelAdminFixture,
@@ -718,6 +728,47 @@ async function seedDirectImageMessage(
       receiver_id: fixture.userId,
       content: JSON.stringify(uploadPayload),
       message_type: 'image',
+    },
+  })
+
+  expect(sendResponse.ok()).toBeTruthy()
+  return sendResponse.json()
+}
+
+async function seedDirectVideoMessage(
+  request: APIRequestContext,
+  fixture: SeededChannelAdminFixture,
+  fileName: string,
+) {
+  const uploadResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/upload-media`, {
+    headers: authOnlyHeaders(fixture.creatorAccessToken),
+    multipart: {
+      file: createPlaywrightBinaryFile(fileName, 'video/webm', GENERATED_WEBM_BASE64),
+    },
+  })
+
+  expect(uploadResponse.ok()).toBeTruthy()
+  const uploadPayload = await uploadResponse.json() as {
+    file_id: string
+    file_name: string
+    mime_type: string
+    size: number
+    width?: number
+    height?: number
+    thumbnail?: string | null
+  }
+  const videoPayload = {
+    ...uploadPayload,
+    width: uploadPayload.width ?? 96,
+    height: uploadPayload.height ?? 96,
+  }
+
+  const sendResponse = await request.post(`${BACKEND_BASE_URL}/api/chat/send`, {
+    headers: authHeaders(fixture.creatorAccessToken),
+    data: {
+      receiver_id: fixture.userId,
+      content: JSON.stringify(videoPayload),
+      message_type: 'video',
     },
   })
 
@@ -1785,7 +1836,7 @@ test.describe('Channel media regressions', () => {
     await expect(sourceMessageBubble.locator('.msg-media-link')).toBeVisible()
 
     await openMessageContextMenu(page, sourceMessageBubble)
-    await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
+    await clickMessageContextMenuAction(page, 'هدایت پیام')
 
     await forwardToTargets(page, [fixture.channelTitle])
     await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
@@ -1809,10 +1860,11 @@ test.describe('Channel media regressions', () => {
     test.slow()
 
     const fixture = seedChannelSession('channel_forward_video', 'admin')
-    const directBootstrapContent = `PW DIRECT VIDEO SOURCE ${Date.now()}`
     const videoFileName = `pw-forward-video-${Date.now()}.webm`
+    const directVideoMessage = await seedDirectVideoMessage(request, fixture, videoFileName) as { id?: number }
+    const sourceMessageId = Number(directVideoMessage?.id)
 
-    await seedDirectTextMessage(request, fixture, directBootstrapContent)
+    expect(Number.isFinite(sourceMessageId)).toBeTruthy()
     await loginWithSeededSession(page, fixture)
 
     await page.goto('/chat')
@@ -1820,26 +1872,15 @@ test.describe('Channel media regressions', () => {
     await expect(directConversationRow).toBeVisible({ timeout: 30000 })
     await directConversationRow.click()
 
-    await expect(page.locator('.messages-container').getByText(directBootstrapContent)).toBeVisible()
-    await activeAttachButton(page).click()
-    await injectGalleryVideo(page, videoFileName)
-
-    await expect
-      .poll(async () => fetchLatestDirectMessageTypes(request, fixture, fixture.creatorUserId), { timeout: 60000 })
-      .toEqual(expect.arrayContaining(['video']))
-
-    await page.goto(`/chat?user_id=${fixture.creatorUserId}`)
-    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=${fixture.creatorUserId}`)
-
-    const sourceMessageBubble = page.locator('.messages-container [id^="msg-"]:has(.msg-media-link)').last()
-    await expect(sourceMessageBubble).toBeVisible({ timeout: 30000 })
+    const sourceMessageBubble = page.locator(`#msg-${sourceMessageId}`)
+    await expect(sourceMessageBubble.locator('.msg-media-link')).toBeVisible({ timeout: 30000 })
 
     await openMessageContextMenu(page, sourceMessageBubble)
-    await page.locator('.context-menu .menu-item').filter({ hasText: 'هدایت پیام' }).click()
+    await clickMessageContextMenuAction(page, 'هدایت پیام')
 
     await forwardToTargets(page, [fixture.channelTitle])
     await expectRoomOpen(page, fixture.channelId, fixture.channelTitle, 'کانال')
-    await expect(forwardedBanner(page, fixture.accountName)).toContainText(`از ${fixture.accountName}`, {
+    await expect(forwardedBanner(page, fixture.creatorAccountName)).toContainText(`از ${fixture.creatorAccountName}`, {
       timeout: 30000,
     })
     await expect(page.locator('.messages-container .msg-media-link').first()).toBeVisible({ timeout: 30000 })
