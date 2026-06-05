@@ -534,6 +534,18 @@ Reduce reload-driven behavior and route all realtime updates through precise sto
 
 ### Exit Criteria
 
+- Started on 2026-06-05 with the first safe Stage F slice:
+  - added event-clock ordering to `ChatEventGateway` for `chat:message` so stale same-message payloads are rejected before they can overwrite newer store state.
+  - added per-room conversation-preview ordering in `ChatEventGateway` so a delayed older realtime message cannot move the conversation preview backwards.
+  - added reaction ordering in `ChatEventGateway` so stale reaction payloads do not overwrite newer reaction state.
+  - mirrored the conversation-preview ordering guard into the current `useChatWebSocket` batched legacy ref path, preserving unread accumulation while keeping preview fields pinned to the newest realtime message.
+- Validation passed for this slice:
+  - `npm run test:unit:run -- src/services/chat/chatEventGateway.test.ts src/composables/chat/useChatWebSocket.test.ts`
+- Remaining before Stage F can close:
+  - replace more `loadConversations()` calls with targeted patches where event payloads are complete.
+  - route notification-driven conversation changes through store patches instead of default list reloads.
+  - add manager capability/member cache and batch group/channel manager refreshes.
+  - run Stage F benchmark subset: S05, S06, S07, S08, S09, S11.
 - Request count in S08/S09/S11 drops by at least 30% from the current benchmark.
 - No stale realtime update overwrites newer store state.
 - Realtime delivery remains correct across direct/group/channel.

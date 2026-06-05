@@ -247,6 +247,19 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         return getConversationPreviewText(data?.message_type, data?.content)
     }
 
+    function getEventTimestamp(value: unknown) {
+        if (typeof value !== 'string' && typeof value !== 'number') return null
+        const timestamp = new Date(value).getTime()
+        return Number.isFinite(timestamp) ? timestamp : null
+    }
+
+    function isSameOrNewerEvent(candidateAt?: string | null, currentAt?: string | null) {
+        const candidateTimestamp = getEventTimestamp(candidateAt)
+        const currentTimestamp = getEventTimestamp(currentAt)
+        if (candidateTimestamp === null || currentTimestamp === null) return true
+        return candidateTimestamp >= currentTimestamp
+    }
+
     function normalizeReactionList(reactions: any) {
         return Array.isArray(reactions)
             ? reactions
@@ -280,9 +293,13 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             resetUnread: false,
         }
 
+        const canReplacePreview = patch.last_message_at
+            ? isSameOrNewerEvent(patch.last_message_at, currentPatch.last_message_at)
+            : false
+
         conversationPatches.set(conversationKey, {
             ...currentPatch,
-            ...patch,
+            ...(canReplacePreview ? patch : {}),
             unreadDelta: currentPatch.unreadDelta + (patch.unreadDelta || 0),
             resetUnread: currentPatch.resetUnread || patch.resetUnread === true,
         })
@@ -457,11 +474,15 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
                     ? 0
                     : Math.max(0, Number(conversation.unread_count || 0) + patch.unreadDelta)
 
+                const canApplyPreview = patch.last_message_at
+                    ? isSameOrNewerEvent(patch.last_message_at, conversation.last_message_at)
+                    : false
+
                 return {
                     ...conversation,
-                    last_message_at: patch.last_message_at ?? conversation.last_message_at,
-                    last_message_type: patch.last_message_type ?? conversation.last_message_type,
-                    last_message_content: patch.last_message_content ?? conversation.last_message_content,
+                    last_message_at: canApplyPreview ? patch.last_message_at : conversation.last_message_at,
+                    last_message_type: canApplyPreview ? patch.last_message_type : conversation.last_message_type,
+                    last_message_content: canApplyPreview ? patch.last_message_content : conversation.last_message_content,
                     unread_count: nextUnreadCount,
                 }
             })

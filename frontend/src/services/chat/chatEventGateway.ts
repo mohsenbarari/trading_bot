@@ -32,6 +32,11 @@ export interface ChatGatewayResult {
   reason?: string
 }
 
+type EventClock = {
+  version: number | null
+  timestamp: number | null
+}
+
 function normalizeReactionList(reactions: unknown): MessageReaction[] {
   return Array.isArray(reactions)
     ? reactions
@@ -49,7 +54,38 @@ function getRoomKeyFromPayload(payload: any): number | null {
   return resolveRoomConversationKey(payload?.room_kind, payload?.chat_id)
 }
 
+function parseEventClock(payload: any): EventClock {
+  const rawVersion = Number(payload?.version ?? payload?.event_version ?? payload?.revision)
+  const rawDate = payload?.updated_at ?? payload?.created_at ?? payload?.timestamp
+  const timestamp = typeof rawDate === 'string' || typeof rawDate === 'number'
+    ? new Date(rawDate).getTime()
+    : Number.NaN
+
+  return {
+    version: Number.isFinite(rawVersion) ? rawVersion : null,
+    timestamp: Number.isFinite(timestamp) ? timestamp : null,
+  }
+}
+
+function compareEventClock(left: EventClock, right: EventClock) {
+  if (left.version !== null && right.version !== null && left.version !== right.version) {
+    return left.version - right.version
+  }
+  if (left.timestamp !== null && right.timestamp !== null && left.timestamp !== right.timestamp) {
+    return left.timestamp - right.timestamp
+  }
+  return 0
+}
+
+function hasComparableClock(clock: EventClock) {
+  return clock.version !== null || clock.timestamp !== null
+}
+
 export class ChatEventGateway {
+  private latestMessageClockById = new Map<number, EventClock>()
+  private latestConversationClockByRoom = new Map<number, EventClock>()
+  private latestReactionClockByMessage = new Map<number, EventClock>()
+
   constructor(private stores: ChatGatewayStores) {}
 
   dispatch(eventName: ChatGatewayEventName, payload: unknown): ChatGatewayResult {
@@ -64,12 +100,34 @@ export class ChatEventGateway {
       if (!data || typeof data.id !== 'number' || roomKey === null) {
         return { handled: false, eventName, roomKey, reason: 'invalid-message' }
       }
+      const messageClock = parseEventClock(data)
+      const latestMessageClock = this.latestMessageClockById.get(data.id)
+      if (
+        latestMessageClock
+        && hasComparableClock(messageClock)
+        && compareEventClock(messageClock, latestMessageClock) < 0
+      ) {
+        return { handled: false, eventName, roomKey, reason: 'stale-message' }
+      }
+      if (hasComparableClock(messageClock)) {
+        this.latestMessageClockById.set(data.id, messageClock)
+      }
+
       this.stores.messages?.appendOrReplaceMessage?.(roomKey, data as Message)
-      this.stores.conversations?.patchConversation?.(roomKey, {
-        last_message_at: data.created_at,
-        last_message_type: data.message_type,
-        last_message_content: typeof data.content === 'string' ? data.content : null,
-      })
+      const latestConversationClock = this.latestConversationClockByRoom.get(roomKey)
+      const canPatchConversation = !latestConversationClock
+        || !hasComparableClock(messageClock)
+        || compareEventClock(messageClock, latestConversationClock) >= 0
+      if (canPatchConversation) {
+        if (hasComparableClock(messageClock)) {
+          this.latestConversationClockByRoom.set(roomKey, messageClock)
+        }
+        this.stores.conversations?.patchConversation?.(roomKey, {
+          last_message_at: data.created_at,
+          last_message_type: data.message_type,
+          last_message_content: typeof data.content === 'string' ? data.content : null,
+        })
+      }
       return { handled: true, eventName, roomKey }
     }
 
@@ -82,6 +140,18 @@ export class ChatEventGateway {
     if (eventName === 'chat:reaction') {
       if (typeof data?.id !== 'number') {
         return { handled: false, eventName, roomKey, reason: 'missing-message-id' }
+      }
+      const reactionClock = parseEventClock(data)
+      const latestReactionClock = this.latestReactionClockByMessage.get(data.id)
+      if (
+        latestReactionClock
+        && hasComparableClock(reactionClock)
+        && compareEventClock(reactionClock, latestReactionClock) < 0
+      ) {
+        return { handled: false, eventName, roomKey, reason: 'stale-reaction' }
+      }
+      if (hasComparableClock(reactionClock)) {
+        this.latestReactionClockByMessage.set(data.id, reactionClock)
       }
       this.stores.messages?.patchReaction?.(data.id, normalizeReactionList(data.reactions))
       return { handled: true, eventName, roomKey }
@@ -114,4 +184,3 @@ export class ChatEventGateway {
 export function createChatEventGateway(stores: ChatGatewayStores) {
   return new ChatEventGateway(stores)
 }
-

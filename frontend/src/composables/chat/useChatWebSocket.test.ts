@@ -305,6 +305,40 @@ describe('useChatWebSocket', () => {
     })
   })
 
+  it('keeps inactive conversation previews ordered when realtime messages arrive out of order', async () => {
+    conversations.value = [{
+      other_user_id: 45,
+      unread_count: 0,
+      last_message_at: '2026-05-14T14:02:00Z',
+      last_message_type: 'text',
+      last_message_content: 'قبلی',
+    }]
+    mountHarness()
+
+    emit('chat:message', {
+      id: 706,
+      sender_id: 45,
+      created_at: '2026-05-14T14:04:00Z',
+      message_type: 'text',
+      content: 'جدیدتر',
+    })
+    emit('chat:message', {
+      id: 705,
+      sender_id: 45,
+      created_at: '2026-05-14T14:03:00Z',
+      message_type: 'text',
+      content: 'قدیمی‌تر',
+    })
+    await Promise.resolve()
+
+    expect(conversations.value[0]).toMatchObject({
+      unread_count: 2,
+      last_message_at: '2026-05-14T14:04:00Z',
+      last_message_type: 'text',
+      last_message_content: 'جدیدتر',
+    })
+  })
+
   it('falls back to loadMessages for incomplete payloads and patches direct read receipts in place', async () => {
     messages.value = [
       { id: 1, receiver_id: 12, is_read: false },
