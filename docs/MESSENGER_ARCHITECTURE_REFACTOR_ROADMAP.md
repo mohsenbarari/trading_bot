@@ -572,7 +572,7 @@ Route websocket handlers back to existing reload-based convergence path.
 
 ## Stage G - UI System Final Pass
 
-Status: In Progress
+Status: Closed
 
 ### 2026-06-05 Start Slice
 
@@ -634,6 +634,13 @@ Make Messenger feel like one polished product, not a mix of legacy surfaces.
 - Manual UX review confirms Messenger feels cohesive.
 - No known bubble/media/voice/avatar/camera UI drift remains.
 - Reduced-motion mode remains usable and faster.
+- Closed on 2026-06-05 after the final manager-route/history hardening slice:
+  - group/channel manager close transitions now discard the internal overlay back-stack entry when the manager opens a room, preventing `history.back()` from reverting `/chat?user_id=-...` after successful create/open flows.
+  - selected channel/group title changes now sync both the active header state and the route query name when the active room is updated.
+  - the room-manager Playwright fallback now accepts the valid in-room post-close state before falling back to conversation-list row selection.
+- Validation passed for Stage G closure:
+  - `npm run test:unit:run -- src/components/chat/ChatMessageItem.test.ts src/components/chat/ChatInputBar.test.ts src/components/chat/ChatHeader.test.ts src/components/chat/ChatContextMenu.test.ts src/components/chat/ChatConversationList.test.ts src/components/chat/AttachmentMenu.test.ts src/components/chat/ChatGroupManagerModal.test.ts src/components/CreateChannelView.test.ts src/components/ChatView.test.ts` (`242` passed).
+  - `npm run test:e2e -- e2e/messenger-room-manager-profile.spec.ts -g "group manager supports|channel manager supports" --reporter=line` (`4` passed on Chromium).
 
 ### Rollback
 

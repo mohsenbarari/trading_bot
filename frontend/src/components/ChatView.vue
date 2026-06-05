@@ -278,7 +278,7 @@ function updateReducedMotionPreference() {
   prefersReducedMotion.value = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 }
 
-function bindOverlayBackState(source: () => boolean, onBack: () => void) {
+function bindOverlayBackState(source: () => boolean, onBack: () => void, consumeProgrammaticClose?: () => boolean) {
   let backStateActive = false
   let closingFromBack = false
 
@@ -299,7 +299,11 @@ function bindOverlayBackState(source: () => boolean, onBack: () => void) {
     if (backStateActive) {
       backStateActive = false
       if (!closingFromBack) {
-        popBackState()
+        if (consumeProgrammaticClose?.()) {
+          discardBackState()
+        } else {
+          popBackState()
+        }
       }
     }
   })
@@ -1816,6 +1820,8 @@ const showChannelManagerModal = ref(false)
 const showAdminBroadcastModal = ref(false)
 const groupManagerChatId = ref<number | null>(null)
 const channelManagerChatId = ref<number | null>(null)
+let discardNextGroupManagerHistoryClose = false
+let discardNextChannelManagerHistoryClose = false
 const newChatModalBackStateActive = ref(false)
 let closingNewChatModalFromBack = false
 
@@ -1913,6 +1919,7 @@ function clearMissingNamedRoomSelection() {
 async function handleChannelManagerOpenChannel(payload: { chatId: number; title: string }) {
   channelManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('channel', payload.chatId) ?? -Math.abs(payload.chatId)
+  discardNextChannelManagerHistoryClose = true
   showChannelManagerModal.value = false
   upsertNamedRoomConversation('channel', payload.chatId, {
     other_user_name: payload.title,
@@ -1924,6 +1931,7 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
 
   if (existingConversation) {
     selectConversation(existingConversation)
+    await syncSelectedConversationRoute(existingConversation.other_user_id, existingConversation.other_user_name)
     return
   }
 
@@ -1932,9 +1940,10 @@ async function handleChannelManagerOpenChannel(payload: { chatId: number; title:
   selectedUserName.value = payload.title
   messagePanelError.value = ''
   void loadMessages(conversationKey)
+  await syncSelectedConversationRoute(conversationKey, payload.title)
 }
 
-function handleChannelManagerConversationRefresh(channel?: {
+async function handleChannelManagerConversationRefresh(channel?: {
   id: number
   title: string
   avatar_file_id?: string | null
@@ -1959,6 +1968,12 @@ function handleChannelManagerConversationRefresh(channel?: {
     is_system: channel.is_system,
     is_mandatory: channel.is_mandatory,
   })
+
+  const conversationKey = resolveRoomConversationKey('channel', channel.id) ?? -Math.abs(channel.id)
+  if (selectedUserId.value === conversationKey) {
+    selectedUserName.value = channel.title
+    await syncSelectedConversationRoute(conversationKey, channel.title)
+  }
 }
 
 function openSelectedRoomManager() {
@@ -1977,6 +1992,7 @@ function openSelectedRoomManager() {
 }
 
 async function handleGroupCreated(group: { id: number; title: string }) {
+  discardNextGroupManagerHistoryClose = true
   showGroupManagerModal.value = false
   groupManagerChatId.value = null
   const conversationKey = resolveRoomConversationKey('group', group.id) ?? -Math.abs(group.id)
@@ -1988,6 +2004,7 @@ async function handleGroupCreated(group: { id: number; title: string }) {
   selectedUserName.value = group.title
   messagePanelError.value = ''
   void loadMessages(conversationKey)
+  await syncSelectedConversationRoute(conversationKey, group.title)
   pushBackState(() => {
     selectedUserId.value = null
     selectedUserName.value = ''
@@ -2004,6 +2021,7 @@ async function handleGroupUpdated(group: { id: number; title: string }) {
   })
   if (shouldRefreshSelectedTitle) {
     selectedUserName.value = group.title
+    await syncSelectedConversationRoute(conversationKey, group.title)
   }
 }
 
@@ -3326,10 +3344,18 @@ bindOverlayBackState(() => Boolean(lightboxMedia.value), () => {
 
 bindOverlayBackState(() => showGroupManagerModal.value, () => {
   closeGroupManager()
+}, () => {
+  const shouldDiscard = discardNextGroupManagerHistoryClose
+  discardNextGroupManagerHistoryClose = false
+  return shouldDiscard
 })
 
 bindOverlayBackState(() => showChannelManagerModal.value, () => {
   closeChannelManager()
+}, () => {
+  const shouldDiscard = discardNextChannelManagerHistoryClose
+  discardNextChannelManagerHistoryClose = false
+  return shouldDiscard
 })
 
 bindOverlayBackState(() => showAdminBroadcastModal.value, () => {
