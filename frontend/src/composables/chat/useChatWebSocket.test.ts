@@ -227,7 +227,7 @@ describe('useChatWebSocket', () => {
     clearTimeoutSpy.mockRestore()
   })
 
-  it('appends incoming open-chat messages, updates previews, and debounces missing conversation reloads', async () => {
+  it('appends incoming open-chat messages, updates previews, and upserts missing conversations without reloads', async () => {
     conversations.value = [{ other_user_id: 12, unread_count: 0, last_message_at: null, last_message_type: null, last_message_content: null }]
     mountHarness()
 
@@ -250,7 +250,31 @@ describe('useChatWebSocket', () => {
     expect(conversations.value[0].unread_count).toBe(0)
     expect(exposed.activityTextByConversation.value[12]).toBeUndefined()
 
-    emit('chat:message', { sender_id: 99, message_type: 'text', content: 'new chat' })
+    emit('chat:message', {
+      id: 702,
+      sender_id: 99,
+      sender_name: 'New Sender',
+      created_at: '2026-05-14T14:01:00Z',
+      message_type: 'text',
+      content: 'new chat',
+    })
+    await Promise.resolve()
+    vi.advanceTimersByTime(400)
+    await Promise.resolve()
+    expect(loadConversationsMock).not.toHaveBeenCalled()
+    expect(conversations.value[0]).toMatchObject({
+      other_user_id: 99,
+      other_user_name: 'New Sender',
+      last_message_content: 'new chat',
+      unread_count: 1,
+      room_kind: 'direct',
+    })
+  })
+
+  it('keeps the reload fallback only for realtime messages without a conversation key', async () => {
+    mountHarness()
+
+    emit('chat:message', { message_type: 'text', content: 'missing routing data' })
     expect(loadConversationsMock).not.toHaveBeenCalled()
 
     await Promise.resolve()

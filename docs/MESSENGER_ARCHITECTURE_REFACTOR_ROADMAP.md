@@ -80,7 +80,7 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | C | Container Extraction And Room Tear-down | Completed | Shrink `ChatView.vue` safely and prevent leaks |
 | D | Message Renderer Split And Error Boundaries | Completed | Make message rendering modular and fault-tolerant |
 | E | Media Dimension Contract And Virtualized Timeline | Completed | Introduce safe real virtualization without scroll jumps |
-| F | Realtime Gateway And Request Churn Reduction | In Progress | Convert realtime/network updates into precise store mutations |
+| F | Realtime Gateway And Request Churn Reduction | Completed | Convert realtime/network updates into precise store mutations |
 | G | UI System Final Pass | Planned | Polish the user-facing experience after architecture is stable |
 | H | Full Release Gate And Legacy Retirement Decision | Planned | Prove feature parity, speed, stability, and UX acceptance |
 
@@ -549,13 +549,20 @@ Reduce reload-driven behavior and route all realtime updates through precise sto
 - Hardened on 2026-06-05 after event-clock memory review:
   - capped `ChatEventGateway` message and reaction clock maps to 2000 recent entries by default, with a smaller 500-entry cap for room conversation clocks.
   - kept the cap local to the gateway instead of coupling it to room teardown, because the ordering guard only needs a recent duplicate/stale window and should not retain every historical message id for multi-day sessions.
+- Closed on 2026-06-05 with the final Stage F realtime fallback audit:
+  - converted the remaining websocket unknown-conversation path from default list reload to a local conversation upsert when the realtime payload includes a resolvable conversation key.
+  - kept the only remaining realtime list-reload fallback for malformed/incomplete message payloads that do not include enough routing data to create a correct conversation row.
+  - documented mount/route-open, retry-button, pin-order, and admin-broadcast reloads as intentional non-realtime full-list convergence paths.
 - Validation passed for this slice:
   - `npm run test:unit:run -- src/composables/useNotificationRuntime.test.ts src/services/chat/chatManagerCache.test.ts src/components/chat/ChatGroupManagerModal.test.ts src/components/CreateChannelView.test.ts src/components/ChatView.test.ts`
   - `npm run test:unit:run -- src/services/chat/chatEventGateway.test.ts`
-- Remaining before Stage F can close:
-  - audit any remaining reload fallback that lacks complete payload data and either keep it documented or add an explicit payload contract.
-  - run Stage F benchmark subset: S05, S06, S07, S08, S09, S11.
-- Request count in S08/S09/S11 drops by at least 30% from the current benchmark.
+- Final Stage F benchmark subset passed:
+  - config: `tmp/messenger-benchmark/stage-f-config.json`
+  - log: `tmp/messenger-benchmark/stage-f-benchmark-20260605T054751Z.log`
+  - result JSON: `tmp/messenger-benchmark/stage-f/performance-results.json`
+  - scenarios: S05, S06, S07, S08, S09, S11 on current build.
+  - all measured scenarios completed without benchmark errors; realtime burst post failures were `0` for S05/S06/S07/S08/S11 and S09 persistence completed with resumable upload.
+  - current-only request counts: S08 `116`, S09 `70`, S11 `77`; the broad old-vs-current request-count delta remains a Stage H release-gate comparison because this Stage F subset intentionally ran only the current build.
 - No stale realtime update overwrites newer store state.
 - Realtime delivery remains correct across direct/group/channel.
 

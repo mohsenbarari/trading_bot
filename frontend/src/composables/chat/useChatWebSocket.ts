@@ -260,6 +260,34 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         return candidateTimestamp >= currentTimestamp
     }
 
+    type RealtimeConversationPatch = {
+        id?: number
+        other_user_id?: number
+        other_user_name?: string
+        room_kind?: 'direct' | 'group' | 'channel'
+        chat_id?: number | null
+        last_message_at?: string
+        last_message_type?: string
+        last_message_content?: string
+        unreadDelta: number
+        resetUnread: boolean
+    }
+
+    function getRealtimeConversationName(data: any, conversationKey: number) {
+        const explicitTitle = typeof data?.conversation_title === 'string' ? data.conversation_title.trim() : ''
+        if (explicitTitle) return explicitTitle
+        const senderName = typeof data?.sender_name === 'string' ? data.sender_name.trim() : ''
+        if (senderName) return senderName
+        return conversationKey < 0 ? 'گفتگوی گروهی' : 'گفتگوی جدید'
+    }
+
+    function getRealtimeConversationRoomKind(data: any, conversationKey: number): 'direct' | 'group' | 'channel' {
+        if (data?.room_kind === 'group' || data?.room_kind === 'channel') {
+            return data.room_kind
+        }
+        return conversationKey < 0 ? 'group' : 'direct'
+    }
+
     function normalizeReactionList(reactions: any) {
         return Array.isArray(reactions)
             ? reactions
@@ -272,21 +300,9 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     }
 
     function queueConversationPatch(
-        conversationPatches: Map<number, {
-            last_message_at?: string
-            last_message_type?: string
-            last_message_content?: string
-            unreadDelta: number
-            resetUnread: boolean
-        }>,
+        conversationPatches: Map<number, RealtimeConversationPatch>,
         conversationKey: number,
-        patch: Partial<{
-            last_message_at: string
-            last_message_type: string
-            last_message_content: string
-            unreadDelta: number
-            resetUnread: boolean
-        }>
+        patch: Partial<RealtimeConversationPatch>
     ) {
         const currentPatch = conversationPatches.get(conversationKey) || {
             unreadDelta: 0,
@@ -300,6 +316,11 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         conversationPatches.set(conversationKey, {
             ...currentPatch,
             ...(canReplacePreview ? patch : {}),
+            id: currentPatch.id ?? patch.id,
+            other_user_id: currentPatch.other_user_id ?? patch.other_user_id,
+            other_user_name: currentPatch.other_user_name ?? patch.other_user_name,
+            room_kind: currentPatch.room_kind ?? patch.room_kind,
+            chat_id: currentPatch.chat_id ?? patch.chat_id,
             unreadDelta: currentPatch.unreadDelta + (patch.unreadDelta || 0),
             resetUnread: currentPatch.resetUnread || patch.resetUnread === true,
         })
@@ -313,13 +334,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             shouldReloadSelectedMessages: boolean
             appendedMessages: any[]
             knownMessageIds: Set<number>
-            conversationPatches: Map<number, {
-                last_message_at?: string
-                last_message_type?: string
-                last_message_content?: string
-                unreadDelta: number
-                resetUnread: boolean
-            }>
+            conversationPatches: Map<number, RealtimeConversationPatch>
             shouldReloadConversations: boolean
         }
     ) {
@@ -355,7 +370,17 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
                     unreadDelta: !(currentSelected !== null && arrivingConversationKey === currentSelected) ? 1 : 0,
                 })
             } else {
-                shouldReloadConversations = true
+                queueConversationPatch(flushState.conversationPatches, arrivingConversationKey, {
+                    id: Math.abs(arrivingConversationKey),
+                    other_user_id: arrivingConversationKey,
+                    other_user_name: getRealtimeConversationName(data, arrivingConversationKey),
+                    room_kind: getRealtimeConversationRoomKind(data, arrivingConversationKey),
+                    chat_id: arrivingConversationKey < 0 ? Math.abs(arrivingConversationKey) : null,
+                    last_message_at: data?.created_at,
+                    last_message_type: data?.message_type,
+                    last_message_content: getConversationPreviewContent(data),
+                    unreadDelta: !(currentSelected !== null && arrivingConversationKey === currentSelected) ? 1 : 0,
+                })
             }
         }
 
@@ -368,13 +393,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         data: any,
         flushState: {
             directReaderIdsToMark: Set<number>
-            conversationPatches: Map<number, {
-                last_message_at?: string
-                last_message_type?: string
-                last_message_content?: string
-                unreadDelta: number
-                resetUnread: boolean
-            }>
+            conversationPatches: Map<number, RealtimeConversationPatch>
         }
     ) {
         const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
@@ -412,13 +431,7 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
             shouldReloadSelectedMessages: false,
             appendedMessages: [] as any[],
             knownMessageIds: new Set(messages.value.map((message: any) => message?.id).filter((id: any) => typeof id === 'number')),
-            conversationPatches: new Map<number, {
-                last_message_at?: string
-                last_message_type?: string
-                last_message_content?: string
-                unreadDelta: number
-                resetUnread: boolean
-            }>(),
+            conversationPatches: new Map<number, RealtimeConversationPatch>(),
             directReaderIdsToMark: new Set<number>(),
             reactionUpdates: new Map<number, any[]>(),
             shouldReloadConversations: false,
@@ -464,11 +477,13 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
         }
 
         if (flushState.conversationPatches.size > 0) {
+            const patchedConversationKeys = new Set<number>()
             conversations.value = conversations.value.map((conversation: any) => {
                 if (!conversation) return conversation
                 const conversationKey = Number(conversation.other_user_id)
                 const patch = flushState.conversationPatches.get(conversationKey)
                 if (!patch) return conversation
+                patchedConversationKeys.add(conversationKey)
 
                 const nextUnreadCount = patch.resetUnread
                     ? 0
@@ -486,6 +501,22 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
                     unread_count: nextUnreadCount,
                 }
             })
+            const newConversations = Array.from(flushState.conversationPatches.entries())
+                .filter(([conversationKey]) => !patchedConversationKeys.has(conversationKey))
+                .map(([conversationKey, patch]) => ({
+                    id: patch.id ?? Math.abs(conversationKey),
+                    other_user_id: patch.other_user_id ?? conversationKey,
+                    other_user_name: patch.other_user_name || 'گفتگوی جدید',
+                    last_message_at: patch.last_message_at ?? null,
+                    last_message_type: patch.last_message_type ?? null,
+                    last_message_content: patch.last_message_content ?? null,
+                    unread_count: patch.resetUnread ? 0 : Math.max(0, patch.unreadDelta),
+                    room_kind: patch.room_kind ?? (conversationKey < 0 ? 'group' : 'direct'),
+                    chat_id: patch.chat_id ?? (conversationKey < 0 ? Math.abs(conversationKey) : null),
+                }))
+            if (newConversations.length > 0) {
+                conversations.value = [...newConversations, ...conversations.value]
+            }
         }
 
         if (flushState.shouldReloadConversations) {
