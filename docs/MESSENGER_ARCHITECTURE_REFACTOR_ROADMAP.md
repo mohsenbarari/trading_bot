@@ -579,6 +579,12 @@ Status: In Progress
 - Started the final UI-system pass with a low-risk token adoption slice.
 - Standardized message bubble, media frame, voice player, document card, location card, and read-only composer sizing through `messenger-design-tokens.css`.
 - Removed practical inline hot-renderer styles from media/voice upload controls while preserving existing message behavior.
+- Continued the final pass across the remaining shell surfaces:
+  - direct/group/channel headers now show consistent room badges and shared menu styling
+  - message and conversation action menus share panel radius, menu width, touch target, shadow, and reduced-motion behavior
+  - group/channel manager shells use shared sheet/panel tokens and touch-target sizing
+  - attachment/camera/gallery controls use the same sheet/action-card sizing and reduced-motion fallback
+  - redundant conversation-list atmosphere decoration was removed to reduce paint cost and improve visual consistency
 
 ### Goal
 

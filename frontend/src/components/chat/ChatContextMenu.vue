@@ -265,17 +265,16 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 
 .telegram-panel {
   width: 100%;
-  background: white;
-  border-radius: 12px;
+  border-radius: var(--messenger-radius-panel, 18px);
   overflow-x: hidden;
   overflow-y: auto;
   max-height: calc(100vh - 16px);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: #fff;
+  border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
+  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
 }
 
 .telegram-menu-shadow {
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12), 0 1px 4px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
   transform-origin: top left;
 }
 
@@ -293,6 +292,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 
 .menu-item {
   padding: 10px 16px;
+  min-height: var(--messenger-touch-target, 44px);
   width: 100%;
   box-sizing: border-box;
   cursor: pointer;
@@ -300,7 +300,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   align-items: center;
   gap: 12px;
   font-size: 14px;
-  color: #111827;
+  color: var(--messenger-text-strong, #111827);
   transition: background 0.1s;
 }
 
@@ -319,7 +319,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 }
 
 .menu-item:hover {
-  background: rgba(0,0,0,0.04);
+  background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05));
 }
 
 .menu-item.is-danger {
@@ -358,7 +358,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 }
 
 .menu-actions-panel {
-  width: min(220px, 100%);
+  width: min(var(--messenger-menu-width, 236px), 100%);
   padding: 4px 0;
 }
 
@@ -380,8 +380,8 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   width: 100%;
   min-height: 34px;
   border: none;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.04);
+  border-radius: var(--messenger-radius-bubble, 12px);
+  background: var(--messenger-surface-muted, #f8fafc);
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -410,7 +410,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 .reaction-btn {
   border: none;
   background: rgba(15, 23, 42, 0.05);
-  border-radius: 14px;
+  border-radius: var(--messenger-radius-bubble, 12px);
   min-width: 0;
   width: 100%;
   height: 40px;
@@ -455,7 +455,7 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 
 .menu-divider {
   height: 1px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
   margin: 4px 0;
 }
 
@@ -472,7 +472,8 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   .zoom-fade-enter-active,
   .zoom-fade-leave-active,
   .reaction-dropdown-enter-active,
-  .reaction-dropdown-leave-active {
+  .reaction-dropdown-leave-active,
+  .reaction-btn {
     transition: none;
   }
 

@@ -28,6 +28,9 @@
         <div class="header-user-info" @click="handleTitleClick">
           <span class="header-name">
             {{ selectedUserName }}
+            <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
+            <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
+            <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
           <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
@@ -379,14 +382,14 @@ function formatDateForSeparator(dateString: string) {
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: var(--messenger-header-height, 56px);
   z-index: 1000;
   display: flex;
   align-items: center;
   padding: 0 8px;
   background: var(--messenger-surface-panel, #ffffff);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-  border-bottom: none;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
   gap: 8px;
   direction: ltr; /* Force LTR layout */
 }
@@ -408,7 +411,7 @@ function formatDateForSeparator(dateString: string) {
 }
 
 .header-btn svg { width: 24px; height: 24px; }
-.header-btn:hover { background: rgba(15, 23, 42, 0.06); }
+.header-btn:hover { background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05)); }
 .header-btn:active { background: rgba(15, 23, 42, 0.1); }
 
 .header-avatar {
@@ -541,6 +544,11 @@ function formatDateForSeparator(dateString: string) {
   color: #2563eb;
 }
 
+.room-badge-small.system {
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+}
+
 .header-room-meta {
   background: rgba(148, 163, 184, 0.14);
   color: var(--messenger-text-muted, #64748b);
@@ -570,16 +578,12 @@ function formatDateForSeparator(dateString: string) {
   height: 38px;
   background: var(--messenger-surface-muted, #f8fafc);
   border: none;
-  border-radius: var(--messenger-radius-control, 8px);
+  border-radius: var(--messenger-radius-panel, 18px);
   padding: 0 16px;
-  font-size: 14px;
+  font-size: 15px;
   font-family: inherit;
   outline: none;
   width: 100%;
-  padding: 0 16px;
-  font-size: 15px;
-  outline: none;
-  font-family: inherit;
   direction: rtl; /* User inputs persian generally */
 }
 
@@ -590,7 +594,7 @@ function formatDateForSeparator(dateString: string) {
   right: 0;
   background: var(--messenger-surface-panel, #ffffff);
   box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
-  border-radius: var(--messenger-radius-control, 8px);
+  border-radius: var(--messenger-radius-panel, 18px);
   max-height: 300px;
   overflow-y: auto;
   z-index: 1001;
@@ -637,7 +641,7 @@ function formatDateForSeparator(dateString: string) {
   font-size: 14px;
   font-weight: 700;
 }
-.header-menu-item:hover { background: rgba(15, 23, 42, 0.05); }
+.header-menu-item:hover { background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05)); }
 .header-menu-item svg { color: var(--messenger-text-muted, #64748b); }
 
 .header-menu-divider {
@@ -677,5 +681,11 @@ function formatDateForSeparator(dateString: string) {
   0% { opacity: 0.2; }
   20% { opacity: 1; }
   100% { opacity: 0.2; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-dots span {
+    animation: none;
+  }
 }
 </style>

@@ -532,8 +532,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="conversation-list-wrapper">
-    <div class="conversation-atmosphere" aria-hidden="true"></div>
-
     <div class="conversation-panel">
       <div class="conversations-list" v-auto-animate @scroll.passive="handleConversationListScroll">
         <div v-if="conversations.length === 0" class="empty-state">
@@ -706,19 +704,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top right, rgba(51, 144, 236, 0.16), transparent 26%),
-    radial-gradient(circle at top left, rgba(245, 158, 11, 0.1), transparent 22%),
-    linear-gradient(180deg, #edf2f7 0%, #f8fafc 54%, #eef4f8 100%);
-}
-
-.conversation-atmosphere {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 18% 14%, rgba(255, 255, 255, 0.28), transparent 18%),
-    radial-gradient(circle at 82% 12%, rgba(255, 255, 255, 0.2), transparent 16%);
+  background: linear-gradient(180deg, #edf2f7 0%, #f8fafc 54%, #eef4f8 100%);
 }
 
 .conversation-panel {
@@ -729,11 +715,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   margin: 10px 12px 0;
   overflow: hidden;
-  border-radius: 28px 28px 0 0;
+  border-radius: var(--messenger-radius-sheet, 28px) var(--messenger-radius-sheet, 28px) 0 0;
   border: 1px solid rgba(255, 255, 255, 0.72);
   background: var(--surface);
   box-shadow:
-    0 18px 45px rgba(15, 23, 42, 0.08),
+    0 12px 28px rgba(15, 23, 42, 0.07),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -867,11 +853,11 @@ onBeforeUnmount(() => {
   gap: 12px;
   min-height: var(--messenger-list-row-min-height, 64px);
   padding: 12px 14px;
-  border-radius: 22px;
+  border-radius: var(--messenger-radius-panel, 18px);
   border: 1px solid var(--line-soft);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
   cursor: pointer;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.065), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.055), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
   transition: transform var(--messenger-motion-standard, 180ms) ease, box-shadow var(--messenger-motion-standard, 180ms) ease, border-color var(--messenger-motion-standard, 180ms) ease;
   user-select: none;
   -webkit-user-select: none;
@@ -889,7 +875,7 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 44px;
   border: 1px solid rgba(51, 144, 236, 0.18);
-  border-radius: 16px;
+  border-radius: var(--messenger-radius-panel, 18px);
   background: rgba(255, 255, 255, 0.78);
   color: var(--accent);
   font: inherit;
@@ -1225,7 +1211,7 @@ onBeforeUnmount(() => {
   width: 58px;
   height: 58px;
   border: none;
-  border-radius: 22px;
+  border-radius: var(--messenger-radius-panel, 18px);
   background: linear-gradient(135deg, #3390ec, #2563eb);
   color: #fff;
   display: flex;
@@ -1256,10 +1242,11 @@ onBeforeUnmount(() => {
 
 .conversation-menu-panel {
   width: 100%;
-  border-radius: 12px;
+  border-radius: var(--messenger-radius-panel, 18px);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
+  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
+  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
@@ -1282,6 +1269,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   width: 100%;
   padding: 10px 16px;
+  min-height: var(--messenger-touch-target, 44px);
   box-sizing: border-box;
   border: 0;
   background: transparent;
@@ -1296,7 +1284,7 @@ onBeforeUnmount(() => {
 }
 
 .menu-action:hover {
-  background: rgba(15, 23, 42, 0.04);
+  background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05));
 }
 
 .menu-action-icon {
@@ -1394,11 +1382,31 @@ onBeforeUnmount(() => {
 
   .conversation-card {
     padding: 13px 14px;
-    border-radius: 22px;
+    border-radius: var(--messenger-radius-panel, 18px);
   }
   .fab-new-chat {
     right: 18px;
     bottom: 22px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mention-badge,
+  .conversation-card,
+  .fab-new-chat,
+  .zoom-fade-enter-active,
+  .zoom-fade-leave-active,
+  .zoom-fade-enter-active .conversation-menu-popover,
+  .zoom-fade-leave-active .conversation-menu-popover {
+    animation: none;
+    transition: none;
+  }
+
+  .conversation-card:hover,
+  .fab-new-chat:hover,
+  .zoom-fade-enter-from .conversation-menu-popover,
+  .zoom-fade-leave-to .conversation-menu-popover {
+    transform: none;
   }
 }
 </style>

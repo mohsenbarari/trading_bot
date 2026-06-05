@@ -2423,14 +2423,14 @@ onBeforeUnmount(() => {
 }
 
 .camera-icon-btn {
-  width: 42px;
-  height: 42px;
+  width: var(--messenger-touch-target, 44px);
+  height: var(--messenger-touch-target, 44px);
   border-radius: 999px;
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.14);
   color: white;
   cursor: pointer;
 }
@@ -2458,6 +2458,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  min-height: 34px;
 }
 
 .camera-mode-btn.active {
@@ -2538,7 +2539,7 @@ onBeforeUnmount(() => {
   max-width: min(88vw, 360px);
   padding: 10px 14px 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 18px;
+  border-radius: var(--messenger-radius-panel, 18px);
   background: rgba(8, 17, 28, 0.78);
   color: white;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34);
@@ -2655,7 +2656,7 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 10px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 6px 2px;
   z-index: 2;
 }
 
@@ -2669,7 +2670,7 @@ onBeforeUnmount(() => {
   min-width: 68px;
   height: 92px;
   border: none;
-  border-radius: 18px;
+  border-radius: var(--messenger-radius-panel, 18px);
   overflow: hidden;
   padding: 0;
   background: rgba(0, 0, 0, 0.38);
@@ -2765,7 +2766,7 @@ onBeforeUnmount(() => {
 }
 
 .camera-queue-action {
-  height: 48px;
+  min-height: var(--messenger-touch-target, 44px);
   border: none;
   border-radius: 999px;
   display: inline-flex;
@@ -2879,13 +2880,14 @@ onBeforeUnmount(() => {
   bottom: 0;
   left: 0;
   right: 0;
-  background: #fff;
-  border-radius: 16px 16px 0 0;
+  background: var(--messenger-panel-glass-bg, rgba(255, 255, 255, 0.92));
+  border-radius: var(--messenger-radius-sheet, 28px) var(--messenger-radius-sheet, 28px) 0 0;
   z-index: 1000;
   max-height: 75vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
   transition: all 0.2s ease-out;
   will-change: transform, height, max-height, border-radius, top;
 }
@@ -2935,7 +2937,7 @@ onBeforeUnmount(() => {
 
 .sheet-tabs {
   display: flex;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
   padding: 0 8px;
 }
 .tab-btn {
@@ -2952,7 +2954,8 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 500;
   border-bottom: 2px solid transparent;
-  transition: all 0.2s;
+  min-height: var(--messenger-touch-target, 44px);
+  transition: color var(--messenger-motion-standard, 180ms), border-color var(--messenger-motion-standard, 180ms);
 }
 .tab-btn.active {
   color: #3390ec;
@@ -2980,12 +2983,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   padding: 20px 24px;
-  background: #f9fafb;
-  border: 1px solid #f0f0f0;
-  border-radius: 16px;
+  background: var(--messenger-surface-muted, #f8fafc);
+  border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.32));
+  border-radius: var(--messenger-radius-panel, 18px);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform var(--messenger-motion-fast, 120ms), background var(--messenger-motion-fast, 120ms);
   min-width: 110px;
+  min-height: 112px;
 }
 .action-card:active {
   transform: scale(0.95);
@@ -3006,8 +3010,8 @@ onBeforeUnmount(() => {
 
 .action-label {
   font-size: 13px;
-  font-weight: 500;
-  color: #374151;
+  font-weight: 700;
+  color: var(--messenger-text-strong, #374151);
 }
 
 /* Location panel */
@@ -3241,6 +3245,25 @@ onBeforeUnmount(() => {
 .slide-up-enter-active { transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1); }
 .slide-up-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 1, 1); }
 .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .camera-capture-feedback,
+  .camera-shutter-btn,
+  .camera-shutter-core,
+  .action-card,
+  .fade-enter-active,
+  .fade-leave-active,
+  .slide-up-enter-active,
+  .slide-up-leave-active {
+    animation: none;
+    transition: none;
+  }
+
+  .action-card:active,
+  .camera-shutter-btn:not(:disabled):active {
+    transform: none;
+  }
+}
 
 @media (max-width: 640px) {
   .camera-topbar {
