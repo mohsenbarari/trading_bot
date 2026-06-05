@@ -838,7 +838,7 @@ test.describe('Notification regressions', () => {
     const fixture = seedRelationAwareRoomActivityFixture('room_relation_activity')
 
     await loginWithSeededSession(page, fixture.owner)
-    await page.goto(`/chat?user_id=-${fixture.groupChatId}&user_name=${encodeURIComponent(fixture.groupTitle)}`)
+    await gotoWithWebKitRetry(page, `/chat?user_id=-${fixture.groupChatId}&user_name=${encodeURIComponent(fixture.groupTitle)}`)
     await expect(page.locator('.chat-header .header-name')).toContainText(fixture.groupTitle, { timeout: 30000 })
     await page.waitForTimeout(1200)
 
@@ -861,7 +861,7 @@ test.describe('Notification regressions', () => {
     const fixture = seedRelationAwareRoomActivityFixture('channel_relation_activity')
 
     await loginWithSeededSession(page, fixture.owner)
-    await page.goto(`/chat?user_id=-${fixture.channelChatId}&user_name=${encodeURIComponent(fixture.channelTitle)}`)
+    await gotoWithWebKitRetry(page, `/chat?user_id=-${fixture.channelChatId}&user_name=${encodeURIComponent(fixture.channelTitle)}`)
     await expect(page.locator('.chat-header .header-name')).toContainText(fixture.channelTitle, { timeout: 30000 })
     await page.waitForTimeout(1200)
 

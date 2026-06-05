@@ -346,8 +346,8 @@ async function getConversationNameOrder(page: Page) {
 }
 
 test.describe('Messenger conversation list state actions', () => {
-  test('direct conversation menu supports pin reorder mute unread and hide flows', async ({ page, request }) => {
-    test.setTimeout(150000)
+  test('direct conversation menu supports pin reorder mute unread and hide flows', async ({ page, request, browserName }) => {
+    test.setTimeout(browserName === 'webkit' ? 240000 : 150000)
     const fixture = seedConversationStateFixture('conversation_actions_direct')
     const suffix = Date.now()
 

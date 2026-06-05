@@ -701,6 +701,10 @@ Status: In Progress
   - focused direct-chat Chromium regression: `1` passed.
   - representative channel-media Chromium/WebKit batch covering group album, group+channel share, channel+direct share, and voice share: `8` passed.
   - broad channel-media Chromium/WebKit subset covering group activity plus all `share receive can fan out` and shared-voice cases: `56` passed in `15.6m`.
+- Reviewed the next full Stage H browser matrix result in `tmp/e2e-logs/stage-h-matrix-20260605T133701Z.log`: `337` passed, `12` skipped, `2` failed.
+  - Both remaining failures were WebKit-only harness stability issues, not confirmed product regressions: the conversation-actions snapshot already showed the expected unread badge but the long WebKit flow reached the whole-test timeout, and the notification failure was Playwright/WebKit's internal navigation error on `page.goto`.
+  - Hardened only the affected harness paths: the direct conversation-actions flow now gets a WebKit-specific timeout budget, and group/channel room-activity notification tests use the existing `gotoWithWebKitRetry()` navigation helper instead of raw `page.goto`.
+  - Full-matrix reruns are intentionally deferred until the two focused WebKit regressions pass, to avoid another long fix/rerun loop.
 
 ### Goal
 
@@ -770,4 +774,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage H with one full browser matrix rerun using detailed logging. If it is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new failures appear, classify them with targeted tests and database/log evidence before scheduling another full matrix run.
+Continue Stage H with the two focused WebKit regressions from `stage-h-matrix-20260605T133701Z.log`. If those pass, run one final full browser matrix with detailed logging. If the final matrix is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new failures appear, classify them with targeted tests and database/log evidence before scheduling another full matrix run.
