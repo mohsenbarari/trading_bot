@@ -1563,7 +1563,9 @@ function onMultiPreviewConfirm(finalFiles: File[]) {
   finalFiles.forEach((file, index) => {
     emit('select-media', file, albumId, index, finalFiles.length)
   })
-  close()
+  void nextTick().then(() => {
+    window.setTimeout(close, 0)
+  })
 }
 
 function onMultiPreviewCancel() {

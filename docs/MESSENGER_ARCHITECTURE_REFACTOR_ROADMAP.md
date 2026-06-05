@@ -81,8 +81,8 @@ Stores must be small and domain-specific. A single huge `useChatStore` would rec
 | D | Message Renderer Split And Error Boundaries | Completed | Make message rendering modular and fault-tolerant |
 | E | Media Dimension Contract And Virtualized Timeline | Completed | Introduce safe real virtualization without scroll jumps |
 | F | Realtime Gateway And Request Churn Reduction | Completed | Convert realtime/network updates into precise store mutations |
-| G | UI System Final Pass | Planned | Polish the user-facing experience after architecture is stable |
-| H | Full Release Gate And Legacy Retirement Decision | Planned | Prove feature parity, speed, stability, and UX acceptance |
+| G | UI System Final Pass | Completed | Polish the user-facing experience after architecture is stable |
+| H | Full Release Gate And Legacy Retirement Decision | In Progress | Prove feature parity, speed, stability, and UX acceptance |
 
 ## Stage A - Domain Naming Cleanup
 
@@ -671,6 +671,21 @@ Status: In Progress
   - focused direct conversation menu action regression on Chromium + WebKit: `2` passed.
   - mini-batch covering all touched messenger E2E specs on Chromium + WebKit: `8` passed in `2.2m`.
 
+### 2026-06-05 Direct-Room Matrix Failure Hardening Slice
+
+- Reviewed the second full Stage H browser matrix result in `tmp/e2e-logs/stage-h-matrix-20260605T092546Z.log`: `335` passed, `12` skipped, `4` failed.
+- Classified the failures before scheduling another full matrix:
+  - the previous channel forward-video and conversation-action failures stayed green in the full matrix.
+  - `messenger-room-manager-profile.spec.ts` failed because the group header includes the canonical `گروه` badge text; the room-open helper now asserts `toContainText(title)` instead of exact header text.
+  - the direct-room album failure persisted both image and video records with a shared `album_id`; the harness now waits for backend album persistence before UI assertions and refreshes the direct room if the current DOM has not yet replaced optimistic media.
+  - the direct-room document-download failure did not reproduce in targeted coverage and remains classified as matrix-pressure timing unless the next full matrix repeats it.
+- Hardened the product album dispatch path:
+  - `AttachmentMenu.vue` now defers closing the gallery preview sheet by one Vue tick plus a macrotask after emitting every album item, preventing WebKit under load from tearing down the attachment surface before parent upload handlers are fully scheduled.
+- Validation passed without another full-matrix loop:
+  - focused direct album regression on Chromium + WebKit: `2` passed in `28.4s`.
+  - focused mini-batch for the three failed Stage H surfaces on Chromium, Firefox, and WebKit: `9` passed in `2.1m`.
+  - focused `AttachmentMenu.vue` Vitest suite: `38` passed.
+
 ### Goal
 
 Prove that the new architecture is faster, safer, and more pleasant before removing legacy fallback.
@@ -739,4 +754,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage H with one full browser matrix rerun using detailed logging. If it is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new unrelated failures appear, classify them before scheduling another full matrix run.
+Continue Stage H with one full browser matrix rerun using detailed logging. If it is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new failures appear, classify them with targeted tests and database/log evidence before scheduling another full matrix run.
