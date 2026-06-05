@@ -651,6 +651,14 @@ test.describe('Messenger room manager and public profile flows', () => {
       .then(() => true)
       .catch(() => false)
     if (!headerAlreadyUpdated) {
+      const headerUpdatedAfterManagerClose = await expect(updatedHeader)
+        .toHaveText(updatedTitle, { timeout: 30000 })
+        .then(() => true)
+        .catch(() => false)
+      if (headerUpdatedAfterManagerClose) {
+        return
+      }
+
       const updatedChannelRow = conversationRow(page, updatedTitle)
       await expect(updatedChannelRow).toBeVisible({ timeout: 30000 })
       await updatedChannelRow.click({ force: true })
