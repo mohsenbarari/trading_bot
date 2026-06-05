@@ -346,25 +346,22 @@ async function getConversationNameOrder(page: Page) {
 }
 
 test.describe('Messenger conversation list state actions', () => {
-  test('direct conversation menu supports pin reorder mute unread and hide flows', async ({ page, request, browserName }) => {
-    test.setTimeout(browserName === 'webkit' ? 240000 : 150000)
-    const fixture = seedConversationStateFixture('conversation_actions_direct')
+  test('direct conversation menu supports pin reorder flows', async ({ page, request, browserName }) => {
+    test.setTimeout(browserName === 'webkit' ? 120000 : 90000)
+    const fixture = seedConversationStateFixture('conversation_actions_direct_pin')
     const suffix = Date.now()
 
     await sendDirectTextMessage(request, fixture.accessToken, fixture.peerAId, `PW DIRECT A ${suffix}`)
     await sendDirectTextMessage(request, fixture.accessToken, fixture.peerBId, `PW DIRECT B ${suffix}`)
-    await sendDirectTextMessage(request, fixture.accessToken, fixture.peerCId, `PW DIRECT C ${suffix}`)
 
     await loginWithSeededSession(page, fixture)
     await page.goto('/chat')
 
     const rowA = conversationRow(page, fixture.peerAName)
     const rowB = conversationRow(page, fixture.peerBName)
-    const rowC = conversationRow(page, fixture.peerCName)
 
     await expect(rowA).toBeVisible({ timeout: 30000 })
     await expect(rowB).toBeVisible({ timeout: 30000 })
-    await expect(rowC).toBeVisible({ timeout: 30000 })
 
     await openConversationMenuByLongPress(page, rowA)
     await clickConversationMenuAction(page, 'سنجاق کردن')
@@ -408,6 +405,21 @@ test.describe('Messenger conversation list state actions', () => {
         return findConversationByDirectUser(conversations, fixture.peerBId)?.is_pinned ?? null
       }, { timeout: 30000 })
       .toBe(false)
+  })
+
+  test('direct conversation menu supports mute flows', async ({ page, request, browserName }) => {
+    test.setTimeout(browserName === 'webkit' ? 120000 : 90000)
+    const fixture = seedConversationStateFixture('conversation_actions_direct_mute')
+    const suffix = Date.now()
+
+    await sendDirectTextMessage(request, fixture.accessToken, fixture.peerBId, `PW DIRECT B ${suffix}`)
+
+    await loginWithSeededSession(page, fixture)
+    await page.goto('/chat')
+
+    const rowB = conversationRow(page, fixture.peerBName)
+
+    await expect(rowB).toBeVisible({ timeout: 30000 })
 
     await openConversationMenuByLongPress(page, rowB)
     await clickConversationMenuAction(page, 'بی‌صدا کردن گفتگو')
@@ -423,13 +435,31 @@ test.describe('Messenger conversation list state actions', () => {
     await openConversationMenuByLongPress(page, rowB)
     await clickConversationMenuAction(page, 'خروج از حالت بی‌صدا')
 
-    await expect(rowB.locator('.side-muted-indicator')).toHaveCount(0)
+    await expect(conversationRow(page, fixture.peerBName).locator('.side-muted-indicator')).toHaveCount(0)
     await expect
       .poll(async () => {
         const conversations = await fetchConversations(request, fixture.accessToken)
         return findConversationByDirectUser(conversations, fixture.peerBId)?.is_muted ?? null
       }, { timeout: 30000 })
       .toBe(false)
+  })
+
+  test('direct conversation menu supports unread and hide flows', async ({ page, request, browserName }) => {
+    test.setTimeout(browserName === 'webkit' ? 120000 : 90000)
+    const fixture = seedConversationStateFixture('conversation_actions_direct_unread_hide')
+    const suffix = Date.now()
+
+    await sendDirectTextMessage(request, fixture.accessToken, fixture.peerAId, `PW DIRECT A ${suffix}`)
+    await sendDirectTextMessage(request, fixture.accessToken, fixture.peerCId, `PW DIRECT C ${suffix}`)
+
+    await loginWithSeededSession(page, fixture)
+    await page.goto('/chat')
+
+    const rowA = conversationRow(page, fixture.peerAName)
+    const rowC = conversationRow(page, fixture.peerCName)
+
+    await expect(rowA).toBeVisible({ timeout: 30000 })
+    await expect(rowC).toBeVisible({ timeout: 30000 })
 
     await openConversationMenuByLongPress(page, rowA)
     await clickConversationMenuAction(page, 'علامت‌گذاری به‌عنوان خوانده‌نشده')
