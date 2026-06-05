@@ -133,6 +133,91 @@ describe('ChatEventGateway', () => {
     expect(patchReaction).toHaveBeenCalledWith(88, [{ emoji: '🔥', user_id: 4 }])
   })
 
+  it('caps message and reaction event-clock memory to recent entries', () => {
+    const appendOrReplaceMessage = vi.fn()
+    const patchReaction = vi.fn()
+    const gateway = createChatEventGateway({
+      messages: { appendOrReplaceMessage, patchReaction },
+      conversations: { patchConversation: vi.fn() },
+    }, {
+      maxMessageClockEntries: 2,
+      maxReactionClockEntries: 2,
+    })
+
+    gateway.dispatch('chat:message', {
+      id: 1,
+      sender_id: 2,
+      receiver_id: 9,
+      content: 'first',
+      message_type: 'text',
+      created_at: '2026-06-05T10:00:01Z',
+    })
+    gateway.dispatch('chat:message', {
+      id: 2,
+      sender_id: 2,
+      receiver_id: 9,
+      content: 'second',
+      message_type: 'text',
+      created_at: '2026-06-05T10:00:02Z',
+    })
+    gateway.dispatch('chat:message', {
+      id: 3,
+      sender_id: 2,
+      receiver_id: 9,
+      content: 'third',
+      message_type: 'text',
+      created_at: '2026-06-05T10:00:03Z',
+    })
+
+    const evictedMessageResult = gateway.dispatch('chat:message', {
+      id: 1,
+      sender_id: 2,
+      receiver_id: 9,
+      content: 'first stale after eviction',
+      message_type: 'text',
+      created_at: '2026-06-05T10:00:00Z',
+    })
+
+    expect(evictedMessageResult).toMatchObject({ handled: true })
+    expect(appendOrReplaceMessage).toHaveBeenCalledWith(2, expect.objectContaining({
+      id: 1,
+      content: 'first stale after eviction',
+    }))
+
+    gateway.dispatch('chat:reaction', {
+      id: 10,
+      sender_id: 2,
+      receiver_id: 9,
+      reactions: [{ emoji: '🔥', user_id: 4 }],
+      updated_at: '2026-06-05T10:00:01Z',
+    })
+    gateway.dispatch('chat:reaction', {
+      id: 11,
+      sender_id: 2,
+      receiver_id: 9,
+      reactions: [{ emoji: '👍', user_id: 4 }],
+      updated_at: '2026-06-05T10:00:02Z',
+    })
+    gateway.dispatch('chat:reaction', {
+      id: 12,
+      sender_id: 2,
+      receiver_id: 9,
+      reactions: [{ emoji: '✅', user_id: 4 }],
+      updated_at: '2026-06-05T10:00:03Z',
+    })
+
+    const evictedReactionResult = gateway.dispatch('chat:reaction', {
+      id: 10,
+      sender_id: 2,
+      receiver_id: 9,
+      reactions: [{ emoji: '❄️', user_id: 4 }],
+      updated_at: '2026-06-05T10:00:00Z',
+    })
+
+    expect(evictedReactionResult).toMatchObject({ handled: true })
+    expect(patchReaction).toHaveBeenLastCalledWith(10, [{ emoji: '❄️', user_id: 4 }])
+  })
+
   it('rejects malformed events without mutating stores', () => {
     const appendOrReplaceMessage = vi.fn()
     const gateway = createChatEventGateway({

@@ -546,8 +546,12 @@ Reduce reload-driven behavior and route all realtime updates through precise sto
   - routed chat notification preview changes through `useConversationsStore.patchConversation()` so realtime notifications update conversation previews/unread counts without forcing a list reload.
   - added a short-lived `chatManagerCache` service for group detail, channel list, channel members, and channel invite-candidate manager reads, with mutation invalidation after create/update/avatar/member/leave flows.
   - converted post-forward conversation refresh into local preview patching for successful forward targets.
+- Hardened on 2026-06-05 after event-clock memory review:
+  - capped `ChatEventGateway` message and reaction clock maps to 2000 recent entries by default, with a smaller 500-entry cap for room conversation clocks.
+  - kept the cap local to the gateway instead of coupling it to room teardown, because the ordering guard only needs a recent duplicate/stale window and should not retain every historical message id for multi-day sessions.
 - Validation passed for this slice:
   - `npm run test:unit:run -- src/composables/useNotificationRuntime.test.ts src/services/chat/chatManagerCache.test.ts src/components/chat/ChatGroupManagerModal.test.ts src/components/CreateChannelView.test.ts src/components/ChatView.test.ts`
+  - `npm run test:unit:run -- src/services/chat/chatEventGateway.test.ts`
 - Remaining before Stage F can close:
   - audit any remaining reload fallback that lacks complete payload data and either keep it documented or add an explicit payload contract.
   - run Stage F benchmark subset: S05, S06, S07, S08, S09, S11.

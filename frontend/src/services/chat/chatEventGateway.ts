@@ -37,6 +37,16 @@ type EventClock = {
   timestamp: number | null
 }
 
+export interface ChatEventGatewayOptions {
+  maxMessageClockEntries?: number
+  maxConversationClockEntries?: number
+  maxReactionClockEntries?: number
+}
+
+const DEFAULT_MAX_MESSAGE_CLOCK_ENTRIES = 2000
+const DEFAULT_MAX_CONVERSATION_CLOCK_ENTRIES = 500
+const DEFAULT_MAX_REACTION_CLOCK_ENTRIES = 2000
+
 function normalizeReactionList(reactions: unknown): MessageReaction[] {
   return Array.isArray(reactions)
     ? reactions
@@ -81,12 +91,40 @@ function hasComparableClock(clock: EventClock) {
   return clock.version !== null || clock.timestamp !== null
 }
 
+function rememberClock(
+  map: Map<number, EventClock>,
+  key: number,
+  clock: EventClock,
+  maxEntries: number,
+) {
+  if (maxEntries <= 0) return
+  if (map.has(key)) {
+    map.delete(key)
+  }
+  map.set(key, clock)
+  while (map.size > maxEntries) {
+    const oldestKey = map.keys().next().value
+    if (oldestKey === undefined) break
+    map.delete(oldestKey)
+  }
+}
+
 export class ChatEventGateway {
   private latestMessageClockById = new Map<number, EventClock>()
   private latestConversationClockByRoom = new Map<number, EventClock>()
   private latestReactionClockByMessage = new Map<number, EventClock>()
+  private maxMessageClockEntries: number
+  private maxConversationClockEntries: number
+  private maxReactionClockEntries: number
 
-  constructor(private stores: ChatGatewayStores) {}
+  constructor(
+    private stores: ChatGatewayStores,
+    options: ChatEventGatewayOptions = {},
+  ) {
+    this.maxMessageClockEntries = options.maxMessageClockEntries ?? DEFAULT_MAX_MESSAGE_CLOCK_ENTRIES
+    this.maxConversationClockEntries = options.maxConversationClockEntries ?? DEFAULT_MAX_CONVERSATION_CLOCK_ENTRIES
+    this.maxReactionClockEntries = options.maxReactionClockEntries ?? DEFAULT_MAX_REACTION_CLOCK_ENTRIES
+  }
 
   dispatch(eventName: ChatGatewayEventName, payload: unknown): ChatGatewayResult {
     const data = payload as any
@@ -110,7 +148,7 @@ export class ChatEventGateway {
         return { handled: false, eventName, roomKey, reason: 'stale-message' }
       }
       if (hasComparableClock(messageClock)) {
-        this.latestMessageClockById.set(data.id, messageClock)
+        rememberClock(this.latestMessageClockById, data.id, messageClock, this.maxMessageClockEntries)
       }
 
       this.stores.messages?.appendOrReplaceMessage?.(roomKey, data as Message)
@@ -120,7 +158,7 @@ export class ChatEventGateway {
         || compareEventClock(messageClock, latestConversationClock) >= 0
       if (canPatchConversation) {
         if (hasComparableClock(messageClock)) {
-          this.latestConversationClockByRoom.set(roomKey, messageClock)
+          rememberClock(this.latestConversationClockByRoom, roomKey, messageClock, this.maxConversationClockEntries)
         }
         this.stores.conversations?.patchConversation?.(roomKey, {
           last_message_at: data.created_at,
@@ -151,7 +189,7 @@ export class ChatEventGateway {
         return { handled: false, eventName, roomKey, reason: 'stale-reaction' }
       }
       if (hasComparableClock(reactionClock)) {
-        this.latestReactionClockByMessage.set(data.id, reactionClock)
+        rememberClock(this.latestReactionClockByMessage, data.id, reactionClock, this.maxReactionClockEntries)
       }
       this.stores.messages?.patchReaction?.(data.id, normalizeReactionList(data.reactions))
       return { handled: true, eventName, roomKey }
@@ -181,6 +219,6 @@ export class ChatEventGateway {
   }
 }
 
-export function createChatEventGateway(stores: ChatGatewayStores) {
-  return new ChatEventGateway(stores)
+export function createChatEventGateway(stores: ChatGatewayStores, options?: ChatEventGatewayOptions) {
+  return new ChatEventGateway(stores, options)
 }
