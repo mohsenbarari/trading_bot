@@ -239,6 +239,8 @@ type NewDirectChatTarget = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_management_name?: string | null
+  customer_tier?: string | null
 }
 
 const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
@@ -1811,7 +1813,11 @@ const startNewChatFromTarget = (target: NewDirectChatTarget) => {
   const userId = Number(target.id)
   if (!Number.isInteger(userId) || userId <= 0) return
 
-  const userName = (target.full_name || '').trim() || (target.account_name || '').trim() || 'گفتگوی جدید'
+  const userName =
+    (target.customer_management_name || '').trim() ||
+    (target.full_name || '').trim() ||
+    (target.account_name || '').trim() ||
+    'گفتگوی جدید'
   prepareConversationTransition()
   const existingConversation = conversations.value.find((conversation) => conversation.other_user_id === userId)
   if (!existingConversation) {
