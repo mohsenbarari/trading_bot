@@ -420,6 +420,47 @@ describe('ChatHeader.vue', () => {
     expect((metaChildren[0] as HTMLElement | undefined)?.textContent).toContain('سرگروه: زهرا')
   })
 
+  it('renders accountant direct role only once when no owner badge is present', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 44,
+        selectedUserName: 'نرگس',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        selectedChatRoleKind: 'accountant',
+        selectedChatRoleLabel: 'حسابدار',
+        selectedAccountantOwnerLabel: null,
+        apiBaseUrl: '',
+        targetUserStatus: 'آخرین بازدید اخیراً',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    expect(wrapper.findAll('.direct-role')).toHaveLength(1)
+    expect(wrapper.find('.accountant-owner').exists()).toBe(false)
+    expect(wrapper.text()).toContain('حسابدار')
+  })
+
   it('renders the selection header and emits clear-selection', async () => {
     const ChatHeader = (await import('./ChatHeader.vue')).default
     const wrapper = mount(ChatHeader, {
