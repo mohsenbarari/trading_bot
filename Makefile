@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
+.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
 
 help:
 	@echo ""
@@ -21,6 +21,7 @@ help:
 	@echo "  make foreign    - Rebuild Docker on foreign server only"
 	@echo "  make sync-recover - Manual fallback to catch up both servers after Iran reconnects"
 	@echo "  make restore-default-commodities - Restore canonical default commodities on the current DB"
+	@echo "  make dev-admin ARGS=\"...\" - Run the developer admin CLI inside the app container"
 	@echo ""
 	@echo "  make down        - Stop foreign containers"
 	@echo "  make logs        - Foreign server logs"
@@ -68,6 +69,9 @@ sync-recover:
 
 restore-default-commodities:
 	@docker compose run --rm migration python scripts/restore_default_commodities.py
+
+dev-admin:
+	@docker compose exec -T app python scripts/dev_admin.py $${ARGS}
 
 # --- Management Commands ---
 
