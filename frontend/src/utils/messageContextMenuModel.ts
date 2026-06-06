@@ -119,7 +119,7 @@ export function buildMessengerContextMenuModel(
       tone: 'warning',
     })
   }
-  if (input.canViewSeenList && !input.isAlbumSelection) {
+  if (input.canViewSeenList) {
     communicationItems.push({ key: 'seen-list', label: 'بازدیدها', tone: 'default' })
   }
   if (communicationItems.length > 0) {

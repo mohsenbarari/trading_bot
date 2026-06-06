@@ -88,6 +88,7 @@ describe('ChatContextMenu.vue', () => {
         canEdit: false,
         canDelete: true,
         canPin: false,
+        canViewSeenList: true,
         isPinnedMessage: false,
         availableReactions: [],
       },
@@ -104,6 +105,7 @@ describe('ChatContextMenu.vue', () => {
 
     expect(wrapper.text()).toContain('دانلود آلبوم')
     expect(wrapper.text()).toContain('اشتراک‌گذاری آلبوم')
+    expect(wrapper.text()).toContain('بازدیدها')
     expect(wrapper.text()).toContain('رسانه و فایل')
     expect(wrapper.text()).not.toContain('ذخیره در گالری')
 
@@ -111,6 +113,11 @@ describe('ChatContextMenu.vue', () => {
     expect(shareAlbumButton).toBeTruthy()
     await shareAlbumButton!.trigger('click')
     expect(wrapper.emitted('share-album')).toHaveLength(1)
+
+    const seenButton = wrapper.findAll('.menu-item').find((item) => item.text().includes('بازدیدها'))
+    expect(seenButton).toBeTruthy()
+    await seenButton!.trigger('click')
+    expect(wrapper.emitted('seen-list')).toHaveLength(1)
   })
 
   it('expands overflow reactions and resets the expanded picker when the menu closes', async () => {

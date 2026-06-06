@@ -42,6 +42,7 @@ describe('messageContextMenuModel', () => {
       canEdit: false,
       canDelete: false,
       canPin: false,
+      canViewSeenList: true,
       isPinnedMessage: false,
       showReactionRow: false,
       hasOverflowReactions: false,
@@ -58,8 +59,14 @@ describe('messageContextMenuModel', () => {
       'save-album',
       'share-album',
     ])
+    expect(withShare.sections[2]?.items.map((item) => item.key)).toEqual([
+      'seen-list',
+    ])
     expect(withoutShare.sections[1]?.items.map((item) => item.key)).toEqual([
       'save-album',
+    ])
+    expect(withoutShare.sections[2]?.items.map((item) => item.key)).toEqual([
+      'seen-list',
     ])
   })
 
