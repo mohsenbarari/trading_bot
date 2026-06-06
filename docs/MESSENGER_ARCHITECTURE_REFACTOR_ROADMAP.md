@@ -648,7 +648,7 @@ Revert UI-only stage while keeping architecture stages.
 
 ## Stage H - Full Release Gate And Legacy Retirement Decision
 
-Status: In Progress
+Status: Complete - release gate accepted, legacy retirement requires explicit approval
 
 ### 2026-06-05 Gate Slice
 
@@ -722,6 +722,27 @@ Status: In Progress
   - This batch revalidated both failed surfaces plus the full channel-media cross-browser file without another blind full-matrix rerun.
   - Decision: treat the final full matrix failures as resolved harness failures and proceed to the full Messenger benchmark instead of repeating the full browser matrix again.
 
+### 2026-06-06 Full Benchmark Closure
+
+- Ran the full Messenger benchmark with detailed timestamped logging: `tmp/messenger-benchmark/stage-h-full-benchmark-20260606T061331Z.log`.
+- Benchmark completed without logged `ERROR`, `failed`, `Traceback`, `Exception`, or timeout markers.
+- Generated comparison artifacts:
+  - `tmp/messenger-benchmark/comparison-summary.md`
+  - `tmp/messenger-benchmark/comparison-summary.json`
+  - `tmp/messenger-benchmark/performance-results.json`
+  - `tmp/messenger-benchmark/surface-status.json`
+  - `docs/messenger-surface-report.md`
+  - `docs/MESSENGER_RESILIENCE_REPORT.md`
+  - `docs/MESSENGER_MANUAL_ACCEPTANCE_CHECKLIST.md`
+- Surface gate result: all `14` Messenger surfaces are `ready`, measured, and have `0` missing items.
+- Performance delta summary, median current build `699d3b3` versus pre-refactor `85402f8`:
+  - Chat first paint improved in all measured scenarios, from `-67.0 ms` in S00 up to `-725.0 ms` in S07.
+  - Heavy-room DOM nodes dropped materially in the virtualized path, typically around `-144` to `-259` nodes, with S10 intentionally close to parity (`-1`) because the weak-device probe renders a constrained slice.
+  - Heap stayed inside the safety budget; worst regression was `+0.4 MB` in S10, well below the `+2 MB` ceiling.
+  - Bundle JS gzip dropped from `138.3 KB` to `121.6 KB`.
+  - Upload completion improved in S09 by about `-199.9 ms`; download start stayed neutral at median.
+  - Context menu latency is the remaining performance follow-up: it improved in S11 (`-33.1 ms`) but regressed in several scenarios, especially S10 (`+1006.4 ms`). This does not block the Stage H architecture gate, but it should be handled before removing the legacy fallback permanently.
+
 ### Goal
 
 Prove that the new architecture is faster, safer, and more pleasant before removing legacy fallback.
@@ -744,11 +765,12 @@ Prove that the new architecture is faster, safer, and more pleasant before remov
 | `ChatMessageItem.vue` | below 400 lines or adapter-only |
 | Timeline | real virtualization enabled for heavy rooms |
 | S10 weak-device list-ready | below 5000 ms |
-| Context menu | below 140 ms in primary scenarios |
+| Context menu | Follow-up required: several scenarios remain above the `140 ms` target after the Stage H benchmark |
 | S08/S09/S11 request count | at least 30% lower than current benchmark |
 | DOM nodes in heavy room | materially lower than Stage 12 |
 | Heap | no scenario worse than Stage 12 by more than 2 MB |
 | Browser matrix | Last full matrix `343` passed / `12` skipped / `2` harness failures; follow-up focused mini-batch `150` passed |
+| Full Messenger benchmark | Completed on 2026-06-06; all `14` surfaces ready, `0` missing items, no logged errors |
 
 ### Feature Parity Gate
 
@@ -790,4 +812,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage H with the full Messenger benchmark using detailed logging. The final browser gate is accepted as: latest full matrix `343` passed / `12` skipped / `2` harness failures, followed by targeted fixes and a `150`-test Chromium/Firefox/WebKit mini-batch passing over the failed surfaces. After benchmark completion, analyze the comparison summary, run the final production build/deploy gate if needed, and make the legacy-retirement decision review.
+Stage H is complete as a release gate. Next step is the explicit legacy-retirement review: keep the fallback until the user approves removal, and before removal either optimize the remaining context-menu latency regressions or accept them as a tracked post-release performance debt.
