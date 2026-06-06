@@ -8,6 +8,7 @@ import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
 import { isUserOnline } from '../../utils/userPresence'
 import { formatIranTime } from '../../utils/iranTime'
+import { getChatRoleBadgeClass } from '../../utils/chatRoleBadges'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
 import { recordMessengerDomSnapshot, scheduleMessengerDiagnosticTask } from '../../utils/messengerDiagnosticsMetrics'
 import {
@@ -604,6 +605,13 @@ onBeforeUnmount(() => {
                   <div class="conv-title-block">
                     <div class="conv-name-row">
                       <span class="conv-name">{{ row.conv.other_user_name }}</span>
+                      <span
+                        v-if="!row.isRoom && row.conv.chat_role_label"
+                        class="conv-role-badge"
+                        :class="getChatRoleBadgeClass(row.conv)"
+                      >
+                        {{ row.conv.chat_role_label }}
+                      </span>
                       <span v-if="row.isChannel" class="channel-badge-list" hidden>کانال</span>
                       <span v-else-if="row.isGroup" class="channel-badge-list" hidden>گروه</span>
                     </div>
@@ -934,9 +942,14 @@ onBeforeUnmount(() => {
 .conversation-card--active .room-badge-list,
 .conversation-card--active .member-count-list,
 .conversation-card--active .deleted-badge-list,
-.conversation-card--active .pin-chip {
+.conversation-card--active .pin-chip,
+.conversation-card--active .conv-role-badge {
   background: rgba(255, 255, 255, 0.16);
   border-color: rgba(255, 255, 255, 0.18);
+}
+
+.conversation-card--active .conv-role-badge {
+  color: #fff;
 }
 
 .conversation-card-glow {
@@ -1034,6 +1047,34 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.conv-role-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(248, 250, 252, 0.9);
+  color: #475569;
+}
+
+.conv-role-badge.role-accountant {
+  border-color: rgba(51, 144, 236, 0.24);
+  background: rgba(51, 144, 236, 0.1);
+  color: #1d4ed8;
+}
+
+.conv-role-badge.role-customer {
+  border-color: rgba(15, 118, 110, 0.22);
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
 }
 
 .conv-time {

@@ -1,4 +1,5 @@
 export type ChatKind = 'direct' | 'channel' | 'group'
+export type ChatRoleKind = 'colleague' | 'accountant' | 'customer'
 
 export interface Conversation {
     id: number
@@ -9,6 +10,8 @@ export interface Conversation {
     profile_user_id?: number | null
     profile_account_name?: string | null
     resolved_from_accountant_id?: number | null
+    chat_role_kind?: ChatRoleKind | null
+    chat_role_label?: string | null
     highlight_accountant_user_id?: number | null
     highlight_accountant_relation_display_name?: string | null
     other_user_is_deleted?: boolean

@@ -4,6 +4,8 @@ import LoadingSkeleton from '../LoadingSkeleton.vue'
 import ChatUserListRow from './ChatUserListRow.vue'
 import { UsersRound } from 'lucide-vue-next'
 import { apiFetchJson } from '../../utils/auth'
+import { getChatRoleBadge } from '../../utils/chatRoleBadges'
+import type { ChatRoleKind } from '../../types/chat'
 
 const props = defineProps<{
   show: boolean
@@ -24,6 +26,8 @@ type SearchUser = {
   mobile_number: string
   avatar_file_id?: string | null
   resolved_from_accountant_id?: number | null
+  chat_role_kind?: ChatRoleKind | null
+  chat_role_label?: string | null
   highlight_accountant_relation_display_name?: string | null
 }
 
@@ -44,8 +48,13 @@ function getAccountantContextLabel(user: SearchUser) {
 }
 
 function getUserBadges(user: SearchUser) {
-  if (!user.resolved_from_accountant_id) return []
-  return [{ label: 'مالک', tone: 'info' as const }]
+  const badges = []
+  const roleBadge = getChatRoleBadge(user)
+  if (roleBadge) badges.push(roleBadge)
+  if (user.resolved_from_accountant_id) {
+    badges.push({ label: 'مالک', tone: 'info' as const })
+  }
+  return badges
 }
 
 const searchUsers = async (query: string = '') => {

@@ -2,6 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import ChatUserListRow from './ChatUserListRow.vue'
 import { apiFetch, apiFetchJson } from '../../utils/auth'
+import { getChatRoleBadge } from '../../utils/chatRoleBadges'
+import type { ChatUserListRowBadge } from './ChatUserListRow.vue'
+import type { ChatRoleKind } from '../../types/chat'
 import { popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../../utils/chatFiles'
 import {
@@ -30,6 +33,8 @@ type PublicUser = {
   full_name?: string
   mobile_number?: string
   avatar_file_id?: string | null
+  chat_role_kind?: ChatRoleKind | null
+  chat_role_label?: string | null
 }
 
 type GroupMember = {
@@ -40,6 +45,8 @@ type GroupMember = {
   avatar_file_id?: string | null
   role: 'admin' | 'member'
   is_group_creator: boolean
+  chat_role_kind?: ChatRoleKind | null
+  chat_role_label?: string | null
 }
 
 type GroupRoom = {
@@ -300,14 +307,24 @@ function getPrimaryUserName(accountName: string, fullName?: string | null) {
   return normalizedFullName || accountName
 }
 
-function getGroupMemberBadges(member: GroupMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+function getGroupMemberBadges(member: GroupMember): ChatUserListRowBadge[] {
+  const badges: ChatUserListRowBadge[] = []
   if (member.is_group_creator) {
-    return [{ label: 'owner', tone: 'creator' as const }]
+    badges.push({ label: 'owner', tone: 'creator' as const })
+  } else {
+    badges.push({ label: member.role === 'admin' ? 'admin' : 'member', tone: member.role === 'admin' ? 'admin' : 'member' as const })
   }
-  return [{ label: member.role === 'admin' ? 'admin' : 'member', tone: member.role === 'admin' ? 'admin' : 'member' as const }]
+  const roleBadge = getChatRoleBadge(member)
+  if (roleBadge) badges.push(roleBadge)
+  return badges
 }
 
-function getPromotableMemberBadges(member: GroupMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+function getRoleOnlyBadges(user: PublicUser): ChatUserListRowBadge[] {
+  const roleBadge = getChatRoleBadge(user)
+  return roleBadge ? [roleBadge] : []
+}
+
+function getPromotableMemberBadges(member: GroupMember): ChatUserListRowBadge[] {
   return getGroupMemberBadges(member)
 }
 
@@ -414,7 +431,7 @@ async function loadUsers(query = '') {
   try {
     const data = await apiFetchJson(buildGroupCandidateUrl(query)) as
       | PublicUser[]
-      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null }> }
+      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null }> }
     const rawItems = Array.isArray(data)
       ? data
       : Array.isArray(data?.items)
@@ -427,6 +444,8 @@ async function loadUsers(query = '') {
         full_name: item.full_name,
         mobile_number: item.mobile_number,
         avatar_file_id: item.avatar_file_id ?? null,
+        chat_role_kind: item.chat_role_kind ?? null,
+        chat_role_label: item.chat_role_label ?? null,
       }))
       .filter((item) => Number.isInteger(item.id) && item.id > 0)
   } catch (error) {
@@ -702,6 +721,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   :selected="selectedUserIds.has(user.id)"
                   :name="user.account_name"
                   :avatar-file-id="user.avatar_file_id || null"
+                  :badges="getRoleOnlyBadges(user)"
                   @click="toggleCandidate(user.id)"
                 >
                   <template #subtitle>
@@ -986,6 +1006,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   :selected="selectedUserIds.has(user.id)"
                   :name="getPrimaryUserName(user.account_name, user.full_name)"
                   :avatar-file-id="user.avatar_file_id || null"
+                  :badges="getRoleOnlyBadges(user)"
                   @click="toggleCandidate(user.id)"
                 >
                   <template #subtitle>

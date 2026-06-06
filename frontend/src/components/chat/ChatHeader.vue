@@ -31,6 +31,13 @@
             <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
             <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
             <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
+            <span
+              v-else-if="selectedRoomKind === 'direct' && selectedChatRoleLabel"
+              class="room-badge-small direct-role"
+              :class="selectedChatRoleClass"
+            >
+              {{ selectedChatRoleLabel }}
+            </span>
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
           <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
@@ -201,12 +208,16 @@ import { Megaphone, MoreVertical, Search, Shield, UsersRound } from 'lucide-vue-
 import { discardBackState, popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial } from '../../utils/chatFiles'
 import { formatIranDateTime } from '../../utils/iranTime'
+import { getChatRoleBadgeClass } from '../../utils/chatRoleBadges'
+import type { ChatRoleKind } from '../../types/chat'
 
 const props = defineProps<{
   isSelectionMode: boolean
   selectedUserId: number | null
   selectedUserName: string
   selectedAvatarFileId?: string | null
+  selectedChatRoleKind?: ChatRoleKind | string | null
+  selectedChatRoleLabel?: string | null
   selectedRoomKind?: 'direct' | 'channel' | 'group' | null
   apiBaseUrl?: string
   targetUserStatus: string
@@ -265,6 +276,11 @@ const selectedRoomManageLabel = computed(() => (
 ))
 
 const headerAvatarUrl = computed(() => buildChatFileUrl(props.selectedAvatarFileId ?? null, props.apiBaseUrl ?? ''))
+
+const selectedChatRoleClass = computed(() => getChatRoleBadgeClass({
+  chat_role_kind: props.selectedChatRoleKind,
+  chat_role_label: props.selectedChatRoleLabel,
+}))
 
 const onSearchInput = () => {
   emit('search', internalSearchQuery.value)
@@ -547,6 +563,21 @@ function formatDateForSeparator(dateString: string) {
 .room-badge-small.system {
   background: rgba(124, 58, 237, 0.12);
   color: #6d28d9;
+}
+
+.room-badge-small.direct-role {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+}
+
+.room-badge-small.direct-role.role-accountant {
+  background: rgba(51, 144, 236, 0.12);
+  color: #1d4ed8;
+}
+
+.room-badge-small.direct-role.role-customer {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
 }
 
 .header-room-meta {
