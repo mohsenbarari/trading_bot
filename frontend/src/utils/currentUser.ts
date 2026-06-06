@@ -10,8 +10,12 @@ export interface CurrentUserSummary {
   global_lock_grace_expires_at?: string | null
   global_web_locked_at?: string | null
   is_accountant?: boolean
+  accountant_owner_user_id?: number | null
+  accountant_owner_account_name?: string | null
   is_customer?: boolean
   customer_tier?: 'tier1' | 'tier2' | null
+  customer_owner_user_id?: number | null
+  customer_owner_account_name?: string | null
 }
 
 const CURRENT_USER_STORAGE_KEY = 'current_user_summary'
@@ -37,8 +41,22 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
     global_web_locked_at:
       typeof user.global_web_locked_at === 'string' ? user.global_web_locked_at : null,
     is_accountant: user.is_accountant === true,
+    accountant_owner_user_id:
+      typeof user.accountant_owner_user_id === 'number'
+        ? user.accountant_owner_user_id
+        : Number.isFinite(Number(user.accountant_owner_user_id))
+          ? Number(user.accountant_owner_user_id)
+          : null,
+    accountant_owner_account_name: typeof user.accountant_owner_account_name === 'string' ? user.accountant_owner_account_name : null,
     is_customer: user.is_customer === true,
     customer_tier: user.customer_tier === 'tier1' || user.customer_tier === 'tier2' ? user.customer_tier : null,
+    customer_owner_user_id:
+      typeof user.customer_owner_user_id === 'number'
+        ? user.customer_owner_user_id
+        : Number.isFinite(Number(user.customer_owner_user_id))
+          ? Number(user.customer_owner_user_id)
+          : null,
+    customer_owner_account_name: typeof user.customer_owner_account_name === 'string' ? user.customer_owner_account_name : null,
   }
 }
 
