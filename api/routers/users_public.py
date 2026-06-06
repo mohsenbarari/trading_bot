@@ -12,6 +12,12 @@ from core.services.customer_relation_service import (
     get_active_customer_relation_for_customer,
     list_active_customers_for_owner,
 )
+from core.services.chat_role_badge_service import (
+    CHAT_ROLE_ACCOUNTANT,
+    CHAT_ROLE_COLLEAGUE,
+    CHAT_ROLE_CUSTOMER,
+    CHAT_ROLE_LABELS,
+)
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.user import User, UserRole
 from api.deps import get_current_user
@@ -35,6 +41,8 @@ def _serialize_public_user(
     user: User,
     *,
     resolved_from_accountant_id: int | None = None,
+    chat_role_kind: str | None = None,
+    chat_role_label: str | None = None,
     highlight_accountant_user_id: int | None = None,
     highlight_accountant_relation_display_name: str | None = None,
     accountant_relations: list[schemas.PublicAccountantRelationSummary] | None = None,
@@ -47,6 +55,8 @@ def _serialize_public_user(
     public_user = schemas.UserPublicRead.model_validate(user, from_attributes=True)
     return public_user.model_copy(update={
         "resolved_from_accountant_id": resolved_from_accountant_id,
+        "chat_role_kind": chat_role_kind,
+        "chat_role_label": chat_role_label,
         "highlight_accountant_user_id": highlight_accountant_user_id,
         "highlight_accountant_relation_display_name": highlight_accountant_relation_display_name,
         "accountant_relations": accountant_relations or [],
@@ -94,6 +104,8 @@ def _serialize_public_search_result(
     user: User,
     *,
     resolved_from_accountant_id: int | None = None,
+    chat_role_kind: str | None = None,
+    chat_role_label: str | None = None,
     highlight_accountant_user_id: int | None = None,
     highlight_accountant_relation_display_name: str | None = None,
     customer_owner_user_id: int | None = None,
@@ -104,6 +116,8 @@ def _serialize_public_search_result(
     search_result = schemas.PublicUserSearchResult.model_validate(user, from_attributes=True)
     return search_result.model_copy(update={
         "resolved_from_accountant_id": resolved_from_accountant_id,
+        "chat_role_kind": chat_role_kind,
+        "chat_role_label": chat_role_label,
         "highlight_accountant_user_id": highlight_accountant_user_id,
         "highlight_accountant_relation_display_name": highlight_accountant_relation_display_name,
         "customer_owner_user_id": customer_owner_user_id,
@@ -397,7 +411,13 @@ async def _resolve_public_search_rows(
             if preserve_chat_target_identity:
                 if user.id == current_user.id or user.id in seen_user_ids:
                     continue
-                serialized_rows.append(_serialize_public_search_result(user))
+                serialized_rows.append(
+                    _serialize_public_search_result(
+                        user,
+                        chat_role_kind=CHAT_ROLE_ACCOUNTANT,
+                        chat_role_label=CHAT_ROLE_LABELS[CHAT_ROLE_ACCOUNTANT],
+                    )
+                )
                 seen_user_ids.add(user.id)
                 continue
 
@@ -408,6 +428,8 @@ async def _resolve_public_search_rows(
                 _serialize_public_search_result(
                     owner_user,
                     resolved_from_accountant_id=user.id,
+                    chat_role_kind=CHAT_ROLE_COLLEAGUE,
+                    chat_role_label=CHAT_ROLE_LABELS[CHAT_ROLE_COLLEAGUE],
                     highlight_accountant_user_id=user.id,
                     highlight_accountant_relation_display_name=relation.relation_display_name,
                 )
@@ -428,6 +450,8 @@ async def _resolve_public_search_rows(
             serialized_rows.append(
                 _serialize_public_search_result(
                     user,
+                    chat_role_kind=CHAT_ROLE_CUSTOMER,
+                    chat_role_label=CHAT_ROLE_LABELS[CHAT_ROLE_CUSTOMER],
                     customer_owner_user_id=owner_user.id if owner_user and not owner_user.is_deleted else None,
                     customer_owner_account_name=owner_user.account_name if owner_user and not owner_user.is_deleted else None,
                     customer_management_name=customer_relation.management_name,
@@ -439,7 +463,13 @@ async def _resolve_public_search_rows(
 
         if user.id == current_user.id or user.id in seen_user_ids:
             continue
-        serialized_rows.append(_serialize_public_search_result(user))
+        serialized_rows.append(
+            _serialize_public_search_result(
+                user,
+                chat_role_kind=CHAT_ROLE_COLLEAGUE,
+                chat_role_label=CHAT_ROLE_LABELS[CHAT_ROLE_COLLEAGUE],
+            )
+        )
         seen_user_ids.add(user.id)
 
     return serialized_rows
@@ -469,12 +499,39 @@ async def search_public_users(
 
     if q:
         search_pattern = f"%{q}%"
+        search_terms = [
+            User.full_name.ilike(search_pattern),
+            User.account_name.ilike(search_pattern),
+            User.username.ilike(search_pattern),
+            User.mobile_number.ilike(search_pattern),
+        ]
+        if direct_chat_targets:
+            accountant_relation_search_alias = aliased(AccountantRelation)
+            accountant_owner_search_alias = aliased(User)
+            accountant_owner_match_exists = (
+                select(accountant_relation_search_alias.id)
+                .join(
+                    accountant_owner_search_alias,
+                    accountant_owner_search_alias.id == accountant_relation_search_alias.owner_user_id,
+                )
+                .where(
+                    accountant_relation_search_alias.accountant_user_id == User.id,
+                    accountant_relation_search_alias.status == AccountantRelationStatus.ACTIVE,
+                    accountant_relation_search_alias.deleted_at.is_(None),
+                    accountant_owner_search_alias.is_deleted.is_(False),
+                    or_(
+                        accountant_owner_search_alias.full_name.ilike(search_pattern),
+                        accountant_owner_search_alias.account_name.ilike(search_pattern),
+                        accountant_owner_search_alias.username.ilike(search_pattern),
+                        accountant_owner_search_alias.mobile_number.ilike(search_pattern),
+                    ),
+                )
+                .exists()
+            )
+            search_terms.append(accountant_owner_match_exists)
         query = query.where(
             or_(
-                User.full_name.ilike(search_pattern),
-                User.account_name.ilike(search_pattern),
-                User.username.ilike(search_pattern),
-                User.mobile_number.ilike(search_pattern)
+                *search_terms,
             )
         )
         

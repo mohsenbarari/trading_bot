@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
 import HelpPopover from './HelpPopover.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
+import { getChatRoleBadge } from '../utils/chatRoleBadges'
+import type { ChatUserListRowBadge } from './chat/ChatUserListRow.vue'
+import type { ChatRoleKind } from '../types/chat'
 import { discardBackState, popBackState, pushBackState } from '../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../utils/chatFiles'
 import {
@@ -55,6 +58,8 @@ type ChannelInviteCandidate = {
   mobile_number: string
   avatar_file_id?: string | null
   is_already_member: boolean
+  chat_role_kind?: ChatRoleKind | null
+  chat_role_label?: string | null
 }
 
 type ChannelInviteCandidateResponse = {
@@ -82,6 +87,8 @@ type ChannelMember = {
   role: 'admin' | 'member'
   joined_at: string
   is_channel_creator: boolean
+  chat_role_kind?: ChatRoleKind | null
+  chat_role_label?: string | null
 }
 
 type ChannelMemberMutationResponse = {
@@ -424,14 +431,24 @@ function getChannelKindLabel(channel: ChannelRoom) {
   return 'اختیاری'
 }
 
-function getChannelMemberBadges(member: ChannelMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+function getChannelMemberBadges(member: ChannelMember): ChatUserListRowBadge[] {
+  const badges: ChatUserListRowBadge[] = []
   if (member.is_channel_creator) {
-    return [{ label: 'owner', tone: 'creator' as const }]
+    badges.push({ label: 'owner', tone: 'creator' as const })
+  } else {
+    badges.push({ label: member.role === 'admin' ? 'admin' : 'member', tone: member.role === 'admin' ? 'admin' : 'member' as const })
   }
-  return [{ label: member.role === 'admin' ? 'admin' : 'member', tone: member.role === 'admin' ? 'admin' : 'member' as const }]
+  const roleBadge = getChatRoleBadge(member)
+  if (roleBadge) badges.push(roleBadge)
+  return badges
 }
 
-function getPromotableMemberBadges(member: ChannelMember): Array<{ label: string; tone: 'admin' | 'member' | 'creator' }> {
+function getRoleOnlyBadges(user: ChannelInviteCandidate): ChatUserListRowBadge[] {
+  const roleBadge = getChatRoleBadge(user)
+  return roleBadge ? [roleBadge] : []
+}
+
+function getPromotableMemberBadges(member: ChannelMember): ChatUserListRowBadge[] {
   return getChannelMemberBadges(member)
 }
 
@@ -1284,6 +1301,7 @@ onBeforeUnmount(() => {
             :selected="selectedUserIds.has(candidate.user_id)"
             :name="getPrimaryUserName(candidate.account_name, candidate.full_name)"
             :avatar-file-id="candidate.avatar_file_id || null"
+            :badges="getRoleOnlyBadges(candidate)"
             @click="toggleUser(candidate.user_id)"
           >
             <template #subtitle>

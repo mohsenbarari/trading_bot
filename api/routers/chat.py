@@ -124,6 +124,7 @@ from core.services.chat_room_service import (
     update_manageable_channel_metadata,
     update_channel_member,
 )
+from core.services.chat_role_badge_service import load_chat_role_badges
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import (
@@ -1007,6 +1008,7 @@ async def get_group_member_candidates(
         exclude_chat_id=exclude_chat_id,
         selected_user_ids=selected_user_ids,
     )
+    role_badges = await load_chat_role_badges(db, {item.user_id for item in page.items})
     return ChannelInviteCandidateListResponse(
         items=[
             {
@@ -1016,6 +1018,8 @@ async def get_group_member_candidates(
                 "mobile_number": item.mobile_number,
                 "avatar_file_id": _optional_attr(item, "avatar_file_id"),
                 "is_already_member": item.is_already_member,
+                "chat_role_kind": role_badges[item.user_id].kind if item.user_id in role_badges else None,
+                "chat_role_label": role_badges[item.user_id].label if item.user_id in role_badges else None,
             }
             for item in page.items
         ],
@@ -1079,6 +1083,7 @@ async def get_group_detail(
     member = await get_active_group_member_or_403(db, chat=group, user_id=current_user.id)
     member_count = await count_active_chat_members(db, group.id)
     members = await list_group_members(db, chat=group)
+    role_badges = await load_chat_role_badges(db, {item.user_id for item in members})
     return GroupDetailRead(
         group=GroupRoomRead(
             id=group.id,
@@ -1102,6 +1107,8 @@ async def get_group_detail(
                 role=item.role.value,
                 joined_at=item.joined_at,
                 is_group_creator=item.is_group_creator,
+                chat_role_kind=role_badges[item.user_id].kind if item.user_id in role_badges else None,
+                chat_role_label=role_badges[item.user_id].label if item.user_id in role_badges else None,
             )
             for item in members
         ],
@@ -1504,6 +1511,7 @@ async def get_channel_members(
     _ = current_user
     channel = await get_channel_or_404(db, chat_id)
     members = await list_channel_members(db, chat=channel)
+    role_badges = await load_chat_role_badges(db, {member.user_id for member in members})
     return [
         ChannelMemberRead(
             user_id=member.user_id,
@@ -1514,6 +1522,8 @@ async def get_channel_members(
             role=member.role.value,
             joined_at=member.joined_at,
             is_channel_creator=member.is_channel_creator,
+            chat_role_kind=role_badges[member.user_id].kind if member.user_id in role_badges else None,
+            chat_role_label=role_badges[member.user_id].label if member.user_id in role_badges else None,
         )
         for member in members
     ]
@@ -1566,6 +1576,7 @@ async def get_channel_invite_candidates(
         offset=offset,
         exclude_chat_id=exclude_chat_id,
     )
+    role_badges = await load_chat_role_badges(db, {item.user_id for item in candidate_page.items})
     return ChannelInviteCandidateListResponse(
         items=[
             {
@@ -1575,6 +1586,8 @@ async def get_channel_invite_candidates(
                 "mobile_number": item.mobile_number,
                 "avatar_file_id": _optional_attr(item, "avatar_file_id"),
                 "is_already_member": item.is_already_member,
+                "chat_role_kind": role_badges[item.user_id].kind if item.user_id in role_badges else None,
+                "chat_role_label": role_badges[item.user_id].label if item.user_id in role_badges else None,
             }
             for item in candidate_page.items
         ],

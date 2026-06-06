@@ -156,6 +156,8 @@ class UserPublicRead(BaseModel):
     trades_count: int = 0
     last_seen_at: datetime | None = None
     resolved_from_accountant_id: int | None = None
+    chat_role_kind: str | None = None
+    chat_role_label: str | None = None
     highlight_accountant_user_id: int | None = None
     highlight_accountant_relation_display_name: str | None = None
     accountant_relations: List['PublicAccountantRelationSummary'] = Field(default_factory=list)
@@ -180,6 +182,8 @@ class PublicUserSearchResult(BaseModel):
     mobile_number: str
     avatar_file_id: str | None = None
     resolved_from_accountant_id: int | None = None
+    chat_role_kind: str | None = None
+    chat_role_label: str | None = None
     highlight_accountant_user_id: int | None = None
     highlight_accountant_relation_display_name: str | None = None
     customer_owner_user_id: int | None = None
@@ -477,4 +481,3 @@ class Commodity(CommodityBase):
 
     class Config:
         from_attributes = True
-

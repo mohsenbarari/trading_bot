@@ -29,6 +29,7 @@ from models.chat import Chat
 from models.chat_file import ChatFile
 from models.chat_member import ChatMember
 from models.conversation import Conversation
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.message import Message
 from models.user import User, UserRole
 
@@ -188,6 +189,8 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     user2_alias = aliased(User)
     user1_relation_alias = aliased(AccountantRelation)
     user2_relation_alias = aliased(AccountantRelation)
+    user1_customer_relation_alias = aliased(CustomerRelation)
+    user2_customer_relation_alias = aliased(CustomerRelation)
     user1_owner_alias = aliased(User)
     user2_owner_alias = aliased(User)
     last_message_alias = aliased(Message)
@@ -275,6 +278,34 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         (Conversation.user1_id == current_user_id, user2_relation_alias.relation_display_name),
         else_=user1_relation_alias.relation_display_name,
     ).label("highlight_accountant_relation_display_name")
+    user1_chat_role_kind = case(
+        (user1_relation_alias.accountant_user_id.is_not(None), "accountant"),
+        (user1_customer_relation_alias.customer_user_id.is_not(None), "customer"),
+        else_="colleague",
+    )
+    user2_chat_role_kind = case(
+        (user2_relation_alias.accountant_user_id.is_not(None), "accountant"),
+        (user2_customer_relation_alias.customer_user_id.is_not(None), "customer"),
+        else_="colleague",
+    )
+    user1_chat_role_label = case(
+        (user1_relation_alias.accountant_user_id.is_not(None), "حسابدار"),
+        (user1_customer_relation_alias.customer_user_id.is_not(None), "مشتری"),
+        else_="همکار",
+    )
+    user2_chat_role_label = case(
+        (user2_relation_alias.accountant_user_id.is_not(None), "حسابدار"),
+        (user2_customer_relation_alias.customer_user_id.is_not(None), "مشتری"),
+        else_="همکار",
+    )
+    other_user_chat_role_kind = case(
+        (Conversation.user1_id == current_user_id, user2_chat_role_kind),
+        else_=user1_chat_role_kind,
+    ).label("chat_role_kind")
+    other_user_chat_role_label = case(
+        (Conversation.user1_id == current_user_id, user2_chat_role_label),
+        else_=user1_chat_role_label,
+    ).label("chat_role_label")
     other_user_avatar_file_id = case(
         (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.avatar_file_id, user2_alias.avatar_file_id)),
         else_=func.coalesce(user1_owner_alias.avatar_file_id, user1_alias.avatar_file_id),
@@ -351,6 +382,8 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             other_user_profile_user_id,
             other_user_profile_account_name,
             resolved_from_accountant_id,
+            other_user_chat_role_kind,
+            other_user_chat_role_label,
             highlight_accountant_user_id,
             highlight_accountant_relation_display_name,
             other_user_is_deleted,
@@ -381,6 +414,22 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
                 user2_relation_alias.accountant_user_id == user2_alias.id,
                 user2_relation_alias.status == AccountantRelationStatus.ACTIVE,
                 user2_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user1_customer_relation_alias,
+            sa.and_(
+                user1_customer_relation_alias.customer_user_id == user1_alias.id,
+                user1_customer_relation_alias.status == CustomerRelationStatus.ACTIVE,
+                user1_customer_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user2_customer_relation_alias,
+            sa.and_(
+                user2_customer_relation_alias.customer_user_id == user2_alias.id,
+                user2_customer_relation_alias.status == CustomerRelationStatus.ACTIVE,
+                user2_customer_relation_alias.deleted_at.is_(None),
             ),
         )
         .outerjoin(

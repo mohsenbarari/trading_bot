@@ -37,6 +37,8 @@ class ChannelInviteCandidate:
     mobile_number: str
     avatar_file_id: str | None = None
     is_already_member: bool = False
+    chat_role_kind: str | None = None
+    chat_role_label: str | None = None
 
 
 @dataclass

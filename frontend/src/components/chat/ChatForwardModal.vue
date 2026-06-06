@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { apiFetchJson } from '../../utils/auth'
-import type { ChatForwardTarget, Conversation } from '../../types/chat'
+import type { ChatForwardTarget, ChatRoleKind, Conversation } from '../../types/chat'
+import { getChatRoleBadgeClass } from '../../utils/chatRoleBadges'
 
 type ForwardUser = {
   id: number
@@ -10,6 +11,8 @@ type ForwardUser = {
   mobile_number: string
   avatar_file_id?: string | null
   resolved_from_accountant_id?: number | null
+  chat_role_kind?: ChatRoleKind | null
+  chat_role_label?: string | null
   highlight_accountant_relation_display_name?: string | null
 }
 
@@ -18,6 +21,8 @@ type ForwardTargetCandidate = ChatForwardTarget & {
   isConversation: boolean
   conversationIndex: number | null
   searchText: string
+  chatRoleKind?: ChatRoleKind | string | null
+  chatRoleLabel?: string | null
 }
 
 const USER_FETCH_LIMIT = 5000
@@ -67,7 +72,18 @@ function getForwardUserTitle(user: ForwardUser) {
 function getTargetBadge(target: ForwardTargetCandidate) {
   if (target.kind === 'channel') return 'کانال'
   if (target.kind === 'group') return 'گروه'
+  if (target.chatRoleLabel) return target.chatRoleLabel
   return target.isConversation ? 'گفتگو' : 'کاربر'
+}
+
+function getTargetBadgeClass(target: ForwardTargetCandidate) {
+  if (target.kind === 'channel') return 'kind-channel'
+  if (target.kind === 'group') return 'kind-group'
+  if (target.chatRoleLabel) return getChatRoleBadgeClass({
+    chat_role_kind: target.chatRoleKind,
+    chat_role_label: target.chatRoleLabel,
+  })
+  return 'kind-user'
 }
 
 const searchPlaceholder = computed(() => {
@@ -147,6 +163,8 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
         isConversation: true,
         conversationIndex: index,
         searchText: buildSearchText([conversation.other_user_name, 'گروه', 'ارسال به گروه']),
+        chatRoleKind: null,
+        chatRoleLabel: null,
       })
       return
     }
@@ -164,6 +182,8 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
         isConversation: true,
         conversationIndex: index,
         searchText: buildSearchText([conversation.other_user_name, 'کانال', 'ارسال به کانال']),
+        chatRoleKind: null,
+        chatRoleLabel: null,
       })
       return
     }
@@ -182,6 +202,8 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
       isConversation: true,
       conversationIndex: index,
       searchText: buildSearchText([title, user?.account_name, subtitle]),
+      chatRoleKind: user?.chat_role_kind ?? conversation.chat_role_kind ?? null,
+      chatRoleLabel: user?.chat_role_label ?? conversation.chat_role_label ?? null,
     })
 
     seenIds.add(conversation.other_user_id)
@@ -202,6 +224,8 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
       isConversation: false,
       conversationIndex: null,
       searchText: buildSearchText([title, user.account_name, user.mobile_number]),
+      chatRoleKind: user.chat_role_kind ?? null,
+      chatRoleLabel: user.chat_role_label ?? null,
     })
   })
 
@@ -338,7 +362,7 @@ function confirmForward() {
                   <div class="target-copy">
                     <div class="target-title-row">
                       <span class="target-title">{{ target.title }}</span>
-                      <span class="target-chip">{{ getTargetBadge(target) }}</span>
+                      <span class="target-chip" :class="getTargetBadgeClass(target)">{{ getTargetBadge(target) }}</span>
                     </div>
                     <span v-if="target.subtitle" class="target-subtitle" dir="ltr">{{ target.subtitle }}</span>
                   </div>
@@ -363,7 +387,10 @@ function confirmForward() {
                     {{ getAvatarInitial(target.title) }}
                   </div>
                   <div class="target-copy">
-                    <span class="target-title">{{ target.title }}</span>
+                    <div class="target-title-row">
+                      <span class="target-title">{{ target.title }}</span>
+                      <span class="target-chip" :class="getTargetBadgeClass(target)">{{ getTargetBadge(target) }}</span>
+                    </div>
                     <span v-if="target.subtitle" class="target-subtitle" dir="ltr">{{ target.subtitle }}</span>
                   </div>
                 </button>
@@ -704,6 +731,21 @@ function confirmForward() {
   padding: 2px 8px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.target-chip.role-accountant {
+  background: rgba(51, 144, 236, 0.12);
+  color: #1d4ed8;
+}
+
+.target-chip.role-customer {
+  background: rgba(15, 118, 110, 0.12);
+  color: #0f766e;
+}
+
+.target-chip.role-colleague {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
 }
 
 .modal-slide-enter-active,
