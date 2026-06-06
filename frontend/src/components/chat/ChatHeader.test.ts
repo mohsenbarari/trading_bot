@@ -60,6 +60,7 @@ describe('ChatHeader.vue', () => {
     })
 
     expect(wrapper.text()).toContain('در حال نوشتن')
+    expect(wrapper.get('.chat-header').element.lastElementChild?.className).toContain('header-menu-container')
 
     await wrapper.find('.header-avatar').trigger('click')
     expect(wrapper.emitted('view-profile')).toHaveLength(1)
@@ -398,6 +399,11 @@ describe('ChatHeader.vue', () => {
         },
       },
     })
+
+    const identity = wrapper.get('.header-identity')
+    const identityChildren = identity.element.children
+    expect(identityChildren[0]?.className).toContain('header-avatar')
+    expect(identityChildren[1]?.className).toContain('header-user-info')
 
     const titleRow = wrapper.get('.header-title-row')
     const directChildren = titleRow.element.children
