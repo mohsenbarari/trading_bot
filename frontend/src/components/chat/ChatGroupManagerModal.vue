@@ -7,6 +7,7 @@ import type { ChatUserListRowBadge } from './ChatUserListRow.vue'
 import type { ChatRoleKind } from '../../types/chat'
 import { popBackState, pushBackState } from '../../composables/useBackButton'
 import { buildChatFileUrl, getAvatarInitial, uploadAvatarImage } from '../../utils/chatFiles'
+import { currentUserSummary, primeCurrentUserSummary } from '../../utils/currentUser'
 import {
   getGroupDetailCacheKey,
   invalidateChatManagerCache,
@@ -37,6 +38,7 @@ type PublicUser = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_owner_account_name?: string | null
 }
 
 type GroupMember = {
@@ -106,6 +108,7 @@ const managerBackStateActive = ref(false)
 const avatarFileId = ref<string | null>(null)
 const avatarBusy = ref(false)
 const avatarInput = ref<HTMLInputElement | null>(null)
+const lastAppliedSuggestedTitle = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let userLoadSequence = 0
 
@@ -118,10 +121,6 @@ const canContinueCreate = computed(() => selectedCount.value > 0)
 const canSubmitAddMembers = computed(() => selectedCount.value > 0 && isAdmin.value)
 const canSaveDetails = computed(() => title.value.trim().length > 0)
 const overviewTitle = computed(() => title.value.trim() || group.value?.title || 'گروه جدید')
-const overviewDescription = computed(() => {
-  const nextDescription = description.value.trim() || group.value?.description || ''
-  return nextDescription || 'توضیحی برای این گروه ثبت نشده است.'
-})
 const groupAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value, props.apiBaseUrl ?? ''))
 const canEditOverviewAvatar = computed(() => !isCreateMode.value && isAdmin.value)
 const currentGroupRoleLabel = computed(() => {
@@ -134,8 +133,62 @@ const availableCandidates = computed(() => {
   return candidates.value.filter((user) => user.id !== props.currentUserId && !memberIds.value.has(user.id))
 })
 
+const selectedCandidates = computed(() => {
+  const selectedIds = selectedUserIds.value
+  return candidates.value.filter((candidate) => selectedIds.has(candidate.id))
+})
+
+const creatorAccountingGroupName = computed(() => {
+  const currentUser = currentUserSummary.value
+  const ownerName = currentUser?.is_accountant === true
+    ? currentUser.accountant_owner_account_name
+    : currentUser?.account_name
+  return normalizeGroupName(ownerName || null)
+})
+
+const suggestedAccountingGroupTitle = computed(() => {
+  const groupNames = new Set<string>()
+  const creatorName = creatorAccountingGroupName.value
+  if (creatorName) groupNames.add(creatorName)
+  selectedCandidates.value.forEach((candidate) => {
+    const groupName = resolveCandidateAccountingGroupName(candidate)
+    if (groupName) groupNames.add(groupName)
+  })
+  if (groupNames.size !== 2) return ''
+  const orderedNames = Array.from(groupNames)
+  const creatorIndex = orderedNames.indexOf(creatorName)
+  if (creatorIndex > 0) {
+    orderedNames.splice(creatorIndex, 1)
+    orderedNames.unshift(creatorName)
+  }
+  return `حسابداری ${orderedNames[0]}-${orderedNames[1]}`
+})
+
 function normalizeSearch(value: string) {
   return value.trim().toLowerCase()
+}
+
+function normalizeGroupName(value?: string | null) {
+  return (value || '').trim()
+}
+
+function resolveCandidateAccountingGroupName(user: PublicUser) {
+  if (user.chat_role_kind === 'accountant') {
+    return normalizeGroupName(user.chat_accountant_owner_name || user.account_name)
+  }
+  if (user.chat_role_kind === 'customer') {
+    return normalizeGroupName(user.customer_owner_account_name || user.account_name)
+  }
+  return normalizeGroupName(user.account_name)
+}
+
+function applySuggestedAccountingGroupTitle() {
+  const suggestedTitle = suggestedAccountingGroupTitle.value
+  if (!suggestedTitle) return
+  const currentTitle = title.value.trim()
+  if (currentTitle && currentTitle !== lastAppliedSuggestedTitle.value) return
+  title.value = suggestedTitle
+  lastAppliedSuggestedTitle.value = suggestedTitle
 }
 
 function compareMemberOrder(left: GroupMember, right: GroupMember) {
@@ -217,7 +270,7 @@ const pageSubtitle = computed(() => {
     case 'add-members':
       return 'کاربران پروژه را انتخاب و به گروه اضافه کنید.'
     case 'edit':
-      return 'نام و توضیحات گروه را دقیقاً از همین صفحه مدیریت کنید.'
+      return 'نام گروه را از همین صفحه مدیریت کنید.'
     default:
       return group.value
         ? `${(group.value.member_count || 0).toLocaleString('fa-IR')} عضو`
@@ -250,6 +303,7 @@ function resetState() {
   pageHistory.value = []
   avatarFileId.value = null
   avatarBusy.value = false
+  lastAppliedSuggestedTitle.value = ''
 }
 
 function setError(error: unknown, fallback: string) {
@@ -370,6 +424,9 @@ function applyPage(nextPage: GroupManagerPage) {
   if (nextPage === 'add-members' || nextPage === 'select-members') {
     void loadUsers(directoryQuery.value)
   }
+  if (isCreateMode.value && nextPage === 'details') {
+    applySuggestedAccountingGroupTitle()
+  }
 }
 
 function setPage(nextPage: GroupManagerPage) {
@@ -423,6 +480,9 @@ function toggleCandidate(userId: number) {
   if (next.has(userId)) next.delete(userId)
   else next.add(userId)
   selectedUserIds.value = next
+  if (isCreateMode.value && page.value === 'details') {
+    applySuggestedAccountingGroupTitle()
+  }
   void loadUsers(directoryQuery.value, { silent: true })
 }
 
@@ -446,7 +506,7 @@ async function loadUsers(query = '', options: { silent?: boolean } = {}) {
   try {
     const data = await apiFetchJson(buildGroupCandidateUrl(query)) as
       | PublicUser[]
-      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null; chat_accountant_owner_name?: string | null; chat_accountant_owner_label?: string | null }> }
+      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null; chat_accountant_owner_name?: string | null; chat_accountant_owner_label?: string | null; customer_owner_account_name?: string | null }> }
     const rawItems = Array.isArray(data)
       ? data
       : Array.isArray(data?.items)
@@ -463,6 +523,7 @@ async function loadUsers(query = '', options: { silent?: boolean } = {}) {
         chat_role_label: item.chat_role_label ?? null,
         chat_accountant_owner_name: item.chat_accountant_owner_name ?? null,
         chat_accountant_owner_label: item.chat_accountant_owner_label ?? null,
+        customer_owner_account_name: item.customer_owner_account_name ?? null,
       }))
       .filter((item) => Number.isInteger(item.id) && item.id > 0)
     if (requestId !== userLoadSequence) return
@@ -514,7 +575,6 @@ async function createGroup() {
       method: 'POST',
       body: JSON.stringify({
         title: title.value.trim(),
-        description: description.value.trim() || undefined,
         avatar_file_id: avatarFileId.value || null,
         member_ids: Array.from(selectedUserIds.value),
       }),
@@ -540,7 +600,6 @@ async function updateGroupSettings() {
       method: 'PATCH',
       body: JSON.stringify({
         title: title.value.trim(),
-        description: description.value.trim() || undefined,
         avatar_file_id: avatarFileId.value || null,
       }),
     })
@@ -568,7 +627,6 @@ async function persistExistingGroupAvatar(nextAvatarFileId: string | null) {
     method: 'PATCH',
     body: JSON.stringify({
       title: group.value.title,
-      description: group.value.description || undefined,
       avatar_file_id: nextAvatarFileId,
     }),
   })
@@ -673,6 +731,12 @@ watch(directoryQuery, (query) => {
   }, 220)
 })
 
+watch([selectedCandidates, suggestedAccountingGroupTitle], () => {
+  if (isCreateMode.value && page.value === 'details') {
+    applySuggestedAccountingGroupTitle()
+  }
+})
+
 watch(() => [props.show, props.groupId] as const, ([show]) => {
   if (!show) {
     if (managerBackStateActive.value) {
@@ -686,6 +750,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
   resetState()
   pushManagerBackState()
   if (isCreateMode.value) {
+    void primeCurrentUserSummary()
     void loadUsers()
     return
   }
@@ -766,7 +831,6 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                 </div>
                 <div class="hero-title">{{ overviewTitle }}</div>
                 <div class="hero-meta">{{ selectedCount.toLocaleString('fa-IR') }} عضو اولیه</div>
-                <p class="hero-description">{{ overviewDescription }}</p>
                 <div class="avatar-tool-row">
                   <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
                     {{ avatarFileId ? 'تغییر عکس گروه' : 'افزودن عکس گروه' }}
@@ -780,9 +844,6 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
               <section class="editor-card">
                 <label class="field-label" for="group-title">نام گروه</label>
                 <input id="group-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="مثلاً تیم فروش" />
-
-                <label class="field-label" for="group-description">توضیحات گروه</label>
-                <textarea id="group-description" v-model="description" class="editor-textarea" rows="4" maxlength="2000" placeholder="چند خط کوتاه درباره موضوع گروه"></textarea>
               </section>
             </template>
 
@@ -808,7 +869,6 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   </button>
                   <div class="hero-title">{{ overviewTitle }}</div>
                   <div class="hero-meta">{{ (group?.member_count || 0).toLocaleString('fa-IR') }} عضو</div>
-                  <p class="hero-description">{{ overviewDescription }}</p>
                   <div v-if="canEditOverviewAvatar" class="avatar-tool-row compact centered-overview-tools">
                     <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
                       {{ avatarFileId ? 'تغییر عکس گروه' : 'افزودن عکس گروه' }}
@@ -865,7 +925,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                       <div class="row-icon muted"><PencilLine :size="18" /></div>
                       <div class="row-copy">
                         <div class="row-title">تنظیمات گروه</div>
-                        <div class="row-subtitle">نام و توضیحات گروه را ویرایش کنید</div>
+                        <div class="row-subtitle">نام گروه را ویرایش کنید</div>
                       </div>
                       <ChevronLeft :size="18" class="row-chevron" />
                     </button>
@@ -1062,9 +1122,6 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
 
                 <label class="field-label" for="group-edit-title">نام گروه</label>
                 <input id="group-edit-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="نام گروه" />
-
-                <label class="field-label" for="group-edit-description">توضیحات گروه</label>
-                <textarea id="group-edit-description" v-model="description" class="editor-textarea" rows="5" maxlength="2000" placeholder="توضیحات گروه برای اعضا"></textarea>
 
                 <button type="button" class="primary-btn" :disabled="!canSaveDetails || isSaving" @click="updateGroupSettings">
                   <Loader2 v-if="isSaving" :size="18" class="spin" />

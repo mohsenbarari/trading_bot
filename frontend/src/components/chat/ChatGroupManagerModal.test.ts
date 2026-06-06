@@ -1,4 +1,4 @@
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { invalidateChatManagerCache } from '../../services/chat/chatManagerCache'
@@ -11,6 +11,14 @@ const pushBackStateMock = vi.fn()
 const popBackStateMock = vi.fn()
 const buildChatFileUrlMock = vi.fn(() => '')
 const uploadAvatarImageMock = vi.fn()
+const currentUserSummaryMock = ref({
+  id: 1,
+  role: 'عادی',
+  account_name: 'owner1',
+  is_accountant: false,
+  accountant_owner_account_name: null,
+})
+const primeCurrentUserSummaryMock = vi.fn(async () => currentUserSummaryMock.value)
 
 vi.mock('../../utils/auth', () => ({
   apiFetch: apiFetchMock,
@@ -26,6 +34,11 @@ vi.mock('../../utils/chatFiles', () => ({
   buildChatFileUrl: buildChatFileUrlMock,
   getAvatarInitial: (value: string) => value.slice(0, 1).toUpperCase(),
   uploadAvatarImage: uploadAvatarImageMock,
+}))
+
+vi.mock('../../utils/currentUser', () => ({
+  currentUserSummary: currentUserSummaryMock,
+  primeCurrentUserSummary: primeCurrentUserSummaryMock,
 }))
 
 function makeResponse(payload: unknown, ok = true, status = ok ? 200 : 400) {
@@ -46,6 +59,14 @@ describe('ChatGroupManagerModal.vue', () => {
     popBackStateMock.mockReset()
     buildChatFileUrlMock.mockClear()
     uploadAvatarImageMock.mockReset()
+    currentUserSummaryMock.value = {
+      id: 1,
+      role: 'عادی',
+      account_name: 'owner1',
+      is_accountant: false,
+      accountant_owner_account_name: null,
+    }
+    primeCurrentUserSummaryMock.mockClear()
   })
 
   it('emits member-profile and leave events from the loaded group manager', async () => {
@@ -163,15 +184,15 @@ describe('ChatGroupManagerModal.vue', () => {
         const body = JSON.parse(String(options?.body || '{}'))
         expect(body).toMatchObject({
           title: 'Fresh Group',
-          description: 'Created in test',
           avatar_file_id: 'group-avatar',
           member_ids: [2],
         })
+        expect(body).not.toHaveProperty('description')
         return makeResponse({
           group: {
             id: 19,
             title: 'Fresh Group',
-            description: 'Created in test',
+            description: null,
             avatar_file_id: 'group-avatar',
             member_count: 2,
             max_members: 50,
@@ -221,7 +242,7 @@ describe('ChatGroupManagerModal.vue', () => {
     await flushPromises()
 
     await wrapper.get('#group-title').setValue('Fresh Group')
-    await wrapper.get('#group-description').setValue('Created in test')
+    expect(wrapper.find('#group-description').exists()).toBe(false)
 
     const createButton = wrapper.findAll('button').find((button) => button.text().includes('ساخت گروه'))
     expect(createButton).toBeTruthy()
@@ -233,13 +254,64 @@ describe('ChatGroupManagerModal.vue', () => {
       {
         id: 19,
         title: 'Fresh Group',
-        description: 'Created in test',
+        description: null,
         avatar_file_id: 'group-avatar',
         member_count: 2,
         max_members: 50,
         current_user_role: 'admin',
       },
     ])
+  })
+
+  it('suggests an accounting group title when selected members belong to exactly two accounting groups', async () => {
+    apiFetchJsonMock.mockImplementation(async (url: string) => {
+      if (url === GROUP_CANDIDATE_BASE_URL || url === `${GROUP_CANDIDATE_BASE_URL}&selected_user_ids=2`) {
+        return {
+          items: [
+            {
+              user_id: 2,
+              account_name: 'accountant2',
+              full_name: 'حسابدار دو',
+              mobile_number: '09120000002',
+              avatar_file_id: null,
+              chat_role_kind: 'accountant',
+              chat_role_label: 'حسابدار',
+              chat_accountant_owner_name: 'owner2',
+            },
+          ],
+        }
+      }
+      throw new Error(`Unhandled apiFetchJson call: ${url}`)
+    })
+
+    const ChatGroupManagerModal = (await import('./ChatGroupManagerModal.vue')).default
+    const wrapper = mount(ChatGroupManagerModal, {
+      props: {
+        show: true,
+        currentUserId: 1,
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const candidateRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('حسابدار دو'))
+    expect(candidateRow).toBeTruthy()
+    await candidateRow!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('ادامه'))!.trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('#group-title').element as HTMLInputElement).value).toBe('حسابداری owner1-owner2')
+    await wrapper.get('#group-title').setValue('نام دستی')
+    expect((wrapper.get('#group-title').element as HTMLInputElement).value).toBe('نام دستی')
   })
 
   it('persists an existing group avatar immediately from the overview', async () => {
@@ -278,9 +350,9 @@ describe('ChatGroupManagerModal.vue', () => {
         const body = JSON.parse(String(options?.body || '{}'))
         expect(body).toEqual({
           title: 'Group Seven',
-          description: 'Example group',
           avatar_file_id: 'group-avatar-new',
         })
+        expect(body).not.toHaveProperty('description')
         currentGroup = { ...currentGroup, avatar_file_id: body.avatar_file_id }
         return makeResponse(currentGroup)
       }
@@ -389,7 +461,7 @@ describe('ChatGroupManagerModal.vue', () => {
         currentGroup = {
           ...currentGroup,
           title: body.title,
-          description: body.description,
+          description: body.description ?? currentGroup.description,
           avatar_file_id: body.avatar_file_id,
         }
         return makeResponse(currentGroup)
@@ -467,7 +539,7 @@ describe('ChatGroupManagerModal.vue', () => {
     expect(clearAvatarButton).toBeTruthy()
     await clearAvatarButton!.trigger('click')
     await wrapper.get('#group-edit-title').setValue('Renamed Group')
-    await wrapper.get('#group-edit-description').setValue('Updated group details')
+    expect(wrapper.find('#group-edit-description').exists()).toBe(false)
 
     const saveButton = wrapper.findAll('button').find((button) => button.text().includes('ذخیره تغییرات'))
     expect(saveButton).toBeTruthy()
@@ -476,7 +548,7 @@ describe('ChatGroupManagerModal.vue', () => {
     await flushPromises()
 
     expect(currentGroup.title).toBe('Renamed Group')
-    expect(currentGroup.description).toBe('Updated group details')
+    expect(currentGroup.description).toBe('Example group')
     expect(currentGroup.avatar_file_id).toBeNull()
     expect(wrapper.emitted('updated')).toHaveLength(1)
 
@@ -713,7 +785,7 @@ describe('ChatGroupManagerModal.vue', () => {
     wrapperVm.page = 'edit'
     await nextTick()
     expect(wrapperVm.pageTitle).toBe('ویرایش اطلاعات گروه')
-    expect(wrapperVm.pageSubtitle).toContain('نام و توضیحات گروه را دقیقاً از همین صفحه مدیریت کنید.')
+    expect(wrapperVm.pageSubtitle).toContain('نام گروه را از همین صفحه مدیریت کنید.')
     expect(wrapperVm.canGoBack).toBe(true)
 
     wrapperVm.page = 'members'
