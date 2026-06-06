@@ -36,6 +36,8 @@ PROJECT_DIRECTORY_ROLES = (
     UserRole.SUPER_ADMIN,
 )
 
+_LAST_SEEN_UNSET = object()
+
 
 def _serialize_public_user(
     user: User,
@@ -53,9 +55,10 @@ def _serialize_public_user(
     customer_management_name: str | None = None,
     customer_tier=None,
     customer_relations: list[schemas.PublicCustomerRelationSummary] | None = None,
+    last_seen_at=_LAST_SEEN_UNSET,
 ) -> schemas.UserPublicRead:
     public_user = schemas.UserPublicRead.model_validate(user, from_attributes=True)
-    return public_user.model_copy(update={
+    updates = {
         "resolved_from_accountant_id": resolved_from_accountant_id,
         "chat_role_kind": chat_role_kind,
         "chat_role_label": chat_role_label,
@@ -69,7 +72,10 @@ def _serialize_public_user(
         "customer_management_name": customer_management_name,
         "customer_tier": customer_tier,
         "customer_relations": customer_relations or [],
-    })
+    }
+    if last_seen_at is not _LAST_SEEN_UNSET:
+        updates["last_seen_at"] = last_seen_at
+    return public_user.model_copy(update=updates)
 
 
 def _serialize_public_accountant_relation(
@@ -627,6 +633,7 @@ async def read_public_user(
             highlight_accountant_relation_display_name=relation.relation_display_name,
             accountant_relations=accountant_relations,
             customer_relations=customer_relations,
+            last_seen_at=getattr(getattr(relation, "accountant_user", None), "last_seen_at", None),
         )
 
     customer_relation = await get_active_customer_relation_for_customer(db, user_id)

@@ -207,10 +207,12 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             avatar_file_id=None,
             created_at=__import__("datetime").datetime(2026, 1, 2),
             trades_count=7,
-            last_seen_at=None,
+            last_seen_at=__import__("datetime").datetime(2026, 1, 4, 12, 0, 0),
         )
+        accountant_last_seen_at = __import__("datetime").datetime(2026, 1, 4, 8, 30, 0)
         relation = SimpleNamespace(
             owner_user=owner_user,
+            accountant_user=SimpleNamespace(id=44, last_seen_at=accountant_last_seen_at),
             relation_display_name="حسابدار فروش",
         )
         active_relation = SimpleNamespace(
@@ -244,6 +246,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.resolved_from_accountant_id, 44)
         self.assertEqual(result.highlight_accountant_user_id, 44)
         self.assertEqual(result.highlight_accountant_relation_display_name, "حسابدار فروش")
+        self.assertEqual(result.last_seen_at, accountant_last_seen_at)
         self.assertEqual(len(result.accountant_relations), 1)
         self.assertEqual(result.accountant_relations[0].accountant_user_id, 44)
         self.assertEqual(result.accountant_relations[0].relation_display_name, "حسابدار فروش")
