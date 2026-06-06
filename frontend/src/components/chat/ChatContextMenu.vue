@@ -102,6 +102,7 @@ const ACTION_ICON_SVG: Record<MessengerContextMenuActionKey, string> = {
   copy: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>',
   edit: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>',
   'pin-message': '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"></path><path d="M5 7V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"></path><path d="M4 7h16l-3 6H7z"></path></svg>',
+  'seen-list': '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>',
   delete: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>',
 }
 
@@ -120,6 +121,7 @@ const props = defineProps<{
   canEdit: boolean
   canDelete: boolean
   canPin: boolean
+  canViewSeenList?: boolean
   isPinnedMessage: boolean
   availableReactions: string[]
 }>()
@@ -131,6 +133,7 @@ const emit = defineEmits<{
   (e: 'copy'): void
   (e: 'edit'): void
   (e: 'delete'): void
+  (e: 'seen-list'): void
   (e: 'pin-message'): void
   (e: 'close'): void
   (e: 'save-media'): void
@@ -171,6 +174,7 @@ const menuModel = computed(() => {
     canEdit: props.canEdit,
     canDelete: props.canDelete,
     canPin: props.canPin,
+    canViewSeenList: props.canViewSeenList,
     isPinnedMessage: props.isPinnedMessage,
     showReactionRow: showReactionRow.value,
     hasOverflowReactions: hasOverflowReactions.value,
@@ -248,6 +252,9 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
       return
     case 'pin-message':
       emit('pin-message')
+      return
+    case 'seen-list':
+      emit('seen-list')
       return
     case 'delete':
       emit('delete')

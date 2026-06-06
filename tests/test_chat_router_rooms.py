@@ -2,8 +2,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 from core.enums import ChatType
 from api.routers.chat import (
+    get_group_message_seen_members,
     get_room_messages,
     mark_room_messages_read,
     send_room_activity_signal,
@@ -68,6 +71,38 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
         serialize_mock.assert_awaited_once_with(db, messages, viewer_user_id=5)
         self.assertIs(result, serialized)
 
+    async def test_get_group_message_seen_members_delegates_only_for_group_rooms(self):
+        current_user = SimpleNamespace(id=5)
+        db = object()
+        chat = SimpleNamespace(id=70, type=ChatType.GROUP)
+        seen_item = SimpleNamespace(
+            user_id=6,
+            account_name="reader",
+            full_name="Reader User",
+            avatar_file_id=None,
+            seen_at="2026-06-06T18:40:00Z",
+        )
+
+        with patch("api.routers.chat.get_room_or_404", new=AsyncMock(return_value=chat)) as room_mock, patch(
+            "api.routers.chat.list_group_message_seen_members",
+            new=AsyncMock(return_value=[seen_item]),
+        ) as seen_mock:
+            result = await get_group_message_seen_members(
+                chat_id=70,
+                message_id=42,
+                current_user=current_user,
+                db=db,
+            )
+
+        room_mock.assert_awaited_once_with(db, 70)
+        seen_mock.assert_awaited_once_with(db, chat=chat, message_id=42, requester_id=5)
+        self.assertEqual(result[0].user_id, 6)
+
+        with patch("api.routers.chat.get_room_or_404", new=AsyncMock(return_value=SimpleNamespace(id=71, type=ChatType.CHANNEL))):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_group_message_seen_members(chat_id=71, message_id=42, current_user=current_user, db=db)
+        self.assertEqual(exc_info.exception.status_code, 404)
+
     async def test_send_room_message_uses_group_branch_and_publishes(self):
         current_user = SimpleNamespace(id=5)
         db = object()
@@ -77,6 +112,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=10,
             forwarded_from_id=20,
+            forwarded_from_name_override=None,
         )
         message = SimpleNamespace(id=99)
         serialized = SimpleNamespace(id=99)
@@ -107,6 +143,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=10,
             forwarded_from_id=20,
+            forwarded_from_name_override=None,
             mentions=[],
             mention_all=False,
         )
@@ -130,6 +167,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=None,
             forwarded_from_id=None,
+            forwarded_from_name_override=None,
         )
         message = SimpleNamespace(id=101)
         serialized = SimpleNamespace(id=101)
@@ -160,6 +198,7 @@ class ChatRouterRoomEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=None,
             forwarded_from_id=None,
+            forwarded_from_name_override=None,
             mentions=[],
             mention_all=False,
         )

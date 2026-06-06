@@ -139,6 +139,15 @@ class GroupMemberSummary:
 
 
 @dataclass
+class GroupMessageSeenSummary:
+    user_id: int
+    account_name: str
+    full_name: str | None
+    avatar_file_id: str | None
+    seen_at: datetime
+
+
+@dataclass
 class GroupMemberMutationSummary:
     chat_id: int
     user_id: int
@@ -1249,6 +1258,48 @@ async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMembe
             )
         )
     return items
+
+
+async def list_group_message_seen_members(
+    db: AsyncSession,
+    *,
+    chat: Chat,
+    message_id: int,
+    requester_id: int,
+) -> list[GroupMessageSeenSummary]:
+    message = await db.get(Message, message_id)
+    if message is None or message.chat_id != chat.id or message.is_deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message.sender_id != requester_id:
+        raise HTTPException(status_code=403, detail="Only the sender can view message seen members")
+
+    await get_active_group_member_or_403(db, chat=chat, user_id=requester_id)
+
+    stmt = (
+        select(ChatMember, User)
+        .join(User, User.id == ChatMember.user_id)
+        .where(
+            ChatMember.chat_id == chat.id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+            ChatMember.user_id != message.sender_id,
+            ChatMember.last_read_message_id.is_not(None),
+            ChatMember.last_read_message_id >= message.id,
+            ChatMember.last_read_at.is_not(None),
+        )
+        .order_by(ChatMember.last_read_at.desc(), User.account_name.asc())
+    )
+    result = await db.execute(stmt)
+    return [
+        GroupMessageSeenSummary(
+            user_id=user.id,
+            account_name=user.account_name,
+            full_name=user.full_name,
+            avatar_file_id=getattr(user, "avatar_file_id", None),
+            seen_at=member.last_read_at,
+        )
+        for member, user in result.all()
+        if member.last_read_at is not None
+    ]
 
 
 async def list_group_messages(

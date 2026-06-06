@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from core.enums import ChatMemberRole, MessageType
 from core.services.chat_room_service import (
+    list_group_message_seen_members,
     mark_channel_messages_read,
     mark_channel_messages_read_with_broadcast,
     mark_group_messages_read,
@@ -360,6 +361,33 @@ class ChatRoomServiceRoomIOTests(unittest.IsolatedAsyncioTestCase):
         message = db.added[0]
         self.assertEqual(message.mentions, [20, 12, 15])
         self.assertTrue(message.mention_all)
+
+    async def test_list_group_message_seen_members_is_sender_only_and_uses_read_cursor(self):
+        seen_at = datetime(2026, 6, 6, 18, 40, 0)
+        chat = SimpleNamespace(id=70)
+        message = SimpleNamespace(id=42, chat_id=70, sender_id=9, is_deleted=False)
+        reader_member = SimpleNamespace(last_read_at=seen_at)
+        reader_user = SimpleNamespace(id=12, account_name="reader", full_name="Reader User", avatar_file_id="avatar-12")
+        db = FakeDB(
+            get_map={42: message},
+            execute_results=[FakeExecuteResult(rows=[(reader_member, reader_user)])],
+        )
+
+        with patch(
+            "core.services.chat_room_service.get_active_group_member_or_403",
+            new=AsyncMock(return_value=SimpleNamespace(user_id=9)),
+        ) as member_guard_mock:
+            result = await list_group_message_seen_members(db, chat=chat, message_id=42, requester_id=9)
+
+        member_guard_mock.assert_awaited_once_with(db, chat=chat, user_id=9)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].user_id, 12)
+        self.assertEqual(result[0].account_name, "reader")
+        self.assertEqual(result[0].seen_at, seen_at)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await list_group_message_seen_members(db, chat=chat, message_id=42, requester_id=12)
+        self.assertEqual(exc_info.exception.status_code, 403)
 
     async def test_send_channel_message_keeps_explicit_mentions_for_non_text_payloads(self):
         now = datetime(2026, 5, 8, 2, 5, 0)

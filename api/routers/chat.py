@@ -45,6 +45,7 @@ from api.routers.chat_schemas import (
     ConversationUnreadResponse,
     ConversationUnreadUpdateRequest,
     DirectChatActivitySignal,
+    GroupMessageSeenRead,
     GroupCreateRequest,
     GroupCreateResponse,
     GroupDetailRead,
@@ -91,6 +92,7 @@ from core.services.chat_room_service import (
     leave_group_chat,
     leave_channel_chat,
     list_group_conversations,
+    list_group_message_seen_members,
     list_group_members,
     list_group_messages,
     list_groups_for_user,
@@ -1665,6 +1667,25 @@ async def get_room_messages(
         messages,
         viewer_user_id=current_user.id,
     )
+
+
+@router.get("/rooms/{chat_id}/messages/{message_id}/seen", response_model=List[GroupMessageSeenRead])
+async def get_group_message_seen_members(
+    chat_id: int,
+    message_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    chat = await get_room_or_404(db, chat_id)
+    if chat.type != ChatType.GROUP:
+        raise HTTPException(status_code=404, detail="Message seen list is available for groups only")
+    items = await list_group_message_seen_members(
+        db,
+        chat=chat,
+        message_id=message_id,
+        requester_id=current_user.id,
+    )
+    return [GroupMessageSeenRead.model_validate(item) for item in items]
 
 
 @router.post("/rooms/{chat_id}/send", response_model=MessageRead)
