@@ -16,7 +16,9 @@ type BackHandler = () => void
 const backStack: BackHandler[] = []
 
 let isListening = false
+let isTelegramListening = false
 let ignoreNextPopState = false
+let telegramInitInterval: any = null
 
 function handlePopState() {
   if (ignoreNextPopState) {
@@ -43,15 +45,35 @@ function updateTelegramBackButton() {
   }
 }
 
-function startListening() {
-  if (isListening) return
-  isListening = true
-  window.addEventListener('popstate', handlePopState)
+function handleTelegramBackClick() {
+  window.history.back()
+}
 
-  // Telegram BackButton
+function initTelegramBackButton() {
   const tg = (window as any).Telegram?.WebApp
   if (tg?.BackButton) {
-    tg.BackButton.onClick(handlePopState)
+    if (!isTelegramListening) {
+      isTelegramListening = true
+      tg.BackButton.onClick(handleTelegramBackClick)
+      if (telegramInitInterval) {
+        clearInterval(telegramInitInterval)
+        telegramInitInterval = null
+      }
+    }
+    updateTelegramBackButton()
+  }
+}
+
+function startListening() {
+  if (!isListening) {
+    isListening = true
+    window.addEventListener('popstate', handlePopState)
+  }
+
+  initTelegramBackButton()
+
+  if (!isTelegramListening && !telegramInitInterval) {
+    telegramInitInterval = setInterval(initTelegramBackButton, 100)
   }
 }
 
@@ -103,6 +125,15 @@ export function discardBackState() {
  */
 export function clearBackStack() {
   backStack.length = 0
+  if (telegramInitInterval) {
+    clearInterval(telegramInitInterval)
+    telegramInitInterval = null
+  }
+  const tg = (window as any).Telegram?.WebApp
+  if (tg?.BackButton && isTelegramListening) {
+    tg.BackButton.offClick(handleTelegramBackClick)
+  }
+  isTelegramListening = false
   updateTelegramBackButton()
 }
 

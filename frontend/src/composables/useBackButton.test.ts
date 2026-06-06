@@ -10,6 +10,7 @@ describe('useBackButton', () => {
     show: vi.fn(),
     hide: vi.fn(),
     onClick: vi.fn(),
+    offClick: vi.fn(),
   }
 
   beforeEach(() => {
@@ -19,6 +20,7 @@ describe('useBackButton', () => {
     telegramBackButton.show.mockClear()
     telegramBackButton.hide.mockClear()
     telegramBackButton.onClick.mockClear()
+    telegramBackButton.offClick.mockClear()
     clearBackStack()
   })
 
@@ -84,5 +86,46 @@ describe('useBackButton', () => {
 
     expect(wrapper.html()).toBe('<div></div>')
     expect(telegramBackButton.show).toHaveBeenCalled()
+  })
+
+  it('handles lazy loading of Telegram WebApp BackButton via polling', async () => {
+    vi.useFakeTimers()
+    delete (window as any).Telegram
+
+    const onBack = vi.fn()
+    pushBackState(onBack)
+
+    expect(telegramBackButton.onClick).not.toHaveBeenCalled()
+
+    // Mock script loads later
+    ;(window as any).Telegram = { WebApp: { BackButton: telegramBackButton } }
+
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(telegramBackButton.onClick).toHaveBeenCalled()
+    expect(telegramBackButton.show).toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('triggers history.back when Telegram BackButton is clicked', () => {
+    const onBack = vi.fn()
+    pushBackState(onBack)
+
+    expect(telegramBackButton.onClick).toHaveBeenCalled()
+    const clickHandler = (telegramBackButton.onClick as any).mock.calls[0][0]
+    expect(clickHandler).toBeTypeOf('function')
+
+    clickHandler()
+    expect(historyBackSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('cleans up the click listener using offClick when clearBackStack is called', () => {
+    pushBackState(vi.fn())
+    expect(telegramBackButton.onClick).toHaveBeenCalled()
+    const clickHandler = (telegramBackButton.onClick as any).mock.calls[0][0]
+
+    clearBackStack()
+    expect(telegramBackButton.offClick).toHaveBeenCalledWith(clickHandler)
   })
 })
