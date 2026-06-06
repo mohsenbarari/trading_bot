@@ -117,6 +117,7 @@ const useVirtualTimeline = computed(() => {
               :isSelectionMode="state.isSelectionMode"
               :searchQuery="state.searchQuery"
               :isManagementMessage="state.isSelectedManagementRoom"
+              :room-kind="state.selectedRoomKind"
               @swipe-reply="handlers.handleReply"
               @select="handlers.handleGroupedItemSelection(item)"
               @click-message="handlers.handleMessageClick"

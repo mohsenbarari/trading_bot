@@ -328,7 +328,7 @@
              </svg>
           </div>
           <!-- Read -->
-          <svg v-else-if="msg.is_read" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
+          <svg v-else-if="shouldShowReadReceipt" viewBox="0 0 24 24" class="icon-read" width="16" height="16">
             <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
           </svg>
           <!-- Unread -->
@@ -462,6 +462,7 @@ const props = defineProps<{
   albumItems?: any[]
   isAlbumDownloadMode?: boolean
   selectedAlbumDownloadMessageIds?: number[]
+  roomKind?: 'direct' | 'group' | 'channel'
 }>()
 
 const emit = defineEmits<{
@@ -488,6 +489,7 @@ const audioStore = useAudioStore()
 
 // --- Computed State ---
 const isSent = computed(() => props.msg.sender_id === props.currentUserId)
+const shouldShowReadReceipt = computed(() => props.roomKind !== 'group' && props.roomKind !== 'channel' && props.msg?.is_read === true)
 const isSending = computed(() => {
   if (props.msg.is_sending) return true
   if (props.msg.id >= 0 || props.msg.is_error) return false
