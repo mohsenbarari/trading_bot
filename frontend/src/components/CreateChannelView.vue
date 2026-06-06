@@ -163,7 +163,7 @@ const canOpenCurrentChannelInMessenger = computed(() => {
 })
 const currentUserCanPostInCurrentChannel = computed(() => currentUserMembership.value?.role === 'admin')
 const activeAdminCount = computed(() => members.value.filter((member) => member.role === 'admin').length)
-const channelAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value))
+const channelAvatarUrl = computed(() => buildChatFileUrl(avatarFileId.value, props.apiBaseUrl))
 const isCurrentUserChannelCreator = computed(() => Boolean(currentUserMembership.value?.is_channel_creator))
 const canEditOverviewAvatar = computed(() => Boolean(activeChannel.value && currentUserMembership.value?.role === 'admin' && !isMembershipManagementLocked.value))
 const currentChannelExitLabel = computed(() => isCurrentUserChannelCreator.value ? 'حذف کانال' : 'خروج از کانال')

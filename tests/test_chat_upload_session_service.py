@@ -377,7 +377,7 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_to_thread_success(fn, *args, **kwargs):
             if getattr(fn, "__name__", "") == "_exif_transpose_sync":
-                return (b"rotated-image", 321, 123)
+                return (b"rotated-image", 321, 123, "image/png", "png")
             return fn(*args, **kwargs)
 
         with patch("core.services.chat_upload_session_service._ensure_directory", new=AsyncMock()), patch(
@@ -406,6 +406,39 @@ class ChatUploadSessionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.width, 321)
         self.assertEqual(result.height, 123)
         self.assertEqual(result.size, len(b"rotated-image"))
+        self.assertEqual(result.chat_file.mime_type, "image/png")
+
+        fake_webp_file = FakeAsyncFile()
+
+        async def fake_to_thread_webp(fn, *args, **kwargs):
+            if getattr(fn, "__name__", "") == "_exif_transpose_sync":
+                return (b"webp-image", 640, 480, "image/webp", "webp")
+            return fn(*args, **kwargs)
+
+        with patch("core.services.chat_upload_session_service._ensure_directory", new=AsyncMock()), patch(
+            "core.services.chat_upload_session_service.asyncio.to_thread",
+            new=AsyncMock(side_effect=fake_to_thread_webp),
+        ), patch(
+            "core.services.chat_upload_session_service.magic.from_buffer",
+            return_value="image/heic",
+        ), patch(
+            "core.services.chat_upload_session_service.uuid.uuid4",
+            return_value="image-webp",
+        ), patch(
+            "core.services.chat_upload_session_service.aiofiles.open",
+            return_value=fake_webp_file,
+        ):
+            webp_result = await persist_chat_media_file_bytes(
+                db,
+                uploader_id=5,
+                file_name="photo.heic",
+                declared_content_type="image/heic",
+                contents=b"raw-heic",
+            )
+
+        fake_webp_file.write.assert_awaited_once_with(b"webp-image")
+        self.assertEqual(webp_result.chat_file.mime_type, "image/webp")
+        self.assertTrue(webp_result.chat_file.s3_key.endswith(".webp"))
 
         fake_warning_file = FakeAsyncFile()
 
