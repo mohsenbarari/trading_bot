@@ -1087,7 +1087,7 @@ const pinnedMessageMetaText = computed(() => {
 })
 
 let pinnedMessageRequestId = 0
-let pinnedMessageLoadTimer: ReturnType<typeof window.setTimeout> | null = null
+let pinnedMessageLoadTimer: number | null = null
 
 function cancelScheduledPinnedMessageLoad() {
   if (pinnedMessageLoadTimer == null) return
