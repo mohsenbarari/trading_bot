@@ -844,6 +844,7 @@ const isSelectedManagementRoom = computed(() => selectedRoomKind.value === 'grou
 const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
 const selectedChatRoleKind = computed(() => selectedConversation.value?.chat_role_kind ?? null)
 const selectedChatRoleLabel = computed(() => selectedConversation.value?.chat_role_label ?? null)
+const selectedAccountantOwnerLabel = computed(() => selectedConversation.value?.chat_accountant_owner_label ?? null)
 const isCurrentUserCustomer = computed(() => props.currentUserIsCustomer === true)
 const canStartNewConversation = computed(() => true)
 const canCreateGroup = computed(() => !isCurrentUserCustomer.value)
@@ -3778,6 +3779,7 @@ defineExpose({
       :selectedAvatarFileId="selectedAvatarFileId"
       :selectedChatRoleKind="selectedChatRoleKind"
       :selectedChatRoleLabel="selectedChatRoleLabel"
+      :selectedAccountantOwnerLabel="selectedAccountantOwnerLabel"
       :selectedRoomKind="selectedRoomKind"
       :apiBaseUrl="apiBaseUrl"
       :targetUserStatus="selectedRoomStatusText"

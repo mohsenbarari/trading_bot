@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import ChatUserListRow from './chat/ChatUserListRow.vue'
 import HelpPopover from './HelpPopover.vue'
 import { apiFetch, apiFetchJson } from '../utils/auth'
-import { getChatRoleBadge } from '../utils/chatRoleBadges'
+import { getAccountantOwnerBadge, getChatRoleBadge } from '../utils/chatRoleBadges'
 import type { ChatUserListRowBadge } from './chat/ChatUserListRow.vue'
 import type { ChatRoleKind } from '../types/chat'
 import { discardBackState, popBackState, pushBackState } from '../composables/useBackButton'
@@ -60,6 +60,8 @@ type ChannelInviteCandidate = {
   is_already_member: boolean
   chat_role_kind?: ChatRoleKind | null
   chat_role_label?: string | null
+  chat_accountant_owner_name?: string | null
+  chat_accountant_owner_label?: string | null
 }
 
 type ChannelInviteCandidateResponse = {
@@ -89,6 +91,8 @@ type ChannelMember = {
   is_channel_creator: boolean
   chat_role_kind?: ChatRoleKind | null
   chat_role_label?: string | null
+  chat_accountant_owner_name?: string | null
+  chat_accountant_owner_label?: string | null
 }
 
 type ChannelMemberMutationResponse = {
@@ -440,12 +444,18 @@ function getChannelMemberBadges(member: ChannelMember): ChatUserListRowBadge[] {
   }
   const roleBadge = getChatRoleBadge(member)
   if (roleBadge) badges.push(roleBadge)
+  const ownerBadge = getAccountantOwnerBadge(member)
+  if (ownerBadge) badges.push(ownerBadge)
   return badges
 }
 
 function getRoleOnlyBadges(user: ChannelInviteCandidate): ChatUserListRowBadge[] {
+  const badges: ChatUserListRowBadge[] = []
   const roleBadge = getChatRoleBadge(user)
-  return roleBadge ? [roleBadge] : []
+  if (roleBadge) badges.push(roleBadge)
+  const ownerBadge = getAccountantOwnerBadge(user)
+  if (ownerBadge) badges.push(ownerBadge)
+  return badges
 }
 
 function getPromotableMemberBadges(member: ChannelMember): ChatUserListRowBadge[] {

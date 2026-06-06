@@ -13,6 +13,8 @@ type ForwardUser = {
   resolved_from_accountant_id?: number | null
   chat_role_kind?: ChatRoleKind | null
   chat_role_label?: string | null
+  chat_accountant_owner_name?: string | null
+  chat_accountant_owner_label?: string | null
   highlight_accountant_relation_display_name?: string | null
 }
 
@@ -23,6 +25,7 @@ type ForwardTargetCandidate = ChatForwardTarget & {
   searchText: string
   chatRoleKind?: ChatRoleKind | string | null
   chatRoleLabel?: string | null
+  accountantOwnerLabel?: string | null
 }
 
 const USER_FETCH_LIMIT = 5000
@@ -163,8 +166,9 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
         isConversation: true,
         conversationIndex: index,
         searchText: buildSearchText([conversation.other_user_name, 'گروه', 'ارسال به گروه']),
-        chatRoleKind: null,
-        chatRoleLabel: null,
+      chatRoleKind: null,
+      chatRoleLabel: null,
+      accountantOwnerLabel: null,
       })
       return
     }
@@ -182,8 +186,9 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
         isConversation: true,
         conversationIndex: index,
         searchText: buildSearchText([conversation.other_user_name, 'کانال', 'ارسال به کانال']),
-        chatRoleKind: null,
-        chatRoleLabel: null,
+      chatRoleKind: null,
+      chatRoleLabel: null,
+      accountantOwnerLabel: null,
       })
       return
     }
@@ -204,6 +209,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
       searchText: buildSearchText([title, user?.account_name, subtitle]),
       chatRoleKind: user?.chat_role_kind ?? conversation.chat_role_kind ?? null,
       chatRoleLabel: user?.chat_role_label ?? conversation.chat_role_label ?? null,
+      accountantOwnerLabel: user?.chat_accountant_owner_label ?? conversation.chat_accountant_owner_label ?? null,
     })
 
     seenIds.add(conversation.other_user_id)
@@ -226,6 +232,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
       searchText: buildSearchText([title, user.account_name, user.mobile_number]),
       chatRoleKind: user.chat_role_kind ?? null,
       chatRoleLabel: user.chat_role_label ?? null,
+      accountantOwnerLabel: user.chat_accountant_owner_label ?? null,
     })
   })
 
@@ -363,6 +370,7 @@ function confirmForward() {
                     <div class="target-title-row">
                       <span class="target-title">{{ target.title }}</span>
                       <span class="target-chip" :class="getTargetBadgeClass(target)">{{ getTargetBadge(target) }}</span>
+                      <span v-if="target.chatRoleKind === 'accountant' && target.accountantOwnerLabel" class="target-chip role-owner">{{ target.accountantOwnerLabel }}</span>
                     </div>
                     <span v-if="target.subtitle" class="target-subtitle" dir="ltr">{{ target.subtitle }}</span>
                   </div>
@@ -390,6 +398,7 @@ function confirmForward() {
                     <div class="target-title-row">
                       <span class="target-title">{{ target.title }}</span>
                       <span class="target-chip" :class="getTargetBadgeClass(target)">{{ getTargetBadge(target) }}</span>
+                      <span v-if="target.chatRoleKind === 'accountant' && target.accountantOwnerLabel" class="target-chip role-owner">{{ target.accountantOwnerLabel }}</span>
                     </div>
                     <span v-if="target.subtitle" class="target-subtitle" dir="ltr">{{ target.subtitle }}</span>
                   </div>
@@ -746,6 +755,11 @@ function confirmForward() {
 .target-chip.role-colleague {
   background: rgba(148, 163, 184, 0.14);
   color: #475569;
+}
+
+.target-chip.role-owner {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
 }
 
 .modal-slide-enter-active,
