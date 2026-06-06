@@ -68,6 +68,7 @@ import {
 import {
   buildMessengerContextMenuModel,
   getMessengerContextMenuStyle,
+  type MessengerContextMenuModel,
 } from '../utils/messageContextMenuModel'
 
 const loadChatSearchGlobalList = () => import('./chat/ChatSearchGlobalList.vue')
@@ -183,6 +184,7 @@ const contextMenu = ref<{
   message: Message | null
   messageIds: number[]
   style: Record<string, string> | null
+  menuModel?: MessengerContextMenuModel | null
 }>({ visible: false, x: 0, y: 0, message: null, messageIds: [], style: null })
 const AVAILABLE_MESSAGE_REACTIONS = [...MESSAGE_REACTION_CATALOG] as const
 const CONTEXT_MENU_SUPPORTS_FILE_SHARE = canShareFiles()
@@ -2196,6 +2198,7 @@ const showContextMenu = (event: Event, msg: Message) => {
     message: msg,
     messageIds,
     style,
+    menuModel,
   }
   markMessengerPerformance('message-context-menu-open')
 
@@ -2230,7 +2233,7 @@ const showContextMenu = (event: Event, msg: Message) => {
 
 function closeContextMenu() {
   contextMenuSnapshotVersion += 1
-  contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [], style: null }
+  contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [], style: null, menuModel: null }
 }
 
 function closeCurrentOverlayThen(closeCurrent: () => void, openNext: () => void) {
