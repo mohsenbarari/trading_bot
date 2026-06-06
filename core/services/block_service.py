@@ -10,18 +10,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User
 from models.user_block import UserBlock
+from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
 
 
 BLOCK_STATUS_REASON_CAPABILITY_DISABLED = "capability_disabled"
 BLOCK_STATUS_REASON_LIMIT_REACHED = "limit_reached"
 BLOCK_STATUS_REASON_CUSTOMER_DELEGATED = "customer_block_delegated"
+BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED = "accountant_block_delegated"
+ACCOUNTANT_BLOCK_MANAGEMENT_MESSAGE = "قابلیت بلاک کاربران فقط در اختیار سرگروه است."
 
 
 async def _is_user_customer_for_block(db: AsyncSession, user_id: int) -> bool:
     if not hasattr(db, "execute"):
         return False
     return await is_user_customer(db, user_id)
+
+
+async def _is_user_accountant_for_block(db: AsyncSession, user_id: int) -> bool:
+    if not hasattr(db, "execute"):
+        return False
+    return await is_user_accountant(db, user_id)
 
 
 def _build_customer_block_status_payload(user: User) -> dict:
@@ -33,6 +42,18 @@ def _build_customer_block_status_payload(user: User) -> dict:
         "remaining": 0,
         "reason_code": BLOCK_STATUS_REASON_CUSTOMER_DELEGATED,
         "reason_message": "سیستم بلاک مشتریان توسط مالک مدیریت می‌شود.",
+    }
+
+
+def _build_accountant_block_status_payload(user: User) -> dict:
+    return {
+        "can_block": False,
+        "can_block_now": False,
+        "max_blocked": 0,
+        "current_blocked": 0,
+        "remaining": 0,
+        "reason_code": BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED,
+        "reason_message": ACCOUNTANT_BLOCK_MANAGEMENT_MESSAGE,
     }
 
 
@@ -73,6 +94,9 @@ async def can_user_block(db: AsyncSession, user_id: int) -> Tuple[bool, str, dic
 
     if await _is_user_customer_for_block(db, user_id):
         return False, "❌ سیستم بلاک مشتریان توسط مالک مدیریت می‌شود.", _build_customer_block_status_payload(user)
+
+    if await _is_user_accountant_for_block(db, user_id):
+        return False, f"❌ {ACCOUNTANT_BLOCK_MANAGEMENT_MESSAGE}", _build_accountant_block_status_payload(user)
     
     if not user.can_block_users:
         return False, "❌ قابلیت مسدود کردن برای شما غیرفعال است.", _build_block_status_payload(user, 0)
@@ -224,6 +248,9 @@ async def get_block_status(db: AsyncSession, user_id: int) -> dict:
 
     if await _is_user_customer_for_block(db, user_id):
         return _build_customer_block_status_payload(user)
+
+    if await _is_user_accountant_for_block(db, user_id):
+        return _build_accountant_block_status_payload(user)
     
     current_blocked = await db.scalar(
         select(func.count()).where(UserBlock.blocker_id == user_id)

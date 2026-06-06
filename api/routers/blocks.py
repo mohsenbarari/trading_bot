@@ -21,6 +21,7 @@ from core.services.block_service import (
     search_users_for_block,
     is_blocked_by
 )
+from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
 
 router = APIRouter(
@@ -65,11 +66,14 @@ class MessageResponse(BaseModel):
 
 
 CUSTOMER_BLOCK_MANAGEMENT_DETAIL = "سیستم بلاک مشتریان توسط مالک مدیریت می‌شود."
+ACCOUNTANT_BLOCK_MANAGEMENT_DETAIL = "قابلیت بلاک کاربران فقط در اختیار سرگروه است."
 
 
 async def ensure_block_management_allowed(db: AsyncSession, current_user: User) -> None:
     if hasattr(db, "execute") and await is_user_customer(db, current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=CUSTOMER_BLOCK_MANAGEMENT_DETAIL)
+    if hasattr(db, "execute") and await is_user_accountant(db, current_user.id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNTANT_BLOCK_MANAGEMENT_DETAIL)
 
 
 # ===== Endpoints =====

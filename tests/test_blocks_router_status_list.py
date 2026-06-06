@@ -47,6 +47,19 @@ class BlocksRouterStatusListTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertIn("مالک", exc_info.exception.detail)
 
+    async def test_get_my_blocked_users_rejects_accountant_viewer(self):
+        current_user = SimpleNamespace(id=7)
+        db = SimpleNamespace(execute=AsyncMock())
+
+        with patch("api.routers.blocks.is_user_customer", new=AsyncMock(return_value=False)), patch(
+            "api.routers.blocks.is_user_accountant", new=AsyncMock(return_value=True)
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_my_blocked_users(db=db, current_user=current_user)
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertIn("سرگروه", exc_info.exception.detail)
+
 
 if __name__ == "__main__":
     unittest.main()
