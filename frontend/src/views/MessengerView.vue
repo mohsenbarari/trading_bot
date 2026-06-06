@@ -113,7 +113,7 @@ function handleNavigate(view: string, payload?: any) {
 function handleBack() {
   // If in a chat, the ChatView handles going back to the conversation list internally.
   // If ChatView emits 'back' when there's nowhere to go back to internally, we can route home.
-  router.push('/')
+  router.replace('/')
 }
 </script>
 

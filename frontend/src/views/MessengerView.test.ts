@@ -6,10 +6,12 @@ import MessengerView from './MessengerView.vue'
 const {
   apiFetchMock,
   routerPushMock,
+  routerReplaceMock,
   routeState,
 } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
   routerPushMock: vi.fn(),
+  routerReplaceMock: vi.fn(),
   routeState: {
     query: {
       user_id: '18',
@@ -25,6 +27,7 @@ vi.mock('../utils/auth', () => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({
     push: routerPushMock,
+    replace: routerReplaceMock,
   }),
   useRoute: () => routeState,
 }))
@@ -112,7 +115,7 @@ describe('MessengerView.vue', () => {
     expect(wrapper.text()).toContain('peer-user')
 
     await wrapper.get('.shell-back').trigger('click')
-    expect(routerPushMock).toHaveBeenCalledWith('/')
+    expect(routerReplaceMock).toHaveBeenCalledWith('/')
   })
 
   it('keeps direct-target props undefined and does not mount ChatView when auth me is not ok', async () => {
@@ -169,6 +172,6 @@ describe('MessengerView.vue', () => {
     })
 
     await wrapper.get('.emit-back').trigger('click')
-    expect(routerPushMock).toHaveBeenNthCalledWith(3, '/')
+    expect(routerReplaceMock).toHaveBeenCalledWith('/')
   })
 })

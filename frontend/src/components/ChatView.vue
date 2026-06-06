@@ -3197,6 +3197,7 @@ async function goBack() {
     popBackState()
     await syncSelectedConversationRoute(null, '')
   } else {
+    popBackState()
     emit('back')
   }
 }
