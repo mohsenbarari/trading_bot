@@ -58,6 +58,17 @@ class UserMentionRead(BaseModel):
         from_attributes = True
 
 
+class GroupMessageSeenRead(BaseModel):
+    user_id: int
+    account_name: str
+    full_name: Optional[str] = None
+    avatar_file_id: Optional[str] = None
+    seen_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class MessageReactionRead(BaseModel):
     emoji: str
     user_id: int

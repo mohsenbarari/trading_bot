@@ -234,4 +234,46 @@ describe('ChatContextMenu.vue', () => {
     expect(wrapper.text()).toContain('برداشتن پیام سنجاق‌شده')
     expect(wrapper.text()).toContain('اشتراک‌گذاری')
   })
+
+  it('shows and emits the seen-list action when it is allowed', async () => {
+    const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+    const wrapper = mount(ChatContextMenu, {
+      props: {
+        menuState: {
+          x: 20,
+          y: 30,
+          visible: true,
+          message: {
+            id: 5,
+            message_type: 'text',
+            is_deleted: false,
+            reactions: [],
+          },
+          messageIds: [5],
+        },
+        isAlbumSelection: false,
+        currentUserId: 7,
+        canEdit: false,
+        canDelete: false,
+        canPin: false,
+        canViewSeenList: true,
+        isPinnedMessage: false,
+        availableReactions: [],
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    const seenButton = wrapper.findAll('.menu-item').find((item) => item.text().includes('بازدیدها'))
+    expect(seenButton).toBeTruthy()
+    await seenButton!.trigger('click')
+    expect(wrapper.emitted('seen-list')).toHaveLength(1)
+  })
 })

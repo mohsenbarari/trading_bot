@@ -8,6 +8,7 @@ export type MessengerContextMenuActionKey =
   | 'copy'
   | 'edit'
   | 'pin-message'
+  | 'seen-list'
   | 'delete'
 
 export type MessengerContextMenuTone = 'default' | 'warning' | 'danger'
@@ -32,6 +33,7 @@ export interface BuildMessengerContextMenuModelInput {
   canEdit: boolean
   canDelete: boolean
   canPin: boolean
+  canViewSeenList?: boolean
   isPinnedMessage: boolean
   showReactionRow: boolean
   hasOverflowReactions: boolean
@@ -116,6 +118,9 @@ export function buildMessengerContextMenuModel(
       label: input.isPinnedMessage ? 'برداشتن پیام سنجاق‌شده' : 'سنجاق کردن پیام',
       tone: 'warning',
     })
+  }
+  if (input.canViewSeenList && !input.isAlbumSelection) {
+    communicationItems.push({ key: 'seen-list', label: 'بازدیدها', tone: 'default' })
   }
   if (communicationItems.length > 0) {
     sections.push({

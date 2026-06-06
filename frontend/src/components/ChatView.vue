@@ -13,7 +13,7 @@ import type { ChatAlbumTimelineItem, ChatForwardTarget, ChatSelectionPurpose, Ch
 import { WS_NOTIFICATION_EVENTS } from '../types/notifications'
 import { useChatMedia } from '../composables/chat/useChatMedia'
 import { useChatWebSocket } from '../composables/chat/useChatWebSocket'
-import { formatIranDate, formatIranTime, isTodayInIran, isYesterdayInIran } from '../utils/iranTime'
+import { formatIranDate, formatIranDateTime, formatIranTime, isTodayInIran, isYesterdayInIran } from '../utils/iranTime'
 import { useChatMessages } from '../composables/chat/useChatMessages'
 import { useChatScroll } from '../composables/chat/useChatScroll'
 import { useNotificationStore } from '../stores/notifications'
@@ -191,6 +191,22 @@ const CONTEXT_MENU_SUPPORTS_FILE_SHARE = canShareFiles()
 const pendingReactionMutationVersion = new Map<number, number>()
 let reactionMutationVersion = 0
 let contextMenuSnapshotVersion = 0
+
+type MessageSeenMember = {
+  user_id: number
+  account_name: string
+  full_name?: string | null
+  avatar_file_id?: string | null
+  seen_at: string
+}
+
+const seenListModal = ref<{
+  visible: boolean
+  isLoading: boolean
+  error: string
+  messageId: number | null
+  members: MessageSeenMember[]
+}>({ visible: false, isLoading: false, error: '', messageId: null, members: [] })
 
 // Input
 const messageInput = ref('')
@@ -908,6 +924,15 @@ function canPinMessageInContext(msg?: Message | null, messageIds: number[] = [])
   return canManagePinnedMessages.value
 }
 
+function canViewSeenListInContext(msg?: Message | null, messageIds: number[] = []) {
+  if (!msg) return false
+  if (messageIds.length !== 1) return false
+  if (selectedRoomKind.value !== 'group') return false
+  if (msg.sender_id !== props.currentUserId) return false
+  if (msg.is_deleted) return false
+  return isPersistedMessageId(msg.id)
+}
+
 function canEditMessageInContext(msg?: Message | null, messageIds: number[] = []) {
   if (!msg) return false
   if (messageIds.length !== 1) return false
@@ -934,6 +959,10 @@ const isContextMessagePinned = computed(() => {
 
 const canPinContextMessage = computed(() => {
   return canPinMessageInContext(contextMenu.value.message, contextMenu.value.messageIds)
+})
+
+const canViewContextSeenList = computed(() => {
+  return canViewSeenListInContext(contextMenu.value.message, contextMenu.value.messageIds)
 })
 
 const selectedRoomStatusText = computed(() => {
@@ -2250,6 +2279,7 @@ const showContextMenu = (event: Event, msg: Message) => {
     canEdit: canEditMessageInContext(msg, messageIds),
     canDelete: canDeleteMessageIdsInContext(messageIds),
     canPin: canPinMessageInContext(msg, messageIds),
+    canViewSeenList: canViewSeenListInContext(msg, messageIds),
     isPinnedMessage: isPinnedMessageInContext(msg),
     showReactionRow: !msg.is_deleted && AVAILABLE_MESSAGE_REACTIONS.length > 0,
     hasOverflowReactions: AVAILABLE_MESSAGE_REACTIONS.length > 6,
@@ -2310,6 +2340,10 @@ const showContextMenu = (event: Event, msg: Message) => {
 function closeContextMenu() {
   contextMenuSnapshotVersion += 1
   contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [], style: null, menuModel: null }
+}
+
+function closeSeenListModal() {
+  seenListModal.value = { visible: false, isLoading: false, error: '', messageId: null, members: [] }
 }
 
 function closeCurrentOverlayThen(closeCurrent: () => void, openNext: () => void) {
@@ -3023,6 +3057,46 @@ const handleForwardMessage = () => {
   })
 }
 
+async function handleSeenListMessage() {
+  const msg = contextMenu.value.message
+  const conversation = selectedConversation.value
+  closeContextMenu()
+  if (!msg || !conversation?.chat_id || selectedRoomKind.value !== 'group') {
+    return
+  }
+
+  seenListModal.value = {
+    visible: true,
+    isLoading: true,
+    error: '',
+    messageId: msg.id,
+    members: [],
+  }
+
+  try {
+    const members = await apiFetch(`/chat/rooms/${conversation.chat_id}/messages/${msg.id}/seen`)
+    seenListModal.value = {
+      visible: true,
+      isLoading: false,
+      error: '',
+      messageId: msg.id,
+      members: Array.isArray(members) ? members : [],
+    }
+  } catch (err) {
+    seenListModal.value = {
+      visible: true,
+      isLoading: false,
+      error: err instanceof Error ? err.message : 'دریافت بازدیدها انجام نشد',
+      messageId: msg.id,
+      members: [],
+    }
+  }
+}
+
+function formatSeenAt(value: string | null | undefined) {
+  return formatIranDateTime(value, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function handleForwardSelectedAlbumMessages() {
   const orderedIds = sortMessageIdsByChatOrder(selectedMessages.value)
   if (orderedIds.length === 0) {
@@ -3421,6 +3495,10 @@ bindOverlayBackState(() => Boolean(lightboxMedia.value), () => {
   closeLightbox()
 })
 
+bindOverlayBackState(() => seenListModal.value.visible, () => {
+  closeSeenListModal()
+})
+
 bindOverlayBackState(() => showGroupManagerModal.value, () => {
   closeGroupManager()
 }, () => {
@@ -3574,6 +3652,7 @@ const chatRoomContainerState = computed(() => ({
   canEdit: canEdit.value,
   canDelete: canDelete.value,
   canPinContextMessage: canPinContextMessage.value,
+  canViewContextSeenList: canViewContextSeenList.value,
   isContextMessagePinned: isContextMessagePinned.value,
   availableMessageReactions: [...AVAILABLE_MESSAGE_REACTIONS],
   lightboxMedia: lightboxMedia.value,
@@ -3660,6 +3739,7 @@ const chatRoomContainerHandlers = {
   handleContextMenuReaction,
   handleReplyMessage,
   handleForwardMessage,
+  handleSeenListMessage,
   handleCopyMessage,
   handleEditMessage,
   handleDeleteMessage,
@@ -3995,6 +4075,35 @@ defineExpose({
       @close="closeAdminBroadcastModal"
       @sent="void loadConversations()"
     />
+
+    <div v-if="seenListModal.visible" class="seen-list-overlay" @click.self="closeSeenListModal">
+      <section class="seen-list-sheet" role="dialog" aria-modal="true" aria-label="بازدیدها">
+        <header class="seen-list-header">
+          <button type="button" class="seen-list-close" @click="closeSeenListModal" aria-label="بستن">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+          <h2>بازدیدها</h2>
+        </header>
+
+        <div v-if="seenListModal.isLoading" class="seen-list-state">در حال دریافت...</div>
+        <div v-else-if="seenListModal.error" class="seen-list-state is-error">{{ seenListModal.error }}</div>
+        <div v-else-if="seenListModal.members.length === 0" class="seen-list-state">هنوز کسی این پست را ندیده است</div>
+        <div v-else class="seen-list-members">
+          <div v-for="member in seenListModal.members" :key="member.user_id" class="seen-list-member">
+            <div class="seen-list-avatar" aria-hidden="true">
+              {{ (member.full_name || member.account_name || '?').slice(0, 1) }}
+            </div>
+            <div class="seen-list-copy">
+              <strong>{{ member.full_name || member.account_name }}</strong>
+              <span>{{ formatSeenAt(member.seen_at) }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
     </ChatShell>
 </template>
 
@@ -4227,6 +4336,114 @@ defineExpose({
   background: var(--messenger-manager-shell-bg, linear-gradient(180deg, #f7fafc 0%, #edf3f8 100%));
 }
 
+.seen-list-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px;
+  background: var(--messenger-overlay-medium, rgba(15, 23, 42, 0.28));
+  backdrop-filter: blur(8px);
+}
+
+.seen-list-sheet {
+  width: min(100%, 420px);
+  max-height: min(72vh, 560px);
+  overflow: hidden;
+  border-radius: 22px;
+  border: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.3));
+  background: var(--messenger-panel-bg, #fff);
+  box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.16));
+  direction: rtl;
+}
+
+.seen-list-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--messenger-border-subtle, rgba(148, 163, 184, 0.22));
+}
+
+.seen-list-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--messenger-text-strong, #0f172a);
+}
+
+.seen-list-close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.06));
+  color: var(--messenger-text-secondary, #64748b);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.seen-list-members {
+  max-height: calc(min(72vh, 560px) - 61px);
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.seen-list-member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+
+.seen-list-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #e0f2fe, #bae6fd);
+  color: #075985;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.seen-list-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seen-list-copy strong {
+  font-size: 14px;
+  color: var(--messenger-text-strong, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seen-list-copy span {
+  font-size: 11px;
+  color: var(--messenger-text-secondary, #64748b);
+}
+
+.seen-list-state {
+  padding: 30px 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--messenger-text-secondary, #64748b);
+}
+
+.seen-list-state.is-error {
+  color: #b91c1c;
+}
+
 @media (min-width: 700px) {
   .channel-manager-overlay {
     padding: 24px;
@@ -4237,6 +4454,10 @@ defineExpose({
     height: min(94vh, 920px);
     border-radius: var(--messenger-radius-sheet, 28px);
     box-shadow: var(--messenger-shadow-panel, 0 18px 50px rgba(15, 23, 42, 0.12));
+  }
+
+  .seen-list-overlay {
+    align-items: center;
   }
 }
 
