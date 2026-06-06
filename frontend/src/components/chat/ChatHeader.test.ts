@@ -363,6 +363,56 @@ describe('ChatHeader.vue', () => {
     expect(wrapper.text()).not.toContain('در حال نوشتن')
   })
 
+  it('renders direct header metadata after the name in role then owner order', async () => {
+    const ChatHeader = (await import('./ChatHeader.vue')).default
+    const wrapper = mount(ChatHeader, {
+      props: {
+        isSelectionMode: false,
+        selectedUserId: 33,
+        selectedUserName: 'نوید',
+        selectedAvatarFileId: null,
+        selectedRoomKind: 'direct',
+        selectedChatRoleKind: 'accountant',
+        selectedChatRoleLabel: 'حسابدار',
+        selectedAccountantOwnerLabel: 'سرگروه: زهرا',
+        apiBaseUrl: '',
+        targetUserStatus: 'آخرین بازدید اخیراً',
+        isTyping: false,
+        totalUnread: 0,
+        isSearchActive: false,
+        searchQuery: '',
+        searchResults: [],
+        currentSearchIndex: 0,
+        selectedMessagesCount: 0,
+        isDeleted: false,
+        roomMemberCount: null,
+        isRoomMandatory: false,
+        isRoomSystem: false,
+        canCreateGroup: true,
+        canCreateChannel: true,
+      },
+      global: {
+        directives: {
+          ripple: {},
+          'click-outside': {},
+        },
+      },
+    })
+
+    const titleRow = wrapper.get('.header-title-row')
+    const directChildren = titleRow.element.children
+
+    expect(directChildren[0]?.className).toContain('header-name')
+    expect((directChildren[0] as HTMLElement | undefined)?.textContent).toContain('نوید')
+
+    const metaChildren = wrapper.get('.header-name-meta').element.children
+    expect(metaChildren).toHaveLength(2)
+    expect(metaChildren[0]?.className).toContain('direct-role')
+    expect((metaChildren[0] as HTMLElement | undefined)?.textContent).toContain('حسابدار')
+    expect(metaChildren[1]?.className).toContain('accountant-owner')
+    expect((metaChildren[1] as HTMLElement | undefined)?.textContent).toContain('سرگروه: زهرا')
+  })
+
   it('renders the selection header and emits clear-selection', async () => {
     const ChatHeader = (await import('./ChatHeader.vue')).default
     const wrapper = mount(ChatHeader, {

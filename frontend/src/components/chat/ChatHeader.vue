@@ -26,26 +26,28 @@
           <template v-else>{{ getAvatarInitial(selectedUserName) }}</template>
         </div>
         <div class="header-user-info" @click="handleTitleClick">
-          <span class="header-name">
-            {{ selectedUserName }}
-            <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
-            <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
-            <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
-            <span
-              v-else-if="selectedRoomKind === 'direct' && selectedChatRoleLabel"
-              class="room-badge-small direct-role"
-              :class="selectedChatRoleClass"
-            >
-              {{ selectedChatRoleLabel }}
-            </span>
-            <span
-              v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedAccountantOwnerLabel"
-              class="room-badge-small accountant-owner"
-            >
-              {{ selectedAccountantOwnerLabel }}
-            </span>
-            <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
-          </span>
+          <div class="header-title-row">
+            <span class="header-name">{{ selectedUserName }}</span>
+            <div class="header-name-meta">
+              <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
+              <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
+              <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
+              <span
+                v-else-if="selectedRoomKind === 'direct' && selectedChatRoleLabel"
+                class="room-badge-small direct-role"
+                :class="selectedChatRoleClass"
+              >
+                {{ selectedChatRoleLabel }}
+              </span>
+              <span
+                v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedAccountantOwnerLabel"
+                class="room-badge-small accountant-owner"
+              >
+                {{ selectedAccountantOwnerLabel }}
+              </span>
+              <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
+            </div>
+          </div>
           <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
             <template v-if="isDeleted">
               حساب کاربری غیرفعال است
@@ -487,6 +489,14 @@ function formatDateForSeparator(dateString: string) {
   cursor: pointer;
 }
 
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
 .header-name {
   font-size: 16px;
   font-weight: 600;
@@ -495,8 +505,18 @@ function formatDateForSeparator(dateString: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
   text-align: left;
+}
+
+.header-name-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 
 .header-status {
@@ -539,13 +559,12 @@ function formatDateForSeparator(dateString: string) {
   font-size: 10px;
   padding: 2px 6px;
   border-radius: var(--messenger-radius-control, 8px);
-  margin-right: 6px;
-  vertical-align: middle;
+  flex: 0 0 auto;
 }
 
 .room-badge-small,
 .header-room-meta {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
@@ -553,8 +572,7 @@ function formatDateForSeparator(dateString: string) {
   font-size: 10px;
   font-weight: 700;
   line-height: 1.2;
-  margin-right: 6px;
-  vertical-align: middle;
+  flex: 0 0 auto;
 }
 
 .room-badge-small.channel {
