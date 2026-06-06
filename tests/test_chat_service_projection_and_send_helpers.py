@@ -90,6 +90,8 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("coalesce(", projection_sql)
         self.assertIn("profile_user_id", projection_sql)
         self.assertIn("profile_account_name", projection_sql)
+        self.assertIn("users_2.avatar_file_id", projection_sql)
+        self.assertNotIn("coalesce(users_4.avatar_file_id", projection_sql)
         self.assertIn("resolved_from_accountant_id", projection_sql)
         self.assertIn("highlight_accountant_relation_display_name", projection_sql)
         self.assertIn("accountant_relations", projection_sql)

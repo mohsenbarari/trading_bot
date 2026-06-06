@@ -331,8 +331,8 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         else_=user1_accountant_owner_label,
     ).label("chat_accountant_owner_label")
     other_user_avatar_file_id = case(
-        (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.avatar_file_id, user2_alias.avatar_file_id)),
-        else_=func.coalesce(user1_owner_alias.avatar_file_id, user1_alias.avatar_file_id),
+        (Conversation.user1_id == current_user_id, user2_alias.avatar_file_id),
+        else_=user1_alias.avatar_file_id,
     ).label("avatar_file_id")
     other_user_is_deleted = case(
         (Conversation.user1_id == current_user_id, user2_alias.is_deleted),

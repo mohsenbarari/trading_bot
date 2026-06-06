@@ -49,7 +49,10 @@ async def load_accountant_chat_identity_map(
 
     stmt = (
         select(AccountantRelation)
-        .options(joinedload(AccountantRelation.owner_user))
+        .options(
+            joinedload(AccountantRelation.owner_user),
+            joinedload(AccountantRelation.accountant_user),
+        )
         .where(
             AccountantRelation.accountant_user_id.in_(normalized_user_ids),
             AccountantRelation.status == AccountantRelationStatus.ACTIVE,
@@ -62,6 +65,7 @@ async def load_accountant_chat_identity_map(
         if relation.accountant_user_id is None or relation.owner_user is None or relation.owner_user.is_deleted:
             continue
         owner_user = relation.owner_user
+        accountant_user = relation.accountant_user
         identity_map[relation.accountant_user_id] = AccountantChatIdentity(
             raw_user_id=relation.accountant_user_id,
             display_name=build_relation_aware_display_name(
@@ -70,7 +74,7 @@ async def load_accountant_chat_identity_map(
             ),
             profile_user_id=owner_user.id,
             profile_account_name=owner_user.account_name,
-            profile_avatar_file_id=getattr(owner_user, "avatar_file_id", None),
+            profile_avatar_file_id=getattr(accountant_user, "avatar_file_id", None),
             resolved_from_accountant_id=relation.accountant_user_id,
             highlight_accountant_user_id=relation.accountant_user_id,
             highlight_accountant_relation_display_name=relation.relation_display_name,
