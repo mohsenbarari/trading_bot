@@ -87,6 +87,7 @@ import {
   buildMessengerContextMenuModel,
   getMessengerContextMenuStyle,
   type MessengerContextMenuActionKey,
+  type MessengerContextMenuModel,
 } from '../../utils/messageContextMenuModel'
 
 const supportsFileShare = canShareFiles()
@@ -112,6 +113,7 @@ const props = defineProps<{
     message: any | null
     messageIds?: number[]
     style?: Record<string, string> | null
+    menuModel?: MessengerContextMenuModel | null
   }
   isAlbumSelection: boolean
   currentUserId: number | null
@@ -157,18 +159,24 @@ const canShowReactionRow = computed(() => {
 
 const showReactionRow = computed(() => canShowReactionRow.value && isReactionRowMounted.value)
 
-const menuModel = computed(() => buildMessengerContextMenuModel({
-  messageType: props.menuState.message?.message_type,
-  isAlbumSelection: props.isAlbumSelection,
-  supportsFileShare,
-  canEdit: props.canEdit,
-  canDelete: props.canDelete,
-  canPin: props.canPin,
-  isPinnedMessage: props.isPinnedMessage,
-  showReactionRow: showReactionRow.value,
-  hasOverflowReactions: hasOverflowReactions.value,
-  isReactionPickerExpanded: isReactionPickerExpanded.value,
-}))
+const menuModel = computed(() => {
+  if (props.menuState.menuModel) {
+    return props.menuState.menuModel
+  }
+
+  return buildMessengerContextMenuModel({
+    messageType: props.menuState.message?.message_type,
+    isAlbumSelection: props.isAlbumSelection,
+    supportsFileShare,
+    canEdit: props.canEdit,
+    canDelete: props.canDelete,
+    canPin: props.canPin,
+    isPinnedMessage: props.isPinnedMessage,
+    showReactionRow: showReactionRow.value,
+    hasOverflowReactions: hasOverflowReactions.value,
+    isReactionPickerExpanded: isReactionPickerExpanded.value,
+  })
+})
 
 const menuStyle = computed(() => {
   if (props.menuState.style) {

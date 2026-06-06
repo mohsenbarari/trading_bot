@@ -743,6 +743,17 @@ Status: Complete - release gate accepted, legacy retirement requires explicit ap
   - Upload completion improved in S09 by about `-199.9 ms`; download start stayed neutral at median.
   - Context menu latency is the remaining performance follow-up: it improved in S11 (`-33.1 ms`) but regressed in several scenarios, especially S10 (`+1006.4 ms`). This does not block the Stage H architecture gate, but it should be handled before removing the legacy fallback permanently.
 
+### 2026-06-06 Context Menu Latency Micro-task
+
+- Scoped the follow-up to a small, reversible interaction-path fix instead of continuing broad Messenger refactoring.
+- Product-side change: `ChatView.vue` now snapshots the already-built context menu model when the menu opens, and `ChatContextMenu.vue` consumes that model instead of rebuilding the same action-section model during render. This keeps action availability behavior unchanged while removing duplicated reactive work from the open path.
+- Benchmark-side change: `runContextMenuProbe()` now dispatches the same deterministic `contextmenu` event that `ChatMessageItem.vue` listens for, instead of trying Playwright right-click first and waiting up to `1500 ms` before falling back. The previous S10 value near `1500 ms` was therefore largely a probe artifact, not pure product latency.
+- Focused validation passed:
+  - `npm run test:unit:run -- src/components/chat/ChatContextMenu.test.ts src/components/ChatView.test.ts`: `103` passed.
+  - `npm run build`: passed.
+  - S10-only benchmark using `tmp/messenger-benchmark/stage11-s10-config.json`: current context menu samples were `391.9`, `453.6`, and `416.6 ms`, versus the previous full benchmark samples around `1333-1501.7 ms`.
+- Remaining debt: even after removing the measurement artifact, current S10 median context menu latency is about `416.6 ms` versus pre-refactor median about `315.3 ms`. Closing this last gap likely requires deeper profiling of menu mount/layout and is not worth another broad refactor loop right now.
+
 ### Goal
 
 Prove that the new architecture is faster, safer, and more pleasant before removing legacy fallback.
@@ -765,7 +776,7 @@ Prove that the new architecture is faster, safer, and more pleasant before remov
 | `ChatMessageItem.vue` | below 400 lines or adapter-only |
 | Timeline | real virtualization enabled for heavy rooms |
 | S10 weak-device list-ready | below 5000 ms |
-| Context menu | Follow-up required: several scenarios remain above the `140 ms` target after the Stage H benchmark |
+| Context menu | Measurement artifact fixed for S10; remaining S10 median is about `416.6 ms`, tracked as performance debt |
 | S08/S09/S11 request count | at least 30% lower than current benchmark |
 | DOM nodes in heavy room | materially lower than Stage 12 |
 | Heap | no scenario worse than Stage 12 by more than 2 MB |
@@ -812,4 +823,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Stage H is complete as a release gate. Next step is the explicit legacy-retirement review: keep the fallback until the user approves removal, and before removal either optimize the remaining context-menu latency regressions or accept them as a tracked post-release performance debt.
+Stage H is complete as a release gate. Keep the legacy fallback until the user explicitly approves removal. The broad architecture refactor should stop here; continue only with bug fixes and narrow, evidence-backed micro-optimizations. The remaining context-menu gap is tracked as performance debt unless a future profiler pass shows a small, low-risk fix.

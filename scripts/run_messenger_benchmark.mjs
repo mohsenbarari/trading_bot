@@ -1124,34 +1124,22 @@ async function runScrollProbe(page) {
 }
 
 async function runContextMenuProbe(page) {
-  const target = page.locator('.message-wrapper, .message-row, .message-bubble').first()
+  const target = page.locator('.message-wrapper').first()
   await target.waitFor({ timeout: 30000 })
   const start = await page.evaluate(() => performance.now())
-  await target.click({ button: 'right', position: { x: 24, y: 24 }, force: true, timeout: 5000 }).catch(() => null)
-  const openedByClick = await page.waitForFunction(
-    () => Boolean(document.querySelector('.context-menu, .chat-context-menu, [role="menu"]')),
-    null,
-    { timeout: 1500 },
-  ).then(() => true).catch(() => false)
-
-  if (!openedByClick) {
-    await target.evaluate((element) => {
-      const dispatchTarget = element.matches('.message-wrapper')
-        ? element
-        : element.querySelector('.message-wrapper, .message-bubble') ?? element
-      const rect = dispatchTarget.getBoundingClientRect()
-      const clientX = rect.left + Math.min(24, Math.max(1, rect.width / 2))
-      const clientY = rect.top + Math.min(24, Math.max(1, rect.height / 2))
-      dispatchTarget.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX,
-        clientY,
-        button: 2,
-        buttons: 2,
-      }))
-    })
-  }
+  await target.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const clientX = rect.left + Math.min(24, Math.max(1, rect.width / 2))
+    const clientY = rect.top + Math.min(24, Math.max(1, rect.height / 2))
+    element.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX,
+      clientY,
+      button: 2,
+      buttons: 2,
+    }))
+  })
   await page.waitForFunction(
     () => Boolean(document.querySelector('.context-menu, .chat-context-menu, [role="menu"]')),
     null,
