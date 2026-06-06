@@ -56,6 +56,7 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
             accountant_user_id=101,
             relation_display_name="دفتر مالک",
             owner_user=owner,
+            accountant_user=SimpleNamespace(id=101, avatar_file_id="avatar-101"),
             status=AccountantRelationStatus.ACTIVE,
             deleted_at=None,
         )
@@ -82,7 +83,7 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(identity_map[101].display_name, "دفتر مالک")
         self.assertEqual(identity_map[101].profile_user_id, 201)
         self.assertEqual(identity_map[101].profile_account_name, "owner-201")
-        self.assertEqual(identity_map[101].profile_avatar_file_id, "avatar-201")
+        self.assertEqual(identity_map[101].profile_avatar_file_id, "avatar-101")
         self.assertEqual(identity_map[101].resolved_from_accountant_id, 101)
         self.assertEqual(identity_map[101].highlight_accountant_user_id, 101)
         self.assertEqual(identity_map[101].highlight_accountant_relation_display_name, "دفتر مالک")
@@ -93,6 +94,7 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
             accountant_user_id=101,
             relation_display_name="دفتر مالک",
             owner_user=owner,
+            accountant_user=SimpleNamespace(id=101, avatar_file_id="avatar-101"),
             status=AccountantRelationStatus.ACTIVE,
             deleted_at=None,
         )
@@ -126,7 +128,7 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
             display_name="دفتر مالک",
             profile_user_id=201,
             profile_account_name="owner-201",
-            profile_avatar_file_id="avatar-201",
+            profile_avatar_file_id="avatar-101",
             resolved_from_accountant_id=101,
             highlight_accountant_user_id=101,
             highlight_accountant_relation_display_name="دفتر مالک",
@@ -137,7 +139,7 @@ class AccountantChatContractTests(unittest.IsolatedAsyncioTestCase):
             {101: identity},
         )
         self.assertEqual(enriched["other_user_name"], "دفتر مالک")
-        self.assertEqual(enriched["avatar_file_id"], "avatar-201")
+        self.assertEqual(enriched["avatar_file_id"], "avatar-101")
         self.assertEqual(enriched["profile_user_id"], 201)
         self.assertEqual(enriched["profile_account_name"], "owner-201")
         self.assertEqual(enriched["resolved_from_accountant_id"], 101)
