@@ -3,7 +3,7 @@
 
 Examples:
   python scripts/dev_admin.py create-superadmin 09120000000 "مدیر ارشد" --password 'TempPass123'
-  python scripts/dev_admin.py create-middle-admin 09120000001 "مدیر میانی" --password 'TempPass123'
+  python scripts/dev_admin.py create-admin 09120000001 "مدیر میانی" --password 'TempPass123'
   python scripts/dev_admin.py create-user 09120000002 "کاربر تست" --role standard
   python scripts/dev_admin.py change-password 09120000000 --password 'NewPass123'
   python scripts/dev_admin.py reset-sessions 09120000000
@@ -69,6 +69,55 @@ ROLE_ALIASES = {
 ADMIN_ROLES = {UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER}
 
 
+def prompt_text(label: str, current: str | None = None, *, required: bool = True, default: str | None = None) -> str | None:
+    if current not in (None, ""):
+        return current
+    suffix = f" [{default}]" if default not in (None, "") else ""
+    while True:
+        value = input(f"{label}{suffix}: ").strip()
+        if value:
+            return value
+        if default not in (None, ""):
+            return default
+        if not required:
+            return None
+        print("This value is required.")
+
+
+def prompt_int(label: str, current: int | None = None, *, default: int | None = None, minimum: int | None = None, maximum: int | None = None) -> int:
+    if current is not None:
+        return current
+    while True:
+        raw = prompt_text(label, default=str(default) if default is not None else None)
+        try:
+            value = int(raw or "")
+        except ValueError:
+            print("Enter a valid number.")
+            continue
+        if minimum is not None and value < minimum:
+            print(f"Value must be at least {minimum}.")
+            continue
+        if maximum is not None and value > maximum:
+            print(f"Value must be at most {maximum}.")
+            continue
+        return value
+
+
+def prompt_bool(label: str, current: bool | None = None, *, default: bool = False) -> bool:
+    if current is not None:
+        return current
+    default_label = "Y/n" if default else "y/N"
+    while True:
+        value = input(f"{label} [{default_label}]: ").strip().lower()
+        if not value:
+            return default
+        if value in {"y", "yes", "1", "true", "بله"}:
+            return True
+        if value in {"n", "no", "0", "false", "خیر"}:
+            return False
+        print("Enter yes or no.")
+
+
 def parse_role(value: str) -> UserRole:
     normalized = value.strip().lower()
     role = ROLE_ALIASES.get(normalized)
@@ -99,6 +148,29 @@ def prompt_password_if_needed(password: str | None, *, required: bool) -> str | 
     if len(first) < 6:
         raise SystemExit("❌ Password must be at least 6 characters.")
     return first
+
+
+def prompt_role_if_needed(role: UserRole | None, *, default: UserRole = UserRole.STANDARD) -> UserRole:
+    if role is not None:
+        return role
+    print("Role options: standard, middle, super, watch, police")
+    while True:
+        raw = prompt_text("Role", default=role_value(default))
+        try:
+            return parse_role(raw or role_value(default))
+        except argparse.ArgumentTypeError as exc:
+            print(exc)
+
+
+def prompt_status_if_needed(status: UserAccountStatus | None) -> UserAccountStatus:
+    if status is not None:
+        return status
+    while True:
+        raw = prompt_text("Status", default="active")
+        try:
+            return parse_status(raw or "active")
+        except argparse.ArgumentTypeError as exc:
+            print(exc)
 
 
 def account_name_from_name(name: str, mobile: str) -> str:
@@ -152,9 +224,39 @@ async def require_user(db, identity: str) -> User:
 
 
 async def create_user(args) -> None:
+    interactive = args.mobile is None or args.name is None
+    args.mobile = prompt_text("Mobile number", args.mobile)
+    args.name = prompt_text("Full name", args.name)
+    if args.role is None:
+        args.role = prompt_role_if_needed(None)
+    if interactive:
+        args.account_name = prompt_text(
+            "Account name",
+            args.account_name,
+            required=False,
+            default=account_name_from_name(args.name, args.mobile),
+        )
+        args.home_server = prompt_text("Home server", None, default=args.home_server or "foreign")
+        args.max_sessions = prompt_int("Max sessions", None, default=args.max_sessions, minimum=1, maximum=3)
+        args.max_accountants = prompt_int("Max accountants", None, default=args.max_accountants, minimum=0)
+        args.max_customers = prompt_int("Max customers", None, default=args.max_customers, minimum=0)
+        args.bot_access = prompt_bool("Bot access", None, default=args.bot_access)
+
     role = args.role
     password_required = role in ADMIN_ROLES
     password = prompt_password_if_needed(args.password or args.password_arg, required=password_required)
+    if interactive and role in ADMIN_ROLES:
+        args.must_change_password = prompt_bool(
+            "Force password change on next login",
+            None,
+            default=True,
+        )
+    if interactive and role == UserRole.SUPER_ADMIN:
+        args.allow_multiple_superadmins = prompt_bool(
+            "Allow creating another super admin if one already exists",
+            None,
+            default=False,
+        )
 
     await init_db()
     async with AsyncSessionLocal() as db:
@@ -239,6 +341,7 @@ async def list_users(args) -> None:
 
 
 async def show_user(args) -> None:
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -262,7 +365,13 @@ async def show_user(args) -> None:
 
 
 async def change_password(args) -> None:
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
     password = prompt_password_if_needed(args.password, required=True)
+    args.must_change_password = prompt_bool(
+        "Force password change on next login",
+        args.must_change_password,
+        default=False,
+    )
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -277,6 +386,7 @@ async def change_password(args) -> None:
 
 
 async def force_password_change(args) -> None:
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -290,6 +400,18 @@ async def force_password_change(args) -> None:
 
 
 async def set_role(args) -> None:
+    interactive = args.identity is None or args.role is None
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
+    args.role = prompt_role_if_needed(args.role)
+    if interactive and args.role in ADMIN_ROLES and not args.password:
+        wants_password = prompt_bool("Set/update admin password now", default=True)
+        if wants_password:
+            args.password = prompt_password_if_needed(None, required=True)
+            args.must_change_password = prompt_bool(
+                "Force password change on next login",
+                args.must_change_password,
+                default=True,
+            )
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -308,6 +430,8 @@ async def set_role(args) -> None:
 
 
 async def set_status(args) -> None:
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
+    args.status = prompt_status_if_needed(args.status)
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -318,6 +442,8 @@ async def set_status(args) -> None:
 
 
 async def set_max_sessions(args) -> None:
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
+    args.max_sessions = prompt_int("Max sessions", args.max_sessions, default=1, minimum=1, maximum=3)
     if args.max_sessions < 1 or args.max_sessions > 3:
         raise SystemExit("❌ max_sessions must be between 1 and 3.")
     await init_db()
@@ -362,6 +488,16 @@ async def collect_login_limit_keys(user: User) -> list[str]:
 
 
 async def reset_sessions(args) -> None:
+    interactive = args.identity is None
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
+    if args.delete_session_rows is None:
+        args.delete_session_rows = (
+            prompt_bool("Delete session rows from database", default=True) if interactive else True
+        )
+    if args.clear_login_limits is None:
+        args.clear_login_limits = (
+            prompt_bool("Clear Redis login/OTP limits", default=True) if interactive else True
+        )
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -386,6 +522,7 @@ async def reset_sessions(args) -> None:
 
 
 async def unlock_login(args) -> None:
+    args.identity = prompt_text("User id/mobile/account_name/username", args.identity)
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
@@ -398,8 +535,8 @@ async def unlock_login(args) -> None:
 
 def add_create_user_parser(subparsers, name: str, *, role: UserRole | None = None):
     parser = subparsers.add_parser(name)
-    parser.add_argument("mobile")
-    parser.add_argument("name")
+    parser.add_argument("mobile", nargs="?")
+    parser.add_argument("name", nargs="?")
     parser.add_argument("password_arg", nargs="?")
     parser.add_argument("--account-name")
     parser.add_argument("--username")
@@ -429,6 +566,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_create_user_parser(subparsers, "create-user")
     add_create_user_parser(subparsers, "create-superadmin", role=UserRole.SUPER_ADMIN)
+    add_create_user_parser(subparsers, "create-admin", role=UserRole.MIDDLE_MANAGER)
     add_create_user_parser(subparsers, "create-middle-admin", role=UserRole.MIDDLE_MANAGER)
 
     list_parser = subparsers.add_parser("list-users")
@@ -440,44 +578,44 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.set_defaults(func=list_users)
 
     show_parser = subparsers.add_parser("show-user")
-    show_parser.add_argument("identity", help="id, mobile, account_name, or username")
+    show_parser.add_argument("identity", nargs="?", help="id, mobile, account_name, or username")
     show_parser.set_defaults(func=show_user)
 
     pass_parser = subparsers.add_parser("change-password")
-    pass_parser.add_argument("identity")
+    pass_parser.add_argument("identity", nargs="?")
     pass_parser.add_argument("--password")
     pass_parser.add_argument("--must-change-password", action="store_true", default=False)
     pass_parser.set_defaults(func=change_password)
 
     force_pass_parser = subparsers.add_parser("force-password-change")
-    force_pass_parser.add_argument("identity")
+    force_pass_parser.add_argument("identity", nargs="?")
     force_pass_parser.set_defaults(func=force_password_change)
 
     role_parser = subparsers.add_parser("set-role")
-    role_parser.add_argument("identity")
-    role_parser.add_argument("role", type=parse_role)
+    role_parser.add_argument("identity", nargs="?")
+    role_parser.add_argument("role", nargs="?", type=parse_role)
     role_parser.add_argument("--password")
     role_parser.add_argument("--must-change-password", action="store_true", default=True)
     role_parser.set_defaults(func=set_role)
 
     status_parser = subparsers.add_parser("set-status")
-    status_parser.add_argument("identity")
-    status_parser.add_argument("status", type=parse_status)
+    status_parser.add_argument("identity", nargs="?")
+    status_parser.add_argument("status", nargs="?", type=parse_status)
     status_parser.set_defaults(func=set_status)
 
     max_sessions_parser = subparsers.add_parser("set-max-sessions")
-    max_sessions_parser.add_argument("identity")
-    max_sessions_parser.add_argument("max_sessions", type=int)
+    max_sessions_parser.add_argument("identity", nargs="?")
+    max_sessions_parser.add_argument("max_sessions", nargs="?", type=int)
     max_sessions_parser.set_defaults(func=set_max_sessions)
 
     reset_parser = subparsers.add_parser("reset-sessions")
-    reset_parser.add_argument("identity")
-    reset_parser.add_argument("--keep-session-rows", dest="delete_session_rows", action="store_false")
-    reset_parser.add_argument("--keep-login-limits", dest="clear_login_limits", action="store_false")
-    reset_parser.set_defaults(func=reset_sessions, delete_session_rows=True, clear_login_limits=True)
+    reset_parser.add_argument("identity", nargs="?")
+    reset_parser.add_argument("--keep-session-rows", dest="delete_session_rows", action="store_false", default=None)
+    reset_parser.add_argument("--keep-login-limits", dest="clear_login_limits", action="store_false", default=None)
+    reset_parser.set_defaults(func=reset_sessions)
 
     unlock_parser = subparsers.add_parser("unlock-login")
-    unlock_parser.add_argument("identity")
+    unlock_parser.add_argument("identity", nargs="?")
     unlock_parser.set_defaults(func=unlock_login)
 
     return parser
