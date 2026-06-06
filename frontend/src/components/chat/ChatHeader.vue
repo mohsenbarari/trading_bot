@@ -10,77 +10,74 @@
       
       <!-- Avatar + User Info (when in chat and not searching) -->
       <template v-if="selectedUserId && !isSearchActive">
-        <div
-          class="header-avatar"
-          :class="{
-            'direct-header-avatar': selectedRoomKind === 'direct',
-            'room-avatar': selectedRoomKind !== 'direct',
-            'channel-avatar': selectedRoomKind === 'channel',
-            'group-avatar': selectedRoomKind === 'group',
-          }"
-          @click="handleTitleClick"
-        >
-          <img v-if="headerAvatarUrl" :src="headerAvatarUrl" :alt="selectedUserName" class="header-avatar-image" />
-          <Shield v-else-if="isManagementRoom" :size="21" />
-          <Megaphone v-else-if="selectedRoomKind === 'channel'" :size="21" />
-          <UsersRound v-else-if="selectedRoomKind === 'group'" :size="21" />
-          <template v-else>{{ getAvatarInitial(selectedUserName) }}</template>
-        </div>
-        <div
-          class="header-user-info"
-          :class="{ 'direct-header-user-info': selectedRoomKind === 'direct' }"
-          @click="handleTitleClick"
-        >
-          <div class="header-title-row">
-            <div class="header-name-meta">
-              <span
-                v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedAccountantOwnerLabel"
-                class="room-badge-small accountant-owner"
-              >
-                {{ selectedAccountantOwnerLabel }}
-              </span>
-              <span
-                v-else-if="selectedRoomKind === 'direct' && selectedChatRoleLabel"
-                class="room-badge-small direct-role"
-                :class="selectedChatRoleClass"
-              >
-                {{ selectedChatRoleLabel }}
-              </span>
-              <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
-              <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
-              <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
-              <span
-                v-if="selectedRoomKind === 'direct' && selectedChatRoleKind !== 'accountant' && selectedChatRoleLabel"
-                class="room-badge-small direct-role"
-                :class="selectedChatRoleClass"
-              >
-                {{ selectedChatRoleLabel }}
-              </span>
-              <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
-            </div>
-            <span
-              v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedChatRoleLabel"
-              class="room-badge-small direct-role"
-              :class="selectedChatRoleClass"
-            >
-              {{ selectedChatRoleLabel }}
-            </span>
-            <span class="header-name">{{ selectedUserName }}</span>
+        <div class="header-identity" :class="{ 'direct-header-identity': selectedRoomKind === 'direct' }">
+          <div
+            class="header-avatar"
+            :class="{
+              'room-avatar': selectedRoomKind !== 'direct',
+              'channel-avatar': selectedRoomKind === 'channel',
+              'group-avatar': selectedRoomKind === 'group',
+            }"
+            @click="handleTitleClick"
+          >
+            <img v-if="headerAvatarUrl" :src="headerAvatarUrl" :alt="selectedUserName" class="header-avatar-image" />
+            <Shield v-else-if="isManagementRoom" :size="21" />
+            <Megaphone v-else-if="selectedRoomKind === 'channel'" :size="21" />
+            <UsersRound v-else-if="selectedRoomKind === 'group'" :size="21" />
+            <template v-else>{{ getAvatarInitial(selectedUserName) }}</template>
           </div>
-          <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
-            <template v-if="isDeleted">
-              حساب کاربری غیرفعال است
-            </template>
-            <template v-else-if="hasActivityStatusText">
-              {{ activityStatusText }}
-            </template>
-            <template v-else-if="selectedRoomKind === 'direct' && isTyping">
-              در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
-            </template>
-            <template v-else>
-              {{ targetUserStatus }}
-            </template>
-          </span>
+          <div class="header-user-info" @click="handleTitleClick">
+            <div class="header-title-row">
+              <div class="header-name-meta">
+                <span
+                  v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedAccountantOwnerLabel"
+                  class="room-badge-small accountant-owner"
+                >
+                  {{ selectedAccountantOwnerLabel }}
+                </span>
+                <span
+                  v-else-if="selectedRoomKind === 'direct' && selectedChatRoleLabel"
+                  class="room-badge-small direct-role"
+                  :class="selectedChatRoleClass"
+                >
+                  {{ selectedChatRoleLabel }}
+                </span>
+                <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
+                <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
+                <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
+                <span
+                  v-if="selectedRoomKind === 'direct' && selectedChatRoleKind !== 'accountant' && selectedChatRoleLabel"
+                  class="room-badge-small direct-role"
+                  :class="selectedChatRoleClass"
+                >
+                  {{ selectedChatRoleLabel }}
+                </span>
+                <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
+              </div>
+              <span
+                v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedChatRoleLabel"
+                class="room-badge-small direct-role"
+                :class="selectedChatRoleClass"
+              >
+                {{ selectedChatRoleLabel }}
+              </span>
+              <span class="header-name">{{ selectedUserName }}</span>
+            </div>
+            <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
+              <template v-if="isDeleted">
+                حساب کاربری غیرفعال است
+              </template>
+              <template v-else-if="hasActivityStatusText">
+                {{ activityStatusText }}
+              </template>
+              <template v-else-if="selectedRoomKind === 'direct' && isTyping">
+                در حال نوشتن<span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+              </template>
+              <template v-else>
+                {{ targetUserStatus }}
+              </template>
+            </span>
+          </div>
         </div>
       </template>
       
@@ -458,6 +455,18 @@ function formatDateForSeparator(dateString: string) {
 .header-btn:hover { background: var(--messenger-action-hover-bg, rgba(15, 23, 42, 0.05)); }
 .header-btn:active { background: rgba(15, 23, 42, 0.1); }
 
+.header-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.header-identity.direct-header-identity {
+  flex-direction: row-reverse;
+}
+
 .header-avatar {
   width: 40px;
   height: 40px;
@@ -502,18 +511,10 @@ function formatDateForSeparator(dateString: string) {
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
   align-items: flex-end;
   padding-right: 4px;
   cursor: pointer;
-}
-
-.header-avatar.direct-header-avatar {
-  order: 2;
-}
-
-.header-user-info.direct-header-user-info {
-  order: 1;
 }
 
 .header-title-row {
