@@ -539,12 +539,6 @@ async def persist_chat_media_file_bytes(
     if size > CHAT_MEDIA_MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large (max {CHAT_MEDIA_MAX_UPLOAD_LABEL})")
 
-    ext = file_name.split(".")[-1] if file_name and "." in file_name else mime.split("/")[-1]
-    file_uuid = str(uuid.uuid4())
-    upload_dir = os.path.join("uploads", "chat_files", str(uploader_id))
-    await _ensure_directory(upload_dir)
-    file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
-
     img_width = None
     img_height = None
     if mime.startswith("image/") and mime != "image/gif":
@@ -556,15 +550,34 @@ async def persist_chat_media_file_bytes(
             pil_img = ImageOps.exif_transpose(pil_img)
             width, height = pil_img.size
             buf = _io.BytesIO()
-            fmt = "JPEG" if mime_type in ("image/jpeg", "image/jpg") else ("PNG" if mime_type == "image/png" else "WEBP")
+            if mime_type in ("image/jpeg", "image/jpg"):
+                fmt = "JPEG"
+                output_mime = "image/jpeg"
+                output_ext = "jpg"
+            elif mime_type == "image/png":
+                fmt = "PNG"
+                output_mime = "image/png"
+                output_ext = "png"
+            else:
+                fmt = "WEBP"
+                output_mime = "image/webp"
+                output_ext = "webp"
             pil_img.save(buf, format=fmt, quality=90)
-            return buf.getvalue(), width, height
+            return buf.getvalue(), width, height, output_mime, output_ext
 
         try:
-            contents, img_width, img_height = await asyncio.to_thread(_exif_transpose_sync, contents, mime)
+            contents, img_width, img_height, mime, ext = await asyncio.to_thread(_exif_transpose_sync, contents, mime)
             size = len(contents)
         except Exception as exc:
             logger.warning("Pillow EXIF transpose failed, saving original: %s", exc)
+            ext = file_name.split(".")[-1] if file_name and "." in file_name else mime.split("/")[-1]
+    else:
+        ext = file_name.split(".")[-1] if file_name and "." in file_name else mime.split("/")[-1]
+
+    file_uuid = str(uuid.uuid4())
+    upload_dir = os.path.join("uploads", "chat_files", str(uploader_id))
+    await _ensure_directory(upload_dir)
+    file_path = os.path.join(upload_dir, f"{file_uuid}.{ext}")
 
     async with aiofiles.open(file_path, "wb") as file_handle:
         await file_handle.write(contents)
