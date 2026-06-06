@@ -398,10 +398,6 @@ export function useChatWebSocket(options: UseChatWebSocketOptions) {
     ) {
         const roomConversationKey = resolveRoomConversationKey(data?.room_kind, data?.chat_id)
         if (roomConversationKey !== null) {
-            const conversationKey = roomConversationKey
-            if (selectedUserId.value === conversationKey) {
-                queueConversationPatch(flushState.conversationPatches, conversationKey, { resetUnread: true })
-            }
             return
         }
 

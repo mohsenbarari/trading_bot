@@ -170,6 +170,9 @@ export class ChatEventGateway {
     }
 
     if (eventName === 'chat:read') {
+      if (resolveRoomConversationKey(data?.room_kind, data?.chat_id) !== null) {
+        return { handled: true, eventName, roomKey }
+      }
       this.stores.messages?.patchReadState?.(roomKey as number, Number(data?.reader_id))
       this.stores.conversations?.patchConversation?.(roomKey as number, { unread_count: 0 })
       return { handled: true, eventName, roomKey }

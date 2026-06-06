@@ -387,7 +387,7 @@ describe('useChatWebSocket', () => {
     expect(messages.value[1].is_read).toBe(false)
   })
 
-  it('clears room unread counts and normalizes reaction payloads', async () => {
+  it('ignores other-member room read events and normalizes reaction payloads', async () => {
     selectedUserId.value = -9
     messages.value = [{ id: 88, reactions: [] }]
     conversations.value = [{ other_user_id: -9, unread_count: 4 }]
@@ -395,7 +395,7 @@ describe('useChatWebSocket', () => {
 
     emit('chat:read', { room_kind: 'channel', chat_id: 9 })
     await Promise.resolve()
-    expect(conversations.value[0].unread_count).toBe(0)
+    expect(conversations.value[0].unread_count).toBe(4)
 
     emit('chat:reaction', {
       id: 88,

@@ -42,6 +42,25 @@ describe('ChatEventGateway', () => {
     expect(setUserTyping).toHaveBeenCalledWith(8, 8, true, 'زهرا')
   })
 
+  it('keeps room read broadcasts from patching message read state or local unread counts', () => {
+    const patchReadState = vi.fn()
+    const patchConversation = vi.fn()
+    const gateway = createChatEventGateway({
+      messages: { patchReadState },
+      conversations: { patchConversation },
+    })
+
+    const result = gateway.dispatch('chat:read', {
+      room_kind: 'group',
+      chat_id: 12,
+      reader_id: 5,
+    })
+
+    expect(result).toMatchObject({ handled: true, roomKey: -12 })
+    expect(patchReadState).not.toHaveBeenCalled()
+    expect(patchConversation).not.toHaveBeenCalled()
+  })
+
   it('ignores stale message replacements and does not regress conversation previews', () => {
     const appendOrReplaceMessage = vi.fn()
     const patchConversation = vi.fn()

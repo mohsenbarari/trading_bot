@@ -199,6 +199,7 @@ defineExpose({
             :isSelectionMode="state.isSelectionMode"
             :searchQuery="state.searchQuery"
             :isManagementMessage="state.isSelectedManagementRoom"
+            :room-kind="state.selectedRoomKind"
             @swipe-reply="handlers.handleReply"
             @select="handlers.handleGroupedItemSelection((rows[virtualRow.index] as VirtualMessageRow).item)"
             @click-message="handlers.handleMessageClick"

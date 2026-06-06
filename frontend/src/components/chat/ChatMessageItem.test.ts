@@ -469,6 +469,14 @@ describe('ChatMessageItem.vue', () => {
     })
     expect(readWrapper.find('.icon-read').exists()).toBe(true)
     expect(readWrapper.find('.icon-unread').exists()).toBe(false)
+
+    const groupReadWrapper = mountTextMessage({
+      sender_id: 7,
+      is_read: true,
+    })
+    await groupReadWrapper.setProps({ roomKind: 'group' })
+    expect(groupReadWrapper.find('.icon-read').exists()).toBe(false)
+    expect(groupReadWrapper.find('.icon-unread').exists()).toBe(true)
   })
 
   it('renders captions for single media bubbles', () => {
