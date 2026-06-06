@@ -48,6 +48,7 @@ from core.utils import normalize_persian_numerals, utc_now
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
+    get_active_accountant_relation_for_accountant,
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
     is_user_accountant,
@@ -260,15 +261,48 @@ def _serialize_current_user_response(
     *,
     is_accountant: bool,
     is_customer: bool,
+    accountant_owner_user_id: int | None = None,
+    accountant_owner_account_name: str | None = None,
     customer_tier: CustomerTier | None = None,
+    customer_owner_user_id: int | None = None,
+    customer_owner_account_name: str | None = None,
 ) -> schemas.UserRead:
     return schemas.UserRead.model_validate(current_user).model_copy(
         update={
             "is_accountant": is_accountant,
+            "accountant_owner_user_id": accountant_owner_user_id,
+            "accountant_owner_account_name": accountant_owner_account_name,
             "is_customer": is_customer,
             "customer_tier": customer_tier,
+            "customer_owner_user_id": customer_owner_user_id,
+            "customer_owner_account_name": customer_owner_account_name,
         }
     )
+
+
+async def _load_current_user_relation_context(
+    db: AsyncSession,
+    current_user: User,
+) -> dict[str, object]:
+    accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
+    customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    return {
+        "is_accountant": accountant_relation is not None,
+        "accountant_owner_user_id": accountant_relation.owner_user_id if accountant_relation else None,
+        "accountant_owner_account_name": (
+            accountant_relation.owner_user.account_name
+            if accountant_relation and accountant_relation.owner_user and not accountant_relation.owner_user.is_deleted
+            else None
+        ),
+        "is_customer": customer_relation is not None,
+        "customer_tier": customer_relation.customer_tier if customer_relation else None,
+        "customer_owner_user_id": customer_relation.owner_user_id if customer_relation else None,
+        "customer_owner_account_name": (
+            customer_relation.owner_user.account_name
+            if customer_relation and customer_relation.owner_user and not customer_relation.owner_user.is_deleted
+            else None
+        ),
+    }
 
 @router.get("/me", response_model=schemas.UserRead)
 async def read_users_me(
@@ -276,12 +310,9 @@ async def read_users_me(
     db: AsyncSession = Depends(get_db),
 ):
     """دریافت اطلاعات کاربر جاری"""
-    customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
     return _serialize_current_user_response(
         current_user,
-        is_accountant=await is_user_accountant(db, current_user.id),
-        is_customer=customer_relation is not None,
-        customer_tier=customer_relation.customer_tier if customer_relation else None,
+        **await _load_current_user_relation_context(db, current_user),
     )
 
 
@@ -298,12 +329,9 @@ async def update_my_avatar(
     )
     await db.commit()
     await db.refresh(current_user)
-    customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
     return _serialize_current_user_response(
         current_user,
-        is_accountant=await is_user_accountant(db, current_user.id),
-        is_customer=customer_relation is not None,
-        customer_tier=customer_relation.customer_tier if customer_relation else None,
+        **await _load_current_user_relation_context(db, current_user),
     )
 
 

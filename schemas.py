@@ -92,6 +92,8 @@ class UserRead(UserBase):
         description="Legacy compatibility field. account_status/global lock state is the runtime authority.",
     )
     is_accountant: bool = False
+    accountant_owner_user_id: int | None = None
+    accountant_owner_account_name: str | None = None
     is_customer: bool = False
     customer_tier: CustomerTier | None = None
     customer_owner_user_id: int | None = None

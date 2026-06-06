@@ -35,7 +35,7 @@ import {
   resolveRoomConversationKey,
 } from '../utils/chatRoomRouting'
 import { resolveConversationProfileTarget } from '../utils/accountantChatIdentity'
-import { isAdminRole } from '../utils/currentUser'
+import { currentUserSummary, isAdminRole } from '../utils/currentUser'
 import { isUserOnline } from '../utils/userPresence'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
 import { recordMessengerDomSnapshot, recordMessengerMetric, scheduleMessengerDiagnosticTask } from '../utils/messengerDiagnosticsMetrics'
@@ -844,7 +844,22 @@ const isSelectedManagementRoom = computed(() => selectedRoomKind.value === 'grou
 const selectedAvatarFileId = computed(() => selectedConversation.value?.avatar_file_id ?? null)
 const selectedChatRoleKind = computed(() => selectedConversation.value?.chat_role_kind ?? null)
 const selectedChatRoleLabel = computed(() => selectedConversation.value?.chat_role_label ?? null)
-const selectedAccountantOwnerLabel = computed(() => selectedConversation.value?.chat_accountant_owner_label ?? null)
+const currentMessengerOwnerAccountName = computed(() => {
+  const summary = currentUserSummary.value
+  const ownerName = summary?.accountant_owner_account_name || summary?.customer_owner_account_name || summary?.account_name || ''
+  return ownerName.trim()
+})
+const selectedAccountantOwnerLabel = computed(() => {
+  const conversation = selectedConversation.value
+  if (!conversation || conversation.chat_role_kind !== 'accountant') return null
+
+  const otherOwnerName = (conversation.chat_accountant_owner_name || '').trim()
+  if (otherOwnerName && otherOwnerName === currentMessengerOwnerAccountName.value) {
+    return null
+  }
+
+  return conversation.chat_accountant_owner_label ?? null
+})
 const isCurrentUserCustomer = computed(() => props.currentUserIsCustomer === true)
 const canStartNewConversation = computed(() => true)
 const canCreateGroup = computed(() => !isCurrentUserCustomer.value)
