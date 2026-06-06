@@ -230,6 +230,17 @@ type PendingSelectionAnchor = {
   userId: number
 }
 
+type NewDirectChatTarget = {
+  id: number
+  account_name?: string | null
+  full_name?: string | null
+  avatar_file_id?: string | null
+  chat_role_kind?: Conversation['chat_role_kind']
+  chat_role_label?: string | null
+  chat_accountant_owner_name?: string | null
+  chat_accountant_owner_label?: string | null
+}
+
 const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
 let messagesContainerResizeObserver: ResizeObserver | null = null
 let previousMessagesContainerMetrics: MessagesContainerMetrics | null = null
@@ -1796,6 +1807,43 @@ const startNewChat = (userId: number, userName: string) => {
   })
 }
 
+const startNewChatFromTarget = (target: NewDirectChatTarget) => {
+  const userId = Number(target.id)
+  if (!Number.isInteger(userId) || userId <= 0) return
+
+  const userName = (target.full_name || '').trim() || (target.account_name || '').trim() || 'گفتگوی جدید'
+  prepareConversationTransition()
+  const existingConversation = conversations.value.find((conversation) => conversation.other_user_id === userId)
+  if (!existingConversation) {
+    conversations.value.unshift({
+      id: userId,
+      other_user_id: userId,
+      other_user_name: userName,
+      avatar_file_id: target.avatar_file_id ?? null,
+      chat_role_kind: target.chat_role_kind ?? null,
+      chat_role_label: target.chat_role_label ?? null,
+      chat_accountant_owner_name: target.chat_accountant_owner_name ?? null,
+      chat_accountant_owner_label: target.chat_accountant_owner_label ?? null,
+      last_message_content: null,
+      last_message_type: null,
+      last_message_at: null,
+      unread_count: 0,
+      room_kind: 'direct',
+    })
+  }
+  selectedUserId.value = userId
+  selectedUserName.value = userName
+  messagePanelError.value = ''
+  warmMessengerInteractionChunks()
+  loadMessages(userId)
+  pushBackState(() => {
+    selectedUserId.value = null
+    selectedUserName.value = ''
+    messages.value = []
+    messagePanelError.value = ''
+  })
+}
+
 function ensureRouteConversationPlaceholder(targetId: number, fallbackName = '') {
   if (conversations.value.some((conversation) => conversation.other_user_id === targetId)) {
     return
@@ -1853,9 +1901,13 @@ function closeNewChatModalForAction() {
   showNewChatModal.value = false
 }
 
-const handleNewChatSearch = (userId: number, userName: string) => {
+const handleNewChatSearch = (target: NewDirectChatTarget | number, fallbackName = '') => {
     closeNewChatModalForAction()
-    startNewChat(userId, userName)
+    if (typeof target === 'number') {
+      startNewChat(target, fallbackName)
+      return
+    }
+    startNewChatFromTarget(target)
 }
 
 function openNewConversation() {

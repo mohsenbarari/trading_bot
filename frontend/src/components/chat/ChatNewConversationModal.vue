@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'start-chat', userId: number, userName: string): void
+  (e: 'start-chat', user: SearchUser): void
   (e: 'create-group'): void
 }>()
 
@@ -123,9 +123,9 @@ function handleCreateGroup() {
   emit('create-group')
 }
 
-function handleUserClick(userId: number, userName: string) {
+function handleUserClick(user: SearchUser) {
   if (props.canStartDirectChat === false) return
-  emit('start-chat', userId, userName)
+  emit('start-chat', user)
 }
 
 </script>
@@ -182,7 +182,7 @@ function handleUserClick(userId: number, userName: string) {
           :name="getPrimaryUserName(user.account_name, user.full_name)"
           :avatar-file-id="user.avatar_file_id || null"
           :badges="getUserBadges(user)"
-          @click="handleUserClick(user.id, getPrimaryUserName(user.account_name, user.full_name))"
+          @click="handleUserClick(user)"
         >
           <template #subtitle>
             <div class="new-chat-user-subtitle">

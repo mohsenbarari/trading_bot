@@ -1225,6 +1225,46 @@ describe('ChatView.vue', () => {
     vi.useRealTimers()
   })
 
+  it('preserves new direct chat role badges in the header placeholder', async () => {
+    const wrapper = await mountChatView({}, {
+      ChatHeader: {
+        props: ['selectedUserName', 'selectedChatRoleKind', 'selectedChatRoleLabel', 'selectedAccountantOwnerLabel'],
+        template: '<div class="header-props">{{ selectedUserName }}|{{ selectedChatRoleKind }}|{{ selectedChatRoleLabel }}|{{ selectedAccountantOwnerLabel }}</div>',
+      },
+      ChatConversationList: {
+        template: '<button class="open-new-conversation" @click="$emit(\'new-conversation\')">new</button>',
+      },
+      ChatNewConversationModal: {
+        props: ['show'],
+        template: `<button
+          v-if="show"
+          class="select-accountant"
+          @click="$emit('start-chat', {
+            id: 42,
+            account_name: 'نوید',
+            full_name: null,
+            avatar_file_id: null,
+            chat_role_kind: 'accountant',
+            chat_role_label: 'حسابدار',
+            chat_accountant_owner_name: 'زهرا',
+            chat_accountant_owner_label: 'سرگروه: زهرا',
+          })"
+        >select</button>`,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.open-new-conversation').trigger('click')
+    await flushPromises()
+    await wrapper.get('.select-accountant').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.header-props').text()).toContain('نوید|accountant|حسابدار|سرگروه: زهرا')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(42)
+
+    wrapper.unmount()
+  })
+
   it('navigates in-chat search results and toggles the in-chat result list', async () => {
     vi.useFakeTimers()
     chatViewMocks.apiFetchMock.mockImplementation(async (url: string, _options?: RequestInit) => {
