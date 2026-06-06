@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
+.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-iran restart restart-iran status test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
 
 help:
 	@echo ""
@@ -22,6 +22,18 @@ help:
 	@echo "  make sync-recover - Manual fallback to catch up both servers after Iran reconnects"
 	@echo "  make restore-default-commodities - Restore canonical default commodities on the current DB"
 	@echo "  make dev-admin ARGS=\"...\" - Run the developer admin CLI inside the app container"
+	@echo "  make create-superadmin - Interactive super admin creation"
+	@echo "  make create-admin      - Interactive middle admin creation"
+	@echo "  make create-user       - Interactive normal user creation"
+	@echo "  make list-users        - List users"
+	@echo "  make show-user         - Interactive user lookup"
+	@echo "  make change-password   - Interactive admin password change"
+	@echo "  make force-password-change - Force an admin to rotate password"
+	@echo "  make set-role          - Interactive role change"
+	@echo "  make set-status        - Interactive account activation/deactivation"
+	@echo "  make set-max-sessions  - Interactive session limit change"
+	@echo "  make reset-sessions    - Interactive session reset"
+	@echo "  make unlock-login      - Interactive login throttle unlock"
 	@echo ""
 	@echo "  make down        - Stop foreign containers"
 	@echo "  make logs        - Foreign server logs"
@@ -72,6 +84,42 @@ restore-default-commodities:
 
 dev-admin:
 	@docker compose exec -T app python scripts/dev_admin.py $${ARGS}
+
+create-superadmin:
+	@docker compose exec app python scripts/dev_admin.py create-superadmin
+
+create-admin:
+	@docker compose exec app python scripts/dev_admin.py create-admin
+
+create-user:
+	@docker compose exec app python scripts/dev_admin.py create-user
+
+list-users:
+	@docker compose exec -T app python scripts/dev_admin.py list-users $${ARGS}
+
+show-user:
+	@docker compose exec app python scripts/dev_admin.py show-user
+
+change-password:
+	@docker compose exec app python scripts/dev_admin.py change-password
+
+force-password-change:
+	@docker compose exec app python scripts/dev_admin.py force-password-change
+
+set-role:
+	@docker compose exec app python scripts/dev_admin.py set-role
+
+set-status:
+	@docker compose exec app python scripts/dev_admin.py set-status
+
+set-max-sessions:
+	@docker compose exec app python scripts/dev_admin.py set-max-sessions
+
+reset-sessions:
+	@docker compose exec app python scripts/dev_admin.py reset-sessions
+
+unlock-login:
+	@docker compose exec app python scripts/dev_admin.py unlock-login
 
 # --- Management Commands ---
 

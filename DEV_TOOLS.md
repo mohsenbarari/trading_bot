@@ -6,17 +6,30 @@ one-off Python scripts.
 
 ## Unified Admin CLI
 
-Use the Makefile wrapper when the Docker app container is running:
+Use the direct Makefile commands for day-to-day work. They open an interactive
+wizard and ask for the required values:
+
+```bash
+make create-superadmin
+make create-admin
+make create-user
+make list-users
+make show-user
+make change-password
+make force-password-change
+make set-role
+make set-status
+make set-max-sessions
+make reset-sessions
+make unlock-login
+```
+
+`make create-admin` creates a `MIDDLE_MANAGER` account. The lower-level wrapper
+is still available for scripted/non-interactive usage:
 
 ```bash
 make dev-admin ARGS="list-users"
 make dev-admin ARGS="show-user 09120000000"
-```
-
-The wrapper runs:
-
-```bash
-docker compose exec -T app python scripts/dev_admin.py ...
 ```
 
 You can also run the script directly from inside the app environment:
@@ -42,13 +55,14 @@ make foreign
 ### 2. See the available operations
 
 ```bash
-make dev-admin ARGS="--help"
+make help
 ```
 
 For command-specific help:
 
 ```bash
 make dev-admin ARGS="create-superadmin --help"
+make dev-admin ARGS="create-admin --help"
 make dev-admin ARGS="reset-sessions --help"
 make dev-admin ARGS="set-role --help"
 ```
@@ -56,13 +70,24 @@ make dev-admin ARGS="set-role --help"
 ### 3. Create the first super admin after a fresh database reset
 
 ```bash
-make dev-admin ARGS="create-superadmin 09120000000 'مدیر ارشد' --password 'TempPass123'"
+make create-superadmin
+```
+
+The command asks for:
+
+```text
+Mobile number
+Full name
+Account name
+Temporary/admin password
+Force password change on next login
+Allow creating another super admin if one already exists
 ```
 
 Then verify the record:
 
 ```bash
-make dev-admin ARGS="show-user 09120000000"
+make show-user
 ```
 
 Expected result: the user has role `SUPER_ADMIN`, is `ACTIVE`, has an admin
@@ -74,19 +99,19 @@ password hash, and `must_change_password=true` unless you passed
 Normal users are OTP-based and do not need a local admin password:
 
 ```bash
-make dev-admin ARGS="create-user 09120000001 'کاربر تست' --role standard"
+make create-user
 ```
 
 Middle admins need a local admin password:
 
 ```bash
-make dev-admin ARGS="create-middle-admin 09120000002 'مدیر میانی' --password 'TempPass123'"
+make create-admin
 ```
 
 List the users:
 
 ```bash
-make dev-admin ARGS="list-users --limit 10"
+make list-users
 ```
 
 ### 5. Fix a user who cannot log in
@@ -94,31 +119,31 @@ make dev-admin ARGS="list-users --limit 10"
 First inspect the user:
 
 ```bash
-make dev-admin ARGS="show-user 09120000000"
+make show-user
 ```
 
 If the account is inactive:
 
 ```bash
-make dev-admin ARGS="set-status 09120000000 active"
+make set-status
 ```
 
 If login throttles or pending login/recovery requests are stuck:
 
 ```bash
-make dev-admin ARGS="unlock-login 09120000000"
+make unlock-login
 ```
 
 If the user must be logged out from every device:
 
 ```bash
-make dev-admin ARGS="reset-sessions 09120000000"
+make reset-sessions
 ```
 
 ### 6. Change an admin password safely
 
 ```bash
-make dev-admin ARGS="change-password 09120000000 --password 'NewPass123' --must-change-password"
+make change-password
 ```
 
 This only applies to `SUPER_ADMIN` and `MIDDLE_MANAGER` users. Normal users use
@@ -129,13 +154,13 @@ the OTP/session login flow and do not have a local admin password.
 Promote a normal user to middle admin:
 
 ```bash
-make dev-admin ARGS="set-role 09120000001 middle --password 'TempPass123'"
+make set-role
 ```
 
 Downgrade a middle admin to a normal user:
 
 ```bash
-make dev-admin ARGS="set-role 09120000002 standard"
+make set-role
 ```
 
 Downgrading from an admin role clears the local admin password hash and
@@ -155,10 +180,21 @@ username
 Examples:
 
 ```bash
-make dev-admin ARGS="show-user 12"
-make dev-admin ARGS="show-user 09120000000"
-make dev-admin ARGS="show-user مدیر_ارشد"
+make show-user
 ```
+
+When prompted, enter one of:
+
+```text
+12
+09120000000
+مدیر_ارشد
+```
+
+## Non-Interactive Examples
+
+Use `make dev-admin ARGS="..."` when you need an exact one-line command for
+automation or repeatable setup.
 
 ### User Creation
 
@@ -171,7 +207,7 @@ make dev-admin ARGS="create-user 09120000002 'کاربر تست' --role standard
 Create a middle admin with a temporary local admin password:
 
 ```bash
-make dev-admin ARGS="create-middle-admin 09120000001 'مدیر میانی' --password 'TempPass123'"
+make dev-admin ARGS="create-admin 09120000001 'مدیر میانی' --password 'TempPass123'"
 ```
 
 Create a super admin:
