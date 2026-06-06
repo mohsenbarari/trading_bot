@@ -2743,7 +2743,7 @@ function openForwardModal() {
 
 async function handleSendVoice(blob: Blob, durationMs: number) {
   if (!selectedUserId.value || !blob) return
-  if (selectedRoomKind.value !== 'direct') return
+  if (isSelectedRoomReadOnly.value) return
   const file = new File([blob], `voice_${Date.now()}.webm`, { type: blob.type || 'audio/webm' })
   // Pack durationMs into the file object so handleMediaUploadWrapper can extract it
   ;(file as any).durationMs = durationMs
