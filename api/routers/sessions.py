@@ -41,6 +41,7 @@ from core.services.session_service import (
     get_effective_max_sessions,
     provision_session_for_login_request,
 )
+from core.services.accountant_relation_service import is_user_accountant
 from core.services.single_session_recovery_service import (
     approve_recovery_request,
     build_identity_requested_sms_text,
@@ -70,6 +71,8 @@ from core.services.single_session_recovery_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+ACCOUNTANT_SESSION_MANAGEMENT_DETAIL = "حسابداران به مدیریت نشست و خروج از حساب کاربری دسترسی ندارند."
 
 
 # --- Schemas ---
@@ -117,6 +120,13 @@ def session_to_dict(s: UserSession) -> dict:
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "last_active_at": s.last_active_at.isoformat() if s.last_active_at else None,
     }
+
+
+async def ensure_non_accountant_session_management(db: AsyncSession, current_user: User) -> None:
+    if getattr(current_user, "is_accountant", False) is True:
+        raise HTTPException(status_code=403, detail=ACCOUNTANT_SESSION_MANAGEMENT_DETAIL)
+    if isinstance(current_user, User) and await is_user_accountant(db, current_user.id):
+        raise HTTPException(status_code=403, detail=ACCOUNTANT_SESSION_MANAGEMENT_DETAIL)
 
 
 def login_request_to_dict(r: SessionLoginRequest) -> dict:
@@ -512,6 +522,7 @@ async def get_pending_requests(
     """
     لیست درخواست‌های ورود در انتظار تایید (فقط دستگاه اصلی)
     """
+    await ensure_non_accountant_session_management(db, current_user)
     current_session_id = None
     try:
         from jose import jwt as jose_jwt
@@ -676,6 +687,7 @@ async def get_pending_single_session_recovery_prompts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await ensure_non_accountant_session_management(db, current_user)
     if current_user.role not in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         return []
 
@@ -695,6 +707,7 @@ async def request_single_session_recovery_identity(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await ensure_non_accountant_session_management(db, current_user)
     try:
         recovery_uuid = uuid.UUID(recovery_id)
     except ValueError:
@@ -733,6 +746,7 @@ async def approve_single_session_recovery(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await ensure_non_accountant_session_management(db, current_user)
     try:
         recovery_uuid = uuid.UUID(recovery_id)
     except ValueError:
@@ -793,6 +807,7 @@ async def reject_single_session_recovery(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await ensure_non_accountant_session_management(db, current_user)
     try:
         recovery_uuid = uuid.UUID(recovery_id)
     except ValueError:
@@ -932,6 +947,7 @@ async def list_active_sessions(
     current_user: User = Depends(get_current_user),
 ):
     """لیست نشست‌های فعال کاربر جاری"""
+    await ensure_non_accountant_session_management(db, current_user)
     # Extract session_id from JWT to mark current session
     current_session_id = None
     try:
@@ -965,6 +981,7 @@ async def terminate_session(
     - دستگاه غیراصلی: فقط نشست خودش
     - نشست اصلی: می‌تواند هر نشستی را پایان دهد اما خودش را اگر نشست‌های دیگر باشند نمی‌تواند پایان دهد
     """
+    await ensure_non_accountant_session_management(db, current_user)
     current_session_id_str = None
     try:
         from jose import jwt as jose_jwt
@@ -1022,6 +1039,7 @@ async def logout_all_sessions(
     current_user: User = Depends(get_current_user),
 ):
     """خروج از تمام نشست‌ها به جز نشست جاری دستگاه (فقط برای دستگاه اصلی)"""
+    await ensure_non_accountant_session_management(db, current_user)
     current_session_id_str = None
     try:
         from jose import jwt as jose_jwt
@@ -1057,6 +1075,7 @@ async def get_pending_login_requests(
     current_user: User = Depends(get_current_user),
 ):
     """دریافت درخواست‌های ورود در انتظار تایید"""
+    await ensure_non_accountant_session_management(db, current_user)
     stmt = select(SessionLoginRequest).where(
         and_(
             SessionLoginRequest.user_id == current_user.id,
@@ -1080,6 +1099,7 @@ async def approve_request(
     تایید درخواست ورود از دستگاه جدید.
     فقط از نشست primary مجاز است.
     """
+    await ensure_non_accountant_session_management(db, current_user)
     try:
         rid = uuid.UUID(request_id)
     except ValueError:
@@ -1126,6 +1146,7 @@ async def reject_request(
     current_user: User = Depends(get_current_user),
 ):
     """رد درخواست ورود"""
+    await ensure_non_accountant_session_management(db, current_user)
     try:
         rid = uuid.UUID(request_id)
     except ValueError:

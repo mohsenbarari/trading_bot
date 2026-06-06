@@ -131,6 +131,7 @@ describe('DashboardView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.find('.hero-btn').exists()).toBe(false)
+    expect(wrapper.find('.logout-btn').exists()).toBe(false)
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith('/market')
   })
 

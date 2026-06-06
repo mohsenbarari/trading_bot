@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { currentUserSummary } from '../utils/currentUser'
 
 const settingsViewMocks = vi.hoisted(() => ({
   backMock: vi.fn(),
@@ -61,6 +62,8 @@ async function mountSettingsView() {
 describe('SettingsView.vue', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    localStorage.clear()
+    currentUserSummary.value = null
     settingsViewMocks.backMock.mockReset()
     settingsViewMocks.apiFetchMock.mockReset()
     settingsViewMocks.forceLogoutMock.mockReset()
@@ -147,6 +150,27 @@ describe('SettingsView.vue', () => {
     expect(wrapper.find('.search-input-wrapper').exists()).toBe(false)
     expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => String(path).startsWith('/api/blocks'))).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it('hides session management and logout for accountant users without loading sessions', async () => {
+    currentUserSummary.value = {
+      id: 44,
+      role: 'عادی',
+      is_accountant: true,
+      accountant_owner_user_id: 20,
+      accountant_owner_account_name: 'owner20',
+    }
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('نشست‌های فعال')
+    expect(wrapper.find('.logout-btn').exists()).toBe(false)
+    expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(false)
+    expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
+
+    currentUserSummary.value = null
     wrapper.unmount()
   })
 

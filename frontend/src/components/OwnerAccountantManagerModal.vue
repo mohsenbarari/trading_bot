@@ -28,6 +28,24 @@ interface AccountantRelation {
   created_at: string
 }
 
+interface AccountantSessionSummary {
+  id: string
+  device_name: string
+  device_ip: string | null
+  platform: string
+  home_server: string
+  is_primary: boolean
+  is_active: boolean
+  created_at: string | null
+  last_active_at: string | null
+}
+
+interface AccountantSessionTerminateResponse {
+  detail: string
+  terminated_session_id: string
+  promoted_primary_session_id: string | null
+}
+
 function makeEmptyCreateForm() {
   return {
     account_name: '',
@@ -52,6 +70,10 @@ const editingRelationId = ref<number | null>(null)
 const error = ref('')
 const notice = ref('')
 const copiedRelationId = ref<number | null>(null)
+const openSessionsRelationId = ref<number | null>(null)
+const sessionsByRelationId = ref<Record<number, AccountantSessionSummary[]>>({})
+const loadingSessionsRelationId = ref<number | null>(null)
+const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
 
 const createForm = reactive(makeEmptyCreateForm())
@@ -85,6 +107,23 @@ function clearEditState() {
 function formatDateTime(value: string | null) {
   if (!value) return '---'
   return formatIranDateTime(value) || value
+}
+
+function getRelationSessions(relationId: number) {
+  return sessionsByRelationId.value[relationId] ?? []
+}
+
+function formatSessionPlatform(platform: string) {
+  if (platform === 'telegram_mini_app') return 'تلگرام'
+  if (platform === 'android') return 'اندروید'
+  if (platform === 'web') return 'وب'
+  return platform || 'نامشخص'
+}
+
+function formatHomeServer(homeServer: string) {
+  if (homeServer === 'iran') return 'ایران'
+  if (homeServer === 'foreign') return 'خارج'
+  return homeServer || 'نامشخص'
 }
 
 function getRemainingMs(value: string | null) {
@@ -196,11 +235,80 @@ async function loadRelations(options?: { silent?: boolean }) {
       throw new Error(parseApiError(payload, 'دریافت لیست حسابداران ناموفق بود.'))
     }
     relations.value = Array.isArray(payload) ? payload : []
+    if (openSessionsRelationId.value !== null) {
+      const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
+      if (!openRelation || openRelation.status !== 'active' || !openRelation.accountant_user_id) {
+        openSessionsRelationId.value = null
+      }
+    }
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست حسابداران ناموفق بود.'
   } finally {
     isLoading.value = false
     isRefreshing.value = false
+  }
+}
+
+async function loadSessionsForRelation(relationId: number) {
+  loadingSessionsRelationId.value = relationId
+  error.value = ''
+
+  try {
+    const response = await apiFetch(`/api/accountants/owner-relations/${relationId}/sessions`, {
+      method: 'GET',
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'دریافت نشست‌های حسابدار ناموفق بود.'))
+    }
+    sessionsByRelationId.value = {
+      ...sessionsByRelationId.value,
+      [relationId]: Array.isArray(payload) ? (payload as AccountantSessionSummary[]) : [],
+    }
+  } catch (err: any) {
+    error.value = err?.message || 'دریافت نشست‌های حسابدار ناموفق بود.'
+  } finally {
+    if (loadingSessionsRelationId.value === relationId) {
+      loadingSessionsRelationId.value = null
+    }
+  }
+}
+
+async function toggleSessionPanel(relation: AccountantRelation) {
+  if (relation.status !== 'active' || !relation.accountant_user_id) return
+  if (openSessionsRelationId.value === relation.id) {
+    openSessionsRelationId.value = null
+    return
+  }
+  openSessionsRelationId.value = relation.id
+  await loadSessionsForRelation(relation.id)
+}
+
+async function terminateAccountantSession(relation: AccountantRelation, session: AccountantSessionSummary) {
+  if (terminatingSessionId.value === session.id) return
+  if (!window.confirm(`نشست «${session.device_name || 'دستگاه حسابدار'}» پایان یابد؟`)) return
+
+  terminatingSessionId.value = session.id
+  error.value = ''
+  notice.value = ''
+
+  try {
+    const response = await apiFetch(`/api/accountants/owner-relations/${relation.id}/sessions/${session.id}`, {
+      method: 'DELETE',
+    })
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'پایان دادن نشست حسابدار ناموفق بود.'))
+    }
+    const result = payload as AccountantSessionTerminateResponse | null
+    notice.value = result?.detail || 'نشست حسابدار با موفقیت پایان یافت.'
+    await loadSessionsForRelation(relation.id)
+  } catch (err: any) {
+    error.value = err?.message || 'پایان دادن نشست حسابدار ناموفق بود.'
+  } finally {
+    if (terminatingSessionId.value === session.id) {
+      terminatingSessionId.value = null
+    }
   }
 }
 
@@ -456,6 +564,14 @@ onBeforeUnmount(() => {
               <div v-else class="accountant-actions">
                 <button type="button" class="secondary-btn start-edit" @click="startEditing(relation)">ویرایش</button>
                 <button
+                  v-if="relation.status === 'active' && relation.accountant_user_id"
+                  type="button"
+                  class="secondary-btn toggle-sessions"
+                  @click="toggleSessionPanel(relation)"
+                >
+                  {{ openSessionsRelationId === relation.id ? 'بستن نشست‌ها' : 'نشست‌های فعال' }}
+                </button>
+                <button
                   v-if="relation.status === 'pending' && relation.registration_link"
                   type="button"
                   class="secondary-btn copy-link"
@@ -479,6 +595,62 @@ onBeforeUnmount(() => {
                 >
                   قطع ارتباط
                 </button>
+              </div>
+
+              <div v-if="relation.status === 'active' && openSessionsRelationId === relation.id" class="session-panel">
+                <div class="session-panel-header">
+                  <div>
+                    <h6>نشست‌های فعال حسابدار</h6>
+                  </div>
+                  <HelpPopover
+                    button-test="accountant-sessions-help"
+                    note-test="accountant-sessions-help-note"
+                    label="راهنمای نشست‌های حسابدار"
+                    text="نشست‌های فعال این حسابدار را می‌توانید ببینید و هر نشست را جداگانه خاتمه دهید."
+                  />
+                  <button
+                    type="button"
+                    class="ghost-btn refresh-sessions"
+                    :disabled="loadingSessionsRelationId === relation.id"
+                    @click="loadSessionsForRelation(relation.id)"
+                  >
+                    {{ loadingSessionsRelationId === relation.id ? 'در حال نوسازی...' : 'نوسازی' }}
+                  </button>
+                </div>
+
+                <div v-if="loadingSessionsRelationId === relation.id" class="accountant-loading session-loading">
+                  در حال دریافت نشست‌های حسابدار...
+                </div>
+                <div v-else-if="!getRelationSessions(relation.id).length" class="accountant-empty session-empty">
+                  در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.
+                </div>
+                <ul v-else class="session-list">
+                  <li v-for="session in getRelationSessions(relation.id)" :key="session.id" class="session-item">
+                    <div class="session-item-main">
+                      <div class="session-item-top">
+                        <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
+                        <div class="session-badges">
+                          <span v-if="session.is_primary" class="session-badge primary">primary</span>
+                          <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
+                          <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
+                        </div>
+                      </div>
+                      <div class="session-item-meta">
+                        <span>آخرین فعالیت: {{ formatDateTime(session.last_active_at) }}</span>
+                        <span>شروع نشست: {{ formatDateTime(session.created_at) }}</span>
+                        <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="danger-btn terminate-session"
+                      :disabled="terminatingSessionId === session.id"
+                      @click="terminateAccountantSession(relation, session)"
+                    >
+                      {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                    </button>
+                  </li>
+                </ul>
               </div>
             </article>
           </div>
@@ -771,6 +943,98 @@ onBeforeUnmount(() => {
   line-height: 1.8;
 }
 
+.session-panel {
+  margin-top: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.session-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.session-panel-header h6 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.session-panel-header .refresh-sessions {
+  margin-inline-start: auto;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.session-item-main {
+  min-width: 0;
+}
+
+.session-item-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.session-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.session-badge.primary {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.session-badge.neutral {
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+}
+
+.session-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 7px;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.terminate-session {
+  flex: 0 0 auto;
+}
+
 .edit-panel {
   display: flex;
   flex-direction: column;
@@ -811,6 +1075,17 @@ onBeforeUnmount(() => {
   .accountant-actions > button,
   .accountant-manager-close,
   .ghost-btn {
+    width: 100%;
+  }
+
+  .session-panel-header,
+  .session-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-panel-header .refresh-sessions,
+  .terminate-session {
     width: 100%;
   }
 }

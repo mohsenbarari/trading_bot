@@ -418,6 +418,14 @@ class CustomerSessionTerminateResponse(BaseModel):
     promoted_primary_session_id: str | None = None
 
 
+class AccountantSessionRead(CustomerSessionRead):
+    pass
+
+
+class AccountantSessionTerminateResponse(CustomerSessionTerminateResponse):
+    pass
+
+
 # --- ۳. اعتبارسنج (validator) اضافه شد ---
 class InvitationBase(BaseModel):
     account_name: str

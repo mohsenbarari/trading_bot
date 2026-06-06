@@ -89,6 +89,43 @@ class NotificationsRouterMutationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.commits, 1)
         sync_mock.assert_awaited_once_with(db, unittest.mock.ANY, 5)
 
+    async def test_accountant_notification_mutations_do_not_touch_owner_copy(self):
+        accountant_user = SimpleNamespace(id=44)
+        owner_copy = make_notification(100, user_id=20, is_read=False)
+        accountant_copy = make_notification(101, user_id=44, is_read=False)
+
+        with patch("api.routers.notifications.sync_unread_count", new=AsyncMock()) as sync_mock:
+            db = FakeDB([FakeExecuteResult(value=accountant_copy)])
+            result = await mark_notification_read(
+                101,
+                current_user=accountant_user,
+                db=db,
+                redis=SimpleNamespace(),
+            )
+
+        self.assertIsNone(result)
+        self.assertTrue(accountant_copy.is_read)
+        self.assertFalse(owner_copy.is_read)
+        self.assertEqual(db.commits, 1)
+        sync_mock.assert_awaited_once_with(db, unittest.mock.ANY, 44)
+
+        owner_copy = make_notification(102, user_id=20, is_read=False)
+        accountant_copy = make_notification(103, user_id=44, is_read=False)
+        with patch("api.routers.notifications.sync_unread_count", new=AsyncMock()) as sync_mock:
+            db = FakeDB([FakeExecuteResult(value=accountant_copy)])
+            result = await delete_notification(
+                103,
+                current_user=accountant_user,
+                db=db,
+                redis=SimpleNamespace(),
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(db.deleted, [accountant_copy])
+        self.assertNotIn(owner_copy, db.deleted)
+        self.assertFalse(owner_copy.is_read)
+        sync_mock.assert_awaited_once_with(db, unittest.mock.ANY, 44)
+
     async def test_mark_all_notifications_read_commits_only_when_needed_and_always_syncs(self):
         current_user = SimpleNamespace(id=5)
         first = make_notification(1, is_read=False)

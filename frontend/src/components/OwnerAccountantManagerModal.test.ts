@@ -176,6 +176,69 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(wrapper.text()).not.toContain('حسابدار فعال')
   })
 
+  it('lets owners view and terminate active accountant sessions', async () => {
+    const activeRelation = makeRelation({
+      id: 8,
+      status: 'active',
+      accountant_user_id: 18,
+      accountant_account_name: 'acc-active',
+      relation_display_name: 'حسابدار فعال',
+      registration_link: null,
+      activated_at: '2026-01-02T08:00:00',
+    })
+    const sessions = [
+      {
+        id: 'session-1',
+        device_name: 'Chrome',
+        device_ip: '10.0.0.1',
+        platform: 'web',
+        home_server: 'foreign',
+        is_primary: true,
+        is_active: true,
+        created_at: '2026-01-02T08:00:00',
+        last_active_at: '2026-01-02T09:00:00',
+      },
+    ]
+
+    apiFetchMock.mockResolvedValueOnce(makeResponse([activeRelation]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse(sessions))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({
+      detail: 'نشست حسابدار با موفقیت پایان یافت',
+      terminated_session_id: 'session-1',
+      promoted_primary_session_id: null,
+    }))
+    apiFetchMock.mockResolvedValueOnce(makeResponse([]))
+
+    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+    const wrapper = mount(OwnerAccountantManagerModal, {
+      global: {
+        stubs: {
+          teleport: true,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('.toggle-sessions').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions', {
+      method: 'GET',
+    })
+    expect(wrapper.text()).toContain('نشست‌های فعال حسابدار')
+    expect(wrapper.text()).toContain('Chrome')
+
+    await wrapper.get('.terminate-session').trigger('click')
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledWith('نشست «Chrome» پایان یابد؟')
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions/session-1', {
+      method: 'DELETE',
+    })
+    expect(wrapper.text()).toContain('نشست حسابدار با موفقیت پایان یافت')
+    expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.')
+  })
+
   it('supports silent refresh, form reset, copy-link feedback, and close emit', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([
       makeRelation(),
