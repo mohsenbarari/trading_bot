@@ -93,6 +93,25 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result[1]["is_current"])
         self.assertEqual(result[0]["platform"], "web")
 
+    async def test_accountants_cannot_access_session_management(self):
+        current_user = SimpleNamespace(id=44, is_accountant=True)
+        request = make_request(token="jwt-token")
+
+        with patch("api.routers.sessions.get_active_sessions", new=AsyncMock()) as get_sessions_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await list_active_sessions(request=request, db=FakeDB(), current_user=current_user)
+        self.assertEqual(exc_info.exception.status_code, 403)
+        self.assertIn("حسابداران", exc_info.exception.detail)
+        get_sessions_mock.assert_not_awaited()
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await terminate_session(str(uuid.uuid4()), request=request, db=FakeDB(), current_user=current_user)
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+        with self.assertRaises(HTTPException) as exc_info:
+            await logout_all_sessions(request=request, db=FakeDB(), current_user=current_user)
+        self.assertEqual(exc_info.exception.status_code, 403)
+
     async def test_terminate_session_enforces_access_rules_and_can_logout(self):
         current_user = SimpleNamespace(id=5)
         target_id = uuid.uuid4()

@@ -247,7 +247,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Logout on the far Left (in RTL) -->
-        <button class="ds-icon-btn logout-btn" @click="logout" aria-label="خروج">
+        <button v-if="!isAccountant" class="ds-icon-btn logout-btn" @click="logout" aria-label="خروج">
           <LogOut :size="20" />
         </button>
       </header>

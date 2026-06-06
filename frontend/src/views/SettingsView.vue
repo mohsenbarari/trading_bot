@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { 
   Smartphone, Trash2, Loader2, HardDrive, 
   ChevronDown, ChevronLeft
@@ -7,6 +7,7 @@ import {
 import { useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
+import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
 const { getCacheSize, clearFileCache } = useChatFileHandler()
@@ -18,6 +19,7 @@ const openSections = ref({
   sessions: false,
   storage: false
 })
+const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
 
 function toggleSection(section: 'sessions' | 'storage') {
   openSections.value[section] = !openSections.value[section]
@@ -54,6 +56,10 @@ const sessions = ref<any[]>([])
 const sessionsLoading = ref(false)
 
 async function fetchSessions() {
+  if (isAccountant.value) {
+    sessions.value = []
+    return
+  }
   sessionsLoading.value = true
   try {
     const res = await apiFetch('/api/sessions/active')
@@ -100,7 +106,11 @@ async function logout() {
 }
 
 onMounted(() => {
-  fetchSessions()
+  void primeCurrentUserSummary().finally(() => {
+    if (!isAccountant.value) {
+      void fetchSessions()
+    }
+  })
   refreshCacheSize()
 })
 </script>
@@ -119,7 +129,7 @@ onMounted(() => {
     <div class="settings-content">
 
       <!-- Active Sessions Accordion -->
-      <div class="ds-accordion">
+      <div v-if="!isAccountant" class="ds-accordion">
         <div class="ds-accordion-header" @click="toggleSection('sessions')">
           <div class="ds-accordion-header-info">
             <Smartphone :size="18" class="icon-primary" />
@@ -205,7 +215,7 @@ onMounted(() => {
       </div>
 
       <!-- Logout Button -->
-      <button class="logout-btn" @click="logout">
+      <button v-if="!isAccountant" class="logout-btn" @click="logout">
         خروج از حساب کاربری
       </button>
 
