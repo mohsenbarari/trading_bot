@@ -191,6 +191,8 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     user2_relation_alias = aliased(AccountantRelation)
     user1_customer_relation_alias = aliased(CustomerRelation)
     user2_customer_relation_alias = aliased(CustomerRelation)
+    current_accountant_relation_alias = aliased(AccountantRelation)
+    current_customer_relation_alias = aliased(CustomerRelation)
     user1_owner_alias = aliased(User)
     user2_owner_alias = aliased(User)
     last_message_alias = aliased(Message)
@@ -306,6 +308,27 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         (Conversation.user1_id == current_user_id, user2_chat_role_label),
         else_=user1_chat_role_label,
     ).label("chat_role_label")
+    current_context_owner_id = func.coalesce(
+        current_accountant_relation_alias.owner_user_id,
+        current_customer_relation_alias.owner_user_id,
+        current_user_id,
+    )
+    user1_accountant_owner_id = case(
+        (user1_relation_alias.accountant_user_id.is_not(None), user1_relation_alias.owner_user_id),
+        else_=None,
+    )
+    user2_accountant_owner_id = case(
+        (user2_relation_alias.accountant_user_id.is_not(None), user2_relation_alias.owner_user_id),
+        else_=None,
+    )
+    other_user_accountant_owner_id = case(
+        (Conversation.user1_id == current_user_id, user2_accountant_owner_id),
+        else_=user1_accountant_owner_id,
+    )
+    should_show_accountant_owner = sa.and_(
+        other_user_accountant_owner_id.is_not(None),
+        other_user_accountant_owner_id != current_context_owner_id,
+    )
     user1_accountant_owner_name = case(
         (user1_relation_alias.accountant_user_id.is_not(None), user1_owner_alias.account_name),
         else_=None,
@@ -315,20 +338,28 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         else_=None,
     )
     other_user_accountant_owner_name = case(
-        (Conversation.user1_id == current_user_id, user2_accountant_owner_name),
-        else_=user1_accountant_owner_name,
+        (
+            sa.and_(Conversation.user1_id == current_user_id, should_show_accountant_owner),
+            user2_accountant_owner_name,
+        ),
+        (should_show_accountant_owner, user1_accountant_owner_name),
+        else_=None,
     ).label("chat_accountant_owner_name")
     user1_accountant_owner_label = case(
-        (user1_relation_alias.accountant_user_id.is_not(None), sa.literal("سرگروه: ") + user1_owner_alias.account_name),
+        (should_show_accountant_owner, sa.literal("سرگروه: ") + user1_owner_alias.account_name),
         else_=None,
     )
     user2_accountant_owner_label = case(
-        (user2_relation_alias.accountant_user_id.is_not(None), sa.literal("سرگروه: ") + user2_owner_alias.account_name),
+        (should_show_accountant_owner, sa.literal("سرگروه: ") + user2_owner_alias.account_name),
         else_=None,
     )
     other_user_accountant_owner_label = case(
-        (Conversation.user1_id == current_user_id, user2_accountant_owner_label),
-        else_=user1_accountant_owner_label,
+        (
+            sa.and_(Conversation.user1_id == current_user_id, should_show_accountant_owner),
+            user2_accountant_owner_label,
+        ),
+        (should_show_accountant_owner, user1_accountant_owner_label),
+        else_=None,
     ).label("chat_accountant_owner_label")
     other_user_avatar_file_id = case(
         (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.avatar_file_id, user2_alias.avatar_file_id)),
@@ -456,6 +487,22 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
                 user2_customer_relation_alias.customer_user_id == user2_alias.id,
                 user2_customer_relation_alias.status == CustomerRelationStatus.ACTIVE,
                 user2_customer_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            current_accountant_relation_alias,
+            sa.and_(
+                current_accountant_relation_alias.accountant_user_id == current_user_id,
+                current_accountant_relation_alias.status == AccountantRelationStatus.ACTIVE,
+                current_accountant_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            current_customer_relation_alias,
+            sa.and_(
+                current_customer_relation_alias.customer_user_id == current_user_id,
+                current_customer_relation_alias.status == CustomerRelationStatus.ACTIVE,
+                current_customer_relation_alias.deleted_at.is_(None),
             ),
         )
         .outerjoin(
