@@ -1070,6 +1070,53 @@ describe('PublicProfile.vue', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('hides the public block action when the viewer is an accountant', async () => {
+    currentUserSummary.value = {
+      id: 44,
+      role: 'عادی',
+      is_accountant: true,
+      accountant_owner_user_id: 20,
+      accountant_owner_account_name: 'owner20',
+    }
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 30,
+      account_name: 'plain30',
+      avatar_file_id: null,
+      mobile_number: '09125555555',
+      address: 'تهران',
+      created_at_jalali: '۱۴۰۵/۰۱/۰۳',
+      trades_count: 4,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 30, account_name: 'plain30' },
+        viewerUserId: 44,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((button) => button.text().includes('بلاک'))).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('hides the block toggle on customer public profiles', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({

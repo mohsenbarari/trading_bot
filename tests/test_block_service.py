@@ -55,6 +55,22 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["reason_code"], block_service.BLOCK_STATUS_REASON_CUSTOMER_DELEGATED)
         db.scalar.assert_not_awaited()
 
+    async def test_can_user_block_returns_accountant_delegated_status(self):
+        user = SimpleNamespace(can_block_users=True, max_blocked_users=5)
+        db = SimpleNamespace(get=AsyncMock(return_value=user), execute=AsyncMock(), scalar=AsyncMock())
+
+        with patch("core.services.block_service.is_user_customer", AsyncMock(return_value=False)), patch(
+            "core.services.block_service.is_user_accountant", AsyncMock(return_value=True)
+        ):
+            can_block, error, status = await block_service.can_user_block(db, 11)
+
+        self.assertFalse(can_block)
+        self.assertIn("سرگروه", error)
+        self.assertFalse(status["can_block"])
+        self.assertFalse(status["can_block_now"])
+        self.assertEqual(status["reason_code"], block_service.BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED)
+        db.scalar.assert_not_awaited()
+
     async def test_can_user_block_returns_limit_reached_status(self):
         user = SimpleNamespace(can_block_users=True, max_blocked_users=2)
         db = SimpleNamespace(get=AsyncMock(return_value=user), scalar=AsyncMock(return_value=2))
@@ -200,6 +216,16 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(customer_status["can_block"])
         self.assertEqual(customer_status["reason_code"], block_service.BLOCK_STATUS_REASON_CUSTOMER_DELEGATED)
         customer_db.scalar.assert_not_awaited()
+
+        accountant_user = SimpleNamespace(can_block_users=True, max_blocked_users=4)
+        accountant_db = SimpleNamespace(get=AsyncMock(return_value=accountant_user), execute=AsyncMock(), scalar=AsyncMock())
+        with patch("core.services.block_service.is_user_customer", AsyncMock(return_value=False)), patch(
+            "core.services.block_service.is_user_accountant", AsyncMock(return_value=True)
+        ):
+            accountant_status = await block_service.get_block_status(accountant_db, 55)
+        self.assertFalse(accountant_status["can_block"])
+        self.assertEqual(accountant_status["reason_code"], block_service.BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED)
+        accountant_db.scalar.assert_not_awaited()
 
         full_user = SimpleNamespace(can_block_users=True, max_blocked_users=2)
         full_db = SimpleNamespace(get=AsyncMock(return_value=full_user), scalar=AsyncMock(return_value=2))

@@ -195,6 +195,7 @@ const showAdminSections = computed(() => !isOwnProfile.value && viewerIsAdmin.va
 const viewerIsCustomer = computed(() => {
   return currentUserSummary.value?.is_customer === true || (isOwnProfile.value && customerProfileContext.value !== null);
 });
+const viewerIsAccountant = computed(() => currentUserSummary.value?.is_accountant === true);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
 const profilePresenceStatus = computed(() => formatLastSeenStatus(profileData.value?.last_seen_at, { emptyText: null }));
 const profileIsOnline = computed(() => isPresenceOnline(profileData.value?.last_seen_at));
@@ -366,7 +367,11 @@ const showProjectUsersSection = computed(() => {
   return isOwnProfile.value || viewerIsDisplayedOwnerAccountant.value;
 });
 const showPublicBlockAction = computed(() => {
-  return showVisitorSections.value && !!profileData.value && customerProfileContext.value === null && !viewerIsCustomer.value;
+  return showVisitorSections.value
+    && !!profileData.value
+    && customerProfileContext.value === null
+    && !viewerIsCustomer.value
+    && !viewerIsAccountant.value;
 });
 const publicBlockActionDisabled = computed(() => {
   if (publicBlockState.value === true) return false;
@@ -2780,4 +2785,3 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   }
 }
 </style>
-
