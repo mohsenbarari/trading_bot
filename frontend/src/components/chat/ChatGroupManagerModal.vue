@@ -107,6 +107,7 @@ const avatarFileId = ref<string | null>(null)
 const avatarBusy = ref(false)
 const avatarInput = ref<HTMLInputElement | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+let userLoadSequence = 0
 
 const isCreateMode = computed(() => !props.groupId)
 const isAdmin = computed(() => isCreateMode.value || group.value?.current_user_role === 'admin')
@@ -422,7 +423,7 @@ function toggleCandidate(userId: number) {
   if (next.has(userId)) next.delete(userId)
   else next.add(userId)
   selectedUserIds.value = next
-  void loadUsers(directoryQuery.value)
+  void loadUsers(directoryQuery.value, { silent: true })
 }
 
 function buildGroupCandidateUrl(query = '') {
@@ -436,8 +437,12 @@ function buildGroupCandidateUrl(query = '') {
   return `/api/chat/groups/member-candidates?${params.toString()}`
 }
 
-async function loadUsers(query = '') {
-  isLoadingUsers.value = true
+async function loadUsers(query = '', options: { silent?: boolean } = {}) {
+  const requestId = ++userLoadSequence
+  const shouldShowLoadingState = options.silent !== true || candidates.value.length === 0
+  if (shouldShowLoadingState) {
+    isLoadingUsers.value = true
+  }
   try {
     const data = await apiFetchJson(buildGroupCandidateUrl(query)) as
       | PublicUser[]
@@ -447,7 +452,7 @@ async function loadUsers(query = '') {
       : Array.isArray(data?.items)
         ? data.items
         : []
-    candidates.value = rawItems
+    const nextCandidates = rawItems
       .map((item) => ({
         id: Number((item as PublicUser).id ?? (item as { user_id: number }).user_id),
         account_name: item.account_name,
@@ -460,10 +465,14 @@ async function loadUsers(query = '') {
         chat_accountant_owner_label: item.chat_accountant_owner_label ?? null,
       }))
       .filter((item) => Number.isInteger(item.id) && item.id > 0)
+    if (requestId !== userLoadSequence) return
+    candidates.value = nextCandidates
   } catch (error) {
     setError(error, 'خطا در دریافت کاربران')
   } finally {
-    isLoadingUsers.value = false
+    if (requestId === userLoadSequence) {
+      isLoadingUsers.value = false
+    }
   }
 }
 
