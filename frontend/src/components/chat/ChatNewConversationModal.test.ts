@@ -104,7 +104,12 @@ describe('ChatNewConversationModal.vue', () => {
     await wrapper.get('.user-row').trigger('click')
 
     expect(wrapper.emitted('create-group')).toHaveLength(1)
-    expect(wrapper.emitted('start-chat')).toEqual([[8, 'owner-eight']])
+    expect(wrapper.emitted('start-chat')?.[0]?.[0]).toMatchObject({
+      id: 8,
+      account_name: 'owner-eight',
+      resolved_from_accountant_id: 81,
+      highlight_accountant_relation_display_name: 'حسابدار فروش',
+    })
   })
 
   it('allows customer-mode direct starts from backend-filtered rows while hiding group creation', async () => {
@@ -127,7 +132,11 @@ describe('ChatNewConversationModal.vue', () => {
 
     await wrapper.get('.user-row').trigger('click')
 
-    expect(wrapper.emitted('start-chat')).toEqual([[20, 'مالک مشتری']])
+    expect(wrapper.emitted('start-chat')?.[0]?.[0]).toMatchObject({
+      id: 20,
+      account_name: 'owner20',
+      full_name: 'مالک مشتری',
+    })
   })
 
   it('keeps shared-group accountants owner-resolved in messenger discovery', async () => {
@@ -160,7 +169,13 @@ describe('ChatNewConversationModal.vue', () => {
 
     await wrapper.get('.user-row').trigger('click')
 
-    expect(wrapper.emitted('start-chat')).toEqual([[20, 'مالک حسابدار گروه']])
+    expect(wrapper.emitted('start-chat')?.[0]?.[0]).toMatchObject({
+      id: 20,
+      account_name: 'owner20',
+      full_name: 'مالک حسابدار گروه',
+      resolved_from_accountant_id: 44,
+      highlight_accountant_relation_display_name: 'حسابدار گروه',
+    })
   })
 
   it('prefers full names for display and emits a generic accountant context label when no relation name exists', async () => {
@@ -191,7 +206,13 @@ describe('ChatNewConversationModal.vue', () => {
     expect(wrapper.text()).not.toContain('از مسیر حسابدار:')
 
     await wrapper.get('.user-row').trigger('click')
-    expect(wrapper.emitted('start-chat')).toEqual([[9, 'مالک نهم']])
+    expect(wrapper.emitted('start-chat')?.[0]?.[0]).toMatchObject({
+      id: 9,
+      account_name: 'owner-nine',
+      full_name: 'مالک نهم',
+      resolved_from_accountant_id: 91,
+      highlight_accountant_relation_display_name: null,
+    })
   })
 
   it('debounces search queries and calls the public search endpoint with the typed filter', async () => {
