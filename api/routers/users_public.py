@@ -518,6 +518,7 @@ async def search_public_users(
         if direct_chat_targets:
             accountant_relation_search_alias = aliased(AccountantRelation)
             accountant_owner_search_alias = aliased(User)
+            customer_relation_search_alias = aliased(CustomerRelation)
             accountant_owner_match_exists = (
                 select(accountant_relation_search_alias.id)
                 .join(
@@ -538,7 +539,18 @@ async def search_public_users(
                 )
                 .exists()
             )
+            customer_management_match_exists = (
+                select(customer_relation_search_alias.id)
+                .where(
+                    customer_relation_search_alias.customer_user_id == User.id,
+                    customer_relation_search_alias.status == CustomerRelationStatus.ACTIVE,
+                    customer_relation_search_alias.deleted_at.is_(None),
+                    customer_relation_search_alias.management_name.ilike(search_pattern),
+                )
+                .exists()
+            )
             search_terms.append(accountant_owner_match_exists)
+            search_terms.append(customer_management_match_exists)
         query = query.where(
             or_(
                 *search_terms,

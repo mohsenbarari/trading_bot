@@ -356,6 +356,45 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("accountant_relations", stmt_text)
         self.assertIn("owner_user_id", stmt_text)
 
+    async def test_search_public_users_chat_targets_match_owned_customer_management_name(self):
+        current_user = SimpleNamespace(id=20, role=UserRole.STANDARD)
+        customer = make_user(id=91, account_name="customer91", full_name=None)
+        owner_user = make_user(id=20, account_name="owner20")
+        db = FakeDB([
+            FakeExecuteResult([customer]),
+            FakeExecuteResult([]),
+            FakeExecuteResult([
+                SimpleNamespace(
+                    customer_user_id=91,
+                    owner_user_id=20,
+                    owner_user=owner_user,
+                    management_name="مشتری بازار تهران",
+                    customer_tier=CustomerTier.TIER_1,
+                )
+            ]),
+        ])
+
+        with patch(
+            "api.routers.users_public.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "api.routers.users_public.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await search_public_users(
+                q="بازار تهران",
+                limit=10,
+                chat_targets=True,
+                db=db,
+                current_user=current_user,
+            )
+
+        self.assertEqual([item.id for item in result], [91])
+        self.assertEqual(result[0].customer_management_name, "مشتری بازار تهران")
+        stmt_text = str(db.stmts[0]).lower()
+        self.assertIn("customer_relations", stmt_text)
+        self.assertIn("management_name", stmt_text)
+
     async def test_search_public_users_owner_resolves_shared_group_accountant_for_customer_viewer(self):
         current_user = SimpleNamespace(id=91, role=UserRole.STANDARD)
         owner_user = make_user(id=20, account_name="owner20")

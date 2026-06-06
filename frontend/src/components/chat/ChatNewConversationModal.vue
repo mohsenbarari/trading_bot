@@ -30,6 +30,8 @@ type SearchUser = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_management_name?: string | null
+  customer_tier?: string | null
   highlight_accountant_relation_display_name?: string | null
 }
 
@@ -37,9 +39,11 @@ const searchQuery = ref('')
 const users = ref<SearchUser[]>([])
 const isLoading = ref(false)
 
-function getPrimaryUserName(accountName: string, fullName?: string | null) {
-  const normalizedFullName = (fullName || '').trim()
-  return normalizedFullName || accountName
+function getPrimaryUserName(user: SearchUser) {
+  const normalizedCustomerName = (user.customer_management_name || '').trim()
+  const normalizedFullName = (user.full_name || '').trim()
+  const normalizedAccountName = (user.account_name || '').trim()
+  return normalizedCustomerName || normalizedFullName || normalizedAccountName
 }
 
 function getAccountantContextLabel(user: SearchUser) {
@@ -179,7 +183,7 @@ function handleUserClick(user: SearchUser) {
           :key="user.id"
           tag="button"
           :interactive="canStartDirectChat !== false"
-          :name="getPrimaryUserName(user.account_name, user.full_name)"
+          :name="getPrimaryUserName(user)"
           :avatar-file-id="user.avatar_file_id || null"
           :badges="getUserBadges(user)"
           @click="handleUserClick(user)"

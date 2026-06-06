@@ -1265,6 +1265,45 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('uses customer management names for new direct chat placeholders', async () => {
+    const wrapper = await mountChatView({}, {
+      ChatHeader: {
+        props: ['selectedUserName', 'selectedChatRoleKind', 'selectedChatRoleLabel'],
+        template: '<div class="header-props">{{ selectedUserName }}|{{ selectedChatRoleKind }}|{{ selectedChatRoleLabel }}</div>',
+      },
+      ChatConversationList: {
+        template: '<button class="open-new-conversation" @click="$emit(\'new-conversation\')">new</button>',
+      },
+      ChatNewConversationModal: {
+        props: ['show'],
+        template: `<button
+          v-if="show"
+          class="select-customer"
+          @click="$emit('start-chat', {
+            id: 91,
+            account_name: 'customer91',
+            full_name: null,
+            avatar_file_id: null,
+            chat_role_kind: 'customer',
+            chat_role_label: 'مشتری',
+            customer_management_name: 'مشتری بازار تهران',
+          })"
+        >select</button>`,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.get('.open-new-conversation').trigger('click')
+    await flushPromises()
+    await wrapper.get('.select-customer').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.header-props').text()).toContain('مشتری بازار تهران|customer|مشتری')
+    expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(91)
+
+    wrapper.unmount()
+  })
+
   it('navigates in-chat search results and toggles the in-chat result list', async () => {
     vi.useFakeTimers()
     chatViewMocks.apiFetchMock.mockImplementation(async (url: string, _options?: RequestInit) => {

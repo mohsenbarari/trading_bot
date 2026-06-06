@@ -139,6 +139,44 @@ describe('ChatNewConversationModal.vue', () => {
     })
   })
 
+  it('uses customer management names as the primary direct-chat discovery label', async () => {
+    fetchMock.mockResolvedValue(
+      makeResponse([
+        {
+          id: 91,
+          account_name: 'customer91',
+          full_name: null,
+          mobile_number: '09125555555',
+          avatar_file_id: null,
+          chat_role_kind: 'customer',
+          chat_role_label: 'مشتری',
+          customer_management_name: 'مشتری بازار تهران',
+          customer_tier: 'tier1',
+        },
+      ]),
+    )
+
+    const wrapper = buildWrapper({
+      show: true,
+      canStartDirectChat: true,
+      canCreateGroup: false,
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('.user-name').text()).toBe('مشتری بازار تهران')
+    expect(wrapper.text()).toContain('مشتری')
+
+    await wrapper.get('.user-row').trigger('click')
+
+    expect(wrapper.emitted('start-chat')?.[0]?.[0]).toMatchObject({
+      id: 91,
+      account_name: 'customer91',
+      chat_role_kind: 'customer',
+      customer_management_name: 'مشتری بازار تهران',
+    })
+  })
+
   it('keeps shared-group accountants owner-resolved in messenger discovery', async () => {
     fetchMock.mockResolvedValue(
       makeResponse([
