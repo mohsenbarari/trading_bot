@@ -25,6 +25,141 @@ You can also run the script directly from inside the app environment:
 python scripts/dev_admin.py --help
 ```
 
+## Quick Tutorial
+
+### 1. Make sure the app container is running
+
+```bash
+docker compose ps
+```
+
+If the `app` service is not running, deploy or start the stack first:
+
+```bash
+make foreign
+```
+
+### 2. See the available operations
+
+```bash
+make dev-admin ARGS="--help"
+```
+
+For command-specific help:
+
+```bash
+make dev-admin ARGS="create-superadmin --help"
+make dev-admin ARGS="reset-sessions --help"
+make dev-admin ARGS="set-role --help"
+```
+
+### 3. Create the first super admin after a fresh database reset
+
+```bash
+make dev-admin ARGS="create-superadmin 09120000000 'مدیر ارشد' --password 'TempPass123'"
+```
+
+Then verify the record:
+
+```bash
+make dev-admin ARGS="show-user 09120000000"
+```
+
+Expected result: the user has role `SUPER_ADMIN`, is `ACTIVE`, has an admin
+password hash, and `must_change_password=true` unless you passed
+`--no-must-change-password`.
+
+### 4. Create normal and middle-admin test users
+
+Normal users are OTP-based and do not need a local admin password:
+
+```bash
+make dev-admin ARGS="create-user 09120000001 'کاربر تست' --role standard"
+```
+
+Middle admins need a local admin password:
+
+```bash
+make dev-admin ARGS="create-middle-admin 09120000002 'مدیر میانی' --password 'TempPass123'"
+```
+
+List the users:
+
+```bash
+make dev-admin ARGS="list-users --limit 10"
+```
+
+### 5. Fix a user who cannot log in
+
+First inspect the user:
+
+```bash
+make dev-admin ARGS="show-user 09120000000"
+```
+
+If the account is inactive:
+
+```bash
+make dev-admin ARGS="set-status 09120000000 active"
+```
+
+If login throttles or pending login/recovery requests are stuck:
+
+```bash
+make dev-admin ARGS="unlock-login 09120000000"
+```
+
+If the user must be logged out from every device:
+
+```bash
+make dev-admin ARGS="reset-sessions 09120000000"
+```
+
+### 6. Change an admin password safely
+
+```bash
+make dev-admin ARGS="change-password 09120000000 --password 'NewPass123' --must-change-password"
+```
+
+This only applies to `SUPER_ADMIN` and `MIDDLE_MANAGER` users. Normal users use
+the OTP/session login flow and do not have a local admin password.
+
+### 7. Promote or downgrade a user
+
+Promote a normal user to middle admin:
+
+```bash
+make dev-admin ARGS="set-role 09120000001 middle --password 'TempPass123'"
+```
+
+Downgrade a middle admin to a normal user:
+
+```bash
+make dev-admin ARGS="set-role 09120000002 standard"
+```
+
+Downgrading from an admin role clears the local admin password hash and
+`must_change_password` flag.
+
+### 8. Common identity formats
+
+Most commands accept any of these values as `identity`:
+
+```text
+database id
+mobile number
+account_name
+username
+```
+
+Examples:
+
+```bash
+make dev-admin ARGS="show-user 12"
+make dev-admin ARGS="show-user 09120000000"
+make dev-admin ARGS="show-user مدیر_ارشد"
+```
+
 ### User Creation
 
 Create a normal OTP-based user:
