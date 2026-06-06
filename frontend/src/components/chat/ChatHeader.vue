@@ -38,6 +38,12 @@
             >
               {{ selectedChatRoleLabel }}
             </span>
+            <span
+              v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedAccountantOwnerLabel"
+              class="room-badge-small accountant-owner"
+            >
+              {{ selectedAccountantOwnerLabel }}
+            </span>
             <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
           </span>
           <span class="header-status" :class="{ 'online': !isDeleted && (((selectedRoomKind === 'direct' && targetUserStatus.includes('آنلاین')) || isTyping || hasActivityStatusText)) }">
@@ -218,6 +224,7 @@ const props = defineProps<{
   selectedAvatarFileId?: string | null
   selectedChatRoleKind?: ChatRoleKind | string | null
   selectedChatRoleLabel?: string | null
+  selectedAccountantOwnerLabel?: string | null
   selectedRoomKind?: 'direct' | 'channel' | 'group' | null
   apiBaseUrl?: string
   targetUserStatus: string
@@ -578,6 +585,11 @@ function formatDateForSeparator(dateString: string) {
 .room-badge-small.direct-role.role-customer {
   background: rgba(15, 118, 110, 0.12);
   color: #0f766e;
+}
+
+.room-badge-small.accountant-owner {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
 }
 
 .header-room-meta {

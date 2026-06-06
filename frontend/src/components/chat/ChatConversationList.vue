@@ -612,6 +612,12 @@ onBeforeUnmount(() => {
                       >
                         {{ row.conv.chat_role_label }}
                       </span>
+                      <span
+                        v-if="!row.isRoom && row.conv.chat_role_kind === 'accountant' && row.conv.chat_accountant_owner_label"
+                        class="conv-role-badge role-owner"
+                      >
+                        {{ row.conv.chat_accountant_owner_label }}
+                      </span>
                       <span v-if="row.isChannel" class="channel-badge-list" hidden>کانال</span>
                       <span v-else-if="row.isGroup" class="channel-badge-list" hidden>گروه</span>
                     </div>
@@ -1075,6 +1081,12 @@ onBeforeUnmount(() => {
   border-color: rgba(15, 118, 110, 0.22);
   background: rgba(15, 118, 110, 0.1);
   color: #0f766e;
+}
+
+.conv-role-badge.role-owner {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.11);
+  color: #b45309;
 }
 
 .conv-time {

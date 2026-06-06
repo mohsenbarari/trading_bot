@@ -306,6 +306,30 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         (Conversation.user1_id == current_user_id, user2_chat_role_label),
         else_=user1_chat_role_label,
     ).label("chat_role_label")
+    user1_accountant_owner_name = case(
+        (user1_relation_alias.accountant_user_id.is_not(None), user1_owner_alias.account_name),
+        else_=None,
+    )
+    user2_accountant_owner_name = case(
+        (user2_relation_alias.accountant_user_id.is_not(None), user2_owner_alias.account_name),
+        else_=None,
+    )
+    other_user_accountant_owner_name = case(
+        (Conversation.user1_id == current_user_id, user2_accountant_owner_name),
+        else_=user1_accountant_owner_name,
+    ).label("chat_accountant_owner_name")
+    user1_accountant_owner_label = case(
+        (user1_relation_alias.accountant_user_id.is_not(None), sa.literal("سرگروه: ") + user1_owner_alias.account_name),
+        else_=None,
+    )
+    user2_accountant_owner_label = case(
+        (user2_relation_alias.accountant_user_id.is_not(None), sa.literal("سرگروه: ") + user2_owner_alias.account_name),
+        else_=None,
+    )
+    other_user_accountant_owner_label = case(
+        (Conversation.user1_id == current_user_id, user2_accountant_owner_label),
+        else_=user1_accountant_owner_label,
+    ).label("chat_accountant_owner_label")
     other_user_avatar_file_id = case(
         (Conversation.user1_id == current_user_id, func.coalesce(user2_owner_alias.avatar_file_id, user2_alias.avatar_file_id)),
         else_=func.coalesce(user1_owner_alias.avatar_file_id, user1_alias.avatar_file_id),
@@ -384,6 +408,8 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
             resolved_from_accountant_id,
             other_user_chat_role_kind,
             other_user_chat_role_label,
+            other_user_accountant_owner_name,
+            other_user_accountant_owner_label,
             highlight_accountant_user_id,
             highlight_accountant_relation_display_name,
             other_user_is_deleted,

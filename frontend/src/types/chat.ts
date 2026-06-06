@@ -12,6 +12,8 @@ export interface Conversation {
     resolved_from_accountant_id?: number | null
     chat_role_kind?: ChatRoleKind | null
     chat_role_label?: string | null
+    chat_accountant_owner_name?: string | null
+    chat_accountant_owner_label?: string | null
     highlight_accountant_user_id?: number | null
     highlight_accountant_relation_display_name?: string | null
     other_user_is_deleted?: boolean

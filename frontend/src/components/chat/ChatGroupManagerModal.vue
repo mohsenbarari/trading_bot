@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import ChatUserListRow from './ChatUserListRow.vue'
 import { apiFetch, apiFetchJson } from '../../utils/auth'
-import { getChatRoleBadge } from '../../utils/chatRoleBadges'
+import { getAccountantOwnerBadge, getChatRoleBadge } from '../../utils/chatRoleBadges'
 import type { ChatUserListRowBadge } from './ChatUserListRow.vue'
 import type { ChatRoleKind } from '../../types/chat'
 import { popBackState, pushBackState } from '../../composables/useBackButton'
@@ -35,6 +35,8 @@ type PublicUser = {
   avatar_file_id?: string | null
   chat_role_kind?: ChatRoleKind | null
   chat_role_label?: string | null
+  chat_accountant_owner_name?: string | null
+  chat_accountant_owner_label?: string | null
 }
 
 type GroupMember = {
@@ -47,6 +49,8 @@ type GroupMember = {
   is_group_creator: boolean
   chat_role_kind?: ChatRoleKind | null
   chat_role_label?: string | null
+  chat_accountant_owner_name?: string | null
+  chat_accountant_owner_label?: string | null
 }
 
 type GroupRoom = {
@@ -316,12 +320,18 @@ function getGroupMemberBadges(member: GroupMember): ChatUserListRowBadge[] {
   }
   const roleBadge = getChatRoleBadge(member)
   if (roleBadge) badges.push(roleBadge)
+  const ownerBadge = getAccountantOwnerBadge(member)
+  if (ownerBadge) badges.push(ownerBadge)
   return badges
 }
 
 function getRoleOnlyBadges(user: PublicUser): ChatUserListRowBadge[] {
+  const badges: ChatUserListRowBadge[] = []
   const roleBadge = getChatRoleBadge(user)
-  return roleBadge ? [roleBadge] : []
+  if (roleBadge) badges.push(roleBadge)
+  const ownerBadge = getAccountantOwnerBadge(user)
+  if (ownerBadge) badges.push(ownerBadge)
+  return badges
 }
 
 function getPromotableMemberBadges(member: GroupMember): ChatUserListRowBadge[] {
@@ -431,7 +441,7 @@ async function loadUsers(query = '') {
   try {
     const data = await apiFetchJson(buildGroupCandidateUrl(query)) as
       | PublicUser[]
-      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null }> }
+      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null; chat_accountant_owner_name?: string | null; chat_accountant_owner_label?: string | null }> }
     const rawItems = Array.isArray(data)
       ? data
       : Array.isArray(data?.items)
@@ -446,6 +456,8 @@ async function loadUsers(query = '') {
         avatar_file_id: item.avatar_file_id ?? null,
         chat_role_kind: item.chat_role_kind ?? null,
         chat_role_label: item.chat_role_label ?? null,
+        chat_accountant_owner_name: item.chat_accountant_owner_name ?? null,
+        chat_accountant_owner_label: item.chat_accountant_owner_label ?? null,
       }))
       .filter((item) => Number.isInteger(item.id) && item.id > 0)
   } catch (error) {

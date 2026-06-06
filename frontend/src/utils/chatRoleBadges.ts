@@ -4,6 +4,7 @@ import type { ChatRoleKind } from '../types/chat'
 type ChatRoleSource = {
   chat_role_kind?: ChatRoleKind | string | null
   chat_role_label?: string | null
+  chat_accountant_owner_label?: string | null
 }
 
 export function getChatRoleBadge(source: ChatRoleSource): ChatUserListRowBadge | null {
@@ -17,6 +18,12 @@ export function getChatRoleBadge(source: ChatRoleSource): ChatUserListRowBadge |
     return { label, tone: 'creator' }
   }
   return { label, tone: 'member' }
+}
+
+export function getAccountantOwnerBadge(source: ChatRoleSource): ChatUserListRowBadge | null {
+  if (source.chat_role_kind !== 'accountant') return null
+  const label = (source.chat_accountant_owner_label || '').trim()
+  return label ? { label, tone: 'info' } : null
 }
 
 export function getChatRoleBadgeClass(source: ChatRoleSource): string {

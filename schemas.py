@@ -158,6 +158,8 @@ class UserPublicRead(BaseModel):
     resolved_from_accountant_id: int | None = None
     chat_role_kind: str | None = None
     chat_role_label: str | None = None
+    chat_accountant_owner_name: str | None = None
+    chat_accountant_owner_label: str | None = None
     highlight_accountant_user_id: int | None = None
     highlight_accountant_relation_display_name: str | None = None
     accountant_relations: List['PublicAccountantRelationSummary'] = Field(default_factory=list)
@@ -184,6 +186,8 @@ class PublicUserSearchResult(BaseModel):
     resolved_from_accountant_id: int | None = None
     chat_role_kind: str | None = None
     chat_role_label: str | None = None
+    chat_accountant_owner_name: str | None = None
+    chat_accountant_owner_label: str | None = None
     highlight_accountant_user_id: int | None = None
     highlight_accountant_relation_display_name: str | None = None
     customer_owner_user_id: int | None = None

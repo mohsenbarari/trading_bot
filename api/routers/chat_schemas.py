@@ -332,6 +332,8 @@ class ConversationRead(BaseModel):
     resolved_from_accountant_id: Optional[int] = None
     chat_role_kind: Optional[str] = None
     chat_role_label: Optional[str] = None
+    chat_accountant_owner_name: Optional[str] = None
+    chat_accountant_owner_label: Optional[str] = None
     highlight_accountant_user_id: Optional[int] = None
     highlight_accountant_relation_display_name: Optional[str] = None
     other_user_is_deleted: bool = False
@@ -469,6 +471,8 @@ class GroupMemberRead(BaseModel):
     is_group_creator: bool = False
     chat_role_kind: Optional[str] = None
     chat_role_label: Optional[str] = None
+    chat_accountant_owner_name: Optional[str] = None
+    chat_accountant_owner_label: Optional[str] = None
 
 
 class GroupCreateRequest(BaseModel):
@@ -578,6 +582,8 @@ class ChannelMemberRead(BaseModel):
     is_channel_creator: bool = False
     chat_role_kind: Optional[str] = None
     chat_role_label: Optional[str] = None
+    chat_accountant_owner_name: Optional[str] = None
+    chat_accountant_owner_label: Optional[str] = None
 
 
 class ChannelCreateRequest(BaseModel):
@@ -654,6 +660,8 @@ class ChannelInviteCandidateRead(BaseModel):
     is_already_member: bool = False
     chat_role_kind: Optional[str] = None
     chat_role_label: Optional[str] = None
+    chat_accountant_owner_name: Optional[str] = None
+    chat_accountant_owner_label: Optional[str] = None
 
 
 class ChannelInviteCandidateListResponse(BaseModel):

@@ -1020,6 +1020,8 @@ async def get_group_member_candidates(
                 "is_already_member": item.is_already_member,
                 "chat_role_kind": role_badges[item.user_id].kind if item.user_id in role_badges else None,
                 "chat_role_label": role_badges[item.user_id].label if item.user_id in role_badges else None,
+                "chat_accountant_owner_name": role_badges[item.user_id].accountant_owner_name if item.user_id in role_badges else None,
+                "chat_accountant_owner_label": role_badges[item.user_id].accountant_owner_label if item.user_id in role_badges else None,
             }
             for item in page.items
         ],
@@ -1109,6 +1111,8 @@ async def get_group_detail(
                 is_group_creator=item.is_group_creator,
                 chat_role_kind=role_badges[item.user_id].kind if item.user_id in role_badges else None,
                 chat_role_label=role_badges[item.user_id].label if item.user_id in role_badges else None,
+                chat_accountant_owner_name=role_badges[item.user_id].accountant_owner_name if item.user_id in role_badges else None,
+                chat_accountant_owner_label=role_badges[item.user_id].accountant_owner_label if item.user_id in role_badges else None,
             )
             for item in members
         ],
@@ -1524,6 +1528,8 @@ async def get_channel_members(
             is_channel_creator=member.is_channel_creator,
             chat_role_kind=role_badges[member.user_id].kind if member.user_id in role_badges else None,
             chat_role_label=role_badges[member.user_id].label if member.user_id in role_badges else None,
+            chat_accountant_owner_name=role_badges[member.user_id].accountant_owner_name if member.user_id in role_badges else None,
+            chat_accountant_owner_label=role_badges[member.user_id].accountant_owner_label if member.user_id in role_badges else None,
         )
         for member in members
     ]
@@ -1588,6 +1594,8 @@ async def get_channel_invite_candidates(
                 "is_already_member": item.is_already_member,
                 "chat_role_kind": role_badges[item.user_id].kind if item.user_id in role_badges else None,
                 "chat_role_label": role_badges[item.user_id].label if item.user_id in role_badges else None,
+                "chat_accountant_owner_name": role_badges[item.user_id].accountant_owner_name if item.user_id in role_badges else None,
+                "chat_accountant_owner_label": role_badges[item.user_id].accountant_owner_label if item.user_id in role_badges else None,
             }
             for item in candidate_page.items
         ],
