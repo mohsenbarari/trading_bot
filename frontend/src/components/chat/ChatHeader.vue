@@ -35,13 +35,6 @@
                 >
                   {{ selectedAccountantOwnerLabel }}
                 </span>
-                <span
-                  v-else-if="selectedRoomKind === 'direct' && selectedChatRoleLabel"
-                  class="room-badge-small direct-role"
-                  :class="selectedChatRoleClass"
-                >
-                  {{ selectedChatRoleLabel }}
-                </span>
                 <span v-if="selectedRoomKind === 'channel'" class="room-badge-small channel">کانال</span>
                 <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
                 <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
