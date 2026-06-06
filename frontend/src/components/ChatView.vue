@@ -926,7 +926,7 @@ function canPinMessageInContext(msg?: Message | null, messageIds: number[] = [])
 
 function canViewSeenListInContext(msg?: Message | null, messageIds: number[] = []) {
   if (!msg) return false
-  if (messageIds.length !== 1) return false
+  if (messageIds.length === 0) return false
   if (selectedRoomKind.value !== 'group') return false
   if (msg.sender_id !== props.currentUserId) return false
   if (msg.is_deleted) return false
