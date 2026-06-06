@@ -11,6 +11,7 @@ PYTHON_BIN = sys.executable
 PYTHON_SCRIPTS = (
     'scripts/backfill_direct_chats.py',
     'scripts/create_superadmin.py',
+    'scripts/dev_admin.py',
     'scripts/free_deleted_user.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
