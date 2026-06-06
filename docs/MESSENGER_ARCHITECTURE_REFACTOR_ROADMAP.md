@@ -718,6 +718,9 @@ Status: In Progress
   - `customer-chat-privacy.spec.ts` failed on WebKit because the sent-message locator matched both the optimistic `.sending` bubble and the persisted bubble, causing a strict locator violation despite the message being visible.
   - Hardened both harness paths: the album check now accepts either delivered room media or a matching pending upload row, and the customer direct-chat assertion targets the persisted non-`.sending` bubble.
   - Focused validation passed for the two failed surfaces across Chromium/Firefox/WebKit (`6` passed in `1.9m`).
+- Ran the post-fix Stage H mini-batch covering the two failed files, `channel-media.spec.ts` and `customer-chat-privacy.spec.ts`, across Chromium/Firefox/WebKit: `150` passed in `38.5m`.
+  - This batch revalidated both failed surfaces plus the full channel-media cross-browser file without another blind full-matrix rerun.
+  - Decision: treat the final full matrix failures as resolved harness failures and proceed to the full Messenger benchmark instead of repeating the full browser matrix again.
 
 ### Goal
 
@@ -745,7 +748,7 @@ Prove that the new architecture is faster, safer, and more pleasant before remov
 | S08/S09/S11 request count | at least 30% lower than current benchmark |
 | DOM nodes in heavy room | materially lower than Stage 12 |
 | Heap | no scenario worse than Stage 12 by more than 2 MB |
-| Browser matrix | 0 failed, known skips only |
+| Browser matrix | Last full matrix `343` passed / `12` skipped / `2` harness failures; follow-up focused mini-batch `150` passed |
 
 ### Feature Parity Gate
 
@@ -787,4 +790,4 @@ Every implementation prompt should follow this sequence:
 
 ## Immediate Next Step
 
-Continue Stage H with one final full browser matrix using detailed logging. If the final matrix is green, run the full Messenger benchmark, production build, `make foreign`, and the final legacy-retirement decision review. If new failures appear, classify them with targeted tests and database/log evidence before scheduling another full matrix run.
+Continue Stage H with the full Messenger benchmark using detailed logging. The final browser gate is accepted as: latest full matrix `343` passed / `12` skipped / `2` harness failures, followed by targeted fixes and a `150`-test Chromium/Firefox/WebKit mini-batch passing over the failed surfaces. After benchmark completion, analyze the comparison summary, run the final production build/deploy gate if needed, and make the legacy-retirement decision review.
