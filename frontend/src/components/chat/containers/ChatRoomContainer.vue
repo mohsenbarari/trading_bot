@@ -248,7 +248,7 @@ const useVirtualTimeline = computed(() => {
     :isReadOnly="state.isSelectedRoomReadOnly"
     :readOnlyBannerText="state.readOnlyBannerText"
     :disableRichComposer="state.isSelectedRoomReadOnly"
-    :allowVoiceRecording="state.selectedRoomKind === 'direct'"
+    :allowVoiceRecording="!state.isSelectedRoomReadOnly"
     :selectedMessages="state.selectedMessages"
     :isUploading="state.isUploading"
     @update:modelValue="handlers.updateMessageInput"

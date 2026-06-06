@@ -1295,7 +1295,7 @@ async function hasDeliveredRoomMessageTypes(
 test.describe('Channel media regressions', () => {
   test.describe.configure({ timeout: 120000 })
 
-  test('channel admin can open attachments without voice and can send image+video album', async ({
+  test('channel admin can open attachments and voice controls and can send image+video album', async ({
     page,
     request,
   }) => {
@@ -1311,7 +1311,7 @@ test.describe('Channel media regressions', () => {
 
     await expectRoomHeaderStatus(page, 'کانال')
     await expect(activeAttachButton(page)).toBeVisible()
-    await expect(activeVoiceButton(page)).toHaveCount(0)
+    await expect(activeVoiceButton(page)).toBeVisible()
 
     await activeAttachButton(page).click()
     await expect(page.getByRole('button', { name: 'گالری' }).first()).toBeVisible()

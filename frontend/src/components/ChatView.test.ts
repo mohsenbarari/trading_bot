@@ -3374,6 +3374,59 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
+  it('routes writable channel voice recordings through the upload wrapper with channel room kind', async () => {
+    const voiceBlob = new Blob(['voice'], { type: 'audio/webm' })
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 77,
+        other_user_id: -77,
+        other_user_name: 'کانال فعال',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'channel',
+        chat_id: 77,
+        can_send: true,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: -77,
+      targetUserName: 'کانال فعال',
+    }, {
+      ChatInputBar: {
+        props: ['allowVoiceRecording'],
+        template: "<div><span class='voice-allowed'>{{ String(allowVoiceRecording) }}</span><button class='send-voice-action' @click='emitVoice'>voice</button></div>",
+        methods: {
+          emitVoice(this: { $emit: (event: string, ...args: unknown[]) => void }) {
+            this.$emit('send-voice', voiceBlob, 1850)
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.voice-allowed').text()).toBe('true')
+
+    chatViewMocks.handleMediaUploadWrapperMock.mockClear()
+    await wrapper.get('.send-voice-action').trigger('click')
+    await flushPromises()
+
+    const voiceCall = chatViewMocks.handleMediaUploadWrapperMock.mock.calls[0]
+    expect(voiceCall?.[0]).toBeInstanceOf(File)
+    expect((voiceCall?.[0] as File).type).toBe('audio/webm')
+    expect((voiceCall?.[0] as File & { durationMs?: number }).durationMs).toBe(1850)
+    expect(voiceCall?.slice(1)).toEqual([
+      null,
+      0,
+      1,
+      { roomKindOverride: 'channel' },
+    ])
+
+    wrapper.unmount()
+  })
+
   it('sends direct locations through the chat API', async () => {
     const wrapper = await mountChatView({
       targetUserId: 55,
