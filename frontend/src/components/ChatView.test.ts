@@ -2631,13 +2631,28 @@ describe('ChatView.vue', () => {
     await wrapper.get('.chat-header-back').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.discardBackStateMock).toHaveBeenCalled()
-    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
+    expect(chatViewMocks.popBackStateMock).toHaveBeenCalled()
+    expect(chatViewMocks.discardBackStateMock).not.toHaveBeenCalled()
     expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
       path: '/chat',
       query: {},
     })
     expect(wrapper.find('.select-conversation-action').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('registers a base back-state handler on mount that emits back to return to the dashboard', async () => {
+    chatViewMocks.pushBackStateMock.mockClear()
+    const wrapper = await mountChatView()
+    await flushPromises()
+
+    expect(chatViewMocks.pushBackStateMock).toHaveBeenCalled()
+    const baseBackCallback = chatViewMocks.pushBackStateMock.mock.calls[0][0]
+    expect(baseBackCallback).toBeTypeOf('function')
+
+    baseBackCallback()
+    expect(wrapper.emitted('back')).toBeTruthy()
 
     wrapper.unmount()
   })
@@ -3692,6 +3707,44 @@ describe('ChatView.vue', () => {
     await wrapper.find('.album-download-selection-bar .selection-action-btn.primary').trigger('click')
     await flushPromises()
     expect(wrapper.get('.forward-modal-state').text()).toBe('true')
+
+    wrapper.unmount()
+  })
+
+  it('keeps system groups writable so voice controls do not disappear after room metadata loads', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 99,
+        other_user_id: -99,
+        other_user_name: 'گروه سیستمی',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'group',
+        chat_id: 99,
+        is_system: true,
+        can_send: false,
+      },
+    ]
+
+    const wrapper = await mountChatView({
+      targetUserId: -99,
+      targetUserName: 'گروه سیستمی',
+    }, {
+      ChatInputBar: {
+        props: ['isReadOnly', 'readOnlyBannerText', 'disableRichComposer', 'allowVoiceRecording'],
+        template: '<div class="room-composer-state">{{ String(isReadOnly) }}|{{ readOnlyBannerText }}|{{ String(disableRichComposer) }}|{{ String(allowVoiceRecording) }}</div>',
+      },
+      AttachmentMenu: {
+        props: ['allowLocation'],
+        template: '<div class="attachment-location-flag">{{ String(allowLocation) }}</div>',
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.room-composer-state').text()).toBe('false||false|true')
+    expect(wrapper.get('.attachment-location-flag').text()).toBe('true')
 
     wrapper.unmount()
   })

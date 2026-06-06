@@ -897,7 +897,7 @@ const canSendAdminBroadcast = computed(() => (props.currentUserRole ?? null) ===
 
 const canSendToSelectedRoom = computed(() => {
   if (selectedRoomKind.value === 'direct') return true
-  if (isSelectedManagementRoom.value) return false
+  if (selectedRoomKind.value === 'group') return true
   return selectedConversation.value?.can_send !== false
 })
 
@@ -1771,17 +1771,20 @@ const clearSelection = () => {
 
 const selectConversation = (conv: Conversation) => {
   prepareConversationTransition()
+  const wasAlreadyInConversation = selectedUserId.value != null
   selectedUserId.value = conv.other_user_id
   selectedUserName.value = conv.other_user_name
   messagePanelError.value = ''
   warmMessengerInteractionChunks()
   loadMessages(conv.other_user_id)
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-    messagePanelError.value = ''
-  })
+  if (!wasAlreadyInConversation) {
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+      messagePanelError.value = ''
+    })
+  }
 }
 
 function openConversationFromRoute(targetId: number, fallbackName = '') {
@@ -1797,17 +1800,20 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
   }
 
   prepareConversationTransition()
+  const wasAlreadyInConversation = selectedUserId.value != null
   selectedUserId.value = targetId
   selectedUserName.value = resolvedName
   messagePanelError.value = ''
   warmMessengerInteractionChunks()
   void loadMessages(targetId)
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-    messagePanelError.value = ''
-  })
+  if (!wasAlreadyInConversation) {
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+      messagePanelError.value = ''
+    })
+  }
 }
 
 const startNewChat = (userId: number, userName: string) => {
@@ -1825,17 +1831,20 @@ const startNewChat = (userId: number, userName: string) => {
       room_kind: 'direct',
     })
   }
+  const wasAlreadyInConversation = selectedUserId.value != null
   selectedUserId.value = userId
   selectedUserName.value = userName
   messagePanelError.value = ''
   warmMessengerInteractionChunks()
   loadMessages(userId)
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-    messagePanelError.value = ''
-  })
+  if (!wasAlreadyInConversation) {
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+      messagePanelError.value = ''
+    })
+  }
 }
 
 const startNewChatFromTarget = (target: NewDirectChatTarget) => {
@@ -1866,17 +1875,20 @@ const startNewChatFromTarget = (target: NewDirectChatTarget) => {
       room_kind: 'direct',
     })
   }
+  const wasAlreadyInConversation = selectedUserId.value != null
   selectedUserId.value = userId
   selectedUserName.value = userName
   messagePanelError.value = ''
   warmMessengerInteractionChunks()
   loadMessages(userId)
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-    messagePanelError.value = ''
-  })
+  if (!wasAlreadyInConversation) {
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+      messagePanelError.value = ''
+    })
+  }
 }
 
 function ensureRouteConversationPlaceholder(targetId: number, fallbackName = '') {
@@ -2106,18 +2118,21 @@ async function handleGroupCreated(group: { id: number; title: string }) {
   upsertNamedRoomConversation('group', group.id, {
     other_user_name: group.title,
   })
+  const wasAlreadyInConversation = selectedUserId.value != null
   prepareConversationTransition()
   selectedUserId.value = conversationKey
   selectedUserName.value = group.title
   messagePanelError.value = ''
   void loadMessages(conversationKey)
   await syncSelectedConversationRoute(conversationKey, group.title)
-  pushBackState(() => {
-    selectedUserId.value = null
-    selectedUserName.value = ''
-    messages.value = []
-    messagePanelError.value = ''
-  })
+  if (!wasAlreadyInConversation) {
+    pushBackState(() => {
+      selectedUserId.value = null
+      selectedUserName.value = ''
+      messages.value = []
+      messagePanelError.value = ''
+    })
+  }
 }
 
 async function handleGroupUpdated(group: { id: number; title: string }) {
@@ -3179,7 +3194,7 @@ async function goBack() {
 
   if (selectedUserId.value) {
     clearActiveConversationState()
-    discardBackState()
+    popBackState()
     await syncSelectedConversationRoute(null, '')
   } else {
     emit('back')
@@ -3376,6 +3391,11 @@ watch(() => timelineRenderBudget.value.itemCount, (itemCount) => {
 onMounted(async () => {
   isLoading.value = true
   updateReducedMotionPreference()
+
+  // Always register a back handler for the conversation list to return to the dashboard
+  pushBackState(() => {
+    emit('back')
+  })
 
   if (props.targetUserId) {
     isLoading.value = false
@@ -3640,9 +3660,9 @@ const chatRoomContainerState = computed(() => ({
   isSending: isSending.value,
   isSelectedUserDeleted: isSelectedUserDeleted.value,
   isSelectedRoomReadOnly: isSelectedRoomReadOnly.value,
-  readOnlyBannerText: isSelectedManagementRoom.value
-    ? 'این گفتگوی مدیریتی فقط برای اطلاع‌رسانی است.'
-    : (selectedRoomKind.value === 'channel' ? 'فقط مدیران کانال امکان ارسال پیام دارند.' : undefined),
+  readOnlyBannerText: selectedRoomKind.value === 'channel'
+    ? 'فقط مدیران کانال امکان ارسال پیام دارند.'
+    : undefined,
   selectedRoomKind: selectedRoomKind.value,
   isUploading: isUploading.value,
   showAttachmentMenu: showAttachmentMenu.value,
