@@ -1,35 +1,39 @@
 import asyncio
 import logging
-import sys
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
+
 from core.config import settings
-from bot.handlers import (
-    start, 
-    panel, 
-    trade_create, 
-    trade_execute, 
-    trade_manage,
-    trade_history,
+from core.logging_config import configure_logging
+
+configure_logging("bot")
+
+from bot.handlers import (  # noqa: E402
     admin,
     admin_commodities,
     admin_users,
     block_manage,
-    link_account, # 👈 Added
-    default
+    default,
+    link_account,
+    panel,
+    start,
+    trade_create,
+    trade_execute,
+    trade_history,
+    trade_manage,
 )
-from core.db import init_db, AsyncSessionLocal
-from core.events import setup_event_listeners
-from bot.middlewares import AuthMiddleware
-from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
+from bot.middlewares import AuthMiddleware  # noqa: E402
+from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events  # noqa: E402
+from core.db import AsyncSessionLocal, init_db  # noqa: E402
+from core.events import setup_event_listeners  # noqa: E402
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 async def main():
     if not settings.bot_token:
-        logger.error("BOT_TOKEN is not set!")
+        logger.error("BOT_TOKEN is not set", extra={"event": "bot.config_missing", "setting": "BOT_TOKEN"})
         return
 
     # Initialize Database
@@ -48,7 +52,7 @@ async def main():
 
     # Include routers
     dp.include_router(start.router)
-    dp.include_router(link_account.router) # 👈 Added (high priority)
+    dp.include_router(link_account.router)  # high priority
     dp.include_router(panel.router)
     dp.include_router(trade_create.router)
     dp.include_router(trade_execute.router)
@@ -58,16 +62,16 @@ async def main():
     dp.include_router(admin_commodities.router)
     dp.include_router(admin_users.router)
     dp.include_router(block_manage.router)
-    
+
     # Default router should be last
     dp.include_router(default.router)
 
-    logger.info("🤖 Bot started...")
+    logger.info("Bot started", extra={"event": "bot.startup"})
     suggestion_sync_task = asyncio.create_task(listen_trade_suggestion_events(bot))
     try:
         await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"Bot error: {e}")
+    except Exception:
+        logger.exception("Bot polling failed", extra={"event": "bot.polling_failed"})
     finally:
         suggestion_sync_task.cancel()
         try:
@@ -76,8 +80,9 @@ async def main():
             pass
         await bot.session.close()
 
+
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot stopped!")
+        logger.info("Bot stopped", extra={"event": "bot.shutdown"})
