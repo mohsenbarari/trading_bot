@@ -314,6 +314,7 @@ def _build_project_user_directory_stmt(
     *,
     q: str | None,
     limit: int,
+    offset: int,
 ):
     active_accountant_exists = (
         select(AccountantRelation.id)
@@ -351,7 +352,7 @@ def _build_project_user_directory_stmt(
             )
         )
 
-    return stmt.order_by(User.account_name.asc(), User.id.asc()).limit(limit)
+    return stmt.order_by(User.account_name.asc(), User.id.asc()).offset(offset).limit(limit)
 
 
 async def _load_public_accountant_relation_summaries(
@@ -579,6 +580,7 @@ async def list_project_users_directory(
     user_id: int,
     q: Optional[str] = Query(None, min_length=1),
     limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -595,7 +597,7 @@ async def list_project_users_directory(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    stmt = _build_project_user_directory_stmt(q=q, limit=limit)
+    stmt = _build_project_user_directory_stmt(q=q, limit=limit, offset=offset)
     rows = (await db.execute(stmt)).scalars().all()
     return [_serialize_project_user_directory_entry(user) for user in rows]
 

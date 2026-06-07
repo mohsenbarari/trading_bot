@@ -756,6 +756,36 @@ describe('PublicProfile.vue', () => {
 
   it('loads the project users directory for self profiles and navigates through result rows', async () => {
     const fetchMock = vi.mocked(fetch)
+    const firstPage = Array.from({ length: 25 }, (_, index) => {
+      if (index === 0) {
+        return {
+          id: 44,
+          account_name: 'owner44',
+          mobile_number: '09127777777',
+        }
+      }
+      if (index === 1) {
+        return {
+          id: 61,
+          account_name: 'manager61',
+          mobile_number: '09121110000',
+        }
+      }
+      const userId = 60 + index
+      return {
+        id: userId,
+        account_name: `manager${userId}`,
+        mobile_number: `0912111${String(userId).padStart(4, '0')}`,
+      }
+    })
+    const secondPage = Array.from({ length: 25 }, (_, index) => {
+      const userId = 100 + index
+      return {
+        id: userId,
+        account_name: `manager${userId}`,
+        mobile_number: `0912222${String(userId).padStart(4, '0')}`,
+      }
+    })
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 44,
       account_name: 'owner44',
@@ -769,18 +799,8 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
-    fetchMock.mockResolvedValueOnce(makeResponse([
-      {
-        id: 44,
-        account_name: 'owner44',
-        mobile_number: '09127777777',
-      },
-      {
-        id: 61,
-        account_name: 'manager61',
-        mobile_number: '09121110000',
-      },
-    ]))
+    fetchMock.mockResolvedValueOnce(makeResponse(firstPage))
+    fetchMock.mockResolvedValueOnce(makeResponse(secondPage))
     fetchMock.mockResolvedValueOnce(makeResponse([
       {
         id: 61,
@@ -813,7 +833,7 @@ describe('PublicProfile.vue', () => {
     await directoryHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25&offset=0', expect.objectContaining({
       headers: expect.objectContaining({
         Authorization: 'Bearer token',
       }),
@@ -830,11 +850,21 @@ describe('PublicProfile.vue', () => {
       },
     ])
 
+    await wrapper.get('.project-users-load-more').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&offset=25', expect.objectContaining({
+      headers: expect.objectContaining({
+        Authorization: 'Bearer token',
+      }),
+    }))
+    expect(wrapper.text()).toContain('manager124')
+
     await wrapper.get('.project-users-search-input').setValue('manager')
     await wrapper.get('.project-users-search-submit').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&q=manager', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/44/project-users?limit=25&offset=0&q=manager', expect.objectContaining({
       headers: expect.objectContaining({
         Authorization: 'Bearer token',
       }),
@@ -906,7 +936,7 @@ describe('PublicProfile.vue', () => {
     await directoryHeader!.trigger('click')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/20/project-users?limit=25', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/20/project-users?limit=25&offset=0', expect.objectContaining({
       headers: expect.objectContaining({
         Authorization: 'Bearer token',
       }),
@@ -969,7 +999,7 @@ describe('PublicProfile.vue', () => {
     await wrapper.get('.project-users-search-submit').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&q=manager', expect.objectContaining({
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&offset=0&q=manager', expect.objectContaining({
       headers: expect.objectContaining({
         Authorization: 'Bearer token',
       }),
