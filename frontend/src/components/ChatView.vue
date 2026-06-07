@@ -287,8 +287,9 @@ function resolveSelectedConversationName(userId: number | null, fallback = '') {
 }
 
 async function syncSelectedConversationRoute(userId: number | null, userName = '') {
-  const currentUserId = getRouteQueryValue(route.query.user_id as string | string[] | undefined)
-  const currentUserName = getRouteQueryValue(route.query.user_name as string | string[] | undefined)
+  const currentQuery = getCurrentMessengerLocationQuery()
+  const currentUserId = getRouteQueryValue(currentQuery.user_id)
+  const currentUserName = getRouteQueryValue(currentQuery.user_name)
   const nextUserId = userId == null ? '' : String(userId)
   const nextUserName = resolveSelectedConversationName(userId, userName)
 
@@ -296,9 +297,35 @@ async function syncSelectedConversationRoute(userId: number | null, userName = '
     return
   }
 
-  const nextQuery = buildMessengerConversationQuery(route.query as Record<string, string | string[] | null | undefined>, userId, nextUserName)
+  const nextQuery = buildMessengerConversationQuery(currentQuery, userId, nextUserName)
+  replaceMessengerLocationQuery(nextQuery)
+}
 
-  await router.replace({ path: route.path, query: nextQuery })
+function getCurrentMessengerLocationQuery() {
+  if (typeof window === 'undefined') {
+    return route.query as Record<string, string | string[] | null | undefined>
+  }
+
+  const query: Record<string, string> = {}
+  const params = new URLSearchParams(window.location.search)
+  params.forEach((value, key) => {
+    if (value) query[key] = value
+  })
+  return query
+}
+
+function replaceMessengerLocationQuery(nextQuery: Record<string, string>) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const params = new URLSearchParams()
+  Object.entries(nextQuery).forEach(([key, value]) => {
+    if (value) params.set(key, value)
+  })
+  const query = params.toString()
+  const nextUrl = query ? `${route.path}?${query}` : route.path
+  window.history.replaceState(window.history.state || {}, '', nextUrl)
 }
 
 function updateIsMobile() {
