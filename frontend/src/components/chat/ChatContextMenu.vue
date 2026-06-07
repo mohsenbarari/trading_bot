@@ -8,6 +8,7 @@
       :style="menuStyle"
       role="menu"
       aria-label="Message actions"
+      @click.stop
     >
       <div v-if="showReactionRow" class="reaction-picker-shell telegram-panel telegram-menu-shadow">
         <div class="reaction-top-grid">
@@ -75,7 +76,7 @@
     </div>
 
     <!-- Click outside to close -->
-    <div v-if="menuState.visible" class="context-overlay" @click="$emit('close')"></div>
+    <div v-if="menuState.visible" class="context-overlay" @click.stop="$emit('close')"></div>
   </Teleport>
 </template>
 
