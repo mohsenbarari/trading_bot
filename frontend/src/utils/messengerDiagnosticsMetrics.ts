@@ -38,10 +38,32 @@ export interface MessengerDiagnosticTaskOptions {
 declare global {
   interface Window {
     __messengerDiagnosticsMetrics?: MessengerMetricEntry[]
+    __MESSENGER_DIAGNOSTICS_ENABLED?: boolean
   }
 }
 
 const MAX_METRIC_ENTRIES = 500
+const MESSENGER_DIAGNOSTICS_STORAGE_KEY = 'messenger_diagnostics'
+
+export function areMessengerDomSnapshotsEnabled() {
+  if (import.meta.env.VITE_MESSENGER_DIAGNOSTICS === 'true') {
+    return true
+  }
+
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  if (window.__MESSENGER_DIAGNOSTICS_ENABLED === true) {
+    return true
+  }
+
+  try {
+    return window.localStorage?.getItem(MESSENGER_DIAGNOSTICS_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
 
 function now() {
   if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
@@ -199,6 +221,10 @@ export function recordMessengerDomSnapshot(
   root: ParentNode = document,
   metadata?: MessengerMetricMetadata,
 ) {
+  if (!areMessengerDomSnapshotsEnabled()) {
+    return null
+  }
+
   const snapshot = collectMessengerDomSnapshot(root)
   const metricMetadata = { ...metadata }
 

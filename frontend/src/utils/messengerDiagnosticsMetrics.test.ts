@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  areMessengerDomSnapshotsEnabled,
   clearMessengerMetricEntries,
   collectMessengerDomSnapshot,
   getMessengerMetricEntries,
@@ -18,6 +19,7 @@ describe('messengerDiagnosticsMetrics', () => {
   afterEach(() => {
     clearMessengerMetricEntries()
     document.body.innerHTML = ''
+    delete window.__MESSENGER_DIAGNOSTICS_ENABLED
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -31,7 +33,7 @@ describe('messengerDiagnosticsMetrics', () => {
     expect(getMessengerMetricEntries()).toHaveLength(1)
   })
 
-  it('captures Messenger DOM baseline counts for hot path selectors', () => {
+  it('keeps DOM snapshot recording gated while preserving raw collection for tools', () => {
     document.body.innerHTML = `
       <main class="chat-view">
         <div class="conversation-card"></div>
@@ -46,7 +48,27 @@ describe('messengerDiagnosticsMetrics', () => {
     expect(snapshot.mediaNodes).toBe(1)
     expect(snapshot.overlayNodes).toBe(1)
 
-    recordMessengerDomSnapshot('surface-ready', document.body)
+    expect(areMessengerDomSnapshotsEnabled()).toBe(false)
+    expect(recordMessengerDomSnapshot('surface-ready', document.body)).toBeNull()
+    expect(getMessengerMetricEntries()).toHaveLength(0)
+  })
+
+  it('records Messenger DOM snapshots only when diagnostics are explicitly enabled', () => {
+    document.body.innerHTML = `
+      <main class="chat-view">
+        <div class="conversation-card"></div>
+        <div class="message-bubble"><img alt="sample" /></div>
+      </main>
+    `
+
+    window.__MESSENGER_DIAGNOSTICS_ENABLED = true
+
+    const snapshot = recordMessengerDomSnapshot('surface-ready', document.body)
+    expect(snapshot).toMatchObject({
+      conversationCards: 1,
+      messageBubbles: 1,
+      mediaNodes: 1,
+    })
     expect(getMessengerMetricEntries().map(entry => entry.name)).toContain('surface-ready:dom-total')
   })
 
