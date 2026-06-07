@@ -5425,11 +5425,18 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     const container = wrapper.get('.messages-container').element as HTMLElement
+    const hooks = getChatViewTestHooks(wrapper)
     let scrollHeight = 1000
     Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => 400 })
     Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
     container.scrollTop = 24
 
+    hooks.state.isInitialChatOpenSettling.value = true
+    await wrapper.get('.messages-container').trigger('scroll')
+    await flushPromises()
+    expect(chatViewMocks.loadOlderMessagesMock).not.toHaveBeenCalled()
+
+    hooks.state.isInitialChatOpenSettling.value = false
     const scrollPromise = wrapper.get('.messages-container').trigger('scroll')
     scrollHeight = 1220
     await scrollPromise
