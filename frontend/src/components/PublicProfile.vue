@@ -2414,6 +2414,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-radius: 1.25rem;
   background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
 }
 
 .profile-menu-heading {
@@ -2440,13 +2443,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   justify-content: flex-start;
   gap: 0.72rem;
   transition: all 0.2s;
-  margin-bottom: 0.625rem;
   text-align: right;
   -webkit-tap-highlight-color: transparent;
-}
-
-.menu-button:last-child {
-  margin-bottom: 0;
 }
 
 .menu-button:hover {
