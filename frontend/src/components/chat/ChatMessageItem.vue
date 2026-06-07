@@ -51,6 +51,17 @@
       @touchcancel="handleTouchCancel()"
       :style="getSwipeStyle()"
     >
+      <button
+        v-if="shouldShowGroupSender"
+        type="button"
+        class="group-sender-name"
+        :class="{ 'is-clickable': canOpenSenderProfile }"
+        :disabled="!canOpenSenderProfile"
+        @click.stop="handleSenderProfileClick"
+      >
+        {{ groupSenderDisplayName }}
+      </button>
+
       <ForwardedHeader
         v-if="msg.forwarded_from_name"
         :name="msg.forwarded_from_name"
@@ -490,6 +501,22 @@ const audioStore = useAudioStore()
 // --- Computed State ---
 const isSent = computed(() => props.msg.sender_id === props.currentUserId)
 const shouldShowReadReceipt = computed(() => props.roomKind !== 'group' && props.roomKind !== 'channel' && props.msg?.is_read === true)
+const groupSenderDisplayName = computed(() => {
+  const value = typeof props.msg.sender_name === 'string' ? props.msg.sender_name.trim() : ''
+  if (value) return value
+  const senderId = Number(props.msg.sender_id)
+  return Number.isFinite(senderId) ? `کاربر ${senderId}` : 'کاربر'
+})
+const shouldShowGroupSender = computed(() => (
+  props.roomKind === 'group'
+  && !isSent.value
+  && !props.isManagementMessage
+  && Boolean(groupSenderDisplayName.value)
+))
+const canOpenSenderProfile = computed(() => (
+  Number.isFinite(Number(props.msg.sender_profile_user_id))
+  && Boolean(props.msg.sender_profile_account_name || props.msg.sender_name)
+))
 const isSending = computed(() => {
   if (props.msg.is_sending) return true
   if (props.msg.id >= 0 || props.msg.is_error) return false
@@ -1499,6 +1526,24 @@ function handleForwardedProfileClick() {
   emit('open-public-profile', target)
 }
 
+function handleSenderProfileClick() {
+  if (!canOpenSenderProfile.value) {
+    return
+  }
+
+  if (props.isSelectionMode) {
+    emit('select', props.msg)
+    return
+  }
+
+  emit('open-public-profile', {
+    id: Number(props.msg.sender_profile_user_id),
+    account_name: props.msg.sender_profile_account_name || props.msg.sender_name || '',
+    highlight_accountant_user_id: props.msg.sender_highlight_accountant_user_id ?? null,
+    highlight_accountant_relation_display_name: props.msg.sender_highlight_accountant_relation_display_name ?? null,
+  })
+}
+
 function handleContentClick(event: MouseEvent) {
   const targetElement = event.target instanceof Element ? event.target : null
   if (!targetElement) {
@@ -1863,6 +1908,27 @@ function getImageThumbnail(content: string, parsedContent?: Record<string, any> 
   font-weight: 950;
 }
 .message-bubble p { margin: 0; }
+.group-sender-name {
+  display: block;
+  max-width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #3390ec;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+.group-sender-name.is-clickable {
+  cursor: pointer;
+}
 .msg-media-link {
   position: relative;
   overflow: hidden;

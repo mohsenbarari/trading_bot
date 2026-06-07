@@ -485,6 +485,37 @@ describe('ChatMessageItem.vue', () => {
     expect(wrapper.find('.media-caption').text()).toContain('کپشن رسانه')
   })
 
+  it('shows the sender name for received group messages like Telegram', async () => {
+    const wrapper = mountTextMessage({
+      sender_id: 9,
+      sender_name: 'کامران',
+      sender_profile_user_id: 9,
+      sender_profile_account_name: 'کامران',
+    })
+    await wrapper.setProps({ roomKind: 'group' })
+
+    const senderName = wrapper.get('.group-sender-name')
+    expect(senderName.text()).toBe('کامران')
+
+    await senderName.trigger('click')
+    expect(wrapper.emitted('open-public-profile')?.[0]).toEqual([{
+      id: 9,
+      account_name: 'کامران',
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+    }])
+  })
+
+  it('does not repeat the current user name above sent group messages', async () => {
+    const wrapper = mountTextMessage({
+      sender_id: 7,
+      sender_name: 'علی',
+    })
+    await wrapper.setProps({ roomKind: 'group' })
+
+    expect(wrapper.find('.group-sender-name').exists()).toBe(false)
+  })
+
   it('renders the first album item caption under album bubbles', () => {
     const albumLeadMessage = {
       id: 81,

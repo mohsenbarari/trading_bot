@@ -444,7 +444,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     await nextTick()
                     markFirstMessagePaint('cache')
                     if (selectedUserId.value === userId) {
-                        scrollToUnreadOrBottom()
+                        scrollToBottom()
                         void markAsRead()
                     }
                     // Keep refreshing from the server, but do it without
@@ -541,7 +541,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     if (!isActiveLoadRequest(requestId, userId)) {
                         return
                     }
-                    scrollToUnreadOrBottom()
+                    scrollToBottom()
                     void markAsRead()
                 }, 0)
 
