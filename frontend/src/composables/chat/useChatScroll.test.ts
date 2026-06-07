@@ -127,6 +127,35 @@ describe('useChatScroll', () => {
     expect(container.scrollTop).toBe(1200)
   })
 
+  it('does not jump to unread-looking messages sent by the current user', () => {
+    const first = document.createElement('div')
+    const second = document.createElement('div')
+    first.className = 'message-bubble'
+    second.className = 'message-bubble'
+    first.scrollIntoView = vi.fn()
+    second.scrollIntoView = vi.fn()
+    container.append(first, second)
+
+    const subject = useChatScroll({
+      messagesContainer: ref(container),
+      messages: ref([
+        { id: 1, sender_id: 7, receiver_id: 7, is_read: false, message_type: 'image' },
+        { id: 2, sender_id: 7, receiver_id: 7, is_read: false, message_type: 'text' },
+      ] as any),
+      currentUserId: 7,
+      unreadNewMessagesCount: ref(0),
+      markAsRead: markAsReadMock,
+      isUserAtBottom: ref(true),
+      showScrollButton: ref(false),
+    })
+
+    subject.scrollToUnreadOrBottom()
+
+    expect(first.scrollIntoView).not.toHaveBeenCalled()
+    expect(second.scrollIntoView).not.toHaveBeenCalled()
+    expect(container.scrollTop).toBe(1200)
+  })
+
   it('highlights a replied message and centers it in the scroll container', () => {
     const target = document.createElement('div')
     target.id = 'msg-50'

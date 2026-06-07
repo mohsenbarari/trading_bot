@@ -14,6 +14,7 @@ import {
   type VirtualMessageRow,
   type VirtualTimelineRow,
 } from '../../utils/chatVirtualTimeline'
+import { isUnreadMessageForViewer } from '../../utils/chatUnread'
 
 const props = defineProps<{
   groups: ChatTimelineGroup[]
@@ -96,12 +97,12 @@ function findFirstUnreadMessageId(currentUserId: number) {
   for (const row of rows.value) {
     if (row.type !== 'message') continue
     if ('messages' in row.item) {
-      const unreadAlbumItem = row.item.messages.find(message => message.receiver_id === currentUserId && !message.is_read)
+      const unreadAlbumItem = row.item.messages.find(message => isUnreadMessageForViewer(message, currentUserId))
       if (unreadAlbumItem) return unreadAlbumItem.id
       continue
     }
 
-    if (row.item.receiver_id === currentUserId && !row.item.is_read) {
+    if (isUnreadMessageForViewer(row.item, currentUserId)) {
       return row.item.id
     }
   }
