@@ -34,6 +34,10 @@ const chatViewMocks = vi.hoisted(() => ({
   scrollToMessageMock: vi.fn(),
   pushBackStateMock: vi.fn(),
   popBackStateMock: vi.fn(),
+  popBackStateAfterHistoryMock: vi.fn((callback?: () => void) => {
+    callback?.()
+    return true
+  }),
   discardBackStateMock: vi.fn(),
   clearBackStackMock: vi.fn(),
   setConversationMutedMock: vi.fn(),
@@ -70,6 +74,7 @@ vi.mock('@formkit/auto-animate/vue', () => ({
 vi.mock('../composables/useBackButton', () => ({
   pushBackState: chatViewMocks.pushBackStateMock,
   popBackState: chatViewMocks.popBackStateMock,
+  popBackStateAfterHistory: chatViewMocks.popBackStateAfterHistoryMock,
   discardBackState: chatViewMocks.discardBackStateMock,
   clearBackStack: chatViewMocks.clearBackStackMock,
 }))
@@ -254,6 +259,7 @@ describe('ChatView.vue', () => {
     chatViewMocks.scrollToMessageMock.mockReset()
     chatViewMocks.pushBackStateMock.mockReset()
     chatViewMocks.popBackStateMock.mockReset()
+    chatViewMocks.popBackStateAfterHistoryMock.mockClear()
     chatViewMocks.discardBackStateMock.mockReset()
     chatViewMocks.clearBackStackMock.mockReset()
     chatViewMocks.setConversationMutedMock.mockReset()
@@ -702,10 +708,10 @@ describe('ChatView.vue', () => {
 
     hooks.goBack()
     expect(hooks.state.selectedUserId.value).toBeNull()
-    expect(chatViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.popBackStateAfterHistoryMock).toHaveBeenCalledTimes(1)
     hooks.goBack()
     expect(wrapper.emitted('back')).toBeTruthy()
-    expect(chatViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.popBackStateAfterHistoryMock).toHaveBeenCalledTimes(1)
 
     hooks.openPublicProfile({ id: 91, account_name: 'owner-91' })
     await vi.runAllTimersAsync()
@@ -2633,13 +2639,85 @@ describe('ChatView.vue', () => {
     await wrapper.get('.chat-header-back').trigger('click')
     await flushPromises()
 
-    expect(chatViewMocks.popBackStateMock).toHaveBeenCalled()
+    expect(chatViewMocks.popBackStateAfterHistoryMock).toHaveBeenCalled()
     expect(chatViewMocks.discardBackStateMock).not.toHaveBeenCalled()
     expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
       path: '/chat',
       query: {},
     })
     expect(wrapper.find('.select-conversation-action').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('keeps one conversation-level back state while switching between multiple rooms', async () => {
+    chatViewMocks.conversationsSeed = [
+      {
+        id: 1,
+        other_user_id: 1,
+        other_user_name: 'User One',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+      {
+        id: 2,
+        other_user_id: -2,
+        other_user_name: 'Group Two',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'group',
+      },
+      {
+        id: 3,
+        other_user_id: 3,
+        other_user_name: 'User Three',
+        last_message_content: null,
+        last_message_type: null,
+        last_message_at: null,
+        unread_count: 0,
+        room_kind: 'direct',
+      },
+    ]
+
+    const wrapper = await mountChatView({}, {
+      ChatConversationList: {
+        props: ['conversations'],
+        template: `
+          <div>
+            <button
+              v-for="conversation in conversations"
+              :key="conversation.other_user_id"
+              class="select-conversation-action"
+              @click="$emit('select-conversation', conversation)"
+            >{{ conversation.other_user_name }}</button>
+          </div>
+        `,
+      },
+    })
+    await flushPromises()
+
+    chatViewMocks.pushBackStateMock.mockClear()
+    const hooks = getChatViewTestHooks(wrapper)
+    hooks.openConversationFromRoute(1, 'User One')
+    await flushPromises()
+    hooks.openConversationFromRoute(-2, 'Group Two')
+    await flushPromises()
+    hooks.openConversationFromRoute(3, 'User Three')
+    await flushPromises()
+
+    expect(chatViewMocks.pushBackStateMock).toHaveBeenCalledTimes(1)
+    expect(hooks.state.selectedUserId.value).toBe(3)
+
+    await wrapper.get('.chat-header-back').trigger('click')
+    await flushPromises()
+
+    expect(chatViewMocks.popBackStateAfterHistoryMock).toHaveBeenCalledTimes(1)
+    expect(hooks.state.selectedUserId.value).toBeNull()
 
     wrapper.unmount()
   })
