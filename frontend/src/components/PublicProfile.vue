@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import { ChevronDown, ChevronLeft, User as UserIcon, Activity, ArrowRight, ChevronRight, Pencil } from 'lucide-vue-next';
+import { ChevronLeft, User as UserIcon, Activity, Pencil } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
 import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
@@ -1174,6 +1174,15 @@ function handleActionClick(action: ProfileActionCard) {
   }
 }
 
+function getActionButtonClass(action: ProfileActionCard) {
+  if (action.key === 'message') return 'message-menu-btn';
+  if (action.key === 'block_toggle') {
+    return publicBlockState.value ? 'unblock-btn' : 'block-btn';
+  }
+  if (action.key === 'admin_settings' || action.key === 'settings') return 'settings-btn';
+  return 'settings-btn';
+}
+
 function isHighlightedAccountant(relation: PublicAccountantRelationSummary) {
   return Number(relation.accountant_user_id) > 0 && Number(relation.accountant_user_id) === Number(highlightedAccountantUserId.value);
 }
@@ -1304,8 +1313,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
     <div class="header-row profile-header-row">
       <div class="header-spacer">
-        <div v-if="showOwnerSections && profileData" class="profile-avatar-stack profile-avatar-stack--header">
+        <div v-if="profileData" class="profile-avatar-stack profile-avatar-stack--header">
           <button
+            v-if="showOwnerSections"
             type="button"
             class="profile-avatar profile-avatar-button profile-avatar-button--editable"
             data-test="profile-avatar-trigger"
@@ -1320,7 +1330,20 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             </span>
             <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
           </button>
-          <p v-if="profilePresenceStatus" class="profile-presence-status profile-presence-status--own" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
+          <div v-else class="profile-avatar profile-avatar--readonly" data-test="profile-avatar-readonly">
+            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
+            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+          </div>
+          <p
+            v-if="profilePresenceStatus"
+            class="profile-presence-status"
+            :class="[
+              showOwnerSections ? 'profile-presence-status--own' : 'profile-presence-status--header',
+              { online: profileIsOnline },
+            ]"
+          >
+            {{ profilePresenceStatus }}
+          </p>
         </div>
       </div>
       <div class="header-title">
@@ -1352,18 +1375,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
     <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
       <section class="profile-section shared-profile-section">
-        <div v-if="!showOwnerSections" class="profile-hero">
-          <div class="profile-avatar">
-            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
-            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
-            <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
-          </div>
-          <div class="profile-hero-copy">
-            <h3>{{ profileData.account_name }}</h3>
-            <p v-if="profilePresenceStatus" class="profile-presence-status" :class="{ online: profileIsOnline }">{{ profilePresenceStatus }}</p>
-          </div>
-        </div>
-
         <div v-if="resolvedAccountantContext" class="accountant-resolution-banner">
           <div class="accountant-resolution-title">نمایش پروفایل مالک اصلی</div>
           <p class="accountant-resolution-copy">
@@ -1371,6 +1382,15 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             <span v-if="resolvedAccountantContext.relationDisplayName">
               عنوان این رابطه: «{{ resolvedAccountantContext.relationDisplayName }}»
             </span>
+          </p>
+        </div>
+
+        <div v-if="customerProfileContext" class="customer-context-banner">
+          <div class="customer-context-title">پروفایل مشتری</div>
+          <p class="customer-context-copy">
+            <span>{{ customerProfileContext.managementName }}</span>
+            <span v-if="customerProfileContext.ownerAccountName"> | مالک: {{ customerProfileContext.ownerAccountName }}</span>
+            <span> | {{ getCustomerTierLabel(customerProfileContext.customerTier) }}</span>
           </p>
         </div>
 
@@ -1595,46 +1615,55 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showVisitorSections && visitorActionCards.length > 0" class="profile-section visitor-profile-section">
-        <div class="action-grid" :class="{ 'single-column': visitorActionCards.length === 1 }">
-          <div
+        <div class="profile-menu-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="public-profile-visitor-menu-help"
+            note-test="public-profile-visitor-menu-help-note"
+            label="راهنمای منوی پروفایل عمومی"
+            text="اقدام‌های عمومی این پروفایل در این بخش قرار گرفته‌اند تا مسیر پیام، بلاک و عملیات مشابه یکپارچه و قابل پیش‌بینی بماند."
+          />
+          <div class="profile-menu-heading">اقدام‌های عمومی</div>
+          <button
             v-for="action in visitorActionCards"
             :key="action.key"
-            class="profile-action-item"
-            :class="{ 'profile-action-item--disabled': Boolean(action.disabled) }"
-          >
-          <button
-            class="settings-btn visitor-action-btn"
+            class="menu-button"
+            :class="[getActionButtonClass(action), { 'menu-button--disabled': Boolean(action.disabled) }]"
             :disabled="Boolean(action.disabled)"
             @click="handleActionClick(action)"
           >
-            <span class="stat-icon">{{ action.icon }}</span>
-            <span class="stat-label">{{ action.label }}</span>
+            <span class="menu-button-icon">{{ action.icon }}</span>
+            <span class="menu-button-copy">
+              <span class="menu-button-label">{{ action.label }}</span>
+              <span v-if="action.description" class="menu-button-note">{{ action.description }}</span>
+            </span>
           </button>
-            <HelpPopover
-              v-if="action.description"
-              floating
-              class="profile-action-help"
-              :button-test="`public-profile-action-help-${action.key}`"
-              :note-test="`public-profile-action-help-note-${action.key}`"
-              :label="`راهنمای ${action.label}`"
-              :text="action.description"
-            />
-          </div>
         </div>
       </section>
 
       <section v-if="showAdminSections && adminActionCards.length > 0" class="profile-section owner-profile-section">
         <p v-if="adminUserError" class="admin-user-error">{{ adminUserError }}</p>
-        <div class="action-grid single-column">
+        <div class="profile-menu-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="public-profile-admin-menu-help"
+            note-test="public-profile-admin-menu-help-note"
+            label="راهنمای منوی مدیریت پروفایل"
+            text="تنظیمات مدیریتی کاربر از بخش عمومی جدا شده‌اند تا عملیات روزمره با ابزارهای مدیریتی مخلوط نشود."
+          />
+          <div class="profile-menu-heading">مدیریت کاربر</div>
           <button
             v-for="action in adminActionCards"
             :key="action.key"
-            class="settings-btn"
+            class="menu-button"
+            :class="getActionButtonClass(action)"
             :disabled="adminUserLoading"
             @click="handleActionClick(action)"
           >
-            <span class="stat-icon">{{ action.icon }}</span>
-            <span class="stat-label">{{ adminUserLoading ? 'در حال بارگذاری...' : action.label }}</span>
+            <span class="menu-button-icon">{{ action.icon }}</span>
+            <span class="menu-button-copy">
+              <span class="menu-button-label">{{ adminUserLoading ? 'در حال بارگذاری...' : action.label }}</span>
+            </span>
           </button>
         </div>
       </section>
@@ -1811,15 +1840,26 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
-        <div class="action-grid owner-action-grid" :class="{ 'single-column': ownerOnlyActions.length === 1 }">
+        <div class="profile-menu-card card-with-help">
+          <HelpPopover
+            floating
+            button-test="public-profile-owner-menu-help"
+            note-test="public-profile-owner-menu-help-note"
+            label="راهنمای منوی مالک"
+            text="میانبرهای تنظیمات، مشتریان و حسابداران در همین منو جمع شده‌اند تا ظاهر پروفایل شما با پروفایل عمومی بقیه بخش‌ها هم‌راستا بماند."
+          />
+          <div class="profile-menu-heading">میانبرهای مدیریت پروفایل</div>
           <button
             v-for="action in ownerOnlyActions"
             :key="action.key"
-            class="settings-btn owner-settings-btn"
+            class="menu-button"
+            :class="getActionButtonClass(action)"
             @click="handleActionClick(action)"
           >
-              <span class="stat-icon">{{ action.icon }}</span>
-              <span class="stat-label">{{ action.label }}</span>
+            <span class="menu-button-icon">{{ action.icon }}</span>
+            <span class="menu-button-copy">
+              <span class="menu-button-label">{{ action.label }}</span>
+            </span>
           </button>
         </div>
       </section>
@@ -1892,15 +1932,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   padding-bottom: 24px;
 }
 
-.profile-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
-  text-align: center;
-}
-
 .profile-avatar-stack {
   display: flex;
   flex-direction: column;
@@ -1952,6 +1983,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   box-shadow: 0 14px 32px rgba(51, 144, 236, 0.18);
 }
 
+.profile-avatar--readonly {
+  box-shadow: 0 10px 24px rgba(51, 144, 236, 0.14);
+}
+
 .profile-avatar-edit-indicator {
   position: absolute;
   left: 50%;
@@ -1987,12 +2022,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   font-weight: 700;
 }
 
-.profile-hero-copy h3 {
-  margin: 0;
-  font-size: 1.15rem;
-  color: var(--ds-text-primary);
-}
-
 .profile-presence-status {
   margin: 6px 0 0;
   font-size: 0.84rem;
@@ -2006,6 +2035,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   left: 0;
   right: 0;
   margin: 0;
+  min-height: 1.1rem;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.profile-presence-status--header {
+  margin-top: 0;
   min-height: 1.1rem;
   font-size: 0.76rem;
   line-height: 1.45;
@@ -2324,13 +2361,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   width: 100%;
 }
 
-.action-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  width: 100%;
-}
-
 .card-with-help {
   position: relative;
   overflow: visible;
@@ -2349,45 +2379,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex: 0 0 auto;
 }
 
-/* If we have 3 buttons, make the first one (Settings) full width 
-   and the next two (Customers/Accountants) side-by-side. */
-.action-grid > button:first-child:nth-last-child(3),
-.action-grid > .profile-action-item:first-child:nth-last-child(3) {
-  grid-column: span 2;
-}
-
 .stats-grid.single-column {
   grid-template-columns: 1fr;
-}
-
-.action-grid.single-column {
-  grid-template-columns: 1fr;
-}
-
-.owner-action-grid {
-  gap: 8px;
-}
-
-.profile-action-item {
-  position: relative;
-  min-width: 0;
-}
-
-.profile-action-item .settings-btn {
-  width: 100%;
-  height: 100%;
-  min-height: 82px;
-  padding-left: 3.25rem;
-}
-
-.profile-action-help {
-  top: 50%;
-  left: 0.55rem;
-  transform: translateY(-50%);
-}
-
-.profile-action-item--disabled .profile-action-help {
-  opacity: 0.95;
 }
 
 .stat-card {
@@ -2402,76 +2395,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   box-shadow: var(--ds-shadow-sm);
 }
 
-.message-btn {
-  background: linear-gradient(135deg, #007aff, #0056b3);
-  color: white;
-  padding: 12px;
-  border-radius: var(--ds-radius-md);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
-  transition: all 0.2s;
-}
-
-.message-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.4);
-}
-
-.settings-btn {
-  background: linear-gradient(135deg, var(--ds-text-secondary), var(--ds-text-primary));
-  color: white;
-  padding: 12px;
-  border-radius: var(--ds-radius-md);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(75, 85, 99, 0.3);
-  transition: all 0.2s;
-}
-
-.owner-settings-btn {
-  min-height: 70px;
-  padding: 10px;
-  gap: 5px;
-}
-
-.owner-settings-btn .stat-icon {
-  font-size: 18px;
-}
-
-.owner-settings-btn .stat-label {
-  font-size: 12px;
-}
-
-.settings-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(75, 85, 99, 0.4);
-}
-
-.settings-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.72;
-  transform: none;
-  box-shadow: 0 1px 4px rgba(75, 85, 99, 0.16);
-}
-
-.message-btn .stat-icon, .settings-btn .stat-icon {
-  font-size: 20px;
-}
-
-.message-btn .stat-label, .settings-btn .stat-label {
-  font-weight: 600;
-  font-size: 13px;
-}
-
 .stat-icon {
     font-size: 20px;
 }
@@ -2481,6 +2404,139 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   font-size: 15px;
   color: var(--ds-primary-500);
   direction: ltr; /* Fix number direction */
+}
+
+.profile-menu-card {
+  position: relative;
+  padding: 1rem;
+  padding-left: 3.8rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 1.25rem;
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+}
+
+.profile-menu-heading {
+  margin-bottom: 0.7rem;
+  padding-right: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #92400e;
+}
+
+.menu-button {
+  width: 100%;
+  min-height: 3.4rem;
+  padding: 0.78rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 850;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2937;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.72rem;
+  transition: all 0.2s;
+  margin-bottom: 0.625rem;
+  text-align: right;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.menu-button:last-child {
+  margin-bottom: 0;
+}
+
+.menu-button:hover {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: #fffbeb;
+}
+
+.menu-button:active {
+  transform: scale(0.98);
+}
+
+.menu-button:disabled,
+.menu-button--disabled {
+  cursor: not-allowed;
+  opacity: 0.78;
+  transform: none;
+}
+
+.menu-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.8rem;
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  font-size: 0.95rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.menu-button-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.18rem;
+}
+
+.menu-button-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-button-note {
+  font-size: 0.72rem;
+  line-height: 1.55;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.message-menu-btn {
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(224, 242, 254, 0.98)) !important;
+  color: #075985 !important;
+  border-color: rgba(14, 165, 233, 0.22) !important;
+}
+
+.message-menu-btn .menu-button-icon {
+  background: rgba(14, 165, 233, 0.14);
+  color: #0369a1;
+}
+
+.settings-btn {
+  background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
+  color: #92400e !important;
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+.block-btn {
+  background: #fef2f2 !important;
+  color: #991b1b !important;
+  border-color: #fecaca !important;
+}
+
+.block-btn .menu-button-icon {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.unblock-btn {
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+  border-color: #bbf7d0 !important;
+}
+
+.unblock-btn .menu-button-icon {
+  background: rgba(34, 197, 94, 0.14);
+  color: #166534;
 }
 
 
