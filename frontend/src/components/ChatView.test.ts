@@ -5474,4 +5474,42 @@ describe('ChatView.vue', () => {
 
     wrapper.unmount()
   })
+
+  it('releases the initial bottom lock when the user scrolls upward during chat open settle', async () => {
+    chatViewMocks.hasOlderMessagesValue = true
+    chatViewMocks.messagesSeed = [buildMessage({ id: 61 })]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const container = wrapper.get('.messages-container').element as HTMLElement
+    const hooks = getChatViewTestHooks(wrapper)
+    let scrollHeight = 1000
+    Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => 400 })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+
+    container.scrollTop = 600
+    hooks.syncMessagesContainerMetrics(container)
+    hooks.state.isInitialChatOpenSettling.value = true
+    await flushPromises()
+
+    container.scrollTop = 200
+    expect(hooks.releaseInitialOpenBottomLockForUserScroll(container)).toBe(true)
+
+    scrollHeight = 1200
+    hooks.handleMessagesContainerResize()
+    expect(container.scrollTop).toBe(200)
+
+    await hooks.handleMessagesScroll()
+    await flushPromises()
+    expect(chatViewMocks.loadOlderMessagesMock).not.toHaveBeenCalled()
+
+    hooks.state.isInitialChatOpenSettling.value = false
+    await flushPromises()
+
+    wrapper.unmount()
+  })
 })
