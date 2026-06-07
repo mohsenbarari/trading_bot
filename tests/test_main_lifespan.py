@@ -151,7 +151,10 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         with patch("pathlib.Path.exists", return_value=False), patch("logging.getLogger") as get_logger:
             importlib.reload(main)
 
-        get_logger.return_value.warning.assert_called_with("⚠️ Frontend build directory not found. Run 'npm run build' first.")
+        get_logger.return_value.warning.assert_called_with(
+            "Frontend build directory not found. Run 'npm run build' first.",
+            extra={"event": "frontend.build_missing", "static_dir": "mini_app_dist"},
+        )
         importlib.reload(main)
 
 
