@@ -656,6 +656,29 @@ describe('useChatMessages', () => {
     expect(scrollToBottomMock).toHaveBeenCalled()
   })
 
+  it('keeps bottom anchored when silent hydration prepends older messages without changing the latest message', async () => {
+    createSubject()
+    messages.value = [
+      { id: 120, sender_id: 7, receiver_id: 12, content: 'tail 1', message_type: 'text' },
+      { id: 121, sender_id: 7, receiver_id: 12, content: 'tail 2', message_type: 'text' },
+    ]
+    isUserAtBottom.value = true
+    isViewingReply.value = false
+    messageMocks.apiFetchJson.mockResolvedValueOnce([
+      { id: 113, sender_id: 7, receiver_id: 12, content: 'older', message_type: 'text' },
+      { id: 120, sender_id: 7, receiver_id: 12, content: 'tail 1', message_type: 'text' },
+      { id: 121, sender_id: 7, receiver_id: 12, content: 'tail 2', message_type: 'text' },
+    ])
+
+    await subject.loadMessages(12, true)
+    await flushPromises()
+
+    expect(messages.value.map((message) => message.id)).toEqual([113, 120, 121])
+    expect(forceScrollToBottomMock).toHaveBeenCalled()
+    expect(scrollToBottomMock).not.toHaveBeenCalled()
+    expect(unreadNewMessagesCount.value).toBe(0)
+  })
+
   it('covers older-message guards and all-duplicate pagination responses', async () => {
     createSubject()
 
