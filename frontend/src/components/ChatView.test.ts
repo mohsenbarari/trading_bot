@@ -225,6 +225,7 @@ vi.mock('../utils/chatRoomRouting', () => ({
 
 describe('ChatView.vue', () => {
   beforeEach(() => {
+    window.history.replaceState({}, '', '/chat')
     chatViewMocks.routeState.query = {}
     chatViewMocks.routerReplaceMock.mockReset()
     chatViewMocks.routerReplaceMock.mockImplementation(async ({ path, query }: { path: string, query?: Record<string, string> }) => {
@@ -394,6 +395,7 @@ describe('ChatView.vue', () => {
       keep: ['yes'],
       empty: [''],
     } as any
+    window.history.replaceState({}, '', '/chat?user_id=12&user_name=old&keep=yes&empty=')
 
     const wrapper = await mountChatView({
       targetUserId: 55,
@@ -402,14 +404,11 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
-    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
-      path: '/chat',
-      query: {
-        keep: 'yes',
-        user_id: '55',
-        user_name: 'Target User',
-      },
-    })
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('keep')).toBe('yes')
+    expect(params.get('user_id')).toBe('55')
+    expect(params.get('user_name')).toBe('Target User')
+    expect(params.has('empty')).toBe(false)
 
     wrapper.unmount()
   }, 10000)
@@ -1101,7 +1100,8 @@ describe('ChatView.vue', () => {
     await onNamedRoomUnavailable?.(-88)
     await flushPromises()
     expect(hooks.state.selectedUserId.value).toBeNull()
-    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({ path: '/chat', query: {} })
+    expect(window.location.pathname).toBe('/chat')
+    expect(window.location.search).toBe('')
 
     hooks.state.selectedUserId.value = -777
     hooks.state.selectedRoomKind.value = 'group'
@@ -2627,13 +2627,9 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.loadMessagesMock).toHaveBeenCalledWith(55)
-    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
-      path: '/chat',
-      query: {
-        user_id: '55',
-        user_name: 'Target User',
-      },
-    })
+    let params = new URLSearchParams(window.location.search)
+    expect(params.get('user_id')).toBe('55')
+    expect(params.get('user_name')).toBe('Target User')
 
     chatViewMocks.routerReplaceMock.mockClear()
     await wrapper.get('.chat-header-back').trigger('click')
@@ -2641,10 +2637,9 @@ describe('ChatView.vue', () => {
 
     expect(chatViewMocks.popBackStateAfterHistoryMock).toHaveBeenCalled()
     expect(chatViewMocks.discardBackStateMock).not.toHaveBeenCalled()
-    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
-      path: '/chat',
-      query: {},
-    })
+    params = new URLSearchParams(window.location.search)
+    expect(params.has('user_id')).toBe(false)
+    expect(params.has('user_name')).toBe(false)
     expect(wrapper.find('.select-conversation-action').exists()).toBe(true)
 
     wrapper.unmount()
@@ -2702,6 +2697,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     chatViewMocks.pushBackStateMock.mockClear()
+    chatViewMocks.routerReplaceMock.mockClear()
     const hooks = getChatViewTestHooks(wrapper)
     hooks.openConversationFromRoute(1, 'User One')
     await flushPromises()
@@ -2711,6 +2707,10 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     expect(chatViewMocks.pushBackStateMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.routerReplaceMock).not.toHaveBeenCalled()
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('user_id')).toBe('3')
+    expect(params.get('user_name')).toBe('User Three')
     expect(hooks.state.selectedUserId.value).toBe(3)
 
     await wrapper.get('.chat-header-back').trigger('click')
@@ -5057,16 +5057,14 @@ describe('ChatView.vue', () => {
       user_id: '-99',
       user_name: 'گروه به‌روز',
     }
+    window.history.replaceState({}, '', '/chat?user_id=-99&user_name=group')
     await hooks.handleGroupLeft(99)
     expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(hooks.state.selectedUserId.value).toBeNull()
     expect(hooks.state.selectedUserName.value).toBe('')
     expect(hooks.state.showAttachmentMenu.value).toBe(false)
     expect(hooks.state.showStickerPicker.value).toBe(false)
-    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
-      path: '/chat',
-      query: {},
-    })
+    expect(window.location.search).toBe('')
 
     chatViewMocks.loadConversationsMock.mockClear()
     chatViewMocks.routerReplaceMock.mockClear()
@@ -5078,16 +5076,14 @@ describe('ChatView.vue', () => {
       user_id: '-23',
       user_name: 'کانال رفرش‌شده',
     }
+    window.history.replaceState({}, '', '/chat?user_id=-23&user_name=channel')
     await hooks.handleChannelLeft(23)
     expect(chatViewMocks.loadConversationsMock).not.toHaveBeenCalled()
     expect(hooks.state.selectedUserId.value).toBeNull()
     expect(hooks.state.selectedUserName.value).toBe('')
     expect(hooks.state.showAttachmentMenu.value).toBe(false)
     expect(hooks.state.showStickerPicker.value).toBe(false)
-    expect(chatViewMocks.routerReplaceMock).toHaveBeenCalledWith({
-      path: '/chat',
-      query: {},
-    })
+    expect(window.location.search).toBe('')
 
     wrapper.unmount()
   })
