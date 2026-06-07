@@ -191,6 +191,7 @@ const CONTEXT_MENU_SUPPORTS_FILE_SHARE = canShareFiles()
 const pendingReactionMutationVersion = new Map<number, number>()
 let reactionMutationVersion = 0
 let contextMenuSnapshotVersion = 0
+let consumeNextContextMenuClose = false
 
 type MessageSeenMember = {
   user_id: number
@@ -409,7 +410,7 @@ function beginReplyTransition(msg: Message) {
     swipedMessageId.value = null
   }
   handleReply(msg)
-  closeContextMenu()
+  closeContextMenuForAction()
 }
 
 function beginEditTransition(msg: Message) {
@@ -420,7 +421,7 @@ function beginEditTransition(msg: Message) {
   }
   editingMessage.value = msg
   messageInput.value = msg.content
-  closeContextMenu()
+  closeContextMenuForAction()
   nextTick(() => {
     chatInputBarRef.value?.adjustTextareaHeight?.()
     chatInputBarRef.value?.focusInput?.({ cursorToEnd: true })
@@ -2369,6 +2370,13 @@ function closeContextMenu() {
   contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [], style: null, menuModel: null }
 }
 
+function closeContextMenuForAction() {
+  if (contextMenu.value.visible) {
+    consumeNextContextMenuClose = true
+  }
+  closeContextMenu()
+}
+
 function closeSeenListModal() {
   seenListModal.value = { visible: false, isLoading: false, error: '', messageId: null, members: [] }
 }
@@ -2414,7 +2422,7 @@ const handleMessageReactionToggle = ({ msg, emoji }: { msg: Message, emoji: stri
 
 const handleContextMenuReaction = (emoji: string) => {
   const msg = contextMenu.value.message
-  closeContextMenu()
+  closeContextMenuForAction()
   if (!msg) {
     return
   }
@@ -2460,17 +2468,17 @@ const handleDeleteMessage = async () => {
     if (pinnedMessage.value && messageIds.includes(pinnedMessage.value.id)) {
       pinnedMessageState.value = null
     }
-    closeContextMenu()
+    closeContextMenuForAction()
   }
 }
 
 async function handlePinMessage() {
   const msg = contextMenu.value.message
   if (!msg) {
-    closeContextMenu()
+    closeContextMenuForAction()
     return
   }
-  closeContextMenu()
+  closeContextMenuForAction()
   await handlePinnedMessageToggle(msg, !isContextMessagePinned.value)
 }
 
@@ -2487,13 +2495,13 @@ function handlePinnedBannerClick() {
 
 const handleCopyMessage = () => {
   const msg = contextMenu.value.message;
-  if (!msg || msg.message_type !== 'text') { closeContextMenu(); return; }
-  navigator.clipboard.writeText(msg.content).then(() => closeContextMenu());
+  if (!msg || msg.message_type !== 'text') { closeContextMenuForAction(); return; }
+  navigator.clipboard.writeText(msg.content).then(() => closeContextMenuForAction());
 };
 
 const handleSaveMedia = () => {
   const msg = contextMenu.value.message;
-  if (!msg) { closeContextMenu(); return; }
+  if (!msg) { closeContextMenuForAction(); return; }
   try {
     const parsed = JSON.parse(msg.content);
     const fileId = parsed?.file_id;
@@ -2502,7 +2510,7 @@ const handleSaveMedia = () => {
     if (!cachedUrl) {
       // Download first, then save
       downloadMedia(msg);
-      closeContextMenu();
+      closeContextMenuForAction();
       return;
     }
     // Trigger browser download via hidden <a> tag
@@ -2517,7 +2525,7 @@ const handleSaveMedia = () => {
   } catch (e) {
     console.error('Save media error:', e);
   }
-  closeContextMenu();
+  closeContextMenuForAction();
 };
 
 const getMediaFileId = (msg: Message) => {
@@ -2585,12 +2593,12 @@ function handleSaveAlbum() {
   const msg = contextMenu.value.message
   const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
   if (!msg || messageIds.length <= 1) {
-    closeContextMenu()
+    closeContextMenuForAction()
     return
   }
 
   startAlbumDownloadSelection(msg, messageIds)
-  closeContextMenu()
+  closeContextMenuForAction()
 }
 
 function inferMediaMime(msg: Message): string {
@@ -2656,7 +2664,7 @@ function showInlineToast(text: string) {
 
 async function handleShareMessage() {
   const msg = contextMenu.value.message
-  closeContextMenu()
+  closeContextMenuForAction()
   if (!msg) return
   const fileId = getMediaFileId(msg)
   if (!fileId) {
@@ -2681,11 +2689,11 @@ function handleShareAlbum() {
   const msg = contextMenu.value.message
   const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
   if (!msg || messageIds.length <= 1) {
-    closeContextMenu()
+    closeContextMenuForAction()
     return
   }
   startAlbumShareSelection(msg, messageIds)
-  closeContextMenu()
+  closeContextMenuForAction()
 }
 
 async function handleShareSelectedAlbumMessages() {
@@ -3073,13 +3081,13 @@ const handleForwardMessage = () => {
   const messageIds = normalizeMessageIds(contextMenu.value.messageIds)
 
   if (msg && messageIds.length > 1) {
-    closeCurrentOverlayThen(closeContextMenu, () => {
+    closeCurrentOverlayThen(closeContextMenuForAction, () => {
       startAlbumForwardSelection(msg, messageIds)
     })
     return
   }
 
-  closeCurrentOverlayThen(closeContextMenu, () => {
+  closeCurrentOverlayThen(closeContextMenuForAction, () => {
     openForwardModalForIds(messageIds)
   })
 }
@@ -3087,7 +3095,7 @@ const handleForwardMessage = () => {
 async function handleSeenListMessage() {
   const msg = contextMenu.value.message
   const conversation = selectedConversation.value
-  closeContextMenu()
+  closeContextMenuForAction()
   if (!msg || !conversation?.chat_id || selectedRoomKind.value !== 'group') {
     return
   }
@@ -3495,6 +3503,10 @@ bindOverlayBackState(() => showForwardModal.value, () => {
 
 bindOverlayBackState(() => contextMenu.value.visible, () => {
   closeContextMenu()
+}, () => {
+  const shouldConsume = consumeNextContextMenuClose
+  consumeNextContextMenuClose = false
+  return shouldConsume
 })
 
 bindOverlayBackState(() => showStickerPicker.value, () => {
@@ -3926,6 +3938,7 @@ defineExpose({
     handleReplyMessage,
     handleEditMessage,
     handleForwardMessage,
+    handleSeenListMessage,
     handleForwardSelectedAlbumMessages,
     handleAlbumReplyItem,
     handleAlbumForwardItem,

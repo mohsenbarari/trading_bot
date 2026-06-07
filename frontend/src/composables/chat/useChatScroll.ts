@@ -26,8 +26,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
 
     const isViewingReply = ref(false)
     let scrollMetricSequence = 0
+    let scrollIntentVersion = 0
 
     function scrollToBottom() {
+        scrollIntentVersion += 1
         const el = messagesContainer.value
         if (el) {
             const distance = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
@@ -53,6 +55,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
 
     function forceScrollToBottom() {
+        scrollIntentVersion += 1
         if (unreadNewMessagesCount.value > 0) {
             markAsRead()
             unreadNewMessagesCount.value = 0
@@ -107,6 +110,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
 
     function scrollToUnreadOrBottom() {
+        scrollIntentVersion += 1
         if (!messagesContainer.value) return
 
         const firstUnreadIndex = messages.value.findIndex(
@@ -124,6 +128,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
 
     const scrollToMessage = (msgId: number) => {
+        const intentVersion = ++scrollIntentVersion
         const el = document.getElementById(`msg-${msgId}`) || document.getElementById(`album-item-${msgId}`)
         const container = messagesContainer.value
         const metricId = ++scrollMetricSequence
@@ -163,6 +168,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
             const startTime = performance.now()
 
             function step(currentTime: number) {
+                if (intentVersion !== scrollIntentVersion) {
+                    return
+                }
+
                 const elapsed = currentTime - startTime
                 const progress = Math.min(elapsed / duration, 1)
 
