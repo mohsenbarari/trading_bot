@@ -683,8 +683,6 @@ describe('PublicProfile.vue', () => {
     const blockButton = wrapper.findAll('button').find((button) => button.text().includes('بلاک کاربر'))
     expect(blockButton).toBeTruthy()
     expect(blockButton!.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).not.toContain('ظرفیت بلاک شما تکمیل است')
-    await wrapper.get('[data-test="public-profile-action-help-block_toggle"]').trigger('click')
     expect(wrapper.text()).toContain('ظرفیت بلاک شما تکمیل است')
     await blockButton!.trigger('click')
     expect(vi.mocked(window.confirm)).not.toHaveBeenCalled()
@@ -1387,6 +1385,108 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.profile-hero').exists()).toBe(false)
     expect(wrapper.find('.profile-hero-copy').exists()).toBe(false)
     expect(wrapper.find('.profile-presence-status--own').exists()).toBe(true)
+  })
+
+  it('uses the standardized header avatar and menu layout on public profiles viewed by others', async () => {
+    const fetchMock = vi.mocked(fetch)
+    buildChatFileUrlMock.mockImplementation((fileId?: string | null) => fileId ? `/files/${fileId}` : '')
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 72,
+      account_name: 'public72',
+      avatar_file_id: 'avatar-72',
+      mobile_number: '09125550000',
+      address: 'تهران',
+      last_seen_at: '2026-06-07T09:00:00Z',
+      created_at_jalali: '۱۴۰۵/۰۳/۱۷',
+      trades_count: 6,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      can_block: true,
+      can_block_now: true,
+      max_blocked: 10,
+      current_blocked: 0,
+      remaining: 10,
+      reason_code: null,
+      reason_message: null,
+    }))
+    fetchMock.mockResolvedValueOnce(makeResponse({ is_blocked_by_me: false }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 72, account_name: 'public72' },
+        viewerUserId: 99,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="profile-avatar-readonly"]').exists()).toBe(true)
+    expect(wrapper.find('.profile-presence-status--header').exists()).toBe(true)
+    expect(wrapper.find('.profile-hero').exists()).toBe(false)
+    expect(wrapper.find('.profile-menu-card').exists()).toBe(true)
+    expect(wrapper.text()).toContain('اقدام‌های عمومی')
+    expect(wrapper.text()).toContain('ارسال پیام')
+  })
+
+  it('renders the standardized customer context banner and public menu on customer profiles', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValueOnce(makeResponse({
+      id: 91,
+      account_name: 'customer91',
+      avatar_file_id: null,
+      mobile_number: '09127777777',
+      address: 'شیراز',
+      created_at_jalali: '۱۴۰۵/۰۲/۰۲',
+      trades_count: 5,
+      resolved_from_accountant_id: null,
+      highlight_accountant_user_id: null,
+      highlight_accountant_relation_display_name: null,
+      accountant_relations: [],
+      customer_owner_user_id: 20,
+      customer_owner_account_name: 'owner20',
+      customer_management_name: 'مشتری ویژه',
+      customer_tier: 'tier2',
+      customer_relations: [],
+    }))
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 91, account_name: 'customer91' },
+        viewerUserId: 20,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+          OwnerCustomerManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.customer-context-banner').exists()).toBe(true)
+    expect(wrapper.text()).toContain('پروفایل مشتری')
+    expect(wrapper.text()).toContain('مالک: owner20')
+    expect(wrapper.find('.profile-menu-card').exists()).toBe(true)
+    expect(wrapper.text()).toContain('ارسال پیام')
   })
 
   it('opens the avatar picker and uploads a new owner avatar', async () => {
@@ -2268,7 +2368,7 @@ describe('PublicProfile.vue', () => {
     expect(accountantAccordion!.classes()).toContain('open')
   })
 
-  it('does not render the customer context banner on customer profiles', async () => {
+  it('renders the standardized customer context banner on customer profiles without legacy copy', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 91,
@@ -2307,9 +2407,11 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
+    expect(wrapper.find('.customer-context-banner').exists()).toBe(true)
+    expect(wrapper.text()).toContain('پروفایل مشتری')
+    expect(wrapper.text()).toContain('مشتری ویژه')
     expect(wrapper.text()).not.toContain('نمای مشتری')
     expect(wrapper.text()).not.toContain('زیرمجموعه مالک')
-    expect(wrapper.text()).not.toContain('مشتری ویژه')
   })
 
   it('shows owner customer list for super-admin viewers', async () => {
