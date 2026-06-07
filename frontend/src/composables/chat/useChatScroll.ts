@@ -28,6 +28,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const isViewingReply = ref(false)
     let scrollMetricSequence = 0
     let scrollIntentVersion = 0
+    const PROGRAMMATIC_SCROLL_PAGINATION_SUPPRESS_MS = 8000
 
     function scrollToBottom() {
         const intentVersion = ++scrollIntentVersion
@@ -160,7 +161,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
             setTimeout(() => {
                 isViewingReply.value = false
                 safeEl.classList.remove('highlight-message')
-            }, 3000)
+            }, PROGRAMMATIC_SCROLL_PAGINATION_SUPPRESS_MS)
 
             const containerRect = safeContainer.getBoundingClientRect()
             const elRect = safeEl.getBoundingClientRect()

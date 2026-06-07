@@ -706,9 +706,11 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 // Reconcile resumed pending uploads after initial render.
                 mergeLatePendingOptimisticMessages(userId, requestId)
 
-                if (shouldHydrateAfterFastOpen && selectedUserId.value === userId) {
-                    scheduleBackgroundHydration(userId)
-                }
+                // Avoid silently prepending older messages after the first paint.
+                // Older history is still loaded on explicit upward scroll; doing
+                // it in the background can move the viewport away from the
+                // selected bottom/unread anchor after a few seconds.
+                shouldHydrateAfterFastOpen = false
             }
         } catch (e: any) {
             if (isActiveLoadRequest(requestId, userId)) {

@@ -468,7 +468,7 @@ function scrollToMessage(msgId: number) {
     isViewingReply.value = true
     window.setTimeout(() => {
       isViewingReply.value = false
-    }, 3000)
+    }, PROGRAMMATIC_SCROLL_PAGINATION_SUPPRESS_MS)
     return
   }
 
@@ -758,6 +758,7 @@ const {
 } = wsLogic
 
 const LOAD_OLDER_TRIGGER_PX = 96
+const PROGRAMMATIC_SCROLL_PAGINATION_SUPPRESS_MS = 8000
 
 function captureMessagesContainerMetrics(container = messagesContainer.value): MessagesContainerMetrics | null {
   if (!container) return null
