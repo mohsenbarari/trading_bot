@@ -599,6 +599,7 @@ const messagesLogic = useChatMessages({
   showStickerPicker,
   scrollToBottom: scrollToBottomForActiveTimeline,
   scrollToUnreadOrBottom: scrollToUnreadOrBottomForActiveTimeline,
+  scrollToMessage,
   forceScrollToBottom,
   focusMessageInput: (options?: { cursorToEnd?: boolean }) => {
     chatInputBarRef.value?.focusInput(options)
@@ -913,6 +914,7 @@ const handleMessagesScroll = async () => {
     || isLoadingMessages.value
     || isInitialChatOpenSettling.value
     || isLoadingOlderMessages.value
+    || isViewingReply.value
     || !hasOlderMessages.value
   ) {
     return

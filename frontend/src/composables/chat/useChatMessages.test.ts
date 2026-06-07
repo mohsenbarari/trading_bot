@@ -13,6 +13,7 @@ const messageMocks = vi.hoisted(() => ({
   hydrateFromCache: vi.fn(async () => null),
   replaceFromServer: vi.fn(async (_userId: number, conversations: any[]) => conversations),
   setConversationStoreError: vi.fn(),
+  conversationHydrationStatus: 'fresh',
 }))
 
 vi.mock('../../utils/auth', () => ({
@@ -31,6 +32,9 @@ vi.mock('../../stores/chat/conversations', () => ({
     hydrateFromCache: messageMocks.hydrateFromCache,
     replaceFromServer: messageMocks.replaceFromServer,
     setError: messageMocks.setConversationStoreError,
+    get hydrationStatus() {
+      return messageMocks.conversationHydrationStatus
+    },
   }),
 }))
 
@@ -65,6 +69,7 @@ describe('useChatMessages', () => {
   let showStickerPicker: ReturnType<typeof ref<boolean>>
   let scrollToBottomMock: ReturnType<typeof vi.fn>
   let scrollToUnreadOrBottomMock: ReturnType<typeof vi.fn>
+  let scrollToMessageMock: ReturnType<typeof vi.fn>
   let forceScrollToBottomMock: ReturnType<typeof vi.fn>
   let focusMessageInputMock: ReturnType<typeof vi.fn>
   let adjustTextareaHeightMock: ReturnType<typeof vi.fn>
@@ -100,6 +105,7 @@ describe('useChatMessages', () => {
         showStickerPicker: showStickerPicker as any,
         scrollToBottom: scrollToBottomMock,
         scrollToUnreadOrBottom: scrollToUnreadOrBottomMock,
+        scrollToMessage: scrollToMessageMock,
         forceScrollToBottom: forceScrollToBottomMock,
         focusMessageInput: focusMessageInputMock,
         adjustTextareaHeight: adjustTextareaHeightMock,
@@ -122,6 +128,8 @@ describe('useChatMessages', () => {
     messageMocks.replaceFromServer.mockReset()
     messageMocks.replaceFromServer.mockImplementation(async (_userId: number, nextConversations: any[]) => nextConversations)
     messageMocks.setConversationStoreError.mockReset()
+    messageMocks.conversationHydrationStatus = 'fresh'
+    window.sessionStorage.clear()
 
     selectedUserId = ref<number | null>(12)
     messages = ref<any[]>([])
@@ -144,6 +152,7 @@ describe('useChatMessages', () => {
     showStickerPicker = ref(false)
     scrollToBottomMock = vi.fn()
     scrollToUnreadOrBottomMock = vi.fn()
+    scrollToMessageMock = vi.fn()
     forceScrollToBottomMock = vi.fn()
     focusMessageInputMock = vi.fn()
     adjustTextareaHeightMock = vi.fn()
@@ -205,6 +214,7 @@ describe('useChatMessages', () => {
             receiver_id: 7,
             content: 'سلام',
             message_type: 'text',
+            is_read: true,
             created_at: '2026-05-14T13:59:00Z',
           },
         ]
@@ -232,8 +242,200 @@ describe('useChatMessages', () => {
     expect(isLoadingMessages.value).toBe(false)
   })
 
+  it('opens at the first valid unread message from the peer before marking the direct chat read', async () => {
+    createSubject()
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
+        return [
+          {
+            id: 20,
+            sender_id: 7,
+            receiver_id: 12,
+            content: 'mine',
+            message_type: 'text',
+            is_read: false,
+            created_at: '2026-05-14T13:58:00Z',
+          },
+          {
+            id: 21,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'unread 1',
+            message_type: 'text',
+            is_read: false,
+            created_at: '2026-05-14T13:59:00Z',
+          },
+          {
+            id: 22,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'unread 2',
+            message_type: 'text',
+            is_read: false,
+            created_at: '2026-05-14T14:00:00Z',
+          },
+        ]
+      }
+      if (url === '/api/chat/read/12') {
+        return {}
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    await subject.loadMessages(12)
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    expect(scrollToMessageMock).toHaveBeenCalledWith(21)
+    expect(scrollToUnreadOrBottomMock).not.toHaveBeenCalled()
+    expect(scrollToBottomMock).not.toHaveBeenCalled()
+    expect(isInitialChatOpenSettling.value).toBe(false)
+    expect(messageMocks.markChatAsRead).toHaveBeenCalledWith(12)
+  })
+
+  it('preserves the initial unread anchor across immediate read-state reloads', async () => {
+    createSubject()
+    let loadCount = 0
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
+        loadCount += 1
+        const isRead = loadCount > 1
+        return [
+          {
+            id: 21,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'first unread',
+            message_type: 'text',
+            is_read: isRead,
+            created_at: '2026-05-14T14:00:00Z',
+          },
+          {
+            id: 22,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'second unread',
+            message_type: 'text',
+            is_read: isRead,
+            created_at: '2026-05-14T14:00:01Z',
+          },
+        ]
+      }
+      if (url === '/api/chat/read/12') {
+        return {}
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    await subject.loadMessages(12)
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    expect(scrollToMessageMock).toHaveBeenCalledWith(21)
+    expect(scrollToUnreadOrBottomMock).not.toHaveBeenCalled()
+
+    scrollToBottomMock.mockClear()
+    await subject.loadMessages(12)
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    expect(scrollToMessageMock).toHaveBeenCalledWith(21)
+    expect(scrollToBottomMock).not.toHaveBeenCalled()
+  })
+
+  it('preserves the initial unread anchor across an immediate remount', async () => {
+    createSubject()
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
+        return [
+          {
+            id: 31,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'first unread',
+            message_type: 'text',
+            is_read: false,
+            created_at: '2026-05-14T14:00:00Z',
+          },
+        ]
+      }
+      if (url === '/api/chat/read/12') return {}
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    await subject.loadMessages(12)
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    scope?.stop()
+    messages.value = []
+    scrollToMessageMock.mockClear()
+    scrollToBottomMock.mockClear()
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
+        return [
+          {
+            id: 31,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'first unread',
+            message_type: 'text',
+            is_read: true,
+            created_at: '2026-05-14T14:00:00Z',
+          },
+        ]
+      }
+      if (url === '/api/chat/read/12') return {}
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    createSubject()
+    await subject.loadMessages(12)
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    expect(scrollToMessageMock).toHaveBeenCalledWith(31)
+    expect(scrollToBottomMock).not.toHaveBeenCalled()
+  })
+
+  it('expands the initial load limit to include all known unread messages from a conversation', async () => {
+    createSubject()
+    conversations.value = [{ other_user_id: 12, unread_count: 30 }]
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
+        return [
+          {
+            id: 1,
+            sender_id: 12,
+            receiver_id: 7,
+            content: 'first unread',
+            message_type: 'text',
+            is_read: false,
+          },
+        ]
+      }
+      if (url === '/api/chat/read/12') {
+        return {}
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    await subject.loadMessages(12)
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=38&/),
+      {},
+      expect.any(Object),
+    )
+    expect(scrollToMessageMock).toHaveBeenCalledWith(1)
+    expect(scrollToBottomMock).not.toHaveBeenCalled()
+  })
+
   it('requests the virtual timeline open limit only when the stage E flag is enabled', async () => {
     createSubject()
+    conversations.value = [{ other_user_id: 12, unread_count: 0 }]
     messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
       if (url === '/api/chat/read/12') return {}
       return []
@@ -250,6 +452,7 @@ describe('useChatMessages', () => {
     messages.value = []
     vi.stubEnv('VITE_MESSENGER_VIRTUAL_TIMELINE', 'true')
     createSubject()
+    conversations.value = [{ other_user_id: 12, unread_count: 0 }]
     messageMocks.apiFetchJson.mockClear()
     messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
       if (url === '/api/chat/read/12') return {}
@@ -259,6 +462,41 @@ describe('useChatMessages', () => {
     await subject.loadMessages(12)
     expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
       expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=128&/),
+      {},
+      expect.any(Object),
+    )
+  })
+
+  it('uses the full initial load limit for route-open chats before conversation state is loaded', async () => {
+    createSubject()
+    conversations.value = []
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/read/12') return {}
+      return []
+    })
+
+    await subject.loadMessages(12)
+
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=48&/),
+      {},
+      expect.any(Object),
+    )
+  })
+
+  it('uses the full initial load limit when conversation state is still cache-hydrated', async () => {
+    createSubject()
+    messageMocks.conversationHydrationStatus = 'cached'
+    conversations.value = [{ other_user_id: 12, unread_count: 0 }]
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url === '/api/chat/read/12') return {}
+      return []
+    })
+
+    await subject.loadMessages(12)
+
+    expect(messageMocks.apiFetchJson).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/chat\/messages\/12\?limit=48&/),
       {},
       expect.any(Object),
     )
