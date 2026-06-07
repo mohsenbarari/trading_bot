@@ -19,6 +19,7 @@ import {
     isRoomConversationKey,
 } from '../../utils/chatRoomRouting'
 import { getConversationPreviewText } from '../../utils/chatMessagePreview'
+import { isUnreadMessageForViewer } from '../../utils/chatUnread'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
 import {
     measureMessengerDiagnostic,
@@ -60,6 +61,7 @@ export interface UseChatMessagesOptions {
     showStickerPicker: Ref<boolean>
     scrollToBottom: () => void
     scrollToUnreadOrBottom: () => void
+    scrollToMessage?: (msgId: number) => void
     forceScrollToBottom: () => void
     focusMessageInput: (options?: { cursorToEnd?: boolean }) => void
     adjustTextareaHeight: () => void
@@ -92,6 +94,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         showStickerPicker,
         scrollToBottom,
         scrollToUnreadOrBottom,
+        scrollToMessage,
         forceScrollToBottom,
         focusMessageInput,
         adjustTextareaHeight,
@@ -111,12 +114,16 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const SEARCH_CONTEXT_LIMIT = 50
     const OLDER_MESSAGES_PAGE_LIMIT = 60
     const INITIAL_CHAT_OPEN_SETTLE_MS = 1400
+    const MAX_UNREAD_INITIAL_OPEN_LIMIT = 200
+    const RECENT_UNREAD_ANCHOR_TTL_MS = 8000
+    const RECENT_UNREAD_ANCHOR_STORAGE_PREFIX = 'messenger_recent_unread_anchor:'
     const hasOlderMessages = ref(true)
     const isLoadingOlderMessages = ref(false)
     const pendingBackgroundHydrationUsers = new Set<number>()
     let latestLoadRequestId = 0
     let chatLoadMetricSequence = 0
     let mutedConversationSyncSequence = 0
+    const recentUnreadAnchorByUser = new Map<number, { messageId: number, expiresAt: number }>()
 
     function cloneMessage(message: Message): Message {
         return {
@@ -309,6 +316,79 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         }
     }
 
+    function hasUnreadJumpTarget(candidateMessages: Message[]) {
+        return candidateMessages.some(message => isUnreadMessageForViewer(message, currentUserId))
+    }
+
+    function getUnreadJumpTargetId(candidateMessages: Message[]) {
+        return candidateMessages.find(message => isUnreadMessageForViewer(message, currentUserId))?.id ?? null
+    }
+
+    function rememberUnreadAnchor(userId: number, messageId: number) {
+        const anchor = {
+            messageId,
+            expiresAt: Date.now() + RECENT_UNREAD_ANCHOR_TTL_MS,
+        }
+        recentUnreadAnchorByUser.set(userId, {
+            messageId: anchor.messageId,
+            expiresAt: anchor.expiresAt,
+        })
+        try {
+            window.sessionStorage?.setItem(`${RECENT_UNREAD_ANCHOR_STORAGE_PREFIX}${userId}`, JSON.stringify(anchor))
+        } catch {
+            // Session storage is best-effort; in-memory anchoring still covers the common path.
+        }
+    }
+
+    function readStoredUnreadAnchor(userId: number) {
+        try {
+            const raw = window.sessionStorage?.getItem(`${RECENT_UNREAD_ANCHOR_STORAGE_PREFIX}${userId}`)
+            if (!raw) return null
+            const parsed = JSON.parse(raw)
+            const messageId = Number(parsed?.messageId)
+            const expiresAt = Number(parsed?.expiresAt)
+            if (!Number.isFinite(messageId) || !Number.isFinite(expiresAt)) return null
+            return { messageId, expiresAt }
+        } catch {
+            return null
+        }
+    }
+
+    function forgetStoredUnreadAnchor(userId: number) {
+        try {
+            window.sessionStorage?.removeItem(`${RECENT_UNREAD_ANCHOR_STORAGE_PREFIX}${userId}`)
+        } catch {
+            // Ignore storage cleanup failures.
+        }
+    }
+
+    function getRecentUnreadAnchorId(userId: number, candidateMessages: Message[]) {
+        const remembered = recentUnreadAnchorByUser.get(userId) ?? readStoredUnreadAnchor(userId)
+        if (!remembered) return null
+        if (remembered.expiresAt < Date.now()) {
+            recentUnreadAnchorByUser.delete(userId)
+            forgetStoredUnreadAnchor(userId)
+            return null
+        }
+        return candidateMessages.some(message => message.id === remembered.messageId)
+            ? remembered.messageId
+            : null
+    }
+
+    function getConversationUnreadCount(userId: number) {
+        const conversation = conversations.value.find(item => Number(item.other_user_id) === Number(userId))
+        const unreadCount = Number(conversation?.unread_count ?? 0)
+        return Number.isFinite(unreadCount) && unreadCount > 0 ? unreadCount : 0
+    }
+
+    function hasConversationState(userId: number) {
+        return conversations.value.some(item => Number(item.other_user_id) === Number(userId))
+    }
+
+    function hasFreshConversationState() {
+        return conversationsStore.hydrationStatus === 'fresh'
+    }
+
     function cancelBackgroundHydration(userId: number) {
         const timerId = backgroundHydrationTimers.get(userId)
         if (timerId !== undefined) {
@@ -447,11 +527,21 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         if (!effectiveSilent) isLoadingMessages.value = true
 
         try {
-            const cachedSnapshot = (!aroundId && !silent) ? getMessageSnapshot(userId) : null
-            const shouldUseFastOpen = !aroundId && !silent && !cachedSnapshot && !shouldPreferFullInitialOpen()
-            const openLimit = shouldUseVirtualTimelineOpenLimit(aroundId)
+            const initialUnreadCount = (!aroundId && !silent) ? getConversationUnreadCount(userId) : 0
+            const hasInitialConversationState = !aroundId && !silent ? hasConversationState(userId) : true
+            const cachedSnapshot = (!aroundId && !silent && initialUnreadCount <= 0) ? getMessageSnapshot(userId) : null
+            const shouldUseFastOpen = !aroundId
+                && !silent
+                && hasInitialConversationState
+                && hasFreshConversationState()
+                && !cachedSnapshot
+                && !shouldPreferFullInitialOpen()
+            const baseOpenLimit = shouldUseVirtualTimelineOpenLimit(aroundId)
                 ? VIRTUAL_TIMELINE_OPEN_LIMIT
                 : (shouldUseFastOpen ? FAST_CHAT_OPEN_LIMIT : INITIAL_CHAT_OPEN_LIMIT)
+            const openLimit = initialUnreadCount > 0
+                ? Math.max(baseOpenLimit, Math.min(MAX_UNREAD_INITIAL_OPEN_LIMIT, initialUnreadCount + 8))
+                : baseOpenLimit
             let shouldHydrateAfterFastOpen = shouldUseFastOpen
             let url = buildMessagesEndpoint(userId, `limit=${openLimit}&_t=${Date.now()}`)
 
@@ -470,9 +560,26 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     await nextTick()
                     markFirstMessagePaint('cache')
                     if (selectedUserId.value === userId) {
-                        scrollToBottom()
+                        if (hasUnreadJumpTarget(messages.value)) {
+                            const unreadAnchorId = getUnreadJumpTargetId(messages.value)
+                            if (unreadAnchorId !== null) rememberUnreadAnchor(userId, unreadAnchorId)
+                            cancelInitialOpenSettle()
+                            if (unreadAnchorId !== null && scrollToMessage) {
+                                scrollToMessage(unreadAnchorId)
+                            } else {
+                                scrollToUnreadOrBottom()
+                            }
+                        } else {
+                            const recentUnreadAnchorId = getRecentUnreadAnchorId(userId, messages.value)
+                            if (recentUnreadAnchorId !== null && scrollToMessage) {
+                                cancelInitialOpenSettle()
+                                scrollToMessage(recentUnreadAnchorId)
+                            } else {
+                                scrollToBottom()
+                                finishInitialOpenSettle(requestId, userId)
+                            }
+                        }
                         void markAsRead()
-                        finishInitialOpenSettle(requestId, userId)
                     }
                     // Keep refreshing from the server, but do it without
                     // showing the skeleton again.
@@ -573,9 +680,26 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     if (!isActiveLoadRequest(requestId, userId)) {
                         return
                     }
-                    scrollToBottom()
+                    if (hasUnreadJumpTarget(messages.value)) {
+                        const unreadAnchorId = getUnreadJumpTargetId(messages.value)
+                        if (unreadAnchorId !== null) rememberUnreadAnchor(userId, unreadAnchorId)
+                        cancelInitialOpenSettle()
+                        if (unreadAnchorId !== null && scrollToMessage) {
+                            scrollToMessage(unreadAnchorId)
+                        } else {
+                            scrollToUnreadOrBottom()
+                        }
+                    } else {
+                        const recentUnreadAnchorId = getRecentUnreadAnchorId(userId, messages.value)
+                        if (recentUnreadAnchorId !== null && scrollToMessage) {
+                            cancelInitialOpenSettle()
+                            scrollToMessage(recentUnreadAnchorId)
+                        } else {
+                            scrollToBottom()
+                            finishInitialOpenSettle(requestId, userId)
+                        }
+                    }
                     void markAsRead()
-                    finishInitialOpenSettle(requestId, userId)
                 }, 0)
 
                 // Don't block first paint waiting for upload service restore.
