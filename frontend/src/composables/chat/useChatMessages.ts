@@ -530,6 +530,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 const lastNewMsg = loadedMessages[loadedMessages.length - 1]
                 const isNewMessage = lastNewMsg && (!lastOldMsg || lastNewMsg.id !== lastOldMsg.id)
                 const oldLength = messages.value.length
+                const shouldKeepBottomAnchoredAfterSilentMerge = isUserAtBottom.value && !isViewingReply.value
 
                 await waitForChatUploadBackgroundReady()
                 const resolvedPendingOptimistic = getPendingOptimisticMessages(userId)
@@ -538,6 +539,10 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     mergeServerTailIntoExistingMessages(messages.value, loadedMessages),
                     mergeOptimisticMessages(tempParams, resolvedPendingOptimistic)
                 )
+                if (shouldKeepBottomAnchoredAfterSilentMerge && selectedUserId.value === userId) {
+                    await nextTick()
+                    forceScrollToBottom()
+                }
 
                 if (isNewMessage) {
                     if (isChannelRoom || lastNewMsg.sender_id !== currentUserId) {
