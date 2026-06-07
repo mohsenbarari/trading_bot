@@ -5,12 +5,18 @@ import MessengerView from './MessengerView.vue'
 
 const {
   apiFetchMock,
+  clearBackStackMock,
+  popBackStateMock,
+  pushBackStateMock,
   routerBackMock,
   routerPushMock,
   routerReplaceMock,
   routeState,
 } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
+  clearBackStackMock: vi.fn(),
+  popBackStateMock: vi.fn(),
+  pushBackStateMock: vi.fn(),
   routerBackMock: vi.fn(),
   routerPushMock: vi.fn(),
   routerReplaceMock: vi.fn(),
@@ -24,6 +30,12 @@ const {
 
 vi.mock('../utils/auth', () => ({
   apiFetch: apiFetchMock,
+}))
+
+vi.mock('../composables/useBackButton', () => ({
+  clearBackStack: clearBackStackMock,
+  popBackState: popBackStateMock,
+  pushBackState: pushBackStateMock,
 }))
 
 vi.mock('vue-router', () => ({
@@ -65,6 +77,9 @@ function makeResponse(payload: unknown, ok = true) {
 describe('MessengerView.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
+    clearBackStackMock.mockReset()
+    popBackStateMock.mockReset()
+    pushBackStateMock.mockReset()
     routerBackMock.mockReset()
     routerPushMock.mockReset()
     routerReplaceMock.mockReset()
@@ -75,6 +90,7 @@ describe('MessengerView.vue', () => {
       user_id: '18',
       user_name: 'peer-user',
     }
+    window.history.replaceState({ back: '/' }, '', '/chat')
   })
 
   it('passes the authenticated accountant state into ChatView', async () => {
@@ -118,8 +134,8 @@ describe('MessengerView.vue', () => {
     expect(wrapper.find('.chat-view-stub').exists()).toBe(false)
     expect(wrapper.find('[data-testid="messenger-refactor-shell"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('peer-user')
+    expect(pushBackStateMock).not.toHaveBeenCalled()
 
-    window.history.pushState({}, '', '/messenger')
     await wrapper.get('.shell-back').trigger('click')
     expect(routerBackMock).toHaveBeenCalledTimes(1)
   })
@@ -177,8 +193,32 @@ describe('MessengerView.vue', () => {
       query: undefined,
     })
 
-    window.history.pushState({}, '', '/messenger')
     await wrapper.get('.emit-back').trigger('click')
     expect(routerBackMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('installs a route-level base back state when messenger is opened without dashboard behind it', async () => {
+    window.history.replaceState({ back: '/users/88' }, '', '/chat?user_id=18')
+    apiFetchMock.mockResolvedValue(makeResponse({
+      id: 42,
+      role: 'عادی',
+      is_accountant: false,
+      is_customer: false,
+    }))
+
+    const wrapper = mount(MessengerView)
+    await flushPromises()
+
+    expect(pushBackStateMock).toHaveBeenCalledTimes(1)
+    const baseBackCallback = pushBackStateMock.mock.calls[0][0]
+    expect(baseBackCallback).toBeTypeOf('function')
+
+    baseBackCallback()
+    expect(routerReplaceMock).toHaveBeenCalledWith('/')
+
+    routerReplaceMock.mockClear()
+    await wrapper.get('.emit-back').trigger('click')
+    expect(popBackStateMock).not.toHaveBeenCalled()
+    expect(routerReplaceMock).toHaveBeenCalledWith('/')
   })
 })
