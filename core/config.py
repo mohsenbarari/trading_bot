@@ -12,6 +12,12 @@ __all__ = ["Settings", "settings"]
 class Settings(BaseSettings):
     bot_token: str | None = None
     bot_username: str | None = None
+
+    # Runtime / logging
+    environment: str = "production"
+    log_level: str = "INFO"
+    log_format: str = "json"  # json | text
+    release_sha: str | None = None
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
