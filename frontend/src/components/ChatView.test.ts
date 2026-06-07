@@ -702,8 +702,10 @@ describe('ChatView.vue', () => {
 
     hooks.goBack()
     expect(hooks.state.selectedUserId.value).toBeNull()
+    expect(chatViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
     hooks.goBack()
     expect(wrapper.emitted('back')).toBeTruthy()
+    expect(chatViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
 
     hooks.openPublicProfile({ id: 91, account_name: 'owner-91' })
     await vi.runAllTimersAsync()
@@ -2642,17 +2644,16 @@ describe('ChatView.vue', () => {
     wrapper.unmount()
   })
 
-  it('registers a base back-state handler on mount that emits back to return to the dashboard', async () => {
+  it('does not register a base back-state handler on mount and emits back directly from the list state', async () => {
     chatViewMocks.pushBackStateMock.mockClear()
     const wrapper = await mountChatView()
     await flushPromises()
 
-    expect(chatViewMocks.pushBackStateMock).toHaveBeenCalled()
-    const baseBackCallback = chatViewMocks.pushBackStateMock.mock.calls[0][0]
-    expect(baseBackCallback).toBeTypeOf('function')
-
-    baseBackCallback()
+    expect(chatViewMocks.pushBackStateMock).not.toHaveBeenCalled()
+    const hooks = getChatViewTestHooks(wrapper)
+    hooks.goBack()
     expect(wrapper.emitted('back')).toBeTruthy()
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })

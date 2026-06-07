@@ -5,11 +5,13 @@ import MessengerView from './MessengerView.vue'
 
 const {
   apiFetchMock,
+  routerBackMock,
   routerPushMock,
   routerReplaceMock,
   routeState,
 } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
+  routerBackMock: vi.fn(),
   routerPushMock: vi.fn(),
   routerReplaceMock: vi.fn(),
   routeState: {
@@ -26,6 +28,7 @@ vi.mock('../utils/auth', () => ({
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
+    back: routerBackMock,
     push: routerPushMock,
     replace: routerReplaceMock,
   }),
@@ -62,7 +65,9 @@ function makeResponse(payload: unknown, ok = true) {
 describe('MessengerView.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
+    routerBackMock.mockReset()
     routerPushMock.mockReset()
+    routerReplaceMock.mockReset()
     vi.unstubAllEnvs()
     localStorage.clear()
     localStorage.setItem('auth_token', 'jwt-token')
@@ -114,8 +119,9 @@ describe('MessengerView.vue', () => {
     expect(wrapper.find('[data-testid="messenger-refactor-shell"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('peer-user')
 
+    window.history.pushState({}, '', '/messenger')
     await wrapper.get('.shell-back').trigger('click')
-    expect(routerReplaceMock).toHaveBeenCalledWith('/')
+    expect(routerBackMock).toHaveBeenCalledTimes(1)
   })
 
   it('keeps direct-target props undefined and does not mount ChatView when auth me is not ok', async () => {
@@ -171,7 +177,8 @@ describe('MessengerView.vue', () => {
       query: undefined,
     })
 
+    window.history.pushState({}, '', '/messenger')
     await wrapper.get('.emit-back').trigger('click')
-    expect(routerReplaceMock).toHaveBeenCalledWith('/')
+    expect(routerBackMock).toHaveBeenCalledTimes(1)
   })
 })

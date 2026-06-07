@@ -3197,7 +3197,6 @@ async function goBack() {
     popBackState()
     await syncSelectedConversationRoute(null, '')
   } else {
-    popBackState()
     emit('back')
   }
 }
@@ -3392,11 +3391,6 @@ watch(() => timelineRenderBudget.value.itemCount, (itemCount) => {
 onMounted(async () => {
   isLoading.value = true
   updateReducedMotionPreference()
-
-  // Always register a back handler for the conversation list to return to the dashboard
-  pushBackState(() => {
-    emit('back')
-  })
 
   if (props.targetUserId) {
     isLoading.value = false
