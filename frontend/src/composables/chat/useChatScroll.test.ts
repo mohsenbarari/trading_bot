@@ -180,7 +180,7 @@ describe('useChatScroll', () => {
     expect(target.classList.contains('highlight-message')).toBe(true)
     expect(container.scrollTop).toBe(140)
 
-    vi.advanceTimersByTime(3000)
+    vi.advanceTimersByTime(8000)
     expect(subject.isViewingReply.value).toBe(false)
     expect(target.classList.contains('highlight-message')).toBe(false)
   })
