@@ -267,6 +267,18 @@ const orderedRelations = computed(() => {
   })
 })
 
+const summaryStats = computed(() => {
+  const pending = relations.value.filter((relation) => relation.status === 'pending').length
+  const active = relations.value.filter((relation) => relation.status === 'active').length
+  const archived = relations.value.length - pending - active
+  return {
+    total: relations.value.length,
+    pending,
+    active,
+    archived: Math.max(0, archived),
+  }
+})
+
 async function loadRelations(options?: { silent?: boolean }) {
   if (options?.silent) {
     isRefreshing.value = true
@@ -522,10 +534,30 @@ onBeforeUnmount(() => {
         <div v-if="notice" class="customer-banner success">{{ notice }}</div>
         <div v-if="error" class="customer-banner error">{{ error }}</div>
 
+        <section class="customer-summary-strip" aria-label="خلاصه وضعیت مشتریان">
+          <article class="summary-card">
+            <span class="summary-label">کل رابطه‌ها</span>
+            <strong class="summary-value">{{ summaryStats.total }}</strong>
+          </article>
+          <article class="summary-card summary-card--active">
+            <span class="summary-label">فعال</span>
+            <strong class="summary-value">{{ summaryStats.active }}</strong>
+          </article>
+          <article class="summary-card summary-card--pending">
+            <span class="summary-label">در انتظار</span>
+            <strong class="summary-value">{{ summaryStats.pending }}</strong>
+          </article>
+          <article class="summary-card summary-card--archived">
+            <span class="summary-label">آرشیوی</span>
+            <strong class="summary-value">{{ summaryStats.archived }}</strong>
+          </article>
+        </section>
+
         <section class="customer-panel">
           <div class="panel-title-row">
             <div>
               <h4>افزودن مشتری جدید</h4>
+              <p>دعوت و تنظیمات اولیه مشتری را یک‌جا ثبت کنید. مشخصات پایه و محدودیت‌های معاملاتی از هم جدا شده‌اند تا فرم سریع‌تر خوانده شود.</p>
             </div>
             <HelpPopover
               button-test="customer-create-help"
@@ -538,46 +570,63 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="customer-form-grid">
-            <label class="field-block">
-              <span>نام کاربری</span>
-              <input v-model.trim="createForm.account_name" class="customer-input create-account-name" type="text" placeholder="customer_user" />
-            </label>
-            <label class="field-block">
-              <span>نام مدیریتی</span>
-              <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="نام نمایشی مشتری" />
-            </label>
-            <label class="field-block">
-              <span>شماره موبایل</span>
-              <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
-            </label>
-            <label class="field-block">
-              <span>سطح مشتری</span>
-              <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
-                <option value="tier1">سطح 1</option>
-                <option value="tier2">سطح 2</option>
-              </select>
-            </label>
-            <label v-if="createForm.customer_tier === 'tier2'" class="field-block">
-              <span>درصد کمیسیون</span>
-              <input v-model.trim="createForm.commission_rate" class="customer-input create-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
-            </label>
-            <label class="field-block">
-              <span>حداقل مقدار معامله</span>
-              <input v-model.trim="createForm.min_trade_quantity" class="customer-input create-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-            </label>
-            <label class="field-block">
-              <span>حداکثر مقدار معامله</span>
-              <input v-model.trim="createForm.max_trade_quantity" class="customer-input create-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-            </label>
-            <label class="field-block">
-              <span>سقف معاملات روزانه</span>
-              <input v-model.trim="createForm.max_daily_trades" class="customer-input create-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
-            </label>
-            <label class="field-block">
-              <span>سقف حجم روزانه</span>
-              <input v-model.trim="createForm.max_daily_commodity_volume" class="customer-input create-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
-            </label>
+          <div class="customer-form-sections">
+            <section class="form-subpanel">
+              <div class="form-subpanel-head">
+                <h5>مشخصات پایه</h5>
+                <p>اطلاعات هویتی و سطح دسترسی مشتری</p>
+              </div>
+              <div class="customer-form-grid">
+                <label class="field-block">
+                  <span>نام کاربری</span>
+                  <input v-model.trim="createForm.account_name" class="customer-input create-account-name" type="text" placeholder="customer_user" />
+                </label>
+                <label class="field-block">
+                  <span>نام مدیریتی</span>
+                  <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="نام نمایشی مشتری" />
+                </label>
+                <label class="field-block">
+                  <span>شماره موبایل</span>
+                  <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
+                </label>
+                <label class="field-block">
+                  <span>سطح مشتری</span>
+                  <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
+                    <option value="tier1">سطح 1</option>
+                    <option value="tier2">سطح 2</option>
+                  </select>
+                </label>
+                <label v-if="createForm.customer_tier === 'tier2'" class="field-block">
+                  <span>درصد کمیسیون</span>
+                  <input v-model.trim="createForm.commission_rate" class="customer-input create-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
+                </label>
+              </div>
+            </section>
+
+            <section class="form-subpanel">
+              <div class="form-subpanel-head">
+                <h5>محدودیت‌های معاملاتی</h5>
+                <p>همه فیلدهای این بخش اختیاری هستند</p>
+              </div>
+              <div class="customer-form-grid">
+                <label class="field-block">
+                  <span>حداقل مقدار معامله</span>
+                  <input v-model.trim="createForm.min_trade_quantity" class="customer-input create-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                </label>
+                <label class="field-block">
+                  <span>حداکثر مقدار معامله</span>
+                  <input v-model.trim="createForm.max_trade_quantity" class="customer-input create-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                </label>
+                <label class="field-block">
+                  <span>سقف معاملات روزانه</span>
+                  <input v-model.trim="createForm.max_daily_trades" class="customer-input create-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
+                </label>
+                <label class="field-block">
+                  <span>سقف حجم روزانه</span>
+                  <input v-model.trim="createForm.max_daily_commodity_volume" class="customer-input create-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
+                </label>
+              </div>
+            </section>
           </div>
 
           <div class="panel-actions">
@@ -592,6 +641,7 @@ onBeforeUnmount(() => {
           <div class="panel-title-row">
             <div>
               <h4>مشتریان فعال و pending</h4>
+              <p>هر کارت، وضعیت، محدودیت‌ها و اقدام‌های مربوط به همان رابطه را یک‌جا نشان می‌دهد.</p>
             </div>
             <HelpPopover
               button-test="customer-list-help"
@@ -611,18 +661,18 @@ onBeforeUnmount(() => {
               class="customer-card"
             >
               <div class="customer-card-head">
-                <div>
+                <div class="customer-identity-block">
                   <h5>{{ relation.management_name }}</h5>
                   <p class="customer-account-name">@{{ getRelationAccountName(relation) }}</p>
+                  <p v-if="relation.mobile_number" class="customer-mobile-number">{{ relation.mobile_number }}</p>
                 </div>
-                <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
+                <div class="customer-card-head-side">
+                  <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
+                  <span class="customer-tier-pill" :class="`tier-${relation.customer_tier}`">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
+                </div>
               </div>
 
               <div class="customer-meta-grid">
-                <div class="meta-item">
-                  <span class="meta-label">سطح</span>
-                  <span class="meta-value">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
-                </div>
                 <div class="meta-item">
                   <span class="meta-label">کمیسیون</span>
                   <span class="meta-value">{{ formatMaybeNumber(relation.commission_rate, '%') }}</span>
@@ -656,34 +706,51 @@ onBeforeUnmount(() => {
               <p v-if="getRelationStateText(relation)" class="customer-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
 
               <div v-if="editingRelationId === relation.id" class="edit-panel">
-                <div class="customer-form-grid compact-grid">
-                  <label class="field-block">
-                    <span>سطح مشتری</span>
-                    <select v-model="editForm.customer_tier" class="customer-input edit-tier-select" @change="handleEditTierChange">
-                      <option value="tier1">سطح 1</option>
-                      <option value="tier2">سطح 2</option>
-                    </select>
-                  </label>
-                  <label v-if="editForm.customer_tier === 'tier2'" class="field-block">
-                    <span>درصد کمیسیون</span>
-                    <input v-model.trim="editForm.commission_rate" class="customer-input edit-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
-                  </label>
-                  <label class="field-block">
-                    <span>حداقل مقدار معامله</span>
-                    <input v-model.trim="editForm.min_trade_quantity" class="customer-input edit-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-                  </label>
-                  <label class="field-block">
-                    <span>حداکثر مقدار معامله</span>
-                    <input v-model.trim="editForm.max_trade_quantity" class="customer-input edit-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-                  </label>
-                  <label class="field-block">
-                    <span>سقف معاملات روزانه</span>
-                    <input v-model.trim="editForm.max_daily_trades" class="customer-input edit-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
-                  </label>
-                  <label class="field-block">
-                    <span>سقف حجم روزانه</span>
-                    <input v-model.trim="editForm.max_daily_commodity_volume" class="customer-input edit-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
-                  </label>
+                <div class="customer-form-sections customer-form-sections--compact">
+                  <section class="form-subpanel form-subpanel--compact">
+                    <div class="form-subpanel-head">
+                      <h5>تنظیمات سطح</h5>
+                      <p>سطح و کمیسیون</p>
+                    </div>
+                    <div class="customer-form-grid compact-grid">
+                      <label class="field-block">
+                        <span>سطح مشتری</span>
+                        <select v-model="editForm.customer_tier" class="customer-input edit-tier-select" @change="handleEditTierChange">
+                          <option value="tier1">سطح 1</option>
+                          <option value="tier2">سطح 2</option>
+                        </select>
+                      </label>
+                      <label v-if="editForm.customer_tier === 'tier2'" class="field-block">
+                        <span>درصد کمیسیون</span>
+                        <input v-model.trim="editForm.commission_rate" class="customer-input edit-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
+                      </label>
+                    </div>
+                  </section>
+
+                  <section class="form-subpanel form-subpanel--compact">
+                    <div class="form-subpanel-head">
+                      <h5>محدودیت‌ها</h5>
+                      <p>مقادیر اختیاری برای این رابطه</p>
+                    </div>
+                    <div class="customer-form-grid compact-grid">
+                      <label class="field-block">
+                        <span>حداقل مقدار معامله</span>
+                        <input v-model.trim="editForm.min_trade_quantity" class="customer-input edit-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                      </label>
+                      <label class="field-block">
+                        <span>حداکثر مقدار معامله</span>
+                        <input v-model.trim="editForm.max_trade_quantity" class="customer-input edit-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                      </label>
+                      <label class="field-block">
+                        <span>سقف معاملات روزانه</span>
+                        <input v-model.trim="editForm.max_daily_trades" class="customer-input edit-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
+                      </label>
+                      <label class="field-block">
+                        <span>سقف حجم روزانه</span>
+                        <input v-model.trim="editForm.max_daily_commodity_volume" class="customer-input edit-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
+                      </label>
+                    </div>
+                  </section>
                 </div>
                 <div class="panel-actions compact">
                   <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="clearEditState">انصراف</button>
@@ -891,6 +958,46 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.customer-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-card {
+  border-radius: 20px;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-card--active {
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(240, 253, 244, 0.98));
+}
+
+.summary-card--pending {
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 247, 237, 0.98));
+}
+
+.summary-card--archived {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98));
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.summary-value {
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #0f172a;
+}
+
 .customer-panel {
   border-radius: 24px;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -924,6 +1031,42 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.customer-form-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.customer-form-sections--compact {
+  grid-template-columns: 1fr;
+}
+
+.form-subpanel {
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(248, 250, 252, 0.72);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-subpanel--compact {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.form-subpanel-head h5 {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+  color: #0f172a;
+}
+
+.form-subpanel-head p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #64748b;
 }
 
 .compact-grid {
@@ -997,6 +1140,20 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.customer-card-head-side {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-direction: column;
+}
+
+.customer-identity-block {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .customer-card-head h5 {
   margin: 0 0 4px;
   font-size: 1rem;
@@ -1006,6 +1163,14 @@ onBeforeUnmount(() => {
 .customer-account-name {
   margin: 0;
   color: #64748b;
+  direction: ltr;
+  text-align: right;
+}
+
+.customer-mobile-number {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
   direction: ltr;
   text-align: right;
 }
@@ -1025,6 +1190,27 @@ onBeforeUnmount(() => {
 .customer-status-badge.status-active {
   background: rgba(16, 185, 129, 0.16);
   color: #047857;
+}
+
+.customer-tier-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.customer-tier-pill.tier-tier1 {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+
+.customer-tier-pill.tier-tier2 {
+  background: rgba(168, 85, 247, 0.12);
+  color: #7e22ce;
 }
 
 .meta-item {
@@ -1193,6 +1379,8 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
+  .customer-summary-strip,
+  .customer-form-sections,
   .customer-form-grid,
   .customer-meta-grid,
   .compact-grid {
