@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { ChevronLeft, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
@@ -94,6 +95,12 @@ const currentTimeMs = ref(Date.now())
 
 const createForm = reactive(makeEmptyCreateForm())
 const editForm = reactive(makeEmptyEditForm())
+const openSections = reactive({
+  create: true,
+  createIdentity: true,
+  createLimits: true,
+  relations: true,
+})
 let countdownTimer: number | null = null
 
 function parseApiError(payload: unknown, fallback: string) {
@@ -108,6 +115,10 @@ function parseApiError(payload: unknown, fallback: string) {
 
 function resetCreateForm() {
   Object.assign(createForm, makeEmptyCreateForm())
+}
+
+function toggleSection(section: keyof typeof openSections) {
+  openSections[section] = !openSections[section]
 }
 
 function clearEditState() {
@@ -553,113 +564,149 @@ onBeforeUnmount(() => {
           </article>
         </section>
 
-        <section class="customer-panel">
-          <div class="panel-title-row">
-            <div>
-              <h4>افزودن مشتری جدید</h4>
-              <p>دعوت و تنظیمات اولیه مشتری را یک‌جا ثبت کنید. مشخصات پایه و محدودیت‌های معاملاتی از هم جدا شده‌اند تا فرم سریع‌تر خوانده شود.</p>
+        <section class="customer-panel customer-panel--accordion">
+          <div class="ds-accordion" :class="{ open: openSections.create }">
+            <div class="ds-accordion-header" @click="toggleSection('create')">
+              <div class="ds-accordion-header-info">
+                <UserPlus :size="18" class="customer-section-icon" />
+                <div>
+                  <h4>افزودن مشتری جدید</h4>
+                  <p>دعوت و تنظیمات اولیه مشتری را یک‌جا ثبت کنید.</p>
+                </div>
+              </div>
+              <div class="accordion-header-actions">
+                <HelpPopover
+                  button-test="customer-create-help"
+                  note-test="customer-create-help-note"
+                  label="راهنمای افزودن مشتری"
+                  text="دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید."
+                />
+                <ChevronLeft :size="20" class="ds-accordion-icon" />
+              </div>
             </div>
-            <HelpPopover
-              button-test="customer-create-help"
-              note-test="customer-create-help-note"
-              label="راهنمای افزودن مشتری"
-              text="دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید."
-            />
-            <button type="button" class="ghost-btn" :disabled="isRefreshing" @click="loadRelations({ silent: true })">
-              {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
-            </button>
-          </div>
+            <div v-show="openSections.create" class="ds-accordion-body customer-accordion-body">
+              <div class="customer-form-sections customer-form-sections--stacked">
+                <section class="form-subpanel form-subpanel--accordion">
+                  <div class="ds-accordion" :class="{ open: openSections.createIdentity }">
+                    <div class="ds-accordion-header" @click.stop="toggleSection('createIdentity')">
+                      <div class="ds-accordion-header-info">
+                        <UserPlus :size="16" class="customer-subsection-icon" />
+                        <div>
+                          <h5>مشخصات پایه</h5>
+                          <p>اطلاعات هویتی و سطح دسترسی مشتری</p>
+                        </div>
+                      </div>
+                      <ChevronLeft :size="18" class="ds-accordion-icon" />
+                    </div>
+                    <div v-show="openSections.createIdentity" class="ds-accordion-body">
+                      <div class="customer-form-grid">
+                        <label class="field-block">
+                          <span>نام کاربری</span>
+                          <input v-model.trim="createForm.account_name" class="customer-input create-account-name" type="text" placeholder="customer_user" />
+                        </label>
+                        <label class="field-block">
+                          <span>نام مدیریتی</span>
+                          <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="نام نمایشی مشتری" />
+                        </label>
+                        <label class="field-block">
+                          <span>شماره موبایل</span>
+                          <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
+                        </label>
+                        <label class="field-block">
+                          <span>سطح مشتری</span>
+                          <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
+                            <option value="tier1">سطح 1</option>
+                            <option value="tier2">سطح 2</option>
+                          </select>
+                        </label>
+                        <label v-if="createForm.customer_tier === 'tier2'" class="field-block">
+                          <span>درصد کمیسیون</span>
+                          <input v-model.trim="createForm.commission_rate" class="customer-input create-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-          <div class="customer-form-sections">
-            <section class="form-subpanel">
-              <div class="form-subpanel-head">
-                <h5>مشخصات پایه</h5>
-                <p>اطلاعات هویتی و سطح دسترسی مشتری</p>
+                <section class="form-subpanel form-subpanel--accordion">
+                  <div class="ds-accordion" :class="{ open: openSections.createLimits }">
+                    <div class="ds-accordion-header" @click.stop="toggleSection('createLimits')">
+                      <div class="ds-accordion-header-info">
+                        <SlidersHorizontal :size="16" class="customer-subsection-icon" />
+                        <div>
+                          <h5>محدودیت‌های معاملاتی</h5>
+                          <p>همه فیلدهای این بخش اختیاری هستند</p>
+                        </div>
+                      </div>
+                      <ChevronLeft :size="18" class="ds-accordion-icon" />
+                    </div>
+                    <div v-show="openSections.createLimits" class="ds-accordion-body">
+                      <div class="customer-form-grid">
+                        <label class="field-block">
+                          <span>حداقل مقدار معامله</span>
+                          <input v-model.trim="createForm.min_trade_quantity" class="customer-input create-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                        </label>
+                        <label class="field-block">
+                          <span>حداکثر مقدار معامله</span>
+                          <input v-model.trim="createForm.max_trade_quantity" class="customer-input create-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                        </label>
+                        <label class="field-block">
+                          <span>سقف معاملات روزانه</span>
+                          <input v-model.trim="createForm.max_daily_trades" class="customer-input create-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
+                        </label>
+                        <label class="field-block">
+                          <span>سقف حجم روزانه</span>
+                          <input v-model.trim="createForm.max_daily_commodity_volume" class="customer-input create-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
               </div>
-              <div class="customer-form-grid">
-                <label class="field-block">
-                  <span>نام کاربری</span>
-                  <input v-model.trim="createForm.account_name" class="customer-input create-account-name" type="text" placeholder="customer_user" />
-                </label>
-                <label class="field-block">
-                  <span>نام مدیریتی</span>
-                  <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="نام نمایشی مشتری" />
-                </label>
-                <label class="field-block">
-                  <span>شماره موبایل</span>
-                  <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
-                </label>
-                <label class="field-block">
-                  <span>سطح مشتری</span>
-                  <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
-                    <option value="tier1">سطح 1</option>
-                    <option value="tier2">سطح 2</option>
-                  </select>
-                </label>
-                <label v-if="createForm.customer_tier === 'tier2'" class="field-block">
-                  <span>درصد کمیسیون</span>
-                  <input v-model.trim="createForm.commission_rate" class="customer-input create-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
-                </label>
-              </div>
-            </section>
 
-            <section class="form-subpanel">
-              <div class="form-subpanel-head">
-                <h5>محدودیت‌های معاملاتی</h5>
-                <p>همه فیلدهای این بخش اختیاری هستند</p>
+              <div class="panel-actions">
+                <button type="button" class="secondary-btn" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن فرم</button>
+                <button type="button" class="primary-btn submit-create" :disabled="isSubmitting" @click="createRelation">
+                  {{ isSubmitting ? 'در حال ثبت...' : 'ثبت مشتری' }}
+                </button>
               </div>
-              <div class="customer-form-grid">
-                <label class="field-block">
-                  <span>حداقل مقدار معامله</span>
-                  <input v-model.trim="createForm.min_trade_quantity" class="customer-input create-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-                </label>
-                <label class="field-block">
-                  <span>حداکثر مقدار معامله</span>
-                  <input v-model.trim="createForm.max_trade_quantity" class="customer-input create-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-                </label>
-                <label class="field-block">
-                  <span>سقف معاملات روزانه</span>
-                  <input v-model.trim="createForm.max_daily_trades" class="customer-input create-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
-                </label>
-                <label class="field-block">
-                  <span>سقف حجم روزانه</span>
-                  <input v-model.trim="createForm.max_daily_commodity_volume" class="customer-input create-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
-                </label>
-              </div>
-            </section>
-          </div>
-
-          <div class="panel-actions">
-            <button type="button" class="secondary-btn" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن فرم</button>
-            <button type="button" class="primary-btn submit-create" :disabled="isSubmitting" @click="createRelation">
-              {{ isSubmitting ? 'در حال ثبت...' : 'ثبت مشتری' }}
-            </button>
+            </div>
           </div>
         </section>
 
-        <section class="customer-panel">
-          <div class="panel-title-row">
-            <div>
-              <h4>مشتریان فعال و pending</h4>
-              <p>هر کارت، وضعیت، محدودیت‌ها و اقدام‌های مربوط به همان رابطه را یک‌جا نشان می‌دهد.</p>
+        <section class="customer-panel customer-panel--accordion">
+          <div class="ds-accordion" :class="{ open: openSections.relations }">
+            <div class="ds-accordion-header" @click="toggleSection('relations')">
+              <div class="ds-accordion-header-info">
+                <Users :size="18" class="customer-section-icon" />
+                <div>
+                  <h4>مشتریان فعال و در انتظار</h4>
+                  <p>رابطه‌ها، وضعیت‌ها و اقدام‌های مدیریتی هر مشتری</p>
+                </div>
+              </div>
+              <div class="accordion-header-actions">
+                <HelpPopover
+                  button-test="customer-list-help"
+                  note-test="customer-list-help-note"
+                  label="راهنمای لیست مشتریان"
+                  text="برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید."
+                />
+                <button type="button" class="ghost-btn ghost-btn--inline" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
+                  {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
+                </button>
+                <ChevronLeft :size="20" class="ds-accordion-icon" />
+              </div>
             </div>
-            <HelpPopover
-              button-test="customer-list-help"
-              note-test="customer-list-help-note"
-              label="راهنمای لیست مشتریان"
-              text="برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید."
-            />
-          </div>
+            <div v-show="openSections.relations" class="ds-accordion-body customer-accordion-body">
+              <div v-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
+              <div v-else-if="orderedRelations.length === 0" class="customer-empty">هنوز مشتری فعالی یا دعوت pending ثبت نشده است.</div>
 
-          <div v-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
-          <div v-else-if="orderedRelations.length === 0" class="customer-empty">هنوز مشتری فعالی یا دعوت pending ثبت نشده است.</div>
-
-          <div v-else class="customer-list">
-            <article
-              v-for="relation in orderedRelations"
-              :key="relation.id"
-              class="customer-card"
-            >
+              <div v-else class="customer-list">
+                <article
+                  v-for="relation in orderedRelations"
+                  :key="relation.id"
+                  class="customer-card"
+                >
               <div class="customer-card-head">
                 <div class="customer-identity-block">
                   <h5>{{ relation.management_name }}</h5>
@@ -851,7 +898,9 @@ onBeforeUnmount(() => {
                 </ul>
               </div>
             </article>
+            </div>
           </div>
+        </div>
         </section>
       </div>
     </div>
@@ -1000,12 +1049,45 @@ onBeforeUnmount(() => {
 
 .customer-panel {
   border-radius: 24px;
+}
+
+.customer-panel--accordion .ds-accordion {
+  border-radius: 24px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.82);
-  padding: 18px;
+  overflow: hidden;
+}
+
+.customer-panel--accordion .ds-accordion-header {
+  gap: 14px;
+}
+
+.customer-panel--accordion .ds-accordion-header-info {
+  gap: 12px;
+}
+
+.customer-panel--accordion .ds-accordion-header-info h4,
+.form-subpanel--accordion .ds-accordion-header-info h5 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.customer-panel--accordion .ds-accordion-header-info p,
+.form-subpanel--accordion .ds-accordion-header-info p {
+  margin: 3px 0 0;
+  font-size: 0.84rem;
+  color: #64748b;
+}
+
+.customer-accordion-body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.customer-section-icon,
+.customer-subsection-icon {
+  color: #d97706;
 }
 
 .panel-title-row {
@@ -1043,6 +1125,10 @@ onBeforeUnmount(() => {
   grid-template-columns: 1fr;
 }
 
+.customer-form-sections--stacked {
+  grid-template-columns: 1fr;
+}
+
 .form-subpanel {
   border-radius: 20px;
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -1055,6 +1141,21 @@ onBeforeUnmount(() => {
 
 .form-subpanel--compact {
   background: rgba(255, 255, 255, 0.9);
+}
+
+.form-subpanel--accordion {
+  padding: 0;
+  overflow: hidden;
+}
+
+.form-subpanel--accordion .ds-accordion {
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+}
+
+.form-subpanel--accordion .ds-accordion-body {
+  padding-top: 2px;
 }
 
 .form-subpanel-head h5 {
@@ -1293,6 +1394,19 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
+.accordion-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  direction: ltr;
+}
+
+.ghost-btn--inline {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 .session-item-main {
   min-width: 0;
   display: flex;
@@ -1395,8 +1509,15 @@ onBeforeUnmount(() => {
   .panel-actions > button,
   .customer-actions > button,
   .customer-manager-close,
-  .ghost-btn {
+  .ghost-btn,
+  .ghost-btn--inline {
     width: 100%;
+  }
+
+  .accordion-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 </style>
