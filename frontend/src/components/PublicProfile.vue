@@ -67,6 +67,8 @@ interface ProjectUserDirectoryEntry {
   mobile_number: string;
 }
 
+const PROJECT_USERS_PAGE_SIZE = 25;
+
 interface MutualTradePreview {
   id: number;
   trade_number: number;
@@ -178,10 +180,13 @@ const adminUserLoading = ref(false);
 const adminUserError = ref('');
 const projectUsers = ref<ProjectUserDirectoryEntry[]>([]);
 const projectUsersLoading = ref(false);
+const projectUsersLoadingMore = ref(false);
 const projectUsersError = ref('');
 const projectUsersQuery = ref('');
 const projectUsersLoaded = ref(false);
 const lastLoadedProjectUsersQuery = ref('');
+const projectUsersOffset = ref(0);
+const projectUsersHasMore = ref(false);
 const viewerRole = computed(() => readCachedCurrentUserRole());
 const isOwnProfile = computed(() => {
   if (!profileData.value) return false;
@@ -893,6 +898,8 @@ async function loadMutualTrades(force = false) {
 
 async function loadProjectUsersDirectory(force = false) {
   const targetProfileUserId = Number(profileData.value?.id);
+  const normalizedQuery = projectUsersQuery.value.trim();
+  const isLoadMore = !force && projectUsersOffset.value > 0;
   if (
     !showProjectUsersSection.value
     || !Number.isInteger(targetProfileUserId)
@@ -903,16 +910,20 @@ async function loadProjectUsersDirectory(force = false) {
     return;
   }
 
-  const normalizedQuery = projectUsersQuery.value.trim();
-  if (!force && projectUsersLoaded.value && lastLoadedProjectUsersQuery.value === normalizedQuery) {
+  if (!force && !isLoadMore && projectUsersLoaded.value && lastLoadedProjectUsersQuery.value === normalizedQuery) {
     return;
   }
 
-  projectUsersLoading.value = true;
+  if (isLoadMore) {
+    projectUsersLoadingMore.value = true;
+  } else {
+    projectUsersLoading.value = true;
+  }
   projectUsersError.value = '';
   try {
     const params = new URLSearchParams();
-    params.set('limit', '25');
+    params.set('limit', String(PROJECT_USERS_PAGE_SIZE));
+    params.set('offset', String(isLoadMore ? projectUsersOffset.value : 0));
     if (normalizedQuery) {
       params.set('q', normalizedQuery);
     }
@@ -922,14 +933,26 @@ async function loadProjectUsersDirectory(force = false) {
       throw new Error(parseApiError(payload, 'خطا در دریافت لیست کاربران پروژه'));
     }
 
-    projectUsers.value = (Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [])
-      .filter((user) => Number(user.id) !== targetProfileUserId);
+    const rawRows = Array.isArray(payload) ? payload as ProjectUserDirectoryEntry[] : [];
+    const nextRows = rawRows.filter((user) => Number(user.id) !== targetProfileUserId);
+    if (isLoadMore) {
+      const existingIds = new Set(projectUsers.value.map((user) => user.id));
+      projectUsers.value = [
+        ...projectUsers.value,
+        ...nextRows.filter((user) => !existingIds.has(user.id)),
+      ];
+    } else {
+      projectUsers.value = nextRows;
+    }
     projectUsersLoaded.value = true;
     lastLoadedProjectUsersQuery.value = normalizedQuery;
+    projectUsersHasMore.value = rawRows.length === PROJECT_USERS_PAGE_SIZE;
+    projectUsersOffset.value += rawRows.length;
   } catch (e: any) {
     projectUsersError.value = e?.message || 'خطا در دریافت لیست کاربران پروژه';
   } finally {
     projectUsersLoading.value = false;
+    projectUsersLoadingMore.value = false;
   }
 }
 
@@ -940,8 +963,18 @@ async function toggleProjectUsersSection() {
 }
 
 async function submitProjectUsersSearch() {
+  projectUsers.value = [];
+  projectUsersOffset.value = 0;
+  projectUsersHasMore.value = false;
   projectUsersLoaded.value = false;
   await loadProjectUsersDirectory(true);
+}
+
+async function loadMoreProjectUsers() {
+  if (projectUsersLoading.value || projectUsersLoadingMore.value || !projectUsersHasMore.value) {
+    return;
+  }
+  await loadProjectUsersDirectory();
 }
 
 async function openAdminUserManager() {
@@ -1440,22 +1473,34 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             <p v-else-if="projectUsers.length === 0" class="empty-text">
               {{ projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.' }}
             </p>
-            <div v-else class="project-users-list">
-              <article
-                v-for="projectUser in projectUsers"
-                :key="projectUser.id"
-                class="project-user-card"
-              >
+            <template v-else>
+              <div class="project-users-list">
+                <article
+                  v-for="projectUser in projectUsers"
+                  :key="projectUser.id"
+                  class="project-user-card"
+                >
+                  <button
+                    type="button"
+                    class="profile-link-btn project-user-link-btn"
+                    @click.stop="openProjectUserProfile(projectUser)"
+                  >
+                    {{ projectUser.account_name }}
+                  </button>
+                  <span class="project-user-mobile">{{ projectUser.mobile_number }}</span>
+                </article>
+              </div>
+              <div v-if="projectUsersHasMore" class="project-users-footer">
                 <button
                   type="button"
-                  class="profile-link-btn project-user-link-btn"
-                  @click.stop="openProjectUserProfile(projectUser)"
+                  class="history-action-btn project-users-load-more"
+                  :disabled="projectUsersLoadingMore"
+                  @click="loadMoreProjectUsers"
                 >
-                  {{ projectUser.account_name }}
+                  {{ projectUsersLoadingMore ? 'در حال دریافت...' : 'نمایش بیشتر' }}
                 </button>
-                <span class="project-user-mobile">{{ projectUser.mobile_number }}</span>
-              </article>
-            </div>
+              </div>
+            </template>
           </div>
         </div>
       </section>
@@ -2069,6 +2114,16 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.project-users-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.project-users-load-more {
+  min-width: 160px;
 }
 
 .project-user-card {
