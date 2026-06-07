@@ -65,7 +65,7 @@
             }"
             v-ripple
             role="menuitem"
-            @click="emitAction(item.key)"
+            @click.prevent.stop="emitAction(item.key)"
           >
             <span class="menu-item-icon" aria-hidden="true" v-html="ACTION_ICON_SVG[item.key]"></span>
             <span class="menu-item-label">{{ item.label }}</span>

@@ -24,6 +24,7 @@ const props = defineProps<{
 const rootRef = ref<HTMLElement | null>(null)
 const measuredRowHeights = new Map<string, number>()
 const MAX_SCROLL_ADJUSTMENT_ATTEMPTS = 10
+let scrollIntentVersion = 0
 
 const normalizedGroups = computed(() => normalizeTimelineMediaDimensions(props.groups || []))
 
@@ -109,6 +110,7 @@ function findFirstUnreadMessageId(currentUserId: number) {
 }
 
 function scrollToMessage(messageId: number, options: VirtualScrollToMessageOptions = {}) {
+  const intentVersion = ++scrollIntentVersion
   const rowIndex = findVirtualTimelineMessageRowIndex(rows.value, messageId)
   if (rowIndex < 0) return false
 
@@ -116,9 +118,11 @@ function scrollToMessage(messageId: number, options: VirtualScrollToMessageOptio
   const align = options.align ?? 'center'
   const shouldHighlight = options.highlight ?? true
   const adjustAndHighlight = () => {
+    if (intentVersion !== scrollIntentVersion) return
     virtualizer.value.scrollToIndex(rowIndex, { align })
     requestAnimationFrame(() => {
       void nextTick(() => {
+        if (intentVersion !== scrollIntentVersion) return
         virtualizer.value.measure()
         if (shouldHighlight && highlightRenderedMessage(messageId)) return
         if (!shouldHighlight && isRenderedMessageAligned(messageId, align)) return
@@ -136,12 +140,14 @@ function scrollToMessage(messageId: number, options: VirtualScrollToMessageOptio
 }
 
 function scrollToBottom() {
+  scrollIntentVersion += 1
   if (rows.value.length === 0) return false
   virtualizer.value.scrollToIndex(rows.value.length - 1, { align: 'end' })
   return true
 }
 
 function scrollToUnreadOrBottom(currentUserId: number) {
+  scrollIntentVersion += 1
   const unreadMessageId = findFirstUnreadMessageId(currentUserId)
   if (unreadMessageId !== null) {
     return scrollToMessage(unreadMessageId, { align: 'start', highlight: false })

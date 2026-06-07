@@ -156,6 +156,43 @@ describe('useChatScroll', () => {
     expect(target.classList.contains('highlight-message')).toBe(false)
   })
 
+  it('cancels stale message-jump animation when a newer bottom scroll starts', () => {
+    const rafCallbacks: FrameRequestCallback[] = []
+    window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      rafCallbacks.push(callback)
+      return rafCallbacks.length
+    }) as any
+
+    const target = document.createElement('div')
+    target.id = 'msg-50'
+    document.body.appendChild(target)
+
+    container.getBoundingClientRect = vi.fn(() => ({ top: 0, height: 400 } as DOMRect))
+    target.getBoundingClientRect = vi.fn(() => ({ top: 300, height: 80 } as DOMRect))
+
+    const subject = useChatScroll({
+      messagesContainer: ref(container),
+      messages: ref([]),
+      currentUserId: 7,
+      unreadNewMessagesCount: ref(0),
+      markAsRead: markAsReadMock,
+      isUserAtBottom: ref(true),
+      showScrollButton: ref(false),
+    })
+
+    subject.scrollToMessage(50)
+    rafCallbacks.shift()?.(performance.now() + 100)
+    expect(container.scrollTop).toBeGreaterThan(0)
+
+    subject.scrollToBottom()
+    vi.advanceTimersByTime(100)
+    expect(container.scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: 'smooth' })
+    expect(container.scrollTop).toBe(1200)
+
+    rafCallbacks.shift()?.(performance.now() + 500)
+    expect(container.scrollTop).toBe(1200)
+  })
+
   it('marks unread messages as read when the scroll handler reaches the bottom', () => {
     const unreadNewMessagesCount = ref(1)
     const subject = useChatScroll({

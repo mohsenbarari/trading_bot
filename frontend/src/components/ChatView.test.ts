@@ -844,11 +844,12 @@ describe('ChatView.vue', () => {
 
     expect(hooks.state.contextMenu.value.visible).toBe(false)
     expect(hooks.state.showForwardModal.value).toBe(true)
-    const forwardPopOrder = chatViewMocks.popBackStateMock.mock.invocationCallOrder.at(0)
+    const forwardDiscardOrder = chatViewMocks.discardBackStateMock.mock.invocationCallOrder.at(0)
     const forwardPushOrder = chatViewMocks.pushBackStateMock.mock.invocationCallOrder.at(0)
-    expect(forwardPopOrder).toBeDefined()
+    expect(forwardDiscardOrder).toBeDefined()
     expect(forwardPushOrder).toBeDefined()
-    expect(forwardPopOrder!).toBeLessThan(forwardPushOrder!)
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
+    expect(forwardDiscardOrder!).toBeLessThan(forwardPushOrder!)
 
     hooks.closeForwardModal()
     await flushPromises()
@@ -857,6 +858,7 @@ describe('ChatView.vue', () => {
     await flushPromises()
 
     chatViewMocks.popBackStateMock.mockClear()
+    chatViewMocks.discardBackStateMock.mockClear()
     chatViewMocks.pushBackStateMock.mockClear()
     hooks.handleLightboxForward(77)
     await flushPromises()
@@ -5257,6 +5259,52 @@ describe('ChatView.vue', () => {
 
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('discards context-menu back state when opening the group seen list from the menu', async () => {
+    const message = buildMessage({ id: 77, content: 'seen target' })
+    const wrapper = await mountChatView({
+      targetUserId: -23,
+      targetUserName: 'گروه تست',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    hooks.state.conversations.value = [{
+      id: 23,
+      other_user_id: -23,
+      other_user_name: 'گروه تست',
+      last_message_content: null,
+      last_message_type: null,
+      last_message_at: null,
+      unread_count: 0,
+      room_kind: 'group',
+      chat_id: 23,
+    }]
+    hooks.state.selectedUserId.value = -23
+    hooks.state.contextMenu.value = {
+      visible: true,
+      message,
+      messageIds: [77],
+      x: 12,
+      y: 18,
+      style: null,
+      menuModel: null,
+    }
+    await flushPromises()
+
+    chatViewMocks.apiFetchMock.mockResolvedValueOnce([])
+    chatViewMocks.popBackStateMock.mockClear()
+    chatViewMocks.discardBackStateMock.mockClear()
+
+    await hooks.handleSeenListMessage()
+    await flushPromises()
+
+    expect(chatViewMocks.apiFetchMock).toHaveBeenCalledWith('/chat/rooms/23/messages/77/seen')
+    expect(chatViewMocks.discardBackStateMock).toHaveBeenCalledTimes(1)
+    expect(chatViewMocks.popBackStateMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
   })
 
   it('routes cancel-send and cancel-download events by message type', async () => {
