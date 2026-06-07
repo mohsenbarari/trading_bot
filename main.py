@@ -1,40 +1,54 @@
-import logging
-from pathlib import Path
-from contextlib import asynccontextmanager
-from urllib.parse import urlparse
-from fastapi import FastAPI, APIRouter, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
-from api.routers import (
-    auth, invitations, commodities, users, notifications, 
-    trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages
-)
-from api.routers import accountants
-from api.routers import customers
-from core.config import settings
-from core.redis import init_redis, close_redis
-from core.db import AsyncSessionLocal, init_db
-from core.events import setup_event_listeners
-from core.connectivity import connectivity_monitor_loop
-from core.market_schedule_loop import market_schedule_loop
-from core.offer_expiry import offer_expiry_loop
-from core.session_expiry import session_expiry_loop
-from core.user_account_status_loop import user_account_status_loop
-from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
-import schemas
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlparse
 
-# -------------------------------------------------------
-# 📋 تنظیمات اولیه
-# -------------------------------------------------------
-logging.basicConfig(level=logging.INFO)
+from fastapi import APIRouter, FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+
+from core.config import settings
+from core.logging_config import configure_logging, install_request_logging_middleware
+
+configure_logging("api")
+
+from api.routers import (  # noqa: E402
+    admin_messages,
+    auth,
+    blocks,
+    chat,
+    commodities,
+    invitations,
+    notifications,
+    offers,
+    realtime,
+    sessions,
+    sync,
+    trades,
+    trading_settings,
+    users,
+    users_public,
+)
+from api.routers import accountants, customers  # noqa: E402
+from core.connectivity import connectivity_monitor_loop  # noqa: E402
+from core.db import AsyncSessionLocal, init_db  # noqa: E402
+from core.events import setup_event_listeners  # noqa: E402
+from core.market_schedule_loop import market_schedule_loop  # noqa: E402
+from core.offer_expiry import offer_expiry_loop  # noqa: E402
+from core.redis import close_redis, init_redis  # noqa: E402
+from core.services.chat_room_service import ensure_mandatory_channel_rollout  # noqa: E402
+from core.session_expiry import session_expiry_loop  # noqa: E402
+from core.user_account_status_loop import user_account_status_loop  # noqa: E402
+import schemas  # noqa: E402,F401
+
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 Starting up...")
+    logger.info("Starting up", extra={"event": "app.startup"})
     await init_db()
     await init_redis()
     setup_event_listeners()
@@ -45,23 +59,25 @@ async def lifespan(app: FastAPI):
             await session.commit()
         except Exception:
             await session.rollback()
+            logger.exception("Mandatory channel rollout failed", extra={"event": "app.startup.rollout_failed"})
             raise
-    
+
     # Start connectivity monitor task (Iran only)
     if settings.server_mode == "iran":
         asyncio.create_task(connectivity_monitor_loop())
-    
+
     # Start offer auto-expiry background task
     asyncio.create_task(offer_expiry_loop())
     asyncio.create_task(market_schedule_loop())
     asyncio.create_task(session_expiry_loop())
     asyncio.create_task(user_account_status_loop())
-    
+
     yield
-    
+
     # Shutdown
-    logger.info("🛑 Shutting down...")
+    logger.info("Shutting down", extra={"event": "app.shutdown"})
     await close_redis()
+
 
 def _normalize_origin(raw_value: str | None) -> str | None:
     value = (raw_value or "").strip()
@@ -106,6 +122,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+install_request_logging_middleware(app)
 
 # -------------------------------------------------------
 # 🔒 CORS Configuration
@@ -156,6 +173,7 @@ async def get_public_config():
         "frontend_url": settings.frontend_url,
     }
 
+
 # -------------------------------------------------------
 # 📂 Static Files & Frontend Serving
 # -------------------------------------------------------
@@ -168,7 +186,7 @@ blocked_frontend_probe_paths = {
 }
 
 if static_dir.exists():
-    
+
     # Catch-all for SPA (Vue Router)
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
@@ -178,22 +196,29 @@ if static_dir.exists():
 
         if full_path in blocked_frontend_probe_paths or full_path.startswith("docs/") or full_path.startswith("redoc/"):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
-             
+
         # اگر فایل استاتیک بود و وجود داشت -> سرو کن (تمام asset ها و عکس ها)
         file_path = static_dir / full_path
         if file_path.is_file():
             return FileResponse(file_path)
-        
+
         # اگر کاربر یک فایل .js از نسخه قدیمی را درخواست کرد (PWA Cache stale):
         if full_path.startswith("assets/") and full_path.endswith(".js"):
-             logger.warning(f"Old JS chunk requested: {full_path}. Forcing PWA reload on client.")
-             js_fallback = "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);"
-             return Response(content=js_fallback, media_type="application/javascript")
-             
+            logger.warning(
+                "Old JS chunk requested. Forcing PWA reload on client.",
+                extra={"event": "frontend.stale_chunk", "asset_path": full_path},
+            )
+            js_fallback = "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);"
+            return Response(content=js_fallback, media_type="application/javascript")
+
         # در غیر این صورت -> index.html (برای Vue Router)
         return FileResponse(static_dir / "index.html")
 else:
-    logger.warning("⚠️ Frontend build directory not found. Run 'npm run build' first.")
+    logger.warning(
+        "Frontend build directory not found. Run 'npm run build' first.",
+        extra={"event": "frontend.build_missing", "static_dir": str(static_dir)},
+    )
+
 
 @app.get("/")
 async def root():
