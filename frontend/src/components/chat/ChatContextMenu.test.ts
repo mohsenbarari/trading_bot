@@ -283,4 +283,56 @@ describe('ChatContextMenu.vue', () => {
     await seenButton!.trigger('click')
     expect(wrapper.emitted('seen-list')).toHaveLength(1)
   })
+
+  it('keeps menu action clicks from bubbling into navigation/back handlers', async () => {
+    const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+    const wrapper = mount(ChatContextMenu, {
+      props: {
+        menuState: {
+          x: 20,
+          y: 30,
+          visible: true,
+          message: {
+            id: 6,
+            message_type: 'text',
+            is_deleted: false,
+            reactions: [],
+          },
+          messageIds: [6],
+        },
+        isAlbumSelection: false,
+        currentUserId: 7,
+        canEdit: false,
+        canDelete: false,
+        canPin: false,
+        canViewSeenList: true,
+        isPinnedMessage: false,
+        availableReactions: [],
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    const bubbled = vi.fn()
+    wrapper.element.addEventListener('click', bubbled)
+    const seenButton = wrapper.findAll('.menu-item').find((item) => item.text().includes('بازدیدها'))
+    expect(seenButton).toBeTruthy()
+
+    const actionClick = new MouseEvent('click', { bubbles: true, cancelable: true })
+    seenButton!.element.dispatchEvent(actionClick)
+
+    expect(wrapper.emitted('seen-list')).toHaveLength(1)
+    expect(actionClick.defaultPrevented).toBe(true)
+    expect(bubbled).not.toHaveBeenCalled()
+
+    await wrapper.get('.context-overlay').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
 })

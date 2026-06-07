@@ -38,7 +38,7 @@ import { resolveConversationProfileTarget } from '../utils/accountantChatIdentit
 import { currentUserSummary, isAdminRole } from '../utils/currentUser'
 import { isUserOnline } from '../utils/userPresence'
 import { markMessengerPerformance } from '../utils/messengerRefactor'
-import { recordMessengerDomSnapshot, recordMessengerMetric, scheduleMessengerDiagnosticTask } from '../utils/messengerDiagnosticsMetrics'
+import { recordMessengerMetric, scheduleMessengerDiagnosticTask } from '../utils/messengerDiagnosticsMetrics'
 import {
   buildMessengerConversationQuery,
   clearMessengerTimelineCache,
@@ -79,7 +79,6 @@ const CreateChannelView = defineAsyncComponent(() => import('./CreateChannelView
 const AdminBroadcastModal = defineAsyncComponent(() => import('./AdminBroadcastModal.vue'))
 const keepInactiveMessengerSurfacesMounted = Boolean(import.meta.env.VITEST)
 const MESSENGER_INTERACTION_WARM_DEFER_MS = 3200
-const MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS = 2600
 const MESSENGER_INITIAL_POLL_DEFER_MS = 4200
 const MESSENGER_STATUS_POLL_DEFER_MS = 1800
 const MESSENGER_PINNED_MESSAGE_DEFER_MS = 900
@@ -192,7 +191,6 @@ const AVAILABLE_MESSAGE_REACTIONS = [...MESSAGE_REACTION_CATALOG] as const
 const CONTEXT_MENU_SUPPORTS_FILE_SHARE = canShareFiles()
 const pendingReactionMutationVersion = new Map<number, number>()
 let reactionMutationVersion = 0
-let contextMenuSnapshotVersion = 0
 let consumeNextContextMenuClose = false
 
 type MessageSeenMember = {
@@ -2387,9 +2385,6 @@ const showContextMenu = (event: Event, msg: Message) => {
     viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
   })
 
-  const expectedMessageId = msg.id
-  const snapshotVersion = ++contextMenuSnapshotVersion
-
   contextMenu.value = {
     visible: true,
     x: Number.parseFloat(style.left) || clientX,
@@ -2400,38 +2395,9 @@ const showContextMenu = (event: Event, msg: Message) => {
     menuModel,
   }
   markMessengerPerformance('message-context-menu-open')
-
-  nextTick(() => {
-    const runSnapshot = () => {
-      if (
-        snapshotVersion !== contextMenuSnapshotVersion
-        || !contextMenu.value.visible
-        || contextMenu.value.message?.id !== expectedMessageId
-      ) {
-        return
-      }
-
-      const root = typeof document !== 'undefined'
-        ? document.querySelector('.chat-view') || document.body
-        : null
-      if (root) {
-        recordMessengerDomSnapshot('message-context-menu-open', root, {
-          selectedUserId: selectedUserId.value,
-          messageCount: messages.value.length,
-        })
-      }
-    }
-
-    scheduleMessengerDiagnosticTask(runSnapshot, {
-      deferMs: MESSENGER_INTERACTION_DIAGNOSTIC_DEFER_MS,
-      timeoutMs: 1200,
-      fallbackDelayMs: 240,
-    })
-  })
 }
 
 function closeContextMenu() {
-  contextMenuSnapshotVersion += 1
   contextMenu.value = { visible: false, x: 0, y: 0, message: null, messageIds: [], style: null, menuModel: null }
 }
 
