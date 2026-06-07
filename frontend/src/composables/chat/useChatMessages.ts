@@ -110,6 +110,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
     const BACKGROUND_HYDRATION_DELAY_MS = 3200
     const SEARCH_CONTEXT_LIMIT = 50
     const OLDER_MESSAGES_PAGE_LIMIT = 60
+    const INITIAL_CHAT_OPEN_SETTLE_MS = 1400
     const hasOlderMessages = ref(true)
     const isLoadingOlderMessages = ref(false)
     const pendingBackgroundHydrationUsers = new Set<number>()
@@ -299,7 +300,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
             if (isActiveLoadRequest(requestId, userId)) {
                 isInitialChatOpenSettling.value = false
             }
-        }, 180)
+        }, INITIAL_CHAT_OPEN_SETTLE_MS)
     }
 
     function cancelInitialOpenSettle() {

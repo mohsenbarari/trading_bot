@@ -147,6 +147,10 @@ function scrollToBottom() {
   return true
 }
 
+function cancelScrollIntent() {
+  scrollIntentVersion += 1
+}
+
 function scrollToUnreadOrBottom(currentUserId: number) {
   scrollIntentVersion += 1
   const unreadMessageId = findFirstUnreadMessageId(currentUserId)
@@ -166,6 +170,7 @@ defineExpose({
   scrollToBottom,
   scrollToUnreadOrBottom,
   preservePrependAnchor,
+  cancelScrollIntent,
 })
 </script>
 

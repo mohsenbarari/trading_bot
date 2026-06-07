@@ -227,7 +227,7 @@ describe('useChatMessages', () => {
     expect(isInitialChatOpenSettling.value).toBe(true)
     expect(scrollToBottomMock).toHaveBeenCalledTimes(1)
     expect(messageMocks.markChatAsRead).toHaveBeenCalledWith(12)
-    vi.advanceTimersByTime(180)
+    vi.advanceTimersByTime(1400)
     expect(isInitialChatOpenSettling.value).toBe(false)
     expect(isLoadingMessages.value).toBe(false)
   })
