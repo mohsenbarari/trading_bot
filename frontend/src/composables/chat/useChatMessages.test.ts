@@ -54,6 +54,7 @@ describe('useChatMessages', () => {
   let unreadNewMessagesCount: ReturnType<typeof ref<number>>
   let isUserAtBottom: ReturnType<typeof ref<boolean>>
   let isViewingReply: ReturnType<typeof ref<boolean>>
+  let isInitialChatOpenSettling: ReturnType<typeof ref<boolean>>
   let targetUserStatus: ReturnType<typeof ref<string>>
   let selectedUserName: ReturnType<typeof ref<string>>
   let messageInput: ReturnType<typeof ref<string>>
@@ -88,6 +89,7 @@ describe('useChatMessages', () => {
         unreadNewMessagesCount: unreadNewMessagesCount as any,
         isUserAtBottom: isUserAtBottom as any,
         isViewingReply: isViewingReply as any,
+        isInitialChatOpenSettling: isInitialChatOpenSettling as any,
         targetUserStatus: targetUserStatus as any,
         selectedUserName: selectedUserName as any,
         messageInput: messageInput as any,
@@ -131,6 +133,7 @@ describe('useChatMessages', () => {
     unreadNewMessagesCount = ref(0)
     isUserAtBottom = ref(true)
     isViewingReply = ref(false)
+    isInitialChatOpenSettling = ref(false)
     targetUserStatus = ref('')
     selectedUserName = ref('مخاطب')
     messageInput = ref('')
@@ -218,11 +221,14 @@ describe('useChatMessages', () => {
     expect(messageMocks.waitForChatUploadBackgroundReady).toHaveBeenCalledTimes(1)
     expect(messages.value!.map((message) => message.id)).toEqual([1, -99])
     expect(scrollToUnreadOrBottomMock).not.toHaveBeenCalled()
-    vi.runOnlyPendingTimers()
+    vi.advanceTimersByTime(0)
     await flushPromises()
     expect(scrollToUnreadOrBottomMock).not.toHaveBeenCalled()
+    expect(isInitialChatOpenSettling.value).toBe(true)
     expect(scrollToBottomMock).toHaveBeenCalledTimes(1)
     expect(messageMocks.markChatAsRead).toHaveBeenCalledWith(12)
+    vi.advanceTimersByTime(180)
+    expect(isInitialChatOpenSettling.value).toBe(false)
     expect(isLoadingMessages.value).toBe(false)
   })
 

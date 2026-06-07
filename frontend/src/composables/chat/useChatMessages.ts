@@ -49,6 +49,7 @@ export interface UseChatMessagesOptions {
     unreadNewMessagesCount: Ref<number>
     isUserAtBottom: Ref<boolean>
     isViewingReply: Ref<boolean>
+    isInitialChatOpenSettling?: Ref<boolean>
     targetUserStatus: Ref<string>
     selectedUserName: Ref<string>
     messageInput: Ref<string>
@@ -80,6 +81,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         unreadNewMessagesCount,
         isUserAtBottom,
         isViewingReply,
+        isInitialChatOpenSettling,
         targetUserStatus,
         selectedUserName,
         messageInput,
@@ -284,6 +286,28 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         return !aroundId && import.meta.env.VITE_MESSENGER_VIRTUAL_TIMELINE === 'true'
     }
 
+    function beginInitialOpenSettle(silent: boolean, aroundId?: number) {
+        if (!silent && !aroundId && isInitialChatOpenSettling) {
+            isInitialChatOpenSettling.value = true
+        }
+    }
+
+    function finishInitialOpenSettle(requestId: number, userId: number) {
+        if (!isInitialChatOpenSettling) return
+
+        window.setTimeout(() => {
+            if (isActiveLoadRequest(requestId, userId)) {
+                isInitialChatOpenSettling.value = false
+            }
+        }, 180)
+    }
+
+    function cancelInitialOpenSettle() {
+        if (isInitialChatOpenSettling) {
+            isInitialChatOpenSettling.value = false
+        }
+    }
+
     function cancelBackgroundHydration(userId: number) {
         const timerId = backgroundHydrationTimers.get(userId)
         if (timerId !== undefined) {
@@ -417,6 +441,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         if (shouldMeasureChatOpen) {
             markMessengerPerformance(chatOpenStartMark)
         }
+        beginInitialOpenSettle(silent, aroundId)
 
         if (!effectiveSilent) isLoadingMessages.value = true
 
@@ -446,6 +471,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     if (selectedUserId.value === userId) {
                         scrollToBottom()
                         void markAsRead()
+                        finishInitialOpenSettle(requestId, userId)
                     }
                     // Keep refreshing from the server, but do it without
                     // showing the skeleton again.
@@ -543,6 +569,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                     }
                     scrollToBottom()
                     void markAsRead()
+                    finishInitialOpenSettle(requestId, userId)
                 }, 0)
 
                 // Don't block first paint waiting for upload service restore.
@@ -554,6 +581,9 @@ export function useChatMessages(options: UseChatMessagesOptions) {
                 }
             }
         } catch (e: any) {
+            if (isActiveLoadRequest(requestId, userId)) {
+                cancelInitialOpenSettle()
+            }
             if (isRoomConversationKey(userId) && selectedUserId.value === userId && (e?.status === 403 || e?.status === 404)) {
                 await onNamedRoomUnavailable?.(userId)
             }

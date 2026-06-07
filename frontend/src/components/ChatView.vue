@@ -165,6 +165,7 @@ const searchDebounceTimeout = ref<any>(null)
 
 // UI State
 const isLoadingMessages = ref(false)
+const isInitialChatOpenSettling = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 const virtualTimelineRef = ref<{
   scrollToMessage: (messageId: number) => boolean
@@ -537,6 +538,7 @@ const messagesLogic = useChatMessages({
   unreadNewMessagesCount,
   isUserAtBottom,
   isViewingReply,
+  isInitialChatOpenSettling,
   targetUserStatus,
   selectedUserName,
   messageInput,
@@ -852,7 +854,14 @@ const handleMessagesScroll = async () => {
   const container = messagesContainer.value
   const userId = selectedUserId.value
 
-  if (!container || !userId || isLoadingMessages.value || isLoadingOlderMessages.value || !hasOlderMessages.value) {
+  if (
+    !container
+    || !userId
+    || isLoadingMessages.value
+    || isInitialChatOpenSettling.value
+    || isLoadingOlderMessages.value
+    || !hasOlderMessages.value
+  ) {
     return
   }
 
@@ -3647,6 +3656,7 @@ const chatRoomContainerState = computed(() => ({
   sortedConversations: sortedConversations.value,
   currentUserId: props.currentUserId,
   isLoadingMessages: isLoadingMessages.value,
+  isInitialChatOpenSettling: isInitialChatOpenSettling.value,
   prefersReducedMotion: prefersReducedMotion.value,
   pinnedMessage: pinnedMessage.value,
   isLoadingOlderMessages: isLoadingOlderMessages.value,
@@ -3846,6 +3856,7 @@ defineExpose({
       messageInput,
       editingMessage,
       replyingToMessage,
+      isInitialChatOpenSettling,
       pendingSelectionAnchor: () => pendingSelectionAnchor,
       timelineRenderBudget,
     },
