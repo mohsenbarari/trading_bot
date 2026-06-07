@@ -9,6 +9,7 @@ from sqlalchemy import select
 from core import security
 from core.config import settings
 from core.db import get_db
+from core.request_context import bind_actor_context
 from core.services.accountant_relation_service import EffectiveOwnerActor, resolve_effective_owner_actor
 from core.services.user_account_status_service import is_user_global_web_locked
 from models.session import UserSession
@@ -124,6 +125,12 @@ async def get_current_user(
     if not user.last_seen_at or (datetime.utcnow() - user.last_seen_at).total_seconds() > 60:
         user.last_seen_at = datetime.utcnow()
         await db.commit()
+
+    bind_actor_context(
+        user_id=user.id,
+        session_id=session_id,
+        actor_role=user.role.value if getattr(user, "role", None) else None,
+    )
         
     return user
 
@@ -182,6 +189,7 @@ async def verify_super_admin_or_dev_key(
     """
     # 1. Check Dev Key
     if dev_key and dev_key == settings.dev_api_key:
+        logger.warning("Dev API key access granted", extra={"event": "auth.dev_key.used", "scope": "super_admin"})
         return None # Special return value indicating system access
 
     # 2. Check User Token
@@ -205,6 +213,7 @@ async def verify_admin_or_dev_key(
     Allow access if user is SUPER_ADMIN/MIDDLE_MANAGER OR if valid DEV_API_KEY is provided.
     """
     if dev_key and dev_key == settings.dev_api_key:
+        logger.warning("Dev API key access granted", extra={"event": "auth.dev_key.used", "scope": "admin"})
         return None
 
     if token:
@@ -216,5 +225,3 @@ async def verify_admin_or_dev_key(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Not authenticated"
     )
-
-
