@@ -263,6 +263,7 @@ type NewDirectChatTarget = {
 const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
 let messagesContainerResizeObserver: ResizeObserver | null = null
 let initialOpenBottomLockTimer: number | null = null
+let initialOpenBottomLockReleasedByUser = false
 let previousMessagesContainerMetrics: MessagesContainerMetrics | null = null
 let pendingSelectionAnchor: PendingSelectionAnchor | null = null
 let suppressMissingRoomCleanupDuringRouteSync = false
@@ -399,6 +400,7 @@ function resetComposerDraftState() {
 }
 
 function prepareConversationTransition() {
+  initialOpenBottomLockReleasedByUser = false
   stopInitialOpenBottomLock()
   cancelProgrammaticTimelineScroll()
   isInitialChatOpenSettling.value = false
@@ -456,6 +458,7 @@ watch(isInitialChatOpenSettling, (isSettling) => {
   if (isSettling) {
     startInitialOpenBottomLock()
   } else {
+    initialOpenBottomLockReleasedByUser = false
     stopInitialOpenBottomLock()
     syncMessagesContainerMetrics()
   }
@@ -533,6 +536,7 @@ function stopInitialOpenBottomLock() {
 }
 
 function startInitialOpenBottomLock() {
+  initialOpenBottomLockReleasedByUser = false
   stopInitialOpenBottomLock()
   forceScrollToBottomForActiveTimeline()
   initialOpenBottomLockTimer = window.setInterval(() => {
@@ -790,7 +794,10 @@ function handleMessagesContainerResize() {
       || previousMetrics.scrollHeight !== nextMetrics.scrollHeight
     if (
       layoutSizeChanged
-      && (previousDistanceFromBottom <= BOTTOM_LAYOUT_LOCK_THRESHOLD_PX || isInitialChatOpenSettling.value)
+      && (
+        previousDistanceFromBottom <= BOTTOM_LAYOUT_LOCK_THRESHOLD_PX
+        || (isInitialChatOpenSettling.value && !initialOpenBottomLockReleasedByUser)
+      )
     ) {
       const adjustedScrollTop = nextMetrics.scrollHeight - nextMetrics.clientHeight - Math.max(0, previousDistanceFromBottom)
       const maxScrollTop = Math.max(0, nextMetrics.scrollHeight - nextMetrics.clientHeight)
@@ -800,6 +807,23 @@ function handleMessagesContainerResize() {
   }
 
   previousMessagesContainerMetrics = nextMetrics
+}
+
+function releaseInitialOpenBottomLockForUserScroll(container = messagesContainer.value) {
+  if (!container || !isInitialChatOpenSettling.value || initialOpenBottomLockTimer === null) {
+    return false
+  }
+
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  if (distanceFromBottom <= BOTTOM_LAYOUT_LOCK_THRESHOLD_PX) {
+    return false
+  }
+
+  initialOpenBottomLockReleasedByUser = true
+  stopInitialOpenBottomLock()
+  cancelDomScrollIntent()
+  syncMessagesContainerMetrics(container)
+  return true
 }
 
 function captureSelectionAnchor(messageId: number) {
@@ -906,6 +930,8 @@ const handleMessagesScroll = async () => {
 
   const container = messagesContainer.value
   const userId = selectedUserId.value
+
+  releaseInitialOpenBottomLockForUserScroll(container)
 
   if (
     !container
@@ -3891,6 +3917,7 @@ defineExpose({
     captureMessagesContainerMetrics,
     syncMessagesContainerMetrics,
     handleMessagesContainerResize,
+    releaseInitialOpenBottomLockForUserScroll,
     captureSelectionAnchor,
     restorePendingSelectionAnchor,
     handleMessagesScroll,
