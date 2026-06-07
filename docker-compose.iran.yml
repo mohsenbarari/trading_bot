@@ -3,11 +3,18 @@
 # بدون Telegram Bot
 # ==========================================
 
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-50m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
 services:
   app:
     image: trading_bot_base_iran
     container_name: trading_bot_app
     restart: always
+    logging: *default-logging
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     environment:
       TZ: UTC
@@ -50,6 +57,7 @@ services:
     image: trading_bot_base_iran
     container_name: trading_bot_sync_worker
     restart: always
+    logging: *default-logging
     command: python -m core.sync_worker
     environment:
       TZ: UTC
@@ -74,6 +82,7 @@ services:
   migration:
     image: trading_bot_base_iran
     container_name: trading_bot_migration
+    logging: *default-logging
     command: [ "python", "manage.py" ]
     environment:
       TZ: UTC
@@ -91,6 +100,7 @@ services:
     image: postgres:15-alpine
     container_name: trading_bot_db
     restart: always
+    logging: *default-logging
     command: postgres -c max_connections=500 -c timezone=UTC -c log_timezone=UTC
     environment:
       TZ: UTC
@@ -111,6 +121,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: trading_bot_redis
+    logging: *default-logging
     environment:
       TZ: UTC
     volumes:
