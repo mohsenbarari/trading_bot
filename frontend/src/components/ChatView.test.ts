@@ -186,6 +186,7 @@ vi.mock('../composables/chat/useChatScroll', async () => {
       isViewingReply: ref(false),
       scrollToBottom: chatViewMocks.scrollToBottomMock,
       forceScrollToBottom: vi.fn(),
+      cancelScrollIntent: vi.fn(),
       handleScroll: vi.fn(),
       scrollToUnreadOrBottom: vi.fn(),
       scrollToMessage: chatViewMocks.scrollToMessageMock,
@@ -435,6 +436,32 @@ describe('ChatView.vue', () => {
     chatViewResizeObserverCallback?.([], {} as ResizeObserver)
 
     expect(container.scrollTop).toBe(600)
+
+    wrapper.unmount()
+  })
+
+  it('keeps bottom messages anchored when media content increases scroll height during chat open', async () => {
+    chatViewMocks.messagesSeed = [buildMessage({ id: 32 })]
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    })
+    await flushPromises()
+
+    const hooks = getChatViewTestHooks(wrapper)
+    const container = wrapper.get('.messages-container').element as HTMLElement
+    const clientHeight = 400
+    let scrollHeight = 1000
+    Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => clientHeight })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    container.scrollTop = 600
+
+    hooks.syncMessagesContainerMetrics(container)
+    hooks.state.isInitialChatOpenSettling.value = true
+    scrollHeight = 1280
+    hooks.handleMessagesContainerResize()
+
+    expect(container.scrollTop).toBe(880)
 
     wrapper.unmount()
   })

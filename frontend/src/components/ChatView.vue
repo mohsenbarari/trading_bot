@@ -172,6 +172,7 @@ const virtualTimelineRef = ref<{
   scrollToBottom?: () => boolean
   scrollToUnreadOrBottom?: (currentUserId: number) => boolean
   preservePrependAnchor?: (messageId: number) => boolean
+  cancelScrollIntent?: () => void
 } | null>(null)
 const isUserAtBottom = ref(true)
 const unreadNewMessagesCount = ref(0)
@@ -263,6 +264,7 @@ type NewDirectChatTarget = {
 
 const BOTTOM_LAYOUT_LOCK_THRESHOLD_PX = 96
 let messagesContainerResizeObserver: ResizeObserver | null = null
+let initialOpenBottomLockTimer: number | null = null
 let previousMessagesContainerMetrics: MessagesContainerMetrics | null = null
 let pendingSelectionAnchor: PendingSelectionAnchor | null = null
 let suppressMissingRoomCleanupDuringRouteSync = false
@@ -399,6 +401,9 @@ function resetComposerDraftState() {
 }
 
 function prepareConversationTransition() {
+  stopInitialOpenBottomLock()
+  cancelProgrammaticTimelineScroll()
+  isInitialChatOpenSettling.value = false
   applyComposerOverlayAction({ type: 'enter_conversation' })
   closeContextMenu()
   resetComposerDraftState()
@@ -433,6 +438,7 @@ const {
   isViewingReply: scrollIsViewingReply,
   scrollToBottom,
   forceScrollToBottom,
+  cancelScrollIntent: cancelDomScrollIntent,
   handleScroll,
   scrollToUnreadOrBottom,
   scrollToMessage: scrollToMessageInDom
@@ -447,6 +453,15 @@ const {
 })
 
 watch(scrollIsViewingReply, (val) => { isViewingReply.value = val })
+
+watch(isInitialChatOpenSettling, (isSettling) => {
+  if (isSettling) {
+    startInitialOpenBottomLock()
+  } else {
+    stopInitialOpenBottomLock()
+    syncMessagesContainerMetrics()
+  }
+})
 
 function scrollToMessage(msgId: number) {
   if (virtualTimelineRef.value?.scrollToMessage(msgId)) {
@@ -466,6 +481,14 @@ function scrollToBottomForActiveTimeline() {
   }
 
   scrollToBottom()
+}
+
+function forceScrollToBottomForActiveTimeline() {
+  if (virtualTimelineRef.value?.scrollToBottom?.()) {
+    return
+  }
+
+  forceScrollToBottom()
 }
 
 function scrollToUnreadOrBottomForActiveTimeline() {
@@ -495,6 +518,33 @@ function scrollToUnreadOrBottomForActiveTimeline() {
   }
 
   scrollToUnreadOrBottom()
+}
+
+function cancelProgrammaticTimelineScroll() {
+  virtualTimelineRef.value?.cancelScrollIntent?.()
+  cancelDomScrollIntent()
+  isViewingReply.value = false
+  scrollIsViewingReply.value = false
+}
+
+function stopInitialOpenBottomLock() {
+  if (initialOpenBottomLockTimer !== null) {
+    window.clearInterval(initialOpenBottomLockTimer)
+    initialOpenBottomLockTimer = null
+  }
+}
+
+function startInitialOpenBottomLock() {
+  stopInitialOpenBottomLock()
+  forceScrollToBottomForActiveTimeline()
+  initialOpenBottomLockTimer = window.setInterval(() => {
+    if (!isInitialChatOpenSettling.value || !selectedUserId.value) {
+      stopInitialOpenBottomLock()
+      return
+    }
+    forceScrollToBottomForActiveTimeline()
+    syncMessagesContainerMetrics()
+  }, 120)
 }
 
 const unreadMentionMessages = computed(() => {
@@ -734,12 +784,15 @@ function handleMessagesContainerResize() {
     previousMetrics
     && previousMetrics.clientHeight > 0
     && nextMetrics.clientHeight > 0
-    && previousMetrics.clientHeight !== nextMetrics.clientHeight
   ) {
     const previousDistanceFromBottom = previousMetrics.scrollHeight - previousMetrics.scrollTop - previousMetrics.clientHeight
-    if (previousDistanceFromBottom <= BOTTOM_LAYOUT_LOCK_THRESHOLD_PX) {
-      const heightDelta = nextMetrics.clientHeight - previousMetrics.clientHeight
-      const adjustedScrollTop = previousMetrics.scrollTop - heightDelta
+    const layoutSizeChanged = previousMetrics.clientHeight !== nextMetrics.clientHeight
+      || previousMetrics.scrollHeight !== nextMetrics.scrollHeight
+    if (
+      layoutSizeChanged
+      && (previousDistanceFromBottom <= BOTTOM_LAYOUT_LOCK_THRESHOLD_PX || isInitialChatOpenSettling.value)
+    ) {
+      const adjustedScrollTop = nextMetrics.scrollHeight - nextMetrics.clientHeight - Math.max(0, previousDistanceFromBottom)
       const maxScrollTop = Math.max(0, nextMetrics.scrollHeight - nextMetrics.clientHeight)
       container.scrollTop = Math.max(0, Math.min(adjustedScrollTop, maxScrollTop))
       nextMetrics.scrollTop = container.scrollTop
@@ -3808,6 +3861,7 @@ const chatRoomContainerHandlers = {
 
 onUnmounted(() => {
   chatRoomLifecycle.leaveRoom(selectedUserId.value)
+  stopInitialOpenBottomLock()
   cancelScheduledPinnedMessageLoad()
   messagesContainerResizeObserver?.disconnect()
   messagesContainerResizeObserver = null

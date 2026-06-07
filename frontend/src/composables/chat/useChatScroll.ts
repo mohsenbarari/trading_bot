@@ -30,7 +30,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     let scrollIntentVersion = 0
 
     function scrollToBottom() {
-        scrollIntentVersion += 1
+        const intentVersion = ++scrollIntentVersion
         const el = messagesContainer.value
         if (el) {
             const distance = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
@@ -46,6 +46,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
         }
 
         setTimeout(() => {
+            if (intentVersion !== scrollIntentVersion) {
+                return
+            }
             if (messagesContainer.value) {
                 messagesContainer.value.scrollTo({
                     top: messagesContainer.value.scrollHeight,
@@ -56,13 +59,16 @@ export function useChatScroll(options: UseChatScrollOptions) {
     }
 
     function forceScrollToBottom() {
-        scrollIntentVersion += 1
+        const intentVersion = ++scrollIntentVersion
         if (unreadNewMessagesCount.value > 0) {
             markAsRead()
             unreadNewMessagesCount.value = 0
         }
 
         const doScroll = () => {
+            if (intentVersion !== scrollIntentVersion) {
+                return
+            }
             if (messagesContainer.value) {
                 messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight + 1000
             }
@@ -126,6 +132,10 @@ export function useChatScroll(options: UseChatScrollOptions) {
         } else {
             messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
         }
+    }
+
+    function cancelScrollIntent() {
+        scrollIntentVersion += 1
     }
 
     const scrollToMessage = (msgId: number) => {
@@ -195,6 +205,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         isViewingReply,
         scrollToBottom,
         forceScrollToBottom,
+        cancelScrollIntent,
         handleScroll,
         scrollToUnreadOrBottom,
         scrollToMessage
