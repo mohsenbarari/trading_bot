@@ -6,7 +6,7 @@ import ChatHeader from './chat/ChatHeader.vue'
 import ChatShell from './chat/containers/ChatShell.vue'
 import ConversationListContainer from './chat/containers/ConversationListContainer.vue'
 import ChatRoomContainer from './chat/containers/ChatRoomContainer.vue'
-import { pushBackState, popBackState, clearBackStack, discardBackState } from '../composables/useBackButton'
+import { pushBackState, popBackState, popBackStateAfterHistory, clearBackStack, discardBackState } from '../composables/useBackButton'
 import { useWebSocket } from '../composables/useWebSocket'
 
 import type { ChatAlbumTimelineItem, ChatForwardTarget, ChatSelectionPurpose, ChatTimelineGroup, ChatTimelineItem, Conversation, Message, MessageReaction, PinnedMessageState } from '../types/chat'
@@ -3178,8 +3178,7 @@ async function goBack() {
   }
 
   if (selectedUserId.value) {
-    popBackState()
-    exitActiveConversationToList()
+    popBackStateAfterHistory(exitActiveConversationToList)
   } else {
     emit('back')
   }

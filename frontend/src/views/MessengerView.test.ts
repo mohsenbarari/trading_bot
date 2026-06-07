@@ -7,6 +7,7 @@ const {
   apiFetchMock,
   clearBackStackMock,
   popBackStateMock,
+  popBackStateAfterHistoryMock,
   pushBackStateMock,
   routerBackMock,
   routerPushMock,
@@ -16,6 +17,10 @@ const {
   apiFetchMock: vi.fn(),
   clearBackStackMock: vi.fn(),
   popBackStateMock: vi.fn(),
+  popBackStateAfterHistoryMock: vi.fn((callback?: () => void) => {
+    callback?.()
+    return true
+  }),
   pushBackStateMock: vi.fn(),
   routerBackMock: vi.fn(),
   routerPushMock: vi.fn(),
@@ -35,6 +40,7 @@ vi.mock('../utils/auth', () => ({
 vi.mock('../composables/useBackButton', () => ({
   clearBackStack: clearBackStackMock,
   popBackState: popBackStateMock,
+  popBackStateAfterHistory: popBackStateAfterHistoryMock,
   pushBackState: pushBackStateMock,
 }))
 
@@ -79,6 +85,7 @@ describe('MessengerView.vue', () => {
     apiFetchMock.mockReset()
     clearBackStackMock.mockReset()
     popBackStateMock.mockReset()
+    popBackStateAfterHistoryMock.mockClear()
     pushBackStateMock.mockReset()
     routerBackMock.mockReset()
     routerPushMock.mockReset()
@@ -215,10 +222,26 @@ describe('MessengerView.vue', () => {
 
     baseBackCallback()
     expect(routerReplaceMock).toHaveBeenCalledWith('/')
+  })
+
+  it('uses the same base history state when the in-app messenger-list back button is clicked', async () => {
+    window.history.replaceState({ back: '/users/88' }, '', '/chat')
+    apiFetchMock.mockResolvedValue(makeResponse({
+      id: 42,
+      role: 'عادی',
+      is_accountant: false,
+      is_customer: false,
+    }))
+
+    const wrapper = mount(MessengerView)
+    await flushPromises()
+
+    expect(pushBackStateMock).toHaveBeenCalledTimes(1)
 
     routerReplaceMock.mockClear()
     await wrapper.get('.emit-back').trigger('click')
     expect(popBackStateMock).not.toHaveBeenCalled()
+    expect(popBackStateAfterHistoryMock).toHaveBeenCalledTimes(1)
     expect(routerReplaceMock).toHaveBeenCalledWith('/')
   })
 })

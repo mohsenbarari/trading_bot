@@ -1,7 +1,7 @@
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearBackStack, discardBackState, popBackState, pushBackState, useBackButton } from './useBackButton'
+import { clearBackStack, discardBackState, popBackState, popBackStateAfterHistory, pushBackState, useBackButton } from './useBackButton'
 
 describe('useBackButton', () => {
   let pushStateSpy: ReturnType<typeof vi.spyOn>
@@ -55,6 +55,22 @@ describe('useBackButton', () => {
 
     window.dispatchEvent(new PopStateEvent('popstate'))
     expect(onBack).not.toHaveBeenCalled()
+  })
+
+  it('runs a UI-close callback after the ignored browser popstate is received', () => {
+    const onBack = vi.fn()
+    const afterHistoryBack = vi.fn()
+    pushBackState(onBack)
+
+    const didPop = popBackStateAfterHistory(afterHistoryBack)
+    expect(didPop).toBe(true)
+    expect(historyBackSpy).toHaveBeenCalledTimes(1)
+    expect(afterHistoryBack).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new PopStateEvent('popstate'))
+
+    expect(onBack).not.toHaveBeenCalled()
+    expect(afterHistoryBack).toHaveBeenCalledTimes(1)
   })
 
   it('supports discarding and clearing internal states without touching browser history', () => {

@@ -5,7 +5,7 @@ import { apiFetch } from '../utils/auth'
 import ChatView from '../components/ChatView.vue'
 import MessengerRefactorShell from '../components/messenger-v2/MessengerRefactorShell.vue'
 import '../styles/messenger-design-tokens.css'
-import { clearBackStack, popBackState, pushBackState } from '../composables/useBackButton'
+import { clearBackStack, popBackStateAfterHistory, pushBackState } from '../composables/useBackButton'
 import {
   markMessengerPerformance,
   resolveMessengerUiVersion,
@@ -138,8 +138,9 @@ function handleNavigate(view: string, payload?: any) {
 function handleBack() {
   if (messengerBaseBackStateActive) {
     messengerBaseBackStateActive = false
-    popBackState()
-    router.replace('/')
+    popBackStateAfterHistory(() => {
+      router.replace('/')
+    })
     return
   }
 

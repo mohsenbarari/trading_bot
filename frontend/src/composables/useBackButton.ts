@@ -18,11 +18,20 @@ const backStack: BackHandler[] = []
 let isListening = false
 let isTelegramListening = false
 let ignoreNextPopState = false
+let ignoredPopStateCallback: BackHandler | null = null
+let ignoredPopStateFallbackTimer: ReturnType<typeof window.setTimeout> | null = null
 let telegramInitInterval: any = null
 
 function handlePopState() {
   if (ignoreNextPopState) {
     ignoreNextPopState = false
+    if (ignoredPopStateFallbackTimer !== null) {
+      window.clearTimeout(ignoredPopStateFallbackTimer)
+      ignoredPopStateFallbackTimer = null
+    }
+    const callback = ignoredPopStateCallback
+    ignoredPopStateCallback = null
+    callback?.()
     return
   }
   if (backStack.length > 0) {
@@ -103,7 +112,32 @@ export function popBackState() {
     // history entry اضافی را بردار
     history.back()
     updateTelegramBackButton()
+    return true
   }
+  return false
+}
+
+export function popBackStateAfterHistory(onAfterHistoryBack: BackHandler) {
+  const didPop = popBackState()
+  if (!didPop) {
+    onAfterHistoryBack()
+    return false
+  }
+
+  ignoredPopStateCallback = onAfterHistoryBack
+  if (ignoredPopStateFallbackTimer !== null) {
+    window.clearTimeout(ignoredPopStateFallbackTimer)
+  }
+  ignoredPopStateFallbackTimer = window.setTimeout(() => {
+    if (!ignoreNextPopState || ignoredPopStateCallback !== onAfterHistoryBack) {
+      return
+    }
+    ignoreNextPopState = false
+    ignoredPopStateCallback = null
+    ignoredPopStateFallbackTimer = null
+    onAfterHistoryBack()
+  }, 120)
+  return true
 }
 
 /**
@@ -125,6 +159,12 @@ export function discardBackState() {
  */
 export function clearBackStack() {
   backStack.length = 0
+  ignoreNextPopState = false
+  ignoredPopStateCallback = null
+  if (ignoredPopStateFallbackTimer !== null) {
+    window.clearTimeout(ignoredPopStateFallbackTimer)
+    ignoredPopStateFallbackTimer = null
+  }
   if (telegramInitInterval) {
     clearInterval(telegramInitInterval)
     telegramInitInterval = null
