@@ -1,5 +1,6 @@
 import { ref, type Ref, nextTick } from 'vue'
 import type { Message } from '../../types/chat'
+import { isUnreadMessageForViewer } from '../../utils/chatUnread'
 import { markMessengerPerformance } from '../../utils/messengerRefactor'
 import { measureMessengerDiagnostic, recordMessengerMetric } from '../../utils/messengerDiagnosticsMetrics'
 
@@ -114,7 +115,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
         if (!messagesContainer.value) return
 
         const firstUnreadIndex = messages.value.findIndex(
-            msg => msg.receiver_id === currentUserId && !msg.is_read
+            msg => isUnreadMessageForViewer(msg, currentUserId)
         )
 
         if (firstUnreadIndex >= 0) {
