@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { apiFetch } from '../utils/auth'
 import ChatView from '../components/ChatView.vue'
 import MessengerRefactorShell from '../components/messenger-v2/MessengerRefactorShell.vue'
 import '../styles/messenger-design-tokens.css'
+import { clearBackStack, popBackState, pushBackState } from '../composables/useBackButton'
 import {
   markMessengerPerformance,
   resolveMessengerUiVersion,
@@ -24,6 +25,7 @@ const user = ref<any>(null)
 const loading = ref(true)
 const messengerUiVersion = ref(resolveMessengerUiVersion())
 let messengerSurfaceMarked = false
+let messengerBaseBackStateActive = false
 const MESSENGER_SURFACE_DIAGNOSTIC_DEFER_MS = 4200
 
 const jwtToken = computed(() => {
@@ -94,9 +96,32 @@ async function fetchUser() {
   }
 }
 
+function isDashboardBackTarget(value: unknown) {
+  if (typeof value !== 'string') return false
+  return value === '/' || value.startsWith('/?')
+}
+
+function ensureMessengerBaseBackState() {
+  if (messengerBaseBackStateActive || isDashboardBackTarget(window.history.state?.back)) {
+    return
+  }
+
+  messengerBaseBackStateActive = true
+  pushBackState(() => {
+    messengerBaseBackStateActive = false
+    router.replace('/')
+  })
+}
+
 onMounted(() => {
   markMessengerPerformance('route-mounted')
+  ensureMessengerBaseBackState()
   fetchUser()
+})
+
+onUnmounted(() => {
+  messengerBaseBackStateActive = false
+  clearBackStack()
 })
 
 function handleNavigate(view: string, payload?: any) {
@@ -111,10 +136,18 @@ function handleNavigate(view: string, payload?: any) {
 }
 
 function handleBack() {
-  if (window.history.length > 1) {
+  if (messengerBaseBackStateActive) {
+    messengerBaseBackStateActive = false
+    popBackState()
+    router.replace('/')
+    return
+  }
+
+  if (isDashboardBackTarget(window.history.state?.back)) {
     router.back()
     return
   }
+
   router.replace('/')
 }
 </script>

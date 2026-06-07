@@ -530,8 +530,7 @@ const messagesLogic = useChatMessages({
     if (selectedUserId.value !== conversationKey) {
       return
     }
-    clearActiveConversationState()
-    await syncSelectedConversationRoute(null, '')
+    exitActiveConversationToList()
     void loadConversations()
   },
 })
@@ -1669,9 +1668,7 @@ const handleSearchResultClick = async (msg: any) => {
         const conv = sortedConversations.value.find(c => c.other_user_id === otherId)
         selectedUserName.value = conv ? conv.other_user_name : 'User'
         pushBackState(() => {
-          selectedUserId.value = null
-          selectedUserName.value = ''
-          messages.value = []
+          exitActiveConversationToList()
         })
         await loadMessages(otherId, false, msg.id)
         nextTick(() => scrollToMessage(msg.id))
@@ -1779,10 +1776,7 @@ const selectConversation = (conv: Conversation) => {
   loadMessages(conv.other_user_id)
   if (!wasAlreadyInConversation) {
     pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-      messagePanelError.value = ''
+      exitActiveConversationToList()
     })
   }
 }
@@ -1808,10 +1802,7 @@ function openConversationFromRoute(targetId: number, fallbackName = '') {
   void loadMessages(targetId)
   if (!wasAlreadyInConversation) {
     pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-      messagePanelError.value = ''
+      exitActiveConversationToList()
     })
   }
 }
@@ -1839,10 +1830,7 @@ const startNewChat = (userId: number, userName: string) => {
   loadMessages(userId)
   if (!wasAlreadyInConversation) {
     pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-      messagePanelError.value = ''
+      exitActiveConversationToList()
     })
   }
 }
@@ -1883,10 +1871,7 @@ const startNewChatFromTarget = (target: NewDirectChatTarget) => {
   loadMessages(userId)
   if (!wasAlreadyInConversation) {
     pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-      messagePanelError.value = ''
+      exitActiveConversationToList()
     })
   }
 }
@@ -2017,6 +2002,11 @@ function clearActiveConversationState() {
   closeContextMenu()
 }
 
+function exitActiveConversationToList() {
+  clearActiveConversationState()
+  void syncSelectedConversationRoute(null, '')
+}
+
 function clearMissingNamedRoomSelection() {
   if (suppressMissingRoomCleanupDuringRouteSync) {
     return
@@ -2032,7 +2022,7 @@ function clearMissingNamedRoomSelection() {
     return
   }
 
-  clearActiveConversationState()
+  exitActiveConversationToList()
 }
 
 async function handleChannelManagerOpenChannel(payload: { chatId: number; title: string }) {
@@ -2127,10 +2117,7 @@ async function handleGroupCreated(group: { id: number; title: string }) {
   await syncSelectedConversationRoute(conversationKey, group.title)
   if (!wasAlreadyInConversation) {
     pushBackState(() => {
-      selectedUserId.value = null
-      selectedUserName.value = ''
-      messages.value = []
-      messagePanelError.value = ''
+      exitActiveConversationToList()
     })
   }
 }
@@ -2158,8 +2145,7 @@ async function handleGroupLeft(chatId: number) {
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
     .some((conversationKey) => selectedUserId.value === conversationKey || routeConversationKey === conversationKey)
   if (shouldClearCurrentGroup) {
-    clearActiveConversationState()
-    await syncSelectedConversationRoute(null, '')
+    exitActiveConversationToList()
   }
   const conversationKeyToRemove = explicitConversationKey ?? managedConversationKey
   if (typeof conversationKeyToRemove === 'number') {
@@ -2178,8 +2164,7 @@ async function handleChannelLeft(chatId: number) {
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
     .some((conversationKey) => selectedUserId.value === conversationKey || routeConversationKey === conversationKey)
   if (shouldClearCurrentChannel) {
-    clearActiveConversationState()
-    await syncSelectedConversationRoute(null, '')
+    exitActiveConversationToList()
   }
   const conversationKeyToRemove = explicitConversationKey ?? managedConversationKey
   if (typeof conversationKeyToRemove === 'number') {
@@ -2191,7 +2176,7 @@ type ConversationListAction = 'pin' | 'unpin' | 'move-pin-up' | 'move-pin-down' 
 
 function clearSelectedConversationIfMatches(conv: Conversation) {
   if (selectedUserId.value !== conv.other_user_id) return
-  clearActiveConversationState()
+  exitActiveConversationToList()
 }
 
 async function handleConversationAction(payload: { action: ConversationListAction; conv: Conversation }) {
@@ -3193,9 +3178,8 @@ async function goBack() {
   }
 
   if (selectedUserId.value) {
-    clearActiveConversationState()
     popBackState()
-    await syncSelectedConversationRoute(null, '')
+    exitActiveConversationToList()
   } else {
     emit('back')
   }
