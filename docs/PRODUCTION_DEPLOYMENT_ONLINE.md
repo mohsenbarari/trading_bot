@@ -1,25 +1,27 @@
-# Production Deployment v1 — Iran Online Scenario
+# Production Deployment v1 — Foreign-Controlled Release Flow
 
-This document defines the first production deployment flow for the case where the Iran server is reachable from the foreign server over SSH and still has internet access.
+This document defines the first production release flow driven from the foreign server.
 
 ## Scope
 
-This is intentionally the **online-first** version:
+This is intentionally the **online-first** version for Iran:
 
-- orchestration runs on the foreign server
-- the Iran server is bootstrapped over SSH
-- SSL is requested directly on the Iran server with `certbot`
-- frontend is built on the foreign server
-- the production payload is rsynced to the Iran server
-- the Docker image is still built on the Iran server
+- the full release starts on the foreign server
+- the foreign server is deployed first
+- the operator is then asked whether Iran currently has working internet
+- if the answer is `yes`, the Iran-online flow runs
+- if the answer is `no`, the script stops because the Iran-offline flow is not implemented yet
+- frontend, Python wheel cache, and Docker images are prepared on the foreign server
+- Docker images are transferred to Iran over SSH and loaded there
+- the Iran server does **not** build app images or pull runtime images during deployment
 
-The later offline scenario should replace the remote build/pull steps with shipped release artifacts.
+The later offline scenario should extend this with a dedicated Iran-offline path.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `scripts/production_deploy_online.sh` | Main deployment helper |
+| `scripts/production_deploy_online.sh` | Main production release script |
 | `deploy/production/online.env.example` | Example deployment manifest |
 | `deploy/production/nginx-iran-online.conf.template` | Templated Nginx config for the Iran host |
 
@@ -39,35 +41,45 @@ Then fill:
 - certbot email
 - path to the private runtime `.env` file that should become `IRAN_PROJECT_DIR/.env`
 
-## Commands
+## Primary command
 
-All commands run on the foreign server:
-
-```bash
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env check-local
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env bootstrap-iran
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env configure-nginx
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env issue-cert
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env build-release
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env sync-project
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env deploy-iran
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env healthcheck
-```
-
-Or run the full sequence:
+The normal path is one command on the foreign server:
 
 ```bash
-scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env full
+scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/online.env
 ```
 
-## What the script does
+Equivalent Make wrapper:
 
-### `check-local`
+```bash
+make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
+```
+
+## Full flow
+
+### 1. Local validation
 - validates local tools (`ssh`, `scp`, `rsync`, `docker`, `npm`, `python3`)
 - validates the manifest
 - checks SSH connectivity to the Iran server
 
-### `bootstrap-iran`
+### 2. Local build + local foreign deploy
+- builds the frontend on the foreign server
+- prepares Python wheel cache
+- builds:
+  - `trading_bot_base`
+  - `trading_bot_base_iran`
+- prepares a loadable Docker bundle containing:
+  - `trading_bot_base_iran`
+  - `postgres:15-alpine`
+  - `redis:7-alpine`
+- deploys the foreign server locally
+
+### 3. Iran scenario question
+- asks whether the Iran server currently has working internet access
+- if `no`, the script stops after the foreign deploy
+- if `yes`, it continues with the Iran-online flow
+
+### 4. `bootstrap-iran`
 - installs baseline packages
 - installs Docker if missing
 - installs Nginx, Certbot, and `python3-certbot-nginx`
@@ -75,46 +87,46 @@ scripts/production_deploy_online.sh --manifest /root/secure-envs/trading-bot/onl
 - creates deploy directories
 - applies host timezone
 
-### `configure-nginx`
+### 5. `sync-project`
+- rsyncs the production payload to the Iran server
+- copies the private runtime `.env` file
+
+### 6. `configure-nginx`
 - renders a domain-aware Nginx config from the template
 - copies it to `/etc/nginx/sites-available/trading-bot`
 - enables the site and reloads Nginx
 
-### `issue-cert`
+### 7. `issue-cert`
 - runs `certbot --nginx -d <domain>`
 - can be skipped with `IRAN_SKIP_CERTBOT=1`
 
-### `build-release`
-- builds the frontend locally
-- prepares the Python wheel cache in `pip_packages/`
+### 8. `ship-images` + `load-images`
+- uploads the prepared Docker image bundle to the Iran host
+- runs `docker load` on the Iran host
 
-### `sync-project`
-- rsyncs the production payload to the Iran server
-- copies the private runtime `.env` file
-
-### `deploy-iran`
-- builds `trading_bot_base_iran` on the Iran host
+### 9. `deploy-iran`
 - runs `docker compose -f docker-compose.iran.yml up -d --wait`
+- does **not** build the image remotely
 
-### `healthcheck`
+### 10. `healthcheck`
 - checks the local API endpoint on the Iran host
 - optionally checks the public HTTPS endpoint
 
 ## Known limitations of v1
 
-1. The Iran image is still built on the Iran server.
-2. SSL still depends on live internet and ACME reachability from the Iran server.
-3. The flow does not yet create immutable release bundles or rollbacks.
-4. Firewall hardening is optional and conservative.
-5. The script assumes Debian/Ubuntu style package management.
+1. SSL still depends on live internet and ACME reachability from the Iran server.
+2. The Iran-offline branch is not implemented yet.
+3. The flow does not yet create immutable rollback releases.
+4. The compose file still uses bind mounts, so the runtime payload is synced alongside the loaded image.
+5. Firewall hardening is optional and conservative.
+6. The script assumes Debian/Ubuntu style package management.
 
 ## Next step after this test phase
 
 After the temporary two-server test succeeds, the next iteration should add:
 
 1. immutable release artifacts
-2. remote `docker load` instead of remote build
+2. rollback support
 3. secret/cert separation from project sync
-4. rollback support
+4. compose/runtime cleanup to reduce bind-mounted code
 5. DNS-based certificate issuance for the Iran-offline scenario
-

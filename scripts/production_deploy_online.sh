@@ -9,26 +9,31 @@ COMMAND=""
 
 usage() {
     cat <<'EOF'
-Production deploy helper for the "Iran online" scenario.
+Production release script driven from the foreign server.
 
 Usage:
-  scripts/production_deploy_online.sh [--manifest /path/to/online.env] <command>
+  scripts/production_deploy_online.sh [--manifest /path/to/online.env] [command]
 
 Commands:
   help                 Show this help.
+  release              Run the full production flow. This is the default.
   check-local          Validate local tooling and manifest.
+  deploy-foreign       Build and deploy the foreign server locally.
   bootstrap-iran       Install Docker/Nginx/Certbot prerequisites on the Iran host.
   configure-nginx      Render and install the Iran Nginx config.
   issue-cert           Request/renew the SSL certificate on the Iran host.
-  build-release        Build frontend locally and prepare wheel cache.
+  build-release        Build frontend locally, prepare wheel cache, and build/loadable Docker artifacts.
   sync-project         Rsync the production payload and runtime env to the Iran host.
-  deploy-iran          Build/start Docker services on the Iran host.
+  ship-images          Upload the prepared Docker image bundle to the Iran host.
+  load-images          Load the uploaded Docker image bundle on the Iran host.
+  deploy-iran          Start Docker services on the Iran host without remote build/pull.
   healthcheck          Validate local and public health endpoints.
-  full                 Run the full Iran-online flow in order.
 
 Notes:
-  - This v1 flow is online-first and still builds the Docker image on the Iran host.
-  - The later offline scenario should replace remote build/pull with artifact shipping.
+  - The script first deploys the foreign server locally.
+  - It then asks whether Iran currently has working internet.
+  - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
+  - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
 EOF
 }
 
@@ -68,7 +73,7 @@ parse_args() {
         esac
     done
 
-    [[ -n "$COMMAND" ]] || COMMAND="help"
+    [[ -n "$COMMAND" ]] || COMMAND="release"
 }
 
 load_manifest() {
@@ -91,10 +96,11 @@ load_manifest() {
 
     IRAN_SKIP_CERTBOT="${IRAN_SKIP_CERTBOT:-0}"
     IRAN_SKIP_FRONTEND_BUILD="${IRAN_SKIP_FRONTEND_BUILD:-0}"
-    IRAN_DOCKER_BUILD_ON_REMOTE="${IRAN_DOCKER_BUILD_ON_REMOTE:-1}"
     IRAN_DEPLOY_WITH_WAIT="${IRAN_DEPLOY_WITH_WAIT:-1}"
     IRAN_RUN_POST_DEPLOY_HEALTHCHECK="${IRAN_RUN_POST_DEPLOY_HEALTHCHECK:-1}"
     IRAN_ENABLE_UFW="${IRAN_ENABLE_UFW:-0}"
+    IRAN_CONNECTIVITY_MODE="${IRAN_CONNECTIVITY_MODE:-ask}"
+    IRAN_SKIP_FOREIGN_DEPLOY="${IRAN_SKIP_FOREIGN_DEPLOY:-0}"
     IRAN_HEALTHCHECK_URL="${IRAN_HEALTHCHECK_URL:-https://$IRAN_APP_DOMAIN/api/config}"
     IRAN_LOCAL_API_URL="${IRAN_LOCAL_API_URL:-http://127.0.0.1:8000/api/config}"
 
@@ -104,6 +110,8 @@ load_manifest() {
 
     IRAN_SSH_TARGET="$IRAN_SSH_USER@$IRAN_HOST"
     RSYNC_SSH="ssh -p $IRAN_SSH_PORT -o StrictHostKeyChecking=no"
+    RELEASE_TMP_DIR="$LOCAL_PROJECT_DIR/tmp/production-release"
+    REMOTE_IMAGE_BUNDLE="$IRAN_DEPLOY_BASE_DIR/releases/trading-bot-images.tar"
 }
 
 ssh_iran() {
@@ -225,13 +233,30 @@ build_release() {
     fi
     prepare_pip_packages
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
+    mkdir -p "$RELEASE_TMP_DIR"
+    log "Building Docker images locally"
+    docker pull postgres:15-alpine >/dev/null
+    docker pull redis:7-alpine >/dev/null
+    docker build -t trading_bot_base "$LOCAL_PROJECT_DIR"
+    docker build -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" -t trading_bot_base_iran "$LOCAL_PROJECT_DIR"
+    log "Packing Docker images for Iran transfer"
+    docker save trading_bot_base_iran postgres:15-alpine redis:7-alpine -o "$RELEASE_TMP_DIR/docker-images.tar"
     log "Local release build complete"
+}
+
+deploy_foreign() {
+    if [[ "$IRAN_SKIP_FOREIGN_DEPLOY" == "1" ]]; then
+        log "Skipping foreign deploy because IRAN_SKIP_FOREIGN_DEPLOY=1"
+        return 0
+    fi
+    log "Deploying the foreign server locally"
+    (cd "$LOCAL_PROJECT_DIR" && bash ./deploy.sh foreign)
 }
 
 sync_project() {
     log "Syncing production payload to the Iran host"
     local staging_dir="$IRAN_PROJECT_DIR"
-    ssh_iran "mkdir -p '$staging_dir'"
+    ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$staging_dir'"
     rsync -avz --delete \
         --exclude '.git' \
         --exclude '.github' \
@@ -243,6 +268,7 @@ sync_project() {
         --exclude '.env.*' \
         --exclude 'frontend' \
         --exclude 'node_modules' \
+        --exclude 'pip_packages' \
         --exclude 'tests' \
         --exclude 'tmp' \
         --exclude 'uploads' \
@@ -255,6 +281,21 @@ sync_project() {
     log "Production payload sync complete"
 }
 
+ship_images() {
+    local bundle="$RELEASE_TMP_DIR/docker-images.tar"
+    [[ -f "$bundle" ]] || die "Docker image bundle missing: $bundle"
+    log "Uploading Docker image bundle to the Iran host"
+    scp_iran "$bundle" "$IRAN_SSH_TARGET:$REMOTE_IMAGE_BUNDLE"
+    log "Docker image bundle upload complete"
+}
+
+load_images() {
+    log "Loading transferred Docker images on the Iran host"
+    ssh_iran "set -euo pipefail
+docker load -i '$REMOTE_IMAGE_BUNDLE'"
+    log "Docker images loaded on the Iran host"
+}
+
 deploy_iran() {
     log "Deploying Docker services on the Iran host"
     local wait_args=""
@@ -263,9 +304,6 @@ deploy_iran() {
     fi
     ssh_iran "set -euo pipefail
 cd '$IRAN_PROJECT_DIR'
-if [ '$IRAN_DOCKER_BUILD_ON_REMOTE' = '1' ]; then
-  DOCKER_BUILDKIT=1 docker build -f Dockerfile.iran -t trading_bot_base_iran .
-fi
 docker compose -f docker-compose.iran.yml up -d $wait_args
 docker compose -f docker-compose.iran.yml ps"
     log "Iran deploy step complete"
@@ -282,13 +320,52 @@ docker compose -f '$IRAN_PROJECT_DIR/docker-compose.iran.yml' ps >/dev/null"
     log "Health checks passed"
 }
 
-run_full() {
+decide_iran_connectivity() {
+    local normalized
+    normalized="$(printf '%s' "$IRAN_CONNECTIVITY_MODE" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+        online|yes|y|1)
+            printf 'online\n'
+            return 0
+            ;;
+        offline|no|n|0)
+            printf 'offline\n'
+            return 0
+            ;;
+        ask|"")
+            ;;
+        *)
+            die "Unsupported IRAN_CONNECTIVITY_MODE: $IRAN_CONNECTIVITY_MODE"
+            ;;
+    esac
+
+    echo
+    echo "Foreign deploy finished."
+    read -r -p "Does the Iran server currently have working internet access? [yes/no]: " answer
+    answer="$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')"
+    case "$answer" in
+        yes|y) printf 'online\n' ;;
+        no|n) printf 'offline\n' ;;
+        *) die "Please answer yes or no." ;;
+    esac
+}
+
+run_release() {
     check_local
+    build_release
+    deploy_foreign
+    local iran_mode
+    iran_mode="$(decide_iran_connectivity)"
+    if [[ "$iran_mode" == "offline" ]]; then
+        log "Iran offline scenario is not implemented yet. Stopping after the foreign deploy."
+        exit 20
+    fi
     bootstrap_iran
+    sync_project
     configure_nginx
     issue_cert
-    build_release
-    sync_project
+    ship_images
+    load_images
     deploy_iran
     healthcheck
 }
@@ -302,14 +379,17 @@ main() {
     load_manifest
     case "$COMMAND" in
         check-local) check_local ;;
+        release) run_release ;;
+        deploy-foreign) check_local; build_release; deploy_foreign ;;
         bootstrap-iran) check_local; bootstrap_iran ;;
         configure-nginx) check_local; configure_nginx ;;
         issue-cert) check_local; issue_cert ;;
         build-release) check_local; build_release ;;
         sync-project) check_local; sync_project ;;
+        ship-images) check_local; ship_images ;;
+        load-images) check_local; load_images ;;
         deploy-iran) check_local; deploy_iran ;;
         healthcheck) check_local; healthcheck ;;
-        full) run_full ;;
         *) die "Unknown command: $COMMAND" ;;
     esac
 }
