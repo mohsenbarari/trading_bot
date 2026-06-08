@@ -7,6 +7,7 @@ import asyncio
 import pytz
 
 from core.db import get_db
+from core.audit_logger import audit_log
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import get_active_customer_relation_for_customer
 from core.services.user_account_status_service import transition_user_account_status
@@ -211,6 +212,28 @@ def _is_admin_role(role) -> bool:
     return _role_value(role) in ADMIN_ROLE_VALUES
 
 
+def _audit_actor(actor) -> dict:
+    actor = _normalize_actor(actor)
+    return {
+        "actor_id": getattr(actor, "id", None),
+        "actor_role": _role_value(getattr(actor, "role", None)),
+    }
+
+
+def _audit_user_summary(user: User) -> dict:
+    return {
+        "role": _role_value(getattr(user, "role", None)),
+        "account_status": getattr(getattr(user, "account_status", None), "value", getattr(user, "account_status", None)),
+        "is_deleted": getattr(user, "is_deleted", None),
+        "trading_restricted": bool(getattr(user, "trading_restricted_until", None)),
+        "max_sessions": getattr(user, "max_sessions", None),
+        "can_block_users": getattr(user, "can_block_users", None),
+        "max_blocked_users": getattr(user, "max_blocked_users", None),
+        "max_accountants": getattr(user, "max_accountants", None),
+        "max_customers": getattr(user, "max_customers", None),
+    }
+
+
 def _ensure_actor_can_manage_target(actor, target_user: User):
     actor = _normalize_actor(actor)
     if actor is None:
@@ -286,6 +309,7 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     actor = _ensure_actor_can_manage_target(actor, user)
+    before_summary = _audit_user_summary(user)
     
     update_data = user_update.model_dump(exclude_unset=True)
     old_role = user.role
@@ -377,6 +401,17 @@ async def update_user(
     # رفع محدودیت (با تاخیر)
     if unlimit_needed:
         asyncio.create_task(send_delayed_removal_notification_api(get_db, user.id, user.telegram_id, is_block=False))
+
+    changed_fields = sorted(update_data.keys())
+    if changed_fields:
+        audit_log(
+            "user.update",
+            target_type="user",
+            target_id=user.id,
+            before_summary=before_summary,
+            after_summary={**_audit_user_summary(user), "updated_fields": changed_fields},
+            **_audit_actor(actor),
+        )
     
     return serialize_user_read(await attach_customer_user_context(db, user))
 
@@ -392,7 +427,8 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    _ensure_actor_can_manage_target(actor, user)
+    actor = _ensure_actor_can_manage_target(actor, user)
+    before_summary = _audit_user_summary(user)
 
     try:
         await delete_user_account(db, user)
@@ -401,6 +437,15 @@ async def delete_user(
             status_code=500, 
             detail=f"خطا در حذف کاربر: {str(e)}"
         )
+
+    audit_log(
+        "user.delete",
+        target_type="user",
+        target_id=user.id,
+        before_summary=before_summary,
+        after_summary={"is_deleted": True},
+        **_audit_actor(actor),
+    )
     
     return {"message": "User deleted successfully"}
 
@@ -415,9 +460,16 @@ async def terminate_user_sessions(
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    _ensure_actor_can_manage_target(actor, user)
+    actor = _ensure_actor_can_manage_target(actor, user)
 
     terminated_count = await force_clear_sessions(db, user.id)
+    audit_log(
+        "user.sessions_terminate_all",
+        target_type="user",
+        target_id=user.id,
+        after_summary={"terminated_sessions": terminated_count},
+        **_audit_actor(actor),
+    )
     return {
         "detail": f"{terminated_count} نشست پایان یافت",
         "terminated_sessions": terminated_count,

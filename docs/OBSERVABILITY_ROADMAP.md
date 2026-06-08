@@ -227,6 +227,8 @@ Acceptance:
 
 ## Stage 4: Audit Logging
 
+Status: Completed on 2026-06-08.
+
 Purpose: security-sensitive and business-critical actions must have an independent audit trail.
 
 Scope:
@@ -263,6 +265,12 @@ Security requirements:
 Acceptance:
 - An admin/security incident can be reconstructed from audit logs.
 - Audit logs are clearly distinguishable from normal app logs.
+
+Completion notes:
+- Added `core/audit_logger.py` with a strict stdout JSON audit schema, request-context inheritance, result normalization, and recursive redaction for summaries and reasons.
+- Added unit coverage in `tests/test_audit_logger.py` for schema fields, actor/request context, result normalization, and secret redaction.
+- Instrumented successful audit events for block/unblock, user update/delete/session reset, customer/accountant link/update/unlink/session termination, direct session termination/logout-all, login-request approve/reject, and admin broadcasts.
+- Kept audit payloads summary-only: no passwords, tokens, OTPs, raw broadcast content, raw request bodies, mobile numbers, message text, or file names are emitted.
 
 ## Stage 5: Metrics Foundation
 
