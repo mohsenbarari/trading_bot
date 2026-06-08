@@ -1,0 +1,96 @@
+{
+  "uid": "trading-bot-infrastructure-log-health",
+  "title": "Trading Bot Infrastructure Log Health",
+  "tags": ["trading-bot", "infrastructure", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Container Log Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (container) (rate({container=~\"trading_bot_.*\"} [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Error Rate by Service",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service, container) (rate({container=~\"trading_bot_.*\"} | json | level=~\"ERROR|CRITICAL\" [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Startup and Health Logs",
+      "type": "logs",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{container=~\"trading_bot_(app|bot|db|redis).*\"} |~ \"Starting|startup|healthy|ready|error|failed|unhealthy\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 4,
+      "title": "Recent Critical Logs",
+      "type": "logs",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{container=~\"trading_bot_.*\"} | json | level=~\"ERROR|CRITICAL\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 5,
+      "title": "DB and Redis Logs",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 17},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{container=~\"trading_bot_(db|redis).*\"}"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}
+

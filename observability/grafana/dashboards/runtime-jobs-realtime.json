@@ -1,0 +1,108 @@
+{
+  "uid": "trading-bot-runtime-jobs-realtime",
+  "title": "Trading Bot Runtime, Jobs, and Realtime",
+  "tags": ["trading-bot", "runtime", "jobs", "realtime", "bot"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Job Runs",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job_name) (rate({log_class=\"job\"} | json [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Job Errors",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job_name) (rate({log_class=\"job\"} | json | level=~\"ERROR|CRITICAL\" [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Job Duration p95",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.95, {log_class=\"job\"} | json | unwrap duration_ms [10m])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "ms"},
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Bot Activity",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level) (rate({service=\"bot\"} [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Realtime and Redis Listener Errors",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"api\"} |~ \"WebSocket|Redis listener|publish\" | json | level=~\"WARNING|ERROR|CRITICAL\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 6,
+      "title": "Recent Job Logs",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{log_class=\"job\"} | json"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}
+

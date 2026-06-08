@@ -2,6 +2,7 @@ apiVersion: 1
 
 datasources:
   - name: Trading Bot Loki
+    uid: trading-bot-loki
     type: loki
     access: proxy
     url: http://loki:3100
@@ -9,4 +10,3 @@ datasources:
     editable: false
     jsonData:
       maxLines: 1000
-

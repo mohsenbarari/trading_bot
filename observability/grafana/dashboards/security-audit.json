@@ -1,0 +1,104 @@
+{
+  "uid": "trading-bot-security-audit",
+  "title": "Trading Bot Security and Audit",
+  "tags": ["trading-bot", "security", "audit"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Audit Events by Action",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (action) (rate({log_class=\"audit\"} | json [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Audit Results",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate({log_class=\"audit\"} | json [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Auth and Session Failures",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (path, status_code) (rate({service=\"api\", log_class=\"access\"} | json | path=~\"/api/(auth|sessions).*\" | status_code >= 400 [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Forbidden/Unauthorized Requests",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status_code) (rate({service=\"api\", log_class=\"access\"} | json | status_code=~\"401|403\" [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Recent Audit Events",
+      "type": "logs",
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{log_class=\"audit\"} | json"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 6,
+      "title": "Security-Relevant API Errors",
+      "type": "logs",
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"api\"} | json | path=~\"/api/(auth|sessions|users|blocks|accountants|customers).*\" | status_code >= 400"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,96 @@
+{
+  "uid": "trading-bot-business-chat-upload",
+  "title": "Trading Bot Business, Chat, and Upload",
+  "tags": ["trading-bot", "business", "chat", "upload"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Trade and Market Events",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (event) (rate({service=\"api\"} | json | event=~\".*trade.*|.*offer.*|.*market.*\" [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Chat API Errors",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status_code, path) (rate({service=\"api\", log_class=\"access\"} | json | path=~\"/api/chat.*\" | status_code >= 400 [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Upload/Media Failures",
+      "type": "logs",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"api\"} |~ \"upload|media|file\" | json | level=~\"WARNING|ERROR|CRITICAL\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 4,
+      "title": "Recent Trade/Offer Logs",
+      "type": "logs",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"api\"} |~ \"trade|offer|market\" | json"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 5,
+      "title": "Recent Chat Logs",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 17},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"api\"} | json | path=~\"/api/chat.*\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}
+

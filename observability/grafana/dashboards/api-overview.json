@@ -1,0 +1,106 @@
+{
+  "uid": "trading-bot-api-overview",
+  "title": "Trading Bot API Overview",
+  "tags": ["trading-bot", "api", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "constant",
+        "query": "api",
+        "current": {
+          "text": "api",
+          "value": "api"
+        },
+        "hide": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate({service=\"$service\", log_class=\"access\"} | json | event=\"http.request.completed\" [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "HTTP Status Classes",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status_code) (rate({service=\"$service\", log_class=\"access\"} | json | event=\"http.request.completed\" [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "p95 Request Duration",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.95, {service=\"$service\", log_class=\"access\"} | json | unwrap duration_ms [5m])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Top API Paths",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (path) (count_over_time({service=\"$service\", log_class=\"access\"} | json | event=\"http.request.completed\" [30m])))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Recent API Errors",
+      "type": "logs",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"$service\"} | json | level=~\"ERROR|CRITICAL\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}
+
