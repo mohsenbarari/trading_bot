@@ -74,7 +74,7 @@ class MetricsRegistry:
         return bool(self._db_path)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, timeout=0.2)
+        conn = sqlite3.connect(self._db_path, timeout=1.0)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(
             """
@@ -140,10 +140,11 @@ class MetricsRegistry:
             self._help.clear()
             self._types.clear()
         if self._shared_enabled():
-            try:
-                os.remove(self._db_path)
-            except FileNotFoundError:
-                pass
+            for path in (self._db_path, f"{self._db_path}-wal", f"{self._db_path}-shm"):
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
 
     def counter(self, name: str, help_text: str, amount: float = 1, **labels: Any) -> None:
         self._upsert_add(name, "counter", labels, "", amount, help_text)
@@ -191,7 +192,7 @@ class MetricsRegistry:
             state["count"] += 1
             for bucket in _HISTOGRAM_BUCKETS:
                 if value <= bucket:
-                            state["buckets"][bucket] += 1
+                    state["buckets"][bucket] += 1
 
     def _render_shared_prometheus(self) -> str | None:
         if not self._shared_enabled() or not os.path.exists(self._db_path):
