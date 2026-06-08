@@ -16,6 +16,10 @@ def get_request_context() -> dict[str, Any]:
     return dict(_request_context.get())
 
 
+def replace_request_context(values: dict[str, Any]) -> None:
+    _request_context.set(dict(values))
+
+
 def set_request_context(**values: Any) -> None:
     current = get_request_context()
     for key, value in values.items():

@@ -7,12 +7,14 @@ import hashlib
 import httpx
 import redis.asyncio as redis
 from core.config import settings
+from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
 from core.server_routing import default_peer_server_url
 
 # Configure logging
 configure_logging("sync-worker")
 logger = logging.getLogger(__name__)
+_loop_errors = RepeatedErrorLogger(every=10)
 
 async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):
     """Send item to target server with security headers"""
@@ -68,7 +70,9 @@ async def main():
         logger.warning(f"⚠️ Sync Worker not fully configured. URL={target_url}, API_Key={'***' if api_key else 'None'}")
     
     async with httpx.AsyncClient() as client:
+        iteration = 0
         while True:
+            iteration += 1
             try:
                 # Wait for items in queue
                 # BLPOP blocks until item is available
@@ -84,7 +88,16 @@ async def main():
                     logger.error(f"❌ Invalid JSON in queue: {payload}")
                     continue
                 
-                logger.info(f"📦 Processing item from {origin_queue}: {data.get('hash', 'unknown')}")
+                item_hash = data.get('hash', 'unknown')
+                logger.info(
+                    "📦 Processing sync item",
+                    extra={
+                        "event": "job.item.received",
+                        "job_name": "sync_worker",
+                        "origin_queue": origin_queue,
+                        "sync_item_hash": item_hash,
+                    },
+                )
                 
                 if not target_url or not api_key:
                      logger.warning("Target URL or API Key missing. Re-queueing to retry queue and sleeping.")
@@ -93,25 +106,50 @@ async def main():
                      continue
 
                 try:
-                    response = await send_sync_item(client, data, target_url, api_key)
+                    start_time = time.perf_counter()
+                    run_id = None
+                    with job_context("sync_worker", iteration=iteration, origin_queue=origin_queue, sync_item_hash=item_hash) as run_id:
+                        response = await send_sync_item(client, data, target_url, api_key)
                     
-                    if response.status_code == 200:
-                        logger.info("✅ Successfully synced item.")
-                        # TODO: Update DB status (mark verified/synced)
-                        # This requires async db session access
-                    else:
-                        logger.error(f"❌ Sync failed: {response.status_code} - {response.text}")
-                        # Push to retry queue (at the end)
-                        await r.rpush(retry_queue, payload)
-                        await asyncio.sleep(1) # Backoff slightly
-                        
+                        if response.status_code == 200:
+                            logger.info(
+                                "✅ Successfully synced item.",
+                                extra={
+                                    "event": "job.item.completed",
+                                    "job_name": "sync_worker",
+                                    "run_id": run_id,
+                                    "iteration": iteration,
+                                    "status_code": response.status_code,
+                                    "duration_ms": duration_ms_since(start_time),
+                                },
+                            )
+                            # TODO: Update DB status (mark verified/synced)
+                            # This requires async db session access
+                        else:
+                            logger.error(
+                                "❌ Sync failed: %s - %s",
+                                response.status_code,
+                                response.text,
+                                extra={
+                                    "event": "job.item.failed",
+                                    "job_name": "sync_worker",
+                                    "run_id": run_id,
+                                    "iteration": iteration,
+                                    "status_code": response.status_code,
+                                    "duration_ms": duration_ms_since(start_time),
+                                },
+                            )
+                            # Push to retry queue (at the end)
+                            await r.rpush(retry_queue, payload)
+                            await asyncio.sleep(1) # Backoff slightly
+
                 except httpx.RequestError as req_err:
-                    logger.error(f"❌ Network error during sync: {req_err}")
+                    _loop_errors.log(logger, "❌ Network error during sync: %s", req_err, job_name="sync_worker", run_id=run_id)
                     await r.rpush(retry_queue, payload)
                     await asyncio.sleep(5) # Network retry backoff
 
             except Exception as e:
-                logger.error(f"❌ Error in Sync Worker Loop: {e}")
+                _loop_errors.log(logger, "❌ Error in Sync Worker Loop: %s", e, job_name="sync_worker")
                 await asyncio.sleep(5)
 
 if __name__ == "__main__":
