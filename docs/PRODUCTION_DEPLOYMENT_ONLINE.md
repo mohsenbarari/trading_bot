@@ -43,7 +43,11 @@ Then fill:
 - certbot email
 - path to the private runtime `.env` file that should become `IRAN_PROJECT_DIR/.env`
 
+If the manifest file does not exist, the script will prompt for these values and create it in the repo path automatically.
+
 The script also updates `/etc/hosts` on both servers so the foreign and Iran domains resolve to the expected internal IPs during sync and runtime traffic. That matters because the sync worker still resolves peer URLs from the configured server domains.
+
+Both servers are forced to `UTC` during the release flow.
 
 ## Primary command
 
@@ -65,6 +69,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - validates local tools (`ssh`, `scp`, `rsync`, `docker`, `npm`, `python3`)
 - validates the manifest
 - checks SSH connectivity to the Iran server
+- if the runtime env file is missing, prompts for the required values and creates it
 
 ### 2. Local build + local foreign deploy
 - builds the frontend on the foreign server
@@ -89,7 +94,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - installs Nginx, Certbot, and `python3-certbot-nginx`
 - attempts to install Docker Compose plugin
 - creates deploy directories
-- applies host timezone
+- forces UTC on the Iran host
 
 ### 5. `/etc/hosts` sync
 - writes a managed hosts block on the foreign server
