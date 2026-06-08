@@ -141,6 +141,16 @@ First checks:
 - Check storage paths and disk pressure manually.
 - Do not add file names, media URLs, captions, signed URLs, or message text to alert annotations.
 
+### Captured exception spike
+
+Trigger:
+- Captured exception events are elevated.
+
+First checks:
+- Open `Trading Bot Error Tracking`.
+- Follow `docs/OBSERVABILITY_ERROR_TRACKING.md#captured-exception-spike`.
+- Use `error_fingerprint`, `request_id`, and `release_sha` for investigation.
+
 ## Not Fully Covered Yet
 
 The following initial-alert goals require infrastructure metrics exporters and are intentionally deferred to Stage 11 production hardening:
@@ -175,4 +185,3 @@ Alert payloads must not include:
 - mobile numbers
 - file names
 - media URLs or signed URLs
-

@@ -1,0 +1,90 @@
+{
+  "uid": "trading-bot-error-tracking",
+  "title": "Trading Bot Error Tracking",
+  "tags": ["trading-bot", "errors", "tracking"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Captured Exceptions",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (error_source) (rate({log_class=\"error\", event=\"error.exception.captured\"} [5m]))"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Top Error Fingerprints",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, sum by (error_fingerprint, exception_type, error_source) (count_over_time({log_class=\"error\", event=\"error.exception.captured\"} | json [24h])))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Errors by Release",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (release_sha) (rate({log_class=\"error\", event=\"error.exception.captured\"} | json [15m]))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Recent Captured Exceptions",
+      "type": "logs",
+      "gridPos": {"h": 12, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{log_class=\"error\", event=\"error.exception.captured\"} | json"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 5,
+      "title": "Error Search by Request ID",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{log_class=\"error\", event=\"error.exception.captured\"} | json | request_id != \"\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}

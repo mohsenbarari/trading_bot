@@ -423,6 +423,8 @@ Completion notes:
 
 ## Stage 9: Error Tracking
 
+Status: Completed on 2026-06-08.
+
 Purpose: unexpected exceptions must be grouped and traceable across releases.
 
 Options:
@@ -440,6 +442,14 @@ Acceptance:
 - Exceptions are grouped by root cause.
 - Error tracking does not collect secrets.
 - Release regressions are visible.
+
+Completion notes:
+- Added `core/error_tracking.py` for scrubbed exception capture, stable `error_fingerprint` grouping, request/actor/job/bot context tags, project-local frames, and redacted messages/extras.
+- Added optional Sentry bridge guarded by `ERROR_TRACKING_DSN`; no Sentry dependency or DSN is required by default.
+- Wired unexpected API request exceptions, bot update exceptions, and background job repeated errors into error capture.
+- Added `tests/test_error_tracking.py` for grouping stability and secret redaction.
+- Added `Trading Bot Error Tracking` Grafana dashboard and a captured-exception-spike alert rule.
+- Added `docs/OBSERVABILITY_ERROR_TRACKING.md` with capture points, Sentry setup, LogQL searches, alert response, and security rules.
 
 ## Stage 10: DevEx and Runbooks
 
@@ -539,6 +549,6 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 6: Log Collection and Search | Completed | Added optional local Loki/Promtail/Grafana stack, low-cardinality Docker log labels, Grafana datasource provisioning, LogQL search examples, and observability make targets. |
 | Stage 7: Dashboards | Completed | Added provisioned Grafana dashboards for API, jobs/bot/realtime, security/audit, business/chat/upload, and infrastructure log health with stable Loki labels and dashboard documentation. |
 | Stage 8: Alerting | Completed | Added Grafana alert provisioning, inert local contact point, Loki-backed core alert rules, notification policy, and alert runbook with security constraints. |
-| Stage 9: Error Tracking | Planned | Add scrubbed exception grouping after logging/metrics baseline stabilizes. |
+| Stage 9: Error Tracking | Completed | Added scrubbed grouped error capture, optional Sentry bridge, API/bot/job hooks, error tracking dashboard, alert rule, focused tests, and runbook documentation. |
 | Stage 10: DevEx and Runbooks | Planned | Add make targets and incident investigation runbooks. |
 | Stage 11: Production Hardening | Planned | Add retention, access control, sampling, and log overhead validation. |

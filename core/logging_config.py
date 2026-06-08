@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import traceback
 from datetime import datetime, timezone
@@ -161,3 +162,23 @@ def configure_logging(service_name: str) -> None:
         inherited = logging.getLogger(inherited_logger)
         inherited.handlers.clear()
         inherited.propagate = True
+
+    if not os.environ.get("ERROR_TRACKING_DSN"):
+        return
+
+    try:
+        from core.config import settings
+        dsn = getattr(settings, "error_tracking_dsn", None)
+        if dsn:
+            import sentry_sdk  # type: ignore
+
+            sentry_sdk.init(
+                dsn=dsn,
+                environment=getattr(settings, "environment", None),
+                release=getattr(settings, "release_sha", None),
+                traces_sample_rate=0.0,
+                sample_rate=float(getattr(settings, "error_tracking_sample_rate", 1.0) or 1.0),
+                send_default_pii=False,
+            )
+    except Exception:
+        logging.getLogger(__name__).debug("Error tracking SDK initialization skipped", exc_info=True)

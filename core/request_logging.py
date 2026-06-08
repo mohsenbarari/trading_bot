@@ -10,6 +10,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import Response
 
+from core.error_tracking import capture_exception
 from core.metrics import normalize_http_route, record_http_request
 from core.request_context import clear_request_context, set_request_context
 
@@ -128,8 +129,18 @@ def install_request_logging_middleware(app: Any) -> None:
             status_code = response.status_code
             response.headers[REQUEST_ID_HEADER] = request_id
             return response
-        except Exception:
+        except Exception as exc:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            error_id = capture_exception(
+                exc,
+                source="api.request",
+                extra={
+                    "method": request.method,
+                    "path": path,
+                    "status_code": status_code,
+                    "sensitive_route": is_sensitive_path(path),
+                },
+            )
             _logger.exception(
                 "HTTP request failed",
                 extra={
@@ -142,6 +153,7 @@ def install_request_logging_middleware(app: Any) -> None:
                     "duration_ms": duration_ms,
                     "client_ip": client_ip_from_request(request),
                     "sensitive_route": is_sensitive_path(path),
+                    "error_fingerprint": error_id,
                 },
             )
             raise
