@@ -257,10 +257,15 @@ load_manifest() {
     IRAN_SSH_TARGET="$IRAN_SSH_USER@$IRAN_HOST"
     case "$IRAN_SSH_AUTH_METHOD" in
         key)
-            : "${IRAN_SSH_PRIVATE_KEY_PATH:?IRAN_SSH_PRIVATE_KEY_PATH is required for key auth}"
-            [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" ]] || die "IRAN_SSH_PRIVATE_KEY_PATH does not exist: $IRAN_SSH_PRIVATE_KEY_PATH"
-            SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
-            SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+            if [[ -n "${IRAN_SSH_PRIVATE_KEY_PATH:-}" ]]; then
+                [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" ]] || die "IRAN_SSH_PRIVATE_KEY_PATH does not exist: $IRAN_SSH_PRIVATE_KEY_PATH"
+                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+            else
+                log "IRAN_SSH_PRIVATE_KEY_PATH is empty; using SSH agent/default keys for Iran access."
+                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
+                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
+            fi
             ;;
         password)
             : "${IRAN_SSH_PASSWORD:?IRAN_SSH_PASSWORD is required for password auth}"
