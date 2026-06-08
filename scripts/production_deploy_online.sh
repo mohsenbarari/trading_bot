@@ -34,6 +34,7 @@ Notes:
   - It then asks whether Iran currently has working internet.
   - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
   - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
+  - For SSH, prefer key-based auth. Password auth is supported only when sshpass is installed.
 EOF
 }
 
@@ -87,12 +88,17 @@ load_manifest() {
     : "${IRAN_HOST:?IRAN_HOST is required}"
     : "${IRAN_SSH_USER:?IRAN_SSH_USER is required}"
     : "${IRAN_SSH_PORT:?IRAN_SSH_PORT is required}"
+    : "${IRAN_SSH_AUTH_METHOD:=key}"
     : "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required}"
     : "${IRAN_DEPLOY_BASE_DIR:?IRAN_DEPLOY_BASE_DIR is required}"
     : "${IRAN_TIMEZONE:?IRAN_TIMEZONE is required}"
     : "${IRAN_APP_DOMAIN:?IRAN_APP_DOMAIN is required}"
     : "${IRAN_CERTBOT_EMAIL:?IRAN_CERTBOT_EMAIL is required}"
     : "${IRAN_ENV_SOURCE_PATH:?IRAN_ENV_SOURCE_PATH is required}"
+    : "${IRAN_PUBLIC_IP:?IRAN_PUBLIC_IP is required}"
+    : "${IRAN_PUBLIC_DOMAIN:?IRAN_PUBLIC_DOMAIN is required}"
+    : "${FOREIGN_PUBLIC_IP:?FOREIGN_PUBLIC_IP is required}"
+    : "${FOREIGN_PUBLIC_DOMAIN:?FOREIGN_PUBLIC_DOMAIN is required}"
 
     IRAN_SKIP_CERTBOT="${IRAN_SKIP_CERTBOT:-0}"
     IRAN_SKIP_FRONTEND_BUILD="${IRAN_SKIP_FRONTEND_BUILD:-0}"
@@ -103,23 +109,42 @@ load_manifest() {
     IRAN_SKIP_FOREIGN_DEPLOY="${IRAN_SKIP_FOREIGN_DEPLOY:-0}"
     IRAN_HEALTHCHECK_URL="${IRAN_HEALTHCHECK_URL:-https://$IRAN_APP_DOMAIN/api/config}"
     IRAN_LOCAL_API_URL="${IRAN_LOCAL_API_URL:-http://127.0.0.1:8000/api/config}"
+    IRAN_SSH_AUTH_METHOD="${IRAN_SSH_AUTH_METHOD,,}"
+    IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
 
     [[ -d "$LOCAL_PROJECT_DIR" ]] || die "LOCAL_PROJECT_DIR does not exist: $LOCAL_PROJECT_DIR"
     [[ -d "$LOCAL_FRONTEND_DIR" ]] || die "LOCAL_FRONTEND_DIR does not exist: $LOCAL_FRONTEND_DIR"
     [[ -f "$IRAN_ENV_SOURCE_PATH" ]] || die "IRAN_ENV_SOURCE_PATH does not exist: $IRAN_ENV_SOURCE_PATH"
 
     IRAN_SSH_TARGET="$IRAN_SSH_USER@$IRAN_HOST"
+    case "$IRAN_SSH_AUTH_METHOD" in
+        key)
+            : "${IRAN_SSH_PRIVATE_KEY_PATH:?IRAN_SSH_PRIVATE_KEY_PATH is required for key auth}"
+            [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" ]] || die "IRAN_SSH_PRIVATE_KEY_PATH does not exist: $IRAN_SSH_PRIVATE_KEY_PATH"
+            SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+            SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+            ;;
+        password)
+            : "${IRAN_SSH_PASSWORD:?IRAN_SSH_PASSWORD is required for password auth}"
+            need_cmd sshpass
+            SSH_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
+            SCP_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
+            ;;
+        *)
+            die "Unsupported IRAN_SSH_AUTH_METHOD: $IRAN_SSH_AUTH_METHOD"
+            ;;
+    esac
     RSYNC_SSH="ssh -p $IRAN_SSH_PORT -o StrictHostKeyChecking=no"
     RELEASE_TMP_DIR="$LOCAL_PROJECT_DIR/tmp/production-release"
     REMOTE_IMAGE_BUNDLE="$IRAN_DEPLOY_BASE_DIR/releases/trading-bot-images.tar"
 }
 
 ssh_iran() {
-    ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no "$IRAN_SSH_TARGET" "$@"
+    "${SSH_IRAN_CMD[@]}" "$IRAN_SSH_TARGET" "$@"
 }
 
 scp_iran() {
-    scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no "$@"
+    "${SCP_IRAN_CMD[@]}" "$@"
 }
 
 ensure_local_tools() {
@@ -131,11 +156,13 @@ ensure_local_tools() {
     need_cmd npm
     need_cmd python3
     need_cmd md5sum
+    need_cmd sed
 }
 
 check_local() {
     log "Checking local prerequisites"
     ensure_local_tools
+    [[ "$(id -u)" -eq 0 ]] || die "This release script must be run as root so it can update /etc/hosts and manage Docker."
     ssh_iran "echo connected-to-\$(hostname)"
     [[ -f "$LOCAL_PROJECT_DIR/requirements.txt" ]] || die "requirements.txt missing"
     [[ -f "$LOCAL_PROJECT_DIR/docker-compose.iran.yml" ]] || die "docker-compose.iran.yml missing"
@@ -200,6 +227,58 @@ issue_cert() {
     ssh_iran "set -euo pipefail
 certbot --nginx -d '$IRAN_APP_DOMAIN' --non-interactive --agree-tos --email '$IRAN_CERTBOT_EMAIL' --redirect"
     log "SSL certificate step completed"
+}
+
+hosts_block() {
+    cat <<EOF
+# trading-bot-production-hosts START
+$FOREIGN_PUBLIC_IP $FOREIGN_PUBLIC_DOMAIN
+$IRAN_PUBLIC_IP $IRAN_PUBLIC_DOMAIN
+# trading-bot-production-hosts END
+EOF
+}
+
+replace_hosts_block_local() {
+    local hosts_file="/etc/hosts"
+    local block
+    block="$(hosts_block)"
+    local tmp
+    tmp="$(mktemp)"
+    if grep -qF "# trading-bot-production-hosts START" "$hosts_file"; then
+        sed '/^# trading-bot-production-hosts START$/,/^# trading-bot-production-hosts END$/d' "$hosts_file" > "$tmp"
+    else
+        cat "$hosts_file" > "$tmp"
+    fi
+    printf '\n%s\n' "$block" >> "$tmp"
+    mv "$tmp" "$hosts_file"
+}
+
+replace_hosts_block_remote() {
+    local block
+    block="$(hosts_block)"
+    ssh_iran "set -euo pipefail
+hosts_file='/etc/hosts'
+tmp=\$(mktemp)
+if grep -qF '# trading-bot-production-hosts START' \"\$hosts_file\"; then
+  sed '/^# trading-bot-production-hosts START$/,/^# trading-bot-production-hosts END$/d' \"\$hosts_file\" > \"\$tmp\"
+else
+  cat \"\$hosts_file\" > \"\$tmp\"
+fi
+cat >> \"\$tmp\" <<'EOF_HOSTS'
+$block
+EOF_HOSTS
+mv \"\$tmp\" \"\$hosts_file\""
+}
+
+sync_hosts_mappings() {
+    if [[ "$IRAN_HOSTS_SYNC_ENABLED" != "1" ]]; then
+        log "Skipping /etc/hosts sync because IRAN_HOSTS_SYNC_ENABLED=0"
+        return 0
+    fi
+    log "Synchronizing host mappings on foreign and Iran"
+    replace_hosts_block_local
+    replace_hosts_block_remote
+    log "Host mappings synchronized"
 }
 
 prepare_pip_packages() {
@@ -354,6 +433,7 @@ run_release() {
     check_local
     build_release
     deploy_foreign
+    sync_hosts_mappings
     local iran_mode
     iran_mode="$(decide_iran_connectivity)"
     if [[ "$iran_mode" == "offline" ]]; then
