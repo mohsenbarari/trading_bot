@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-deploy production-online-health production-online-full
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
 
 help:
 	@echo ""
@@ -66,16 +66,18 @@ help:
 	@echo "  make messenger-benchmark-run - Run the official Messenger performance benchmark"
 	@echo "  make messenger-benchmark-report - Build comparison-summary and surface-status artifacts"
 	@echo "  make messenger-benchmark-all - Run the full benchmark prep + measure + report pipeline"
-	@echo "  make production-online-help   - Show the Iran-online production deploy helper usage"
+	@echo "  make production-release       - Run the full foreign-controlled production release flow"
+	@echo "  make production-online-help   - Show the production release helper usage"
 	@echo "  make production-online-check  - Validate the production deploy manifest and SSH access"
 	@echo "  make production-online-bootstrap - Install Iran host prerequisites over SSH"
 	@echo "  make production-online-nginx  - Render and install the Iran Nginx config"
 	@echo "  make production-online-cert   - Request/renew SSL on the Iran host"
-	@echo "  make production-online-build  - Build frontend locally and prepare wheel cache"
+	@echo "  make production-online-build  - Build local artifacts for the release"
 	@echo "  make production-online-sync   - Rsync the production payload to the Iran host"
-	@echo "  make production-online-deploy - Build/start the Iran Docker stack"
+	@echo "  make production-online-ship-images - Upload the prepared Docker image bundle"
+	@echo "  make production-online-load-images - Load the uploaded Docker image bundle on Iran"
+	@echo "  make production-online-deploy - Start the Iran Docker stack without remote build"
 	@echo "  make production-online-health - Run post-deploy health checks"
-	@echo "  make production-online-full   - Run the full Iran-online deployment flow"
 	@echo ""
 
 # --- Deploy Commands ---
@@ -228,6 +230,9 @@ frontend-test-e2e-matrix:
 messenger-surface-report:
 	@python3 ./scripts/build_messenger_surface_report.py
 
+production-release:
+	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env}
+
 production-online-help:
 	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} help
 
@@ -249,14 +254,17 @@ production-online-build:
 production-online-sync:
 	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} sync-project
 
+production-online-ship-images:
+	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} ship-images
+
+production-online-load-images:
+	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} load-images
+
 production-online-deploy:
 	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} deploy-iran
 
 production-online-health:
 	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} healthcheck
-
-production-online-full:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} full
 
 messenger-query-plans:
 	@python3 ./scripts/report_messenger_query_plans.py
