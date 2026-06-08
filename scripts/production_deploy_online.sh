@@ -51,6 +51,138 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
 
+prompt_value() {
+    local __name="$1"
+    local __label="$2"
+    local __default="${3:-}"
+    local __secret="${4:-0}"
+    local __input=""
+
+    if [[ -n "$__default" ]]; then
+        if [[ "$__secret" == "1" ]]; then
+            read -r -s -p "$__label [$__default]: " __input
+            echo
+        else
+            read -r -p "$__label [$__default]: " __input
+        fi
+        __input="${__input:-$__default}"
+    else
+        while [[ -z "$__input" ]]; do
+            if [[ "$__secret" == "1" ]]; then
+                read -r -s -p "$__label: " __input
+                echo
+            else
+                read -r -p "$__label: " __input
+            fi
+        done
+    fi
+
+    printf -v "$__name" '%s' "$__input"
+}
+
+ensure_manifest_file() {
+    if [[ -f "$MANIFEST_PATH" ]]; then
+        return 0
+    fi
+
+    log "Manifest not found. Creating it at $MANIFEST_PATH"
+    mkdir -p "$(dirname "$MANIFEST_PATH")"
+
+    local local_project_dir="$PROJECT_DIR"
+    local local_frontend_dir="$PROJECT_DIR/frontend"
+    local local_dist_dir="$PROJECT_DIR/mini_app_dist"
+    local foreign_public_ip=""
+    local foreign_public_domain=""
+    local foreign_timezone="UTC"
+    local iran_host=""
+    local iran_ssh_user="root"
+    local iran_ssh_port="22"
+    local iran_ssh_auth_method="key"
+    local iran_ssh_private_key_path="$HOME/.ssh/id_ed25519"
+    local iran_ssh_password=""
+    local iran_project_dir="/srv/trading-bot/current"
+    local iran_deploy_base_dir="/srv/trading-bot"
+    local iran_timezone="UTC"
+    local iran_public_ip=""
+    local iran_public_domain=""
+    local iran_app_domain=""
+    local iran_certbot_email=""
+    local iran_env_source_path="$PROJECT_DIR/deploy/production/iran.runtime.env"
+
+    prompt_value local_project_dir "Local project dir" "$local_project_dir"
+    prompt_value local_frontend_dir "Local frontend dir" "$local_frontend_dir"
+    prompt_value local_dist_dir "Local dist dir" "$local_dist_dir"
+    prompt_value foreign_public_ip "Foreign public IP"
+    prompt_value foreign_public_domain "Foreign public domain"
+    prompt_value foreign_timezone "Foreign timezone" "$foreign_timezone"
+    prompt_value iran_host "Iran SSH host/IP"
+    prompt_value iran_ssh_user "Iran SSH user" "$iran_ssh_user"
+    prompt_value iran_ssh_port "Iran SSH port" "$iran_ssh_port"
+    prompt_value iran_ssh_auth_method "Iran SSH auth method (key/password)" "$iran_ssh_auth_method"
+    if [[ "${iran_ssh_auth_method,,}" == "key" ]]; then
+        prompt_value iran_ssh_private_key_path "Iran SSH private key path" "$iran_ssh_private_key_path"
+    else
+        prompt_value iran_ssh_password "Iran SSH password" "" 1
+    fi
+    prompt_value iran_project_dir "Iran project dir" "$iran_project_dir"
+    prompt_value iran_deploy_base_dir "Iran deploy base dir" "$iran_deploy_base_dir"
+    prompt_value iran_timezone "Iran timezone" "$iran_timezone"
+    prompt_value iran_public_ip "Iran public IP"
+    prompt_value iran_public_domain "Iran public domain"
+    prompt_value iran_app_domain "Iran app domain" "$iran_public_domain"
+    prompt_value iran_certbot_email "Certbot email"
+    prompt_value iran_env_source_path "Iran runtime env source path" "$iran_env_source_path"
+
+    cat > "$MANIFEST_PATH" <<EOF
+# Production deployment manifest for the foreign-controlled release flow.
+
+# --- Local / foreign control plane ---
+LOCAL_PROJECT_DIR=$local_project_dir
+LOCAL_FRONTEND_DIR=$local_frontend_dir
+LOCAL_DIST_DIR=$local_dist_dir
+FOREIGN_PUBLIC_IP=$foreign_public_ip
+FOREIGN_PUBLIC_DOMAIN=$foreign_public_domain
+FOREIGN_TIMEZONE=$foreign_timezone
+
+# --- Iran SSH access ---
+IRAN_HOST=$iran_host
+IRAN_SSH_USER=$iran_ssh_user
+IRAN_SSH_PORT=$iran_ssh_port
+IRAN_SSH_AUTH_METHOD=${iran_ssh_auth_method,,}
+IRAN_SSH_PRIVATE_KEY_PATH=$iran_ssh_private_key_path
+IRAN_SSH_PASSWORD=$iran_ssh_password
+IRAN_PROJECT_DIR=$iran_project_dir
+IRAN_DEPLOY_BASE_DIR=$iran_deploy_base_dir
+IRAN_TIMEZONE=$iran_timezone
+
+# --- Iran public app ---
+IRAN_PUBLIC_IP=$iran_public_ip
+IRAN_APP_DOMAIN=$iran_app_domain
+IRAN_PUBLIC_DOMAIN=$iran_public_domain
+IRAN_CERTBOT_EMAIL=$iran_certbot_email
+
+# --- Local source env -> remote runtime env ---
+IRAN_ENV_SOURCE_PATH=$iran_env_source_path
+
+# --- Optional runtime toggles ---
+IRAN_SKIP_CERTBOT=0
+IRAN_SKIP_FRONTEND_BUILD=0
+IRAN_DEPLOY_WITH_WAIT=1
+IRAN_RUN_POST_DEPLOY_HEALTHCHECK=1
+IRAN_ENABLE_UFW=0
+IRAN_CONNECTIVITY_MODE=ask
+IRAN_SKIP_FOREIGN_DEPLOY=0
+IRAN_HOSTS_SYNC_ENABLED=1
+
+# --- Healthcheck ---
+IRAN_HEALTHCHECK_URL=https://$iran_app_domain/api/config
+IRAN_LOCAL_API_URL=http://127.0.0.1:8000/api/config
+EOF
+
+    chmod 600 "$MANIFEST_PATH" || true
+    log "Created manifest at $MANIFEST_PATH"
+}
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -91,7 +223,8 @@ load_manifest() {
     : "${IRAN_SSH_AUTH_METHOD:=key}"
     : "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required}"
     : "${IRAN_DEPLOY_BASE_DIR:?IRAN_DEPLOY_BASE_DIR is required}"
-    : "${IRAN_TIMEZONE:?IRAN_TIMEZONE is required}"
+    : "${FOREIGN_TIMEZONE:=UTC}"
+    : "${IRAN_TIMEZONE:=UTC}"
     : "${IRAN_APP_DOMAIN:?IRAN_APP_DOMAIN is required}"
     : "${IRAN_CERTBOT_EMAIL:?IRAN_CERTBOT_EMAIL is required}"
     : "${IRAN_ENV_SOURCE_PATH:?IRAN_ENV_SOURCE_PATH is required}"
@@ -111,6 +244,12 @@ load_manifest() {
     IRAN_LOCAL_API_URL="${IRAN_LOCAL_API_URL:-http://127.0.0.1:8000/api/config}"
     IRAN_SSH_AUTH_METHOD="${IRAN_SSH_AUTH_METHOD,,}"
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
+
+    if [[ "$FOREIGN_TIMEZONE" != "UTC" || "$IRAN_TIMEZONE" != "UTC" ]]; then
+        log "Overriding configured timezones to UTC for production release."
+        FOREIGN_TIMEZONE="UTC"
+        IRAN_TIMEZONE="UTC"
+    fi
 
     [[ -d "$LOCAL_PROJECT_DIR" ]] || die "LOCAL_PROJECT_DIR does not exist: $LOCAL_PROJECT_DIR"
     [[ -d "$LOCAL_FRONTEND_DIR" ]] || die "LOCAL_FRONTEND_DIR does not exist: $LOCAL_FRONTEND_DIR"
@@ -186,7 +325,7 @@ fi
 systemctl enable --now docker
 systemctl enable --now nginx
 mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_PROJECT_DIR'
-timedatectl set-timezone '$IRAN_TIMEZONE' || true
+timedatectl set-timezone 'UTC' || true
 if command -v ufw >/dev/null 2>&1 && [ '$IRAN_ENABLE_UFW' = '1' ]; then
   ufw allow OpenSSH || true
   ufw allow 80/tcp || true
@@ -270,6 +409,11 @@ EOF_HOSTS
 mv \"\$tmp\" \"\$hosts_file\""
 }
 
+ensure_local_timezone_utc() {
+    log "Ensuring foreign host timezone is UTC"
+    timedatectl set-timezone 'UTC' || true
+}
+
 sync_hosts_mappings() {
     if [[ "$IRAN_HOSTS_SYNC_ENABLED" != "1" ]]; then
         log "Skipping /etc/hosts sync because IRAN_HOSTS_SYNC_ENABLED=0"
@@ -323,6 +467,86 @@ build_release() {
     log "Local release build complete"
 }
 
+ensure_runtime_env_file() {
+    if [[ -f "$IRAN_ENV_SOURCE_PATH" ]]; then
+        return 0
+    fi
+
+    log "Iran runtime env file not found. Creating it at $IRAN_ENV_SOURCE_PATH"
+    mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")"
+
+    local bot_token=""
+    local bot_username=""
+    local database_url=""
+    local sync_database_url=""
+    local postgres_db=""
+    local postgres_user=""
+    local postgres_password=""
+    local frontend_url=""
+    local redis_url=""
+    local jwt_secret_key=""
+    local dev_api_key=""
+    local sync_api_key=""
+    local channel_id=""
+    local channel_invite_link=""
+    local smsir_api_key=""
+    local smsir_line_number=""
+    local s3_endpoint_url=""
+    local s3_access_key=""
+    local s3_secret_key=""
+    local s3_bucket_name=""
+    local error_tracking_dsn=""
+
+    prompt_value bot_token "BOT_TOKEN" "" 1
+    prompt_value bot_username "BOT_USERNAME"
+    prompt_value database_url "DATABASE_URL"
+    prompt_value sync_database_url "SYNC_DATABASE_URL"
+    prompt_value postgres_db "POSTGRES_DB"
+    prompt_value postgres_user "POSTGRES_USER"
+    prompt_value postgres_password "POSTGRES_PASSWORD" "" 1
+    prompt_value frontend_url "FRONTEND_URL"
+    prompt_value redis_url "REDIS_URL"
+    prompt_value jwt_secret_key "JWT_SECRET_KEY" "" 1
+    prompt_value dev_api_key "DEV_API_KEY" "" 1
+    prompt_value sync_api_key "SYNC_API_KEY" "" 1
+    prompt_value channel_id "CHANNEL_ID"
+    prompt_value channel_invite_link "CHANNEL_INVITE_LINK"
+    prompt_value smsir_api_key "SMSIR_API_KEY" "" 1
+    prompt_value smsir_line_number "SMSIR_LINE_NUMBER"
+    prompt_value s3_endpoint_url "S3_ENDPOINT_URL"
+    prompt_value s3_access_key "S3_ACCESS_KEY" "" 1
+    prompt_value s3_secret_key "S3_SECRET_KEY" "" 1
+    prompt_value s3_bucket_name "S3_BUCKET_NAME"
+    prompt_value error_tracking_dsn "ERROR_TRACKING_DSN"
+
+    cat > "$IRAN_ENV_SOURCE_PATH" <<EOF
+BOT_TOKEN=$bot_token
+BOT_USERNAME=$bot_username
+DATABASE_URL=$database_url
+SYNC_DATABASE_URL=$sync_database_url
+POSTGRES_DB=$postgres_db
+POSTGRES_USER=$postgres_user
+POSTGRES_PASSWORD=$postgres_password
+FRONTEND_URL=$frontend_url
+REDIS_URL=$redis_url
+JWT_SECRET_KEY=$jwt_secret_key
+DEV_API_KEY=$dev_api_key
+SYNC_API_KEY=$sync_api_key
+CHANNEL_ID=$channel_id
+CHANNEL_INVITE_LINK=$channel_invite_link
+SMSIR_API_KEY=$smsir_api_key
+SMSIR_LINE_NUMBER=$smsir_line_number
+S3_ENDPOINT_URL=$s3_endpoint_url
+S3_ACCESS_KEY=$s3_access_key
+S3_SECRET_KEY=$s3_secret_key
+S3_BUCKET_NAME=$s3_bucket_name
+ERROR_TRACKING_DSN=$error_tracking_dsn
+EOF
+
+    chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
+    log "Created Iran runtime env at $IRAN_ENV_SOURCE_PATH"
+}
+
 deploy_foreign() {
     if [[ "$IRAN_SKIP_FOREIGN_DEPLOY" == "1" ]]; then
         log "Skipping foreign deploy because IRAN_SKIP_FOREIGN_DEPLOY=1"
@@ -334,6 +558,7 @@ deploy_foreign() {
 
 sync_project() {
     log "Syncing production payload to the Iran host"
+    ensure_runtime_env_file
     local staging_dir="$IRAN_PROJECT_DIR"
     ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$staging_dir'"
     rsync -avz --delete \
@@ -431,6 +656,7 @@ decide_iran_connectivity() {
 
 run_release() {
     check_local
+    ensure_local_timezone_utc
     build_release
     deploy_foreign
     sync_hosts_mappings
@@ -441,6 +667,7 @@ run_release() {
         exit 20
     fi
     bootstrap_iran
+    ensure_runtime_env_file
     sync_project
     configure_nginx
     issue_cert
@@ -456,6 +683,7 @@ main() {
         usage
         exit 0
     fi
+    ensure_manifest_file
     load_manifest
     case "$COMMAND" in
         check-local) check_local ;;
