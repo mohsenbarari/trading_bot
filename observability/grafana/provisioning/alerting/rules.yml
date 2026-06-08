@@ -1,0 +1,450 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Trading Bot Core Service Alerts
+    folder: Trading Bot Alerts
+    interval: 1m
+    rules:
+      - uid: trading-bot-api-service-silent
+        title: API service log stream silent
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({service="api"}[10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+        noDataState: Alerting
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: API log stream has been silent for 10 minutes.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#api-service-log-stream-silent
+
+      - uid: trading-bot-bot-service-silent
+        title: Bot service log stream silent
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({service="bot"}[15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+        noDataState: Alerting
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          component: bot
+        annotations:
+          summary: Bot log stream has been silent for 15 minutes.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#bot-service-log-stream-silent
+
+      - uid: trading-bot-http-5xx-spike
+        title: API 5xx response spike
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(rate({service="api", log_class="access"} | json | status_code >= 500 [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0.05]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: API 5xx responses are above the initial threshold.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#api-5xx-response-spike
+
+  - orgId: 1
+    name: Trading Bot Security and Auth Alerts
+    folder: Trading Bot Alerts
+    interval: 1m
+    rules:
+      - uid: trading-bot-auth-failure-spike
+        title: Auth/session failure spike
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(rate({service="api", log_class="access"} | json | path=~"/api/(auth|sessions).*" | status_code >= 400 [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0.2]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          component: auth
+        annotations:
+          summary: Auth/session failures are elevated.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#authsession-failure-spike
+
+      - uid: trading-bot-audit-failure
+        title: Audit failure or denied event detected
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({log_class="audit"} | json | result=~"failure|denied" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        labels:
+          severity: warning
+          component: audit
+        annotations:
+          summary: A denied or failed audit event was recorded.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#audit-failure-or-denied-event-detected
+
+  - orgId: 1
+    name: Trading Bot Runtime Alerts
+    folder: Trading Bot Alerts
+    interval: 1m
+    rules:
+      - uid: trading-bot-job-error-spike
+        title: Background job repeated failures
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum by (job_name) (count_over_time({log_class="job"} | json | level=~"ERROR|CRITICAL" [10m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: max
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          component: jobs
+        annotations:
+          summary: A background job has repeated failures.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#background-job-repeated-failures
+
+      - uid: trading-bot-websocket-publish-failures
+        title: WebSocket or Redis publish failures
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({service="api"} |~ "Error publishing|Error broadcasting|Redis listener" | json | level=~"WARNING|ERROR|CRITICAL" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: warning
+          component: realtime
+        annotations:
+          summary: Realtime publish/listener failures were observed.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#websocket-or-redis-publish-failures
+
+      - uid: trading-bot-chat-upload-failures
+        title: Chat upload or media failures
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({service="api"} |~ "upload|media|file" | json | level=~"WARNING|ERROR|CRITICAL" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        labels:
+          severity: warning
+          component: chat
+        annotations:
+          summary: Chat upload/media failure logs were observed.
+          runbook_url: docs/OBSERVABILITY_ALERTS.md#chat-upload-or-media-failures
+
