@@ -60,7 +60,7 @@ start_sync_workers() {
     print_header "Starting sync workers"
     (
         cd "$PROJECT_DIR"
-        docker compose --profile disabled up -d sync_worker >/dev/null
+        docker compose up -d sync_worker >/dev/null
     )
     ssh -o StrictHostKeyChecking=no "$IRAN_USER@$IRAN_HOST" \
         "cd '$IRAN_PROJECT_DIR' && docker compose -f docker-compose.iran.yml up -d sync_worker >/dev/null"

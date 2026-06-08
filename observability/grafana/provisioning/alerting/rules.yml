@@ -501,3 +501,170 @@ groups:
         annotations:
           summary: Captured exceptions are elevated.
           runbook_url: docs/OBSERVABILITY_ERROR_TRACKING.md#captured-exception-spike
+
+  - orgId: 1
+    name: Trading Bot Cross Server Sync Alerts
+    folder: Trading Bot Alerts
+    interval: 1m
+    rules:
+      - uid: trading-bot-sync-backlog-high
+        title: Cross-server sync backlog high
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | unwrap unsynced_change_log_count [10m])'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [100]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          component: sync
+        annotations:
+          summary: Cross-server sync backlog is above the initial threshold.
+          runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-backlog-high
+
+      - uid: trading-bot-sync-lag-high
+        title: Cross-server sync lag high
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | unwrap oldest_unsynced_age_seconds [15m])'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [900]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        labels:
+          severity: warning
+          component: sync
+        annotations:
+          summary: Oldest unsynced change is older than 15 minutes.
+          runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-lag-high
+
+      - uid: trading-bot-sync-retry-queue-nonempty
+        title: Cross-server sync retry queue non-empty
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'max_over_time({log_class="integration", event="sync.health"} | json | unwrap sync_retry_queue_length [10m])'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          component: sync
+        annotations:
+          summary: Cross-server sync retry queue is not empty.
+          runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-retry-queue-non-empty

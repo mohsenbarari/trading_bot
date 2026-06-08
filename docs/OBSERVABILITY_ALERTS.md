@@ -151,6 +151,38 @@ First checks:
 - Follow `docs/OBSERVABILITY_ERROR_TRACKING.md#captured-exception-spike`.
 - Use `error_fingerprint`, `request_id`, and `release_sha` for investigation.
 
+### Cross-server sync backlog high
+
+Trigger:
+- `sync.health` samples show `unsynced_change_log_count > 100`.
+
+First checks:
+- `make sync-health`
+- `make sync-health-iran`
+- `make logs-jobs`
+- Follow `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-backlog-high`.
+
+### Cross-server sync lag high
+
+Trigger:
+- `sync.health` samples show `oldest_unsynced_age_seconds > 900`.
+
+First checks:
+- Confirm whether Iran was recently disconnected.
+- If connectivity is restored, run `make sync-recover`.
+- Follow `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-lag-high`.
+
+### Cross-server sync retry queue non-empty
+
+Trigger:
+- `sync.health` samples show `sync_retry_queue_length > 0`.
+
+First checks:
+- `make sync-health`
+- `make sync-health-iran`
+- `make sync-recover`
+- Follow `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-retry-queue-non-empty`.
+
 ## Not Fully Covered Yet
 
 The following initial-alert goals require infrastructure metrics exporters and are intentionally deferred to Stage 11 production hardening:

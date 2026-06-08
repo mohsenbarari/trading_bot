@@ -56,7 +56,6 @@ services:
   sync_worker:
     image: trading_bot_base
     container_name: trading_bot_sync_worker
-    profiles: ["disabled"]
     restart: always
     command: python -m core.sync_worker
     environment:

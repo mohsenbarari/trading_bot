@@ -49,6 +49,8 @@ make logs-bot
 make logs-jobs
 make logs-follow
 make metrics
+make sync-health
+make sync-health-iran
 make observability-up
 make observability-down
 make observability-logs
@@ -58,6 +60,10 @@ make audit-log-export
 
 `make metrics` prints the local API Prometheus endpoint from
 `http://127.0.0.1:8000/metrics`.
+
+`make sync-health` prints the local/foreign sync backlog and lag. `make
+sync-health-iran` runs the same check on the Iran server through SSH. Use these
+before and after `make sync-recover` when Iran reconnects after an outage.
 
 `make observability-up` starts the optional local Loki, Promtail, and Grafana
 stack. Use it only on trusted operator machines and keep Grafana/Loki bound to
@@ -71,6 +77,7 @@ docs/OBSERVABILITY_LOG_SEARCH.md
 docs/OBSERVABILITY_DASHBOARDS.md
 docs/OBSERVABILITY_ALERTS.md
 docs/OBSERVABILITY_ERROR_TRACKING.md
+docs/CROSS_SERVER_SYNC_OBSERVABILITY.md
 ```
 
 The runbook covers failed login tracing, websocket disconnects, media upload

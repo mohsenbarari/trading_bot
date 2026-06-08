@@ -314,7 +314,7 @@ deploy_iran() {
 # ==========================================
 deploy_foreign() {
     print_header "🌍 Deploying Foreign Server (local)"
-    local core_services=(db redis migration app bot)
+    local core_services=(db redis migration app bot sync_worker)
 
     cd "$PROJECT_DIR"
     ensure_local_host_timezone

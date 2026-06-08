@@ -1,0 +1,116 @@
+{
+  "uid": "trading-bot-cross-server-sync",
+  "title": "Trading Bot Cross Server Sync",
+  "tags": ["trading-bot", "sync", "iran", "foreign"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Unsynced ChangeLog Backlog",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max_over_time({log_class=\"integration\", event=\"sync.health\"} | json | unwrap unsynced_change_log_count [5m])"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Oldest Unsynced Age",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max_over_time({log_class=\"integration\", event=\"sync.health\"} | json | unwrap oldest_unsynced_age_seconds [5m])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "s"},
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Redis Sync Queues",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max_over_time({log_class=\"integration\", event=\"sync.health\"} | json | unwrap sync_outbound_queue_length [5m])"
+        },
+        {
+          "refId": "B",
+          "expr": "max_over_time({log_class=\"integration\", event=\"sync.health\"} | json | unwrap sync_retry_queue_length [5m])"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Recent Sync Health Samples",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{log_class=\"integration\", event=\"sync.health\"} | json"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 5,
+      "title": "Sync Worker Failures",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{log_class=\"job\"} | json | job_name=\"sync_worker\" | level=~\"WARNING|ERROR|CRITICAL\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 6,
+      "title": "Direct Push Cooldown / Errors",
+      "type": "logs",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "loki", "uid": "trading-bot-loki"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"api\"} |~ \"Direct push|sync_worker will retry|cooldown\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}

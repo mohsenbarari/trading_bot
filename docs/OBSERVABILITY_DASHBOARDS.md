@@ -7,6 +7,8 @@ Stage 7 adds Grafana dashboard provisioning for the optional local observability
 Start the Stage 6 stack:
 
 ```bash
+export GRAFANA_ADMIN_USER=admin
+export GRAFANA_ADMIN_PASSWORD='use-a-long-random-password'
 make observability-up
 ```
 
@@ -17,6 +19,12 @@ http://127.0.0.1:3000
 ```
 
 The dashboards are provisioned under the `Trading Bot` folder.
+
+Default local URL:
+
+```text
+http://127.0.0.1:3000
+```
 
 ## Dashboards
 
@@ -94,10 +102,29 @@ Purpose:
 Current limitation:
 - This is log-based. CPU, memory, disk, DB connection pool, and Redis memory require node/container exporters and are expected in later production hardening.
 
+### Trading Bot Cross Server Sync
+
+File: `observability/grafana/dashboards/cross-server-sync.json`
+
+Purpose:
+- Foreign/Iran sync backlog.
+- Oldest unsynced change age.
+- Redis outbound and retry queue state.
+- Recent `sync.health` samples.
+- Sync worker failures.
+- Direct push cooldown/failure logs.
+
+How to feed it:
+- Run `make sync-health` on the foreign/local server.
+- Run `make sync-health-iran` to sample the Iran server through SSH.
+- For production, run both checks periodically through cron, systemd timer, or a small monitor container.
+
+Runbook:
+- `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md`
+
 ## Dashboard Policy
 
 - Use bounded labels only: `service`, `level`, `log_class`, `event`, `logger`, `container`, stable status codes, and fixed action names.
 - Use `| json` for high-cardinality fields such as `request_id`, `actor_id`, and `path`; do not promote them to labels.
 - Keep Grafana and Loki bound to `127.0.0.1` unless production access control, TLS, and authentication are explicitly configured.
 - Do not enable anonymous Grafana access.
-
