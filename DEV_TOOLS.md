@@ -52,6 +52,8 @@ make metrics
 make observability-up
 make observability-down
 make observability-logs
+make observability-overhead
+make audit-log-export
 ```
 
 `make metrics` prints the local API Prometheus endpoint from
@@ -73,6 +75,18 @@ docs/OBSERVABILITY_ERROR_TRACKING.md
 
 The runbook covers failed login tracing, websocket disconnects, media upload
 failures, trade actions, worker failures, and alert investigation.
+
+For production-hardening checks:
+
+- `make observability-overhead` measures local structured logging overhead and
+  fails if the default per-event budget is exceeded.
+- `make audit-log-export` exports audit logs from local Loki to
+  `tmp/audit-log-exports/*.jsonl`. Pass Loki/query/window overrides through
+  `ARGS`, for example:
+
+```bash
+make audit-log-export ARGS="--hours 72 --limit 10000"
+```
 
 ## Quick Tutorial
 

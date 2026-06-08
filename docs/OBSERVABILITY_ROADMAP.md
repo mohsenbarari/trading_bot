@@ -488,6 +488,8 @@ Completion notes:
 
 ## Stage 11: Production Hardening
 
+Status: Completed on 2026-06-08.
+
 Purpose: finalize observability for production operations.
 
 Scope:
@@ -503,6 +505,13 @@ Acceptance:
 - Logging overhead is measured and acceptable.
 - Storage growth is bounded.
 - Sensitive logs are protected by access control and retention policy.
+
+Completion notes:
+- Added `docs/OBSERVABILITY_PRODUCTION_HARDENING.md` with retention, dashboard access-control, audit export, log budget, sampling/rate-limit, overhead-check, and security policies.
+- Added bounded repeated-exception rate limiting in `core/error_tracking.py` with environment-configurable window, per-fingerprint budget, and max fingerprint map size.
+- Added `scripts/measure_logging_overhead.py` plus `make observability-overhead` to measure structured logging overhead.
+- Added `scripts/export_audit_logs.py` plus `make audit-log-export` for restricted audit-log JSONL export from local Loki.
+- Updated `DEV_TOOLS.md` with Stage 11 operator commands.
 
 ## Recommended Execution Order
 
@@ -559,4 +568,4 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 8: Alerting | Completed | Added Grafana alert provisioning, inert local contact point, Loki-backed core alert rules, notification policy, and alert runbook with security constraints. |
 | Stage 9: Error Tracking | Completed | Added scrubbed grouped error capture, optional Sentry bridge, API/bot/job hooks, error tracking dashboard, alert rule, focused tests, and runbook documentation. |
 | Stage 10: DevEx and Runbooks | Completed | Added developer/operator make shortcuts for API/bot/job/all logs and metrics, plus the observability incident runbook and DEV_TOOLS command map. |
-| Stage 11: Production Hardening | Planned | Add retention, access control, sampling, and log overhead validation. |
+| Stage 11: Production Hardening | Completed | Added production hardening policy, repeated-exception rate limiting, audit-log export tooling, logging-overhead measurement, and DEV_TOOLS command coverage. |

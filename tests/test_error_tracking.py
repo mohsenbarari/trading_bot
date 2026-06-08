@@ -4,7 +4,7 @@ import logging
 import unittest
 from unittest.mock import patch
 
-from core.error_tracking import capture_exception, error_fingerprint
+from core.error_tracking import _reset_error_tracking_rate_limiter, capture_exception, error_fingerprint
 from core.log_redaction import REDACTED
 from core.logging_config import configure_logging
 from core.request_context import clear_request_context, set_request_context
@@ -12,6 +12,7 @@ from core.request_context import clear_request_context, set_request_context
 
 class ErrorTrackingTests(unittest.TestCase):
     def tearDown(self):
+        _reset_error_tracking_rate_limiter()
         clear_request_context()
         logging.getLogger().handlers.clear()
 
@@ -57,6 +58,23 @@ class ErrorTrackingTests(unittest.TestCase):
 
         self.assertEqual(first_fingerprint, second_fingerprint)
         self.assertEqual(len(first_fingerprint), 16)
+
+    def test_capture_exception_rate_limits_repeated_fingerprints(self):
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("error-test")
+
+        with patch("core.error_tracking._rate_limit_config", return_value=(60, 1, 16)):
+            for _ in range(3):
+                try:
+                    self._raise_secret_error()
+                except RuntimeError as exc:
+                    capture_exception(exc, source="api.request")
+
+        lines = [line for line in stream.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        payload = json.loads(lines[0])
+        self.assertEqual(payload["event"], "error.exception.captured")
 
 
 if __name__ == "__main__":
