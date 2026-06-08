@@ -35,11 +35,15 @@ cp deploy/production/online.env.example /root/secure-envs/trading-bot/online.env
 
 Then fill:
 
+- foreign and Iran public IP/domain pairs
 - SSH host/user/port
+- SSH auth mode and key path or password
 - target project directory on the Iran server
 - public Iran domain
 - certbot email
 - path to the private runtime `.env` file that should become `IRAN_PROJECT_DIR/.env`
+
+The script also updates `/etc/hosts` on both servers so the foreign and Iran domains resolve to the expected internal IPs during sync and runtime traffic. That matters because the sync worker still resolves peer URLs from the configured server domains.
 
 ## Primary command
 
@@ -87,28 +91,33 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - creates deploy directories
 - applies host timezone
 
-### 5. `sync-project`
+### 5. `/etc/hosts` sync
+- writes a managed hosts block on the foreign server
+- writes the same managed hosts block on the Iran server
+- keeps the foreign and Iran domains mapped to their production IPs for sync and runtime calls
+
+### 6. `sync-project`
 - rsyncs the production payload to the Iran server
 - copies the private runtime `.env` file
 
-### 6. `configure-nginx`
+### 7. `configure-nginx`
 - renders a domain-aware Nginx config from the template
 - copies it to `/etc/nginx/sites-available/trading-bot`
 - enables the site and reloads Nginx
 
-### 7. `issue-cert`
+### 8. `issue-cert`
 - runs `certbot --nginx -d <domain>`
 - can be skipped with `IRAN_SKIP_CERTBOT=1`
 
-### 8. `ship-images` + `load-images`
+### 9. `ship-images` + `load-images`
 - uploads the prepared Docker image bundle to the Iran host
 - runs `docker load` on the Iran host
 
-### 9. `deploy-iran`
+### 10. `deploy-iran`
 - runs `docker compose -f docker-compose.iran.yml up -d --wait`
 - does **not** build the image remotely
 
-### 10. `healthcheck`
+### 11. `healthcheck`
 - checks the local API endpoint on the Iran host
 - optionally checks the public HTTPS endpoint
 
@@ -120,6 +129,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 4. The compose file still uses bind mounts, so the runtime payload is synced alongside the loaded image.
 5. Firewall hardening is optional and conservative.
 6. The script assumes Debian/Ubuntu style package management.
+7. For SSH password auth, `sshpass` must be installed on the foreign server.
 
 ## Next step after this test phase
 
