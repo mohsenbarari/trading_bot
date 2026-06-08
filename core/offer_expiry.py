@@ -11,6 +11,7 @@ users can no longer interact with expired offers.
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 
 from sqlalchemy import select, update
@@ -18,6 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from core.db import AsyncSessionLocal
 from core.config import settings
+from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from models.offer import Offer, OfferStatus
 
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # How often to check for expired offers (seconds)
 CHECK_INTERVAL = 15
+_loop_errors = RepeatedErrorLogger(every=10)
 
 
 async def remove_channel_buttons(channel_message_id: int) -> None:
@@ -127,13 +130,29 @@ async def offer_expiry_loop() -> None:
     Should be started as an asyncio task in the app lifespan.
     """
     logger.info(f"⏰ Offer expiry loop started (check every {CHECK_INTERVAL}s)")
+    iteration = 0
     
     while True:
-        try:
-            count = await expire_stale_offers()
-            if count > 0:
-                logger.info(f"⏰ Expiry cycle: {count} offers expired")
-        except Exception as e:
-            logger.error(f"❌ Error in offer expiry loop: {e}")
+        iteration += 1
+        start_time = time.perf_counter()
+        with job_context("offer_expiry", iteration=iteration) as run_id:
+            try:
+                count = await expire_stale_offers()
+                duration_ms = duration_ms_since(start_time)
+                if count > 0:
+                    logger.info(f"⏰ Expiry cycle: {count} offers expired")
+                    logger.info(
+                        "Offer expiry cycle completed",
+                        extra={
+                            "event": "job.cycle.completed",
+                            "job_name": "offer_expiry",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "expired_count": count,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+            except Exception as e:
+                _loop_errors.log(logger, "❌ Error in offer expiry loop: %s", e, job_name="offer_expiry", run_id=run_id)
         
         await asyncio.sleep(CHECK_INTERVAL)

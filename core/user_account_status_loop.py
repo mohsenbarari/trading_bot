@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import time
 
 from core.db import AsyncSessionLocal
+from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.user_account_status_service import (
     GLOBAL_LOCK_LOOP_INTERVAL_SECONDS,
     mark_due_users_globally_locked,
@@ -9,6 +11,7 @@ from core.services.user_account_status_service import (
 
 
 logger = logging.getLogger(__name__)
+_loop_errors = RepeatedErrorLogger(every=10)
 
 
 async def finalize_due_user_global_locks() -> int:
@@ -29,10 +32,26 @@ async def user_account_status_loop() -> None:
         "⏰ User account-status loop started (check every %ss)",
         GLOBAL_LOCK_LOOP_INTERVAL_SECONDS,
     )
+    iteration = 0
     while True:
-        try:
-            await finalize_due_user_global_locks()
-        except Exception as exc:
-            logger.error("❌ Error in user account-status loop: %s", exc)
+        iteration += 1
+        start_time = time.perf_counter()
+        with job_context("user_account_status", iteration=iteration) as run_id:
+            try:
+                blocked_count = await finalize_due_user_global_locks()
+                if blocked_count > 0:
+                    logger.info(
+                        "User account-status cycle completed",
+                        extra={
+                            "event": "job.cycle.completed",
+                            "job_name": "user_account_status",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "blocked_count": blocked_count,
+                            "duration_ms": duration_ms_since(start_time),
+                        },
+                    )
+            except Exception as exc:
+                _loop_errors.log(logger, "❌ Error in user account-status loop: %s", exc, job_name="user_account_status", run_id=run_id)
 
         await asyncio.sleep(GLOBAL_LOCK_LOOP_INTERVAL_SECONDS)
