@@ -453,6 +453,8 @@ Completion notes:
 
 ## Stage 10: DevEx and Runbooks
 
+Status: Completed on 2026-06-08.
+
 Purpose: developers and operators must be able to diagnose issues quickly.
 
 Scope:
@@ -477,6 +479,12 @@ Scope:
 Acceptance:
 - A developer can find relevant logs and metrics without knowing internal container names.
 - Incident investigation steps are documented.
+
+Completion notes:
+- Added `make logs-api`, `make logs-bot`, `make logs-jobs`, `make logs-follow`, and `make metrics` shortcuts.
+- Kept `make observability-up`, `make observability-down`, and `make observability-logs` as the local Loki/Promtail/Grafana entrypoints.
+- Added `docs/OBSERVABILITY_RUNBOOK.md` for failed login tracing, websocket disconnects, failed media uploads, trade actions, worker failures, and alert cause checks.
+- Updated `DEV_TOOLS.md` with the observability shortcuts and runbook map.
 
 ## Stage 11: Production Hardening
 
@@ -550,5 +558,5 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 7: Dashboards | Completed | Added provisioned Grafana dashboards for API, jobs/bot/realtime, security/audit, business/chat/upload, and infrastructure log health with stable Loki labels and dashboard documentation. |
 | Stage 8: Alerting | Completed | Added Grafana alert provisioning, inert local contact point, Loki-backed core alert rules, notification policy, and alert runbook with security constraints. |
 | Stage 9: Error Tracking | Completed | Added scrubbed grouped error capture, optional Sentry bridge, API/bot/job hooks, error tracking dashboard, alert rule, focused tests, and runbook documentation. |
-| Stage 10: DevEx and Runbooks | Planned | Add make targets and incident investigation runbooks. |
+| Stage 10: DevEx and Runbooks | Completed | Added developer/operator make shortcuts for API/bot/job/all logs and metrics, plus the observability incident runbook and DEV_TOOLS command map. |
 | Stage 11: Production Hardening | Planned | Add retention, access control, sampling, and log overhead validation. |

@@ -38,6 +38,42 @@ You can also run the script directly from inside the app environment:
 python scripts/dev_admin.py --help
 ```
 
+## Observability Shortcuts
+
+Use these commands when you need logs, metrics, dashboards, or incident
+investigation without remembering Docker service names:
+
+```bash
+make logs-api
+make logs-bot
+make logs-jobs
+make logs-follow
+make metrics
+make observability-up
+make observability-down
+make observability-logs
+```
+
+`make metrics` prints the local API Prometheus endpoint from
+`http://127.0.0.1:8000/metrics`.
+
+`make observability-up` starts the optional local Loki, Promtail, and Grafana
+stack. Use it only on trusted operator machines and keep Grafana/Loki bound to
+private access.
+
+Incident runbooks:
+
+```text
+docs/OBSERVABILITY_RUNBOOK.md
+docs/OBSERVABILITY_LOG_SEARCH.md
+docs/OBSERVABILITY_DASHBOARDS.md
+docs/OBSERVABILITY_ALERTS.md
+docs/OBSERVABILITY_ERROR_TRACKING.md
+```
+
+The runbook covers failed login tracing, websocket disconnects, media upload
+failures, trade actions, worker failures, and alert investigation.
+
 ## Quick Tutorial
 
 ### 1. Make sure the app container is running

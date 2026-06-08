@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-iran restart restart-iran status observability-up observability-down observability-logs test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
+.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
 
 help:
 	@echo ""
@@ -37,6 +37,11 @@ help:
 	@echo ""
 	@echo "  make down        - Stop foreign containers"
 	@echo "  make logs        - Foreign server logs"
+	@echo "  make logs-api    - Follow API container logs"
+	@echo "  make logs-bot    - Follow bot container logs"
+	@echo "  make logs-jobs   - Follow app/bot logs where background jobs emit events"
+	@echo "  make logs-follow - Follow all local runtime logs with a bounded tail"
+	@echo "  make metrics     - Print Prometheus metrics from the local API"
 	@echo "  make logs-iran   - Iran server logs"
 	@echo "  make restart     - Restart foreign containers"
 	@echo "  make restart-iran - Restart Iran containers"
@@ -131,6 +136,21 @@ down:
 
 logs:
 	@docker compose logs -f
+
+logs-api:
+	@docker compose logs -f --tail=150 app
+
+logs-bot:
+	@docker compose logs -f --tail=150 bot
+
+logs-jobs:
+	@docker compose logs -f --tail=200 app bot
+
+logs-follow:
+	@docker compose logs -f --tail=100 app bot redis db
+
+metrics:
+	@curl -fsS http://127.0.0.1:8000/metrics
 
 logs-iran:
 	@ssh -o StrictHostKeyChecking=no $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml logs -f --tail=50'
