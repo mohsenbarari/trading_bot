@@ -42,6 +42,100 @@ Acceptance:
 - Every critical flow has an assigned log class and required context fields.
 - Every sensitive field has a masking or omission rule.
 
+### Runtime Service Inventory
+
+| Runtime surface | Entrypoint / owner | Primary risks | Required observability |
+| --- | --- | --- | --- |
+| API service | `main.py` / FastAPI routers | request failures, auth/session regressions, slow DB paths, upload failures, websocket auth failures | access logs, request ids, error logs, route latency metrics, security/audit events |
+| Telegram bot | `run_bot.py`, `bot/handlers/*` | polling failures, handler exceptions, Telegram API failures, accidental secret/message logging | service logs, handler context, Telegram failure metrics, redacted update metadata |
+| Realtime websocket | `api/routers/realtime.py`, Redis pub/sub | dropped connections, listener loop failures, publish failures, auth token failures | realtime logs, active connection metrics, publish failure counters, disconnect reason taxonomy |
+| Sync worker | `core/sync_worker.py`, `core/events.py`, `api/routers/sync.py` | cross-server drift, invalid signatures, retry storms, leaked sync API keys | job logs, integration logs, HMAC failure security logs, retry/backoff metrics |
+| Offer expiry loop | `core/offer_expiry.py` | missed expirations, repeated DB errors, Telegram notification failures | job run logs, counts, duration, failure metrics |
+| Market schedule loop | `core/market_schedule_loop.py` | wrong market state, missed transitions, timezone errors | job run logs, transition audit logs, duration/failure metrics |
+| Session expiry loop | `core/session_expiry.py` | stale sessions, missed revocation, user lockout issues | job run logs, revoked-session counts, security event metrics |
+| User account status loop | `core/user_account_status_loop.py` | account status drift, notification errors | job run logs, status-change audit/security logs |
+| Redis/cache helpers | `core/redis.py`, `core/cache.py` | connection loss, stale data, pub/sub interruption | reconnect logs, cache failure metrics, degraded-mode warnings |
+| Database layer | `core/db.py`, SQLAlchemy sessions | connection failures, transaction rollbacks, slow queries | error logs, later slow-query metrics, transaction failure counters |
+| Deployment scripts | `Makefile`, deploy scripts, Docker Compose | failed build/deploy, unhealthy containers, disk pressure | deployment logs, healthcheck events, disk/memory alerts |
+
+### Event Taxonomy
+
+| Event family | Examples | Log class | Default severity | Required fields | Sensitive-data policy |
+| --- | --- | --- | --- | --- | --- |
+| API request lifecycle | request completed, request failed | access/app | info/error | `request_id`, `method`, `path`, `status_code`, `duration_ms`, `service` | no raw body, no query secrets, no auth headers |
+| Authentication | login success/failure, OTP request, token refresh | security/app | info/warning | `request_id`, `actor_id` when known, `result`, `reason_code`, `client_ip` | never log OTP, password, access/refresh token, cookie |
+| Session management | session create, revoke, reset, recovery approve/reject | security/audit | info/warning | `request_id`, `actor_id`, `target_id`, `session_id`, `result` | log session id only if opaque/internal; never log refresh token |
+| User/admin management | create user, set role/status, force password change | audit/security | info/warning | `actor_id`, `actor_role`, `target_id`, `action`, `result` | no password values; summarize changed fields only |
+| Customer/accountant management | link/unlink, status change, limit update | audit/app | info/warning | `actor_id`, `target_id`, `relation_id`, `action`, `result` | mask mobile/name where not operationally required |
+| Trade lifecycle | offer create, trade execute/reject/cancel, sync trade | audit/app/integration | info/error | `actor_id`, `trade_id`, `offer_id`, `commodity_id`, `action`, `result` | no free-form message text; quantities/status only |
+| Chat message flow | send message, upload finalize, download failure, moderation | app/audit | info/warning/error | `request_id`, `actor_id`, `room_id`, `message_id`, `media_type`, `result` | never log message body, captions, filenames with PII, media URLs/tokens |
+| Realtime/websocket | connect, disconnect, publish, listener error | realtime/app | info/warning/error | `user_id`, `connection_id`, `event`, `reason_code`, `duration_ms` | never log websocket token or raw event payload when sensitive |
+| Sync/integration | outbound push, inbound receive, signature failure, retry | integration/security | info/warning/error | `sync_item_id`, `table`, `operation`, `target_server`, `result` | never log sync API key/signature; payload summaries only |
+| Background job | start, finish, skip, retry, fail | job/app | info/warning/error | `job_name`, `run_id`, `duration_ms`, `success_count`, `error_count` | no raw records; counts and ids only |
+| Deployment/runtime | service start, service stop, healthcheck, config missing | deployment/app | info/warning/error | `service`, `environment`, `server_mode`, `release_sha`, `result` | never log `.env` values or full config dumps |
+| Security anomaly | invalid token, invalid signature, brute-force hints, forbidden access | security | warning/error | `request_id`, `actor_id` when known, `client_ip`, `reason_code`, `path` | no supplied secrets; sanitize identifiers |
+
+### Log Class Definitions
+
+| Log class | Purpose | Sink phase | Retention target | Access level |
+| --- | --- | --- | --- | --- |
+| `app` | normal application behavior and operational errors | stdout JSON, later Loki | 14-30 days | developers/operators |
+| `access` | sanitized API request completion/failure | stdout JSON, later Loki/metrics | 14-30 days | developers/operators |
+| `security` | auth/session/security anomalies | stdout JSON, later separate Loki stream | 90-180 days | restricted admins/operators |
+| `audit` | business/security-sensitive user actions | stdout JSON first, later dedicated audit sink | 180-365 days | restricted admins only |
+| `job` | recurring workers and background loops | stdout JSON, later Loki/metrics | 30-60 days | developers/operators |
+| `realtime` | websocket and Redis pub/sub behavior | stdout JSON, later Loki/metrics | 14-30 days | developers/operators |
+| `integration` | cross-server sync and external providers | stdout JSON, later Loki/metrics | 30-90 days | developers/operators |
+| `deployment` | builds, migrations, healthchecks, deploy events | deploy logs, later Loki | 30-90 days | operators |
+
+### Severity Matrix
+
+| Severity | Use for | Do not use for |
+| --- | --- | --- |
+| `debug` | local-only detail, temporary diagnostics behind an explicit flag | production secrets, raw payloads, high-volume default logs |
+| `info` | expected successful lifecycle events and summarized business operations | repeated tight-loop noise |
+| `warning` | expected but undesirable outcomes: invalid login, forbidden action, retry, degraded dependency | unexpected exceptions with stack traces |
+| `error` | failed requests/jobs/integrations that need investigation but do not stop the process | normal validation errors |
+| `critical` | service cannot continue, data integrity risk, security incident requiring immediate action | ordinary 5xx without systemic impact |
+
+### Sensitive Data Handling Matrix
+
+| Data type | Logging policy | Allowed replacement |
+| --- | --- | --- |
+| Passwords and password hashes | never log | `[REDACTED]` |
+| Access/refresh/JWT tokens | never log | `[REDACTED]` / `[REDACTED_JWT]` |
+| OTP and recovery codes | never log | `[REDACTED]` |
+| Cookies and authorization headers | never log | `[REDACTED]` |
+| Telegram bot token | never log | `[REDACTED]` |
+| Sync API key and HMAC signature | never log | `[REDACTED]` |
+| Mobile numbers | mask unless explicitly needed for an audit export | `0912****789` |
+| Account names and display names | allowed only when operationally necessary; prefer ids | user id, role, masked display |
+| Chat message text and captions | never log in app/access/realtime logs | message id, room id, media type |
+| File names, media URLs, signed URLs | avoid by default; signed URLs never log | file id, media type, size bucket |
+| Request/response body | never log for sensitive endpoints; summarize only for safe internal events | route, status, reason code |
+
+### Baseline Dashboard and Alert Candidates
+
+| Area | Dashboard panels | Initial alerts |
+| --- | --- | --- |
+| API | request rate, p95 latency, 4xx/5xx rate, slow routes | service down, 5xx spike, p95 latency spike |
+| Auth/sessions | login success/failure, OTP failure rate, session revoke/recovery counts | auth failure spike, OTP provider failure, recovery abuse hint |
+| Bot | polling status, handler failures, Telegram API failures | bot down, Telegram API failure spike |
+| Realtime | active websocket connections, disconnect reasons, publish failures | websocket publish failure spike, Redis listener repeated failure |
+| Jobs | run duration, success/failure count, missed cycles | repeated job failure, missed expiry loop |
+| Sync | outbound queue length, retries, signature failures | retry storm, invalid signature spike, peer unreachable |
+| Chat/upload | send failure, upload finalize failure, download failure | upload failure spike, media storage failure |
+| Infra | CPU, memory, disk, DB/Redis health | disk high, memory pressure, DB/Redis unhealthy |
+
+### Stage 0 Completion Criteria
+
+- Runtime surfaces are inventoried.
+- Critical event families are mapped to log classes.
+- Severity usage is defined.
+- Retention and access expectations are defined by log class.
+- Sensitive fields have explicit omit/mask/replacement rules.
+- Dashboard and alert candidates are ready for metrics and collection stages.
+
 ## Stage 1: Central Logging Foundation
 
 Purpose: replace scattered logging setup with one safe, predictable logging foundation.
@@ -389,7 +483,7 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 
 | Stage | Status | Notes |
 | --- | --- | --- |
-| Stage 0: Discovery and Baseline | Planned | Event taxonomy and retention matrix still need to be written before audit/metrics expansion. |
+| Stage 0: Discovery and Baseline | Completed | Added runtime service inventory, event taxonomy, log class definitions, severity matrix, sensitive-data handling matrix, baseline dashboard/alert candidates, and completion criteria. |
 | Stage 1: Central Logging Foundation | Completed | Added request context, redaction helpers, central logging configuration, API/bot/sync-worker entrypoint wiring, focused redaction tests, and deploy smoke validation with JSON logs from healthy `app` and `bot` containers. |
 | Stage 2: API Request Logging and Correlation | Planned | Add FastAPI middleware for `X-Request-ID`, access logs, sanitized route policy, and request failure logs. |
 | Stage 3: Bot and Background Worker Logging | Planned | Add handler/job context, run ids, and repeated failure rate limiting. |
