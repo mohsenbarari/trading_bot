@@ -309,6 +309,36 @@ def record_job_run(*, job_name: str, result: str, duration_ms: float) -> None:
     registry.observe("trading_bot_job_duration_ms", "Background job iteration duration in milliseconds.", duration_ms, **labels)
 
 
+def record_sync_health(*, server_mode: str, unsynced_count: int, oldest_unsynced_age_seconds: float, outbound_queue: int, retry_queue: int) -> None:
+    labels = {"server_mode": _sanitize_label_value(server_mode, max_length=16)}
+    registry.gauge(
+        "trading_bot_sync_unsynced_change_log_entries",
+        "Unsynced change_log entries waiting to be replayed to the peer server.",
+        max(int(unsynced_count), 0),
+        **labels,
+    )
+    registry.gauge(
+        "trading_bot_sync_oldest_unsynced_age_seconds",
+        "Age in seconds of the oldest unsynced change_log entry.",
+        max(float(oldest_unsynced_age_seconds), 0.0),
+        **labels,
+    )
+    registry.gauge(
+        "trading_bot_sync_redis_queue_length",
+        "Redis sync queue length by queue name.",
+        max(int(outbound_queue), 0),
+        queue="outbound",
+        **labels,
+    )
+    registry.gauge(
+        "trading_bot_sync_redis_queue_length",
+        "Redis sync queue length by queue name.",
+        max(int(retry_queue), 0),
+        queue="retry",
+        **labels,
+    )
+
+
 def record_business_action(*, action: str, result: str) -> None:
     registry.counter(
         "trading_bot_business_actions_total",

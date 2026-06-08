@@ -3,16 +3,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.db import get_db
 from models.change_log import ChangeLog
 from core.config import settings
+from core.metrics import record_sync_health
+from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
 import hmac
 import hashlib
 import time
 import json
 import logging
-from datetime import date as date_cls, datetime, time as time_cls
+from datetime import date as date_cls, datetime, time as time_cls, timezone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _require_dev_key(request: Request) -> None:
+    dev_key = request.headers.get("X-Dev-Api-Key")
+    if not settings.dev_api_key or dev_key != settings.dev_api_key:
+        raise HTTPException(status_code=403, detail="Dev API Key required")
+
+
+def _age_seconds(value) -> float:
+    if not value:
+        return 0.0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return max((datetime.now(timezone.utc) - value).total_seconds(), 0.0)
 
 # Table processing order: dependencies first
 TABLE_ORDER = {
@@ -620,9 +636,7 @@ async def resync_from_changelog(
     Requires Dev API Key (X-Dev-Api-Key header).
     Optional: ?table_filter=users&limit=200
     """
-    dev_key = request.headers.get("X-Dev-Api-Key")
-    if dev_key != settings.dev_api_key:
-        raise HTTPException(status_code=403, detail="Dev API Key required")
+    _require_dev_key(request)
 
     target_url = peer_server_url_for(target_server) if target_server else default_peer_server_url()
     api_key = getattr(settings, "sync_api_key", None)
@@ -706,3 +720,83 @@ async def resync_from_changelog(
 
     await db.commit()
     return {"status": "ok", "processed": processed, "errors": errors, "total_entries": len(entries)}
+
+
+@router.get("/health")
+async def get_sync_health(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return local cross-server sync backlog and lag state for operators."""
+    _require_dev_key(request)
+
+    summary_stmt = select(
+        sa_func.count(ChangeLog.id),
+        sa_func.min(ChangeLog.created_at),
+    ).where(ChangeLog.synced == False)
+    result = await db.execute(summary_stmt)
+    unsynced_count, oldest_unsynced_at = result.one()
+
+    table_stmt = (
+        select(ChangeLog.table_name, sa_func.count(ChangeLog.id))
+        .where(ChangeLog.synced == False)
+        .group_by(ChangeLog.table_name)
+        .order_by(ChangeLog.table_name)
+    )
+    table_rows = await db.execute(table_stmt)
+    unsynced_by_table = {table: int(count or 0) for table, count in table_rows.all()}
+
+    outbound_queue = 0
+    retry_queue = 0
+    redis_ok = True
+    try:
+        redis_client = get_redis_client()
+        outbound_queue = int(await redis_client.llen("sync:outbound") or 0)
+        retry_queue = int(await redis_client.llen("sync:retry") or 0)
+    except Exception as exc:
+        redis_ok = False
+        logger.warning(
+            "Could not read sync Redis queues",
+            extra={
+                "event": "sync.health.redis_error",
+                "log_class": "integration",
+                "server_mode": settings.server_mode,
+                "error_type": type(exc).__name__,
+            },
+        )
+
+    oldest_age = _age_seconds(oldest_unsynced_at)
+    record_sync_health(
+        server_mode=settings.server_mode,
+        unsynced_count=int(unsynced_count or 0),
+        oldest_unsynced_age_seconds=oldest_age,
+        outbound_queue=outbound_queue,
+        retry_queue=retry_queue,
+    )
+    payload = {
+        "status": "ok",
+        "server_mode": settings.server_mode,
+        "peer_server_url_configured": bool(default_peer_server_url()),
+        "redis_ok": redis_ok,
+        "unsynced_change_log_count": int(unsynced_count or 0),
+        "oldest_unsynced_age_seconds": round(oldest_age, 3),
+        "unsynced_by_table": unsynced_by_table,
+        "redis_queues": {
+            "sync:outbound": outbound_queue,
+            "sync:retry": retry_queue,
+        },
+    }
+    logger.info(
+        "Sync health sampled",
+        extra={
+            "event": "sync.health",
+            "log_class": "integration",
+            "server_mode": payload["server_mode"],
+            "redis_ok": payload["redis_ok"],
+            "unsynced_change_log_count": payload["unsynced_change_log_count"],
+            "oldest_unsynced_age_seconds": payload["oldest_unsynced_age_seconds"],
+            "sync_outbound_queue_length": outbound_queue,
+            "sync_retry_queue_length": retry_queue,
+        },
+    )
+    return payload

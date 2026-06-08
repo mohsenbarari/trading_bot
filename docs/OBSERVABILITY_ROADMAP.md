@@ -569,3 +569,17 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 9: Error Tracking | Completed | Added scrubbed grouped error capture, optional Sentry bridge, API/bot/job hooks, error tracking dashboard, alert rule, focused tests, and runbook documentation. |
 | Stage 10: DevEx and Runbooks | Completed | Added developer/operator make shortcuts for API/bot/job/all logs and metrics, plus the observability incident runbook and DEV_TOOLS command map. |
 | Stage 11: Production Hardening | Completed | Added production hardening policy, repeated-exception rate limiting, audit-log export tooling, logging-overhead measurement, and DEV_TOOLS command coverage. |
+
+## Post-Roadmap Addendum: Cross-Server Sync Resilience
+
+Status: Completed on 2026-06-08.
+
+Purpose: make foreign/Iran outage recovery observable and safer when Iran loses connectivity and later reconnects.
+
+Completion notes:
+- Foreign deploy now starts `sync_worker` with the other core services so retry delivery can continue after reconnect.
+- Added `GET /api/sync/health` behind `X-Dev-Api-Key` with change-log backlog, oldest unsynced age, per-table backlog, Redis sync queue lengths, and structured `event=sync.health` logs.
+- Added sync health metrics for `/metrics`.
+- Added `make sync-health` and `make sync-health-iran`.
+- Added the `Trading Bot Cross Server Sync` Grafana dashboard and sync backlog/lag/retry alert rules.
+- Added `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md` as the operating runbook for Iran outages and reconnect recovery.

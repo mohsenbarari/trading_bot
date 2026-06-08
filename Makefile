@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
 
 help:
 	@echo ""
@@ -20,6 +20,8 @@ help:
 	@echo "  make iran       - Build frontend + full Iran deploy"
 	@echo "  make foreign    - Rebuild Docker on foreign server only"
 	@echo "  make sync-recover - Manual fallback to catch up both servers after Iran reconnects"
+	@echo "  make sync-health - Show local/foreign sync backlog and lag"
+	@echo "  make sync-health-iran - Show Iran sync backlog and lag through SSH"
 	@echo "  make restore-default-commodities - Restore canonical default commodities on the current DB"
 	@echo "  make dev-admin ARGS=\"...\" - Run the developer admin CLI inside the app container"
 	@echo "  make create-superadmin - Interactive super admin creation"
@@ -88,6 +90,12 @@ foreign:
 sync-recover:
 	@chmod +x ./scripts/recover_cross_server_sync.sh
 	@./scripts/recover_cross_server_sync.sh
+
+sync-health:
+	@set -a; [ ! -f .env ] || . ./.env; set +a; curl -fsS -H "X-Dev-Api-Key: $${DEV_API_KEY}" http://127.0.0.1:8000/api/sync/health
+
+sync-health-iran:
+	@ssh -o StrictHostKeyChecking=no $(IRAN_HOST) 'cd $(IRAN_DIR) && set -a; [ ! -f .env ] || . ./.env; set +a; curl -fsS -H "X-Dev-Api-Key: $$DEV_API_KEY" http://127.0.0.1:8000/api/sync/health'
 
 restore-default-commodities:
 	@docker compose run --rm migration python scripts/restore_default_commodities.py
