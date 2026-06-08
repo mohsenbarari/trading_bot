@@ -25,6 +25,7 @@ from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
 import schemas
 from core.logging_config import configure_logging
+from core.request_logging import install_request_logging_middleware
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -107,6 +108,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+install_request_logging_middleware(app)
 
 # -------------------------------------------------------
 # 🔒 CORS Configuration

@@ -8,6 +8,25 @@ from typing import Any
 REDACTED = "[REDACTED]"
 REDACTED_JWT = "[REDACTED_JWT]"
 
+SAFE_CODE_KEYS = {
+    "status-code",
+    "reason-code",
+    "error-code",
+    "http-code",
+    "status",
+}
+
+SENSITIVE_EXACT_KEYS = {
+    "authorization",
+    "cookie",
+    "code",
+    "otp",
+    "password",
+    "passwd",
+    "secret",
+    "signature",
+}
+
 SENSITIVE_KEY_PARTS = (
     "authorization",
     "cookie",
@@ -20,7 +39,6 @@ SENSITIVE_KEY_PARTS = (
     "x-api-key",
     "x-dev-api-key",
     "otp",
-    "code",
     "refresh",
     "access",
     "jwt",
@@ -40,6 +58,14 @@ _MOBILE_RE = re.compile(r"(?<!\d)(09\d{2})\d{4}(\d{3})(?!\d)")
 
 def is_sensitive_key(key: str) -> bool:
     normalized = key.lower().replace("_", "-")
+    if normalized in SAFE_CODE_KEYS:
+        return False
+    if normalized in SENSITIVE_EXACT_KEYS:
+        return True
+    if normalized.endswith("-code") and any(
+        prefix in normalized for prefix in ("otp", "recovery", "verification", "password", "login")
+    ):
+        return True
     return any(part in normalized for part in SENSITIVE_KEY_PARTS)
 
 

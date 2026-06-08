@@ -11,6 +11,7 @@ from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import EffectiveOwnerActor, resolve_effective_owner_actor
 from core.services.user_account_status_service import is_user_global_web_locked
+from core.request_context import set_request_context
 from models.session import UserSession
 from models.user import User, UserRole
 from datetime import datetime
@@ -124,6 +125,12 @@ async def get_current_user(
     if not user.last_seen_at or (datetime.utcnow() - user.last_seen_at).total_seconds() > 60:
         user.last_seen_at = datetime.utcnow()
         await db.commit()
+
+    set_request_context(
+        actor_id=user.id,
+        actor_role=getattr(user.role, "value", str(user.role)),
+        session_id=session_id,
+    )
         
     return user
 
@@ -216,5 +223,4 @@ async def verify_admin_or_dev_key(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Not authenticated"
     )
-
 

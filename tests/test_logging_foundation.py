@@ -22,12 +22,18 @@ class LoggingFoundationTests(unittest.TestCase):
                 "note": "authorization: Bearer abc.def.ghi otp=123456",
             },
             "items": [{"refresh_token": "secret-refresh"}],
+            "status_code": 200,
+            "otp_code": "123456",
+            "reason_code": "invalid_password",
         }
 
         redacted = redact(payload)
 
         self.assertEqual(redacted["password"], REDACTED)
         self.assertEqual(redacted["items"][0]["refresh_token"], REDACTED)
+        self.assertEqual(redacted["status_code"], 200)
+        self.assertEqual(redacted["otp_code"], REDACTED)
+        self.assertEqual(redacted["reason_code"], "invalid_password")
         self.assertIn("0912****789", redacted["profile"]["mobile"])
         self.assertIn(REDACTED, redacted["profile"]["note"])
         self.assertIn(f"otp={REDACTED}", redacted["profile"]["note"])
