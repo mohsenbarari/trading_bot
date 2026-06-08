@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     release_sha: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"
+    error_tracking_dsn: str | None = None
+    error_tracking_sample_rate: float = 1.0
 
     database_url: str
     sync_database_url: str

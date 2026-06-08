@@ -448,3 +448,56 @@ groups:
           summary: Chat upload/media failure logs were observed.
           runbook_url: docs/OBSERVABILITY_ALERTS.md#chat-upload-or-media-failures
 
+      - uid: trading-bot-captured-exception-spike
+        title: Captured exception spike
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({log_class="error", event="error.exception.captured"} [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: gt
+                    params: [3]
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: warning
+          component: errors
+        annotations:
+          summary: Captured exceptions are elevated.
+          runbook_url: docs/OBSERVABILITY_ERROR_TRACKING.md#captured-exception-spike

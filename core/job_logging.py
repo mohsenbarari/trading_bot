@@ -6,6 +6,7 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Iterator
 
+from core.error_tracking import capture_exception
 from core.metrics import record_job_run
 from core.request_context import get_request_context, replace_request_context, set_request_context
 
@@ -50,6 +51,16 @@ class RepeatedErrorLogger:
             self._repeat_count = 1
 
         if self._repeat_count == 1 or self._repeat_count % self.every == 0:
+            error_id = capture_exception(
+                exc,
+                source="job",
+                handled=True,
+                extra={
+                    "repeat_count": self._repeat_count,
+                    "suppressed_repeats": max(self._repeat_count - 1, 0),
+                    **extra,
+                },
+            )
             record_job_run(
                 job_name=str(extra.get("job_name") or get_request_context().get("job_name") or "unknown"),
                 result="failure",
@@ -62,6 +73,7 @@ class RepeatedErrorLogger:
                     "event": "job.error",
                     "repeat_count": self._repeat_count,
                     "suppressed_repeats": max(self._repeat_count - 1, 0),
+                    "error_fingerprint": error_id,
                     **extra,
                 },
             )

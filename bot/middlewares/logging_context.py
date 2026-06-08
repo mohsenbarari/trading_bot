@@ -8,6 +8,7 @@ from uuid import uuid4
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject, Update
 
+from core.error_tracking import capture_exception
 from core.metrics import record_bot_update
 from core.request_context import clear_request_context, set_request_context
 
@@ -53,8 +54,9 @@ class BotLoggingContextMiddleware(BaseMiddleware):
             result = await handler(event, data)
             record_bot_update(event_type=event_type, result="success", duration_ms=round((time.perf_counter() - start_time) * 1000, 2))
             return result
-        except Exception:
+        except Exception as exc:
             record_bot_update(event_type=event_type, result="failure", duration_ms=round((time.perf_counter() - start_time) * 1000, 2))
+            capture_exception(exc, source="bot.update", extra={"bot_event_type": event_type})
             raise
         finally:
             clear_request_context()
