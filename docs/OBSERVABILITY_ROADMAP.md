@@ -384,3 +384,20 @@ The first safe implementation slice should include:
 7. Smoke validation that API and bot still boot.
 
 This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Those belong after the logging foundation is stable.
+
+## Execution Tracker
+
+| Stage | Status | Notes |
+| --- | --- | --- |
+| Stage 0: Discovery and Baseline | Planned | Event taxonomy and retention matrix still need to be written before audit/metrics expansion. |
+| Stage 1: Central Logging Foundation | Completed | Added request context, redaction helpers, central logging configuration, API/bot/sync-worker entrypoint wiring, focused redaction tests, and deploy smoke validation with JSON logs from healthy `app` and `bot` containers. |
+| Stage 2: API Request Logging and Correlation | Planned | Add FastAPI middleware for `X-Request-ID`, access logs, sanitized route policy, and request failure logs. |
+| Stage 3: Bot and Background Worker Logging | Planned | Add handler/job context, run ids, and repeated failure rate limiting. |
+| Stage 4: Audit Logging | Planned | Add strict audit event schema for security-sensitive and business-critical actions. |
+| Stage 5: Metrics Foundation | Planned | Add Prometheus metrics with low-cardinality labels. |
+| Stage 6: Log Collection and Search | Planned | Add Loki/Promtail or equivalent collection after JSON logs are stable. |
+| Stage 7: Dashboards | Planned | Add Grafana dashboards for API, bot, realtime, auth, chat/upload, jobs, and infra. |
+| Stage 8: Alerting | Planned | Add actionable alerts with no secret-bearing payloads. |
+| Stage 9: Error Tracking | Planned | Add scrubbed exception grouping after logging/metrics baseline stabilizes. |
+| Stage 10: DevEx and Runbooks | Planned | Add make targets and incident investigation runbooks. |
+| Stage 11: Production Hardening | Planned | Add retention, access control, sampling, and log overhead validation. |

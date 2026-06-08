@@ -24,11 +24,12 @@ from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
 import schemas
+from core.logging_config import configure_logging
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
 # -------------------------------------------------------
-logging.basicConfig(level=logging.INFO)
+configure_logging("api")
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager

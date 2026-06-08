@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     foreign_server_url: str | None = None
     sync_api_key: str | None = None
     sync_direct_push_cooldown_seconds: float = 90.0
+    environment: str = "production"
+    release_sha: str | None = None
+    log_level: str = "INFO"
+    log_format: str = "json"
 
     database_url: str
     sync_database_url: str
