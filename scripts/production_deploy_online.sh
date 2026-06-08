@@ -383,9 +383,15 @@ parse_args() {
 }
 
 load_manifest() {
+    local env_iran_connectivity_mode="${IRAN_CONNECTIVITY_MODE-}"
+
     [[ -f "$MANIFEST_PATH" ]] || die "Manifest not found: $MANIFEST_PATH"
     # shellcheck disable=SC1090
     source "$MANIFEST_PATH"
+
+    if [[ -n "$env_iran_connectivity_mode" ]]; then
+        IRAN_CONNECTIVITY_MODE="$env_iran_connectivity_mode"
+    fi
 
     : "${LOCAL_PROJECT_DIR:?LOCAL_PROJECT_DIR is required}"
     : "${LOCAL_FRONTEND_DIR:?LOCAL_FRONTEND_DIR is required}"
