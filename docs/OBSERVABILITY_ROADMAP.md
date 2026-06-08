@@ -506,8 +506,8 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 1: Central Logging Foundation | Completed | Added request context, redaction helpers, central logging configuration, API/bot/sync-worker entrypoint wiring, focused redaction tests, and deploy smoke validation with JSON logs from healthy `app` and `bot` containers. |
 | Stage 2: API Request Logging and Correlation | Completed | Added FastAPI request logging middleware, `X-Request-ID` propagation, sanitized access logs, sensitive/static route policy, actor context attachment after authentication, focused request logging tests, and deploy smoke validation confirming query secrets stay out of access logs. |
 | Stage 3: Bot and Background Worker Logging | Completed | Added job context helpers, run ids, iteration fields, duration helpers, repeated-error suppression, structured context for offer/session/market/user-status loops and sync worker, and a bot update logging-context middleware that avoids raw message payloads. |
-| Stage 4: Audit Logging | Planned | Add strict audit event schema for security-sensitive and business-critical actions. |
-| Stage 5: Metrics Foundation | Planned | Add Prometheus metrics with low-cardinality labels. |
+| Stage 4: Audit Logging | Completed | Added strict audit event schema and summary-only audit events for sensitive user/session/relation/block/broadcast actions with redaction coverage. |
+| Stage 5: Metrics Foundation | Completed | Added `/metrics`, shared SQLite-backed Prometheus text metrics for multi-worker API/job aggregation, low-cardinality request/job/realtime/bot/audit metrics, and focused metrics tests/smoke validation. |
 | Stage 6: Log Collection and Search | Planned | Add Loki/Promtail or equivalent collection after JSON logs are stable. |
 | Stage 7: Dashboards | Planned | Add Grafana dashboards for API, bot, realtime, auth, chat/upload, jobs, and infra. |
 | Stage 8: Alerting | Planned | Add actionable alerts with no secret-bearing payloads. |
