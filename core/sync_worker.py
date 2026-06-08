@@ -7,10 +7,11 @@ import hashlib
 import httpx
 import redis.asyncio as redis
 from core.config import settings
+from core.logging_config import configure_logging
 from core.server_routing import default_peer_server_url
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+configure_logging("sync-worker")
 logger = logging.getLogger(__name__)
 
 async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):

@@ -22,9 +22,10 @@ from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
 from bot.middlewares import AuthMiddleware
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
+from core.logging_config import configure_logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+configure_logging("bot")
 logger = logging.getLogger(__name__)
 
 async def main():
