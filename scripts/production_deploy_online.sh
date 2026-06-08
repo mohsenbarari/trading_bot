@@ -253,7 +253,6 @@ load_manifest() {
 
     [[ -d "$LOCAL_PROJECT_DIR" ]] || die "LOCAL_PROJECT_DIR does not exist: $LOCAL_PROJECT_DIR"
     [[ -d "$LOCAL_FRONTEND_DIR" ]] || die "LOCAL_FRONTEND_DIR does not exist: $LOCAL_FRONTEND_DIR"
-    [[ -f "$IRAN_ENV_SOURCE_PATH" ]] || die "IRAN_ENV_SOURCE_PATH does not exist: $IRAN_ENV_SOURCE_PATH"
 
     IRAN_SSH_TARGET="$IRAN_SSH_USER@$IRAN_HOST"
     case "$IRAN_SSH_AUTH_METHOD" in
