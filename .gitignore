@@ -8,6 +8,7 @@ docs/*
 !docs/MESSENGER_VERSION_COMPARISON_TEST_PLAN.md
 !docs/messenger-surface-manifest.json
 !docs/messenger-surface-report.md
+!docs/PRODUCTION_DEPLOYMENT_ONLINE.md
 .env
 .env.iran
 # Environments
