@@ -385,6 +385,8 @@ Completion notes:
 
 ## Stage 8: Alerting
 
+Status: Completed on 2026-06-08.
+
 Purpose: actionable issues must be reported before manual user complaints.
 
 Initial alerts:
@@ -411,6 +413,13 @@ Security requirements:
 Acceptance:
 - Alerts are actionable and not noisy.
 - Every alert has a runbook link or clear remediation hint.
+
+Completion notes:
+- Added Grafana alert provisioning under `observability/grafana/provisioning/alerting/`.
+- Added an inert local webhook contact point and notification policy so cloned repos do not accidentally send alerts.
+- Added Loki-backed alert rules for API log silence, bot log silence, API 5xx spike, auth/session failure spike, audit failure/denied events, repeated job failures, realtime publish/listener failures, and chat upload/media failures.
+- Added `docs/OBSERVABILITY_ALERTS.md` with receiver setup guidance, per-alert first checks, LogQL examples, and alert payload security rules.
+- Deferred disk/memory/CPU/DB-pool/Redis-memory alerts to Stage 11 because they require node/container/exporter metrics, not only application logs.
 
 ## Stage 9: Error Tracking
 
@@ -529,7 +538,7 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 5: Metrics Foundation | Completed | Added `/metrics`, shared SQLite-backed Prometheus text metrics for multi-worker API/job aggregation, low-cardinality request/job/realtime/bot/audit metrics, and focused metrics tests/smoke validation. |
 | Stage 6: Log Collection and Search | Completed | Added optional local Loki/Promtail/Grafana stack, low-cardinality Docker log labels, Grafana datasource provisioning, LogQL search examples, and observability make targets. |
 | Stage 7: Dashboards | Completed | Added provisioned Grafana dashboards for API, jobs/bot/realtime, security/audit, business/chat/upload, and infrastructure log health with stable Loki labels and dashboard documentation. |
-| Stage 8: Alerting | Planned | Add actionable alerts with no secret-bearing payloads. |
+| Stage 8: Alerting | Completed | Added Grafana alert provisioning, inert local contact point, Loki-backed core alert rules, notification policy, and alert runbook with security constraints. |
 | Stage 9: Error Tracking | Planned | Add scrubbed exception grouping after logging/metrics baseline stabilizes. |
 | Stage 10: DevEx and Runbooks | Planned | Add make targets and incident investigation runbooks. |
 | Stage 11: Production Hardening | Planned | Add retention, access control, sampling, and log overhead validation. |

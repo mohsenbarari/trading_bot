@@ -1,0 +1,15 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Trading Bot Local Webhook
+    receivers:
+      - uid: trading-bot-local-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: http://127.0.0.1:9/trading-bot-alerts-disabled
+          httpMethod: POST
+          title: '{{ template "default.title" . }}'
+          message: '{{ template "default.message" . }}'
+
