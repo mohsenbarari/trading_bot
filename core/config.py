@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     log_format: str = "json"
     error_tracking_dsn: str | None = None
     error_tracking_sample_rate: float = 1.0
+    error_tracking_rate_limit_window_seconds: int = 60
+    error_tracking_max_events_per_fingerprint: int = 10
+    error_tracking_rate_limit_max_fingerprints: int = 2048
 
     database_url: str
     sync_database_url: str

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import traceback
+from collections import OrderedDict
+from threading import Lock
 from types import TracebackType
 from typing import Any
 
@@ -13,6 +16,52 @@ from core.request_context import get_request_context
 
 
 _logger = logging.getLogger("error.tracking")
+_rate_limit_lock = Lock()
+_rate_limit_state: OrderedDict[str, dict[str, float | int]] = OrderedDict()
+
+
+def _rate_limit_config() -> tuple[int, int, int]:
+    try:
+        from core.config import settings
+
+        return (
+            int(getattr(settings, "error_tracking_rate_limit_window_seconds", 60) or 60),
+            int(getattr(settings, "error_tracking_max_events_per_fingerprint", 10) or 10),
+            int(getattr(settings, "error_tracking_rate_limit_max_fingerprints", 2048) or 2048),
+        )
+    except Exception:
+        return 60, 10, 2048
+
+
+def _reset_error_tracking_rate_limiter() -> None:
+    with _rate_limit_lock:
+        _rate_limit_state.clear()
+
+
+def _should_capture_fingerprint(fingerprint: str) -> tuple[bool, int]:
+    window_seconds, max_events, max_fingerprints = _rate_limit_config()
+    if window_seconds <= 0 or max_events <= 0:
+        return True, 0
+
+    now = time.monotonic()
+    with _rate_limit_lock:
+        state = _rate_limit_state.get(fingerprint)
+        if not state or now - float(state["window_start"]) >= window_seconds:
+            suppressed = int(state.get("suppressed", 0)) if state else 0
+            _rate_limit_state[fingerprint] = {"window_start": now, "count": 1, "suppressed": 0}
+            _rate_limit_state.move_to_end(fingerprint)
+            while len(_rate_limit_state) > max_fingerprints:
+                _rate_limit_state.popitem(last=False)
+            return True, suppressed
+
+        if int(state["count"]) < max_events:
+            state["count"] = int(state["count"]) + 1
+            _rate_limit_state.move_to_end(fingerprint)
+            return True, 0
+
+        state["suppressed"] = int(state.get("suppressed", 0)) + 1
+        _rate_limit_state.move_to_end(fingerprint)
+        return False, 0
 
 
 def _runtime_metadata() -> dict[str, Any]:
@@ -67,6 +116,10 @@ def capture_exception(
 
     context = get_request_context()
     fingerprint = error_fingerprint(exc, source=source)
+    should_capture, suppressed_repeats = _should_capture_fingerprint(fingerprint)
+    if not should_capture:
+        return fingerprint
+
     frames = _project_frames(exc.__traceback__)
     payload = {
         "event": "error.exception.captured",
@@ -90,6 +143,8 @@ def capture_exception(
         "extra": redact(extra or {}),
         **_runtime_metadata(),
     }
+    if suppressed_repeats:
+        payload["suppressed_repeats"] = suppressed_repeats
     payload = {key: value for key, value in payload.items() if value not in (None, {}, [])}
     _logger.error("Exception captured", extra=payload)
 

@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
+.PHONY: help up deploy frontend iran foreign sync-recover restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all
 
 help:
 	@echo ""
@@ -49,6 +49,8 @@ help:
 	@echo "  make observability-up   - Start local Loki/Promtail/Grafana stack"
 	@echo "  make observability-down - Stop local observability stack"
 	@echo "  make observability-logs - Follow observability stack logs"
+	@echo "  make observability-overhead - Measure structured logging overhead"
+	@echo "  make audit-log-export - Export audit logs from local Loki to JSONL"
 	@echo "  make test-report - Show repository test breadth summary"
 	@echo "  make test-gate   - Enforce repository test breadth baseline"
 	@echo "  make test-diff-gate BASE=<ref> - Enforce test changes alongside product changes"
@@ -177,6 +179,12 @@ observability-down:
 
 observability-logs:
 	@docker compose -f docker-compose.observability.yml logs -f --tail=100
+
+observability-overhead:
+	@python3 scripts/measure_logging_overhead.py
+
+audit-log-export:
+	@python3 scripts/export_audit_logs.py $${ARGS}
 
 test-report:
 	@/bin/python3 ./scripts/report_test_matrix.py
