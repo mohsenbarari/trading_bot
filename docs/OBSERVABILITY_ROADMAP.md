@@ -274,6 +274,8 @@ Completion notes:
 
 ## Stage 5: Metrics Foundation
 
+Status: Completed on 2026-06-08.
+
 Purpose: production health must be measurable with numeric time-series data, not inferred only from logs.
 
 Scope:
@@ -305,6 +307,15 @@ Security requirements:
 Acceptance:
 - Prometheus can scrape metrics.
 - Metrics remain bounded and do not create cardinality explosions.
+
+Completion notes:
+- Added `core/metrics.py`, a dependency-free Prometheus text-format registry for counters, gauges, and fixed-bucket histograms, backed by a shared SQLite file under `/tmp` so API/job counters aggregate across the current multi-worker Uvicorn setup.
+- Added `/metrics` in `main.py` with Prometheus text output and process uptime.
+- Instrumented API request count, duration, and 4xx/5xx counts through the request logging middleware using route templates/normalized paths instead of raw URLs.
+- Instrumented active websocket connections and websocket/Redis publish failures.
+- Instrumented bot update count/duration, job run count/duration/failure, and audit/business action counts.
+- Added `tests/test_metrics.py` for label normalization, text rendering, bot/job/audit metrics, and secret-free output.
+- Kept labels low-cardinality: method, route template, status class, event type, job name, result, and fixed action names only.
 
 ## Stage 6: Log Collection and Search
 

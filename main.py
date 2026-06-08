@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -25,6 +26,7 @@ from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
 import schemas
 from core.logging_config import configure_logging
+from core.metrics import metrics_response_body, registry, uptime_seconds
 from core.request_logging import install_request_logging_middleware
 
 # -------------------------------------------------------
@@ -32,6 +34,7 @@ from core.request_logging import install_request_logging_middleware
 # -------------------------------------------------------
 configure_logging("api")
 logger = logging.getLogger(__name__)
+_PROCESS_STARTED_AT = time.monotonic()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -158,6 +161,17 @@ async def get_public_config():
         "bot_username": settings.bot_username,
         "frontend_url": settings.frontend_url,
     }
+
+
+@app.get("/metrics")
+async def get_metrics():
+    """Prometheus-compatible metrics endpoint."""
+    registry.gauge(
+        "trading_bot_process_uptime_seconds",
+        "Process uptime in seconds.",
+        uptime_seconds(_PROCESS_STARTED_AT),
+    )
+    return Response(content=metrics_response_body(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 # -------------------------------------------------------
 # 📂 Static Files & Frontend Serving

@@ -16,6 +16,7 @@ from jose import jwt, JWTError
 from core.redis import pool
 from core.config import settings
 from core.db import AsyncSessionLocal
+from core.metrics import record_websocket_publish_failure, set_active_websocket_connections
 from core.services.session_service import is_session_blacklisted
 from models.session import UserSession
 from models.user import User
@@ -51,10 +52,12 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        set_active_websocket_connections(len(self.active_connections))
     
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        set_active_websocket_connections(len(self.active_connections))
     
     async def broadcast(self, message: dict):
         """ارسال پیام به همه کانکشن‌های فعال"""
@@ -64,6 +67,7 @@ class ConnectionManager:
                 await connection.send_json(message)
             except:
                 disconnected.append(connection)
+                record_websocket_publish_failure(message.get("type", "broadcast"))
         
         # حذف کانکشن‌های بسته شده
         for conn in disconnected:
@@ -316,6 +320,7 @@ async def publish_event(event_type: str, data: dict):
             channel = f"events:{event_type}"
             await redis_client.publish(channel, json.dumps(data, ensure_ascii=False, default=str))
     except Exception as e:
+        record_websocket_publish_failure(event_type)
         logging.warning(f"⚠️ Error publishing event {event_type}: {e}")
 
     try:
@@ -326,6 +331,7 @@ async def publish_event(event_type: str, data: dict):
             "data": safe_data
         })
     except Exception as e:
+        record_websocket_publish_failure(event_type)
         logging.warning(f"⚠️ Error broadcasting event {event_type}: {e}")
 
 
@@ -346,4 +352,5 @@ async def publish_user_event(user_id: int | None, event_type: str, data: dict):
                 json.dumps(payload, ensure_ascii=False, default=str),
             )
     except Exception as e:
+        record_websocket_publish_failure(event_type)
         logging.warning(f"⚠️ Error publishing user event {event_type} for user {user_id}: {e}")
