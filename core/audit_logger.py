@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from core.log_redaction import redact
+from core.metrics import record_business_action
 from core.request_context import get_request_context
 
 
@@ -76,5 +77,5 @@ def audit_log(
         payload["audit_extra"] = _safe_mapping(extra)
 
     payload = {key: value for key, value in payload.items() if value is not None}
+    record_business_action(action=action, result=payload["result"])
     _AUDIT_LOGGER.info("Audit event recorded", extra=payload)
-

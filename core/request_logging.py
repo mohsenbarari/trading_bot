@@ -10,6 +10,7 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import Response
 
+from core.metrics import normalize_http_route, record_http_request
 from core.request_context import clear_request_context, set_request_context
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -98,6 +99,12 @@ def request_log_extra(
     }
 
 
+def request_route_template(request: Request, path: str) -> str:
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None)
+    return normalize_http_route(route_path or path)
+
+
 def install_request_logging_middleware(app: Any) -> None:
     """Install request id propagation and sanitized access logs."""
 
@@ -140,6 +147,13 @@ def install_request_logging_middleware(app: Any) -> None:
             raise
         finally:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            route_template = request_route_template(request, path)
+            record_http_request(
+                method=request.method,
+                route=route_template,
+                status_code=status_code,
+                duration_ms=duration_ms,
+            )
             if should_log_request_path(path):
                 extra = request_log_extra(
                     request_id=request_id,
