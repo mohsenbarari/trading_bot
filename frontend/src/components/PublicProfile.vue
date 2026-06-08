@@ -1903,9 +1903,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .profile-content {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 7px;
   align-items: center;
-  padding: 10px 0 12rem 0;
+  padding: 4px 0 12rem 0;
 }
 
 .profile-content--own {
