@@ -7,6 +7,7 @@ from sqlalchemy.orm import joinedload
 
 import schemas
 from api.deps import get_effective_owner_actor_context
+from core.audit_logger import audit_log
 from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import (
@@ -51,6 +52,14 @@ def serialize_accountant_relation(relation) -> dict:
         "activated_at": relation.activated_at,
         "deleted_at": relation.deleted_at,
         "created_at": relation.created_at,
+    }
+
+
+def audit_actor_context(context: EffectiveOwnerActor) -> dict:
+    actor_user = getattr(context, "actor_user", None) or context.owner_user
+    return {
+        "actor_id": getattr(actor_user, "id", None),
+        "actor_role": getattr(getattr(actor_user, "role", None), "value", getattr(actor_user, "role", None)),
     }
 
 
@@ -156,6 +165,18 @@ async def create_my_accountant(
             web_link=registration_link,
         )
 
+    audit_log(
+        "accountant.link",
+        target_type="accountant_relation",
+        target_id=relation.id,
+        after_summary={
+            "owner_user_id": relation.owner_user_id,
+            "accountant_user_id": relation.accountant_user_id,
+            "status": relation.status,
+        },
+        **audit_actor_context(context),
+    )
+
     return serialize_accountant_relation(relation)
 
 
@@ -199,6 +220,17 @@ async def terminate_my_accountant_session(
         session_id=normalized_session_id,
     )
     promoted_session = await logout_session(db, session)
+    audit_log(
+        "accountant.session_terminate",
+        target_type="accountant_session",
+        target_id=session.id,
+        after_summary={
+            "relation_id": relation.id,
+            "accountant_user_id": relation.accountant_user_id,
+            "promoted_primary_session_id": str(promoted_session.id) if promoted_session else None,
+        },
+        **audit_actor_context(context),
+    )
     return {
         "detail": "نشست حسابدار با موفقیت پایان یافت",
         "terminated_session_id": str(session.id),
@@ -218,6 +250,18 @@ async def cancel_my_pending_accountant(
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
     )
+    audit_log(
+        "accountant.unlink",
+        target_type="accountant_relation",
+        target_id=relation.id,
+        before_summary={
+            "owner_user_id": relation.owner_user_id,
+            "accountant_user_id": relation.accountant_user_id,
+            "status": relation.status,
+        },
+        after_summary={"deleted_at": relation.deleted_at, "status": relation.status},
+        **audit_actor_context(context),
+    )
     return serialize_accountant_relation(relation)
 
 
@@ -234,5 +278,12 @@ async def update_my_accountant(
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
         duty_description=payload.duty_description,
+    )
+    audit_log(
+        "accountant.update",
+        target_type="accountant_relation",
+        target_id=relation.id,
+        after_summary={"updated_fields": ["duty_description"], "status": relation.status},
+        **audit_actor_context(context),
     )
     return serialize_accountant_relation(relation)

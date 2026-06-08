@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from datetime import datetime
 
 from core.db import get_db
+from core.audit_logger import audit_log
 from models.user import User
 from api.deps import get_current_user
 
@@ -132,6 +133,15 @@ async def block_a_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=message
         )
+
+    audit_log(
+        "user.block",
+        target_type="user",
+        target_id=user_id,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={"blocked": True},
+    )
     
     return {"success": True, "message": message}
 
@@ -153,6 +163,15 @@ async def unblock_a_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=message
         )
+
+    audit_log(
+        "user.unblock",
+        target_type="user",
+        target_id=user_id,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={"blocked": False},
+    )
     
     return {"success": True, "message": message}
 

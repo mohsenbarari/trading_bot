@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user, get_db, verify_super_admin
 from api.routers.chat_schemas import MessageRead
+from core.audit_logger import audit_log
 from core.enums import NotificationCategory, NotificationLevel
 from core.events import publish_event_sync
 from core.services.admin_message_service import (
@@ -254,6 +255,18 @@ async def create_broadcast(
                 "chat_id": created.chat.id,
             },
         )
+
+    audit_log(
+        "admin.broadcast",
+        target_type="admin_broadcast",
+        target_id=broadcast.id,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={
+            "target_groups": target_groups,
+            "recipient_count": len(recipient_ids),
+        },
+    )
 
     base = _serialize_broadcast(broadcast).model_dump()
     return AdminBroadcastCreateResponse(**base, delivered_user_ids=recipient_ids)

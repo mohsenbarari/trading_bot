@@ -11,6 +11,7 @@ from typing import Optional, List
 from datetime import datetime
 
 from core.db import get_db
+from core.audit_logger import audit_log
 from core.config import settings
 from core.enums import MessageType
 from core.security import create_access_token, create_refresh_token
@@ -1029,6 +1030,14 @@ async def terminate_session(
             )
 
     await logout_session(db, session)
+    audit_log(
+        "session.terminate",
+        target_type="session",
+        target_id=session.id,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={"target_user_id": current_user.id, "is_current": str(sid) == current_session_id_str},
+    )
     return {"detail": "نشست با موفقیت پایان یافت"}
 
 
@@ -1066,6 +1075,14 @@ async def logout_all_sessions(
         )
 
     count = await force_clear_sessions(db, current_user.id, exclude_session_id=caller_sid)
+    audit_log(
+        "session.logout_all",
+        target_type="user",
+        target_id=current_user.id,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={"terminated_sessions": count, "excluded_session_id": str(caller_sid)},
+    )
     return {"detail": f"{count} نشست پایان یافت"}
 
 
@@ -1136,6 +1153,15 @@ async def approve_request(
 
     await _store_temporary_refresh_token(f"login_req_token:{request_id}", new_refresh)
 
+    audit_log(
+        "session.login_request_approve",
+        target_type="session_login_request",
+        target_id=rid,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={"target_user_id": login_req.user_id, "new_session_id": str(result["session"].id)},
+    )
+
     return {"detail": "درخواست ورود تایید شد", "session": session_to_dict(result["session"])}
 
 
@@ -1167,6 +1193,15 @@ async def reject_request(
     result = await reject_login_request(db, rid, primary_session)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+
+    audit_log(
+        "session.login_request_reject",
+        target_type="session_login_request",
+        target_id=rid,
+        actor_id=current_user.id,
+        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        after_summary={"target_user_id": current_user.id},
+    )
 
     return {"detail": "درخواست ورود رد شد"}
 

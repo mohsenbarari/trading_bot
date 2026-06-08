@@ -7,6 +7,7 @@ from sqlalchemy.orm import joinedload
 
 import schemas
 from api.deps import get_effective_owner_actor_context
+from core.audit_logger import audit_log
 from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import EffectiveOwnerActor
@@ -71,6 +72,14 @@ def serialize_customer_session(session: UserSession) -> schemas.CustomerSessionR
         created_at=session.created_at,
         last_active_at=session.last_active_at,
     )
+
+
+def audit_actor_context(context: EffectiveOwnerActor) -> dict:
+    actor_user = getattr(context, "actor_user", None) or context.owner_user
+    return {
+        "actor_id": getattr(actor_user, "id", None),
+        "actor_role": getattr(getattr(actor_user, "role", None), "value", getattr(actor_user, "role", None)),
+    }
 
 
 async def ensure_owner_context(context: EffectiveOwnerActor, db: AsyncSession) -> None:
@@ -171,6 +180,19 @@ async def create_my_customer(
             web_link=registration_link,
         )
 
+    audit_log(
+        "customer.link",
+        target_type="customer_relation",
+        target_id=relation.id,
+        after_summary={
+            "owner_user_id": relation.owner_user_id,
+            "customer_user_id": relation.customer_user_id,
+            "customer_tier": relation.customer_tier,
+            "status": relation.status,
+        },
+        **audit_actor_context(context),
+    )
+
     return serialize_customer_relation(relation, invitation=invitation)
 
 
@@ -187,6 +209,19 @@ async def unlink_my_customer(
         relation_id=relation_id,
     )
     invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
+    audit_log(
+        "customer.unlink",
+        target_type="customer_relation",
+        target_id=relation.id,
+        before_summary={
+            "owner_user_id": relation.owner_user_id,
+            "customer_user_id": relation.customer_user_id,
+            "customer_tier": relation.customer_tier,
+            "status": relation.status,
+        },
+        after_summary={"deleted_at": relation.deleted_at, "status": relation.status},
+        **audit_actor_context(context),
+    )
     return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
 
 
@@ -205,6 +240,17 @@ async def update_my_customer(
         update_data=payload.model_dump(exclude_unset=True),
     )
     invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
+    audit_log(
+        "customer.update",
+        target_type="customer_relation",
+        target_id=relation.id,
+        after_summary={
+            "updated_fields": sorted(payload.model_dump(exclude_unset=True).keys()),
+            "customer_tier": relation.customer_tier,
+            "status": relation.status,
+        },
+        **audit_actor_context(context),
+    )
     return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
 
 
@@ -248,6 +294,17 @@ async def terminate_my_customer_session(
         session_id=normalized_session_id,
     )
     promoted_session = await logout_session(db, session)
+    audit_log(
+        "customer.session_terminate",
+        target_type="customer_session",
+        target_id=session.id,
+        after_summary={
+            "relation_id": relation.id,
+            "customer_user_id": relation.customer_user_id,
+            "promoted_primary_session_id": str(promoted_session.id) if promoted_session else None,
+        },
+        **audit_actor_context(context),
+    )
     return {
         "detail": "نشست مشتری با موفقیت پایان یافت",
         "terminated_session_id": str(session.id),
