@@ -319,6 +319,8 @@ Completion notes:
 
 ## Stage 6: Log Collection and Search
 
+Status: Completed on 2026-06-08.
+
 Purpose: logs must be searchable across app, bot, workers, and deployments.
 
 Recommended stack:
@@ -346,6 +348,14 @@ Security requirements:
 Acceptance:
 - A production error can be found by request id or timestamp.
 - API, bot, and worker logs can be filtered independently.
+
+Completion notes:
+- Added `docker-compose.observability.yml` as an optional local-only Loki, Promtail, and Grafana stack.
+- Added Loki retention/storage config in `observability/loki/loki-config.yml`.
+- Added Promtail Docker log discovery in `observability/promtail/promtail-config.yml`, restricted to `trading_bot_*` containers and low-cardinality labels.
+- Added Grafana Loki datasource provisioning in `observability/grafana/provisioning/datasources/datasources.yml`.
+- Added `docs/OBSERVABILITY_LOG_SEARCH.md` with run commands, security notes, label policy, and LogQL search examples for `request_id`, `actor_id`, `event`, `service`, `status_code`, jobs, bot logs, and audit logs.
+- Added `make observability-up`, `make observability-down`, and `make observability-logs`.
 
 ## Stage 7: Dashboards
 
@@ -508,7 +518,7 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 3: Bot and Background Worker Logging | Completed | Added job context helpers, run ids, iteration fields, duration helpers, repeated-error suppression, structured context for offer/session/market/user-status loops and sync worker, and a bot update logging-context middleware that avoids raw message payloads. |
 | Stage 4: Audit Logging | Completed | Added strict audit event schema and summary-only audit events for sensitive user/session/relation/block/broadcast actions with redaction coverage. |
 | Stage 5: Metrics Foundation | Completed | Added `/metrics`, shared SQLite-backed Prometheus text metrics for multi-worker API/job aggregation, low-cardinality request/job/realtime/bot/audit metrics, and focused metrics tests/smoke validation. |
-| Stage 6: Log Collection and Search | Planned | Add Loki/Promtail or equivalent collection after JSON logs are stable. |
+| Stage 6: Log Collection and Search | Completed | Added optional local Loki/Promtail/Grafana stack, low-cardinality Docker log labels, Grafana datasource provisioning, LogQL search examples, and observability make targets. |
 | Stage 7: Dashboards | Planned | Add Grafana dashboards for API, bot, realtime, auth, chat/upload, jobs, and infra. |
 | Stage 8: Alerting | Planned | Add actionable alerts with no secret-bearing payloads. |
 | Stage 9: Error Tracking | Planned | Add scrubbed exception grouping after logging/metrics baseline stabilizes. |
