@@ -16,6 +16,47 @@ SYNC_RECOVERY_SCRIPT="$PROJECT_DIR/scripts/recover_cross_server_sync.sh"
 FOREIGN_HOST_TIMEZONE="${FOREIGN_HOST_TIMEZONE:-UTC}"
 IRAN_HOST_TIMEZONE="${IRAN_HOST_TIMEZONE:-UTC}"
 AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY="${AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY:-1}"
+LOCAL_COMPOSE_CMD=""
+
+normalize_arch() {
+    case "${1:-}" in
+        x86_64|amd64) printf 'amd64\n' ;;
+        aarch64|arm64) printf 'arm64\n' ;;
+        *) echo "Unsupported architecture: $1" >&2; exit 1 ;;
+    esac
+}
+
+resolve_local_compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        LOCAL_COMPOSE_CMD="docker compose"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        LOCAL_COMPOSE_CMD="docker-compose"
+    else
+        echo "No Docker Compose command is available locally." >&2
+        exit 1
+    fi
+}
+
+append_pip_platform_args() {
+    case "$(normalize_arch "$1")" in
+        amd64)
+            printf '%s\n' \
+                "--platform" "manylinux2014_x86_64" \
+                "--platform" "manylinux_2_17_x86_64" \
+                "--platform" "manylinux_2_28_x86_64" \
+                "--platform" "linux_x86_64" \
+                "--platform" "any"
+            ;;
+        arm64)
+            printf '%s\n' \
+                "--platform" "manylinux2014_aarch64" \
+                "--platform" "manylinux_2_17_aarch64" \
+                "--platform" "manylinux_2_28_aarch64" \
+                "--platform" "linux_aarch64" \
+                "--platform" "any"
+            ;;
+    esac
+}
 
 IRAN_HOST="87.107.110.68"
 IRAN_USER="root"
@@ -231,11 +272,14 @@ prepare_pip_packages() {
     print_header "📦 Checking pip dependencies"
     
     HASH_FILE="$PROJECT_DIR/pip_packages/.requirements_hash"
-    CURRENT_HASH=$(md5sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)
+    LOCAL_ARCH="$(normalize_arch "$(dpkg --print-architecture)")"
+    CURRENT_HASH="$(md5sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)-$LOCAL_ARCH"
     
     if [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
         echo "🔄 requirements.txt changed or packages missing. Downloading..."
         mkdir -p "$PROJECT_DIR/pip_packages"
+        rm -f "$PROJECT_DIR"/pip_packages/*.whl "$PROJECT_DIR/pip_packages/.requirements_hash" 2>/dev/null || true
+        mapfile -t PIP_PLATFORM_ARGS < <(append_pip_platform_args "$LOCAL_ARCH")
         
         # Download for Python 3.11 (Docker image version)
         pip download -r "$PROJECT_DIR/requirements.txt" \
@@ -243,11 +287,7 @@ prepare_pip_packages() {
             --python-version 311 \
             --implementation cp \
             --abi cp311 \
-            --platform manylinux2014_x86_64 \
-            --platform manylinux_2_17_x86_64 \
-            --platform manylinux_2_28_x86_64 \
-            --platform linux_x86_64 \
-            --platform any \
+            "${PIP_PLATFORM_ARGS[@]}" \
             --only-binary=:all:
             
         echo "$CURRENT_HASH" > "$HASH_FILE"
@@ -301,10 +341,18 @@ deploy_iran() {
 
     echo "🐳 Recreating Docker services on Iran..."
     echo "⏳ Waiting for Iran services to become ready..."
-    ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml up -d --wait --wait-timeout 180"
+    ssh_iran "set -e; \
+        if docker compose version >/dev/null 2>&1; then COMPOSE_CMD='docker compose'; \
+        elif command -v docker-compose >/dev/null 2>&1; then COMPOSE_CMD='docker-compose'; \
+        else echo 'No Docker Compose command is available on Iran host.' >&2; exit 1; fi; \
+        cd $IRAN_PROJECT_DIR && eval \"\$COMPOSE_CMD -f docker-compose.iran.yml up -d --wait --wait-timeout 180\""
 
     echo "✅ Iran deployment complete!"
-    ssh_iran "cd $IRAN_PROJECT_DIR && docker compose -f docker-compose.iran.yml ps"
+    ssh_iran "set -e; \
+        if docker compose version >/dev/null 2>&1; then COMPOSE_CMD='docker compose'; \
+        elif command -v docker-compose >/dev/null 2>&1; then COMPOSE_CMD='docker-compose'; \
+        else echo 'No Docker Compose command is available on Iran host.' >&2; exit 1; fi; \
+        cd $IRAN_PROJECT_DIR && eval \"\$COMPOSE_CMD -f docker-compose.iran.yml ps\""
     
     auto_cleanup_iran
 }
@@ -318,6 +366,7 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     ensure_local_host_timezone
+    resolve_local_compose_cmd
 
     echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
     run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
@@ -325,10 +374,10 @@ deploy_foreign() {
     echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
     echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
     echo "⏳ Waiting for foreign core services to become ready..."
-    run_with_local_resource_guard "Foreign core service startup" docker compose up -d --wait --wait-timeout 180 "${core_services[@]}"
+    run_with_local_resource_guard "Foreign core service startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --wait --wait-timeout 180 ${core_services[*]}"
 
     echo "✅ Foreign deployment complete!"
-    docker compose ps
+    bash -lc "$LOCAL_COMPOSE_CMD ps"
 
     auto_cleanup_local
 }

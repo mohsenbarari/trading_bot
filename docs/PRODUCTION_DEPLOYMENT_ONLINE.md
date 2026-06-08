@@ -66,22 +66,27 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 ## Full flow
 
 ### 1. Local validation
-- validates local tools (`ssh`, `scp`, `rsync`, `docker`, `npm`, `python3`)
+- validates local tools (`ssh`, `scp`, `rsync`, `python3`)
+- auto-installs missing local `docker` / `npm` / `pip` packages on the foreign server when needed
 - validates the manifest
 - checks SSH connectivity to the Iran server
-- if the runtime env file is missing, prompts for the required values and creates it
+- detects Docker Compose command and CPU architecture on both servers before deploy
+- if either env file is missing, prompts for the required values and creates both:
+  - local foreign `.env`
+  - Iran runtime `.env`
 
 ### 2. Local build + local foreign deploy
-- builds the frontend on the foreign server
-- prepares Python wheel cache
+- first deploys the foreign server with host-native dependencies and compose command detection
+- then builds the Iran artifacts after the foreign deploy completes
+- prepares Python wheel caches per target architecture
 - builds:
-  - `trading_bot_base`
-  - `trading_bot_base_iran`
+  - host-native foreign image path via `deploy.sh foreign`
+  - `trading_bot_base_iran` for the detected Iran target architecture
 - prepares a loadable Docker bundle containing:
   - `trading_bot_base_iran`
   - `postgres:15-alpine`
   - `redis:7-alpine`
-- deploys the foreign server locally
+- uses `buildx` for the Iran image when foreign and Iran architectures differ
 
 ### 3. Iran scenario question
 - asks whether the Iran server currently has working internet access
@@ -89,10 +94,14 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - if `yes`, it continues with the Iran-online flow
 
 ### 4. `bootstrap-iran`
-- installs baseline packages
-- installs Docker if missing
-- installs Nginx, Certbot, and `python3-certbot-nginx`
-- attempts to install Docker Compose plugin
+- prepares a package bundle on the foreign server when foreign and Iran share the same Debian architecture
+- invalidates and rebuilds that bundle automatically when the bootstrap package set changes
+- transfers the bundle over SSH
+- installs baseline packages on Iran from the transferred `.deb` files with `--no-download`
+- installs `docker`, `docker compose`, `docker-compose`, `npm`, and `python3-pip` from the transferred bundle when needed
+- if the offline apt install still fails in the Iran-online scenario, refreshes apt indices once and retries with `--fix-missing`
+- when foreign and Iran architectures differ, skips the foreign-built `.deb` bundle and performs a retry-hardened direct apt install on Iran instead
+- verifies that either `docker compose` or `docker-compose` is actually available before bootstrap is considered successful
 - creates deploy directories
 - forces UTC on the Iran host
 
@@ -103,7 +112,8 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 
 ### 6. `sync-project`
 - rsyncs the production payload to the Iran server
-- copies the private runtime `.env` file
+- copies the private Iran runtime `.env` file
+- syncs the prepared `pip_packages/` wheelhouse for the runtime image build context
 
 ### 7. `configure-nginx`
 - renders a domain-aware Nginx config from the template
@@ -112,6 +122,8 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 
 ### 8. `issue-cert`
 - runs `certbot --nginx -d <domain>`
+- enables `certbot.timer` automatically when systemd provides it
+- falls back to a cron-based `certbot renew` entry if `certbot.timer` is unavailable
 - can be skipped with `IRAN_SKIP_CERTBOT=1`
 
 ### 9. `ship-images` + `load-images`
@@ -119,12 +131,14 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - runs `docker load` on the Iran host
 
 ### 10. `deploy-iran`
-- runs `docker compose -f docker-compose.iran.yml up -d --wait`
+- detects whether Iran provides `docker compose` or `docker-compose`
+- runs the available compose command with `-f docker-compose.iran.yml up -d --wait`
+- the Iran `app` service now has its own HTTP healthcheck on `/api/config`, so `--wait` includes actual API readiness instead of only container start
 - does **not** build the image remotely
 
 ### 11. `healthcheck`
-- checks the local API endpoint on the Iran host
-- optionally checks the public HTTPS endpoint
+- retries the local API endpoint on the Iran host with backoff until it becomes ready
+- optionally retries the public HTTPS endpoint with backoff until it becomes ready
 
 ## Known limitations of v1
 
@@ -135,6 +149,9 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 5. Firewall hardening is optional and conservative.
 6. The script assumes Debian/Ubuntu style package management.
 7. For SSH password auth, `sshpass` must be installed on the foreign server.
+8. Iran bootstrap currently assumes the transferred package bundle contains all required `.deb` files for the target distro family.
+9. The foreign host must have root-level access to install missing packages when `docker`, `npm`, or `pip` are absent.
+10. S3 support has been removed from the production deploy flow and from the generated env files.
 
 ## Next step after this test phase
 
