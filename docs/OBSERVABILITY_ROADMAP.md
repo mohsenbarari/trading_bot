@@ -359,6 +359,8 @@ Completion notes:
 
 ## Stage 7: Dashboards
 
+Status: Completed on 2026-06-08.
+
 Purpose: operations must be visible without manual log inspection.
 
 Dashboards:
@@ -373,6 +375,13 @@ Dashboards:
 Acceptance:
 - Each critical runtime surface has a dashboard.
 - Dashboards use stable labels and do not expose secrets.
+
+Completion notes:
+- Added Grafana dashboard provisioning in `observability/grafana/provisioning/dashboards/dashboards.yml`.
+- Added dashboard JSON files under `observability/grafana/dashboards/` for API overview, runtime/jobs/realtime, security/audit, business/chat/upload, and infrastructure log health.
+- Wired dashboards into `docker-compose.observability.yml` through read-only provisioning volumes.
+- Added `docs/OBSERVABILITY_DASHBOARDS.md` with dashboard coverage, local loading instructions, label policy, sensitive-data rules, and current log-based infrastructure limitations.
+- Kept dashboards Loki/log based for this stage so no new production runtime dependency or exporter is required.
 
 ## Stage 8: Alerting
 
@@ -519,7 +528,7 @@ This slice must not introduce Loki, Prometheus, dashboards, or alerting yet. Tho
 | Stage 4: Audit Logging | Completed | Added strict audit event schema and summary-only audit events for sensitive user/session/relation/block/broadcast actions with redaction coverage. |
 | Stage 5: Metrics Foundation | Completed | Added `/metrics`, shared SQLite-backed Prometheus text metrics for multi-worker API/job aggregation, low-cardinality request/job/realtime/bot/audit metrics, and focused metrics tests/smoke validation. |
 | Stage 6: Log Collection and Search | Completed | Added optional local Loki/Promtail/Grafana stack, low-cardinality Docker log labels, Grafana datasource provisioning, LogQL search examples, and observability make targets. |
-| Stage 7: Dashboards | Planned | Add Grafana dashboards for API, bot, realtime, auth, chat/upload, jobs, and infra. |
+| Stage 7: Dashboards | Completed | Added provisioned Grafana dashboards for API, jobs/bot/realtime, security/audit, business/chat/upload, and infrastructure log health with stable Loki labels and dashboard documentation. |
 | Stage 8: Alerting | Planned | Add actionable alerts with no secret-bearing payloads. |
 | Stage 9: Error Tracking | Planned | Add scrubbed exception grouping after logging/metrics baseline stabilizes. |
 | Stage 10: DevEx and Runbooks | Planned | Add make targets and incident investigation runbooks. |

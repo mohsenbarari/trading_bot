@@ -35,6 +35,8 @@ services:
     volumes:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - loki
     restart: unless-stopped
@@ -42,4 +44,3 @@ services:
 volumes:
   loki_data:
   grafana_data:
-
