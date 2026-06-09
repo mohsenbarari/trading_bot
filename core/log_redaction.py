@@ -29,12 +29,18 @@ SAFE_CODE_KEYS = {
 }
 
 SENSITIVE_EXACT_KEYS = {
+    "access-token",
+    "access_token",
     "authorization",
     "cookie",
     "code",
+    "id-token",
+    "id_token",
     "otp",
     "password",
     "passwd",
+    "refresh-token",
+    "refresh_token",
     "secret",
     "session-id",
     "signature",
@@ -71,7 +77,6 @@ SENSITIVE_KEY_PARTS = (
     "original-file-name",
     "s3_key",
     "s3-key",
-    "access",
     "jwt",
     "signature",
 )

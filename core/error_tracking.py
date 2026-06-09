@@ -7,6 +7,7 @@ import logging
 import time
 import traceback
 from collections import OrderedDict
+from pathlib import Path
 from threading import Lock
 from types import TracebackType
 from typing import Any
@@ -16,6 +17,7 @@ from core.request_context import get_request_context
 
 
 _logger = logging.getLogger("error.tracking")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _rate_limit_lock = Lock()
 _rate_limit_state: OrderedDict[str, dict[str, float | int]] = OrderedDict()
 
@@ -77,6 +79,13 @@ def _runtime_metadata() -> dict[str, Any]:
         return {}
 
 
+def _relative_project_path(filename: str) -> str:
+    try:
+        return Path(filename).resolve().relative_to(_PROJECT_ROOT).as_posix()
+    except Exception:
+        return filename.rsplit("/", 1)[-1]
+
+
 def _project_frames(tb: TracebackType | None, *, limit: int = 8) -> list[dict[str, Any]]:
     frames: list[dict[str, Any]] = []
     for frame in traceback.extract_tb(tb or None):
@@ -85,7 +94,7 @@ def _project_frames(tb: TracebackType | None, *, limit: int = 8) -> list[dict[st
             continue
         frames.append(
             {
-                "file": filename.rsplit("/", 1)[-1],
+                "file": _relative_project_path(filename),
                 "function": frame.name,
                 "line": frame.lineno,
             }

@@ -123,6 +123,33 @@ class TextLogFormatter(logging.Formatter):
             record.args = original_args
 
 
+def _build_managed_handler(*, log_level: int, log_format: str) -> logging.Handler:
+    handler = logging.StreamHandler(sys.stdout)
+    handler._trading_bot_managed = True  # type: ignore[attr-defined]
+    handler.setLevel(log_level)
+    handler.addFilter(RequestContextFilter())
+    if log_format == "text":
+        handler.setFormatter(
+            TextLogFormatter(
+                fmt="%(asctime)s %(levelname)s [%(service)s] %(name)s: %(message)s",
+                datefmt="%Y-%m-%dT%H:%M:%S%z",
+            )
+        )
+    else:
+        handler.setFormatter(JsonLogFormatter())
+    return handler
+
+
+def _remove_managed_handlers(logger: logging.Logger) -> None:
+    for handler in list(logger.handlers):
+        if getattr(handler, "_trading_bot_managed", False):
+            logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+
+
 def configure_logging(service_name: str) -> None:
     """Configure root logging for one service process."""
     global SERVICE_NAME
@@ -137,22 +164,9 @@ def configure_logging(service_name: str) -> None:
         log_level = logging.INFO
         log_format = "json"
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(log_level)
-    handler.addFilter(RequestContextFilter())
-    if log_format == "text":
-        handler.setFormatter(
-            TextLogFormatter(
-                fmt="%(asctime)s %(levelname)s [%(service)s] %(name)s: %(message)s",
-                datefmt="%Y-%m-%dT%H:%M:%S%z",
-            )
-        )
-    else:
-        handler.setFormatter(JsonLogFormatter())
-
     root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
+    _remove_managed_handlers(root_logger)
+    root_logger.addHandler(_build_managed_handler(log_level=log_level, log_format=log_format))
     root_logger.setLevel(log_level)
 
     for noisy_logger in ("uvicorn.access",):
@@ -160,7 +174,7 @@ def configure_logging(service_name: str) -> None:
 
     for inherited_logger in ("uvicorn", "uvicorn.error", "aiogram"):
         inherited = logging.getLogger(inherited_logger)
-        inherited.handlers.clear()
+        _remove_managed_handlers(inherited)
         inherited.propagate = True
 
     if not os.environ.get("ERROR_TRACKING_DSN"):

@@ -44,6 +44,8 @@ Production requirements:
 - Do not create dashboard variables from high-cardinality or secret-bearing fields.
 - Rotate Grafana credentials when team access changes.
 
+Promtail currently discovers Docker containers through a read-only Docker socket mount. That is acceptable only for the local operator stack on a trusted host. If the observability stack is moved to a shared or less-trusted environment, replace direct socket access with a socket proxy or file-based scrape path before rollout.
+
 ## Production Alert Delivery
 
 Provisioned alert delivery is intentionally env-driven. The repo ships three receiver names:

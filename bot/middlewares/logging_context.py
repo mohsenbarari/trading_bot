@@ -1,6 +1,7 @@
 """Bot update logging context middleware."""
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Awaitable, Callable
 import time
 from uuid import uuid4
@@ -27,6 +28,27 @@ def _event_type(event: TelegramObject | None) -> str:
     return type(event).__name__ if event is not None else "unknown"
 
 
+def _telegram_update_id(event: TelegramObject) -> int | None:
+    if isinstance(event, Update):
+        return event.update_id
+    return None
+
+
+def _hashed_telegram_user_id(raw_user_id: int | None) -> str | None:
+    if raw_user_id is None:
+        return None
+    try:
+        from core.config import settings
+
+        salt = getattr(settings, "observability_telegram_user_hash_salt", None) or settings.jwt_secret_key
+    except Exception:
+        salt = None
+    if not salt:
+        return None
+    digest = hashlib.sha256(f"{salt}:{raw_user_id}".encode("utf-8", errors="replace")).hexdigest()
+    return f"tg:{digest[:16]}"
+
+
 class BotLoggingContextMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -40,13 +62,16 @@ class BotLoggingContextMiddleware(BaseMiddleware):
         actor_id = getattr(db_user, "id", None)
         actor_role = getattr(getattr(db_user, "role", None), "value", None)
         event_type = _event_type(inner)
+        correlation_id = str(uuid4())
+        telegram_update_id = _telegram_update_id(event)
         start_time = time.perf_counter()
 
         set_request_context(
             log_class="bot",
-            bot_update_id=str(uuid4()),
+            bot_correlation_id=correlation_id,
+            bot_update_id=str(telegram_update_id) if telegram_update_id is not None else None,
             bot_event_type=event_type,
-            telegram_user_id=getattr(telegram_user, "id", None),
+            telegram_user_id=_hashed_telegram_user_id(getattr(telegram_user, "id", None)),
             actor_id=actor_id,
             actor_role=actor_role,
         )
