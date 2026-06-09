@@ -452,6 +452,20 @@ Acceptance:
 - Bot/update correlation supports Telegram-side debugging.
 - Error frames are useful without exposing host paths.
 
+Status: Completed on 2026-06-09.
+
+Completion notes:
+
+- Hardened `core/request_logging.py` so `X-Request-ID` only accepts a bounded safe charset and length; invalid values are replaced with a generated UUID instead of being echoed into logs or responses.
+- Added trusted-proxy handling for `X-Forwarded-For` / `X-Real-IP`: forwarded client IPs are now accepted only when the direct peer belongs to configured `TRUSTED_PROXY_CIDRS`; otherwise logs keep the direct socket peer.
+- Added `trusted_proxy_cidrs` and `observability_telegram_user_hash_salt` settings in `core/config.py`.
+- Updated `bot/middlewares/logging_context.py` to record both a stable internal `bot_correlation_id` and the real Telegram `Update.update_id` (as `bot_update_id` when present), while hashing `telegram_user_id` before it enters structured logs.
+- Reworked `core/error_tracking.py` stack frames to emit project-relative file paths instead of basename-only entries or absolute host paths; kept fingerprint grouping stable without adding line-number noise at this stage.
+- Made `configure_logging()` idempotent in `core/logging_config.py` by replacing only Codex-managed handlers and preserving unrelated future handlers/integrations.
+- Narrowed secret-key matching in `core/log_redaction.py` so operational fields such as `access_level` remain visible while actual token fields stay redacted.
+- Documented the current Promtail Docker socket model as local-trusted-only in `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`; Loki remains acceptable without auth only while bound to `127.0.0.1`.
+- Added focused regressions for invalid request ids, trusted/untrusted proxy IP extraction, bot update correlation, hashed Telegram ids, project-relative error frames, `access_level` visibility, and idempotent logging setup.
+
 ### Stage R7: Observability CI Gate
 
 Goal: prevent future observability regressions.

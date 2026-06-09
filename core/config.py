@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     error_tracking_rate_limit_max_fingerprints: int = 2048
     observability_api_key: str | None = None
     audit_trail_path: str | None = None
+    trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
+    observability_telegram_user_hash_salt: str | None = None
 
     database_url: str
     sync_database_url: str

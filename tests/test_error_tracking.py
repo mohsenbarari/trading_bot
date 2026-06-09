@@ -61,6 +61,22 @@ class ErrorTrackingTests(unittest.TestCase):
         self.assertEqual(first_fingerprint, second_fingerprint)
         self.assertEqual(len(first_fingerprint), 16)
 
+    def test_capture_exception_uses_project_relative_frame_paths(self):
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("error-test")
+
+        try:
+            self._raise_secret_error()
+        except RuntimeError as exc:
+            capture_exception(exc, source="api.request")
+
+        payload = json.loads(stream.getvalue().strip())
+        self.assertTrue(payload["frames"])
+        top_frame = payload["frames"][-1]["file"]
+        self.assertFalse(top_frame.startswith("/"))
+        self.assertIn("tests/test_error_tracking.py", top_frame)
+
     def test_capture_exception_rate_limits_repeated_fingerprints(self):
         stream = io.StringIO()
         with patch("sys.stdout", stream):

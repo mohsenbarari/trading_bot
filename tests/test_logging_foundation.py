@@ -165,6 +165,34 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertNotIn("owner@example.com", log_line)
         self.assertNotIn("unsafe-token", log_line)
 
+    def test_redaction_does_not_hide_operational_access_level_fields(self):
+        redacted = redact({"access_level": "middle-admin", "access_token": "unsafe-token"})
+
+        self.assertEqual(redacted["access_level"], "middle-admin")
+        self.assertEqual(redacted["access_token"], REDACTED)
+
+    def test_configure_logging_is_idempotent_and_preserves_unmanaged_handlers(self):
+        root_logger = logging.getLogger()
+        extra_handler = logging.StreamHandler(io.StringIO())
+        root_logger.addHandler(extra_handler)
+
+        first_stream = io.StringIO()
+        second_stream = io.StringIO()
+        with patch("sys.stdout", first_stream):
+            configure_logging("api-test")
+        with patch("sys.stdout", second_stream):
+            configure_logging("api-test-2")
+
+        managed_handlers = [
+            handler for handler in root_logger.handlers if getattr(handler, "_trading_bot_managed", False)
+        ]
+        self.assertEqual(len(managed_handlers), 1)
+        self.assertIn(extra_handler, root_logger.handlers)
+
+        logging.getLogger("tests.logging").info("hello")
+        payload = json.loads(second_stream.getvalue().strip())
+        self.assertEqual(payload["service"], "api-test-2")
+
 
 if __name__ == "__main__":
     unittest.main()

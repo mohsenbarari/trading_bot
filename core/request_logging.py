@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import ipaddress
 import re
 import time
 import uuid
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Any
 
 from starlette.requests import Request
@@ -60,6 +62,7 @@ _SAFE_SEGMENTS_AFTER_SECRET_MARKER = frozenset(
     }
 )
 _REDACTED_PATH_SEGMENT = "[REDACTED]"
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 
 _STATIC_PATH_PREFIXES = (
     "/assets/",
@@ -86,17 +89,61 @@ _STATIC_PATH_SUFFIXES = (
 
 def make_request_id(raw_request_id: str | None = None) -> str:
     candidate = (raw_request_id or "").strip()
-    if not candidate:
+    if not candidate or not _REQUEST_ID_RE.fullmatch(candidate):
         return str(uuid.uuid4())
-    return candidate[:128]
+    return candidate
+
+
+@lru_cache(maxsize=1)
+def _trusted_proxy_networks() -> tuple[ipaddress._BaseNetwork, ...]:
+    try:
+        from core.config import settings
+
+        raw_value = getattr(settings, "trusted_proxy_cidrs", "") or ""
+    except Exception:
+        raw_value = ""
+    networks: list[ipaddress._BaseNetwork] = []
+    for item in raw_value.split(","):
+        candidate = item.strip()
+        if not candidate:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(candidate, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def _parse_ip_address(value: str | None) -> ipaddress._BaseAddress | None:
+    if not value:
+        return None
+    try:
+        return ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+
+
+def _is_trusted_proxy(client_host: str | None) -> bool:
+    client_ip = _parse_ip_address(client_host)
+    if client_ip is None:
+        return False
+    return any(client_ip in network for network in _trusted_proxy_networks())
 
 
 def client_ip_from_request(request: Request) -> str | None:
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip() or None
-    if request.client:
-        return request.client.host
+    direct_host = request.client.host if request.client else None
+    if _is_trusted_proxy(direct_host):
+        real_ip = _parse_ip_address(request.headers.get("x-real-ip"))
+        if real_ip is not None:
+            return str(real_ip)
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            for item in forwarded_for.split(","):
+                forwarded_ip = _parse_ip_address(item)
+                if forwarded_ip is not None:
+                    return str(forwarded_ip)
+    if direct_host:
+        return direct_host
     return None
 
 

@@ -64,7 +64,11 @@ async def call_app(
 class RequestLoggingTests(unittest.TestCase):
     def test_make_request_id_uses_incoming_header_with_length_cap(self):
         self.assertEqual(make_request_id(" req-1 "), "req-1")
-        self.assertEqual(len(make_request_id("x" * 200)), 128)
+        generated = make_request_id("x" * 200)
+        self.assertEqual(len(generated), 36)
+        self.assertNotEqual(generated, "x" * 200)
+        self.assertEqual(len(make_request_id("trace.id:1-2_3")), len("trace.id:1-2_3"))
+        self.assertEqual(len(make_request_id("bad value with spaces")), 36)
         self.assertTrue(make_request_id())
 
     def test_path_policy_marks_sensitive_and_static_paths(self):
@@ -196,6 +200,46 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(REQUEST_ID_HEADER, response.headers)
         logger.info.assert_not_called()
+
+    def test_client_ip_only_trusts_forwarded_headers_from_configured_proxy(self):
+        app = make_test_app()
+
+        with patch("core.request_logging._logger") as logger, patch(
+            "core.request_logging._trusted_proxy_networks",
+            return_value=(),
+        ):
+            response = asyncio.run(
+                call_app(
+                    app,
+                    "GET",
+                    "/api/config",
+                    headers={"x-forwarded-for": "203.0.113.9", "x-real-ip": "198.51.100.4"},
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        extra = logger.info.call_args.kwargs["extra"]
+        self.assertEqual(extra["client_ip"], "127.0.0.1")
+
+    def test_client_ip_uses_forwarded_headers_from_trusted_proxy(self):
+        app = make_test_app()
+
+        with patch("core.request_logging._logger") as logger, patch(
+            "core.request_logging._trusted_proxy_networks",
+            return_value=(__import__("ipaddress").ip_network("127.0.0.1/32"),),
+        ):
+            response = asyncio.run(
+                call_app(
+                    app,
+                    "GET",
+                    "/api/config",
+                    headers={"x-forwarded-for": "203.0.113.9, 10.0.0.2", "x-real-ip": "198.51.100.4"},
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        extra = logger.info.call_args.kwargs["extra"]
+        self.assertEqual(extra["client_ip"], "198.51.100.4")
 
 
 if __name__ == "__main__":
