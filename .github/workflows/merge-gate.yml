@@ -37,10 +37,38 @@ jobs:
         if: github.event_name == 'pull_request'
         run: make test-diff-gate BASE=${{ github.event.pull_request.base.sha }}
 
+  observability-gate:
+    name: observability-gate
+    runs-on: ubuntu-latest
+    needs: repository-governance
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run focused observability gate
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            make observability-gate ARGS="--base-ref ${{ github.event.pull_request.base.sha }} --head-ref ${{ github.sha }}"
+          else
+            make observability-gate
+          fi
+
   frontend-browser-matrix:
     name: frontend-browser-matrix (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    needs: repository-governance
+    needs:
+      - repository-governance
+      - observability-gate
     timeout-minutes: 75
     env:
       CERTS_HOST_PATH: /tmp/trading-bot-ci-certs

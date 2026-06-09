@@ -39,10 +39,33 @@ jobs:
       - name: Run repository breadth gate
         run: make test-gate
 
+  observability-gate:
+    name: observability-gate
+    runs-on: ubuntu-latest
+    needs: repository-governance
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run focused observability gate
+        run: make observability-gate
+
   frontend-browser-matrix:
     name: frontend-browser-matrix (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    needs: repository-governance
+    needs:
+      - repository-governance
+      - observability-gate
     timeout-minutes: 75
     env:
       CERTS_HOST_PATH: /tmp/trading-bot-ci-certs
