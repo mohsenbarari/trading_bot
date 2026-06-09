@@ -190,7 +190,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT"), patch(
             "api.routers.sync.update", return_value=UpdateBuilder()
-        ):
+        ), patch("api.routers.sync.logger") as logger_mock:
             result = await _apply_item(
                 db,
                 "users",
@@ -201,6 +201,9 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
                 new_offers=[],
             )
         self.assertEqual(result, "error")
+        rendered_merge_log = repr(logger_mock.error.call_args_list[0])
+        self.assertNotIn("12345", rendered_merge_log)
+        self.assertIn("natural_value_hash", rendered_merge_log)
 
         generic_error = IntegrityError("stmt", {}, Exception("check constraint failed"))
         db = ApplyDB([generic_error])

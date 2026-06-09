@@ -63,6 +63,8 @@ Equivalent Make wrapper:
 make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 ```
 
+`release` remains the production-authoritative path. Standalone subcommands are still available for controlled recovery work, but they now inherit the same runtime env observability validation through `check-local`, and the sampler-sensitive commands also install or verify the sync-health sampler explicitly.
+
 ## Full flow
 
 ### 1. Local validation
@@ -78,6 +80,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - `TRUSTED_PROXY_CIDRS`
   - `OBSERVABILITY_TELEGRAM_USER_HASH_SALT`
   - non-local Grafana alert receivers / webhook / email targets
+- the same validation now runs before standalone deploy subcommands too, because `check-local` is shared by `deploy-foreign`, `bootstrap-iran`, `build-release`, `sync-project`, `deploy-iran`, and `healthcheck`
 
 ### 2. Local build + local foreign deploy
 - first deploys the foreign server with host-native dependencies and compose command detection
@@ -91,6 +94,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - `postgres:15-alpine`
   - `redis:7-alpine`
 - uses `buildx` for the Iran image when foreign and Iran architectures differ
+- `deploy-foreign` also installs and verifies the local sync-health sampler when used standalone
 
 ### 3. Iran scenario question
 - asks whether the Iran server currently has working internet access
@@ -108,6 +112,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - verifies that either `docker compose` or `docker-compose` is actually available before bootstrap is considered successful
 - creates deploy directories
 - forces UTC on the Iran host
+- when used standalone, also installs and verifies the Iran sync-health sampler
 
 ### 5. `/etc/hosts` sync
 - writes a managed hosts block on the foreign server
@@ -139,6 +144,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - runs the available compose command with `-f docker-compose.iran.yml up -d --wait`
 - the Iran `app` service now has its own HTTP healthcheck on `/api/config`, so `--wait` includes actual API readiness instead of only container start
 - does **not** build the image remotely
+- when used standalone, also installs and verifies the Iran sync-health sampler before service startup
 
 ### 11. `healthcheck`
 - retries the local API endpoint on the Iran host with backoff until it becomes ready

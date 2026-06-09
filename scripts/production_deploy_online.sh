@@ -634,6 +634,8 @@ check_local() {
     [[ -f "$LOCAL_PROJECT_DIR/docker-compose.iran.yml" ]] || die "docker-compose.iran.yml missing"
     [[ -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" ]] || die "Dockerfile.iran missing"
     [[ -f "$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template" ]] || die "Nginx template missing"
+    ensure_runtime_env_file
+    validate_observability_release_inputs
     log "Local checks passed"
 }
 
@@ -1200,8 +1202,6 @@ decide_iran_connectivity() {
 run_release() {
     check_local
     ensure_local_timezone_utc
-    ensure_runtime_env_file
-    validate_observability_release_inputs
     install_sync_sampler_local
     deploy_foreign
     verify_sync_sampler_local
@@ -1235,15 +1235,15 @@ main() {
     case "$COMMAND" in
         check-local) check_local ;;
         release) run_release ;;
-        deploy-foreign) check_local; build_release; deploy_foreign ;;
-        bootstrap-iran) check_local; bootstrap_iran ;;
+        deploy-foreign) check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
+        bootstrap-iran) check_local; bootstrap_iran; install_sync_sampler_remote; verify_sync_sampler_remote ;;
         configure-nginx) check_local; configure_nginx ;;
         issue-cert) check_local; issue_cert ;;
         build-release) check_local; build_release ;;
         sync-project) check_local; sync_project ;;
         ship-images) check_local; ship_images ;;
         load-images) check_local; load_images ;;
-        deploy-iran) check_local; deploy_iran ;;
+        deploy-iran) check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote ;;
         healthcheck) check_local; healthcheck ;;
         *) die "Unknown command: $COMMAND" ;;
     esac

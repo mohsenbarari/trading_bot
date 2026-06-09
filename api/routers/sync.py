@@ -235,6 +235,25 @@ NATURAL_KEYS = {
     "trades": "trade_number",
 }
 
+SAFE_NATURAL_VALUE_LOG_KEYS = {
+    ("commodities", "name"),
+    ("commodity_aliases", "alias"),
+    ("market_schedule_overrides", "date"),
+    ("trades", "trade_number"),
+}
+
+
+def _summarize_natural_key_context(table: str, natural_key: str, natural_value) -> dict[str, object]:
+    context: dict[str, object] = {"natural_key": natural_key}
+    if natural_value is None:
+        return context
+    if (table, natural_key) in SAFE_NATURAL_VALUE_LOG_KEYS:
+        context["natural_value"] = natural_value
+        return context
+    value_bytes = str(natural_value).encode("utf-8", errors="replace")
+    context["natural_value_hash"] = hashlib.sha256(value_bytes).hexdigest()[:16] if value_bytes else None
+    return context
+
 SEQUENCE_MAP = {
     "users": ("users_id_seq", "users"),
     "accountant_relations": ("accountant_relations_id_seq", "accountant_relations"),
@@ -412,7 +431,15 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
                                     .values(**update_data)
                                 )
                                 await db.execute(stmt_update, execution_options={"is_sync": True})
-                        logger.info(f"🔀 Sync merged by {natural_key}='{natural_value}': {table}:{record_id}")
+                        logger.info(
+                            "Sync merged by natural key fallback",
+                            extra={
+                                "event": "sync.integrity.merge_by_natural_key",
+                                "table": table,
+                                "record_id": record_id,
+                                **_summarize_natural_key_context(table, natural_key, natural_value),
+                            },
+                        )
                         return 'ok'
                     except Exception as merge_err:
                         logger.error(
@@ -421,8 +448,7 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
                                 "event": "sync.integrity.merge_failed",
                                 "table": table,
                                 "record_id": record_id,
-                                "natural_key": natural_key,
-                                "natural_value": natural_value,
+                                **_summarize_natural_key_context(table, natural_key, natural_value),
                                 **_summarize_exception(merge_err),
                             },
                         )
