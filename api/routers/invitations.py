@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from core.db import get_db
+from core.utils import utc_now_naive
 from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
@@ -90,7 +91,7 @@ async def create_invitation(
     # Create new invitation
     token = generate_token()
     short_code = generate_short_code()
-    expires_at = datetime.utcnow() + timedelta(days=settings.invitation_expiry_days)
+    expires_at = utc_now_naive() + timedelta(days=settings.invitation_expiry_days)
     
     new_inv = Invitation(
         account_name=invite.account_name,
@@ -172,7 +173,7 @@ async def lookup_invitation(
         if not relation:
             raise HTTPException(status_code=400, detail="Invitation expired")
         
-    if inv.expires_at < datetime.utcnow():
+    if inv.expires_at < utc_now_naive():
         raise HTTPException(status_code=400, detail="Invitation expired")
         
     return {"token": inv.token}
@@ -203,7 +204,7 @@ async def validate_invitation(
         if not relation:
             raise HTTPException(status_code=400, detail="Invitation expired")
         
-    if inv.expires_at < datetime.utcnow():
+    if inv.expires_at < utc_now_naive():
         raise HTTPException(status_code=400, detail="Invitation expired")
         
     return {

@@ -15,7 +15,7 @@ from core.services.user_account_status_service import is_user_global_web_locked
 from core.request_context import set_request_context
 from models.session import UserSession
 from models.user import User, UserRole
-from datetime import datetime
+from core.utils import utc_now_naive
 import logging
 
 logger = logging.getLogger(__name__)
@@ -129,8 +129,8 @@ async def get_current_user(
         )
         
     # Update last_seen
-    if not user.last_seen_at or (datetime.utcnow() - user.last_seen_at).total_seconds() > 60:
-        user.last_seen_at = datetime.utcnow()
+    if not user.last_seen_at or (utc_now_naive() - user.last_seen_at).total_seconds() > 60:
+        user.last_seen_at = utc_now_naive()
         await db.commit()
 
     set_request_context(

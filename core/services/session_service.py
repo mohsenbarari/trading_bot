@@ -11,6 +11,7 @@ from sqlalchemy import select, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.enums import UserAccountStatus
+from core.utils import utc_now_naive
 from models.session import UserSession, SessionLoginRequest, LoginRequestStatus, Platform
 from models.user import User, UserRole
 from core.trading_settings import get_trading_settings_async
@@ -110,7 +111,7 @@ async def create_session(
         refresh_token_hash=hash_token(refresh_token),
         is_primary=is_primary,
         is_active=True,
-        expires_at=datetime.utcnow() + timedelta(days=30),
+        expires_at=utc_now_naive() + timedelta(days=30),
     )
     db.add(session)
     await db.flush()
@@ -179,8 +180,8 @@ async def handle_login_session(
                 suspended_session.device_ip = device_ip
             suspended_session.platform = platform
             suspended_session.home_server = home_server
-            suspended_session.last_active_at = datetime.utcnow()
-            suspended_session.expires_at = datetime.utcnow() + timedelta(days=30)
+            suspended_session.last_active_at = utc_now_naive()
+            suspended_session.expires_at = utc_now_naive() + timedelta(days=30)
             await db.commit()
             return {"action": "session_created", "session": suspended_session}
 
@@ -234,7 +235,7 @@ async def handle_login_session(
         and_(
             SessionLoginRequest.user_id == user.id,
             SessionLoginRequest.status == LoginRequestStatus.PENDING,
-            SessionLoginRequest.expires_at > datetime.utcnow(),
+            SessionLoginRequest.expires_at > utc_now_naive(),
         )
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
@@ -259,7 +260,7 @@ async def handle_login_session(
         requester_ip=device_ip,
         requester_home_server=home_server,
         status=LoginRequestStatus.PENDING,
-        expires_at=datetime.utcnow() + timedelta(seconds=LOGIN_REQUEST_TIMEOUT_SECONDS),
+        expires_at=utc_now_naive() + timedelta(seconds=LOGIN_REQUEST_TIMEOUT_SECONDS),
     )
     db.add(login_request)
 
@@ -311,7 +312,7 @@ async def approve_login_request(
         return {"error": "درخواست یافت نشد"}
     if login_req.status != LoginRequestStatus.PENDING:
         return {"error": "درخواست قبلاً پردازش شده است"}
-    if login_req.expires_at.replace(tzinfo=None) < datetime.utcnow():
+    if login_req.expires_at.replace(tzinfo=None) < utc_now_naive():
         login_req.status = LoginRequestStatus.EXPIRED
         await db.commit()
         return {"error": "درخواست منقضی شده است"}

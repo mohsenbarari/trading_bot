@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 from core.db import get_db
 from core.config import settings
 from core.trading_settings import TradingSettings, get_trading_settings
-from core.utils import check_user_limits, increment_user_counter, to_jalali_str
+from core.utils import check_user_limits, increment_user_counter, to_jalali_str, utc_now_naive
 from core.services.market_transition_service import (
     evaluate_current_market_schedule,
     register_market_offer_created,
@@ -332,8 +332,8 @@ async def create_offer(
     
     # بررسی مسدودیت
     if owner_user.trading_restricted_until:
-        if owner_user.trading_restricted_until > datetime.utcnow():
-            remaining = owner_user.trading_restricted_until - datetime.utcnow()
+        if owner_user.trading_restricted_until > utc_now_naive():
+            remaining = owner_user.trading_restricted_until - utc_now_naive()
             total_seconds = int(remaining.total_seconds())
             days = total_seconds // 86400
             hours = (total_seconds % 86400) // 3600
@@ -626,7 +626,7 @@ async def get_my_offers(
     
     if since_hours:
         from datetime import timedelta
-        cutoff_time = datetime.utcnow() - timedelta(hours=since_hours)
+        cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
         query = query.where(Offer.created_at >= cutoff_time)
         
         if status_filter:

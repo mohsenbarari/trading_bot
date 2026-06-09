@@ -44,7 +44,7 @@ from core.services.user_account_status_service import get_user_account_status, i
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
 import uuid
-from core.utils import normalize_persian_numerals, utc_now
+from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
@@ -360,7 +360,7 @@ async def register_otp_request(
         raise HTTPException(status_code=404, detail="دعوت‌نامه نامعتبر است")
     if inv.is_used:
         raise HTTPException(status_code=400, detail="دعوت‌نامه قبلاً استفاده شده است")
-    if inv.expires_at < datetime.utcnow():
+    if inv.expires_at < utc_now_naive():
         raise HTTPException(status_code=400, detail="دعوت‌نامه منقضی شده است")
 
     if is_accountant_invitation_token(req.token):
@@ -429,7 +429,7 @@ async def register_complete(
     stmt = select(Invitation).where(Invitation.token == req.token)
     inv = (await db.execute(stmt)).scalar_one_or_none()
     
-    if not inv or inv.is_used or inv.expires_at < datetime.utcnow():
+    if not inv or inv.is_used or inv.expires_at < utc_now_naive():
         raise HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")
 
     accountant_relation = None
