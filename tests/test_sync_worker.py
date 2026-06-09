@@ -200,6 +200,8 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         send_mock.assert_not_awaited()
         sleep_mock.assert_not_awaited()
         self.assertEqual(fake_redis.rpush_calls, [])
+        self.assertEqual(fake_redis.blpop_calls[0][0], ("sync:outbound", "sync:retry"))
+        self.assertEqual(fake_redis.blpop_calls[1][0], ("sync:retry", "sync:outbound"))
 
     async def test_main_logs_and_retries_unexpected_loop_errors(self):
         fake_redis, send_mock, sleep_mock = await self._run_main_once(

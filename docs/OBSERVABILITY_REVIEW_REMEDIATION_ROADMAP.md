@@ -348,7 +348,7 @@ Completion notes:
 - Updated `scripts/export_audit_logs.py` with Loki pagination, durable-file export, hash-chain verification, output SHA-256, and `.manifest.json` sidecars.
 - Added focused tests in `tests/test_audit_logger.py` and `tests/test_audit_export.py` for durable hash chaining, redaction, manifest generation, and tamper detection.
 
-### Stage R4: P1 Cross-Server Sync Observability
+### Stage R4: P1 Cross-Server Sync Observability `[completed 2026-06-09]`
 
 Goal: make Iran/foreign reconnect monitoring active instead of manual.
 
@@ -375,6 +375,15 @@ Acceptance:
 - Sync backlog, lag, and retry queue panels update without manual `make sync-health`.
 - Alerts detect both bad values and missing health samples.
 - Retry work makes progress under continuous outbound traffic.
+
+Completion notes:
+
+- Changed `GET /api/sync/health` to use the narrow observability access path: non-loopback callers must use `X-Observability-Api-Key` backed by `settings.observability_api_key`, and the broad `X-Dev-Api-Key` is no longer accepted for read-only sync health.
+- Added `scripts/sample_sync_health.py` to sample both local and Iran sync health from the foreign host, and `scripts/install_sync_health_monitor.sh` to install a one-minute systemd timer or print a cron fallback.
+- Added `make sync-health-sample` and `make sync-health-monitor-install`, and switched `make sync-health` / `make sync-health-iran` to the observability key header.
+- Added queue polling fairness in `core/sync_worker.py` by alternating `sync:outbound` and `sync:retry` priority per iteration so retry work cannot starve under sustained outbound load.
+- Kept worker success semantics on `job.item.delivered` and updated sync alerting so missing `sync.health` samples alert explicitly for both `server_mode=foreign` and `server_mode=iran`.
+- Updated `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md` with the new auth header, sampler installation, and missing-sample incident path.
 
 ### Stage R5: P1 Production Alert Delivery and Baseline
 

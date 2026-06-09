@@ -57,10 +57,11 @@ Both commands call:
 GET /api/sync/health
 ```
 
-The endpoint requires:
+The endpoint accepts either:
 
 ```text
-X-Dev-Api-Key
+loopback access from the local host
+X-Observability-Api-Key for non-loopback callers
 ```
 
 Returned fields:
@@ -143,6 +144,14 @@ Important panels:
 
 The dashboard needs `make sync-health` and `make sync-health-iran` to be run periodically or by an external scheduler so fresh `sync.health` samples exist in Loki.
 
+For production on the foreign host:
+
+```bash
+make sync-health-monitor-install
+```
+
+This installs a one-minute systemd timer when `systemctl` is available. If systemd is missing, the installer prints the equivalent cron entry instead.
+
 ## Alert Rules
 
 ### Sync backlog high
@@ -206,6 +215,29 @@ First action:
 make sync-recover
 ```
 
+## Missing Sync Health Samples
+
+Trigger:
+
+- no `sync.health` sample from `server_mode=foreign` for 5 minutes
+- no `sync.health` sample from `server_mode=iran` for 5 minutes
+
+Meaning:
+
+- the foreign sampler is not running, failing, or cannot reach one side
+- Grafana/Loki ingestion may be broken
+- the foreign host may have lost SSH access to Iran
+
+First checks:
+
+```bash
+make sync-health-sample
+systemctl status trading-bot-sync-health-sampler.timer
+systemctl status trading-bot-sync-health-sampler.service
+```
+
+If systemd is not used, check the cron entry and its target log file.
+
 ## Operational Rule
 
 Do not delete `change_log` rows or Redis sync queues to silence alerts. Backlog is the evidence needed to recover after an outage.
@@ -217,14 +249,13 @@ Only consider manual cleanup after:
 - a backup exists
 - the cleanup is documented
 
-## Monitoring Gaps
+## Production Sampler
 
-This implementation makes sync backlog and lag visible. It does not yet run an always-on external heartbeat scheduler.
+The foreign host now has a dedicated sampler path:
 
-Recommended production addition:
+- `scripts/sample_sync_health.py` samples local sync health and then SSHes into Iran to sample the Iran API over `127.0.0.1`
+- `scripts/install_sync_health_monitor.sh` installs a one-minute systemd timer or prints a cron fallback
+- `make sync-health-sample` runs a single immediate sample
+- `make sync-health-monitor-install` installs the recurring sampler
 
-- run `make sync-health` locally every 1 minute
-- run `make sync-health-iran` from the foreign server every 1 minute
-- alert if either command fails repeatedly
-
-That scheduler can be cron, systemd timer, or a small dedicated monitor container.
+This keeps the sync dashboard and alerts active without manual `make sync-health` calls.

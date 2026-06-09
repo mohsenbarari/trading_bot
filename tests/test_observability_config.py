@@ -42,6 +42,7 @@ class ObservabilityConfigTests(unittest.TestCase):
         for expected_field in (
             "status_code",
             "path",
+            "server_mode",
             "unsynced_change_log_count",
             "oldest_unsynced_age_seconds",
             "sync_retry_queue_length",
