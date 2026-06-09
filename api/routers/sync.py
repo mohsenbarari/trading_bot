@@ -79,6 +79,15 @@ def _summarize_peer_response(response) -> dict[str, object]:
         "peer_content_type": headers.get("content-type") if hasattr(headers, "get") else None,
     }
 
+
+def _summarize_exception(exc: Exception) -> dict[str, object]:
+    exc_text = str(exc) or ""
+    exc_bytes = exc_text.encode("utf-8", errors="replace")
+    return {
+        "error_type": type(exc).__name__,
+        "error_digest": hashlib.sha256(exc_bytes).hexdigest()[:16] if exc_bytes else None,
+    }
+
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
@@ -175,7 +184,13 @@ async def verify_signature(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Signature verification error: {e}")
+        logger.error(
+            "Signature verification error",
+            extra={
+                "event": "sync.signature_verification_error",
+                **_summarize_exception(e),
+            },
+        )
         audit_log(
             "sync.authenticate",
             target_type="sync",
@@ -400,10 +415,28 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
                         logger.info(f"🔀 Sync merged by {natural_key}='{natural_value}': {table}:{record_id}")
                         return 'ok'
                     except Exception as merge_err:
-                        logger.error(f"Failed to merge {table}:{record_id} by {natural_key}: {merge_err}")
+                        logger.error(
+                            "Failed to merge synced row by natural key",
+                            extra={
+                                "event": "sync.integrity.merge_failed",
+                                "table": table,
+                                "record_id": record_id,
+                                "natural_key": natural_key,
+                                "natural_value": natural_value,
+                                **_summarize_exception(merge_err),
+                            },
+                        )
                         return 'error'
                 else:
-                    logger.error(f"UniqueViolation on {table}:{record_id} but no natural key to merge: {e}")
+                    logger.error(
+                        "Unique violation on synced row without natural key fallback",
+                        extra={
+                            "event": "sync.integrity.unique_violation",
+                            "table": table,
+                            "record_id": record_id,
+                            **_summarize_exception(e),
+                        },
+                    )
                     return 'error'
 
             # --- Case B: FK violation (parent not yet synced) → defer for retry ---
@@ -412,7 +445,15 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
                 return 'deferred'
 
             else:
-                logger.error(f"IntegrityError on {table}:{record_id}: {e}")
+                logger.error(
+                    "Integrity error on synced row",
+                    extra={
+                        "event": "sync.integrity.error",
+                        "table": table,
+                        "record_id": record_id,
+                        **_summarize_exception(e),
+                    },
+                )
                 return 'error'
 
     elif operation == "DELETE":
@@ -441,7 +482,15 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
                 await db.execute(stmt, execution_options={"is_sync": True})
             return 'ok'
         except IntegrityError as e:
-            logger.error(f"Cannot delete {table}:{record_id} (FK dependency): {e}")
+            logger.error(
+                "Cannot delete synced row because of FK dependency",
+                extra={
+                    "event": "sync.delete_fk_dependency",
+                    "table": table,
+                    "record_id": record_id,
+                    **_summarize_exception(e),
+                },
+            )
             return 'error'
 
     return 'error'
@@ -564,7 +613,13 @@ async def receive_sync_data(
                         processed_count += 1
                         logger.info(f"✅ Notification relayed to {chat_id}")
                 except Exception as e:
-                    logger.error(f"Failed to relay notification: {e}")
+                    logger.error(
+                        "Failed to relay synced notification",
+                        extra={
+                            "event": "sync.notification_relay_failed",
+                            **_summarize_exception(e),
+                        },
+                    )
                 continue
 
             parsed = _parse_item(item)
@@ -586,7 +641,15 @@ async def receive_sync_data(
                 else:
                     errors.append(f"{table}:{record_id}")
             except Exception as e:
-                logger.error(f"Unexpected error on {table}:{record_id}: {e}")
+                logger.error(
+                    "Unexpected sync application error",
+                    extra={
+                        "event": "sync.apply_unexpected_error",
+                        "table": table,
+                        "record_id": record_id,
+                        **_summarize_exception(e),
+                    },
+                )
                 errors.append(f"{table}:{record_id}")
 
         # --- Pass 2: Retry deferred items (FK violations) ---
@@ -604,7 +667,15 @@ async def receive_sync_data(
                         errors.append(f"{table}:{record_id} (deferred)")
                         logger.error(f"Deferred item still failed: {table}:{record_id}")
                 except Exception as e:
-                    logger.error(f"Deferred retry error {table}:{record_id}: {e}")
+                    logger.error(
+                        "Deferred retry error",
+                        extra={
+                            "event": "sync.deferred_retry_error",
+                            "table": table,
+                            "record_id": record_id,
+                            **_summarize_exception(e),
+                        },
+                    )
                     errors.append(f"{table}:{record_id}")
 
         if user_changes_applied:
@@ -640,7 +711,13 @@ async def receive_sync_data(
                 await refresh_settings_cache_async()
                 logger.info("🔄 Trading settings cache refreshed")
             except Exception as e:
-                 logger.error(f"Failed to refresh settings cache: {e}")
+                 logger.error(
+                     "Failed to refresh settings cache",
+                     extra={
+                         "event": "sync.settings_cache_refresh_failed",
+                         **_summarize_exception(e),
+                     },
+                 )
 
         if "notifications" in items_tables:
             await _refresh_notification_unread_counts(db, notification_user_ids)
@@ -651,7 +728,13 @@ async def receive_sync_data(
                 await invalidate_commodities_cache()
                 logger.info("🔄 Commodities cache invalidated after sync")
             except Exception as e:
-                logger.error(f"Failed to invalidate commodities cache: {e}")
+                logger.error(
+                    "Failed to invalidate commodities cache",
+                    extra={
+                        "event": "sync.commodities_cache_invalidation_failed",
+                        **_summarize_exception(e),
+                    },
+                )
             # Also invalidate bot's commodity cache
             try:
                 from bot.utils.redis_helpers import invalidate_commodity_cache
@@ -663,48 +746,59 @@ async def receive_sync_data(
         # Uses SELECT FOR UPDATE SKIP LOCKED to prevent duplicate sends
         # (same sync item may arrive via both direct-push and sync_worker)
         if settings.server_mode != "iran" and new_offers:
-             try:
-                 from sqlalchemy.orm import selectinload
-                 from models.offer import OfferStatus
-                 from api.routers.offers import send_offer_to_channel
+            try:
+                from sqlalchemy.orm import selectinload
+                from models.offer import OfferStatus
+                from api.routers.offers import send_offer_to_channel
 
-                 # Deduplicate offer IDs
-                 unique_offer_ids = list(set(new_offers))
-                 logger.info(f"📋 Channel publish candidates: {unique_offer_ids}")
+                unique_offer_ids = list(set(new_offers))
+                logger.info(f"📋 Channel publish candidates: {unique_offer_ids}")
 
-                 for oid in unique_offer_ids:
-                     try:
-                         # Each offer in its own mini-transaction with row lock
-                         async with db.begin_nested():
-                             stmt = select(Offer).options(
-                                 selectinload(Offer.user), 
-                                 selectinload(Offer.commodity)
-                             ).where(
-                                 Offer.id == oid, 
-                                 Offer.status == OfferStatus.ACTIVE,
-                                 Offer.channel_message_id.is_(None)
-                             ).with_for_update(skip_locked=True)
-                             result = await db.execute(stmt)
-                             offer = result.scalars().first()
-                             
-                             if offer:
-                                 msg_id = await send_offer_to_channel(offer, offer.user)
-                                 if msg_id:
-                                     offer.channel_message_id = msg_id
-                                     logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
-                                 else:
-                                     logger.warning(f"⚠️ send_offer_to_channel returned None for offer {oid}")
-                             else:
-                                 logger.info(f"⏭️ Offer {oid} already published or locked by another request")
-                     except Exception as e:
-                         logger.error(f"Failed to publish synced offer {oid}: {e}")
-                 
-                 await db.commit()
-                     
-             except ImportError:
-                 logger.error("Could not import send_offer_to_channel")
-             except Exception as e:
-                 logger.error(f"Error publishing synced offers: {e}")
+                for oid in unique_offer_ids:
+                    try:
+                        async with db.begin_nested():
+                            stmt = select(Offer).options(
+                                selectinload(Offer.user),
+                                selectinload(Offer.commodity),
+                            ).where(
+                                Offer.id == oid,
+                                Offer.status == OfferStatus.ACTIVE,
+                                Offer.channel_message_id.is_(None),
+                            ).with_for_update(skip_locked=True)
+                            result = await db.execute(stmt)
+                            offer = result.scalars().first()
+
+                            if offer:
+                                msg_id = await send_offer_to_channel(offer, offer.user)
+                                if msg_id:
+                                    offer.channel_message_id = msg_id
+                                    logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
+                                else:
+                                    logger.warning(f"⚠️ send_offer_to_channel returned None for offer {oid}")
+                            else:
+                                logger.info(f"⏭️ Offer {oid} already published or locked by another request")
+                    except Exception as e:
+                        logger.error(
+                            "Failed to publish synced offer",
+                            extra={
+                                "event": "sync.synced_offer_publish_failed",
+                                "offer_id": oid,
+                                **_summarize_exception(e),
+                            },
+                        )
+
+                await db.commit()
+
+            except ImportError:
+                logger.error("Could not import send_offer_to_channel")
+            except Exception as e:
+                logger.error(
+                    "Error publishing synced offers",
+                    extra={
+                        "event": "sync.synced_offer_publish_batch_failed",
+                        **_summarize_exception(e),
+                    },
+                )
         
         if errors:
             return {"status": "partial", "processed": processed_count, "errors": len(errors)}
@@ -712,7 +806,13 @@ async def receive_sync_data(
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error processing sync batch: {e}")
+        logger.error(
+            "Error processing sync batch",
+            extra={
+                "event": "sync.receive_batch_error",
+                **_summarize_exception(e),
+            },
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -776,7 +876,15 @@ async def resync_from_changelog(
                         "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time()
                     })
                 except Exception as e:
-                    logger.error(f"Resync parse error for {entry.table_name}:{entry.record_id}: {e}")
+                    logger.error(
+                        "Resync parse error",
+                        extra={
+                            "event": "sync.resync.parse_error",
+                            "table_name": entry.table_name,
+                            "record_id": entry.record_id,
+                            **_summarize_exception(e),
+                        },
+                    )
                     errors += 1
 
             if not items:
@@ -815,7 +923,14 @@ async def resync_from_changelog(
                     errors += len(batch)
 
             except Exception as e:
-                logger.error(f"Resync batch error: {e}")
+                logger.error(
+                    "Resync batch error",
+                    extra={
+                        "event": "sync.resync.batch_exception",
+                        "batch_size": len(batch),
+                        **_summarize_exception(e),
+                    },
+                )
                 errors += len(batch)
 
     await db.commit()
