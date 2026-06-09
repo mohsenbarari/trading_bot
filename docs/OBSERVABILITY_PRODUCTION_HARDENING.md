@@ -225,6 +225,31 @@ budget_us=1000.0
 acceptable=true
 ```
 
+## Production Metrics Architecture
+
+The current `memory` backend is the correct local default, but it is not the final production architecture.
+
+Production interpretation rules:
+
+- `api`:
+  - Local `/metrics` on an API worker exposes only the in-process view of that worker.
+  - Because the API runs with multiple Uvicorn workers, a single scrape of one worker is not a full application aggregate.
+- `bot`:
+  - Bot metrics are produced in the bot process and are not exported through the API `/metrics` endpoint when the backend is `memory`.
+- `sync_worker`:
+  - Sync-worker metrics are produced in the worker process and are not exported through the API `/metrics` endpoint when the backend is `memory`.
+
+Production path for this project:
+
+1. Keep `TRADING_BOT_METRICS_BACKEND=memory` as the local/runtime-safe default during development and current release hardening.
+2. Treat API, bot, and sync-worker as separate metric surfaces unless an explicit aggregation/export layer is enabled.
+3. Before relying on metrics for production SLOs or alert thresholds, deploy one of these explicit aggregation strategies:
+   - per-service scrape endpoints with operator-visible separation, or
+   - a dedicated exporter/aggregation layer that merges API multi-worker, bot, and sync-worker metrics deliberately.
+4. Do not assume the API `/metrics` endpoint is a full-system aggregate while the backend remains `memory`.
+
+Until that production aggregation layer exists, Grafana dashboards and alerting should treat logs/Loki as the authoritative cross-service source and use metrics as bounded local process telemetry.
+
 ## Security Constraints
 
 Never log or export:

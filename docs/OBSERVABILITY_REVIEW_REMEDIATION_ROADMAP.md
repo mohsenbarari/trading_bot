@@ -644,6 +644,18 @@ Acceptance:
 - Production metrics behavior is explicitly defined for API, bot, and sync-worker surfaces.
 - Repeated-error suppression is no longer excessively sensitive to changing message text.
 
+Status: Completed on 2026-06-09.
+
+Completion notes:
+
+- Reworked `core/job_logging.py::RepeatedErrorLogger` so repeat suppression keys no longer depend on the raw stringified exception message. The key now uses job name plus a stable exception fingerprint derived from error site/type.
+- Added `repeat_key` to repeated job-error payloads for debugging suppression behavior without leaking raw incidental message values.
+- Added a focused regression proving repeated errors from the same site with different per-message values still collapse into the same suppression group.
+- Added an explicit `Production Metrics Architecture` section to `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`, clarifying that:
+  - API `/metrics` is per-worker under the current `memory` backend,
+  - bot and sync-worker metrics are not aggregated into API `/metrics`,
+  - production must treat those surfaces as separate until an explicit aggregation/export layer is deployed.
+
 ### Stage R11: Durable Audit Evidence and Deployment Enforcement
 
 Goal: harden operational trust signals around audit durability and observability deployment completeness.
