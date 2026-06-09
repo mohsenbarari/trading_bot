@@ -1,0 +1,297 @@
+# Observability Review Remediation Roadmap
+
+Last updated: 2026-06-09
+
+Source review file: `tmp/log`
+
+This document records the second-pass review of the logging and monitoring critique. The current observability foundation is useful and directionally correct, but it should not be treated as production-complete until the P0 and P1 items below are closed.
+
+## Review Verdict
+
+Most of the critique is valid. The highest-risk findings are not cosmetic: the current Promtail pipeline can make Loki dashboards and alerts unable to parse JSON fields, several sensitive identifiers can still reach logs, Sentry can receive raw exceptions when enabled, and job/sync failure metrics can be counted as successful runs.
+
+Some critique items are duplicated or overstated:
+
+- Critique 8 is duplicated in `tmp/log`; it is one metrics-backend issue.
+- Critique 12 is duplicated in `tmp/log`; it is one redaction-coverage issue.
+- Critiques 18, 19, 20, 27, 29, 31, and 32 are mostly production-hardening or quality issues, not immediate breakages in the local-only stack.
+- Critique 21 is already documented as a gap in `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md`, but it is still not implemented.
+
+## Decision Matrix
+
+| # | Decision | Exact Evidence | Remediation |
+| --- | --- | --- | --- |
+| 1 | Accepted, P0 | `observability/promtail/promtail-config.yml:30-53` promotes a few fields, then `output.source: message`; dashboards and alerts use `| json`, e.g. `observability/grafana/dashboards/api-overview.json:37`, `:50`, `:63`, `:82`, and `observability/grafana/provisioning/alerting/rules.yml:130`, `:189`. | Preserve the full JSON log line in Loki or explicitly store all required structured fields. |
+| 2 | Accepted, P0 | `core/request_logging.py:95`, `:122`, `:139`, `:151` store raw path while only adding `sensitive_route`. | Log route template/redacted path for sensitive and dynamic routes. |
+| 3 | Accepted, P0 | `api/deps.py:129-133` adds `session_id` to request context; `core/logging_config.py:69-71` injects context into every record; `core/log_redaction.py:19-46` does not classify `session_id` as sensitive. | Redact or hash session ids before log emission. |
+| 4 | Accepted, P0 when Sentry is enabled | `core/error_tracking.py:151-160` forwards the raw exception to Sentry; `core/logging_config.py:175-182` initializes Sentry without a `before_send` scrubber. | Add a Sentry scrubber or forward sanitized events only. |
+| 5 | Accepted, P0 | `core/sync_worker.py:85-88` logs raw invalid Redis payload; `core/sync_worker.py:129-132` logs raw peer response body. | Log only hashes, status, table/operation/id summaries, and bounded sanitized error classes. |
+| 6 | Accepted, P0 | `core/job_logging.py:19-33` records success unless an exception escapes; loops catch inside the context in `core/offer_expiry.py:138-156`, `core/market_schedule_loop.py:58-74`, `core/session_expiry.py:65-81`, `core/user_account_status_loop.py:39-55`. | Add explicit failure marking or move catch outside `job_context`. |
+| 7 | Accepted, P0 | `core/sync_worker.py:111-143` handles non-200 inside `job_context` without raising or marking failure. | Non-200 sync delivery must record job failure/retry result. |
+| 8 | Accepted, P1 | `core/metrics.py:66`, `:100-114`, `:163-182` writes SQLite in request/job hot paths; `docker-compose.yml:10-24`, `:56-74`, `:147-150` does not share a metrics volume across app/bot/sync_worker. | Replace SQLite hot-path aggregation or make it bounded/async/shared deliberately. |
+| 9 | Accepted, P0/P1 | `main.py:166-174` exposes `/metrics` without auth. App port is local-bound in `docker-compose.yml:23-24`, but `scripts/setup_foreign_nginx.sh:72-83` proxies all `/` to FastAPI, so `/metrics` can become public on the foreign server. | Block `/metrics` at Nginx and/or protect it with a narrow metrics key. |
+| 10 | Accepted, P1 | `core/audit_logger.py:40-81` emits audit events only to stdout; Loki retention is 7 days in `observability/loki/loki-config.yml:35-43`; export tooling is pull-based. | Add durable append-only/tamper-evident audit storage. |
+| 11 | Accepted, P1 | `core/audit_logger.py:14-16` supports `failure` and `denied`, but current router instrumentation is mostly success-path calls, e.g. `api/routers/users.py`, `blocks.py`, `customers.py`, `accountants.py`, `sessions.py`. | Add denied/failure audit events around security-sensitive rejection paths. |
+| 12 | Accepted, P0/P1 | `core/log_redaction.py:56` only masks `09...` mobile numbers; `core/logging_config.py:108` uses `json.dumps(..., default=str)`. | Expand Iranian PII/signed URL/file-name redaction and avoid unsafe object stringification. |
+| 13 | Accepted, P2 | `core/log_redaction.py:30-46`, `:59-69` treats any key containing `access` as sensitive. | Narrow exact/semantic secret-key matching to reduce unnecessary redaction. |
+| 14 | Accepted, P2 | `core/request_logging.py:55-59` trims/truncates `X-Request-ID` but does not validate charset. | Restrict request ids to a safe charset or generate a replacement. |
+| 15 | Accepted, P1/P2 | `core/request_logging.py:62-68` trusts any `X-Forwarded-For`; Nginx forwards it in `scripts/setup_foreign_nginx.sh:36`, `:51`, `:68`, `:77` and Iran templates. | Trust forwarded IPs only from configured proxy ranges or use `X-Real-IP` from trusted Nginx. |
+| 16 | Accepted, P2 | `bot/middlewares/logging_context.py:45-49` generates a UUID instead of using Telegram `Update.update_id`. | Store both internal correlation id and Telegram update id. |
+| 17 | Accepted with policy decision, P2 | `bot/middlewares/logging_context.py:49` logs raw Telegram user id. It is not promoted as a Loki label, so cardinality risk is limited; privacy policy remains open. | Decide raw vs hashed Telegram id for production. |
+| 18 | Partially accepted, P2 | `docker-compose.observability.yml:17-20` mounts Docker socket read-only. Stack ports are local-bound. | Keep acceptable for local operator stack; consider file-based Docker log scraping or socket proxy for production/shared hosts. |
+| 19 | Partially accepted, P2 | `observability/loki/loki-config.yml:1` has `auth_enabled: false`; `docker-compose.observability.yml:6-7`, `:28-29` binds Loki/Grafana to `127.0.0.1`. | Accept local-only use; require auth/reverse-proxy controls if ever exposed beyond localhost. |
+| 20 | Accepted as intentional limitation, P1 | `observability/grafana/provisioning/alerting/contact-points.yml:3-12` points to an inert webhook. | Configure real Telegram/email/webhook receiver for production. |
+| 21 | Accepted, P1 | `api/routers/sync.py:725-802` logs `sync.health` only when called; `Makefile:106-110` exposes manual calls; `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md:220-228` already says no always-on sampler exists. | Add systemd timer/cron/monitor container to sample both servers. |
+| 22 | Accepted, P1 | `api/routers/sync.py:20-23` uses broad `DEV_API_KEY` for health. | Add `OBSERVABILITY_API_KEY` or `SYNC_HEALTH_API_KEY`. |
+| 23 | Accepted, P2 | `core/sync_worker.py:77-84` calls `BLPOP([queue_name, retry_queue])`, so a busy outbound queue can delay retry work. | Add fair queue selection or alternating priority. |
+| 24 | Accepted, P2 | `core/sync_worker.py:114-127` logs success on HTTP 200 while TODO says DB status is not marked verified/synced. | Rename event to delivered/accepted or add DB verification before success. |
+| 25 | Accepted, P0 | `core/job_logging.py:53-68` records failure metrics only when the repeated error is emitted. Suppressed failures are not counted. | Record every failure metric; rate-limit only logs/error-tracking events. |
+| 26 | Accepted, P2 | `core/request_logging.py:163-177` records metrics before static access log suppression. | Align static route metric policy with access-log policy or separate static metrics. |
+| 27 | Partially accepted, P2 | `core/logging_config.py:153-164` clears root and selected handlers. Current entrypoint use is intentional, but future APM/OpenTelemetry/Sentry integrations could be affected. | Make logging setup idempotent and integration-aware. |
+| 28 | Accepted, P2 | `core/logging_config.py:166-172` checks `os.environ` before reading `settings.error_tracking_dsn`; local `.env` loaded by settings may not initialize Sentry. | Read settings first, then decide. |
+| 29 | Partially accepted, P2 | `core/error_tracking.py:96-100` excludes line number from fingerprint. This is privacy-safe and stable, but can group separate errors in the same function. | Consider optional line-bucket or top-frame line in fingerprint after noise testing. |
+| 30 | Accepted, P2 | `core/error_tracking.py:80-93` stores only basename, function, line. | Use project-relative paths without leaking host paths. |
+| 31 | Accepted as current-stage tradeoff, P2 | Dashboards under `observability/grafana/dashboards/*.json` are Loki/log based. | Add Prometheus/metric-based SLO panels after metrics backend is production-grade. |
+| 32 | Accepted, P1 | `observability/grafana/provisioning/alerting/rules.yml:157-158`, `:216-217`, `:550-551`, `:604-605`, `:657-659` use initial hard-coded thresholds. | Baseline with real traffic and tune thresholds. |
+| 33 | Partially accepted, P1 | `.github/workflows/merge-gate.yml` and `pre-release-gate.yml` run broad gates, but no observability-specific config/dashboard/redaction gate exists. | Add a focused observability CI job. |
+| 34 | Accepted positive | Central logging, contextvars, request id propagation, datasource UID consistency, local-bound observability ports, and sync health concept are good foundations. | Preserve these properties while fixing the issues above. |
+
+## Remediation Stages
+
+### Stage R1: P0 Log Integrity and Secret Hygiene
+
+Goal: make logs parseable and prevent high-risk sensitive data leakage.
+
+Files:
+
+- `observability/promtail/promtail-config.yml`
+- `observability/grafana/dashboards/*.json`
+- `observability/grafana/provisioning/alerting/rules.yml`
+- `core/request_logging.py`
+- `api/deps.py`
+- `core/log_redaction.py`
+- `core/logging_config.py`
+- `core/error_tracking.py`
+- `core/sync_worker.py`
+- `core/job_logging.py`
+- `main.py`
+- `scripts/setup_foreign_nginx.sh`
+- `deploy/production/nginx-iran-online.conf.template`
+- tests under `tests/test_logging_foundation.py`, `tests/test_request_logging.py`, `tests/test_error_tracking.py`, `tests/test_sync_worker.py`, `tests/test_job_logging.py`
+
+Work:
+
+1. Remove or replace `output.source: message` so Loki keeps the full application JSON log line.
+2. Add a static test with a sample JSON log line proving dashboard/alert queries still have `event`, `request_id`, `path` or `route`, `status_code`, `duration_ms`, and job fields available after Promtail processing assumptions.
+3. Replace raw access-log `path` with a safe route template or redacted path for sensitive/dynamic routes.
+4. Do not store raw `session_id` in formatted logs. Use `[REDACTED]` or `session_id_hash` if correlation is needed.
+5. Add `session_id`, `sid`, upload session ids, signed-url keys, Iran mobile variants, email, card number, IBAN/sheba, and national-id patterns to redaction coverage.
+6. Stop relying on `json.dumps(default=str)` for unknown objects that may expose PII through `__str__`; convert unknown objects to safe type metadata unless explicitly allowed.
+7. Add Sentry `before_send` scrubbing or disable raw `sentry_sdk.capture_exception(exc)` forwarding in favor of sanitized structured events.
+8. Remove raw Redis sync payload and peer `response.text` from sync worker logs.
+9. Change `job_context` so handled failures can be explicitly marked as failure.
+10. Count every repeated job failure in metrics even when the log line is suppressed.
+11. Treat sync non-200 responses as failure/retry in metrics.
+12. Protect `/metrics`: add Nginx deny/allow for public configs and add optional app-level auth or local-only guard.
+
+Acceptance:
+
+- Loki dashboard and alert queries that use `| json` parse fields again.
+- No raw session id, token-like path segment, invalid sync payload, peer response body, OTP, mobile, signed URL, or secret-bearing object string appears in unit-test log output.
+- Failed job iterations and sync non-200 attempts increment failure metrics.
+- Public `/metrics` is blocked or authenticated in deployment-facing Nginx config.
+
+### Stage R2: P1 Metrics Backend and Runtime Cost Hardening
+
+Goal: make metrics production-safe under traffic and multi-container deployment.
+
+Files:
+
+- `core/metrics.py`
+- `main.py`
+- `docker-compose.yml`
+- `docker-compose.iran.yml`
+- deployment env generation in `scripts/production_deploy_online.sh`
+- `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`
+
+Work:
+
+1. Decide metrics backend:
+   - Preferred: `prometheus_client` with process-aware/multiprocess support and one scrape endpoint per service or a dedicated exporter.
+   - Conservative fallback: keep SQLite only as opt-in development aggregation, disable it by default in hot paths, and expose per-process memory metrics clearly.
+2. Make API, bot, and sync worker metrics visible deliberately. The current `/metrics` endpoint only exposes the app container state unless all services share a backend.
+3. Add bounded queue/buffer behavior if writes are async.
+4. Document expected overhead and run `make observability-overhead` before/after.
+5. Add a smoke check that metrics output does not include raw routes, ids, phone numbers, names, filenames, or tokens.
+
+Acceptance:
+
+- Request hot path has no unbounded SQLite lock/file I/O risk.
+- Metrics semantics are clear across app workers, bot, and sync worker.
+- `/metrics` output is low-cardinality and secret-free.
+
+### Stage R3: P1 Audit Trail Hardening
+
+Goal: separate incident/debug logs from security-grade audit evidence.
+
+Files:
+
+- `core/audit_logger.py`
+- new durable audit sink module, e.g. `core/audit_sink.py`
+- new migration/model if using Postgres audit table
+- `api/routers/users.py`
+- `api/routers/blocks.py`
+- `api/routers/customers.py`
+- `api/routers/accountants.py`
+- `api/routers/sessions.py`
+- `api/routers/sync.py`
+- `scripts/export_audit_logs.py`
+- `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`
+
+Work:
+
+1. Add durable audit storage with event id, timestamp, actor, target, action, result, request id, client ip, and redacted summaries.
+2. Add tamper-evidence: hash chain or signed export manifest. If Postgres is used, do not rely on ordinary mutable rows as the only evidence.
+3. Keep stdout/Loki audit events as searchable mirrors, not the only audit store.
+4. Add denied/failure audit events for:
+   - forbidden role/status/session changes,
+   - accountant/customer attempts to use owner-only actions,
+   - block/unblock denials,
+   - login approval/recovery failures,
+   - invalid sync API key/signature/timestamp,
+   - wrong dev/observability key usage.
+5. Update export tooling to page safely beyond 5000 records and include integrity metadata.
+
+Acceptance:
+
+- Security-relevant denied/failure actions can be reconstructed even if Loki retention expires.
+- Audit export proves completeness/integrity for the exported range.
+
+### Stage R4: P1 Cross-Server Sync Observability
+
+Goal: make Iran/foreign reconnect monitoring active instead of manual.
+
+Files:
+
+- `api/routers/sync.py`
+- `core/sync_worker.py`
+- `core/config.py`
+- `Makefile`
+- new systemd timer/cron/monitor script under `scripts/`
+- `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md`
+- `observability/grafana/provisioning/alerting/rules.yml`
+
+Work:
+
+1. Add `OBSERVABILITY_API_KEY` or `SYNC_HEALTH_API_KEY`; stop using broad `DEV_API_KEY` for read-only health.
+2. Add a production sampler that calls local and Iran `/api/sync/health` every minute from the foreign server.
+3. Make sync alerts treat missing samples as suspicious for production, not always `OK`.
+4. Add retry queue fairness so `sync:retry` is not starved by a constantly non-empty `sync:outbound`.
+5. Rename HTTP-200-only success to `delivered` or implement DB verification before emitting `success`.
+
+Acceptance:
+
+- Sync backlog, lag, and retry queue panels update without manual `make sync-health`.
+- Alerts detect both bad values and missing health samples.
+- Retry work makes progress under continuous outbound traffic.
+
+### Stage R5: P1 Production Alert Delivery and Baseline
+
+Goal: make alerting operational without causing noise.
+
+Files:
+
+- `observability/grafana/provisioning/alerting/contact-points.yml`
+- `observability/grafana/provisioning/alerting/rules.yml`
+- `docs/OBSERVABILITY_ALERTS.md`
+- `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`
+- production env/manifest docs
+
+Work:
+
+1. Keep inert contact point for local clones, but add production contact point template for Telegram admin channel/email/webhook.
+2. Make alert receiver secrets env-driven and never committed.
+3. Collect a baseline from real staging/production traffic.
+4. Tune thresholds for 5xx, auth failures, sync lag, retry queue, upload/media failures, and captured exceptions.
+5. Add alert payload policy: request ids and event ids only, no raw message/body/path tokens.
+
+Acceptance:
+
+- Production alerts can be delivered to the intended channel.
+- Alert thresholds are documented with a baseline date and observed traffic range.
+
+### Stage R6: P2 Collector and Privacy Hardening
+
+Goal: reduce operational risk and improve debugging quality.
+
+Files:
+
+- `docker-compose.observability.yml`
+- `observability/loki/loki-config.yml`
+- `core/request_logging.py`
+- `bot/middlewares/logging_context.py`
+- `core/error_tracking.py`
+- `core/log_redaction.py`
+- `core/logging_config.py`
+
+Work:
+
+1. Validate `X-Request-ID` charset and length; generate a replacement for invalid values.
+2. Trust `X-Forwarded-For` only from configured trusted proxy ranges.
+3. Store Telegram `Update.update_id` alongside an internal UUID correlation id.
+4. Decide raw vs hashed `telegram_user_id`; implement the policy.
+5. Replace basename-only exception frames with project-relative paths.
+6. Consider adding top-frame line number to error fingerprint only after checking grouping noise.
+7. Make `configure_logging()` idempotent and safe for future APM/OpenTelemetry handlers.
+8. Narrow redaction key matching so operational fields like `access_level` are not unnecessarily removed.
+9. Keep Docker socket based Promtail only for local trusted use; document or implement socket-proxy/file-scrape alternative for production/shared hosts.
+10. Keep Loki unauthenticated only while bound to localhost; require auth if exposed.
+
+Acceptance:
+
+- Request/audit IPs are not spoofable through client-supplied forwarded headers.
+- Bot/update correlation supports Telegram-side debugging.
+- Error frames are useful without exposing host paths.
+
+### Stage R7: Observability CI Gate
+
+Goal: prevent future observability regressions.
+
+Files:
+
+- `.github/workflows/merge-gate.yml`
+- `.github/workflows/pre-release-gate.yml`
+- new or existing tests under `tests/`
+- optional scripts under `scripts/`
+
+Work:
+
+1. Add a focused observability test command that runs:
+   - logging/redaction tests,
+   - request path/session id safety tests,
+   - job metric success/failure tests,
+   - sync worker no-raw-payload tests,
+   - audit schema tests,
+   - dashboard/alert JSON/YAML syntax checks,
+   - static check that Promtail does not replace the log line with plain `message` while dashboards depend on `| json`.
+2. Wire that command into merge/pre-release workflows or make it part of `make test-gate`.
+3. Add diff-aware trigger notes so observability changes cannot bypass the focused gate.
+
+Acceptance:
+
+- A PR that breaks redaction, Promtail JSON parsing, alert/dashboard syntax, or job failure metrics fails CI.
+
+## Immediate Execution Order
+
+1. Stage R1 first. This is the only stage that blocks trust in the existing dashboards/alerts.
+2. Stage R2 and R4 next. They affect production monitoring accuracy and Iran/foreign recovery.
+3. Stage R3 before official production release if audit evidence matters beyond short-term incident debugging.
+4. Stage R5 before enabling real alert delivery.
+5. Stage R6 and R7 as hardening and regression prevention.
+
+## Do Not Change Yet
+
+- Do not delete the current observability stack. It is a useful local operator stack.
+- Do not expose Grafana/Loki publicly to compensate for missing alert delivery.
+- Do not increase Loki labels with high-cardinality fields such as `request_id`, `actor_id`, `path`, `telegram_user_id`, message ids, filenames, or raw user input.
+- Do not treat HTTP 200 from sync peer as final business convergence unless DB/change-log verification is added.
