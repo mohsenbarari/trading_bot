@@ -302,7 +302,7 @@ Completion notes:
 - Updated `docs/OBSERVABILITY_PRODUCTION_HARDENING.md` with backend policy, service semantics, and the R2 overhead result.
 - Validated with `python3 -m unittest tests.test_metrics tests.test_main_metrics_guard`, `python3 -m py_compile core/metrics.py main.py core/config.py`, and `make observability-overhead` (`per_event_overhead_us=377.33`, budget `1000.0`, acceptable `true`).
 
-### Stage R3: P1 Audit Trail Hardening
+### Stage R3: P1 Audit Trail Hardening `[completed 2026-06-09]`
 
 Goal: separate incident/debug logs from security-grade audit evidence.
 
@@ -338,6 +338,15 @@ Acceptance:
 
 - Security-relevant denied/failure actions can be reconstructed even if Loki retention expires.
 - Audit export proves completeness/integrity for the exported range.
+
+Completion notes:
+
+- Added `core/audit_sink.py` as a durable append-only JSONL sink with `audit_event_id`, millisecond UTC timestamp, `previous_hash`, `event_hash`, and fully redacted payloads.
+- Wired `audit_log()` to write the durable sink first and mirror audit metadata back into stdout/Loki events, preserving existing search workflows while making Loki non-authoritative.
+- Added `AUDIT_TRAIL_PATH` config, production env generation, and `audit_data:/app/audit_trail` API mounts in both foreign and Iran Compose files.
+- Added denied/failure audit events for block-management denials, invalid sync API key/signature/timestamp/missing headers, sync verification failures, and wrong observability-key metrics access.
+- Updated `scripts/export_audit_logs.py` with Loki pagination, durable-file export, hash-chain verification, output SHA-256, and `.manifest.json` sidecars.
+- Added focused tests in `tests/test_audit_logger.py` and `tests/test_audit_export.py` for durable hash chaining, redaction, manifest generation, and tamper detection.
 
 ### Stage R4: P1 Cross-Server Sync Observability
 

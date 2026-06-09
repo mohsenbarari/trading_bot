@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.db import get_db
 from models.change_log import ChangeLog
 from core.config import settings
+from core.audit_logger import audit_log
 from core.metrics import record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
@@ -58,10 +59,24 @@ async def verify_signature(request: Request):
     signature = request.headers.get("X-Signature")
     
     if not api_key or not timestamp or not signature:
+        audit_log(
+            "sync.authenticate",
+            target_type="sync",
+            result="denied",
+            reason="missing_authentication_headers",
+            extra={"path": str(request.url.path), "status_code": 401},
+        )
         raise HTTPException(status_code=401, detail="Missing authentication headers")
         
     
     if api_key != settings.sync_api_key:
+        audit_log(
+            "sync.authenticate",
+            target_type="sync",
+            result="denied",
+            reason="invalid_api_key",
+            extra={"path": str(request.url.path), "status_code": 401},
+        )
         raise HTTPException(status_code=401, detail="Invalid API Key")
         
     # Check timestamp (max 5 minutes drift)
@@ -69,8 +84,22 @@ async def verify_signature(request: Request):
         ts = int(timestamp)
         now = int(time.time())
         if abs(now - ts) > 300:
+            audit_log(
+                "sync.authenticate",
+                target_type="sync",
+                result="denied",
+                reason="expired_timestamp",
+                extra={"path": str(request.url.path), "status_code": 401},
+            )
             raise HTTPException(status_code=401, detail="Request expired")
     except ValueError:
+        audit_log(
+            "sync.authenticate",
+            target_type="sync",
+            result="denied",
+            reason="invalid_timestamp",
+            extra={"path": str(request.url.path), "status_code": 401},
+        )
         raise HTTPException(status_code=401, detail="Invalid timestamp")
         
     # Verify signature
@@ -86,10 +115,26 @@ async def verify_signature(request: Request):
         ).hexdigest()
         
         if signature != expected_signature:
-             raise HTTPException(status_code=401, detail="Invalid signature")
+            audit_log(
+                "sync.authenticate",
+                target_type="sync",
+                result="denied",
+                reason="invalid_signature",
+                extra={"path": str(request.url.path), "status_code": 401},
+            )
+            raise HTTPException(status_code=401, detail="Invalid signature")
              
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Signature verification error: {e}")
+        audit_log(
+            "sync.authenticate",
+            target_type="sync",
+            result="failure",
+            reason="verification_failed",
+            extra={"path": str(request.url.path), "status_code": 401, "error_type": type(e).__name__},
+        )
         raise HTTPException(status_code=401, detail="Verification failed")
 
 from sqlalchemy import insert, update, delete, select, text as sa_text

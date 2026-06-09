@@ -1,7 +1,9 @@
 import io
 import json
 import logging
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from core.audit_logger import audit_log
@@ -72,7 +74,44 @@ class AuditLoggerTests(unittest.TestCase):
         self.assertEqual(payload["audit_extra"]["status_code"], 403)
         self.assertNotIn("secret-refresh", stream.getvalue())
 
+    def test_audit_log_writes_durable_hash_chain_when_configured(self):
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("audit-test")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_path = f"{tmpdir}/audit.jsonl"
+            with patch("core.audit_sink._audit_trail_path", return_value=audit_path):
+                audit_log(
+                    "user.password_change",
+                    target_type="user",
+                    target_id=10,
+                    result="success",
+                    actor_id=1,
+                    after_summary={"password": "raw-secret"},
+                )
+                audit_log(
+                    "session.reset",
+                    target_type="session",
+                    target_id="sess-1",
+                    result="denied",
+                    actor_id=1,
+                    reason="token=unsafe",
+                )
+
+            lines = [json.loads(line) for line in Path(audit_path).read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(len(lines), 2)
+        self.assertIsNone(lines[0]["previous_hash"])
+        self.assertEqual(lines[1]["previous_hash"], lines[0]["event_hash"])
+        self.assertEqual(lines[0]["payload"]["after_summary"]["password"], REDACTED)
+        self.assertNotIn("raw-secret", repr(lines))
+        self.assertNotIn("unsafe", repr(lines))
+
+        stdout_payloads = [json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual(stdout_payloads[0]["audit_event_hash"], lines[0]["event_hash"])
+        self.assertEqual(stdout_payloads[1]["audit_previous_hash"], lines[0]["event_hash"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

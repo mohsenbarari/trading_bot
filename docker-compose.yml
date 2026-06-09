@@ -8,6 +8,7 @@ services:
       TZ: UTC
       TRADING_BOT_SERVICE: api
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      AUDIT_TRAIL_PATH: ${AUDIT_TRAIL_PATH:-/app/audit_trail/audit.jsonl}
 
     volumes:
       - ${CERTS_HOST_PATH:-/root/cert/ip}:/app/certs  # Mount Host Certs
@@ -22,6 +23,7 @@ services:
       - ./mini_app_dist:/app/mini_app_dist
       - ./trading_settings.json:/app/trading_settings.json
       - uploads_data:/app/uploads
+      - audit_data:/app/audit_trail
     ports:
       - "127.0.0.1:8000:8000"
     ulimits:
@@ -154,3 +156,4 @@ volumes:
   postgres_data:
   redis_data:
   uploads_data:
+  audit_data:
