@@ -20,15 +20,59 @@ Grafana loads the rules into the `Trading Bot Alerts` folder.
 
 ## Contact Point
 
-The provisioned contact point is intentionally inert:
+The local default receiver remains intentionally inert:
 
 ```text
 http://127.0.0.1:9/trading-bot-alerts-disabled
 ```
 
-This prevents accidental alert delivery from a cloned repository. Before production use, configure a real receiver in Grafana UI or replace the local webhook through deployment-specific secret management.
+This prevents accidental alert delivery from a cloned repository.
+
+Provisioned receiver templates now exist for:
+
+- `Trading Bot Local Webhook`
+- `Trading Bot Production Webhook`
+- `Trading Bot Production Email`
+
+Notification routing is env-driven through the Grafana container environment:
+
+```text
+GRAFANA_ALERT_DEFAULT_RECEIVER
+GRAFANA_ALERT_CRITICAL_RECEIVER
+GRAFANA_ALERT_WARNING_RECEIVER
+GRAFANA_ALERT_WEBHOOK_URL
+GRAFANA_ALERT_EMAIL_ADDRESSES
+GF_SMTP_ENABLED
+GF_SMTP_HOST
+GF_SMTP_USER
+GF_SMTP_PASSWORD
+GF_SMTP_FROM_ADDRESS
+GF_SMTP_FROM_NAME
+```
+
+Production guidance:
+
+- Use `Trading Bot Production Webhook` when alerts must reach a Telegram admin channel through a private webhook bridge, Alertmanager relay, or internal notification gateway.
+- Use `Trading Bot Production Email` only when Grafana SMTP is configured through env vars and the SMTP secret stays outside git.
+- Keep local clones on `Trading Bot Local Webhook`.
 
 Do not commit Telegram bot tokens, webhook secrets, email passwords, API keys, or private receiver URLs.
+
+Example production shell exports before `make observability-up`:
+
+```bash
+export GRAFANA_ALERT_DEFAULT_RECEIVER='Trading Bot Production Webhook'
+export GRAFANA_ALERT_CRITICAL_RECEIVER='Trading Bot Production Webhook'
+export GRAFANA_ALERT_WARNING_RECEIVER='Trading Bot Production Email'
+export GRAFANA_ALERT_WEBHOOK_URL='https://alerts-bridge.example.internal/trading-bot'
+export GRAFANA_ALERT_EMAIL_ADDRESSES='ops@example.ir,dev@example.ir'
+export GF_SMTP_ENABLED=true
+export GF_SMTP_HOST='smtp.example.ir:587'
+export GF_SMTP_USER='alerts@example.ir'
+export GF_SMTP_PASSWORD='set-from-secret-store'
+export GF_SMTP_FROM_ADDRESS='alerts@example.ir'
+export GF_SMTP_FROM_NAME='Trading Bot Alerts'
+```
 
 ## Alert Rules
 
@@ -217,3 +261,45 @@ Alert payloads must not include:
 - mobile numbers
 - file names
 - media URLs or signed URLs
+
+The provisioned webhook/email templates are intentionally limited to:
+
+- `alertname`
+- `severity`
+- `component`
+- safe `summary`
+- `runbook_url`
+- `request_id`
+- `event_id`
+
+They do not include raw bodies, chat text, path tokens, filenames, URLs, or identifiers outside explicit request/event ids.
+
+## Baseline Snapshot
+
+Baseline date:
+
+- `2026-06-09`
+
+Observed environment:
+
+- current foreign runtime with live sync backlog present
+- low-traffic operator smoke window for API/bot/chat paths
+- no intentional public traffic replay
+
+Initial observed ranges and tuned thresholds:
+
+| Alert family | Observed range on 2026-06-09 | Threshold kept/tuned |
+| --- | --- | --- |
+| API 5xx spike | `0` observed during smoke window | keep `rate > 0.05` over `5m` for `5m` |
+| Auth/session failure spike | `0` observed during smoke window | keep `rate > 0.2` over `5m` for `5m` |
+| Chat upload/media failures | `0` observed during smoke window | keep `count > 0` over `5m` for `2m` |
+| Captured exception spike | `0` observed on clean runtime; test-induced failures exceed threshold by design | keep `count > 3` over `5m` for `5m` |
+| Sync backlog high | live sample showed `3513` unsynced rows | keep `backlog > 100` for `10m`; this should alert until recovery |
+| Sync lag high | live sample showed `287238s` oldest unsynced age | keep `age > 900s` for `10m`; this should alert until recovery |
+| Sync retry queue non-empty | live sample showed `3504` retry items | keep `retry queue > 0` for `5m`; this should alert until recovery |
+
+Interpretation:
+
+- non-sync alert families are still in a low-traffic baseline phase, so thresholds remain conservative and intentionally low
+- sync alerts are already proving useful because the current foreign runtime is not in steady state
+- after the first stable post-recovery week, refresh this table with a real 24h production sample and adjust only if alert noise is confirmed

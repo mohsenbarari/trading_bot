@@ -44,6 +44,40 @@ Production requirements:
 - Do not create dashboard variables from high-cardinality or secret-bearing fields.
 - Rotate Grafana credentials when team access changes.
 
+## Production Alert Delivery
+
+Provisioned alert delivery is intentionally env-driven. The repo ships three receiver names:
+
+- `Trading Bot Local Webhook`
+- `Trading Bot Production Webhook`
+- `Trading Bot Production Email`
+
+The Grafana container reads these environment variables:
+
+```text
+GRAFANA_ALERT_DEFAULT_RECEIVER
+GRAFANA_ALERT_CRITICAL_RECEIVER
+GRAFANA_ALERT_WARNING_RECEIVER
+GRAFANA_ALERT_WEBHOOK_URL
+GRAFANA_ALERT_EMAIL_ADDRESSES
+GF_SMTP_ENABLED
+GF_SMTP_HOST
+GF_SMTP_USER
+GF_SMTP_PASSWORD
+GF_SMTP_FROM_ADDRESS
+GF_SMTP_FROM_NAME
+```
+
+Policy:
+
+- keep the default local receiver inert in clones and developer machines
+- use a private webhook bridge for Telegram admin-channel delivery instead of committing bot tokens into Grafana provisioning
+- keep SMTP credentials in deployment secrets only
+- rotate webhook URLs, SMTP passwords, and admin access when operators change
+- never put secret receiver values into git-tracked env files
+
+Baseline alert thresholds and observed ranges are recorded in `docs/OBSERVABILITY_ALERTS.md`.
+
 ## Audit Log Export
 
 Audit logs are operationally sensitive. Keep short local retention and export required windows to restricted storage.
