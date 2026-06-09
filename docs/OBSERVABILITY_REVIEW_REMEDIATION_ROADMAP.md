@@ -107,6 +107,8 @@ Completion notes:
 
 #### Stage R1.2: Request Path and Session Identifier Safety
 
+Status: Completed on 2026-06-09.
+
 Purpose: prevent sensitive path segments and session identifiers from reaching logs.
 
 Work:
@@ -119,6 +121,14 @@ Acceptance:
 
 - Access/error logs do not contain raw token-like path segments on sensitive routes.
 - `session_id` is never emitted raw by `JsonLogFormatter`.
+
+Completion notes:
+
+- Added `safe_request_log_path()` and sensitive segment redaction in `core/request_logging.py`, so access/error logs use route templates such as `/api/invitations/accept/{token}`, `/api/chat/upload-sessions/{session_id}/chunk`, and `/api/recovery/{code}` instead of raw token/session/code path segments; unmatched sensitive paths also redact token-like or marker-adjacent secret segments before logging.
+- Added `/invitations` to the sensitive route policy because invitation accept links can carry token-like path segments.
+- Added `session_id` / `sid` redaction coverage in `core/log_redaction.py`; `JsonLogFormatter` now emits `[REDACTED]` for request-context session ids.
+- Migrated `tests/test_request_logging.py` from `TestClient` to `httpx.ASGITransport` because `TestClient` hangs in the current sandbox environment, then added route-template regressions for token-bearing invitation paths, upload-session paths, and exception logging paths.
+- Validated with `timeout 30 python3 -m unittest tests.test_request_logging tests.test_logging_foundation tests.test_observability_config`, `python3 -m unittest tests.test_error_tracking`, and `python3 -m py_compile core/request_logging.py core/log_redaction.py`.
 
 #### Stage R1.3: Redaction Coverage and Object Safety
 
