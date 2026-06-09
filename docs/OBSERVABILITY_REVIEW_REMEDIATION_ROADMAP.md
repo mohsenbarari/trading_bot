@@ -494,6 +494,17 @@ Acceptance:
 
 - A PR that breaks redaction, Promtail JSON parsing, alert/dashboard syntax, or job failure metrics fails CI.
 
+Status: Completed on 2026-06-09.
+
+Completion notes:
+
+- Added `scripts/run_observability_gate.py` as the focused observability regression entrypoint. It runs the core logging/redaction, request path/session safety, error tracking, job metric semantics, sync worker, audit trail/export, metrics guard, sync health, and observability config test modules in one place.
+- Added `make observability-gate` so the focused gate can run locally and in CI with the same command.
+- The gate supports diff-aware notes through `--base-ref/--head-ref` and prints observability-related changed paths when present, so PR runs show when the diff touched logging/metrics/collector/dashboard surfaces.
+- Added a dedicated `observability-gate` job to both `.github/workflows/merge-gate.yml` and `.github/workflows/pre-release-gate.yml`; the heavier frontend browser matrix now waits on this job.
+- Added static workflow regressions in `tests/test_observability_workflows.py` so future CI edits cannot silently remove the focused observability gate.
+- Added script regressions in `tests/test_observability_gate.py` and compile-smoke coverage for `scripts/run_observability_gate.py`.
+
 ## Immediate Execution Order
 
 1. Stage R1 first. This is the only stage that blocks trust in the existing dashboards/alerts.

@@ -15,6 +15,7 @@ PYTHON_SCRIPTS = (
     'scripts/free_deleted_user.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
+    'scripts/run_observability_gate.py',
     'scripts/reset_sessions.py',
     'scripts/restore_default_commodities.py',
     'scripts/test_invite.py',

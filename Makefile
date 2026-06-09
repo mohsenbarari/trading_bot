@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
 
 help:
 	@echo ""
@@ -54,6 +54,7 @@ help:
 	@echo "  make observability-down - Stop local observability stack"
 	@echo "  make observability-logs - Follow observability stack logs"
 	@echo "  make observability-overhead - Measure structured logging overhead"
+	@echo "  make observability-gate - Run the focused observability regression gate"
 	@echo "  make audit-log-export - Export audit logs from local Loki to JSONL"
 	@echo "  make test-report - Show repository test breadth summary"
 	@echo "  make test-gate   - Enforce repository test breadth baseline"
@@ -211,6 +212,9 @@ observability-logs:
 
 observability-overhead:
 	@python3 scripts/measure_logging_overhead.py
+
+observability-gate:
+	@python3 scripts/run_observability_gate.py $${ARGS}
 
 audit-log-export:
 	@python3 scripts/export_audit_logs.py $${ARGS}
