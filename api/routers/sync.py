@@ -37,9 +37,7 @@ def _is_loopback_client(client_host: str | None) -> bool:
 
 def _is_loopback_sync_request(request: Request) -> bool:
     client_host = request.client.host if getattr(request, "client", None) else None
-    if _is_loopback_client(client_host):
-        return True
-    return _is_loopback_client(getattr(request.url, "hostname", None))
+    return _is_loopback_client(client_host)
 
 
 def _require_observability_key(request: Request) -> None:

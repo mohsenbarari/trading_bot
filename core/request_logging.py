@@ -277,12 +277,11 @@ def install_request_logging_middleware(app: Any) -> None:
             raise
         finally:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-            route_template = request_route_template(request, path)
             safe_path = safe_request_log_path(request, path)
             set_request_context(path=safe_path)
             record_http_request(
                 method=request.method,
-                route=route_template,
+                route=safe_path,
                 status_code=status_code,
                 duration_ms=duration_ms,
             )

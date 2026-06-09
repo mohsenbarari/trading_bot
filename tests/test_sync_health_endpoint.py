@@ -62,8 +62,8 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]))
         request = SimpleNamespace(
             headers={},
-            url=SimpleNamespace(path="/api/sync/health", hostname="127.0.0.1"),
-            client=None,
+            url=SimpleNamespace(path="/api/sync/health", hostname="public.example"),
+            client=SimpleNamespace(host="127.0.0.1"),
         )
 
         with patch("api.routers.sync.settings.observability_api_key", None), patch(
@@ -74,6 +74,17 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             payload = await get_sync_health(request=request, db=db)
 
         self.assertEqual(payload["status"], "ok")
+
+    async def test_sync_health_does_not_trust_host_header_for_loopback_bypass(self):
+        request = SimpleNamespace(
+            headers={},
+            url=SimpleNamespace(path="/api/sync/health", hostname="127.0.0.1"),
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_sync_health(request=request, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 403)
 
     async def test_sync_health_reports_backlog_and_queue_state(self):
         oldest = datetime(2026, 6, 9, 10, 0, 0, tzinfo=timezone.utc)
