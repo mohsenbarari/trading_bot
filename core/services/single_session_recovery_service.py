@@ -10,6 +10,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.utils import utc_now_naive
 from models.session import (
     SessionLoginRequest,
     SingleSessionRecoveryAdminTarget,
@@ -46,7 +47,7 @@ class InvalidSingleSessionRecoveryTransition(ValueError):
 
 
 def _utcnow(now: Optional[datetime] = None) -> datetime:
-    return now or datetime.utcnow()
+    return now or utc_now_naive()
 
 
 def _extend_action_windows(

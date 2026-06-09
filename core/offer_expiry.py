@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -21,6 +21,7 @@ from core.db import AsyncSessionLocal
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
+from core.utils import utc_now_naive
 from models.offer import Offer, OfferStatus
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ async def expire_stale_offers() -> int:
     if expiry_minutes <= 0:
         return 0
     
-    cutoff_time = datetime.utcnow() - timedelta(minutes=expiry_minutes)
+    cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
     
     async with AsyncSessionLocal() as session:
         # Find active offers older than cutoff

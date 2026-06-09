@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 __all__ = [
     # Timezone & Date
     "utc_now",
+    "utc_now_naive",
     "to_iran_time",
     "get_iran_time",
     "format_iran_datetime",
@@ -76,6 +77,14 @@ def utc_now() -> datetime:
         datetime: زمان فعلی به UTC (timezone-aware)
     """
     return datetime.now(timezone.utc)
+
+
+def utc_now_naive() -> datetime:
+    """Return the current UTC time as a naive datetime.
+
+    Use this for legacy database columns that still store naive UTC timestamps.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def get_iran_time() -> datetime:
@@ -382,7 +391,7 @@ def check_user_limits(
         return (True, None)
     
     # اگر محدودیت منقضی شده، مجاز است
-    if user.limitations_expire_at <= datetime.utcnow():
+    if user.limitations_expire_at <= utc_now_naive():
         return (True, None)
     
     if action_type == 'trade':

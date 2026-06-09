@@ -1,11 +1,12 @@
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select, and_
 from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
+from core.utils import utc_now_naive
 from models.session import UserSession
 from core.services.session_service import deactivate_session, promote_next_primary
 
@@ -19,7 +20,7 @@ async def expire_stale_sessions() -> int:
     Find and deactivate user sessions that have been expired for more than 5 days.
     If the deactivated session was a primary session, promote the oldest active.
     """
-    cutoff_time = datetime.utcnow() - timedelta(days=5)
+    cutoff_time = utc_now_naive() - timedelta(days=5)
     
     count = 0
     async with AsyncSessionLocal() as db:

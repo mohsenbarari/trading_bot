@@ -1,8 +1,9 @@
 from jose import jwt
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional, Union, Any
 import bcrypt
 from core.config import settings
+from core.utils import utc_now_naive
 
 # JWT configuration
 SECRET_KEY = settings.jwt_secret_key
@@ -19,9 +20,9 @@ def create_access_token(subject: Union[int, str, Any] = None, data: dict = None,
     if server_id is not None:
         to_encode["srv"] = server_id
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = utc_now_naive() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = utc_now_naive() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire, "type": "access"})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -31,9 +32,9 @@ def create_refresh_token(subject: Union[int, str, Any] = None, data: dict = None
     if subject is not None:
         to_encode["sub"] = str(subject)
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = utc_now_naive() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expire = utc_now_naive() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh"})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
