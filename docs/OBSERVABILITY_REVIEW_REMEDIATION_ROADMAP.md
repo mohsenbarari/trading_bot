@@ -573,6 +573,15 @@ Acceptance:
 - `/api/sync/health` cannot be treated as loopback through a spoofed host name.
 - Sensitive unmatched routes do not leak token-like path segments into Prometheus route labels.
 
+Status: Completed on 2026-06-09.
+
+Completion notes:
+
+- Removed the `request.url.hostname` fallback from `api/routers/sync.py::_is_loopback_sync_request()`. Loopback bypass for `/api/sync/health` is now based only on the direct client peer address.
+- Changed `core/request_logging.py` so `record_http_request()` uses the same sanitized path/route that the access and error logs use, instead of the rawer `route_template`.
+- This closes the remaining unmatched-sensitive-route leak path in Prometheus route labels. Matched sensitive routes still record their safe route template; unmatched sensitive routes now record the redacted safe path.
+- Added regressions proving a spoofed loopback host name does not bypass sync-health authentication and proving metrics route labels stay sanitized for both matched and unmatched sensitive routes.
+
 ### Stage R9: Remaining Raw Payload and Error-Tracking Gate Cleanup
 
 Goal: remove the last raw-body/logging escapes and finish the deferred Sentry init hardening.

@@ -241,6 +241,31 @@ class RequestLoggingTests(unittest.TestCase):
         extra = logger.info.call_args.kwargs["extra"]
         self.assertEqual(extra["client_ip"], "198.51.100.4")
 
+    def test_metrics_use_sanitized_path_for_unmatched_sensitive_route(self):
+        app = make_test_app()
+        raw_token = "tok_abcdefghijklmnopqrstuvwxyz123456"
+
+        with patch("core.request_logging.record_http_request") as record_http_request:
+            response = asyncio.run(call_app(app, "GET", f"/api/invitations/accept/{raw_token}/missing"))
+
+        self.assertEqual(response.status_code, 404)
+        record_http_request.assert_called_once()
+        self.assertEqual(
+            record_http_request.call_args.kwargs["route"],
+            "/api/invitations/accept/[REDACTED]/missing",
+        )
+        self.assertNotIn(raw_token, repr(record_http_request.call_args.kwargs))
+
+    def test_metrics_use_route_template_for_matched_sensitive_route(self):
+        app = make_test_app()
+        raw_token = "tok_abcdefghijklmnopqrstuvwxyz123456"
+
+        with patch("core.request_logging.record_http_request") as record_http_request:
+            response = asyncio.run(call_app(app, "GET", f"/api/invitations/accept/{raw_token}"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(record_http_request.call_args.kwargs["route"], "/api/invitations/accept/{token}")
+
 
 if __name__ == "__main__":
     unittest.main()
