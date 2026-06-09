@@ -116,6 +116,11 @@ class ObservabilityConfigTests(unittest.TestCase):
             "verify_sync_sampler_local",
             "verify_sync_sampler_remote",
             "trading-bot-sync-health-sampler.timer",
+            "check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local",
+            "check_local; bootstrap_iran; install_sync_sampler_remote; verify_sync_sampler_remote",
+            "check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote",
+            "ensure_runtime_env_file",
+            "validate_observability_release_inputs",
         ):
             self.assertIn(expected, script)
 
