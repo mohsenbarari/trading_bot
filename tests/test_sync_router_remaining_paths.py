@@ -351,11 +351,14 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.default_peer_server_url", return_value="https://peer.example"
         ), patch("api.routers.sync.settings.sync_api_key", "secret"), patch(
             "api.routers.sync.time.time", return_value=1_700_000_111
-        ), patch("httpx.AsyncClient", side_effect=client_factory):
+        ), patch("httpx.AsyncClient", side_effect=client_factory), patch("api.routers.sync.logger") as logger_mock:
             result = await resync_from_changelog(request=request, db=db)
         self.assertEqual(result, {"status": "ok", "processed": 0, "errors": 1, "total_entries": 1})
         self.assertFalse(entry.synced)
         self.assertEqual(len(calls), 1)
+        rendered_log_call = repr(logger_mock.warning.call_args)
+        self.assertNotIn("bad gateway", rendered_log_call)
+        self.assertIn("peer_response_sha256", rendered_log_call)
 
 
 if __name__ == "__main__":
