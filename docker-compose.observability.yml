@@ -32,6 +32,17 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-before-production}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SMTP_ENABLED: ${GF_SMTP_ENABLED:-false}
+      GF_SMTP_HOST: ${GF_SMTP_HOST:-smtp.example.invalid:587}
+      GF_SMTP_USER: ${GF_SMTP_USER:-}
+      GF_SMTP_PASSWORD: ${GF_SMTP_PASSWORD:-}
+      GF_SMTP_FROM_ADDRESS: ${GF_SMTP_FROM_ADDRESS:-alerts@example.invalid}
+      GF_SMTP_FROM_NAME: ${GF_SMTP_FROM_NAME:-Trading Bot Alerts}
+      GRAFANA_ALERT_DEFAULT_RECEIVER: ${GRAFANA_ALERT_DEFAULT_RECEIVER:-Trading Bot Local Webhook}
+      GRAFANA_ALERT_CRITICAL_RECEIVER: ${GRAFANA_ALERT_CRITICAL_RECEIVER:-Trading Bot Local Webhook}
+      GRAFANA_ALERT_WARNING_RECEIVER: ${GRAFANA_ALERT_WARNING_RECEIVER:-Trading Bot Local Webhook}
+      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-http://127.0.0.1:9/trading-bot-alerts-disabled}
+      GRAFANA_ALERT_EMAIL_ADDRESSES: ${GRAFANA_ALERT_EMAIL_ADDRESSES:-alerts@example.invalid}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro

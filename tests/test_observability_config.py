@@ -67,6 +67,41 @@ class ObservabilityConfigTests(unittest.TestCase):
                 self.assertIn("deny all", metrics_block.group("body"))
                 self.assertIn("return 404", metrics_block.group("body"))
 
+    def test_alert_contact_points_and_policies_are_env_driven_and_safe(self):
+        contact_points = (ROOT / "observability/grafana/provisioning/alerting/contact-points.yml").read_text(
+            encoding="utf-8"
+        )
+        policies = (ROOT / "observability/grafana/provisioning/alerting/notification-policies.yml").read_text(
+            encoding="utf-8"
+        )
+        compose = (ROOT / "docker-compose.observability.yml").read_text(encoding="utf-8")
+
+        for expected_receiver in (
+            "Trading Bot Local Webhook",
+            "Trading Bot Production Webhook",
+            "Trading Bot Production Email",
+        ):
+            self.assertIn(expected_receiver, contact_points)
+
+        self.assertIn("${GRAFANA_ALERT_WEBHOOK_URL}", contact_points)
+        self.assertIn("${GRAFANA_ALERT_EMAIL_ADDRESSES}", contact_points)
+        self.assertIn("${GRAFANA_ALERT_DEFAULT_RECEIVER}", policies)
+        self.assertIn("${GRAFANA_ALERT_CRITICAL_RECEIVER}", policies)
+        self.assertIn("${GRAFANA_ALERT_WARNING_RECEIVER}", policies)
+        self.assertIn("request_id={{ index .CommonLabels \"request_id\" }}", contact_points)
+        self.assertIn("event_id={{ index .CommonLabels \"event_id\" }}", contact_points)
+        self.assertNotIn("default.message", contact_points)
+        for expected_env in (
+            "GF_SMTP_ENABLED",
+            "GF_SMTP_HOST",
+            "GF_SMTP_USER",
+            "GF_SMTP_PASSWORD",
+            "GRAFANA_ALERT_DEFAULT_RECEIVER",
+            "GRAFANA_ALERT_WEBHOOK_URL",
+            "GRAFANA_ALERT_EMAIL_ADDRESSES",
+        ):
+            self.assertIn(expected_env, compose)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,45 @@ contactPoints:
         settings:
           url: http://127.0.0.1:9/trading-bot-alerts-disabled
           httpMethod: POST
-          title: '{{ template "default.title" . }}'
-          message: '{{ template "default.message" . }}'
-
+          title: 'Trading Bot alert: {{ .CommonLabels.alertname }}'
+          message: |-
+            severity={{ .CommonLabels.severity }}
+            component={{ .CommonLabels.component }}
+            summary={{ index .CommonAnnotations "summary" }}
+            runbook={{ index .CommonAnnotations "runbook_url" }}
+            request_id={{ index .CommonLabels "request_id" }}
+            event_id={{ index .CommonLabels "event_id" }}
+  - orgId: 1
+    name: Trading Bot Production Webhook
+    receivers:
+      - uid: trading-bot-production-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: ${GRAFANA_ALERT_WEBHOOK_URL}
+          httpMethod: POST
+          title: 'Trading Bot alert: {{ .CommonLabels.alertname }}'
+          message: |-
+            severity={{ .CommonLabels.severity }}
+            component={{ .CommonLabels.component }}
+            summary={{ index .CommonAnnotations "summary" }}
+            runbook={{ index .CommonAnnotations "runbook_url" }}
+            request_id={{ index .CommonLabels "request_id" }}
+            event_id={{ index .CommonLabels "event_id" }}
+  - orgId: 1
+    name: Trading Bot Production Email
+    receivers:
+      - uid: trading-bot-production-email
+        type: email
+        disableResolveMessage: false
+        settings:
+          addresses: ${GRAFANA_ALERT_EMAIL_ADDRESSES}
+          singleEmail: false
+          subject: 'Trading Bot alert: {{ .CommonLabels.alertname }}'
+          message: |-
+            severity={{ .CommonLabels.severity }}
+            component={{ .CommonLabels.component }}
+            summary={{ index .CommonAnnotations "summary" }}
+            runbook={{ index .CommonAnnotations "runbook_url" }}
+            request_id={{ index .CommonLabels "request_id" }}
+            event_id={{ index .CommonLabels "event_id" }}

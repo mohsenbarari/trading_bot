@@ -385,7 +385,7 @@ Completion notes:
 - Kept worker success semantics on `job.item.delivered` and updated sync alerting so missing `sync.health` samples alert explicitly for both `server_mode=foreign` and `server_mode=iran`.
 - Updated `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md` with the new auth header, sampler installation, and missing-sample incident path.
 
-### Stage R5: P1 Production Alert Delivery and Baseline
+### Stage R5: P1 Production Alert Delivery and Baseline `[completed 2026-06-09]`
 
 Goal: make alerting operational without causing noise.
 
@@ -409,6 +409,15 @@ Acceptance:
 
 - Production alerts can be delivered to the intended channel.
 - Alert thresholds are documented with a baseline date and observed traffic range.
+
+Completion notes:
+
+- Added env-driven Grafana receiver wiring in `docker-compose.observability.yml` for webhook/email delivery and SMTP settings, while keeping the local default receiver inert for clones.
+- Expanded `observability/grafana/provisioning/alerting/contact-points.yml` with safe-template production webhook and production email receivers, and switched `notification-policies.yml` to env-driven receiver selection for default, warning, and critical routes.
+- Documented the production receiver contract, Telegram-through-webhook-bridge guidance, SMTP secret handling, and alert payload restrictions in `docs/OBSERVABILITY_ALERTS.md` and `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`.
+- Added a dated baseline snapshot (`2026-06-09`) with observed ranges and the currently kept thresholds for API 5xx, auth/session failures, upload/media failures, captured exceptions, and sync backlog/lag/retry alerts.
+- Added optional observability receiver hints to `deploy/production/online.env.example` without introducing any real secret-bearing values.
+- Added config regressions proving alert provisioning stays env-driven and limited to safe template fields (`request_id`, `event_id`, bounded labels/annotations only).
 
 ### Stage R6: P2 Collector and Privacy Hardening
 
