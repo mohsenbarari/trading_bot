@@ -103,13 +103,20 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         return fake_redis, send_mock, sleep_mock
 
     async def test_main_skips_invalid_json_payload(self):
-        fake_redis, send_mock, sleep_mock = await self._run_main_once(
-            blpop_results=[("sync:outbound", "not-json"), asyncio.CancelledError()]
-        )
+        raw_payload = "not-json token=unsafe 09123456789"
+        with patch("core.sync_worker.logger") as logger_mock:
+            fake_redis, send_mock, sleep_mock = await self._run_main_once(
+                blpop_results=[("sync:outbound", raw_payload), asyncio.CancelledError()]
+            )
 
         send_mock.assert_not_awaited()
         sleep_mock.assert_not_awaited()
         self.assertEqual(fake_redis.rpush_calls, [])
+        rendered_log_call = repr(logger_mock.error.call_args)
+        self.assertNotIn(raw_payload, rendered_log_call)
+        self.assertNotIn("unsafe", rendered_log_call)
+        self.assertNotIn("09123456789", rendered_log_call)
+        self.assertIn("payload_sha256", rendered_log_call)
 
     async def test_main_requeues_when_sync_config_missing(self):
         payload = json.dumps({"hash": "abc"})
@@ -140,15 +147,30 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_main_requeues_non_200_response(self):
         payload = json.dumps({"hash": "abc"})
-        response = SimpleNamespace(status_code=500, text="boom")
-        fake_redis, send_mock, sleep_mock = await self._run_main_once(
-            blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
-            send_return_value=response,
+        response = SimpleNamespace(
+            status_code=500,
+            text="boom token=unsafe 09123456789",
+            headers={"content-type": "application/json"},
         )
+        with patch("core.job_logging.record_job_run") as record_job_run, patch(
+            "core.sync_worker.logger"
+        ) as logger_mock:
+            fake_redis, send_mock, sleep_mock = await self._run_main_once(
+                blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
+                send_return_value=response,
+            )
 
         send_mock.assert_awaited_once()
         self.assertEqual(fake_redis.rpush_calls, [("sync:retry", payload)])
         sleep_mock.assert_awaited_once_with(1)
+        record_job_run.assert_called_once()
+        self.assertEqual(record_job_run.call_args.kwargs["job_name"], "sync_worker")
+        self.assertEqual(record_job_run.call_args.kwargs["result"], "failure")
+        rendered_log_call = repr(logger_mock.error.call_args)
+        self.assertNotIn(response.text, rendered_log_call)
+        self.assertNotIn("unsafe", rendered_log_call)
+        self.assertNotIn("09123456789", rendered_log_call)
+        self.assertIn("peer_response_sha256", rendered_log_call)
 
     async def test_main_requeues_request_errors(self):
         payload = json.dumps({"hash": "abc"})

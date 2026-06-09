@@ -16,6 +16,34 @@ configure_logging("sync-worker")
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
 
+
+class SyncDeliveryError(Exception):
+    def __init__(self, *, status_code: int, response_summary: dict):
+        super().__init__(f"sync delivery rejected with status {status_code}")
+        self.status_code = status_code
+        self.response_summary = response_summary
+
+
+def summarize_queue_payload(payload: str) -> dict:
+    payload_bytes = payload.encode("utf-8", errors="replace")
+    return {
+        "payload_size_bytes": len(payload_bytes),
+        "payload_sha256": hashlib.sha256(payload_bytes).hexdigest()[:16],
+    }
+
+
+def summarize_peer_response(response) -> dict:
+    body = getattr(response, "text", "") or ""
+    body_bytes = str(body).encode("utf-8", errors="replace")
+    headers = getattr(response, "headers", {}) or {}
+    return {
+        "status_code": getattr(response, "status_code", None),
+        "peer_response_size_bytes": len(body_bytes),
+        "peer_response_sha256": hashlib.sha256(body_bytes).hexdigest()[:16] if body_bytes else None,
+        "peer_content_type": headers.get("content-type") if hasattr(headers, "get") else None,
+    }
+
+
 async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):
     """Send item to target server with security headers"""
     timestamp = int(time.time())
@@ -85,7 +113,15 @@ async def main():
                 try:
                     data = json.loads(payload)
                 except json.JSONDecodeError:
-                    logger.error(f"❌ Invalid JSON in queue: {payload}")
+                    logger.error(
+                        "❌ Invalid JSON in sync queue",
+                        extra={
+                            "event": "job.item.invalid_payload",
+                            "job_name": "sync_worker",
+                            "origin_queue": origin_queue,
+                            **summarize_queue_payload(payload),
+                        },
+                    )
                     continue
                 
                 item_hash = data.get('hash', 'unknown')
@@ -113,9 +149,9 @@ async def main():
                     
                         if response.status_code == 200:
                             logger.info(
-                                "✅ Successfully synced item.",
+                                "✅ Sync item delivered to peer.",
                                 extra={
-                                    "event": "job.item.completed",
+                                    "event": "job.item.delivered",
                                     "job_name": "sync_worker",
                                     "run_id": run_id,
                                     "iteration": iteration,
@@ -126,23 +162,26 @@ async def main():
                             # TODO: Update DB status (mark verified/synced)
                             # This requires async db session access
                         else:
-                            logger.error(
-                                "❌ Sync failed: %s - %s",
-                                response.status_code,
-                                response.text,
-                                extra={
-                                    "event": "job.item.failed",
-                                    "job_name": "sync_worker",
-                                    "run_id": run_id,
-                                    "iteration": iteration,
-                                    "status_code": response.status_code,
-                                    "duration_ms": duration_ms_since(start_time),
-                                },
+                            raise SyncDeliveryError(
+                                status_code=response.status_code,
+                                response_summary=summarize_peer_response(response),
                             )
-                            # Push to retry queue (at the end)
-                            await r.rpush(retry_queue, payload)
-                            await asyncio.sleep(1) # Backoff slightly
 
+                except SyncDeliveryError as delivery_err:
+                    logger.error(
+                        "❌ Sync delivery rejected by peer",
+                        extra={
+                            "event": "job.item.failed",
+                            "job_name": "sync_worker",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "duration_ms": duration_ms_since(start_time),
+                            **delivery_err.response_summary,
+                        },
+                    )
+                    # Push to retry queue (at the end)
+                    await r.rpush(retry_queue, payload)
+                    await asyncio.sleep(1) # Backoff slightly
                 except httpx.RequestError as req_err:
                     _loop_errors.log(logger, "❌ Network error during sync: %s", req_err, job_name="sync_worker", run_id=run_id)
                     await r.rpush(retry_queue, payload)

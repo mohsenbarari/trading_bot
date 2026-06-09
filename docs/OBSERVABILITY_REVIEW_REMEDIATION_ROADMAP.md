@@ -180,6 +180,8 @@ Completion notes:
 
 #### Stage R1.5: Sync Worker Log and Failure Semantics
 
+Status: Completed on 2026-06-09.
+
 Purpose: make sync logs safe and sync metrics truthful.
 
 Work:
@@ -192,6 +194,15 @@ Acceptance:
 
 - Sync worker tests prove invalid payloads and peer response bodies are not emitted raw.
 - Non-200 sync attempts increment failure/retry metrics.
+
+Completion notes:
+
+- Added sync payload and peer response summarizers in `core/sync_worker.py`; invalid Redis payload logs now include only payload size and SHA-256 prefix, not raw queue contents.
+- Removed raw peer `response.text` from non-200 logs; failure logs now include status, response size, response hash, and content type.
+- Changed HTTP 200 success event from `job.item.completed` to `job.item.delivered` to avoid claiming DB-level verified/synced state before that TODO is implemented.
+- Added `SyncDeliveryError` so non-200 peer responses leave `job_context` through a controlled exception path and record `result="failure"` in job metrics before the item is requeued.
+- Added focused sync worker tests proving invalid payloads and peer response bodies are not logged raw, and proving non-200 delivery attempts record failure metrics.
+- Validated with `python3 -m unittest tests.test_sync_worker`, `python3 -m unittest tests.test_job_logging tests.test_metrics tests.test_sync_worker`, and `python3 -m py_compile core/sync_worker.py`.
 
 #### Stage R1.6: Job Failure Metric Semantics
 
