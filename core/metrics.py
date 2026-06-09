@@ -16,14 +16,24 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from core.log_redaction import redact_string
+
 
 _LABEL_VALUE_RE = re.compile(r"[^a-zA-Z0-9_.:/{}-]+")
 _HTTP_ROUTE_ID_RE = re.compile(r"/(?:\d+|[0-9a-fA-F-]{16,})(?=/|$)")
+_FILENAME_LABEL_RE = re.compile(r"(?i)\b[\w.-]+\.(?:jpg|jpeg|png|webp|gif|pdf|xlsx?|docx?|zip|mp4|mov|mp3|wav|ogg)\b")
 _HISTOGRAM_BUCKETS = (5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000)
+_SUPPORTED_BACKENDS = {"memory", "shared_sqlite"}
+
+
+def _coerce_metrics_backend(value: str | None) -> str:
+    candidate = (value or "memory").strip().lower()
+    return candidate if candidate in _SUPPORTED_BACKENDS else "memory"
 
 
 def _sanitize_label_value(value: Any, *, fallback: str = "unknown", max_length: int = 96) -> str:
     raw = str(value if value is not None else fallback).strip() or fallback
+    raw = _FILENAME_LABEL_RE.sub("redacted_file", redact_string(raw))
     sanitized = _LABEL_VALUE_RE.sub("_", raw)[:max_length]
     return sanitized or fallback
 
@@ -63,6 +73,8 @@ def _format_labels(labels: Iterable[tuple[str, str]]) -> str:
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._backend = _coerce_metrics_backend(os.getenv("TRADING_BOT_METRICS_BACKEND"))
+        self._service_name = _sanitize_label_value(os.getenv("TRADING_BOT_SERVICE", "app"), max_length=32)
         self._db_path = os.getenv("TRADING_BOT_METRICS_DB", "/tmp/trading_bot_metrics.sqlite3")
         self._counters: dict[str, dict[tuple[tuple[str, str], ...], float]] = defaultdict(lambda: defaultdict(float))
         self._gauges: dict[str, dict[tuple[tuple[str, str], ...], float]] = defaultdict(dict)
@@ -71,7 +83,13 @@ class MetricsRegistry:
         self._types: dict[str, str] = {}
 
     def _shared_enabled(self) -> bool:
-        return bool(self._db_path)
+        return self._backend == "shared_sqlite" and bool(self._db_path)
+
+    def backend_name(self) -> str:
+        return self._backend
+
+    def service_name(self) -> str:
+        return self._service_name
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, timeout=1.0)
@@ -238,10 +256,18 @@ class MetricsRegistry:
 
     def render_prometheus(self) -> str:
         shared = self._render_shared_prometheus()
+        metadata_lines = [
+            "# HELP trading_bot_metrics_backend_info Metrics backend metadata for this service process.",
+            "# TYPE trading_bot_metrics_backend_info gauge",
+            (
+                "trading_bot_metrics_backend_info"
+                f'{{backend="{self._backend}",service="{self._service_name}",shared="{str(self._shared_enabled()).lower()}"}} 1'
+            ),
+        ]
         if shared is not None:
-            return shared
+            return "\n".join(metadata_lines) + "\n" + shared
 
-        lines: list[str] = []
+        lines: list[str] = list(metadata_lines)
         with self._lock:
             metric_names = sorted(set(self._help) | set(self._types))
             for name in metric_names:

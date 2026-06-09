@@ -132,6 +132,44 @@ If the budget fails:
 3. Keep stack traces only for captured errors.
 4. Re-run the overhead check before deploying.
 
+## Metrics Backend Policy
+
+R2 chooses the conservative production-safe default:
+
+```text
+TRADING_BOT_METRICS_BACKEND=memory
+```
+
+This keeps request, bot, job, websocket, sync, and audit metric updates in process memory and avoids SQLite file locks or disk I/O in hot paths. The `/metrics` response includes explicit backend metadata:
+
+```text
+trading_bot_metrics_backend_info{backend="memory",service="api",shared="false"} 1
+```
+
+Service semantics:
+
+- `api` metrics are exposed by the API container process that receives the scrape.
+- `bot` and `sync_worker` maintain their own in-process metrics. They are not automatically merged into the API `/metrics` response when the backend is `memory`.
+- Docker Compose sets `TRADING_BOT_SERVICE` for `api`, `bot`, and `sync_worker` so each process can identify its metrics surface.
+
+The legacy SQLite aggregation path is now explicit opt-in only:
+
+```text
+TRADING_BOT_METRICS_BACKEND=shared_sqlite
+TRADING_BOT_METRICS_DB=/tmp/trading_bot_metrics.sqlite3
+```
+
+Use `shared_sqlite` only for local development or short diagnostic windows. It restores cross-process aggregation through a shared file, but it reintroduces SQLite write cost into high-frequency metric paths.
+
+R2 validation result:
+
+```text
+make observability-overhead
+per_event_overhead_us=377.33
+budget_us=1000.0
+acceptable=true
+```
+
 ## Security Constraints
 
 Never log or export:
