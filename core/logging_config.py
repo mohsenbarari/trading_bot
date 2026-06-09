@@ -105,7 +105,7 @@ class JsonLogFormatter(logging.Formatter):
         if record.stack_info:
             payload["stack_info"] = redact(record.stack_info)
 
-        return json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 class TextLogFormatter(logging.Formatter):

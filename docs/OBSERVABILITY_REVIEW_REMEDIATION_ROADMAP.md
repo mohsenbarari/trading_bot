@@ -132,6 +132,8 @@ Completion notes:
 
 #### Stage R1.3: Redaction Coverage and Object Safety
 
+Status: Completed on 2026-06-09.
+
 Purpose: strengthen redaction against Iranian PII and unsafe object stringification.
 
 Work:
@@ -143,6 +145,14 @@ Work:
 Acceptance:
 
 - No raw OTP, mobile, email, card, sheba, national id, signed URL, file name, or secret-bearing object string appears in formatted log output.
+
+Completion notes:
+
+- Expanded `core/log_redaction.py` coverage for email, Iranian mobile variants, bank card numbers, sheba/IBAN values, national ids, signed URL query secrets, file-name keys, upload-session ids, and `sid`/session-style keys.
+- Replaced unsafe unknown-object passthrough with safe object metadata, so arbitrary objects in structured log extras no longer rely on `__str__`/`__repr__` output.
+- Removed `json.dumps(default=str)` from `JsonLogFormatter`; formatted log payloads must now be JSON-safe after redaction/coercion instead of silently stringifying unknown objects.
+- Added focused redaction regressions in `tests/test_logging_foundation.py` for Iranian PII, signed URLs, filenames, upload/session keys, and secret-bearing unknown objects.
+- Validated with `timeout 30 python3 -m unittest tests.test_request_logging tests.test_logging_foundation tests.test_observability_config tests.test_error_tracking`, `python3 -m unittest tests.test_audit_logger`, and `python3 -m py_compile core/log_redaction.py core/logging_config.py`.
 
 #### Stage R1.4: Error Tracking Scrubbing
 

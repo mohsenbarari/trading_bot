@@ -4,9 +4,26 @@ import logging
 import unittest
 from unittest.mock import patch
 
-from core.log_redaction import REDACTED, REDACTED_JWT, redact
+from core.log_redaction import (
+    REDACTED,
+    REDACTED_CARD,
+    REDACTED_EMAIL,
+    REDACTED_FILENAME,
+    REDACTED_JWT,
+    REDACTED_MOBILE,
+    REDACTED_NATIONAL_ID,
+    REDACTED_OBJECT,
+    REDACTED_SHEBA,
+    REDACTED_SIGNED_URL_VALUE,
+    redact,
+)
 from core.logging_config import configure_logging
 from core.request_context import clear_request_context, set_request_context
+
+
+class SecretBearingObject:
+    def __str__(self):
+        return "leaky object mobile=09123456789 email=owner@example.com token=unsafe-token"
 
 
 class LoggingFoundationTests(unittest.TestCase):
@@ -46,6 +63,64 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertEqual(redact(f"token={token}"), f"token={REDACTED}")
         self.assertEqual(redact(f"raw {token}"), f"raw {REDACTED_JWT}")
 
+    def test_redact_masks_iranian_pii_signed_urls_and_file_names(self):
+        signed_url = (
+            "https://cdn.example.test/private/report.pdf?"
+            "X-Amz-Signature=abcdef123456&X-Amz-Credential=credential-value&safe=1"
+        )
+        payload = {
+            "email": "owner@example.com",
+            "message": (
+                "mobile +98 912 345 6789 card 6037-9911-1111-1111 "
+                "sheba IR820540102680020817909002 national 0079059744 "
+                "file_name=identity-card.png url="
+                f"{signed_url}"
+            ),
+            "original_file_name": "passport.png",
+            "signed_url": signed_url,
+            "upload_session_id": "upload-session-abcdefghijklmnopqrstuvwxyz123456",
+            "sid": "11111111-2222-3333-4444-555555555555",
+        }
+
+        redacted = redact(payload)
+        rendered = json.dumps(redacted, ensure_ascii=False)
+
+        self.assertEqual(redacted["email"], REDACTED_EMAIL)
+        self.assertEqual(redacted["original_file_name"], REDACTED)
+        self.assertEqual(redacted["signed_url"], REDACTED)
+        self.assertEqual(redacted["upload_session_id"], REDACTED)
+        self.assertEqual(redacted["sid"], REDACTED)
+        self.assertIn(REDACTED_MOBILE, redacted["message"])
+        self.assertIn(REDACTED_CARD, redacted["message"])
+        self.assertIn(REDACTED_SHEBA, redacted["message"])
+        self.assertIn(REDACTED_NATIONAL_ID, redacted["message"])
+        self.assertIn(REDACTED_FILENAME, redacted["message"])
+        self.assertIn(REDACTED_SIGNED_URL_VALUE, redacted["message"])
+        for raw in (
+            "owner@example.com",
+            "+98 912 345 6789",
+            "6037-9911-1111-1111",
+            "IR820540102680020817909002",
+            "0079059744",
+            "identity-card.png",
+            "passport.png",
+            "abcdef123456",
+            "credential-value",
+            "upload-session-abcdefghijklmnopqrstuvwxyz123456",
+            "11111111-2222-3333-4444-555555555555",
+        ):
+            self.assertNotIn(raw, rendered)
+
+    def test_unknown_objects_are_reduced_to_safe_type_metadata(self):
+        redacted = redact({"unsafe": SecretBearingObject()})
+
+        self.assertEqual(redacted["unsafe"]["redacted"], REDACTED_OBJECT)
+        self.assertIn("SecretBearingObject", redacted["unsafe"]["object_type"])
+        rendered = json.dumps(redacted)
+        self.assertNotIn("09123456789", rendered)
+        self.assertNotIn("owner@example.com", rendered)
+        self.assertNotIn("unsafe-token", rendered)
+
     def test_configure_logging_emits_json_with_context_and_redaction(self):
         stream = io.StringIO()
         with patch("sys.stdout", stream):
@@ -71,6 +146,24 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertNotIn("unsafe-token", log_line)
         self.assertNotIn(raw_session_id, log_line)
         self.assertIn("0912****789", log_line)
+
+    def test_json_formatter_does_not_stringify_unknown_extra_objects(self):
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("api-test")
+
+        logging.getLogger("tests.logging").info(
+            "object extra attached",
+            extra={"unsafe_object": SecretBearingObject()},
+        )
+
+        log_line = stream.getvalue().strip()
+        payload = json.loads(log_line)
+        self.assertEqual(payload["unsafe_object"]["redacted"], REDACTED_OBJECT)
+        self.assertIn("SecretBearingObject", payload["unsafe_object"]["object_type"])
+        self.assertNotIn("09123456789", log_line)
+        self.assertNotIn("owner@example.com", log_line)
+        self.assertNotIn("unsafe-token", log_line)
 
 
 if __name__ == "__main__":
