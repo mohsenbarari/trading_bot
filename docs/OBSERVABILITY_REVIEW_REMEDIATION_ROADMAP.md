@@ -206,6 +206,8 @@ Completion notes:
 
 #### Stage R1.6: Job Failure Metric Semantics
 
+Status: Completed on 2026-06-09.
+
 Purpose: make background job success/failure metrics trustworthy.
 
 Work:
@@ -217,6 +219,15 @@ Work:
 Acceptance:
 
 - Failed job iterations and suppressed repeated failures increment failure metrics exactly once per failure.
+
+Completion notes:
+
+- Added `mark_current_job_failed()` in `core/job_logging.py`, allowing handled failures inside `job_context` to explicitly mark the current iteration as failed without re-raising.
+- `job_context()` now reads the final `job_result` from request context before recording metrics, so loops that catch exceptions internally no longer produce false `success` metrics.
+- `RepeatedErrorLogger.log()` now counts every failure attempt in metrics even when repeated logs/error tracking events are suppressed; when called inside an active `job_context`, it marks the current iteration failed and lets the context record exactly one failure metric.
+- Added `metric_recorded=True` support for cases where a failure metric has already been recorded by an exited `job_context`, and applied it to sync worker network-error logging to avoid double-counting.
+- Added focused tests for manually marked handled failures, active-job repeated errors, suppressed repeated failure metrics, and sync worker network-error single-count behavior.
+- Validated with `python3 -m unittest tests.test_job_logging tests.test_sync_worker tests.test_metrics` and `python3 -m py_compile core/job_logging.py core/sync_worker.py`.
 
 #### Stage R1.7: Metrics Endpoint Exposure Guard
 

@@ -183,7 +183,14 @@ async def main():
                     await r.rpush(retry_queue, payload)
                     await asyncio.sleep(1) # Backoff slightly
                 except httpx.RequestError as req_err:
-                    _loop_errors.log(logger, "❌ Network error during sync: %s", req_err, job_name="sync_worker", run_id=run_id)
+                    _loop_errors.log(
+                        logger,
+                        "❌ Network error during sync: %s",
+                        req_err,
+                        job_name="sync_worker",
+                        run_id=run_id,
+                        metric_recorded=True,
+                    )
                     await r.rpush(retry_queue, payload)
                     await asyncio.sleep(5) # Network retry backoff
 

@@ -178,14 +178,18 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
             "network down",
             request=httpx.Request("POST", "https://peer.example/api/sync/receive"),
         )
-        fake_redis, send_mock, sleep_mock = await self._run_main_once(
-            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
-            send_side_effect=request_error,
-        )
+        with patch("core.job_logging.record_job_run") as record_job_run:
+            fake_redis, send_mock, sleep_mock = await self._run_main_once(
+                blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
+                send_side_effect=request_error,
+            )
 
         send_mock.assert_awaited_once()
         self.assertEqual(fake_redis.rpush_calls, [("sync:retry", payload)])
         sleep_mock.assert_awaited_once_with(5)
+        record_job_run.assert_called_once()
+        self.assertEqual(record_job_run.call_args.kwargs["job_name"], "sync_worker")
+        self.assertEqual(record_job_run.call_args.kwargs["result"], "failure")
 
     async def test_main_ignores_empty_blpop_results(self):
         fake_redis, send_mock, sleep_mock = await self._run_main_once(
