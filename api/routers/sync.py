@@ -9,6 +9,7 @@ from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
 import hmac
 import hashlib
+import ipaddress
 import time
 import json
 import logging
@@ -16,12 +17,49 @@ from datetime import date as date_cls, datetime, time as time_cls, timezone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 
 
 def _require_dev_key(request: Request) -> None:
     dev_key = request.headers.get("X-Dev-Api-Key")
     if not settings.dev_api_key or dev_key != settings.dev_api_key:
         raise HTTPException(status_code=403, detail="Dev API Key required")
+
+
+def _is_loopback_client(client_host: str | None) -> bool:
+    if not client_host:
+        return False
+    try:
+        return ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        return client_host in {"localhost"}
+
+
+def _is_loopback_sync_request(request: Request) -> bool:
+    client_host = request.client.host if getattr(request, "client", None) else None
+    if _is_loopback_client(client_host):
+        return True
+    return _is_loopback_client(getattr(request.url, "hostname", None))
+
+
+def _require_observability_key(request: Request) -> None:
+    configured_key = getattr(settings, "observability_api_key", None)
+    supplied_key = request.headers.get(OBSERVABILITY_API_KEY_HEADER)
+    if configured_key and supplied_key == configured_key:
+        return
+    if _is_loopback_sync_request(request):
+        return
+    if not configured_key:
+        raise HTTPException(status_code=503, detail="Observability API key is not configured for remote sync health access")
+    if supplied_key != configured_key:
+        audit_log(
+            "sync.health_access",
+            target_type="sync_health",
+            result="denied",
+            reason="invalid_observability_api_key",
+            extra={"path": str(request.url.path), "status_code": 403},
+        )
+        raise HTTPException(status_code=403, detail="Observability API Key required")
 
 
 def _age_seconds(value) -> float:
@@ -773,7 +811,7 @@ async def get_sync_health(
     db: AsyncSession = Depends(get_db),
 ):
     """Return local cross-server sync backlog and lag state for operators."""
-    _require_dev_key(request)
+    _require_observability_key(request)
 
     summary_stmt = select(
         sa_func.count(ChangeLog.id),

@@ -44,6 +44,13 @@ def summarize_peer_response(response) -> dict:
     }
 
 
+def queue_poll_order(iteration: int) -> list[str]:
+    """Alternate queue priority so retry work cannot starve behind fresh outbound traffic."""
+    if iteration % 2 == 0:
+        return ["sync:retry", "sync:outbound"]
+    return ["sync:outbound", "sync:retry"]
+
+
 async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):
     """Send item to target server with security headers"""
     timestamp = int(time.time())
@@ -104,7 +111,7 @@ async def main():
             try:
                 # Wait for items in queue
                 # BLPOP blocks until item is available
-                res = await r.blpop([queue_name, retry_queue], timeout=5)
+                res = await r.blpop(queue_poll_order(iteration), timeout=5)
                 
                 if not res:
                     continue

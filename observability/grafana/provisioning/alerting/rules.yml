@@ -507,6 +507,114 @@ groups:
     folder: Trading Bot Alerts
     interval: 1m
     rules:
+      - uid: trading-bot-sync-health-foreign-missing
+        title: Foreign sync health samples missing
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({log_class="integration", event="sync.health"} | json | server_mode="foreign" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+        noDataState: Alerting
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: critical
+          component: sync
+        annotations:
+          summary: Foreign sync health samples have been missing for 5 minutes.
+          runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#missing-sync-health-samples
+
+      - uid: trading-bot-sync-health-iran-missing
+        title: Iran sync health samples missing
+        condition: C
+        data:
+          - refId: A
+            queryType: range
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: trading-bot-loki
+            model:
+              refId: A
+              queryType: range
+              expr: 'sum(count_over_time({log_class="integration", event="sync.health"} | json | server_mode="iran" [5m]))'
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+        noDataState: Alerting
+        execErrState: Error
+        for: 5m
+        labels:
+          severity: critical
+          component: sync
+        annotations:
+          summary: Iran sync health samples have been missing for 5 minutes.
+          runbook_url: docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#missing-sync-health-samples
+
       - uid: trading-bot-sync-backlog-high
         title: Cross-server sync backlog high
         condition: C
@@ -551,7 +659,7 @@ groups:
                     params: [100]
                   operator:
                     type: and
-        noDataState: OK
+        noDataState: Alerting
         execErrState: Error
         for: 10m
         labels:
@@ -605,7 +713,7 @@ groups:
                     params: [900]
                   operator:
                     type: and
-        noDataState: OK
+        noDataState: Alerting
         execErrState: Error
         for: 10m
         labels:
@@ -659,7 +767,7 @@ groups:
                     params: [0]
                   operator:
                     type: and
-        noDataState: OK
+        noDataState: Alerting
         execErrState: Error
         for: 5m
         labels:
