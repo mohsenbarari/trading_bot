@@ -1,9 +1,10 @@
 import logging
+import ipaddress
 import time
 from pathlib import Path
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
-from fastapi import FastAPI, APIRouter, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -35,6 +36,24 @@ from core.request_logging import install_request_logging_middleware
 configure_logging("api")
 logger = logging.getLogger(__name__)
 _PROCESS_STARTED_AT = time.monotonic()
+OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
+
+
+def _is_loopback_client(client_host: str | None) -> bool:
+    if not client_host:
+        return False
+    try:
+        return ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        return client_host in {"localhost"}
+
+
+def _is_metrics_request_allowed(request: Request) -> bool:
+    configured_key = getattr(settings, "observability_api_key", None)
+    supplied_key = request.headers.get(OBSERVABILITY_API_KEY_HEADER)
+    if configured_key and supplied_key == configured_key:
+        return True
+    return _is_loopback_client(request.client.host if request.client else None)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -164,8 +183,10 @@ async def get_public_config():
 
 
 @app.get("/metrics")
-async def get_metrics():
+async def get_metrics(request: Request):
     """Prometheus-compatible metrics endpoint."""
+    if not _is_metrics_request_allowed(request):
+        raise HTTPException(status_code=404, detail="Not found")
     registry.gauge(
         "trading_bot_process_uptime_seconds",
         "Process uptime in seconds.",

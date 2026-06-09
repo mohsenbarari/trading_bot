@@ -231,6 +231,8 @@ Completion notes:
 
 #### Stage R1.7: Metrics Endpoint Exposure Guard
 
+Status: Completed on 2026-06-09.
+
 Purpose: prevent public exposure of operational metrics.
 
 Work:
@@ -242,6 +244,15 @@ Acceptance:
 
 - Public deployment-facing Nginx configs do not expose `/metrics` accidentally.
 - If app-level access is enabled, the key is narrow and separate from broad dev access.
+
+Completion notes:
+
+- Added `OBSERVABILITY_API_KEY` / `settings.observability_api_key` as a narrow metrics-access key, separate from broad `DEV_API_KEY`.
+- Added app-level `/metrics` guard in `main.py`: loopback clients may scrape locally; non-loopback clients must provide `X-Observability-Api-Key`; unauthorized remote requests receive `404`.
+- Added `location = /metrics { deny all; return 404; }` to the foreign Nginx setup script and Iran production Nginx template so public reverse proxies do not expose metrics.
+- Updated production env generation to prompt/write `OBSERVABILITY_API_KEY` for both foreign and Iran env files.
+- Added tests proving app-level metrics access allows loopback, rejects remote requests without the observability key, does not accept `X-DEV-API-KEY`, and static-checks public Nginx configs for metrics blocking.
+- Validated with `python3 -m unittest tests.test_main_metrics_guard tests.test_observability_config tests.test_metrics` and `python3 -m py_compile main.py core/config.py`.
 
 Acceptance:
 

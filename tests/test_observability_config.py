@@ -51,6 +51,21 @@ class ObservabilityConfigTests(unittest.TestCase):
         promtail = (ROOT / "observability/promtail/promtail-config.yml").read_text(encoding="utf-8")
         self.assertIsNone(re.search(r"(?m)^\s*source:\s*message\s*$", promtail))
 
+    def test_public_nginx_configs_block_metrics_endpoint(self):
+        paths = [
+            ROOT / "scripts/setup_foreign_nginx.sh",
+            ROOT / "deploy/production/nginx-iran-online.conf.template",
+        ]
+
+        for path in paths:
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                content = path.read_text(encoding="utf-8")
+                self.assertRegex(content, r"location\s+=\s+/metrics\s*\{")
+                metrics_block = re.search(r"location\s+=\s+/metrics\s*\{(?P<body>.*?)\n\s*\}", content, re.S)
+                self.assertIsNotNone(metrics_block)
+                self.assertIn("deny all", metrics_block.group("body"))
+                self.assertIn("return 404", metrics_block.group("body"))
+
 
 if __name__ == "__main__":
     unittest.main()
