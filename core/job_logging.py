@@ -1,12 +1,13 @@
 """Structured context and noise controls for background jobs."""
 from __future__ import annotations
 
+import hashlib
 import time
 import uuid
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-from core.error_tracking import capture_exception
+from core.error_tracking import capture_exception, error_fingerprint
 from core.metrics import record_job_run
 from core.request_context import get_request_context, replace_request_context, set_request_context
 
@@ -53,8 +54,15 @@ class RepeatedErrorLogger:
         self._last_key: str | None = None
         self._repeat_count = 0
 
+    def _repeat_key(self, exc: Exception, *, job_name: str) -> str:
+        fingerprint = error_fingerprint(exc, source=f"job.{job_name}")
+        raw = f"{job_name}|{type(exc).__module__}.{type(exc).__name__}|{fingerprint}"
+        return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:24]
+
     def log(self, logger: Any, message: str, exc: Exception, metric_recorded: bool = False, **extra: Any) -> None:
-        key = f"{type(exc).__name__}:{exc}"
+        context = get_request_context()
+        job_name = str(extra.get("job_name") or context.get("job_name") or "unknown")
+        key = self._repeat_key(exc, job_name=job_name)
         if key == self._last_key:
             self._repeat_count += 1
         else:
@@ -62,8 +70,6 @@ class RepeatedErrorLogger:
             self._repeat_count = 1
 
         if not metric_recorded:
-            context = get_request_context()
-            job_name = str(extra.get("job_name") or context.get("job_name") or "unknown")
             if context.get("run_id") and context.get("job_name"):
                 mark_current_job_failed(type(exc).__name__)
             else:
@@ -77,6 +83,7 @@ class RepeatedErrorLogger:
                 extra={
                     "repeat_count": self._repeat_count,
                     "suppressed_repeats": max(self._repeat_count - 1, 0),
+                    "repeat_key": key,
                     **extra,
                 },
             )
@@ -88,6 +95,7 @@ class RepeatedErrorLogger:
                     "repeat_count": self._repeat_count,
                     "suppressed_repeats": max(self._repeat_count - 1, 0),
                     "error_fingerprint": error_id,
+                    "repeat_key": key,
                     **extra,
                 },
             )

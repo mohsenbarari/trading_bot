@@ -75,6 +75,27 @@ class JobLoggingTests(unittest.TestCase):
         record_job_run.assert_not_called()
         logger.error.assert_called_once()
 
+    def test_repeated_error_logger_groups_same_site_even_when_message_changes(self):
+        logger = MagicMock()
+        limiter = RepeatedErrorLogger(every=3)
+
+        def raise_error(value: int):
+            raise RuntimeError(f"user={value}")
+
+        with patch("core.job_logging.record_job_run"):
+            for value in (101, 202, 303):
+                try:
+                    raise_error(value)
+                except RuntimeError as exc:
+                    limiter.log(logger, "job failed: %s", exc, job_name="worker")
+
+        self.assertEqual(logger.error.call_count, 2)
+        first_extra = logger.error.call_args_list[0].kwargs["extra"]
+        second_extra = logger.error.call_args_list[1].kwargs["extra"]
+        self.assertEqual(first_extra["repeat_count"], 1)
+        self.assertEqual(second_extra["repeat_count"], 3)
+        self.assertEqual(first_extra["repeat_key"], second_extra["repeat_key"])
+
 
 if __name__ == "__main__":
     unittest.main()
