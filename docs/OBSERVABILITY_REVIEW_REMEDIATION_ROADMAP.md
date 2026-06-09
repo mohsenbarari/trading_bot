@@ -79,20 +79,116 @@ Files:
 - `deploy/production/nginx-iran-online.conf.template`
 - tests under `tests/test_logging_foundation.py`, `tests/test_request_logging.py`, `tests/test_error_tracking.py`, `tests/test_sync_worker.py`, `tests/test_job_logging.py`
 
+Sub-stages:
+
+#### Stage R1.1: Loki JSON Preservation
+
+Status: Completed on 2026-06-09.
+
+Purpose: keep the structured JSON log line intact after Promtail processing.
+
 Work:
 
 1. Remove or replace `output.source: message` so Loki keeps the full application JSON log line.
-2. Add a static test with a sample JSON log line proving dashboard/alert queries still have `event`, `request_id`, `path` or `route`, `status_code`, `duration_ms`, and job fields available after Promtail processing assumptions.
-3. Replace raw access-log `path` with a safe route template or redacted path for sensitive/dynamic routes.
-4. Do not store raw `session_id` in formatted logs. Use `[REDACTED]` or `session_id_hash` if correlation is needed.
-5. Add `session_id`, `sid`, upload session ids, signed-url keys, Iran mobile variants, email, card number, IBAN/sheba, and national-id patterns to redaction coverage.
-6. Stop relying on `json.dumps(default=str)` for unknown objects that may expose PII through `__str__`; convert unknown objects to safe type metadata unless explicitly allowed.
-7. Add Sentry `before_send` scrubbing or disable raw `sentry_sdk.capture_exception(exc)` forwarding in favor of sanitized structured events.
-8. Remove raw Redis sync payload and peer `response.text` from sync worker logs.
-9. Change `job_context` so handled failures can be explicitly marked as failure.
-10. Count every repeated job failure in metrics even when the log line is suppressed.
-11. Treat sync non-200 responses as failure/retry in metrics.
-12. Protect `/metrics`: add Nginx deny/allow for public configs and add optional app-level auth or local-only guard.
+2. Add a static regression test proving the Promtail config does not collapse the line to plain `message` while dashboards/alerts still depend on `| json`.
+3. Validate that dashboard/alert query assumptions remain coherent: `event`, `request_id`, `path` or `route`, `status_code`, `duration_ms`, and job fields must be parseable from JSON log lines, not only labels.
+
+Acceptance:
+
+- `observability/promtail/promtail-config.yml` keeps the original JSON payload as the Loki line.
+- The focused observability config test fails if `output.source: message` returns.
+- Existing Grafana queries using `| json` remain compatible.
+
+Completion notes:
+
+- Removed the Promtail `output.source: message` stage so the original structured JSON app log remains the Loki line.
+- Added `tests/test_observability_config.py` to guard Promtail JSON preservation and validate the dashboard/alert JSON-field query assumptions.
+- Validated with `python3 -m unittest tests.test_observability_config`.
+
+#### Stage R1.2: Request Path and Session Identifier Safety
+
+Purpose: prevent sensitive path segments and session identifiers from reaching logs.
+
+Work:
+
+1. Replace raw access-log `path` with a safe route template or redacted path for sensitive/dynamic routes.
+2. Do not store raw `session_id` in formatted logs. Use `[REDACTED]` or `session_id_hash` if correlation is needed.
+3. Add request-logging tests for token-bearing paths, upload-session paths, and authenticated context logs.
+
+Acceptance:
+
+- Access/error logs do not contain raw token-like path segments on sensitive routes.
+- `session_id` is never emitted raw by `JsonLogFormatter`.
+
+#### Stage R1.3: Redaction Coverage and Object Safety
+
+Purpose: strengthen redaction against Iranian PII and unsafe object stringification.
+
+Work:
+
+1. Add `session_id`, `sid`, upload session ids, signed-url keys, Iran mobile variants, email, card number, IBAN/sheba, and national-id patterns to redaction coverage.
+2. Stop relying on `json.dumps(default=str)` for unknown objects that may expose PII through `__str__`; convert unknown objects to safe type metadata unless explicitly allowed.
+3. Add focused redaction tests for every new pattern.
+
+Acceptance:
+
+- No raw OTP, mobile, email, card, sheba, national id, signed URL, file name, or secret-bearing object string appears in formatted log output.
+
+#### Stage R1.4: Error Tracking Scrubbing
+
+Purpose: prevent optional external error tracking from bypassing local redaction.
+
+Work:
+
+1. Add Sentry `before_send` scrubbing or disable raw `sentry_sdk.capture_exception(exc)` forwarding in favor of sanitized structured events.
+2. Add tests/mocks proving raw exception messages and extras are scrubbed before external forwarding.
+
+Acceptance:
+
+- Enabling Sentry cannot send raw tokens, OTPs, mobile numbers, signed URLs, request bodies, or raw exception text containing secrets.
+
+#### Stage R1.5: Sync Worker Log and Failure Semantics
+
+Purpose: make sync logs safe and sync metrics truthful.
+
+Work:
+
+1. Remove raw Redis sync payload and peer `response.text` from sync worker logs.
+2. Treat sync non-200 responses as failure/retry in metrics.
+3. Rename HTTP-200-only success to a precise delivered/accepted event unless DB verification is implemented.
+
+Acceptance:
+
+- Sync worker tests prove invalid payloads and peer response bodies are not emitted raw.
+- Non-200 sync attempts increment failure/retry metrics.
+
+#### Stage R1.6: Job Failure Metric Semantics
+
+Purpose: make background job success/failure metrics trustworthy.
+
+Work:
+
+1. Change `job_context` so handled failures can be explicitly marked as failure.
+2. Count every repeated job failure in metrics even when the log line is suppressed.
+3. Update loops that catch exceptions inside `job_context`.
+
+Acceptance:
+
+- Failed job iterations and suppressed repeated failures increment failure metrics exactly once per failure.
+
+#### Stage R1.7: Metrics Endpoint Exposure Guard
+
+Purpose: prevent public exposure of operational metrics.
+
+Work:
+
+1. Protect `/metrics`: add Nginx deny/allow for public configs and add optional app-level auth or local-only guard.
+2. Add deployment config tests or static checks for public Nginx templates.
+
+Acceptance:
+
+- Public deployment-facing Nginx configs do not expose `/metrics` accidentally.
+- If app-level access is enabled, the key is narrow and separate from broad dev access.
 
 Acceptance:
 
