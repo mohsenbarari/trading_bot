@@ -736,7 +736,14 @@ prepare_pip_packages() {
     log "Preparing wheel cache for arch=$target_arch at $output_dir"
     local current_hash
     local hash_material
-    hash_material="$(md5sum "$LOCAL_PROJECT_DIR/requirements.txt" | cut -d' ' -f1)-$target_arch"
+    local bootstrap_requirements="$LOCAL_PROJECT_DIR/deploy/production/pip-bootstrap-requirements.txt"
+    [[ -f "$bootstrap_requirements" ]] || die "Missing bootstrap wheel requirements: $bootstrap_requirements"
+    hash_material="$(
+        {
+            md5sum "$LOCAL_PROJECT_DIR/requirements.txt"
+            md5sum "$bootstrap_requirements"
+        } | md5sum | cut -d' ' -f1
+    )-$target_arch"
     current_hash="$hash_material"
     mkdir -p "$output_dir"
     local needs_refresh=0
@@ -746,8 +753,9 @@ prepare_pip_packages() {
     if [[ "$needs_refresh" == "0" && "$target_arch" == "$LOCAL_HOST_ARCH" ]]; then
         if ! docker run --rm \
             -v "$output_dir:/tmp/pip_packages:ro" \
+            -v "$bootstrap_requirements:/tmp/pip-bootstrap-requirements.txt:ro" \
             -v "$LOCAL_PROJECT_DIR/requirements.txt:/tmp/requirements.txt:ro" \
-            "python:3.11-slim-bullseye" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
+            "python:3.11-slim-bullseye" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
             log "Existing wheel cache failed validation; rebuilding it."
             needs_refresh=1
         fi
@@ -755,6 +763,13 @@ prepare_pip_packages() {
     if [[ "$needs_refresh" == "1" ]]; then
         rm -f "$output_dir"/*.whl "$output_dir"/.requirements_hash 2>/dev/null || true
         mapfile -t pip_platform_args < <(append_pip_platform_args "$target_arch")
+        python3 -m pip download -r "$bootstrap_requirements" \
+            -d "$output_dir/" \
+            --python-version 311 \
+            --implementation cp \
+            --abi cp311 \
+            "${pip_platform_args[@]}" \
+            --only-binary=:all:
         python3 -m pip download -r "$LOCAL_PROJECT_DIR/requirements.txt" \
             -d "$output_dir/" \
             --python-version 311 \
