@@ -1,8 +1,12 @@
+import os
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from core.audit_logger import audit_log
 from core.job_logging import job_context
 from core.metrics import (
+    MetricsRegistry,
     metrics_response_body,
     normalize_http_route,
     record_bot_update,
@@ -28,6 +32,8 @@ class MetricsTests(unittest.TestCase):
         self.assertIn('route="/api/users/{user_id}"', body)
         self.assertIn('status_class="4xx"', body)
         self.assertIn("trading_bot_http_request_duration_ms_bucket", body)
+        self.assertIn("trading_bot_metrics_backend_info", body)
+        self.assertIn('backend="memory"', body)
         self.assertNotIn("token=secret", body)
 
     def test_bot_job_and_audit_metrics_are_recorded(self):
@@ -44,6 +50,64 @@ class MetricsTests(unittest.TestCase):
         self.assertIn('job_name="offer_expiry"', body)
         self.assertIn("trading_bot_business_actions_total", body)
         self.assertIn('action="user.update"', body)
+
+    def test_default_memory_backend_does_not_create_sqlite_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "metrics.sqlite3")
+            with patch.dict(os.environ, {"TRADING_BOT_METRICS_DB": db_path}, clear=False):
+                local_registry = MetricsRegistry()
+                local_registry.counter("trading_bot_test_total", "Test counter.")
+                body = local_registry.render_prometheus()
+
+            self.assertFalse(os.path.exists(db_path))
+            self.assertIn('backend="memory"', body)
+            self.assertIn('shared="false"', body)
+            self.assertIn("trading_bot_test_total", body)
+
+    def test_shared_sqlite_backend_is_explicit_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "metrics.sqlite3")
+            with patch.dict(
+                os.environ,
+                {
+                    "TRADING_BOT_METRICS_BACKEND": "shared_sqlite",
+                    "TRADING_BOT_METRICS_DB": db_path,
+                    "TRADING_BOT_SERVICE": "api",
+                },
+                clear=False,
+            ):
+                first = MetricsRegistry()
+                second = MetricsRegistry()
+                first.counter("trading_bot_shared_total", "Shared counter.", service_part="one")
+                body = second.render_prometheus()
+
+            self.assertTrue(os.path.exists(db_path))
+            self.assertIn('backend="shared_sqlite"', body)
+            self.assertIn('shared="true"', body)
+            self.assertIn("trading_bot_shared_total", body)
+            self.assertIn('service_part="one"', body)
+
+    def test_metrics_output_remains_secret_free(self):
+        record_http_request(
+            method="GET",
+            route="/api/users/123/sessions/11111111-2222-3333-4444-555555555555?token=secret",
+            status_code=500,
+            duration_ms=10,
+        )
+        record_bot_update(event_type="message:09123456789:owner@example.com:report.pdf", result="success", duration_ms=1)
+        audit_log("download.report.pdf", target_type="user", target_id=1, result="success")
+
+        body = metrics_response_body()
+
+        for raw in (
+            "11111111-2222-3333-4444-555555555555",
+            "token=secret",
+            "09123456789",
+            "owner@example.com",
+            "report.pdf",
+        ):
+            self.assertNotIn(raw, body)
+        self.assertIn("/api/users/{id}/sessions/{id}", body)
 
 
 if __name__ == "__main__":

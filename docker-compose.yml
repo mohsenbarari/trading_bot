@@ -6,6 +6,8 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
     environment:
       TZ: UTC
+      TRADING_BOT_SERVICE: api
+      TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
 
     volumes:
       - ${CERTS_HOST_PATH:-/root/cert/ip}:/app/certs  # Mount Host Certs
@@ -43,6 +45,8 @@ services:
     command: python run_bot.py
     environment:
       TZ: UTC
+      TRADING_BOT_SERVICE: bot
+      TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
     volumes:
       - .:/app
     env_file:
@@ -60,6 +64,8 @@ services:
     command: python -m core.sync_worker
     environment:
       TZ: UTC
+      TRADING_BOT_SERVICE: sync_worker
+      TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
     volumes:
       - ./api:/app/api
       - ./bot:/app/bot

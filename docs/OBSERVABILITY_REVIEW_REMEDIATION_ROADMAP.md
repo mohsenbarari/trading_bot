@@ -263,6 +263,8 @@ Acceptance:
 
 ### Stage R2: P1 Metrics Backend and Runtime Cost Hardening
 
+Status: Completed on 2026-06-09.
+
 Goal: make metrics production-safe under traffic and multi-container deployment.
 
 Files:
@@ -289,6 +291,16 @@ Acceptance:
 - Request hot path has no unbounded SQLite lock/file I/O risk.
 - Metrics semantics are clear across app workers, bot, and sync worker.
 - `/metrics` output is low-cardinality and secret-free.
+
+Completion notes:
+
+- Chose the conservative backend path for this release: `TRADING_BOT_METRICS_BACKEND=memory` is now the default, so request/job/bot/audit/realtime metric updates no longer write SQLite in hot paths unless explicitly opted in.
+- Kept the prior shared SQLite implementation available only through `TRADING_BOT_METRICS_BACKEND=shared_sqlite` plus `TRADING_BOT_METRICS_DB`, for local diagnostics or deliberate short windows.
+- Added `trading_bot_metrics_backend_info{backend=...,service=...,shared=...}` to `/metrics` output so operators can see whether they are looking at per-process memory metrics or an explicitly shared backend.
+- Added `TRADING_BOT_SERVICE` and explicit metrics backend env defaults for app/API, bot, and sync worker in `docker-compose.yml` and `docker-compose.iran.yml`; production env generation also writes `TRADING_BOT_METRICS_BACKEND=memory`.
+- Hardened metric label sanitization with existing redaction rules and filename-like label removal, then added a smoke test proving metrics output does not contain raw ids, tokens, mobile numbers, emails, or filenames.
+- Updated `docs/OBSERVABILITY_PRODUCTION_HARDENING.md` with backend policy, service semantics, and the R2 overhead result.
+- Validated with `python3 -m unittest tests.test_metrics tests.test_main_metrics_guard`, `python3 -m py_compile core/metrics.py main.py core/config.py`, and `make observability-overhead` (`per_event_overhead_us=377.33`, budget `1000.0`, acceptable `true`).
 
 ### Stage R3: P1 Audit Trail Hardening
 
