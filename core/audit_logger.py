@@ -6,6 +6,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from core.audit_sink import write_audit_record
 from core.log_redaction import redact
 from core.metrics import record_business_action
 from core.request_context import get_request_context
@@ -77,5 +78,11 @@ def audit_log(
         payload["audit_extra"] = _safe_mapping(extra)
 
     payload = {key: value for key, value in payload.items() if value is not None}
+    audit_record = write_audit_record(payload)
+    payload["audit_event_id"] = audit_record.get("audit_event_id")
+    payload["audit_event_hash"] = audit_record.get("event_hash")
+    payload["audit_recorded_at"] = audit_record.get("audit_recorded_at")
+    if audit_record.get("previous_hash"):
+        payload["audit_previous_hash"] = audit_record.get("previous_hash")
     record_business_action(action=action, result=payload["result"])
     _AUDIT_LOGGER.info("Audit event recorded", extra=payload)

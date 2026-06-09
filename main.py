@@ -28,6 +28,7 @@ import asyncio
 import schemas
 from core.logging_config import configure_logging
 from core.metrics import metrics_response_body, registry, uptime_seconds
+from core.audit_logger import audit_log
 from core.request_logging import install_request_logging_middleware
 
 # -------------------------------------------------------
@@ -186,6 +187,14 @@ async def get_public_config():
 async def get_metrics(request: Request):
     """Prometheus-compatible metrics endpoint."""
     if not _is_metrics_request_allowed(request):
+        if request.headers.get(OBSERVABILITY_API_KEY_HEADER):
+            audit_log(
+                "observability.metrics_access",
+                target_type="metrics",
+                result="denied",
+                reason="invalid_observability_api_key",
+                extra={"path": "/metrics", "status_code": 404},
+            )
         raise HTTPException(status_code=404, detail="Not found")
     registry.gauge(
         "trading_bot_process_uptime_seconds",

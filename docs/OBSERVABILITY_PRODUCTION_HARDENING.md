@@ -48,6 +48,14 @@ Production requirements:
 
 Audit logs are operationally sensitive. Keep short local retention and export required windows to restricted storage.
 
+Runtime audit policy:
+
+- `core.audit_logger.audit_log()` still emits searchable stdout/Loki audit events.
+- Production Compose also enables a durable append-only JSONL trail through `AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl`.
+- The API container mounts the named `audit_data` Docker volume at `/app/audit_trail`.
+- Each durable record includes `audit_event_id`, `audit_recorded_at`, `previous_hash`, `event_hash`, and the redacted audit payload.
+- The hash chain is tamper-evident, not encryption. Keep volume and exported files restricted.
+
 Export from local Loki:
 
 ```bash
@@ -60,11 +68,22 @@ Customize the window:
 make audit-log-export ARGS="--hours 72 --limit 10000"
 ```
 
+Export and verify the durable local trail:
+
+```bash
+python3 scripts/export_audit_logs.py \
+  --source=file \
+  --input=/app/audit_trail/audit.jsonl \
+  --output=tmp/audit-log-exports/audit-trail.jsonl
+```
+
 The exporter writes JSONL files under:
 
 ```text
 tmp/audit-log-exports/
 ```
+
+Each export writes a `.manifest.json` sidecar with record count, source, output SHA-256, and integrity metadata. Loki exports are paged with `--page-size` so windows larger than 5000 records do not silently truncate at the first page.
 
 Export files must be moved to restricted storage if they are needed beyond local retention. Do not commit exported audit logs.
 
