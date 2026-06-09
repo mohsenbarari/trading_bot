@@ -51,7 +51,8 @@ class LoggingFoundationTests(unittest.TestCase):
         with patch("sys.stdout", stream):
             configure_logging("api-test")
 
-        set_request_context(request_id="req-1", actor_id=42)
+        raw_session_id = "11111111-2222-3333-4444-555555555555"
+        set_request_context(request_id="req-1", actor_id=42, session_id=raw_session_id)
         logging.getLogger("tests.logging").info(
             "login failed password=hunter2 mobile=09123456789",
             extra={"authorization": "Bearer unsafe-token", "safe_field": "visible"},
@@ -63,10 +64,12 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertEqual(payload["service"], "api-test")
         self.assertEqual(payload["request_id"], "req-1")
         self.assertEqual(payload["actor_id"], 42)
+        self.assertEqual(payload["session_id"], REDACTED)
         self.assertEqual(payload["authorization"], REDACTED)
         self.assertEqual(payload["safe_field"], "visible")
         self.assertNotIn("hunter2", log_line)
         self.assertNotIn("unsafe-token", log_line)
+        self.assertNotIn(raw_session_id, log_line)
         self.assertIn("0912****789", log_line)
 
 

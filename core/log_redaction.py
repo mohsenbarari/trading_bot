@@ -24,7 +24,9 @@ SENSITIVE_EXACT_KEYS = {
     "password",
     "passwd",
     "secret",
+    "session-id",
     "signature",
+    "sid",
 }
 
 SENSITIVE_KEY_PARTS = (
@@ -40,6 +42,8 @@ SENSITIVE_KEY_PARTS = (
     "x-dev-api-key",
     "otp",
     "refresh",
+    "session_id",
+    "session-id",
     "access",
     "jwt",
     "signature",

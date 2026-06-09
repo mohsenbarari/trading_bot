@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -20,6 +21,8 @@ _logger = logging.getLogger("api.request")
 
 _SENSITIVE_PATH_PARTS = (
     "/auth",
+    "/files",
+    "/invitations",
     "/sessions",
     "/recovery",
     "/password",
@@ -28,6 +31,35 @@ _SENSITIVE_PATH_PARTS = (
     "/upload",
     "/media",
 )
+
+_TOKENISH_PATH_SEGMENT_RE = re.compile(r"^(?=.{12,}$)(?=.*(?:\d|[._~+=%]))[A-Za-z0-9._~+=%-]+$")
+_REDACT_NEXT_SEGMENT_AFTER = frozenset(
+    {
+        "accept",
+        "files",
+        "media",
+        "otp",
+        "password",
+        "recovery",
+        "reset",
+        "upload-sessions",
+        "verify",
+    }
+)
+_SAFE_SEGMENTS_AFTER_SECRET_MARKER = frozenset(
+    {
+        "approve",
+        "cancel",
+        "chunk",
+        "finalize",
+        "identity",
+        "pending",
+        "reject",
+        "request-identity",
+        "status",
+    }
+)
+_REDACTED_PATH_SEGMENT = "[REDACTED]"
 
 _STATIC_PATH_PREFIXES = (
     "/assets/",
@@ -73,6 +105,30 @@ def is_sensitive_path(path: str) -> bool:
     return any(part in lowered for part in _SENSITIVE_PATH_PARTS)
 
 
+def redact_sensitive_path_segments(path: str) -> str:
+    segments = path.split("/")
+    redacted: list[str] = []
+    redact_next_segment = False
+    for segment in segments:
+        if not segment:
+            redacted.append(segment)
+            continue
+        if segment.startswith("{") and segment.endswith("}"):
+            redacted.append(segment)
+            redact_next_segment = False
+            continue
+        lowered = segment.lower()
+        if (
+            redact_next_segment
+            and lowered not in _SAFE_SEGMENTS_AFTER_SECRET_MARKER
+        ) or _TOKENISH_PATH_SEGMENT_RE.match(segment):
+            redacted.append(_REDACTED_PATH_SEGMENT)
+        else:
+            redacted.append(segment)
+        redact_next_segment = lowered in _REDACT_NEXT_SEGMENT_AFTER
+    return "/".join(redacted)
+
+
 def should_log_request_path(path: str) -> bool:
     lowered = path.lower()
     if any(lowered.startswith(prefix) for prefix in _STATIC_PATH_PREFIXES):
@@ -84,6 +140,7 @@ def request_log_extra(
     *,
     request_id: str,
     request: Request,
+    path: str,
     status_code: int,
     duration_ms: float,
 ) -> dict[str, Any]:
@@ -92,7 +149,7 @@ def request_log_extra(
         "log_class": "access",
         "request_id": request_id,
         "method": request.method,
-        "path": request.url.path,
+        "path": path,
         "status_code": status_code,
         "duration_ms": duration_ms,
         "client_ip": client_ip_from_request(request),
@@ -106,6 +163,13 @@ def request_route_template(request: Request, path: str) -> str:
     return normalize_http_route(route_path or path)
 
 
+def safe_request_log_path(request: Request, path: str) -> str:
+    route_path = request_route_template(request, path)
+    if is_sensitive_path(path):
+        return redact_sensitive_path_segments(route_path)
+    return route_path
+
+
 def install_request_logging_middleware(app: Any) -> None:
     """Install request id propagation and sanitized access logs."""
 
@@ -115,11 +179,16 @@ def install_request_logging_middleware(app: Any) -> None:
         path = request.url.path
         start_time = time.perf_counter()
         status_code = 500
+        initial_path = (
+            redact_sensitive_path_segments(normalize_http_route(path))
+            if is_sensitive_path(path)
+            else normalize_http_route(path)
+        )
 
         set_request_context(
             request_id=request_id,
             method=request.method,
-            path=path,
+            path=initial_path,
             client_ip=client_ip_from_request(request),
             log_class="access",
         )
@@ -131,12 +200,14 @@ def install_request_logging_middleware(app: Any) -> None:
             return response
         except Exception as exc:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            safe_path = safe_request_log_path(request, path)
+            set_request_context(path=safe_path)
             error_id = capture_exception(
                 exc,
                 source="api.request",
                 extra={
                     "method": request.method,
-                    "path": path,
+                    "path": safe_path,
                     "status_code": status_code,
                     "sensitive_route": is_sensitive_path(path),
                 },
@@ -148,7 +219,7 @@ def install_request_logging_middleware(app: Any) -> None:
                     "log_class": "access",
                     "request_id": request_id,
                     "method": request.method,
-                    "path": path,
+                    "path": safe_path,
                     "status_code": status_code,
                     "duration_ms": duration_ms,
                     "client_ip": client_ip_from_request(request),
@@ -160,6 +231,8 @@ def install_request_logging_middleware(app: Any) -> None:
         finally:
             duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
             route_template = request_route_template(request, path)
+            safe_path = safe_request_log_path(request, path)
+            set_request_context(path=safe_path)
             record_http_request(
                 method=request.method,
                 route=route_template,
@@ -170,6 +243,7 @@ def install_request_logging_middleware(app: Any) -> None:
                 extra = request_log_extra(
                     request_id=request_id,
                     request=request,
+                    path=safe_path,
                     status_code=status_code,
                     duration_ms=duration_ms,
                 )
