@@ -519,3 +519,139 @@ Completion notes:
 - Do not expose Grafana/Loki publicly to compensate for missing alert delivery.
 - Do not increase Loki labels with high-cardinality fields such as `request_id`, `actor_id`, `path`, `telegram_user_id`, message ids, filenames, or raw user input.
 - Do not treat HTTP 200 from sync peer as final business convergence unless DB/change-log verification is added.
+
+## Third-Pass Review After R1-R7
+
+Last reviewed: 2026-06-09
+Review source: updated `tmp/log`
+
+The R1-R7 remediation pass materially improved the observability foundation, but a third review surfaced several real remaining gaps. Not every new critique is accepted:
+
+- Accepted:
+  - `api/routers/sync.py` still allows loopback fallback through `request.url.hostname` in `_is_loopback_sync_request()`.
+  - `core/request_logging.py` still records metrics with `route_template`, not the already-sanitized `safe_path`.
+  - `api/routers/sync.py` still logs raw `response.text[:200]` in the manual resync path.
+  - `core/logging_config.py` still gates Sentry init on `os.environ.get("ERROR_TRACKING_DSN")` before reading `settings.error_tracking_dsn`.
+  - `core/job_logging.py` still groups repeated errors by `f"{type(exc).__name__}:{exc}"`, which is too message-sensitive.
+  - The default `memory` metrics backend is intentionally faster, but it is not production-complete for multi-worker API visibility or bot/sync-worker scraping.
+- Accepted as lower-priority hardening:
+  - `api/deps.py` still keeps raw `session_id` in runtime request context before formatter redaction.
+  - `core/log_redaction.py` still treats `sid` as a broad substring match instead of exact-key-only matching.
+  - `core.audit_logger.py` does not expose whether a durable write actually happened.
+  - The durable audit hash-chain still lacks an external anchor.
+  - Production deployment still needs explicit checks for sync sampler installation, non-default alert receivers, `TRUSTED_PROXY_CIDRS`, and a dedicated Telegram observability hash salt.
+- Rejected or already-covered:
+  - Docker socket exposure in Promtail is already accepted and documented as local-trusted-only.
+  - Loki `auth_enabled: false` is already accepted only because the stack stays bound to `127.0.0.1`.
+  - The lack of a visible GitHub workflow run for the current head is an execution-status gap, not a repository-code defect.
+
+## Extension Stages
+
+### Stage R8: Sync Health Access and Metrics Route Sanitization
+
+Goal: close the remaining high-risk access and data-leak paths left after R7.
+
+Files:
+
+- `api/routers/sync.py`
+- `core/request_logging.py`
+- `tests/test_sync_health_endpoint.py`
+- `tests/test_request_logging.py`
+- `tests/test_observability_gate.py`
+
+Work:
+
+1. Remove the `request.url.hostname` fallback from `_is_loopback_sync_request()`; only the direct client peer may qualify as loopback.
+2. Decide whether loopback bypass should remain at all for `/api/sync/health`; if retained, keep it strictly peer-based.
+3. Change `record_http_request()` call sites to use the same sanitized route/path that logs use, or collapse unmatched sensitive paths to a constant safe route.
+4. Add regressions for:
+   - spoofed `Host` header not bypassing `/api/sync/health`,
+   - unmatched sensitive routes not leaking token-like segments into metrics labels.
+
+Acceptance:
+
+- `/api/sync/health` cannot be treated as loopback through a spoofed host name.
+- Sensitive unmatched routes do not leak token-like path segments into Prometheus route labels.
+
+### Stage R9: Remaining Raw Payload and Error-Tracking Gate Cleanup
+
+Goal: remove the last raw-body/logging escapes and finish the deferred Sentry init hardening.
+
+Files:
+
+- `api/routers/sync.py`
+- `core/logging_config.py`
+- `core/sync_worker.py` (shared response-summary helper if needed)
+- `tests/test_sync_worker.py`
+- `tests/test_error_tracking.py`
+
+Work:
+
+1. Replace manual resync warning logs that use `response.text[:200]` with the same safe response summary pattern already used in `core/sync_worker.py`.
+2. Move Sentry initialization gating fully to `settings.error_tracking_dsn`; do not require a parallel raw process env check first.
+3. Add regressions proving:
+   - manual resync logs do not emit peer response bodies,
+   - Sentry init honors `settings.error_tracking_dsn` even when the raw process env check would previously skip it.
+
+Acceptance:
+
+- No sync path logs raw peer response bodies.
+- Error tracking initialization depends on configured settings, not a separate preflight env shortcut.
+
+### Stage R10: Production-Grade Metrics and Repeated-Error Stability
+
+Goal: convert the current fast local metrics posture into a production-monitorable architecture.
+
+Files:
+
+- `core/metrics.py`
+- `core/job_logging.py`
+- `docker-compose.yml`
+- `docker-compose.iran.yml`
+- observability docs and dashboards as needed
+- deployment docs/scripts as needed
+
+Work:
+
+1. Define the production metrics architecture explicitly:
+   - API multi-worker aggregation,
+   - bot metrics scrape/export path,
+   - sync-worker metrics scrape/export path.
+2. Keep the `memory` backend as the local-safe default, but document and implement the production aggregation path rather than treating current output as complete.
+3. Rework `RepeatedErrorLogger` grouping so suppression keys use a normalized/fingerprinted error identity instead of raw stringified exception messages.
+4. Add a regression or design-time validation proving repeated errors with different incidental values still collapse into the same suppression group when appropriate.
+
+Acceptance:
+
+- Production metrics behavior is explicitly defined for API, bot, and sync-worker surfaces.
+- Repeated-error suppression is no longer excessively sensitive to changing message text.
+
+### Stage R11: Durable Audit Evidence and Deployment Enforcement
+
+Goal: harden operational trust signals around audit durability and observability deployment completeness.
+
+Files:
+
+- `core/audit_logger.py`
+- `core/audit_sink.py`
+- `scripts/production_deploy_online.sh`
+- observability production docs
+- deployment env examples/docs
+
+Work:
+
+1. Emit whether each audit event was durably persisted or fell back to non-durable record generation.
+2. Design an external audit-anchor path for periodic head-hash export outside the local host.
+3. Add production deployment checks for:
+   - sync sampler timer/service installation,
+   - non-default alert receivers,
+   - explicit `TRUSTED_PROXY_CIDRS`,
+   - explicit `OBSERVABILITY_TELEGRAM_USER_HASH_SALT`.
+4. Optionally move raw `session_id` out of request context in favor of a pre-hashed/opaque correlation field.
+5. Narrow `sid` matching from broad substring behavior to exact-key semantics unless a real redaction corpus shows the current behavior is still needed.
+
+Acceptance:
+
+- Operators can tell whether audit events were durably written.
+- Production deployment has explicit observability readiness checks instead of relying on default values.
+- Audit evidence design includes an external integrity anchor plan.
