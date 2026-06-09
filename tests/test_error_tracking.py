@@ -1,10 +1,12 @@
 import io
 import json
 import logging
+import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from core.error_tracking import _reset_error_tracking_rate_limiter, capture_exception, error_fingerprint
+from core.error_tracking import _reset_error_tracking_rate_limiter, capture_exception, error_fingerprint, scrub_sentry_event
 from core.log_redaction import REDACTED
 from core.logging_config import configure_logging
 from core.request_context import clear_request_context, set_request_context
@@ -75,6 +77,75 @@ class ErrorTrackingTests(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         payload = json.loads(lines[0])
         self.assertEqual(payload["event"], "error.exception.captured")
+
+    def test_sentry_before_send_scrubs_raw_event_payloads(self):
+        raw_event = {
+            "message": "failed password=hunter2 token=unsafe 09123456789 owner@example.com",
+            "request": {
+                "url": "https://example.test/api/auth/token?token=unsafe",
+                "query_string": "token=unsafe&mobile=09123456789",
+                "data": {"password": "hunter2", "mobile": "09123456789"},
+                "cookies": {"session": "unsafe-cookie"},
+                "headers": {"authorization": "Bearer unsafe-token", "x-safe": "visible"},
+            },
+            "exception": {
+                "values": [
+                    {
+                        "type": "RuntimeError",
+                        "value": "otp=123456 email=owner@example.com",
+                    }
+                ]
+            },
+        }
+
+        scrubbed = scrub_sentry_event(raw_event, {"exc_info": "ignored"})
+        rendered = json.dumps(scrubbed, ensure_ascii=False)
+
+        self.assertEqual(scrubbed["request"]["data"], REDACTED)
+        self.assertEqual(scrubbed["request"]["cookies"], REDACTED)
+        self.assertEqual(scrubbed["request"]["headers"]["authorization"], REDACTED)
+        self.assertEqual(scrubbed["request"]["headers"]["x-safe"], "visible")
+        for raw in ("hunter2", "unsafe-token", "unsafe-cookie", "09123456789", "owner@example.com", "123456"):
+            self.assertNotIn(raw, rendered)
+
+    def test_capture_exception_forwards_only_sanitized_sentry_event(self):
+        sentry_calls = {"events": [], "exceptions": [], "tags": []}
+
+        fake_sentry = SimpleNamespace(
+            set_tag=lambda key, value: sentry_calls["tags"].append((key, value)),
+            capture_event=lambda event: sentry_calls["events"].append(event),
+            capture_exception=lambda exc: sentry_calls["exceptions"].append(exc),
+        )
+
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("error-test")
+
+        with patch.dict(sys.modules, {"sentry_sdk": fake_sentry}):
+            try:
+                self._raise_secret_error()
+            except RuntimeError as exc:
+                fingerprint = capture_exception(
+                    exc,
+                    source="api.request",
+                    extra={
+                        "authorization": "Bearer unsafe-token",
+                        "request_body": {"password": "hunter2", "mobile": "09123456789"},
+                        "signed_url": "https://cdn.example.test/file?X-Amz-Signature=abcdef123456",
+                    },
+                )
+
+        self.assertEqual(sentry_calls["exceptions"], [])
+        self.assertEqual(len(sentry_calls["events"]), 1)
+        event = sentry_calls["events"][0]
+        rendered = json.dumps(event, ensure_ascii=False)
+        self.assertEqual(event["fingerprint"], [fingerprint])
+        self.assertEqual(event["tags"]["error_source"], "api.request")
+        self.assertEqual(event["extra"]["extra"]["authorization"], REDACTED)
+        self.assertEqual(event["extra"]["extra"]["request_body"]["password"], REDACTED)
+        self.assertEqual(event["extra"]["extra"]["signed_url"], REDACTED)
+        for raw in ("hunter2", "unsafe-token", "09123456789", "abcdef123456"):
+            self.assertNotIn(raw, rendered)
 
 
 if __name__ == "__main__":

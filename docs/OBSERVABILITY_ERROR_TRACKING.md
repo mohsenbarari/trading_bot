@@ -51,6 +51,11 @@ ENVIRONMENT=production
 
 Do not commit DSNs or Sentry auth tokens. `send_default_pii` is disabled when the optional SDK is initialized.
 
+External forwarding is scrubbed in two layers:
+
+- `capture_exception()` emits a sanitized structured Sentry event with the same redacted fields used by local JSON logs. It does not call `sentry_sdk.capture_exception(exc)` with the raw exception object.
+- `configure_logging()` registers `core.error_tracking.scrub_sentry_event` as Sentry `before_send`, so SDK-generated events are recursively redacted before leaving the process. Request bodies, cookies, and request env data are replaced with `[REDACTED]`.
+
 ## Grafana
 
 Dashboard:

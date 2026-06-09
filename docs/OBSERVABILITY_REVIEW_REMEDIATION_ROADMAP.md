@@ -156,6 +156,8 @@ Completion notes:
 
 #### Stage R1.4: Error Tracking Scrubbing
 
+Status: Completed on 2026-06-09.
+
 Purpose: prevent optional external error tracking from bypassing local redaction.
 
 Work:
@@ -166,6 +168,15 @@ Work:
 Acceptance:
 
 - Enabling Sentry cannot send raw tokens, OTPs, mobile numbers, signed URLs, request bodies, or raw exception text containing secrets.
+
+Completion notes:
+
+- Added `scrub_sentry_event()` in `core/error_tracking.py` to recursively apply log redaction to Sentry events and replace request bodies, cookies, and request environment payloads with `[REDACTED]`.
+- Changed `capture_exception()` to forward a sanitized structured Sentry event via `capture_event()` instead of passing the raw exception object to `sentry_sdk.capture_exception(exc)`.
+- Registered the same scrubber as Sentry `before_send` in `core/logging_config.py` so SDK-generated events are scrubbed before external forwarding.
+- Updated `docs/OBSERVABILITY_ERROR_TRACKING.md` to document the two-layer external scrubbing model.
+- Added focused tests proving raw Sentry event payloads are scrubbed and `capture_exception()` does not forward raw exception objects.
+- Validated with `timeout 30 python3 -m unittest tests.test_error_tracking tests.test_logging_foundation tests.test_request_logging tests.test_observability_config tests.test_audit_logger` and `python3 -m py_compile core/error_tracking.py core/logging_config.py`.
 
 #### Stage R1.5: Sync Worker Log and Failure Semantics
 
