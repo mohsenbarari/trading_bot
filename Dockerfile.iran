@@ -4,19 +4,13 @@ RUN apt-get -o Acquire::Retries=5 update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# Explicitly remove any old pip mirror config & use default PyPI
-RUN pip config unset global.index-url 2>/dev/null; \
-    pip config unset global.trusted-host 2>/dev/null; \
-    pip install --upgrade pip setuptools wheel
-
 COPY pip_packages/ /tmp/pip_packages/
+COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
 COPY requirements.txt .
-RUN if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; then \
-            pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r requirements.txt; \
-        else \
-            pip install --no-cache-dir -r requirements.txt; \
-        fi \
-        && rm -rf /tmp/pip_packages/
+RUN test -n "$(find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' -print -quit)" \
+        && pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r /tmp/pip-bootstrap-requirements.txt \
+        && pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages/ -r requirements.txt \
+        && rm -rf /tmp/pip_packages/ /tmp/pip-bootstrap-requirements.txt
 COPY api/ ./api/
 COPY bot/ ./bot/
 COPY core/ ./core/
