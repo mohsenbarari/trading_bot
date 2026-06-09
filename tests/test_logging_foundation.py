@@ -129,7 +129,7 @@ class LoggingFoundationTests(unittest.TestCase):
             configure_logging("api-test")
 
         raw_session_id = "11111111-2222-3333-4444-555555555555"
-        set_request_context(request_id="req-1", actor_id=42, session_id=raw_session_id)
+        set_request_context(request_id="req-1", actor_id=42, session_id_hash="c01f4e2d0e6c8b0c")
         logging.getLogger("tests.logging").info(
             "login failed password=hunter2 mobile=09123456789",
             extra={"authorization": "Bearer unsafe-token", "safe_field": "visible"},
@@ -141,7 +141,7 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertEqual(payload["service"], "api-test")
         self.assertEqual(payload["request_id"], "req-1")
         self.assertEqual(payload["actor_id"], 42)
-        self.assertEqual(payload["session_id"], REDACTED)
+        self.assertEqual(payload["session_id_hash"], "c01f4e2d0e6c8b0c")
         self.assertEqual(payload["authorization"], REDACTED)
         self.assertEqual(payload["safe_field"], "visible")
         self.assertNotIn("hunter2", log_line)
@@ -172,6 +172,21 @@ class LoggingFoundationTests(unittest.TestCase):
 
         self.assertEqual(redacted["access_level"], "middle-admin")
         self.assertEqual(redacted["access_token"], REDACTED)
+
+    def test_sid_redaction_matches_exact_sensitive_keys_not_incidental_substrings(self):
+        redacted = redact(
+            {
+                "sid": "session-1",
+                "session_sid": "session-2",
+                "outside_reference": "safe",
+                "residency_status": "resident",
+            }
+        )
+
+        self.assertEqual(redacted["sid"], REDACTED)
+        self.assertEqual(redacted["session_sid"], REDACTED)
+        self.assertEqual(redacted["outside_reference"], "safe")
+        self.assertEqual(redacted["residency_status"], "resident")
 
     def test_configure_logging_is_idempotent_and_preserves_unmanaged_handlers(self):
         root_logger = logging.getLogger()

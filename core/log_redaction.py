@@ -21,6 +21,7 @@ REDACTED_SHEBA = "[REDACTED_SHEBA]"
 REDACTED_SIGNED_URL_VALUE = "[REDACTED_SIGNED_URL_VALUE]"
 
 SAFE_CODE_KEYS = {
+    "session-id-hash",
     "status-code",
     "reason-code",
     "error-code",
@@ -112,6 +113,16 @@ _NATIONAL_ID_RE = re.compile(r"(?<![\d۰-۹٠-٩])[\d۰-۹٠-٩]{10}(?![\d۰-۹�
 _SAFE_SCALAR_TYPES = (str, int, float, bool)
 
 
+def _matches_sensitive_key_part(normalized: str, part: str) -> bool:
+    if normalized == part:
+        return True
+    return (
+        normalized.startswith(f"{part}-")
+        or normalized.endswith(f"-{part}")
+        or f"-{part}-" in normalized
+    )
+
+
 def is_sensitive_key(key: str) -> bool:
     normalized = key.lower().replace("_", "-")
     if normalized in SAFE_CODE_KEYS:
@@ -122,7 +133,7 @@ def is_sensitive_key(key: str) -> bool:
         prefix in normalized for prefix in ("otp", "recovery", "verification", "password", "login")
     ):
         return True
-    return any(part in normalized for part in SENSITIVE_KEY_PARTS)
+    return any(_matches_sensitive_key_part(normalized, part) for part in SENSITIVE_KEY_PARTS)
 
 
 def mask_mobile(value: str) -> str:

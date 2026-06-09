@@ -123,6 +123,31 @@ Each export writes a `.manifest.json` sidecar with record count, source, output 
 
 Export files must be moved to restricted storage if they are needed beyond local retention. Do not commit exported audit logs.
 
+## External Audit Integrity Anchor
+
+The local append-only audit trail is durable and hash chained, but it still lives on the same host as the application. Production should add an external anchor so host compromise cannot silently rewrite both the trail and its latest known head hash.
+
+Recommended path:
+
+1. Keep `AUDIT_TRAIL_PATH` enabled on every production API container.
+2. On a fixed interval, export only the latest durable head metadata:
+   - `audit_event_id`
+   - `audit_recorded_at`
+   - `event_hash`
+   - `previous_hash`
+   - release identifier / host identifier
+3. Push that compact head record to an external append-only destination that is not writable by the app container runtime. Acceptable options:
+   - foreign-host restricted object storage bucket with versioning and immutable retention
+   - operator-controlled Git repository or signed manifest store
+   - separate SIEM / audit archive endpoint
+4. Store export manifests with monotonic timestamps so missing anchors are also visible.
+5. Verify periodically that:
+   - the local trail hash-chain is intact,
+   - the latest exported anchor matches the local head for the same window,
+   - the external destination has stricter access controls than the app host.
+
+This stage adds `audit_durable` signaling into runtime audit logs. That signal answers whether a record was durably appended locally; it does not replace the external anchor requirement above.
+
 ## Log Volume Budget
 
 Default production budget:

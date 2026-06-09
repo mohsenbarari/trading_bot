@@ -476,6 +476,95 @@ scp_iran() {
     "${SCP_IRAN_CMD[@]}" "$@"
 }
 
+read_env_value() {
+    local env_path="$1"
+    local key="$2"
+    local line
+    line="$(grep -E "^${key}=" "$env_path" | tail -n 1 || true)"
+    printf '%s' "${line#*=}"
+}
+
+require_env_value() {
+    local env_path="$1"
+    local key="$2"
+    local value
+    value="$(read_env_value "$env_path" "$key")"
+    [[ -n "$value" ]] || die "Missing required env value '$key' in $env_path"
+}
+
+validate_observability_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    [[ -f "$env_path" ]] || die "Missing runtime env for $role_label: $env_path"
+
+    require_env_value "$env_path" "TRUSTED_PROXY_CIDRS"
+    require_env_value "$env_path" "OBSERVABILITY_TELEGRAM_USER_HASH_SALT"
+    require_env_value "$env_path" "GRAFANA_ALERT_DEFAULT_RECEIVER"
+    require_env_value "$env_path" "GRAFANA_ALERT_CRITICAL_RECEIVER"
+    require_env_value "$env_path" "GRAFANA_ALERT_WARNING_RECEIVER"
+    require_env_value "$env_path" "GRAFANA_ALERT_WEBHOOK_URL"
+    require_env_value "$env_path" "GRAFANA_ALERT_EMAIL_ADDRESSES"
+
+    local trusted_proxy_cidrs
+    trusted_proxy_cidrs="$(read_env_value "$env_path" "TRUSTED_PROXY_CIDRS")"
+    local hash_salt
+    hash_salt="$(read_env_value "$env_path" "OBSERVABILITY_TELEGRAM_USER_HASH_SALT")"
+    local default_receiver
+    default_receiver="$(read_env_value "$env_path" "GRAFANA_ALERT_DEFAULT_RECEIVER")"
+    local critical_receiver
+    critical_receiver="$(read_env_value "$env_path" "GRAFANA_ALERT_CRITICAL_RECEIVER")"
+    local warning_receiver
+    warning_receiver="$(read_env_value "$env_path" "GRAFANA_ALERT_WARNING_RECEIVER")"
+    local webhook_url
+    webhook_url="$(read_env_value "$env_path" "GRAFANA_ALERT_WEBHOOK_URL")"
+    local email_addresses
+    email_addresses="$(read_env_value "$env_path" "GRAFANA_ALERT_EMAIL_ADDRESSES")"
+
+    [[ "$trusted_proxy_cidrs" != "127.0.0.1/32,::1/128" ]] || die "$role_label env still uses loopback-only TRUSTED_PROXY_CIDRS. Set the real trusted reverse-proxy CIDRs in $env_path"
+    [[ -n "$hash_salt" ]] || die "$role_label env is missing OBSERVABILITY_TELEGRAM_USER_HASH_SALT in $env_path"
+    [[ "$default_receiver" != "Trading Bot Local Webhook" ]] || die "$role_label env still uses the local default alert receiver in $env_path"
+    [[ "$critical_receiver" != "Trading Bot Local Webhook" ]] || die "$role_label env still uses the local critical alert receiver in $env_path"
+    [[ "$warning_receiver" != "Trading Bot Local Webhook" ]] || die "$role_label env still uses the local warning alert receiver in $env_path"
+    [[ "$webhook_url" != "http://127.0.0.1:9/trading-bot-alerts-disabled" ]] || die "$role_label env still uses the disabled Grafana webhook URL in $env_path"
+    [[ "$email_addresses" != "alerts@example.invalid" ]] || die "$role_label env still uses the placeholder Grafana email addresses in $env_path"
+}
+
+validate_observability_release_inputs() {
+    validate_observability_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
+    validate_observability_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+}
+
+install_sync_sampler_local() {
+    log "Ensuring foreign sync health sampler is installed"
+    (cd "$LOCAL_PROJECT_DIR" && bash ./scripts/install_sync_health_monitor.sh)
+}
+
+install_sync_sampler_remote() {
+    log "Ensuring Iran sync health sampler is installed"
+    ssh_iran "set -euo pipefail
+cd '$IRAN_PROJECT_DIR'
+bash ./scripts/install_sync_health_monitor.sh"
+}
+
+verify_sync_sampler_local() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl is-enabled trading-bot-sync-health-sampler.timer >/dev/null 2>&1 || die "Foreign sync sampler timer is not enabled"
+        systemctl is-active trading-bot-sync-health-sampler.timer >/dev/null 2>&1 || die "Foreign sync sampler timer is not active"
+        return 0
+    fi
+    grep -R "sample_sync_health.py" /etc/cron.d /var/spool/cron >/dev/null 2>&1 || die "Foreign sync sampler is not installed via cron"
+}
+
+verify_sync_sampler_remote() {
+    ssh_iran "set -euo pipefail
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl is-enabled trading-bot-sync-health-sampler.timer >/dev/null 2>&1 || exit 11
+  systemctl is-active trading-bot-sync-health-sampler.timer >/dev/null 2>&1 || exit 12
+else
+  grep -R 'sample_sync_health.py' /etc/cron.d /var/spool/cron >/dev/null 2>&1 || exit 13
+fi" || die "Iran sync sampler is not installed and active"
+}
+
 ensure_local_tools() {
     need_cmd ssh
     need_cmd scp
@@ -856,6 +945,13 @@ ensure_runtime_env_file() {
     local smsir_api_key=""
     local smsir_line_number=""
     local error_tracking_dsn=""
+    local trusted_proxy_cidrs="127.0.0.1/32,::1/128"
+    local observability_telegram_user_hash_salt=""
+    local grafana_alert_default_receiver="Trading Bot Production Webhook"
+    local grafana_alert_critical_receiver="Trading Bot Production Webhook"
+    local grafana_alert_warning_receiver="Trading Bot Production Email"
+    local grafana_alert_webhook_url=""
+    local grafana_alert_email_addresses=""
 
     mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
 
@@ -876,6 +972,13 @@ ensure_runtime_env_file() {
     prompt_value smsir_api_key "SMSIR_API_KEY" "" 1
     prompt_value smsir_line_number "SMSIR_LINE_NUMBER"
     prompt_value error_tracking_dsn "ERROR_TRACKING_DSN"
+    prompt_value trusted_proxy_cidrs "TRUSTED_PROXY_CIDRS" "$trusted_proxy_cidrs"
+    prompt_value observability_telegram_user_hash_salt "OBSERVABILITY_TELEGRAM_USER_HASH_SALT" "" 1
+    prompt_value grafana_alert_default_receiver "GRAFANA_ALERT_DEFAULT_RECEIVER" "$grafana_alert_default_receiver"
+    prompt_value grafana_alert_critical_receiver "GRAFANA_ALERT_CRITICAL_RECEIVER" "$grafana_alert_critical_receiver"
+    prompt_value grafana_alert_warning_receiver "GRAFANA_ALERT_WARNING_RECEIVER" "$grafana_alert_warning_receiver"
+    prompt_value grafana_alert_webhook_url "GRAFANA_ALERT_WEBHOOK_URL"
+    prompt_value grafana_alert_email_addresses "GRAFANA_ALERT_EMAIL_ADDRESSES"
 
     cat > "$local_env_path" <<EOF
 SERVER_MODE=foreign
@@ -897,6 +1000,13 @@ CHANNEL_INVITE_LINK=$channel_invite_link
 SMSIR_API_KEY=$smsir_api_key
 SMSIR_LINE_NUMBER=$smsir_line_number
 ERROR_TRACKING_DSN=$error_tracking_dsn
+TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs
+OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$observability_telegram_user_hash_salt
+GRAFANA_ALERT_DEFAULT_RECEIVER=$grafana_alert_default_receiver
+GRAFANA_ALERT_CRITICAL_RECEIVER=$grafana_alert_critical_receiver
+GRAFANA_ALERT_WARNING_RECEIVER=$grafana_alert_warning_receiver
+GRAFANA_ALERT_WEBHOOK_URL=$grafana_alert_webhook_url
+GRAFANA_ALERT_EMAIL_ADDRESSES=$grafana_alert_email_addresses
 TRADING_BOT_METRICS_BACKEND=memory
 AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl
 FOREIGN_SERVER_URL=$FOREIGN_SERVER_URL
@@ -925,6 +1035,13 @@ CHANNEL_INVITE_LINK=$channel_invite_link
 SMSIR_API_KEY=$smsir_api_key
 SMSIR_LINE_NUMBER=$smsir_line_number
 ERROR_TRACKING_DSN=$error_tracking_dsn
+TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs
+OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$observability_telegram_user_hash_salt
+GRAFANA_ALERT_DEFAULT_RECEIVER=$grafana_alert_default_receiver
+GRAFANA_ALERT_CRITICAL_RECEIVER=$grafana_alert_critical_receiver
+GRAFANA_ALERT_WARNING_RECEIVER=$grafana_alert_warning_receiver
+GRAFANA_ALERT_WEBHOOK_URL=$grafana_alert_webhook_url
+GRAFANA_ALERT_EMAIL_ADDRESSES=$grafana_alert_email_addresses
 TRADING_BOT_METRICS_BACKEND=memory
 AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl
 FOREIGN_SERVER_URL=$FOREIGN_SERVER_URL
@@ -1034,6 +1151,8 @@ for _attempt in \$(seq 1 24); do
   sleep 5
 done
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\" >/dev/null"
+    verify_sync_sampler_local
+    verify_sync_sampler_remote
     if [[ "$IRAN_RUN_POST_DEPLOY_HEALTHCHECK" == "1" ]]; then
         for _attempt in $(seq 1 24); do
             if curl -kfsS "$IRAN_HEALTHCHECK_URL" >/dev/null; then
@@ -1081,7 +1200,11 @@ decide_iran_connectivity() {
 run_release() {
     check_local
     ensure_local_timezone_utc
+    ensure_runtime_env_file
+    validate_observability_release_inputs
+    install_sync_sampler_local
     deploy_foreign
+    verify_sync_sampler_local
     sync_hosts_mappings
     local iran_mode
     iran_mode="$(decide_iran_connectivity)"
@@ -1091,8 +1214,8 @@ run_release() {
     fi
     build_release
     bootstrap_iran
-    ensure_runtime_env_file
     sync_project
+    install_sync_sampler_remote
     configure_nginx
     issue_cert
     ship_images

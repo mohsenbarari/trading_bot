@@ -63,16 +63,31 @@ def _last_event_hash(path: Path) -> str | None:
         return None
 
 
-def build_audit_record(payload: dict[str, Any], *, previous_hash: str | None = None) -> dict[str, Any]:
+def build_audit_record(
+    payload: dict[str, Any],
+    *,
+    previous_hash: str | None = None,
+    durable_written: bool,
+    durable_reason: str | None = None,
+    durable_path: str | None = None,
+    durable_error_type: str | None = None,
+) -> dict[str, Any]:
     safe_payload = redact(payload)
     if not isinstance(safe_payload, dict):
         safe_payload = {"redacted": REDACTED}
     record = {
         "audit_event_id": str(uuid.uuid4()),
         "audit_recorded_at": _utc_now_iso(),
+        "audit_durable": durable_written,
         "previous_hash": previous_hash,
         "payload": safe_payload,
     }
+    if durable_reason:
+        record["audit_durable_reason"] = durable_reason
+    if durable_path:
+        record["audit_trail_path"] = durable_path
+    if durable_error_type:
+        record["audit_durable_error_type"] = durable_error_type
     record["event_hash"] = _hash_payload(record)
     return record
 
@@ -80,13 +95,19 @@ def build_audit_record(payload: dict[str, Any], *, previous_hash: str | None = N
 def write_audit_record(payload: dict[str, Any]) -> dict[str, Any]:
     path_raw = _audit_trail_path()
     if not path_raw:
-        return build_audit_record(payload)
+        return build_audit_record(payload, durable_written=False, durable_reason="audit_trail_unconfigured")
 
     path = Path(path_raw)
     with _write_lock:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            record = build_audit_record(payload, previous_hash=_last_event_hash(path))
+            record = build_audit_record(
+                payload,
+                previous_hash=_last_event_hash(path),
+                durable_written=True,
+                durable_reason=None,
+                durable_path=str(path),
+            )
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(_canonical_json(record) + "\n")
             return record
@@ -99,5 +120,10 @@ def write_audit_record(payload: dict[str, Any]) -> dict[str, Any]:
                     "error_type": type(exc).__name__,
                 },
             )
-            return build_audit_record(payload)
-
+            return build_audit_record(
+                payload,
+                durable_written=False,
+                durable_reason="audit_trail_write_failed",
+                durable_path=str(path),
+                durable_error_type=type(exc).__name__,
+            )

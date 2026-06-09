@@ -74,6 +74,10 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - if either env file is missing, prompts for the required values and creates both:
   - local foreign `.env`
   - Iran runtime `.env`
+- blocks the release if the runtime env files still use observability placeholders or missing production-only values:
+  - `TRUSTED_PROXY_CIDRS`
+  - `OBSERVABILITY_TELEGRAM_USER_HASH_SALT`
+  - non-local Grafana alert receivers / webhook / email targets
 
 ### 2. Local build + local foreign deploy
 - first deploys the foreign server with host-native dependencies and compose command detection
@@ -139,6 +143,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 ### 11. `healthcheck`
 - retries the local API endpoint on the Iran host with backoff until it becomes ready
 - optionally retries the public HTTPS endpoint with backoff until it becomes ready
+- verifies that the sync-health sampler timer is installed and active on both foreign and Iran
 
 ## Known limitations of v1
 
