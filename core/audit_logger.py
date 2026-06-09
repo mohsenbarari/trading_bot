@@ -82,6 +82,13 @@ def audit_log(
     payload["audit_event_id"] = audit_record.get("audit_event_id")
     payload["audit_event_hash"] = audit_record.get("event_hash")
     payload["audit_recorded_at"] = audit_record.get("audit_recorded_at")
+    payload["audit_durable"] = bool(audit_record.get("audit_durable"))
+    if audit_record.get("audit_durable_reason"):
+        payload["audit_durable_reason"] = audit_record.get("audit_durable_reason")
+    if audit_record.get("audit_trail_path"):
+        payload["audit_trail_path"] = audit_record.get("audit_trail_path")
+    if audit_record.get("audit_durable_error_type"):
+        payload["audit_durable_error_type"] = audit_record.get("audit_durable_error_type")
     if audit_record.get("previous_hash"):
         payload["audit_previous_hash"] = audit_record.get("previous_hash")
     record_business_action(action=action, result=payload["result"])

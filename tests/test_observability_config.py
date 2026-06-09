@@ -102,6 +102,32 @@ class ObservabilityConfigTests(unittest.TestCase):
         ):
             self.assertIn(expected_env, compose)
 
+    def test_production_release_script_enforces_observability_guards(self):
+        script = (ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        for expected in (
+            "validate_observability_env_file",
+            "TRUSTED_PROXY_CIDRS",
+            "OBSERVABILITY_TELEGRAM_USER_HASH_SALT",
+            "GRAFANA_ALERT_DEFAULT_RECEIVER",
+            "Trading Bot Local Webhook",
+            "install_sync_sampler_local",
+            "install_sync_sampler_remote",
+            "verify_sync_sampler_local",
+            "verify_sync_sampler_remote",
+            "trading-bot-sync-health-sampler.timer",
+        ):
+            self.assertIn(expected, script)
+
+    def test_production_docs_and_examples_include_audit_anchor_and_runtime_env_requirements(self):
+        hardening = (ROOT / "docs/OBSERVABILITY_PRODUCTION_HARDENING.md").read_text(encoding="utf-8")
+        manifest_example = (ROOT / "deploy/production/online.env.example").read_text(encoding="utf-8")
+
+        self.assertIn("## External Audit Integrity Anchor", hardening)
+        self.assertIn("audit_durable", hardening)
+        self.assertIn("TRUSTED_PROXY_CIDRS", manifest_example)
+        self.assertIn("OBSERVABILITY_TELEGRAM_USER_HASH_SALT", manifest_example)
+
 
 if __name__ == "__main__":
     unittest.main()

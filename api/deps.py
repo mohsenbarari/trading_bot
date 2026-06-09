@@ -1,5 +1,6 @@
 from typing import Generator, Optional
 import uuid
+import hashlib
 from fastapi import Depends, HTTPException, status, Security
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
@@ -34,6 +35,12 @@ DEV_API_KEY_HEADER = "X-DEV-API-KEY"
 
 from fastapi.security import APIKeyHeader
 api_key_header = APIKeyHeader(name=DEV_API_KEY_HEADER, auto_error=False)
+
+
+def _opaque_session_id(session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
 
 
 async def get_current_user(
@@ -129,7 +136,7 @@ async def get_current_user(
     set_request_context(
         actor_id=user.id,
         actor_role=getattr(user.role, "value", str(user.role)),
-        session_id=session_id,
+        session_id_hash=_opaque_session_id(session_id),
     )
         
     return user
@@ -223,4 +230,3 @@ async def verify_admin_or_dev_key(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Not authenticated"
     )
-

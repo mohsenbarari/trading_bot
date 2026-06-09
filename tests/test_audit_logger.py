@@ -46,6 +46,8 @@ class AuditLoggerTests(unittest.TestCase):
         self.assertEqual(payload["client_ip"], "127.0.0.1")
         self.assertEqual(payload["actor_id"], 42)
         self.assertEqual(payload["actor_role"], "مدیر ارشد")
+        self.assertFalse(payload["audit_durable"])
+        self.assertEqual(payload["audit_durable_reason"], "audit_trail_unconfigured")
         self.assertEqual(payload["after_summary"]["password"], REDACTED)
         self.assertNotIn("new-secret", stream.getvalue())
         self.assertNotIn("unsafe", stream.getvalue())
@@ -103,6 +105,7 @@ class AuditLoggerTests(unittest.TestCase):
 
         self.assertEqual(len(lines), 2)
         self.assertIsNone(lines[0]["previous_hash"])
+        self.assertTrue(lines[0]["audit_durable"])
         self.assertEqual(lines[1]["previous_hash"], lines[0]["event_hash"])
         self.assertEqual(lines[0]["payload"]["after_summary"]["password"], REDACTED)
         self.assertNotIn("raw-secret", repr(lines))
@@ -110,7 +113,31 @@ class AuditLoggerTests(unittest.TestCase):
 
         stdout_payloads = [json.loads(line) for line in stream.getvalue().splitlines()]
         self.assertEqual(stdout_payloads[0]["audit_event_hash"], lines[0]["event_hash"])
+        self.assertTrue(stdout_payloads[0]["audit_durable"])
+        self.assertEqual(stdout_payloads[0]["audit_trail_path"], audit_path)
         self.assertEqual(stdout_payloads[1]["audit_previous_hash"], lines[0]["event_hash"])
+
+    def test_audit_log_marks_non_durable_fallback_when_sink_write_fails(self):
+        stream = io.StringIO()
+        with patch("sys.stdout", stream):
+            configure_logging("audit-test")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit_dir = Path(tmpdir) / "audit-dir"
+            audit_dir.mkdir()
+            with patch("core.audit_sink._audit_trail_path", return_value=str(audit_dir)):
+                audit_log(
+                    "user.delete",
+                    target_type="user",
+                    target_id=99,
+                    result="failure",
+                    actor_id=1,
+                )
+
+        payload = json.loads(stream.getvalue().strip().splitlines()[-1])
+        self.assertFalse(payload["audit_durable"])
+        self.assertEqual(payload["audit_durable_reason"], "audit_trail_write_failed")
+        self.assertEqual(payload["audit_durable_error_type"], "IsADirectoryError")
 
 
 if __name__ == "__main__":

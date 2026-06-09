@@ -685,3 +685,19 @@ Acceptance:
 - Operators can tell whether audit events were durably written.
 - Production deployment has explicit observability readiness checks instead of relying on default values.
 - Audit evidence design includes an external integrity anchor plan.
+
+Status: Completed on 2026-06-09.
+
+Completion notes:
+
+- `core.audit_sink.py` now records `audit_durable`, optional `audit_durable_reason`, optional `audit_trail_path`, and optional `audit_durable_error_type` in every generated audit record. `core.audit_logger.py` forwards those fields into the structured audit log line so operators can immediately see whether the durable append succeeded or the event fell back to non-durable generation.
+- `api/deps.py` no longer places raw JWT `sid` values into request logging context. It now stores a short opaque `session_id_hash`, which preserves correlation value without exposing the session identifier itself in runtime logs.
+- `core.log_redaction.py` narrowed sensitive-key matching from broad substring behavior to boundary-aware matching. Exact/compound `sid` and session-style keys still redact correctly, while incidental strings such as `outside_reference` and `residency_status` no longer get caught by accident.
+- `scripts/production_deploy_online.sh` now blocks a release when runtime env files still rely on observability placeholders or are missing production-only inputs. It explicitly validates:
+  - `TRUSTED_PROXY_CIDRS`
+  - `OBSERVABILITY_TELEGRAM_USER_HASH_SALT`
+  - non-local Grafana alert receivers
+  - non-placeholder Grafana webhook/email targets
+- The production deploy flow now installs and verifies the `trading-bot-sync-health-sampler` timer on both foreign and Iran hosts as part of the release path.
+- `docs/OBSERVABILITY_PRODUCTION_HARDENING.md` now includes an explicit external audit-integrity anchor design so local durable trails can be periodically anchored outside the app host.
+- Added focused regressions in `tests/test_audit_logger.py`, `tests/test_logging_foundation.py`, and `tests/test_observability_config.py` covering durable/fallback audit signaling, opaque session correlation, exact-key redaction semantics, and production deploy observability guards.
