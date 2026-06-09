@@ -607,6 +607,15 @@ Acceptance:
 - No sync path logs raw peer response bodies.
 - Error tracking initialization depends on configured settings, not a separate preflight env shortcut.
 
+Status: Completed on 2026-06-09.
+
+Completion notes:
+
+- Added `_summarize_peer_response()` in `api/routers/sync.py` and replaced the manual resync warning that previously logged `response.text[:200]`.
+- Manual resync failures now emit structured summaries only: status, bounded response size, SHA-256 prefix, and content type.
+- Removed the `os.environ.get("ERROR_TRACKING_DSN")` pre-gate from `core/logging_config.py`; Sentry initialization now depends only on `settings.error_tracking_dsn`.
+- Added regressions proving manual resync warnings do not emit raw peer response bodies and proving `configure_logging()` initializes Sentry from settings even when the raw process environment does not carry `ERROR_TRACKING_DSN`.
+
 ### Stage R10: Production-Grade Metrics and Repeated-Error Stability
 
 Goal: convert the current fast local metrics posture into a production-monitorable architecture.

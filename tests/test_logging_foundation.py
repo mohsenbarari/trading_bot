@@ -1,7 +1,9 @@
 import io
 import json
 import logging
+import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from core.log_redaction import (
@@ -192,6 +194,30 @@ class LoggingFoundationTests(unittest.TestCase):
         logging.getLogger("tests.logging").info("hello")
         payload = json.loads(second_stream.getvalue().strip())
         self.assertEqual(payload["service"], "api-test-2")
+
+    def test_configure_logging_initializes_sentry_from_settings_without_raw_env_gate(self):
+        sentry_init_calls = []
+        fake_sentry = SimpleNamespace(init=lambda **kwargs: sentry_init_calls.append(kwargs))
+        fake_settings = SimpleNamespace(
+            log_level="INFO",
+            log_format="json",
+            error_tracking_dsn="https://examplePublicKey@example.ingest.sentry.io/1",
+            environment="test",
+            release_sha="sha-test",
+            error_tracking_sample_rate=0.5,
+        )
+
+        with patch("sys.stdout", io.StringIO()), patch.dict(sys.modules, {"sentry_sdk": fake_sentry}, clear=False), patch(
+            "core.config.settings", fake_settings
+        ), patch.dict("os.environ", {}, clear=True):
+            configure_logging("api-test")
+
+        self.assertEqual(len(sentry_init_calls), 1)
+        self.assertEqual(
+            sentry_init_calls[0]["dsn"],
+            "https://examplePublicKey@example.ingest.sentry.io/1",
+        )
+        self.assertEqual(sentry_init_calls[0]["environment"], "test")
 
 
 if __name__ == "__main__":

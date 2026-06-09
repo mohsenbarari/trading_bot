@@ -177,25 +177,24 @@ def configure_logging(service_name: str) -> None:
         _remove_managed_handlers(inherited)
         inherited.propagate = True
 
-    if not os.environ.get("ERROR_TRACKING_DSN"):
-        return
-
     try:
         from core.config import settings
         dsn = getattr(settings, "error_tracking_dsn", None)
-        if dsn:
-            from core.error_tracking import scrub_sentry_event
+        if not dsn:
+            return
 
-            import sentry_sdk  # type: ignore
+        from core.error_tracking import scrub_sentry_event
 
-            sentry_sdk.init(
-                dsn=dsn,
-                environment=getattr(settings, "environment", None),
-                release=getattr(settings, "release_sha", None),
-                traces_sample_rate=0.0,
-                sample_rate=float(getattr(settings, "error_tracking_sample_rate", 1.0) or 1.0),
-                send_default_pii=False,
-                before_send=scrub_sentry_event,
-            )
+        import sentry_sdk  # type: ignore
+
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=getattr(settings, "environment", None),
+            release=getattr(settings, "release_sha", None),
+            traces_sample_rate=0.0,
+            sample_rate=float(getattr(settings, "error_tracking_sample_rate", 1.0) or 1.0),
+            send_default_pii=False,
+            before_send=scrub_sentry_event,
+        )
     except Exception:
         logging.getLogger(__name__).debug("Error tracking SDK initialization skipped", exc_info=True)

@@ -67,6 +67,18 @@ def _age_seconds(value) -> float:
         value = value.replace(tzinfo=timezone.utc)
     return max((datetime.now(timezone.utc) - value).total_seconds(), 0.0)
 
+
+def _summarize_peer_response(response) -> dict[str, object]:
+    body = getattr(response, "text", "") or ""
+    body_bytes = str(body).encode("utf-8", errors="replace")
+    headers = getattr(response, "headers", {}) or {}
+    return {
+        "status_code": getattr(response, "status_code", None),
+        "peer_response_size_bytes": len(body_bytes),
+        "peer_response_sha256": hashlib.sha256(body_bytes).hexdigest()[:16] if body_bytes else None,
+        "peer_content_type": headers.get("content-type") if hasattr(headers, "get") else None,
+    }
+
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
@@ -792,7 +804,14 @@ async def resync_from_changelog(
                         entry.synced = True
                     processed += len(batch)
                 else:
-                    logger.warning(f"Resync batch failed: {response.status_code} - {response.text[:200]}")
+                    logger.warning(
+                        "Resync batch failed",
+                        extra={
+                            "event": "sync.resync.batch_failed",
+                            "batch_size": len(batch),
+                            **_summarize_peer_response(response),
+                        },
+                    )
                     errors += len(batch)
 
             except Exception as e:
