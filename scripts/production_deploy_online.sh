@@ -850,6 +850,7 @@ ensure_runtime_env_file() {
     local jwt_secret_key=""
     local dev_api_key=""
     local sync_api_key=""
+    local observability_api_key=""
     local channel_id=""
     local channel_invite_link=""
     local smsir_api_key=""
@@ -869,6 +870,7 @@ ensure_runtime_env_file() {
     prompt_value jwt_secret_key "JWT_SECRET_KEY" "" 1
     prompt_value dev_api_key "DEV_API_KEY" "" 1
     prompt_value sync_api_key "SYNC_API_KEY" "" 1
+    prompt_value observability_api_key "OBSERVABILITY_API_KEY" "" 1
     prompt_value channel_id "CHANNEL_ID"
     prompt_value channel_invite_link "CHANNEL_INVITE_LINK"
     prompt_value smsir_api_key "SMSIR_API_KEY" "" 1
@@ -889,6 +891,7 @@ REDIS_URL=$redis_url
 JWT_SECRET_KEY=$jwt_secret_key
 DEV_API_KEY=$dev_api_key
 SYNC_API_KEY=$sync_api_key
+OBSERVABILITY_API_KEY=$observability_api_key
 CHANNEL_ID=$channel_id
 CHANNEL_INVITE_LINK=$channel_invite_link
 SMSIR_API_KEY=$smsir_api_key
@@ -914,6 +917,7 @@ REDIS_URL=$redis_url
 JWT_SECRET_KEY=$jwt_secret_key
 DEV_API_KEY=$dev_api_key
 SYNC_API_KEY=$sync_api_key
+OBSERVABILITY_API_KEY=$observability_api_key
 CHANNEL_ID=$channel_id
 CHANNEL_INVITE_LINK=$channel_invite_link
 SMSIR_API_KEY=$smsir_api_key

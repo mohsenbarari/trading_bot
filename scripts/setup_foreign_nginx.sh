@@ -29,6 +29,13 @@ server {
     client_max_body_size 50M;
 
     # API and realtime traffic continue to flow through the app container.
+    location = /metrics {
+        deny all;
+        return 404;
+    }
+
+    # Prometheus scrapes should use the app container's local loopback binding
+    # or an explicit observability key, never the public reverse proxy.
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
