@@ -170,6 +170,8 @@ def configure_logging(service_name: str) -> None:
         from core.config import settings
         dsn = getattr(settings, "error_tracking_dsn", None)
         if dsn:
+            from core.error_tracking import scrub_sentry_event
+
             import sentry_sdk  # type: ignore
 
             sentry_sdk.init(
@@ -179,6 +181,7 @@ def configure_logging(service_name: str) -> None:
                 traces_sample_rate=0.0,
                 sample_rate=float(getattr(settings, "error_tracking_sample_rate", 1.0) or 1.0),
                 send_default_pii=False,
+                before_send=scrub_sentry_event,
             )
     except Exception:
         logging.getLogger(__name__).debug("Error tracking SDK initialization skipped", exc_info=True)

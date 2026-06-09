@@ -11,7 +11,7 @@ from threading import Lock
 from types import TracebackType
 from typing import Any
 
-from core.log_redaction import redact
+from core.log_redaction import REDACTED, redact
 from core.request_context import get_request_context
 
 
@@ -100,6 +100,53 @@ def error_fingerprint(exc: BaseException, *, source: str | None = None) -> str:
     return hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
+def scrub_sentry_event(event: dict[str, Any], hint: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Scrub Sentry events before they leave the process."""
+
+    sanitized = redact(event)
+    if not isinstance(sanitized, dict):
+        return {"message": REDACTED}
+
+    request = sanitized.get("request")
+    if isinstance(request, dict):
+        for key in ("data", "body", "json", "cookies", "env"):
+            if key in request:
+                request[key] = REDACTED
+        headers = request.get("headers")
+        if isinstance(headers, dict):
+            request["headers"] = redact(headers)
+        if "query_string" in request:
+            request["query_string"] = redact(str(request.get("query_string") or ""))
+
+    return sanitized
+
+
+def _build_sanitized_sentry_event(payload: dict[str, Any]) -> dict[str, Any]:
+    event = {
+        "message": "Exception captured",
+        "level": str(payload.get("severity") or "error"),
+        "fingerprint": [str(payload["error_fingerprint"])],
+        "tags": {
+            "error_source": payload.get("error_source"),
+            "error_fingerprint": payload.get("error_fingerprint"),
+            "request_id": payload.get("request_id"),
+            "actor_role": payload.get("actor_role"),
+            "server_mode": payload.get("server_mode"),
+        },
+        "extra": payload,
+        "exception": {
+            "values": [
+                {
+                    "type": payload.get("exception_type"),
+                    "value": payload.get("exception_message"),
+                    "stacktrace": {"frames": payload.get("frames", [])},
+                }
+            ]
+        },
+    }
+    return {key: value for key, value in scrub_sentry_event(event, None).items() if value not in (None, {}, [])}
+
+
 def capture_exception(
     exc: BaseException,
     *,
@@ -111,7 +158,7 @@ def capture_exception(
     """Record a scrubbed grouped error event and optionally forward to Sentry.
 
     The event is emitted to structured logs first. If ``sentry_sdk`` is present
-    and configured by deployment code, a minimal sanitized event is forwarded.
+    and configured by deployment code, a sanitized structured event is forwarded.
     """
 
     context = get_request_context()
@@ -157,7 +204,7 @@ def capture_exception(
             sentry_sdk.set_tag("request_id", context.get("request_id"))
         if context.get("actor_role"):
             sentry_sdk.set_tag("actor_role", context.get("actor_role"))
-        sentry_sdk.capture_exception(exc)
+        sentry_sdk.capture_event(_build_sanitized_sentry_event(payload))
     except Exception:
         pass
 
