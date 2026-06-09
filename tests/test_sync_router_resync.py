@@ -163,6 +163,28 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(good.synced)
         self.assertEqual(db.commits, 1)
 
+    async def test_resync_logs_structured_batch_exceptions_without_raw_exception_text(self):
+        request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
+        entry = make_entry(3)
+        db = FakeDB([FakeExecuteResult([entry])])
+        client_factory = lambda **kwargs: FakeAsyncClient(error=RuntimeError("network down"), **kwargs)
+
+        with patch("api.routers.sync.settings.dev_api_key", "dev-key"), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://peer.example"
+        ), patch("api.routers.sync.settings.sync_api_key", "secret"), patch(
+            "httpx.AsyncClient", side_effect=client_factory
+        ), patch("api.routers.sync.logger") as logger_mock:
+            result = await resync_from_changelog(request=request, db=db)
+
+        self.assertEqual(result, {"status": "ok", "processed": 0, "errors": 1, "total_entries": 1})
+        self.assertFalse(entry.synced)
+        rendered = repr(logger_mock.error.call_args)
+        self.assertNotIn("network down", rendered)
+        self.assertIn("sync.resync.batch_exception", rendered)
+        self.assertIn("error_type", rendered)
+        self.assertIn("error_digest", rendered)
+        self.assertNotIn("error_message", rendered)
+
     async def test_resync_preserves_accountant_relation_and_actor_fields_in_payload(self):
         request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
         relation_entry = make_entry(
