@@ -49,6 +49,3 @@ scrape_configs:
           log_class:
           event:
           logger:
-      - output:
-          source: message
-
