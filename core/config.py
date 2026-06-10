@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     audit_trail_path: str | None = None
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
     observability_telegram_user_hash_salt: str | None = None
+    grafana_alert_default_receiver: str | None = None
+    grafana_alert_critical_receiver: str | None = None
+    grafana_alert_warning_receiver: str | None = None
+    grafana_alert_webhook_url: str | None = None
+    grafana_alert_email_addresses: str | None = None
 
     database_url: str
     sync_database_url: str

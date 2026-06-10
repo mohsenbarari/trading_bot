@@ -7,6 +7,10 @@
 
 set -e
 
+PROJECT_DIR="/srv/trading-bot/current"
+DIST_DIR="$PROJECT_DIR/mini_app_dist"
+UPLOADS_DIR="$PROJECT_DIR/uploads"
+
 echo "🚀 شروع نصب Nginx و SSL برای سرور ایران..."
 
 # 1. آپدیت و نصب پکیج‌ها
@@ -16,8 +20,8 @@ apt install -y nginx certbot python3-certbot-nginx
 
 # 2. ایجاد دایرکتوری برای frontend
 echo "📁 ایجاد دایرکتوری‌ها..."
-mkdir -p /root/trading-bot/trading_bot/mini_app_dist
-mkdir -p /root/trading-bot/trading_bot/uploads
+mkdir -p "$DIST_DIR"
+mkdir -p "$UPLOADS_DIR"
 
 # 3. ایجاد کانفیگ Nginx
 echo "⚙️ ایجاد کانفیگ Nginx..."
@@ -34,7 +38,7 @@ server {
 
     # Frontend (Vue.js static files)
     location / {
-        root /root/trading-bot/trading_bot/mini_app_dist;
+        root /srv/trading-bot/current/mini_app_dist;
         try_files $uri $uri/ /index.html;
         
         # Cache static assets
@@ -86,7 +90,7 @@ server {
 
     # Favicon
     location /favicon.ico {
-        root /root/trading-bot/trading_bot/mini_app_dist;
+        root /srv/trading-bot/current/mini_app_dist;
         access_log off;
     }
 }
@@ -104,7 +108,7 @@ nginx -t
 # 6. تنظیم مجوزها
 echo "🔧 تنظیم مجوزها..."
 chmod 755 /root
-chmod -R 755 /root/trading-bot
+chmod -R 755 /srv/trading-bot
 
 # 7. ریستارت Nginx
 echo "🔄 ریستارت Nginx..."

@@ -6,7 +6,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
-IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io docker-compose-plugin docker-compose python3-pip python3-setuptools python3-wheel"
+IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io docker-compose python3-pip python3-setuptools python3-wheel"
 LOCAL_HOST_ARCH=""
 LOCAL_DPKG_ARCH=""
 IRAN_HOST_ARCH=""
@@ -183,12 +183,27 @@ remote_post_bootstrap_guard() {
     cat <<'EOF'
 if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   apt-get -o Acquire::Retries=5 update
-  apt-get -o Acquire::Retries=5 install -y --fix-missing docker-compose docker-compose-plugin || true
+  apt-get -o Acquire::Retries=5 install -y --fix-missing docker-compose || true
 fi
 if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
   echo "No Docker Compose command is available on the Iran host after bootstrap." >&2
   exit 1
 fi
+EOF
+}
+
+remote_docker_cleanup_guard() {
+    cat <<'EOF'
+docker_cleanup_packages=""
+for pkg in containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin docker.io containerd runc; do
+  if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then
+    docker_cleanup_packages="$docker_cleanup_packages $pkg"
+  fi
+done
+if [ -n "$docker_cleanup_packages" ]; then
+  apt-get -y purge $docker_cleanup_packages || true
+fi
+apt-get -y autoremove || true
 EOF
 }
 
@@ -665,14 +680,17 @@ prepare_iran_package_bundle() {
         chown _apt:root "$bundle_dir/partial" 2>/dev/null || true
         chmod 700 "$bundle_dir/partial" 2>/dev/null || true
     fi
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get -o Acquire::Retries=5 update
-    apt-get -y \
-        -o Acquire::Retries=5 \
-        -o Dir::Cache::archives="$bundle_dir" \
-        --fix-missing \
-        --download-only install \
-        $IRAN_BOOTSTRAP_APT_PACKAGES
+
+    local ubuntu_image="ubuntu:${IRAN_OS_CODENAME:-noble}"
+    log "Downloading Iran bootstrap packages in a clean container image=$ubuntu_image platform=$IRAN_IMAGE_PLATFORM"
+    docker run --rm \
+        --platform "$IRAN_IMAGE_PLATFORM" \
+        -v "$bundle_dir:/bundle" \
+        "$ubuntu_image" \
+        bash -lc "set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get -o Acquire::Retries=5 -y --download-only -o Dir::Cache::archives=/bundle install $IRAN_BOOTSTRAP_APT_PACKAGES"
     tar -C "$bundle_dir" -czf "$bundle_tar" .
     printf '%s\n' "$bundle_signature" > "$bundle_hash_file"
     log "Iran bootstrap package bundle prepared at $bundle_tar"
@@ -682,6 +700,8 @@ bootstrap_iran() {
     log "Bootstrapping the Iran host"
     local post_bootstrap_guard
     post_bootstrap_guard="$(remote_post_bootstrap_guard)"
+    local docker_cleanup_guard
+    docker_cleanup_guard="$(remote_docker_cleanup_guard)"
     ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$IRAN_PROJECT_DIR'"
     if [[ "$IRAN_APT_BUNDLE_MODE" == "same-arch" ]]; then
         prepare_iran_package_bundle
@@ -693,6 +713,7 @@ package_tar='$IRAN_DEPLOY_BASE_DIR/releases/iran-packages.tar.gz'
 rm -rf \"\$package_dir\"
 mkdir -p \"\$package_dir\"
 tar -xzf \"\$package_tar\" -C \"\$package_dir\"
+$docker_cleanup_guard
 if ! apt-get install -y --no-download \"\$package_dir\"/*.deb; then
   apt-get -o Acquire::Retries=5 update
   apt-get -o Acquire::Retries=5 install -y --fix-missing \"\$package_dir\"/*.deb
@@ -707,10 +728,11 @@ if command -v ufw >/dev/null 2>&1 && [ '$IRAN_ENABLE_UFW' = '1' ]; then
   ufw allow 443/tcp || true
 fi
 $post_bootstrap_guard"
-    else
+else
         ssh_iran "export DEBIAN_FRONTEND=noninteractive
 set -euo pipefail
 apt-get -o Acquire::Retries=5 update
+$docker_cleanup_guard
 apt-get -o Acquire::Retries=5 install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES
 systemctl enable --now docker
 systemctl enable --now nginx
@@ -1121,16 +1143,16 @@ fi"
 
 deploy_iran() {
     log "Deploying Docker services on the Iran host"
-    local wait_args=""
-    if [[ "$IRAN_DEPLOY_WITH_WAIT" == "1" ]]; then
-        wait_args="--wait --wait-timeout 180"
-    fi
     local compose_resolver
     compose_resolver="$(remote_compose_resolver)"
     ssh_iran "set -euo pipefail
 $compose_resolver
 cd '$IRAN_PROJECT_DIR'
-eval \"\$compose_cmd -f docker-compose.iran.yml up -d $wait_args\"
+wait_args=''
+if [ '$IRAN_DEPLOY_WITH_WAIT' = '1' ] && [ \"\$compose_cmd\" = 'docker compose' ]; then
+  wait_args='--wait --wait-timeout 180'
+fi
+eval \"\$compose_cmd -f docker-compose.iran.yml up -d \$wait_args\"
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\""
     log "Iran deploy step complete"
 }

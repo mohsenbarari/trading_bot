@@ -3,9 +3,9 @@ set -euo pipefail
 
 PROJECT_DIR="/root/trading-bot/trading_bot"
 LOCAL_API_URL="${LOCAL_API_URL:-http://127.0.0.1:8000}"
-IRAN_HOST="${IRAN_HOST:-87.107.110.68}"
+IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
 IRAN_USER="${IRAN_USER:-root}"
-IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-/root/trading-bot/trading_bot}"
+IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-/srv/trading-bot/current}"
 IRAN_API_URL="${IRAN_API_URL:-http://127.0.0.1:8000}"
 SYNC_LIMIT="${SYNC_LIMIT:-200}"
 SYNC_MAX_ROUNDS="${SYNC_MAX_ROUNDS:-20}"

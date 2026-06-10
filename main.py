@@ -109,7 +109,7 @@ def _build_allowed_origins() -> list[str]:
         "https://mini-app.362514.ir",
         "https://coin.362514.ir",
         "https://coin.gold-trade.ir",
-        "http://87.107.110.68",
+        "http://87.107.3.22",
     }
 
     for raw_candidate in (

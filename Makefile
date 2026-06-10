@@ -6,8 +6,8 @@
 # Iran:              API + Nginx + Frontend
 # ==========================================
 
-IRAN_HOST = root@87.107.110.68
-IRAN_DIR  = /root/trading-bot/trading_bot
+IRAN_HOST = root@87.107.3.22
+IRAN_DIR  = /srv/trading-bot/current
 
 .PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
 
@@ -220,7 +220,7 @@ status:
 	@echo "🌍 Foreign Server (local):"
 	@docker compose ps
 	@echo ""
-	@echo "🇮🇷 Iran Server (87.107.110.68):"
+	@echo "🇮🇷 Iran Server (87.107.3.22):"
 	@ssh -o StrictHostKeyChecking=no $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml ps'
 
 observability-up:
