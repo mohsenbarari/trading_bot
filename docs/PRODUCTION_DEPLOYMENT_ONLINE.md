@@ -156,6 +156,10 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - `make audit-anchor-monitor-install`
 - verify the compact anchor export path:
   - default host file: `/var/lib/trading-bot-observability/audit-anchor.jsonl`
+- install the audit anchor shipper when a restricted remote sink exists:
+  - `make audit-anchor-ship-install`
+- verify the remote or staged replication target:
+  - example: `ops@foreign-audit.example:/srv/trading-bot-audit/audit-anchor.jsonl`
 - render the current metrics collection contract for operators:
   - `make metrics-targets`
 - treat Loki/log-based dashboards and alerts as the authoritative cross-service source until a future dedicated multi-surface metrics exporter exists

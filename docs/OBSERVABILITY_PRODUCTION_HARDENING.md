@@ -175,6 +175,27 @@ The installed timer runs every 5 minutes, executes the exporter inside the API c
 
 That host file is intentionally outside the app container writable path. It is still not the final remote sink; operators should replicate or back up that file to the foreign restricted destination described above.
 
+R13 adds that replication path directly:
+
+```bash
+make audit-anchor-ship ARGS="--input /var/lib/trading-bot-observability/audit-anchor.jsonl --remote ops@foreign-audit.example:/srv/trading-bot-audit/audit-anchor.jsonl"
+```
+
+Behavior:
+
+- reads only the latest non-empty compact anchor line
+- validates required anchor fields before shipping
+- appends only that compact line to the remote or relay destination
+- fails closed on malformed local anchor JSON or partial payloads
+
+Recommended production installation:
+
+```bash
+make audit-anchor-ship-install
+```
+
+The shipper timer runs every 10 minutes and is intended to move the compact host-level anchor off-host to a restricted append-only destination. This is the first point where the evidence leaves the app host entirely.
+
 ## Log Volume Budget
 
 Default production budget:

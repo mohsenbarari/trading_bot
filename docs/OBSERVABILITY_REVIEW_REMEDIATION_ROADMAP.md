@@ -767,3 +767,46 @@ Completion notes:
 - Added `scripts/render_metrics_targets.py`, which renders the explicit operator-facing metrics collection contract and makes it clear that only API is currently scrapeable over HTTP while `bot` and `sync_worker` remain log-authoritative under the `memory` backend.
 - Added `make audit-anchor-export`, `make audit-anchor-monitor-install`, and `make metrics-targets` so operators can use the new R12 artifacts without memorizing script paths.
 - Extended `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`, `docs/PRODUCTION_DEPLOYMENT_ONLINE.md`, and `deploy/production/online.env.example` with the new audit-anchor and metrics-surface guidance.
+
+### Stage R13: Remote Audit Anchor Replication
+
+Goal: move audit anchor evidence one step further out of the app host without introducing a new runtime dependency or changing request/job hot paths.
+
+Files:
+
+- `scripts/ship_audit_anchor.py` (new)
+- `scripts/install_audit_anchor_shipper.sh` (new)
+- `Makefile`
+- `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`
+- `docs/PRODUCTION_DEPLOYMENT_ONLINE.md`
+- `deploy/production/online.env.example`
+- focused script tests
+
+Work:
+
+1. Add a shipper that reads the latest exported host-level audit anchor line and appends it to:
+   - a remote SSH target (`user@host:/path/file.jsonl`), or
+   - a second local restricted path for staged relay flows.
+2. Validate the anchor payload before shipping:
+   - JSON parse must succeed,
+   - required head fields must exist,
+   - do not ship malformed/partial lines.
+3. Add a host timer installer for periodic replication so the remote sink step is operational, not manual.
+4. Keep the shipper append-only and content-minimal:
+   - ship the compact anchor line only,
+   - do not re-export full audit payloads or the full local trail.
+
+Acceptance:
+
+- Operators can replicate the compact anchor file off-host on a timer.
+- The shipper fails closed on malformed local anchor input.
+- No app runtime hot path changes are required.
+
+Status: Completed on 2026-06-10.
+
+Completion notes:
+
+- Added `scripts/ship_audit_anchor.py`, which reads only the latest compact host-level anchor line, validates the required fields, and appends that line to either a remote SSH target or a second local restricted relay path.
+- Added `scripts/install_audit_anchor_shipper.sh`, which installs a 10-minute host timer for periodic off-host anchor replication without involving the app runtime hot path.
+- Added `make audit-anchor-ship` and `make audit-anchor-ship-install` for operator use.
+- Extended production docs and env examples with remote-anchor shipping guidance and target placeholders.
