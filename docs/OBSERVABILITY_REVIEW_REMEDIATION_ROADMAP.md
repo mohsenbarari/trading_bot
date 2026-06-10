@@ -1,6 +1,6 @@
 # Observability Review Remediation Roadmap
 
-Last updated: 2026-06-09
+Last updated: 2026-06-10
 
 Source review file: `tmp/log`
 
@@ -701,3 +701,59 @@ Completion notes:
 - The production deploy flow now installs and verifies the `trading-bot-sync-health-sampler` timer on both foreign and Iran hosts as part of the release path.
 - `docs/OBSERVABILITY_PRODUCTION_HARDENING.md` now includes an explicit external audit-integrity anchor design so local durable trails can be periodically anchored outside the app host.
 - Added focused regressions in `tests/test_audit_logger.py`, `tests/test_logging_foundation.py`, and `tests/test_observability_config.py` covering durable/fallback audit signaling, opaque session correlation, exact-key redaction semantics, and production deploy observability guards.
+
+### Stage R12: Low-Risk Production Readiness Lift
+
+Goal: raise production-readiness on the two remaining architectural gaps without reopening hot-path refactors or replacing the current safe local defaults.
+
+Scope policy:
+
+- do not replace the `memory` metrics backend in request/job hot paths,
+- do not add cross-process SQLite writes back into production traffic,
+- do not redesign audit event generation or log pipelines,
+- instead, add explicit export/anchoring paths around the existing safe runtime behavior.
+
+Files:
+
+- `scripts/export_audit_anchor.py` (new)
+- `scripts/install_audit_anchor_timer.sh` (new)
+- `scripts/render_metrics_targets.py` or equivalent manifest helper (new)
+- `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`
+- `docs/OBSERVABILITY_ALERTS.md`
+- `docs/PRODUCTION_DEPLOYMENT_ONLINE.md`
+- `deploy/production/online.env.example`
+- focused tests for script/config rendering
+
+Work:
+
+1. Implement a real external audit-anchor export path:
+   - read the current durable audit trail head,
+   - emit only compact head metadata (`audit_event_id`, `audit_recorded_at`, `event_hash`, `previous_hash`, host/release identity),
+   - write an append-only exported anchor file or payload suitable for shipping to a foreign restricted sink,
+   - fail closed on malformed or hash-broken local trail input.
+2. Add an operator-installable timer/service for periodic audit-anchor export.
+   - The timer must be separate from the app runtime.
+   - The export destination must be outside the app container write surface.
+3. Define production metrics as explicit separate scrape surfaces instead of pretending API `/metrics` is a full aggregate:
+   - API worker surface,
+   - bot surface,
+   - sync-worker surface.
+4. Add a small manifest/render helper that produces the operator-facing scrape target list and required auth headers for each surface.
+   - This is intentionally a manifest/export step, not an in-process aggregator.
+5. Extend production docs so operators know:
+   - which metrics are authoritative only per-process,
+   - which alerts should stay Loki-backed until multi-surface scraping is deployed,
+   - how audit-anchor export is installed, verified, and monitored.
+
+Acceptance:
+
+- The repo contains a real audit-anchor export script, not only design prose.
+- Operators can install a periodic audit-anchor export without modifying app code paths.
+- Production docs stop at an explicit multi-surface metrics model and do not imply false aggregation.
+- No request/job hot path gets a new blocking metrics write or cross-process lock.
+
+Why this stage is intentionally small:
+
+- It improves audit evidence from "durable local only" to "durable local plus external anchor path".
+- It improves metrics truthfulness from "documented limitation" to "deployable explicit scrape contract".
+- It avoids the high-risk alternative of introducing a new production aggregation backend inside request/job execution paths right before release.
