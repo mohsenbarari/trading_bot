@@ -58,9 +58,9 @@ append_pip_platform_args() {
     esac
 }
 
-IRAN_HOST="87.107.110.68"
+IRAN_HOST="87.107.3.22"
 IRAN_USER="root"
-IRAN_PROJECT_DIR="/root/trading-bot/trading_bot"
+IRAN_PROJECT_DIR="/srv/trading-bot/current"
 
 # ==========================================
 # Helper Functions

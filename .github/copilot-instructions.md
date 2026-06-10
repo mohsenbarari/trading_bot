@@ -7,25 +7,11 @@
 
 ## Architecture Overview
 
-> [!WARNING]
-> **TEMPORARY: SINGLE-SERVER DEVELOPMENT MODE IN EFFECT (IRAN INTERNET OUTAGE)**
-> 
-> Due to internet connectivity issues reaching the Iran server (`87.107.110.68`), the following temporary changes are in effect to prevent development from stopping:
-> 1. **DO NOT DEPLOY TO IRAN:** Do not use `make up` or `make iran`. Instead, ONLY use `make foreign` for deployments to build the frontend and serve it from the German API on port 8000.
-> 2. **CROSS-SERVER SYNC OFF:** `trading_bot_sync_worker` container has been stopped via `docker stop` to prevent log floods and connection timeouts.
-> 3. **MESSENGER ON FOREIGN:** The frontend Messenger (`mini_app_dist`) is fully available and testable locally on the Foreign server at `http://<Foreign_IP>:8000/chat`.
-> 
-> **To Revert when regular internet access resumes:**
-> 1. Remove this warning block from `.github/copilot-instructions.md`.
-> 2. Revert `deploy.sh`: Remove the `build_frontend` line from the `foreign)` case if you don't want the frontend to automatically build on foreign-only deployments.
-> 3. Run full deploy: `make up`.
-> 4. `make up` now auto-starts both `sync_worker` services and runs the cross-server recovery pass. Use `make sync-recover` only as a manual fallback if that automatic phase is interrupted.
-
 ### Two-Server Deployment
 | Server | Location | Services | Domain |
 |---|---|---|---|
 | **Foreign** | Germany (current machine) | Bot + API + Sync Worker + DB + Redis | — |
-| **Iran** | 87.107.110.68 | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
+| **Iran** | 87.107.3.22 | API + Nginx + Frontend (no bot) | `coin.gold-trade.ir` |
 
 ### Tech Stack
 - **Backend**: FastAPI 0.111 + SQLAlchemy 2.0 (async, asyncpg) + PostgreSQL 15 + Redis 7
@@ -1224,6 +1210,7 @@ make status      # Container status
 | 2026-06-10 00:39 UTC | Codex | **Observability Stage R12 Completed**: Implemented `scripts/export_audit_anchor.py` to verify the full durable audit hash chain and export only compact head metadata suitable for external anchoring, plus `scripts/install_audit_anchor_timer.sh` to append those anchors on a 5-minute host timer outside the app container write surface. Added `scripts/render_metrics_targets.py` and matching `make` targets so operators can render the explicit metrics-surface contract that keeps API scrapeability separate from `bot` / `sync_worker` log-authoritative telemetry under the `memory` backend. Updated `docs/OBSERVABILITY_REVIEW_REMEDIATION_ROADMAP.md`, `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`, `docs/PRODUCTION_DEPLOYMENT_ONLINE.md`, and `deploy/production/online.env.example`, and added focused regressions in `tests/test_audit_anchor_export.py` and `tests/test_metrics_targets_render.py`. |
 | 2026-06-10 01:02 UTC | Codex | **Observability Stage R13 Completed**: Added `scripts/ship_audit_anchor.py` to read only the latest compact host-level audit anchor line, validate required fields, and append it to either a restricted remote SSH target or a second local relay path. Added `scripts/install_audit_anchor_shipper.sh` plus `make audit-anchor-ship` / `make audit-anchor-ship-install` so operators can replicate anchors off-host every 10 minutes without touching request/job hot paths. Updated the remediation roadmap, production hardening guide, deployment guide, and `deploy/production/online.env.example`, and added focused regressions in `tests/test_audit_anchor_ship.py`. |
 | 2026-06-10 01:24 UTC | Codex | **Sync Router Cleanup Pass Completed**: Replaced the remaining raw sync-router logs for missing `trading_settings.key`, foreign-key deferrals, notification unread-count refresh failures, mandatory channel rollout refresh failures, deferred-item failures, sequence-fix warnings, and empty offer-publish results with structured `event`/metadata payloads. Also replaced the outer `receive_sync_data` 500 response detail with a generic message so raw exception text no longer escapes to the client. Added regressions in `tests/test_sync_router_remaining_paths.py` covering missing trading-setting keys and commit-failure handling, then revalidated with focused unittest coverage and `py_compile`. |
+| 2026-06-10 02:10 UTC | Codex | **Iran Production Host Alignment Updated**: Removed the stale single-server warning from `.github/copilot-instructions.md`, updated the live Iran host reference from `87.107.110.68` to `87.107.3.22` across `Makefile`, `deploy.sh`, `main.py`, `scripts/recover_cross_server_sync.sh`, and `scripts/sample_sync_health.py`, aligned `deploy/production/online.env.example` with the current `coin.362514.ir` and `coin.gold-trade.ir` domains, and continued hardening `scripts/production_deploy_online.sh` for clean-container bootstrap downloads, safe Docker package cleanup, Grafana alert env compatibility, and `docker-compose`-only Iran hosts. |
 | 2026-06-09 16:59 UTC | Codex | **Observability Stage R8 Access and Metrics Sanitization Completed**: Removed the host-name fallback from `/api/sync/health` loopback detection so only the direct client peer can qualify as loopback, and changed request metrics recording to use the same sanitized safe path/route as access logs. Added focused regressions for spoofed loopback host headers and for matched/unmatched sensitive routes staying redacted in Prometheus route labels. |
 | 2026-06-09 17:12 UTC | Codex | **Observability Stage R9 Raw Payload and Sentry Gate Cleanup Completed**: Replaced the last manual-resync warning that logged `response.text[:200]` with a structured peer-response summary in `api/routers/sync.py`, and removed the stale `os.environ.get("ERROR_TRACKING_DSN")` pre-check from `core/logging_config.py` so Sentry initialization depends solely on `settings.error_tracking_dsn`. Added focused regressions for raw-body-free resync warnings and Sentry init from settings-only configuration. |
 | 2026-06-09 17:26 UTC | Codex | **Observability Stage R10 Metrics Architecture and Repeat-Key Stability Completed**: Reworked `RepeatedErrorLogger` so suppression keys are derived from job name plus stable exception fingerprints instead of raw exception messages, added `repeat_key` to emitted job-error payloads, and locked the behavior with a regression proving different incidental values from the same failure site still collapse into one suppression stream. Also updated `docs/OBSERVABILITY_PRODUCTION_HARDENING.md` with an explicit production metrics architecture section clarifying that the current `memory` backend is per-worker/per-process telemetry and not a full-system production aggregate. |
