@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_runtime_envs.py"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -1004,75 +1005,39 @@ ensure_runtime_env_file() {
     prompt_value grafana_alert_webhook_url "GRAFANA_ALERT_WEBHOOK_URL"
     prompt_value grafana_alert_email_addresses "GRAFANA_ALERT_EMAIL_ADDRESSES"
 
-    cat > "$local_env_path" <<EOF
-SERVER_MODE=foreign
-BOT_TOKEN=$bot_token
-BOT_USERNAME=$bot_username
-DATABASE_URL=$database_url
-SYNC_DATABASE_URL=$sync_database_url
-POSTGRES_DB=$postgres_db
-POSTGRES_USER=$postgres_user
-POSTGRES_PASSWORD=$postgres_password
-FRONTEND_URL=$FOREIGN_FRONTEND_URL
-REDIS_URL=$redis_url
-JWT_SECRET_KEY=$jwt_secret_key
-DEV_API_KEY=$dev_api_key
-SYNC_API_KEY=$sync_api_key
-OBSERVABILITY_API_KEY=$observability_api_key
-CHANNEL_ID=$channel_id
-CHANNEL_INVITE_LINK=$channel_invite_link
-SMSIR_API_KEY=$smsir_api_key
-SMSIR_LINE_NUMBER=$smsir_line_number
-ERROR_TRACKING_DSN=$error_tracking_dsn
-TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs
-OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$observability_telegram_user_hash_salt
-GRAFANA_ALERT_DEFAULT_RECEIVER=$grafana_alert_default_receiver
-GRAFANA_ALERT_CRITICAL_RECEIVER=$grafana_alert_critical_receiver
-GRAFANA_ALERT_WARNING_RECEIVER=$grafana_alert_warning_receiver
-GRAFANA_ALERT_WEBHOOK_URL=$grafana_alert_webhook_url
-GRAFANA_ALERT_EMAIL_ADDRESSES=$grafana_alert_email_addresses
-TRADING_BOT_METRICS_BACKEND=memory
-AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl
-FOREIGN_SERVER_URL=$FOREIGN_SERVER_URL
-FOREIGN_SERVER_DOMAIN=$FOREIGN_SERVER_DOMAIN
-IRAN_SERVER_URL=$IRAN_SERVER_URL
-IRAN_SERVER_DOMAIN=$IRAN_SERVER_DOMAIN
-EOF
-
-    cat > "$IRAN_ENV_SOURCE_PATH" <<EOF
-SERVER_MODE=iran
-BOT_TOKEN=$bot_token
-BOT_USERNAME=$bot_username
-DATABASE_URL=$database_url
-SYNC_DATABASE_URL=$sync_database_url
-POSTGRES_DB=$postgres_db
-POSTGRES_USER=$postgres_user
-POSTGRES_PASSWORD=$postgres_password
-FRONTEND_URL=$IRAN_FRONTEND_URL
-REDIS_URL=$redis_url
-JWT_SECRET_KEY=$jwt_secret_key
-DEV_API_KEY=$dev_api_key
-SYNC_API_KEY=$sync_api_key
-OBSERVABILITY_API_KEY=$observability_api_key
-CHANNEL_ID=$channel_id
-CHANNEL_INVITE_LINK=$channel_invite_link
-SMSIR_API_KEY=$smsir_api_key
-SMSIR_LINE_NUMBER=$smsir_line_number
-ERROR_TRACKING_DSN=$error_tracking_dsn
-TRUSTED_PROXY_CIDRS=$trusted_proxy_cidrs
-OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$observability_telegram_user_hash_salt
-GRAFANA_ALERT_DEFAULT_RECEIVER=$grafana_alert_default_receiver
-GRAFANA_ALERT_CRITICAL_RECEIVER=$grafana_alert_critical_receiver
-GRAFANA_ALERT_WARNING_RECEIVER=$grafana_alert_warning_receiver
-GRAFANA_ALERT_WEBHOOK_URL=$grafana_alert_webhook_url
-GRAFANA_ALERT_EMAIL_ADDRESSES=$grafana_alert_email_addresses
-TRADING_BOT_METRICS_BACKEND=memory
-AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl
-FOREIGN_SERVER_URL=$FOREIGN_SERVER_URL
-FOREIGN_SERVER_DOMAIN=$FOREIGN_SERVER_DOMAIN
-IRAN_SERVER_URL=$IRAN_SERVER_URL
-IRAN_SERVER_DOMAIN=$IRAN_SERVER_DOMAIN
-EOF
+    BOT_TOKEN="$bot_token" \
+    BOT_USERNAME="$bot_username" \
+    DATABASE_URL="$database_url" \
+    SYNC_DATABASE_URL="$sync_database_url" \
+    POSTGRES_DB="$postgres_db" \
+    POSTGRES_USER="$postgres_user" \
+    POSTGRES_PASSWORD="$postgres_password" \
+    REDIS_URL="$redis_url" \
+    JWT_SECRET_KEY="$jwt_secret_key" \
+    DEV_API_KEY="$dev_api_key" \
+    SYNC_API_KEY="$sync_api_key" \
+    OBSERVABILITY_API_KEY="$observability_api_key" \
+    CHANNEL_ID="$channel_id" \
+    CHANNEL_INVITE_LINK="$channel_invite_link" \
+    SMSIR_API_KEY="$smsir_api_key" \
+    SMSIR_LINE_NUMBER="$smsir_line_number" \
+    ERROR_TRACKING_DSN="$error_tracking_dsn" \
+    TRUSTED_PROXY_CIDRS="$trusted_proxy_cidrs" \
+    OBSERVABILITY_TELEGRAM_USER_HASH_SALT="$observability_telegram_user_hash_salt" \
+    GRAFANA_ALERT_DEFAULT_RECEIVER="$grafana_alert_default_receiver" \
+    GRAFANA_ALERT_CRITICAL_RECEIVER="$grafana_alert_critical_receiver" \
+    GRAFANA_ALERT_WARNING_RECEIVER="$grafana_alert_warning_receiver" \
+    GRAFANA_ALERT_WEBHOOK_URL="$grafana_alert_webhook_url" \
+    GRAFANA_ALERT_EMAIL_ADDRESSES="$grafana_alert_email_addresses" \
+    python3 "$RUNTIME_ENV_RENDERER" \
+        --local-output "$local_env_path" \
+        --iran-output "$IRAN_ENV_SOURCE_PATH" \
+        --foreign-frontend-url "$FOREIGN_FRONTEND_URL" \
+        --iran-frontend-url "$IRAN_FRONTEND_URL" \
+        --foreign-server-url "$FOREIGN_SERVER_URL" \
+        --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
+        --iran-server-url "$IRAN_SERVER_URL" \
+        --iran-server-domain "$IRAN_SERVER_DOMAIN"
 
     chmod 600 "$local_env_path" || true
     chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
