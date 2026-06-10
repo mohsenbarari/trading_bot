@@ -115,6 +115,18 @@ Exit criteria:
 
 - Operator edits one manifest and the release helpers derive the rest.
 
+Status:
+
+- Completed for the current release path.
+- `scripts/render_runtime_envs.py` generates the foreign and Iran runtime env files from prompted secret inputs plus manifest-derived network identity.
+- `scripts/render_release_artifacts.py` generates:
+  - `hosts.block`
+  - `iran-online-nginx.conf`
+  - `healthcheck.json`
+  - `release-values.json`
+- `scripts/production_deploy_online.sh` now calls these renderers instead of maintaining duplicated shell heredocs or direct sed/hosts rendering.
+- The renderer validates the main contradictory deploy values before artifact use, including IP validity, bare-domain fields, server URL/domain agreement, public healthcheck target, and distinct foreign/Iran public IPs.
+
 ## Stage C5 — Hardcode Guardrail
 
 Add a focused regression gate that fails when new Iran/foreign deployment identities leak back into runtime code.
@@ -138,11 +150,10 @@ Exit criteria:
 4. Stage C4
 5. Stage C5
 
-## Current Turn Scope
+## Current Status
 
-This turn should implement:
-
-- Stage C1
-- Stage C2
-
-Stage C3+ stay separate because they touch more operator workflows and deserve isolated verification.
+- Stage C1: Complete
+- Stage C2: Complete
+- Stage C3: Complete
+- Stage C4: Complete for the current release path
+- Stage C5: Remaining
