@@ -11,6 +11,7 @@ IRAN_DIR ?= $(shell python3 scripts/deploy_config.py --key IRAN_PROJECT_DIR 2>/d
 IRAN_HOST_DISPLAY ?= $(shell python3 scripts/deploy_config.py --key IRAN_HOST 2>/dev/null)
 IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>/dev/null)
 SSH_IRAN_OPTS = -o StrictHostKeyChecking=no -p $(IRAN_SSH_PORT)
+IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 
 .PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
 
@@ -119,7 +120,7 @@ sync-health:
 	@docker compose exec -T app python -c "import os, urllib.request; req = urllib.request.Request('http://127.0.0.1:8000/api/sync/health', headers={'X-Observability-Api-Key': os.environ.get('OBSERVABILITY_API_KEY', '')}); print(urllib.request.urlopen(req, timeout=15).read().decode())"
 
 sync-health-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml exec -T app python -c "import os, urllib.request; req = urllib.request.Request(\"http://127.0.0.1:8000/api/sync/health\", headers={\"X-Observability-Api-Key\": os.environ.get(\"OBSERVABILITY_API_KEY\", \"\")}); print(urllib.request.urlopen(req, timeout=15).read().decode())"'
+	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml exec -T app python -c "import os, urllib.request; req = urllib.request.Request(\"http://127.0.0.1:8000/api/sync/health\", headers={\"X-Observability-Api-Key\": os.environ.get(\"OBSERVABILITY_API_KEY\", \"\")}); print(urllib.request.urlopen(req, timeout=15).read().decode())"'
 
 sync-health-sample:
 	@python3 scripts/sample_sync_health.py $${ARGS}
@@ -214,13 +215,13 @@ metrics:
 	@curl -fsS http://127.0.0.1:8000/metrics
 
 logs-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml logs -f --tail=50'
+	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml logs -f --tail=50'
 
 restart:
 	@docker compose restart
 
 restart-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml restart'
+	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml restart'
 
 status:
 	@echo ""
@@ -228,7 +229,7 @@ status:
 	@docker compose ps
 	@echo ""
 	@echo "🇮🇷 Iran Server ($(IRAN_HOST_DISPLAY)):"
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && docker compose -f docker-compose.iran.yml ps'
+	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml ps'
 
 observability-up:
 	@docker compose -f docker-compose.observability.yml up -d
