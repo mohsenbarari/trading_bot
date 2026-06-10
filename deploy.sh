@@ -13,6 +13,7 @@ FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
 TIMEZONE_SCRIPT="$PROJECT_DIR/scripts/ensure_host_timezone.sh"
 SYNC_RECOVERY_SCRIPT="$PROJECT_DIR/scripts/recover_cross_server_sync.sh"
+DEPLOY_CONFIG_SCRIPT="$PROJECT_DIR/scripts/deploy_config.py"
 FOREIGN_HOST_TIMEZONE="${FOREIGN_HOST_TIMEZONE:-UTC}"
 IRAN_HOST_TIMEZONE="${IRAN_HOST_TIMEZONE:-UTC}"
 AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY="${AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY:-1}"
@@ -58,19 +59,37 @@ append_pip_platform_args() {
     esac
 }
 
-IRAN_HOST="87.107.3.22"
-IRAN_USER="root"
-IRAN_PROJECT_DIR="/srv/trading-bot/current"
+IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
+IRAN_USER="${IRAN_USER:-root}"
+IRAN_SSH_PORT="${IRAN_SSH_PORT:-22}"
+IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-/srv/trading-bot/current}"
+
+load_shared_deploy_surface() {
+    if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
+        local shell_exports
+        shell_exports="$(python3 "$DEPLOY_CONFIG_SCRIPT" --format shell 2>/dev/null || true)"
+        if [[ -n "$shell_exports" ]]; then
+            # shellcheck disable=SC1090
+            eval "$shell_exports"
+            IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
+            IRAN_USER="${IRAN_SSH_USER:-${IRAN_USER:-root}}"
+            IRAN_SSH_PORT="${IRAN_SSH_PORT:-22}"
+            IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-${IRAN_DIR:-/srv/trading-bot/current}}"
+        fi
+    fi
+}
+
+load_shared_deploy_surface
 
 # ==========================================
 # Helper Functions
 # ==========================================
 ssh_iran() {
-    ssh -o StrictHostKeyChecking=no "$IRAN_USER@$IRAN_HOST" "$@"
+    ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" "$@"
 }
 
 scp_iran() {
-    scp -r -o StrictHostKeyChecking=no "$@"
+    scp -r -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no "$@"
 }
 
 ensure_local_host_timezone() {

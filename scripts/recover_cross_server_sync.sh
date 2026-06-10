@@ -2,14 +2,30 @@
 set -euo pipefail
 
 PROJECT_DIR="/root/trading-bot/trading_bot"
+DEPLOY_CONFIG_SCRIPT="$PROJECT_DIR/scripts/deploy_config.py"
 LOCAL_API_URL="${LOCAL_API_URL:-http://127.0.0.1:8000}"
 IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
 IRAN_USER="${IRAN_USER:-root}"
+IRAN_SSH_PORT="${IRAN_SSH_PORT:-22}"
 IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-/srv/trading-bot/current}"
 IRAN_API_URL="${IRAN_API_URL:-http://127.0.0.1:8000}"
 SYNC_LIMIT="${SYNC_LIMIT:-200}"
 SYNC_MAX_ROUNDS="${SYNC_MAX_ROUNDS:-20}"
 TABLES=(users commodities commodity_aliases trading_settings offers trades user_blocks)
+
+load_shared_deploy_surface() {
+    if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
+        local shell_exports
+        shell_exports="$(python3 "$DEPLOY_CONFIG_SCRIPT" --format shell 2>/dev/null || true)"
+        if [[ -n "$shell_exports" ]]; then
+            eval "$shell_exports"
+            IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
+            IRAN_USER="${IRAN_SSH_USER:-${IRAN_USER:-root}}"
+            IRAN_SSH_PORT="${IRAN_SSH_PORT:-22}"
+            IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-${IRAN_DIR:-/srv/trading-bot/current}}"
+        fi
+    fi
+}
 
 print_header() {
     echo ""
@@ -47,7 +63,7 @@ wait_for_local_api() {
 
 wait_for_iran_api() {
     for _ in $(seq 1 30); do
-        if ssh -o StrictHostKeyChecking=no "$IRAN_USER@$IRAN_HOST" "curl -fsS '$IRAN_API_URL/api/config' >/dev/null" 2>/dev/null; then
+        if ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" "curl -fsS '$IRAN_API_URL/api/config' >/dev/null" 2>/dev/null; then
             return 0
         fi
         sleep 4
@@ -62,7 +78,7 @@ start_sync_workers() {
         cd "$PROJECT_DIR"
         docker compose up -d sync_worker >/dev/null
     )
-    ssh -o StrictHostKeyChecking=no "$IRAN_USER@$IRAN_HOST" \
+    ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
         "cd '$IRAN_PROJECT_DIR' && docker compose -f docker-compose.iran.yml up -d sync_worker >/dev/null"
 }
 
@@ -82,7 +98,7 @@ resync_local_table() {
 
 resync_iran_table() {
     local table="$1"
-    ssh -o StrictHostKeyChecking=no "$IRAN_USER@$IRAN_HOST" \
+    ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
         "curl -fsS -X POST '$IRAN_API_URL/api/sync/resync?limit=$SYNC_LIMIT&table_filter=$table' -H 'X-Dev-Api-Key: $IRAN_DEV_API_KEY'"
 }
 
@@ -134,6 +150,7 @@ drain_direction() {
 }
 
 main() {
+    load_shared_deploy_surface
     ensure_local_env
 
     print_header "Waiting for APIs"

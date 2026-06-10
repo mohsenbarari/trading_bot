@@ -13,17 +13,21 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from deploy_config import resolve_deploy_settings
+
 
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 
 
 def parse_args() -> argparse.Namespace:
+    defaults = resolve_deploy_settings()
     parser = argparse.ArgumentParser(description="Sample local and Iran sync-health endpoints.")
     parser.add_argument("--env-file", default=".env", help="Local env file path.")
     parser.add_argument("--local-url", default="http://127.0.0.1:8000/api/sync/health", help="Local sync-health URL.")
     parser.add_argument("--iran-url", default="http://127.0.0.1:8000/api/sync/health", help="Iran sync-health URL executed over SSH.")
-    parser.add_argument("--iran-host", default=os.getenv("IRAN_HOST", "root@87.107.3.22"), help="Iran SSH target.")
-    parser.add_argument("--iran-dir", default=os.getenv("IRAN_DIR", "/srv/trading-bot/current"), help="Iran repo directory.")
+    parser.add_argument("--iran-host", default=os.getenv("IRAN_SSH_TARGET", defaults["IRAN_SSH_TARGET"]), help="Iran SSH target.")
+    parser.add_argument("--iran-dir", default=os.getenv("IRAN_DIR", defaults["IRAN_DIR"]), help="Iran repo directory.")
+    parser.add_argument("--iran-port", default=os.getenv("IRAN_SSH_PORT", defaults["IRAN_SSH_PORT"]), help="Iran SSH port.")
     parser.add_argument("--ssh-option", action="append", default=["StrictHostKeyChecking=no"], help="Additional ssh -o options.")
     parser.add_argument("--skip-iran", action="store_true", help="Only sample the local host.")
     return parser.parse_args()
@@ -53,7 +57,7 @@ def fetch_sync_health(url: str, api_key: str) -> dict:
 
 
 def build_iran_ssh_command(args: argparse.Namespace) -> list[str]:
-    ssh_cmd = ["ssh"]
+    ssh_cmd = ["ssh", "-p", str(args.iran_port)]
     for option in args.ssh_option:
         ssh_cmd.extend(["-o", option])
     remote = (
