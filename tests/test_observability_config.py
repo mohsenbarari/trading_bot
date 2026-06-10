@@ -148,6 +148,29 @@ class ObservabilityConfigTests(unittest.TestCase):
         ):
             self.assertIn(expected, script)
 
+    def test_iran_operator_commands_support_docker_compose_v1_fallback(self):
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        recover_script = (ROOT / "scripts/recover_cross_server_sync.sh").read_text(encoding="utf-8")
+
+        self.assertIn("IRAN_REMOTE_COMPOSE", makefile)
+        self.assertIn('command -v docker-compose', makefile)
+        for target in ("sync-health-iran:", "logs-iran:", "restart-iran:", "status:"):
+            target_match = re.search(rf"(?m)^{re.escape(target)}$", makefile)
+            self.assertIsNotNone(target_match)
+            target_index = target_match.start()
+            next_target_index = makefile.find("\n\n", target_index)
+            target_body = makefile[target_index : next_target_index if next_target_index != -1 else None]
+            self.assertIn("IRAN_REMOTE_COMPOSE", target_body)
+            self.assertIn("$$compose_cmd -f docker-compose.iran.yml", target_body)
+
+        self.assertIn("local_compose_cmd()", recover_script)
+        self.assertIn("command -v docker-compose", recover_script)
+        self.assertIn("$compose_cmd -f docker-compose.iran.yml up -d sync_worker", recover_script)
+        self.assertIn("read_env_value()", recover_script)
+        self.assertNotIn("source \"$PROJECT_DIR/.env\"", recover_script)
+        for expected_table in ("chat_members", "market_runtime_state", "admin_market_messages"):
+            self.assertIn(expected_table, recover_script)
+
     def test_production_docs_and_examples_include_audit_anchor_and_runtime_env_requirements(self):
         hardening = (ROOT / "docs/OBSERVABILITY_PRODUCTION_HARDENING.md").read_text(encoding="utf-8")
         manifest_example = (ROOT / "deploy/production/online.env.example").read_text(encoding="utf-8")

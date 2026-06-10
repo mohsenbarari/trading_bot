@@ -11,7 +11,25 @@ IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-}"
 IRAN_API_URL="${IRAN_API_URL:-http://127.0.0.1:8000}"
 SYNC_LIMIT="${SYNC_LIMIT:-200}"
 SYNC_MAX_ROUNDS="${SYNC_MAX_ROUNDS:-20}"
-TABLES=(users commodities commodity_aliases trading_settings offers trades user_blocks)
+TABLES=(
+    users
+    accountant_relations
+    customer_relations
+    chats
+    chat_members
+    invitations
+    admin_market_messages
+    admin_broadcast_messages
+    notifications
+    user_blocks
+    commodities
+    commodity_aliases
+    trading_settings
+    market_schedule_overrides
+    market_runtime_state
+    offers
+    trades
+)
 
 load_shared_deploy_surface() {
     if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
@@ -39,10 +57,8 @@ print_header() {
 
 ensure_local_env() {
     if [[ -f "$PROJECT_DIR/.env" ]]; then
-        set -a
-        # shellcheck disable=SC1091
-        source "$PROJECT_DIR/.env"
-        set +a
+        DEV_API_KEY="${DEV_API_KEY:-$(read_env_value "$PROJECT_DIR/.env" DEV_API_KEY)}"
+        IRAN_DEV_API_KEY="${IRAN_DEV_API_KEY:-$(read_env_value "$PROJECT_DIR/.env" IRAN_DEV_API_KEY)}"
     fi
 
     if [[ -z "${DEV_API_KEY:-}" ]]; then
@@ -51,6 +67,29 @@ ensure_local_env() {
     fi
 
     IRAN_DEV_API_KEY="${IRAN_DEV_API_KEY:-$DEV_API_KEY}"
+}
+
+read_env_value() {
+    local env_file="$1"
+    local wanted_key="$2"
+    python3 - "$env_file" "$wanted_key" <<'PY'
+import sys
+from pathlib import Path
+
+env_file = Path(sys.argv[1])
+wanted_key = sys.argv[2]
+if not env_file.exists():
+    raise SystemExit(0)
+
+for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    if key.strip() == wanted_key:
+        print(value.strip().strip('"').strip("'"))
+        break
+PY
 }
 
 wait_for_local_api() {
@@ -75,14 +114,26 @@ wait_for_iran_api() {
     exit 1
 }
 
+local_compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        printf 'docker compose\n'
+    elif command -v docker-compose >/dev/null 2>&1; then
+        printf 'docker-compose\n'
+    else
+        echo "❌ No Docker Compose command is available on the foreign host"
+        exit 1
+    fi
+}
+
 start_sync_workers() {
     print_header "Starting sync workers"
     (
         cd "$PROJECT_DIR"
-        docker compose up -d sync_worker >/dev/null
+        compose_cmd="$(local_compose_cmd)"
+        $compose_cmd up -d sync_worker >/dev/null
     )
     ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
-        "cd '$IRAN_PROJECT_DIR' && docker compose -f docker-compose.iran.yml up -d sync_worker >/dev/null"
+        "cd '$IRAN_PROJECT_DIR' && if docker compose version >/dev/null 2>&1; then compose_cmd='docker compose'; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd='docker-compose'; else echo 'No Docker Compose command is available on the Iran host.' >&2; exit 1; fi; \$compose_cmd -f docker-compose.iran.yml up -d sync_worker >/dev/null"
 }
 
 parse_processed() {
