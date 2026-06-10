@@ -34,13 +34,15 @@ class ServerRoutingTests(unittest.TestCase):
     def test_server_from_request_prefers_forwarded_host_and_telegram_override(self):
         request = SimpleNamespace(headers={"x-forwarded-host": "coin.gold-trade.ir:443", "host": "coin.362514.ir"})
 
-        self.assertEqual(server_routing.server_from_request(request), server_routing.SERVER_IRAN)
-        self.assertEqual(
-            server_routing.server_from_request(request, force_telegram_foreign=True),
-            server_routing.SERVER_FOREIGN,
-        )
+        with patch.object(server_routing.settings, "iran_server_aliases", "coin.gold-trade.ir"), \
+             patch.object(server_routing.settings, "foreign_server_aliases", "coin.362514.ir"):
+            self.assertEqual(server_routing.server_from_request(request), server_routing.SERVER_IRAN)
+            self.assertEqual(
+                server_routing.server_from_request(request, force_telegram_foreign=True),
+                server_routing.SERVER_FOREIGN,
+            )
 
-    def test_server_from_request_uses_configured_domains_builtin_hosts_and_current_server_fallback(self):
+    def test_server_from_request_uses_configured_domains_aliases_and_current_server_fallback(self):
         request_iran = SimpleNamespace(headers={"host": "iran.custom.example"})
         request_foreign = SimpleNamespace(headers={"host": "foreign.custom.example"})
         request_builtin_foreign = SimpleNamespace(headers={"host": "coin.362514.ir:8443"})
@@ -48,6 +50,7 @@ class ServerRoutingTests(unittest.TestCase):
 
         with patch.object(server_routing.settings, "iran_server_domain", "iran.custom.example"), \
              patch.object(server_routing.settings, "foreign_server_domain", "foreign.custom.example"), \
+             patch.object(server_routing.settings, "foreign_server_aliases", "coin.362514.ir"), \
              patch.object(server_routing.settings, "server_mode", "IRAN"):
             self.assertEqual(server_routing.server_from_request(request_iran), server_routing.SERVER_IRAN)
             self.assertEqual(server_routing.server_from_request(request_foreign), server_routing.SERVER_FOREIGN)
