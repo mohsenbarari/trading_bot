@@ -38,3 +38,4 @@ map_data/
 
 /tmp/
 .deploy_count
+deploy/production/online.env
