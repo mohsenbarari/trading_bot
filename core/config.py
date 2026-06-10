@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     error_tracking_max_events_per_fingerprint: int = 10
     error_tracking_rate_limit_max_fingerprints: int = 2048
     observability_api_key: str | None = None
+    trading_bot_service: str = "app"
+    trading_bot_metrics_backend: str = "memory"
     audit_trail_path: str | None = None
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
     observability_telegram_user_hash_salt: str | None = None

@@ -149,6 +149,12 @@ class ObservabilityConfigTests(unittest.TestCase):
         self.assertIn("TRUSTED_PROXY_CIDRS", manifest_example)
         self.assertIn("OBSERVABILITY_TELEGRAM_USER_HASH_SALT", manifest_example)
 
+    def test_settings_accept_compose_observability_runtime_keys(self):
+        config = (ROOT / "core/config.py").read_text(encoding="utf-8")
+
+        self.assertIn('trading_bot_service: str = "app"', config)
+        self.assertIn('trading_bot_metrics_backend: str = "memory"', config)
+
 
 if __name__ == "__main__":
     unittest.main()
