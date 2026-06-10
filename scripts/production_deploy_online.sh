@@ -196,10 +196,27 @@ fi
 EOF
 }
 
+remote_docker_service_guard() {
+    cat <<'EOF'
+systemctl daemon-reload || true
+systemctl reset-failed docker.service docker.socket || true
+systemctl enable --now containerd.service || true
+if systemctl list-unit-files docker.socket >/dev/null 2>&1; then
+  systemctl enable --now docker.socket || true
+fi
+systemctl enable docker.service || true
+if ! systemctl start docker.service; then
+  systemctl restart docker.socket || true
+  systemctl start docker.service
+fi
+docker info >/dev/null
+EOF
+}
+
 remote_docker_cleanup_guard() {
     cat <<'EOF'
 docker_cleanup_packages=""
-for pkg in containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin docker.io containerd runc; do
+for pkg in containerd.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin; do
   if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then
     docker_cleanup_packages="$docker_cleanup_packages $pkg"
   fi
@@ -768,6 +785,8 @@ bootstrap_iran() {
     post_bootstrap_guard="$(remote_post_bootstrap_guard)"
     local docker_cleanup_guard
     docker_cleanup_guard="$(remote_docker_cleanup_guard)"
+    local docker_service_guard
+    docker_service_guard="$(remote_docker_service_guard)"
     ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$IRAN_PROJECT_DIR'"
     if [[ "$IRAN_APT_BUNDLE_MODE" == "same-arch" ]]; then
         prepare_iran_package_bundle
@@ -784,7 +803,7 @@ if ! apt-get install -y --no-download \"\$package_dir\"/*.deb; then
   apt-get -o Acquire::Retries=5 update
   apt-get -o Acquire::Retries=5 install -y --fix-missing \"\$package_dir\"/*.deb
 fi
-systemctl enable --now docker
+$docker_service_guard
 systemctl enable --now nginx
 python3 -m pip --version >/dev/null 2>&1 || true
 timedatectl set-timezone 'UTC' || true
@@ -800,7 +819,7 @@ set -euo pipefail
 apt-get -o Acquire::Retries=5 update
 $docker_cleanup_guard
 apt-get -o Acquire::Retries=5 install -y --fix-missing $IRAN_BOOTSTRAP_APT_PACKAGES
-systemctl enable --now docker
+$docker_service_guard
 systemctl enable --now nginx
 python3 -m pip --version >/dev/null 2>&1 || true
 timedatectl set-timezone 'UTC' || true
