@@ -15,6 +15,22 @@ DEFAULTS = {
     "IRAN_PROJECT_DIR": "/srv/trading-bot/current",
 }
 
+MANIFEST_KEYS = (
+    "FOREIGN_PUBLIC_IP",
+    "FOREIGN_PUBLIC_DOMAIN",
+    "FOREIGN_SERVER_URL",
+    "FOREIGN_SERVER_DOMAIN",
+    "IRAN_PUBLIC_IP",
+    "IRAN_PUBLIC_DOMAIN",
+    "IRAN_APP_DOMAIN",
+    "IRAN_SERVER_URL",
+    "IRAN_SERVER_DOMAIN",
+    "IRAN_FRONTEND_URL",
+    "FOREIGN_FRONTEND_URL",
+    "IRAN_HEALTHCHECK_URL",
+    "IRAN_CERTBOT_EMAIL",
+)
+
 
 def parse_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
@@ -43,6 +59,10 @@ def resolve_deploy_settings(
     for key, default in DEFAULTS.items():
         resolved[key] = env.get(key) or file_values.get(key) or default
 
+    for key in MANIFEST_KEYS:
+        if env.get(key) or file_values.get(key):
+            resolved[key] = env.get(key) or file_values.get(key) or ""
+
     resolved["IRAN_PROJECT_DIR"] = (
         env.get("IRAN_PROJECT_DIR")
         or file_values.get("IRAN_PROJECT_DIR")
@@ -51,6 +71,8 @@ def resolve_deploy_settings(
         or DEFAULTS["IRAN_PROJECT_DIR"]
     )
     resolved["IRAN_DIR"] = resolved["IRAN_PROJECT_DIR"]
+    resolved.setdefault("IRAN_APP_DOMAIN", "")
+    resolved.setdefault("IRAN_CERTBOT_EMAIL", "")
     resolved["IRAN_SSH_TARGET"] = f"{resolved['IRAN_SSH_USER']}@{resolved['IRAN_HOST']}"
     resolved["IRAN_HOST_DISPLAY"] = resolved["IRAN_HOST"]
     resolved["DEPLOY_MANIFEST"] = str(path)
