@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.render_runtime_envs import build_runtime_env, main as render_runtime_envs_main
+from scripts.render_runtime_envs import build_runtime_env, collect_runtime_values, main as render_runtime_envs_main
 
 
 class RenderRuntimeEnvsTests(unittest.TestCase):
@@ -105,6 +105,30 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)
             self.assertIn("FOREIGN_SERVER_URL=https://coin.362514.ir", iran_lines)
+
+    def test_collect_runtime_values_reads_non_shell_safe_source_env_and_allows_overrides(self):
+        values = self.sample_values()
+        values.pop("CHANNEL_INVITE_LINK")
+        values.pop("ERROR_TRACKING_DSN")
+        values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
+        values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
+        values["GRAFANA_ALERT_WARNING_RECEIVER"] = "Trading Bot Production Email"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source_path = Path(tmpdir) / "runtime.env"
+            source_path.write_text(
+                "\n".join(f"{key}={value}" for key, value in values.items()) + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"GRAFANA_ALERT_WEBHOOK_URL": "https://override.example/alerts"}, clear=True):
+                collected = collect_runtime_values(str(source_path))
+
+        self.assertEqual(collected["CHANNEL_INVITE_LINK"], "")
+        self.assertEqual(collected["ERROR_TRACKING_DSN"], "")
+        self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
+        self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
+        self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")
 
 
 if __name__ == "__main__":
