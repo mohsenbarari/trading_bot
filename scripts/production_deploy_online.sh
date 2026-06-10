@@ -593,10 +593,65 @@ ensure_local_tools() {
     need_cmd sed
 }
 
+local_node_version_ok() {
+    local version major minor
+    command -v node >/dev/null 2>&1 || return 1
+    version="$(node -p 'process.versions.node' 2>/dev/null || true)"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    major="${version%%.*}"
+    minor="${version#*.}"
+    minor="${minor%%.*}"
+
+    if (( major > 22 )); then
+        return 0
+    fi
+    if (( major == 22 && minor >= 12 )); then
+        return 0
+    fi
+    if (( major == 20 && minor >= 19 )); then
+        return 0
+    fi
+    return 1
+}
+
+install_local_node_runtime() {
+    local node_version="${DEPLOY_NODE_VERSION:-22.12.0}"
+    local node_arch install_root archive_url tmp_dir archive_path extracted_dir
+
+    case "$(normalize_arch "$(uname -m)")" in
+        amd64) node_arch="x64" ;;
+        arm64) node_arch="arm64" ;;
+        *) die "Unsupported local Node.js architecture: $(uname -m)" ;;
+    esac
+
+    log "Installing local Node.js $node_version for frontend production builds"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -o Acquire::Retries=5 update
+    apt-get -o Acquire::Retries=5 install -y ca-certificates curl xz-utils
+
+    install_root="/usr/local/lib/nodejs"
+    tmp_dir="$RELEASE_TMP_DIR/nodejs"
+    archive_url="https://nodejs.org/dist/v${node_version}/node-v${node_version}-linux-${node_arch}.tar.xz"
+    archive_path="$tmp_dir/node-v${node_version}-linux-${node_arch}.tar.xz"
+    extracted_dir="$install_root/node-v${node_version}-linux-${node_arch}"
+
+    mkdir -p "$tmp_dir" "$install_root"
+    curl -fsSL "$archive_url" -o "$archive_path"
+    rm -rf "$extracted_dir"
+    tar -xJf "$archive_path" -C "$install_root"
+    ln -sfn "$extracted_dir/bin/node" /usr/local/bin/node
+    ln -sfn "$extracted_dir/bin/npm" /usr/local/bin/npm
+    ln -sfn "$extracted_dir/bin/npx" /usr/local/bin/npx
+    hash -r
+
+    local_node_version_ok || die "Installed Node.js is still too old for the frontend build: $(node --version 2>/dev/null || true)"
+    npm --version >/dev/null 2>&1 || die "npm is unavailable after local Node.js installation"
+}
+
 ensure_local_runtime_packages() {
     local missing_packages=()
     local need_docker=0
-    local need_npm=0
+    local need_node_runtime=0
     local need_pip=0
     local need_buildx=0
 
@@ -613,9 +668,8 @@ ensure_local_runtime_packages() {
         missing_packages+=(docker-buildx-plugin)
     fi
 
-    if ! command -v npm >/dev/null 2>&1; then
-        need_npm=1
-        missing_packages+=(nodejs npm)
+    if ! local_node_version_ok || ! command -v npm >/dev/null 2>&1; then
+        need_node_runtime=1
     fi
 
     if ! python3 -m pip --version >/dev/null 2>&1; then
@@ -633,8 +687,13 @@ ensure_local_runtime_packages() {
         fi
     fi
 
+    if [[ $need_node_runtime -eq 1 ]]; then
+        install_local_node_runtime
+    fi
+
     need_cmd docker
     need_cmd npm
+    local_node_version_ok || die "Node.js $(node --version 2>/dev/null || true) is too old. Frontend build requires Node.js 20.19+ or 22.12+."
     python3 -m pip --version >/dev/null 2>&1 || die "python3-pip is still unavailable after local installation"
     if [[ $need_buildx -eq 1 ]]; then
         docker buildx version >/dev/null 2>&1 || die "docker buildx is still unavailable after local installation"
