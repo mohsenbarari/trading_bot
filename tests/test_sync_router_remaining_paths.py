@@ -7,6 +7,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from api.routers.sync import _apply_item, _build_upsert_stmt, receive_sync_data, resync_from_changelog
@@ -222,6 +223,27 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         result = await _apply_item(ApplyDB(), "users", "UNKNOWN", 1, {}, model=object, new_offers=[])
         self.assertEqual(result, "error")
 
+    async def test_apply_item_logs_missing_trading_setting_key_without_raw_payload(self):
+        db = ApplyDB()
+        model = type("TradingSettingsModel", (), {})
+
+        with patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trading_settings",
+                "INSERT",
+                9,
+                {"name": "hidden", "value": "secret"},
+                model=model,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "error")
+        rendered = repr(logger_mock.warning.call_args)
+        self.assertIn("sync.trading_setting_missing_key", rendered)
+        self.assertNotIn("hidden", rendered)
+        self.assertNotIn("secret", rendered)
+
     async def test_receive_sync_data_covers_notification_failure_unknown_table_and_apply_exception(self):
         db = ReceiveDB()
         items = [
@@ -261,6 +283,22 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
         self.assertEqual(result, {"status": "partial", "processed": 0, "errors": 1})
+
+    async def test_receive_sync_data_returns_generic_detail_on_commit_failure(self):
+        items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"telegram_id": 10}}]
+
+        db = ReceiveDB(fail_commit_on=1)
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch("api.routers.sync.logger") as logger_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(exc_info.exception.status_code, 500)
+        self.assertEqual(exc_info.exception.detail, "Sync batch processing failed")
+        rendered = repr(logger_mock.error.call_args)
+        self.assertIn("sync.receive_batch_error", rendered)
+        self.assertNotIn("publish commit failed", rendered)
 
     async def test_receive_sync_data_tolerates_cache_invalidation_failures(self):
         db = ReceiveDB()
