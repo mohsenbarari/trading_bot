@@ -53,6 +53,12 @@ class FakeAsyncClient:
         return self.response
 
 
+def make_response(status_code=200, text="ok", payload=None):
+    if payload is None:
+        payload = {"status": "success", "processed": 1, "errors": 0}
+    return SimpleNamespace(status_code=status_code, text=text, json=lambda: payload)
+
+
 def make_entry(entry_id, **overrides):
     data = {
         "id": entry_id,
@@ -104,7 +110,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeExecuteResult([entry])])
         calls = []
         client_factory = lambda **kwargs: FakeAsyncClient(
-            response=SimpleNamespace(status_code=200, text="ok"),
+            response=make_response(),
             calls=calls,
             **kwargs,
         )
@@ -226,7 +232,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeExecuteResult([relation_entry, offer_entry, trade_entry])])
         calls = []
         client_factory = lambda **kwargs: FakeAsyncClient(
-            response=SimpleNamespace(status_code=200, text="ok"),
+            response=make_response(payload={"status": "success", "processed": 3, "errors": 0}),
             calls=calls,
             **kwargs,
         )
@@ -283,7 +289,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeExecuteResult([user_entry, relation_entry])])
         calls = []
         client_factory = lambda **kwargs: FakeAsyncClient(
-            response=SimpleNamespace(status_code=200, text="ok"),
+            response=make_response(payload={"status": "success", "processed": 2, "errors": 0}),
             calls=calls,
             **kwargs,
         )

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from api.routers.sync import _apply_item, _build_upsert_stmt, receive_sync_data, resync_from_changelog
+from api.routers.sync import _apply_item, _build_upsert_stmt, _filter_model_columns, receive_sync_data, resync_from_changelog
 
 
 class AsyncNullContext:
@@ -148,6 +148,12 @@ class FakeAsyncClient:
         return self.response
 
 
+def make_response(status_code=200, text="ok", payload=None):
+    if payload is None:
+        payload = {"status": "success", "processed": 1, "errors": 0}
+    return SimpleNamespace(status_code=status_code, text=text, json=lambda: payload)
+
+
 def make_entry(entry_id, **overrides):
     data = {
         "id": entry_id,
@@ -164,6 +170,40 @@ def make_entry(entry_id, **overrides):
 
 
 class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sync_payload_aliases_are_filtered_before_model_upsert(self):
+        model = SimpleNamespace(
+            __table__=SimpleNamespace(
+                columns={
+                    "id": object(),
+                    "mobile_number": object(),
+                    "messenger_grace_expires_at": object(),
+                    "messenger_blocked_at": object(),
+                }
+            )
+        )
+
+        filtered = _filter_model_columns(
+            model,
+            {
+                "id": 49,
+                "mobile_number": "09370809280",
+                "messenger_grace_expires_at": None,
+                "messenger_blocked_at": None,
+                "global_lock_grace_expires_at": None,
+                "global_web_locked_at": None,
+            },
+        )
+
+        self.assertEqual(
+            filtered,
+            {
+                "id": 49,
+                "mobile_number": "09370809280",
+                "messenger_grace_expires_at": None,
+                "messenger_blocked_at": None,
+            },
+        )
+
     async def test_build_upsert_stmt_covers_user_and_default_tables(self):
         builder = FakeInsertBuilder()
         user_model = type("UserModel", (), {"trades_count": "current-trades", "full_name": "current-name"})
@@ -367,7 +407,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         db = ReceiveDB([FakeExecuteResult([bad])])
         calls = []
         client_factory = lambda **kwargs: FakeAsyncClient(
-            response=SimpleNamespace(status_code=200, text="ok"),
+            response=make_response(payload={"status": "success", "processed": 1, "errors": 0}),
             calls=calls,
             **kwargs,
         )
@@ -384,7 +424,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         db = ReceiveDB([FakeExecuteResult([entry])])
         calls = []
         client_factory = lambda **kwargs: FakeAsyncClient(
-            response=SimpleNamespace(status_code=503, text="bad gateway"),
+            response=make_response(status_code=503, text="bad gateway", payload={"status": "error"}),
             calls=calls,
             **kwargs,
         )
@@ -400,6 +440,23 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         rendered_log_call = repr(logger_mock.warning.call_args)
         self.assertNotIn("bad gateway", rendered_log_call)
         self.assertIn("peer_response_sha256", rendered_log_call)
+
+        partial_entry = make_entry(4)
+        db = ReceiveDB([FakeExecuteResult([partial_entry])])
+        calls = []
+        client_factory = lambda **kwargs: FakeAsyncClient(
+            response=make_response(payload={"status": "partial", "processed": 0, "errors": 1}),
+            calls=calls,
+            **kwargs,
+        )
+        with patch("api.routers.sync.settings.dev_api_key", "dev-key"), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://peer.example"
+        ), patch("api.routers.sync.settings.sync_api_key", "secret"), patch(
+            "api.routers.sync.time.time", return_value=1_700_000_111
+        ), patch("httpx.AsyncClient", side_effect=client_factory):
+            result = await resync_from_changelog(request=request, db=db)
+        self.assertEqual(result, {"status": "ok", "processed": 0, "errors": 1, "total_entries": 1})
+        self.assertFalse(partial_entry.synced)
 
 
 if __name__ == "__main__":
