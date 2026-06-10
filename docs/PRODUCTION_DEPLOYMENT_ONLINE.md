@@ -151,6 +151,15 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - optionally retries the public HTTPS endpoint with backoff until it becomes ready
 - verifies that the sync-health sampler timer is installed and active on both foreign and Iran
 
+### 12. Observability post-release operator steps
+- install the audit anchor timer on the foreign host:
+  - `make audit-anchor-monitor-install`
+- verify the compact anchor export path:
+  - default host file: `/var/lib/trading-bot-observability/audit-anchor.jsonl`
+- render the current metrics collection contract for operators:
+  - `make metrics-targets`
+- treat Loki/log-based dashboards and alerts as the authoritative cross-service source until a future dedicated multi-surface metrics exporter exists
+
 ## Known limitations of v1
 
 1. SSL still depends on live internet and ACME reachability from the Iran server.
