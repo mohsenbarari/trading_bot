@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from core.config import settings
+from core.deployment_surface import extract_host, foreign_server_aliases, iran_server_aliases
 
 SERVER_FOREIGN = "foreign"
 SERVER_IRAN = "iran"
@@ -34,7 +35,7 @@ def _host_from_request(request) -> str:
         return ""
     forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("x-original-host")
     host = forwarded_host or request.headers.get("host", "")
-    return host.split(",")[0].split(":")[0].strip().lower()
+    return extract_host(host)
 
 
 def server_from_request(request, *, force_telegram_foreign: bool = False) -> str:
@@ -42,17 +43,9 @@ def server_from_request(request, *, force_telegram_foreign: bool = False) -> str
         return SERVER_FOREIGN
 
     host = _host_from_request(request)
-    iran_domain = (settings.iran_server_domain or "").strip().lower()
-    foreign_domain = (settings.foreign_server_domain or "").strip().lower()
-
-    if iran_domain and host == iran_domain:
+    if host in iran_server_aliases(settings):
         return SERVER_IRAN
-    if foreign_domain and host == foreign_domain:
-        return SERVER_FOREIGN
-
-    if host in {"iran.server.ir", "coin.gold-trade.ir"}:
-        return SERVER_IRAN
-    if host in {"germany.server.com", "mini-app.362514.ir", "coin.362514.ir"}:
+    if host in foreign_server_aliases(settings):
         return SERVER_FOREIGN
 
     return current_server()

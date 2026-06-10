@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     germany_server_url: str | None = None
     foreign_server_domain: str | None = None
     iran_server_domain: str | None = None
+    foreign_server_aliases: str | None = None
+    iran_server_aliases: str | None = None
+    extra_cors_origins: str | None = None
+    sms_public_host: str | None = None
     trade_forward_timeout_seconds: float = 3.0
     trade_forward_grace_seconds: int = 3
     foreign_server_url: str | None = None

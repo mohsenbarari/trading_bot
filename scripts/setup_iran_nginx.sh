@@ -7,9 +7,11 @@
 
 set -e
 
-PROJECT_DIR="/srv/trading-bot/current"
-DIST_DIR="$PROJECT_DIR/mini_app_dist"
-UPLOADS_DIR="$PROJECT_DIR/uploads"
+IRAN_APP_DOMAIN="${IRAN_APP_DOMAIN:-coin.gold-trade.ir}"
+IRAN_CERTBOT_EMAIL="${IRAN_CERTBOT_EMAIL:-mohsenbarari235@gmail.com}"
+PROJECT_DIR="${IRAN_PROJECT_DIR:-/srv/trading-bot/current}"
+DIST_DIR="${IRAN_DIST_DIR:-$PROJECT_DIR/mini_app_dist}"
+UPLOADS_DIR="${IRAN_UPLOADS_DIR:-$PROJECT_DIR/uploads}"
 
 echo "🚀 شروع نصب Nginx و SSL برای سرور ایران..."
 
@@ -25,10 +27,10 @@ mkdir -p "$UPLOADS_DIR"
 
 # 3. ایجاد کانفیگ Nginx
 echo "⚙️ ایجاد کانفیگ Nginx..."
-cat > /etc/nginx/sites-available/trading-bot << 'EOF'
+cat > /etc/nginx/sites-available/trading-bot <<EOF
 server {
     listen 80;
-    server_name coin.gold-trade.ir;
+    server_name ${IRAN_APP_DOMAIN};
     client_max_body_size 50M;
 
     # Security headers
@@ -38,8 +40,8 @@ server {
 
     # Frontend (Vue.js static files)
     location / {
-        root /srv/trading-bot/current/mini_app_dist;
-        try_files $uri $uri/ /index.html;
+        root ${DIST_DIR};
+        try_files \$uri \$uri/ /index.html;
         
         # Cache static assets
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
@@ -51,10 +53,10 @@ server {
     # API proxying to Docker container
     location /api/ {
         proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         
         # WebSocket support
         proxy_http_version 1.1;
@@ -66,10 +68,10 @@ server {
     location /api/realtime/ws {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
         proxy_connect_timeout 7d;
         proxy_send_timeout 7d;
         proxy_read_timeout 7d;
@@ -90,7 +92,7 @@ server {
 
     # Favicon
     location /favicon.ico {
-        root /srv/trading-bot/current/mini_app_dist;
+        root ${DIST_DIR};
         access_log off;
     }
 }
@@ -108,7 +110,7 @@ nginx -t
 # 6. تنظیم مجوزها
 echo "🔧 تنظیم مجوزها..."
 chmod 755 /root
-chmod -R 755 /srv/trading-bot
+chmod -R 755 "$(dirname "$PROJECT_DIR")"
 
 # 7. ریستارت Nginx
 echo "🔄 ریستارت Nginx..."
@@ -117,7 +119,7 @@ systemctl enable nginx
 
 # 8. دریافت SSL
 echo "🔐 دریافت SSL Certificate..."
-certbot --nginx -d coin.gold-trade.ir --non-interactive --agree-tos --email mohsenbarari235@gmail.com --redirect
+certbot --nginx -d "$IRAN_APP_DOMAIN" --non-interactive --agree-tos --email "$IRAN_CERTBOT_EMAIL" --redirect
 
 # 9. تست نهایی
 echo ""
@@ -126,7 +128,7 @@ echo ""
 echo "📋 خلاصه:"
 echo "   • Nginx: نصب شد ✅"
 echo "   • SSL: فعال شد ✅"
-echo "   • Domain: https://coin.gold-trade.ir"
+echo "   • Domain: https://$IRAN_APP_DOMAIN"
 echo ""
 echo "📌 مرحله بعد:"
 echo "   1. پروژه را clone کنید یا فایل‌ها را منتقل کنید"

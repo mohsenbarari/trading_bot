@@ -5,6 +5,7 @@ SMS service using SMS.ir for OTP delivery and invitation notifications.
 import logging
 from sms_ir import SmsIr
 from core.config import settings
+from core.deployment_surface import sms_public_host
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +60,12 @@ def send_sms(mobile: str, message: str) -> bool:
 
 def send_otp_sms(mobile: str, code: str) -> bool:
     """Send OTP code via SMS."""
+    public_host = sms_public_host(settings)
     message = (
         f"کد تایید شما: {code}\n"
         f"این کد تا ۲ دقیقه معتبر است.\n"
         f"\n"
-        f"@coin.gold-trade.ir #{code}"
+        f"@{public_host} #{code}"
     )
     return send_sms(mobile, message)
 
