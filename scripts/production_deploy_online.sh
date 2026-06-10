@@ -11,6 +11,7 @@ COMMAND=""
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io docker-compose python3-pip python3-setuptools python3-wheel"
 LOCAL_HOST_ARCH=""
 LOCAL_DPKG_ARCH=""
+LOCAL_OS_CODENAME=""
 IRAN_HOST_ARCH=""
 IRAN_DPKG_ARCH=""
 IRAN_OS_CODENAME=""
@@ -117,6 +118,7 @@ resolve_local_compose_cmd() {
 detect_runtime_metadata() {
     LOCAL_HOST_ARCH="$(normalize_arch "$(uname -m)")"
     LOCAL_DPKG_ARCH="$(normalize_arch "$(dpkg --print-architecture)")"
+    LOCAL_OS_CODENAME="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-unknown}")"
     resolve_local_compose_cmd
 
     local remote_info
@@ -139,13 +141,13 @@ fi")"
     IRAN_DPKG_ARCH="$(normalize_arch "$IRAN_DPKG_ARCH")"
     [[ "$IRAN_COMPOSE_CMD" != "missing" ]] || IRAN_COMPOSE_CMD=""
     IRAN_IMAGE_PLATFORM="$(docker_platform_for_arch "$IRAN_HOST_ARCH")"
-    if [[ "$LOCAL_DPKG_ARCH" != "$IRAN_DPKG_ARCH" ]]; then
+    if [[ "$LOCAL_DPKG_ARCH" != "$IRAN_DPKG_ARCH" || "$LOCAL_OS_CODENAME" != "$IRAN_OS_CODENAME" ]]; then
         IRAN_APT_BUNDLE_MODE="remote-install"
     else
         IRAN_APT_BUNDLE_MODE="same-arch"
     fi
 
-    log "Foreign arch=$LOCAL_HOST_ARCH dpkg=$LOCAL_DPKG_ARCH compose='$LOCAL_COMPOSE_CMD'"
+    log "Foreign arch=$LOCAL_HOST_ARCH dpkg=$LOCAL_DPKG_ARCH codename=${LOCAL_OS_CODENAME:-unknown} compose='$LOCAL_COMPOSE_CMD'"
     log "Iran arch=$IRAN_HOST_ARCH dpkg=$IRAN_DPKG_ARCH codename=${IRAN_OS_CODENAME:-unknown} compose='${IRAN_COMPOSE_CMD:-missing}' apt_bundle_mode=$IRAN_APT_BUNDLE_MODE"
 }
 
@@ -720,7 +722,7 @@ check_local() {
 
 prepare_iran_package_bundle() {
     if [[ "$IRAN_APT_BUNDLE_MODE" != "same-arch" ]]; then
-        log "Skipping foreign-built Iran apt bundle because architectures differ (foreign=$LOCAL_DPKG_ARCH iran=$IRAN_DPKG_ARCH)."
+        log "Skipping foreign-built Iran apt bundle because apt identity differs (foreign=${LOCAL_DPKG_ARCH}/${LOCAL_OS_CODENAME:-unknown} iran=${IRAN_DPKG_ARCH}/${IRAN_OS_CODENAME:-unknown})."
         return 0
     fi
 
@@ -728,7 +730,7 @@ prepare_iran_package_bundle() {
     local bundle_tar="$RELEASE_TMP_DIR/iran-packages.tar.gz"
     local bundle_hash_file="$RELEASE_TMP_DIR/iran-packages.sha256"
     local bundle_signature
-    bundle_signature="$(printf '%s\n' "$IRAN_BOOTSTRAP_APT_PACKAGES" | sha256sum | cut -d' ' -f1)"
+    bundle_signature="$(printf '%s\n%s\n%s\n' "$IRAN_OS_CODENAME" "$IRAN_IMAGE_PLATFORM" "$IRAN_BOOTSTRAP_APT_PACKAGES" | sha256sum | cut -d' ' -f1)"
 
     if [[ -f "$bundle_tar" && -f "$bundle_hash_file" && "$(cat "$bundle_hash_file")" == "$bundle_signature" ]]; then
         return 0
@@ -961,7 +963,7 @@ prepare_pip_packages() {
 build_release() {
     if [[ "$IRAN_SKIP_FRONTEND_BUILD" != "1" ]]; then
         log "Building frontend locally"
-        (cd "$LOCAL_FRONTEND_DIR" && npm install --silent && NODE_OPTIONS="--max-old-space-size=1024" npm run build)
+        (cd "$LOCAL_FRONTEND_DIR" && if [[ -f package-lock.json ]]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS="--max-old-space-size=1024" npm run build)
     else
         log "Skipping frontend build because IRAN_SKIP_FRONTEND_BUILD=1"
     fi

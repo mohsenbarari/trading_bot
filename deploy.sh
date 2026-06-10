@@ -275,7 +275,7 @@ print_header "🚀 Deploy: $TARGET"
 # ==========================================
 build_frontend() {
     print_header "📦 Building Frontend"
-    run_with_local_resource_guard "Frontend build" bash -lc "cd \"$FRONTEND_DIR\" && npm install --silent && NODE_OPTIONS=\"--max-old-space-size=1024\" npm run build"
+    run_with_local_resource_guard "Frontend build" bash -lc "cd \"$FRONTEND_DIR\" && if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS=\"--max-old-space-size=1024\" npm run build"
 
     if [ ! -d "$DIST_DIR" ]; then
         echo "❌ Build directory ($DIST_DIR) not found!"
