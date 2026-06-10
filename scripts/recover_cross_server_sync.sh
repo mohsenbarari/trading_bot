@@ -4,10 +4,10 @@ set -euo pipefail
 PROJECT_DIR="/root/trading-bot/trading_bot"
 DEPLOY_CONFIG_SCRIPT="$PROJECT_DIR/scripts/deploy_config.py"
 LOCAL_API_URL="${LOCAL_API_URL:-http://127.0.0.1:8000}"
-IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
-IRAN_USER="${IRAN_USER:-root}"
-IRAN_SSH_PORT="${IRAN_SSH_PORT:-22}"
-IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-/srv/trading-bot/current}"
+IRAN_HOST="${IRAN_HOST:-}"
+IRAN_USER="${IRAN_USER:-}"
+IRAN_SSH_PORT="${IRAN_SSH_PORT:-}"
+IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-}"
 IRAN_API_URL="${IRAN_API_URL:-http://127.0.0.1:8000}"
 SYNC_LIMIT="${SYNC_LIMIT:-200}"
 SYNC_MAX_ROUNDS="${SYNC_MAX_ROUNDS:-20}"
@@ -15,16 +15,19 @@ TABLES=(users commodities commodity_aliases trading_settings offers trades user_
 
 load_shared_deploy_surface() {
     if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
+        local explicit_iran_user="${IRAN_USER:-}"
         local shell_exports
         shell_exports="$(python3 "$DEPLOY_CONFIG_SCRIPT" --format shell 2>/dev/null || true)"
         if [[ -n "$shell_exports" ]]; then
             eval "$shell_exports"
-            IRAN_HOST="${IRAN_HOST:-87.107.3.22}"
-            IRAN_USER="${IRAN_SSH_USER:-${IRAN_USER:-root}}"
-            IRAN_SSH_PORT="${IRAN_SSH_PORT:-22}"
-            IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-${IRAN_DIR:-/srv/trading-bot/current}}"
+            IRAN_USER="${explicit_iran_user:-${IRAN_SSH_USER:-${IRAN_USER:-}}}"
+            IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-${IRAN_DIR:-}}"
         fi
     fi
+    : "${IRAN_HOST:?IRAN_HOST is required. Define it in DEPLOY_MANIFEST or environment.}"
+    : "${IRAN_USER:?IRAN_USER/IRAN_SSH_USER is required. Define it in DEPLOY_MANIFEST or environment.}"
+    : "${IRAN_SSH_PORT:?IRAN_SSH_PORT is required. Define it in DEPLOY_MANIFEST or environment.}"
+    : "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required. Define it in DEPLOY_MANIFEST or environment.}"
 }
 
 print_header() {

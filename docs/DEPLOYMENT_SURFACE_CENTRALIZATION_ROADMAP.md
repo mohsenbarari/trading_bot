@@ -142,6 +142,17 @@ Exit criteria:
 
 - New hardcoded deployment identity leakage is caught in CI/local validation.
 
+Status:
+
+- Complete.
+- `scripts/check_deployment_surface_guard.py` reads deployment identities from `deploy/production/online.env.example` and rejects:
+  - production IP/domain/URL leakage in runtime code paths
+  - production IP/domain/URL leakage in operator entrypoints that should consume `scripts/deploy_config.py`
+  - stale retired identities such as old Iran host/domain values
+  - drift between `scripts/deploy_config.py` defaults and the manifest example for shared SSH/project defaults
+- `tests/test_deployment_surface_guard.py` runs the guard as a regression.
+- `make deployment-surface-guard` is available for explicit local/operator validation.
+
 ## Recommended Execution Order
 
 1. Stage C1
@@ -156,4 +167,4 @@ Exit criteria:
 - Stage C2: Complete
 - Stage C3: Complete
 - Stage C4: Complete for the current release path
-- Stage C5: Remaining
+- Stage C5: Complete

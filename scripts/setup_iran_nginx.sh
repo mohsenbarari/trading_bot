@@ -2,14 +2,24 @@
 
 # ==========================================
 # اسکریپت نصب Nginx و SSL برای سرور ایران
-# Domain: coin.gold-trade.ir
+# Domain is read from IRAN_APP_DOMAIN or deploy/production/online.env.
 # ==========================================
 
 set -e
 
-IRAN_APP_DOMAIN="${IRAN_APP_DOMAIN:-coin.gold-trade.ir}"
-IRAN_CERTBOT_EMAIL="${IRAN_CERTBOT_EMAIL:-mohsenbarari235@gmail.com}"
-PROJECT_DIR="${IRAN_PROJECT_DIR:-/srv/trading-bot/current}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_CONFIG_SCRIPT="${DEPLOY_CONFIG_SCRIPT:-$SCRIPT_DIR/deploy_config.py}"
+
+if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
+    IRAN_APP_DOMAIN="${IRAN_APP_DOMAIN:-$(python3 "$DEPLOY_CONFIG_SCRIPT" --key IRAN_APP_DOMAIN 2>/dev/null || true)}"
+    IRAN_CERTBOT_EMAIL="${IRAN_CERTBOT_EMAIL:-$(python3 "$DEPLOY_CONFIG_SCRIPT" --key IRAN_CERTBOT_EMAIL 2>/dev/null || true)}"
+    IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-$(python3 "$DEPLOY_CONFIG_SCRIPT" --key IRAN_PROJECT_DIR 2>/dev/null || true)}"
+fi
+
+: "${IRAN_APP_DOMAIN:?IRAN_APP_DOMAIN is required. Define it in DEPLOY_MANIFEST or environment.}"
+: "${IRAN_CERTBOT_EMAIL:?IRAN_CERTBOT_EMAIL is required. Define it in DEPLOY_MANIFEST or environment.}"
+: "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required. Define it in DEPLOY_MANIFEST or environment.}"
+PROJECT_DIR="$IRAN_PROJECT_DIR"
 DIST_DIR="${IRAN_DIST_DIR:-$PROJECT_DIR/mini_app_dist}"
 UPLOADS_DIR="${IRAN_UPLOADS_DIR:-$PROJECT_DIR/uploads}"
 

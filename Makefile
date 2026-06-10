@@ -6,13 +6,13 @@
 # Iran:              API + Nginx + Frontend
 # ==========================================
 
-IRAN_HOST ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_TARGET 2>/dev/null || printf 'root@87.107.3.22')
-IRAN_DIR ?= $(shell python3 scripts/deploy_config.py --key IRAN_PROJECT_DIR 2>/dev/null || printf '/srv/trading-bot/current')
-IRAN_HOST_DISPLAY ?= $(shell python3 scripts/deploy_config.py --key IRAN_HOST 2>/dev/null || printf '87.107.3.22')
-IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>/dev/null || printf '22')
+IRAN_HOST ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_TARGET 2>/dev/null)
+IRAN_DIR ?= $(shell python3 scripts/deploy_config.py --key IRAN_PROJECT_DIR 2>/dev/null)
+IRAN_HOST_DISPLAY ?= $(shell python3 scripts/deploy_config.py --key IRAN_HOST 2>/dev/null)
+IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>/dev/null)
 SSH_IRAN_OPTS = -o StrictHostKeyChecking=no -p $(IRAN_SSH_PORT)
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
 
 help:
 	@echo ""
@@ -32,6 +32,7 @@ help:
 	@echo "  make audit-anchor-ship - Ship the latest compact audit anchor line to a restricted sink"
 	@echo "  make audit-anchor-ship-install - Install the 10-minute audit anchor shipper timer on the host"
 	@echo "  make metrics-targets - Render the explicit production metrics surface contract"
+	@echo "  make deployment-surface-guard - Fail if production IP/domain identities leak into runtime/entrypoint code"
 	@echo "  make restore-default-commodities - Restore canonical default commodities on the current DB"
 	@echo "  make dev-admin ARGS=\"...\" - Run the developer admin CLI inside the app container"
 	@echo "  make create-superadmin - Interactive super admin creation"
@@ -143,6 +144,9 @@ audit-anchor-ship-install:
 
 metrics-targets:
 	@python3 scripts/render_metrics_targets.py $${ARGS}
+
+deployment-surface-guard:
+	@python3 scripts/check_deployment_surface_guard.py
 
 restore-default-commodities:
 	@docker compose run --rm migration python scripts/restore_default_commodities.py
