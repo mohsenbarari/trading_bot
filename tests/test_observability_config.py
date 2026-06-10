@@ -123,6 +123,8 @@ class ObservabilityConfigTests(unittest.TestCase):
             "--source-env-file",
             "install_foreign_runtime_env",
             "Installed rendered foreign runtime env",
+            "filter_hosts_file_for_managed_domains",
+            "$i == foreign_domain || $i == iran_domain",
             "check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local",
             "check_local; bootstrap_iran; install_sync_sampler_remote; verify_sync_sampler_remote",
             "check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote",

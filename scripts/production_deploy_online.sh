@@ -860,19 +860,39 @@ hosts_block() {
     cat "$RELEASE_ARTIFACT_DIR/hosts.block"
 }
 
+filter_hosts_file_for_managed_domains() {
+    local source_file="$1"
+    local output_file="$2"
+    awk \
+        -v start_marker="# trading-bot-production-hosts START" \
+        -v end_marker="# trading-bot-production-hosts END" \
+        -v foreign_domain="$FOREIGN_PUBLIC_DOMAIN" \
+        -v iran_domain="$IRAN_PUBLIC_DOMAIN" '
+        $0 == start_marker { in_managed_block = 1; next }
+        $0 == end_marker { in_managed_block = 0; next }
+        in_managed_block { next }
+        /^[[:space:]]*($|#)/ { print; next }
+        {
+            for (i = 2; i <= NF; i++) {
+                if ($i == foreign_domain || $i == iran_domain) {
+                    next
+                }
+            }
+            print
+        }
+    ' "$source_file" > "$output_file"
+}
+
 replace_hosts_block_local() {
     local hosts_file="/etc/hosts"
     local block
     block="$(hosts_block)"
     local tmp
     tmp="$(mktemp)"
-    if grep -qF "# trading-bot-production-hosts START" "$hosts_file"; then
-        sed '/^# trading-bot-production-hosts START$/,/^# trading-bot-production-hosts END$/d' "$hosts_file" > "$tmp"
-    else
-        cat "$hosts_file" > "$tmp"
-    fi
+    filter_hosts_file_for_managed_domains "$hosts_file" "$tmp"
     printf '\n%s\n' "$block" >> "$tmp"
-    mv "$tmp" "$hosts_file"
+    cp "$tmp" "$hosts_file"
+    rm -f "$tmp"
 }
 
 replace_hosts_block_remote() {
@@ -881,15 +901,28 @@ replace_hosts_block_remote() {
     ssh_iran "set -euo pipefail
 hosts_file='/etc/hosts'
 tmp=\$(mktemp)
-if grep -qF '# trading-bot-production-hosts START' \"\$hosts_file\"; then
-  sed '/^# trading-bot-production-hosts START$/,/^# trading-bot-production-hosts END$/d' \"\$hosts_file\" > \"\$tmp\"
-else
-  cat \"\$hosts_file\" > \"\$tmp\"
-fi
+awk -v start_marker='# trading-bot-production-hosts START' \\
+    -v end_marker='# trading-bot-production-hosts END' \\
+    -v foreign_domain='$FOREIGN_PUBLIC_DOMAIN' \\
+    -v iran_domain='$IRAN_PUBLIC_DOMAIN' '
+  \$0 == start_marker { in_managed_block = 1; next }
+  \$0 == end_marker { in_managed_block = 0; next }
+  in_managed_block { next }
+  /^[[:space:]]*(\$|#)/ { print; next }
+  {
+    for (i = 2; i <= NF; i++) {
+      if (\$i == foreign_domain || \$i == iran_domain) {
+        next
+      }
+    }
+    print
+  }
+' \"\$hosts_file\" > \"\$tmp\"
 cat >> \"\$tmp\" <<'EOF_HOSTS'
 $block
 EOF_HOSTS
-mv \"\$tmp\" \"\$hosts_file\""
+cp \"\$tmp\" \"\$hosts_file\"
+rm -f \"\$tmp\""
 }
 
 ensure_local_timezone_utc() {
