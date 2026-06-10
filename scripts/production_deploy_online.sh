@@ -1014,7 +1014,29 @@ build_release() {
 
 ensure_runtime_env_file() {
     local local_env_path="$LOCAL_ENV_SOURCE_PATH"
-    if [[ -f "$local_env_path" && -f "$IRAN_ENV_SOURCE_PATH" ]]; then
+    local source_env_path=""
+
+    if [[ -f "$local_env_path" ]]; then
+        source_env_path="$local_env_path"
+    elif [[ -f "$IRAN_ENV_SOURCE_PATH" ]]; then
+        source_env_path="$IRAN_ENV_SOURCE_PATH"
+    fi
+
+    if [[ -n "$source_env_path" ]]; then
+        mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
+        python3 "$RUNTIME_ENV_RENDERER" \
+            --source-env-file "$source_env_path" \
+            --local-output "$local_env_path" \
+            --iran-output "$IRAN_ENV_SOURCE_PATH" \
+            --foreign-frontend-url "$FOREIGN_FRONTEND_URL" \
+            --iran-frontend-url "$IRAN_FRONTEND_URL" \
+            --foreign-server-url "$FOREIGN_SERVER_URL" \
+            --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
+            --iran-server-url "$IRAN_SERVER_URL" \
+            --iran-server-domain "$IRAN_SERVER_DOMAIN"
+        chmod 600 "$local_env_path" || true
+        chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
+        log "Rendered runtime env files from source env: $source_env_path"
         return 0
     fi
 
@@ -1110,6 +1132,16 @@ ensure_runtime_env_file() {
     log "Created Iran runtime env at $IRAN_ENV_SOURCE_PATH"
 }
 
+install_foreign_runtime_env() {
+    local project_env_path="$LOCAL_PROJECT_DIR/.env"
+    if [[ "$LOCAL_ENV_SOURCE_PATH" == "$project_env_path" ]]; then
+        return 0
+    fi
+    cp "$LOCAL_ENV_SOURCE_PATH" "$project_env_path"
+    chmod 600 "$project_env_path" || true
+    log "Installed rendered foreign runtime env at $project_env_path"
+}
+
 deploy_foreign() {
     if [[ "$IRAN_SKIP_FOREIGN_DEPLOY" == "1" ]]; then
         log "Skipping foreign deploy because IRAN_SKIP_FOREIGN_DEPLOY=1"
@@ -1117,6 +1149,7 @@ deploy_foreign() {
     fi
     log "Deploying the foreign server locally"
     ensure_runtime_env_file
+    install_foreign_runtime_env
     (cd "$LOCAL_PROJECT_DIR" && bash ./deploy.sh foreign)
 }
 
