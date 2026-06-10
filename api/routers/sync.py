@@ -361,6 +361,16 @@ def _build_upsert_stmt(model, table, data):
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
 
 
+def _filter_model_columns(model, data: dict) -> dict:
+    """Drop sync payload aliases that are not persisted DB columns."""
+    table = getattr(model, "__table__", None)
+    columns = getattr(table, "columns", None)
+    if columns is None:
+        return data
+    column_names = set(columns.keys())
+    return {key: value for key, value in data.items() if key in column_names}
+
+
 async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, data: dict, model, new_offers: list):
     """
     Apply a single sync item using SAVEPOINT so failures don't kill the transaction.
@@ -383,6 +393,7 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
                 },
             )
             return 'error'
+        data = _filter_model_columns(model, data)
         stmt = pg_insert(model).values(**data)
         stmt = stmt.on_conflict_do_update(index_elements=['key'], set_=data)
         async with db.begin_nested():
@@ -421,6 +432,7 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
             if operation == "INSERT" and settings.server_mode != "iran":
                 new_offers.append(record_id)
 
+        data = _filter_model_columns(model, data)
         stmt = _build_upsert_stmt(model, table, data)
 
         try:
@@ -1008,7 +1020,16 @@ async def resync_from_changelog(
                     }
                 )
 
-                if response.status_code == 200:
+                response_payload = {}
+                try:
+                    response_payload = response.json()
+                except ValueError:
+                    response_payload = {}
+
+                response_errors = int(response_payload.get("errors") or 0) if isinstance(response_payload, dict) else 0
+                response_status = response_payload.get("status") if isinstance(response_payload, dict) else None
+
+                if response.status_code == 200 and response_errors == 0 and response_status in {"success", "ok"}:
                     for entry in batch:
                         entry.synced = True
                     processed += len(batch)
@@ -1018,6 +1039,8 @@ async def resync_from_changelog(
                         extra={
                             "event": "sync.resync.batch_failed",
                             "batch_size": len(batch),
+                            "peer_sync_status": response_status,
+                            "peer_sync_errors": response_errors,
                             **_summarize_peer_response(response),
                         },
                     )
