@@ -757,3 +757,13 @@ Why this stage is intentionally small:
 - It improves audit evidence from "durable local only" to "durable local plus external anchor path".
 - It improves metrics truthfulness from "documented limitation" to "deployable explicit scrape contract".
 - It avoids the high-risk alternative of introducing a new production aggregation backend inside request/job execution paths right before release.
+
+Status: Completed on 2026-06-10.
+
+Completion notes:
+
+- Added `scripts/export_audit_anchor.py`, which verifies the full durable audit trail hash chain and emits only compact head metadata (`audit_event_id`, `audit_recorded_at`, `event_hash`, `previous_hash`, release/host/source identity, record count, trail digest).
+- Added `scripts/install_audit_anchor_timer.sh`, which installs a host-level 5-minute timer that executes the exporter inside the API container and appends the compact anchor line to a host path outside the app container write surface.
+- Added `scripts/render_metrics_targets.py`, which renders the explicit operator-facing metrics collection contract and makes it clear that only API is currently scrapeable over HTTP while `bot` and `sync_worker` remain log-authoritative under the `memory` backend.
+- Added `make audit-anchor-export`, `make audit-anchor-monitor-install`, and `make metrics-targets` so operators can use the new R12 artifacts without memorizing script paths.
+- Extended `docs/OBSERVABILITY_PRODUCTION_HARDENING.md`, `docs/PRODUCTION_DEPLOYMENT_ONLINE.md`, and `deploy/production/online.env.example` with the new audit-anchor and metrics-surface guidance.

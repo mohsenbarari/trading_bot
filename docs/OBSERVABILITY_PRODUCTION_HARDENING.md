@@ -148,6 +148,33 @@ Recommended path:
 
 This stage adds `audit_durable` signaling into runtime audit logs. That signal answers whether a record was durably appended locally; it does not replace the external anchor requirement above.
 
+R12 adds a concrete export step so this is no longer design-only:
+
+```bash
+make audit-anchor-export ARGS="--input /app/audit_trail/audit.jsonl"
+```
+
+Export behavior:
+
+- verifies the full local audit hash chain before emitting anything
+- emits only compact head metadata plus trail digest and record count
+- fails closed on malformed JSON, `previous_hash` drift, or `event_hash` mismatch
+- can print to stdout (`--output -`) so a host-level timer can append outside the app container write surface
+
+Recommended production installation:
+
+```bash
+make audit-anchor-monitor-install
+```
+
+The installed timer runs every 5 minutes, executes the exporter inside the API container, and appends the compact anchor line to a host-level path such as:
+
+```text
+/var/lib/trading-bot-observability/audit-anchor.jsonl
+```
+
+That host file is intentionally outside the app container writable path. It is still not the final remote sink; operators should replicate or back up that file to the foreign restricted destination described above.
+
 ## Log Volume Budget
 
 Default production budget:
@@ -274,6 +301,20 @@ Production path for this project:
 4. Do not assume the API `/metrics` endpoint is a full-system aggregate while the backend remains `memory`.
 
 Until that production aggregation layer exists, Grafana dashboards and alerting should treat logs/Loki as the authoritative cross-service source and use metrics as bounded local process telemetry.
+
+R12 also adds an explicit operator manifest for this contract:
+
+```bash
+make metrics-targets
+```
+
+Current interpretation:
+
+- `api`: scrapeable over HTTP with `X-Observability-Api-Key`, but only authoritative for the single API process that answered.
+- `bot`: no direct metrics scrape surface under the `memory` backend; production should treat Loki/logs as authoritative for bot alerts until a dedicated exporter or sidecar exists.
+- `sync_worker`: same as bot; rely on Loki plus the sync-health sampler until a dedicated exporter or sidecar exists.
+
+This is deliberate. The repo should not imply a false full-system aggregate while the runtime remains on the low-risk `memory` backend.
 
 ## Security Constraints
 

@@ -9,7 +9,7 @@
 IRAN_HOST = root@87.107.110.68
 IRAN_DIR  = /root/trading-bot/trading_bot
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install metrics-targets restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-health
 
 help:
 	@echo ""
@@ -24,6 +24,9 @@ help:
 	@echo "  make sync-health-iran - Show Iran sync backlog and lag through SSH"
 	@echo "  make sync-health-sample - Sample local and Iran sync health from the foreign host"
 	@echo "  make sync-health-monitor-install - Install the 1-minute sync health sampler on the foreign host"
+	@echo "  make audit-anchor-export - Export the current durable audit head as a compact anchor"
+	@echo "  make audit-anchor-monitor-install - Install the 5-minute audit anchor exporter timer on the host"
+	@echo "  make metrics-targets - Render the explicit production metrics surface contract"
 	@echo "  make restore-default-commodities - Restore canonical default commodities on the current DB"
 	@echo "  make dev-admin ARGS=\"...\" - Run the developer admin CLI inside the app container"
 	@echo "  make create-superadmin - Interactive super admin creation"
@@ -118,6 +121,16 @@ sync-health-sample:
 sync-health-monitor-install:
 	@chmod +x ./scripts/install_sync_health_monitor.sh
 	@./scripts/install_sync_health_monitor.sh
+
+audit-anchor-export:
+	@python3 scripts/export_audit_anchor.py $${ARGS}
+
+audit-anchor-monitor-install:
+	@chmod +x ./scripts/install_audit_anchor_timer.sh
+	@./scripts/install_audit_anchor_timer.sh
+
+metrics-targets:
+	@python3 scripts/render_metrics_targets.py $${ARGS}
 
 restore-default-commodities:
 	@docker compose run --rm migration python scripts/restore_default_commodities.py
