@@ -18,6 +18,7 @@ PYTHON_SCRIPTS = (
     'scripts/run_observability_gate.py',
     'scripts/reset_sessions.py',
     'scripts/restore_default_commodities.py',
+    'scripts/seed_shared_sync_tables.py',
     'scripts/test_invite.py',
     'scripts/test_session_realtime.py',
     'scripts/test_ws_e2e.py',
