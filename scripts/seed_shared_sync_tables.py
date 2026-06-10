@@ -19,10 +19,15 @@ import time
 import uuid
 from datetime import date, datetime, time as time_type
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import httpx
 from sqlalchemy import select
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from api.routers.sync import TABLE_ORDER, get_model_class
 from core.config import settings
@@ -102,6 +107,25 @@ async def load_table_rows(table_name: str) -> list[Any]:
         return list(result.scalars().all())
 
 
+async def load_chat_sync_flags() -> dict[int, dict[str, Any]]:
+    model = get_model_class("chats")
+    if model is None:
+        raise ValueError("Unknown sync table: chats")
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(model.id, model.type, model.is_system, model.is_mandatory)
+        )
+        return {
+            int(chat_id): {
+                "chat_type": json_safe(chat_type),
+                "chat_is_system": bool(is_system),
+                "chat_is_mandatory": bool(is_mandatory),
+            }
+            for chat_id, chat_type, is_system, is_mandatory in result.all()
+        }
+
+
 async def send_items(target_url: str, api_key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     body = json.dumps(items, sort_keys=True, default=str)
     async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
@@ -123,6 +147,7 @@ async def send_items(target_url: str, api_key: str, items: list[dict[str, Any]])
 
 async def seed_table(table_name: str, *, target_url: str, api_key: str, batch_size: int, dry_run: bool) -> dict[str, int]:
     rows = await load_table_rows(table_name)
+    chat_sync_flags = await load_chat_sync_flags() if table_name == "chat_members" else {}
     if dry_run:
         print(f"[dry-run][{table_name}] rows={len(rows)}")
         return {"rows": len(rows), "sent": 0}
@@ -130,18 +155,22 @@ async def seed_table(table_name: str, *, target_url: str, api_key: str, batch_si
     sent = 0
     for index in range(0, len(rows), batch_size):
         batch_rows = rows[index : index + batch_size]
-        items = [
-            {
-                "type": "db_change",
-                "operation": "UPDATE",
-                "table": table_name,
-                "id": record_id_for(row),
-                "data": row_payload(table_name, row),
-                "hash": "",
-                "timestamp": time.time(),
-            }
-            for row in batch_rows
-        ]
+        items = []
+        for row in batch_rows:
+            data = row_payload(table_name, row)
+            if table_name == "chat_members":
+                data.update(chat_sync_flags.get(int(data.get("chat_id") or 0), {}))
+            items.append(
+                {
+                    "type": "db_change",
+                    "operation": "UPDATE",
+                    "table": table_name,
+                    "id": record_id_for(row),
+                    "data": data,
+                    "hash": "",
+                    "timestamp": time.time(),
+                }
+            )
         if not items:
             continue
         await send_items(target_url, api_key, items)
