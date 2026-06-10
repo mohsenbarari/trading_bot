@@ -9,6 +9,8 @@ DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io docker-compose python3-pip python3-setuptools python3-wheel"
+SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, chats, chat_members, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, trades"
+IRAN_SHARED_RESET_CONFIRM_TEXT="RESET_IRAN_SHARED_DATA"
 LOCAL_HOST_ARCH=""
 LOCAL_DPKG_ARCH=""
 LOCAL_OS_CODENAME=""
@@ -40,6 +42,8 @@ Commands:
   ship-images          Upload the prepared Docker image bundle to the Iran host.
   load-images          Load the uploaded Docker image bundle on the Iran host.
   deploy-iran          Start Docker services on the Iran host without remote build/pull.
+  inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
+  seed-shared-data     Apply guarded shared-table seed/reset handling for the Iran host.
   healthcheck          Validate local and public health endpoints.
 
 Notes:
@@ -382,6 +386,9 @@ IRAN_ENABLE_UFW=0
 IRAN_CONNECTIVITY_MODE=ask
 IRAN_SKIP_FOREIGN_DEPLOY=0
 IRAN_HOSTS_SYNC_ENABLED=1
+IRAN_SHARED_DATA_MODE=auto
+IRAN_SHARED_SEED_BATCH_SIZE=50
+IRAN_SHARED_RESET_CONFIRM=
 
 # --- Healthcheck ---
 IRAN_HEALTHCHECK_URL=https://$iran_app_domain/api/config
@@ -466,6 +473,9 @@ load_manifest() {
     IRAN_LOCAL_API_URL="${IRAN_LOCAL_API_URL:-http://127.0.0.1:8000/api/config}"
     IRAN_SSH_AUTH_METHOD="${IRAN_SSH_AUTH_METHOD,,}"
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
+    IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
+    IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
+    IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
 
     if [[ "$FOREIGN_TIMEZONE" != "UTC" || "$IRAN_TIMEZONE" != "UTC" ]]; then
         log "Overriding configured timezones to UTC for production release."
@@ -1272,8 +1282,30 @@ eval \"\$compose_cmd -f docker-compose.iran.yml ps\""
     log "Iran deploy step complete"
 }
 
-healthcheck() {
-    log "Running post-deploy health checks"
+shell_quote() {
+    python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$1"
+}
+
+extract_json_field() {
+    local field="$1"
+    python3 -c 'import json, sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$field"
+}
+
+extract_sync_unsynced_count() {
+    python3 -c 'import json, sys; print(int(json.load(sys.stdin).get("unsynced_change_log_count", 0)))'
+}
+
+run_iran_migration_python() {
+    local script_args="$*"
+    local compose_resolver
+    compose_resolver="$(remote_compose_resolver)"
+    ssh_iran "set -euo pipefail
+$compose_resolver
+cd '$IRAN_PROJECT_DIR'
+eval \"\$compose_cmd -f docker-compose.iran.yml run --rm --no-deps migration python $script_args\""
+}
+
+wait_for_iran_local_api() {
     local compose_resolver
     compose_resolver="$(remote_compose_resolver)"
     ssh_iran "set -euo pipefail
@@ -1290,6 +1322,198 @@ for _attempt in \$(seq 1 24); do
   sleep 5
 done
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\" >/dev/null"
+}
+
+inspect_iran_shared_data() {
+    log "Inspecting Iran shared-table state"
+    local output inspection_json
+    output="$(run_iran_migration_python "scripts/inspect_shared_sync_state.py --format json")"
+    inspection_json="$(printf '%s\n' "$output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+    printf '%s\n' "$inspection_json" | python3 -m json.tool
+}
+
+backup_iran_database_before_shared_reset() {
+    local backup_path="$IRAN_DEPLOY_BASE_DIR/backups/iran-shared-reset-$(date -u +%Y%m%dT%H%M%SZ).sql"
+    log "Backing up Iran database before shared-table reset: $backup_path"
+    ssh_iran "set -euo pipefail
+mkdir -p '$IRAN_DEPLOY_BASE_DIR/backups'
+docker exec trading_bot_db sh -lc 'pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\"' > '$backup_path'"
+    log "Iran database backup completed: $backup_path"
+}
+
+confirm_iran_shared_reset() {
+    if [[ "$IRAN_SHARED_RESET_CONFIRM" == "$IRAN_SHARED_RESET_CONFIRM_TEXT" ]]; then
+        return 0
+    fi
+    if [[ ! -t 0 ]]; then
+        die "Iran shared-table reset requires IRAN_SHARED_RESET_CONFIRM=$IRAN_SHARED_RESET_CONFIRM_TEXT in non-interactive mode."
+    fi
+
+    local confirm=""
+    echo
+    echo "This will reset Iran shared tables after taking a pg_dump backup."
+    read -r -p "Type $IRAN_SHARED_RESET_CONFIRM_TEXT to continue: " confirm
+    [[ "$confirm" == "$IRAN_SHARED_RESET_CONFIRM_TEXT" ]] || die "Iran shared-table reset was not confirmed."
+}
+
+reset_iran_shared_tables() {
+    confirm_iran_shared_reset
+    backup_iran_database_before_shared_reset
+    log "Resetting Iran shared tables"
+    ssh_iran "set -euo pipefail
+docker exec -i trading_bot_db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At' <<'SQL'
+TRUNCATE TABLE change_log, $SHARED_SYNC_TABLES_SQL RESTART IDENTITY CASCADE;
+SQL"
+    log "Iran shared-table reset completed"
+}
+
+mark_foreign_preseed_backlog_synced() {
+    local cutoff="$1"
+    local query="
+UPDATE change_log
+SET synced = true
+WHERE synced = false
+  AND table_name IN ('users', 'accountant_relations', 'customer_relations', 'chats', 'chat_members', 'invitations', 'admin_market_messages', 'admin_broadcast_messages', 'notifications', 'user_blocks', 'commodities', 'commodity_aliases', 'trading_settings', 'market_schedule_overrides', 'market_runtime_state', 'offers', 'trades')
+  AND created_at <= '$cutoff'::timestamptz
+RETURNING table_name;"
+    log "Marking foreign pre-seed shared backlog as synced up to $cutoff"
+    (cd "$LOCAL_PROJECT_DIR" && $LOCAL_COMPOSE_CMD exec -T db sh -lc "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc \"$query\" | sort | uniq -c")
+}
+
+mark_iran_seed_generated_backlog_synced() {
+    log "Marking Iran seed-generated mandatory/system backlog as synced"
+    ssh_iran "set -euo pipefail
+docker exec -i trading_bot_db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At' <<'SQL'
+UPDATE change_log
+SET synced = true
+WHERE synced = false
+  AND (
+    (table_name = 'chats' AND data->>'is_system' = 'true' AND data->>'is_mandatory' = 'true')
+    OR (table_name = 'chat_members' AND data->>'chat_is_system' = 'true' AND data->>'chat_is_mandatory' = 'true')
+    OR table_name = 'market_runtime_state'
+  )
+RETURNING table_name;
+SQL"
+}
+
+seed_shared_tables_to_iran() {
+    local cutoff
+    cutoff="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    wait_for_iran_local_api
+    log "Seeding current shared-table state from foreign to Iran"
+    (cd "$LOCAL_PROJECT_DIR" && $LOCAL_COMPOSE_CMD run --rm --no-deps migration python scripts/seed_shared_sync_tables.py --target-server iran --batch-size "$IRAN_SHARED_SEED_BATCH_SIZE")
+    mark_foreign_preseed_backlog_synced "$cutoff"
+    mark_iran_seed_generated_backlog_synced
+    verify_shared_sync_health_clean
+}
+
+verify_shared_sync_health_clean() {
+    log "Verifying cross-server sync health"
+    local foreign_dev_api_key iran_dev_api_key foreign_health iran_health foreign_unsynced iran_unsynced iran_header
+    foreign_dev_api_key="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "DEV_API_KEY")"
+    iran_dev_api_key="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "DEV_API_KEY")"
+    [[ -n "$foreign_dev_api_key" ]] || die "DEV_API_KEY is missing from $LOCAL_ENV_SOURCE_PATH"
+    [[ -n "$iran_dev_api_key" ]] || die "DEV_API_KEY is missing from $IRAN_ENV_SOURCE_PATH"
+
+    foreign_health="$(curl -fsS "http://127.0.0.1:8000/api/sync/health" -H "X-Dev-Api-Key: $foreign_dev_api_key")"
+    foreign_unsynced="$(printf '%s' "$foreign_health" | extract_sync_unsynced_count)"
+    [[ "$foreign_unsynced" == "0" ]] || die "Foreign sync backlog is not clean after shared-table seed: $foreign_health"
+
+    iran_header="$(shell_quote "X-Dev-Api-Key: $iran_dev_api_key")"
+    iran_health="$(ssh_iran "curl -fsS 'http://127.0.0.1:8000/api/sync/health' -H $iran_header")"
+    iran_unsynced="$(printf '%s' "$iran_health" | extract_sync_unsynced_count)"
+    [[ "$iran_unsynced" == "0" ]] || die "Iran sync backlog is not clean after shared-table seed: $iran_health"
+    log "Cross-server sync health is clean"
+}
+
+decide_existing_shared_data_action() {
+    local normalized
+    normalized="$(printf '%s' "$IRAN_SHARED_DATA_MODE" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized" in
+        skip)
+            printf 'skip\n'
+            return 0
+            ;;
+        reset)
+            printf 'reset\n'
+            return 0
+            ;;
+        abort)
+            printf 'abort\n'
+            return 0
+            ;;
+        auto|ask|"")
+            ;;
+        *)
+            die "Unsupported IRAN_SHARED_DATA_MODE: $IRAN_SHARED_DATA_MODE"
+            ;;
+    esac
+
+    if [[ ! -t 0 ]]; then
+        die "Iran shared tables contain existing data. Set IRAN_SHARED_DATA_MODE=skip, reset, or abort."
+    fi
+
+    echo
+    echo "Iran shared tables contain existing project data."
+    echo "Choose one action:"
+    echo "  skip  - keep Iran data unchanged and continue deploy"
+    echo "  reset - pg_dump backup, reset shared tables, then seed current state from foreign"
+    echo "  abort - stop release without changing Iran data"
+    local action=""
+    read -r -p "Action [skip/reset/abort]: " action
+    action="$(printf '%s' "${action:-}" | tr '[:upper:]' '[:lower:]')"
+    case "$action" in
+        skip|reset|abort) printf '%s\n' "$action" ;;
+        *) die "Unsupported shared-data action: $action" ;;
+    esac
+}
+
+handle_iran_shared_data() {
+    local normalized inspection_output inspection_json classification signal_total action
+    normalized="$(printf '%s' "$IRAN_SHARED_DATA_MODE" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$normalized" == "skip" ]]; then
+        log "Skipping Iran shared-table seed/reset because IRAN_SHARED_DATA_MODE=skip"
+        return 0
+    fi
+
+    log "Inspecting Iran shared tables before seed/reset"
+    inspection_output="$(run_iran_migration_python "scripts/inspect_shared_sync_state.py --format json")"
+    inspection_json="$(printf '%s\n' "$inspection_output" | sed '/^[[:space:]]*$/d' | tail -n 1)"
+    classification="$(printf '%s' "$inspection_json" | extract_json_field classification)"
+    signal_total="$(printf '%s' "$inspection_json" | extract_json_field signal_total)"
+    log "Iran shared data classification=$classification signal_total=$signal_total"
+
+    case "$classification" in
+        fresh)
+            if [[ "$normalized" == "reset" ]]; then
+                reset_iran_shared_tables
+            fi
+            seed_shared_tables_to_iran
+            ;;
+        existing)
+            action="$(decide_existing_shared_data_action)"
+            case "$action" in
+                skip)
+                    log "Keeping existing Iran shared data unchanged"
+                    ;;
+                reset)
+                    reset_iran_shared_tables
+                    seed_shared_tables_to_iran
+                    ;;
+                abort)
+                    die "Release aborted because Iran shared tables contain existing data."
+                    ;;
+            esac
+            ;;
+        *)
+            die "Could not classify Iran shared-table state: $inspection_json"
+            ;;
+    esac
+}
+
+healthcheck() {
+    log "Running post-deploy health checks"
+    wait_for_iran_local_api
     verify_sync_sampler_local
     verify_sync_sampler_remote
     if [[ "$IRAN_RUN_POST_DEPLOY_HEALTHCHECK" == "1" ]]; then
@@ -1358,6 +1582,7 @@ run_release() {
     ship_images
     load_images
     deploy_iran
+    handle_iran_shared_data
     healthcheck
 }
 
@@ -1381,6 +1606,8 @@ main() {
         ship-images) check_local; ship_images ;;
         load-images) check_local; load_images ;;
         deploy-iran) check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote ;;
+        inspect-shared-data) check_local; inspect_iran_shared_data ;;
+        seed-shared-data) check_local; handle_iran_shared_data ;;
         healthcheck) check_local; healthcheck ;;
         *) die "Unknown command: $COMMAND" ;;
     esac
