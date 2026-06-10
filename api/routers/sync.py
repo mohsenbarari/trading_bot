@@ -88,6 +88,15 @@ def _summarize_exception(exc: Exception) -> dict[str, object]:
         "error_digest": hashlib.sha256(exc_bytes).hexdigest()[:16] if exc_bytes else None,
     }
 
+
+def _summarize_payload(data) -> dict[str, object]:
+    if not isinstance(data, dict):
+        return {"data_kind": type(data).__name__}
+    return {
+        "data_kind": "dict",
+        "data_key_count": len(data),
+    }
+
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
@@ -364,7 +373,15 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
     if table == "trading_settings":
         setting_key = data.get('key')
         if not setting_key:
-            logger.warning(f"Skipping trading_setting sync without key: {data}")
+            logger.warning(
+                "Skipping trading_setting sync without key",
+                extra={
+                    "event": "sync.trading_setting_missing_key",
+                    "table": table,
+                    "record_id": record_id,
+                    **_summarize_payload(data),
+                },
+            )
             return 'error'
         stmt = pg_insert(model).values(**data)
         stmt = stmt.on_conflict_do_update(index_elements=['key'], set_=data)
@@ -467,7 +484,14 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
 
             # --- Case B: FK violation (parent not yet synced) → defer for retry ---
             elif "foreign key" in err_str:
-                logger.warning(f"⏳ FK violation for {table}:{record_id}, deferring for retry")
+                logger.warning(
+                    "FK violation for synced row; deferring for retry",
+                    extra={
+                        "event": "sync.integrity.foreign_key_violation",
+                        "table": table,
+                        "record_id": record_id,
+                    },
+                )
                 return 'deferred'
 
             else:
@@ -549,7 +573,13 @@ async def _refresh_notification_unread_counts(db: AsyncSession, user_ids: set[in
         from core.redis import get_redis_client
         redis_client = get_redis_client()
     except Exception as exc:
-        logger.warning(f"Could not refresh notification unread counts after sync: {exc}")
+        logger.warning(
+            "Could not refresh notification unread counts after sync",
+            extra={
+                "event": "sync.notification_unread_counts_refresh_failed",
+                **_summarize_exception(exc),
+            },
+        )
         return
 
     for user_id in user_ids:
@@ -562,7 +592,14 @@ async def _refresh_notification_unread_counts(db: AsyncSession, user_ids: set[in
             unread_count = int(result.scalar() or 0)
             await redis_client.set(f"user:{user_id}:unread_count", unread_count)
         except Exception as exc:
-            logger.warning(f"Could not refresh notification unread count for user {user_id}: {exc}")
+            logger.warning(
+                "Could not refresh notification unread count for user",
+                extra={
+                    "event": "sync.notification_unread_count_refresh_failed",
+                    "user_id": user_id,
+                    **_summarize_exception(exc),
+                },
+            )
 
 
 def _parse_item(item: dict):
@@ -612,7 +649,13 @@ async def receive_sync_data(
     _ = Depends(verify_signature)
 ):
     """Receive sync data from other server"""
-    logger.info(f"Received sync batch with {len(items)} items")
+    logger.info(
+        "Received sync batch",
+        extra={
+            "event": "sync.receive_batch",
+            "item_count": len(items),
+        },
+    )
     
     # Sort items by dependency order: users first, then commodities, then offers, then trades
     sorted_items = sorted(items, key=lambda x: TABLE_ORDER.get(x.get('table', ''), 99))
@@ -650,7 +693,13 @@ async def receive_sync_data(
 
             parsed = _parse_item(item)
             if not parsed:
-                logger.warning(f"Unknown table in sync: {item.get('table')}")
+                logger.warning(
+                    "Unknown table in sync",
+                    extra={
+                        "event": "sync.unknown_table",
+                        "table": item.get("table"),
+                    },
+                )
                 continue
 
             table, operation, model, data, record_id = parsed
@@ -691,7 +740,14 @@ async def receive_sync_data(
                         logger.info(f"✅ Deferred item applied: {table}:{record_id}")
                     else:
                         errors.append(f"{table}:{record_id} (deferred)")
-                        logger.error(f"Deferred item still failed: {table}:{record_id}")
+                        logger.error(
+                            "Deferred item still failed",
+                            extra={
+                                "event": "sync.deferred_item_still_failed",
+                                "table": table,
+                                "record_id": record_id,
+                            },
+                        )
                 except Exception as e:
                     logger.error(
                         "Deferred retry error",
@@ -708,7 +764,13 @@ async def receive_sync_data(
             try:
                 await ensure_mandatory_channel_rollout(db)
             except Exception as exc:
-                logger.error(f"Failed to refresh mandatory channel rollout after sync: {exc}")
+                logger.error(
+                    "Failed to refresh mandatory channel rollout after sync",
+                    extra={
+                        "event": "sync.mandatory_channel_rollout_refresh_failed",
+                        **_summarize_exception(exc),
+                    },
+                )
 
         await db.commit()
 
@@ -726,7 +788,14 @@ async def receive_sync_data(
                     )
                     logger.info(f"🔢 Sequence {seq_name} synced to MAX(id)")
                 except Exception as seq_err:
-                    logger.warning(f"⚠️ Failed to fix sequence {seq_name}: {seq_err}")
+                    logger.warning(
+                        "Failed to fix sequence after sync",
+                        extra={
+                            "event": "sync.sequence_fix_failed",
+                            "sequence_name": seq_name,
+                            **_summarize_exception(seq_err),
+                        },
+                    )
         await db.commit()
 
         # Refresh caches for affected tables
@@ -800,7 +869,13 @@ async def receive_sync_data(
                                     offer.channel_message_id = msg_id
                                     logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
                                 else:
-                                    logger.warning(f"⚠️ send_offer_to_channel returned None for offer {oid}")
+                                    logger.warning(
+                                        "send_offer_to_channel returned None",
+                                        extra={
+                                            "event": "sync.synced_offer_publish_empty_result",
+                                            "offer_id": oid,
+                                        },
+                                    )
                             else:
                                 logger.info(f"⏭️ Offer {oid} already published or locked by another request")
                     except Exception as e:
@@ -839,7 +914,7 @@ async def receive_sync_data(
                 **_summarize_exception(e),
             },
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Sync batch processing failed")
 
 
 @router.post("/resync")
