@@ -124,6 +124,18 @@ class ObservabilityConfigTests(unittest.TestCase):
         ):
             self.assertIn(expected, script)
 
+    def test_production_release_script_enforces_modern_node_for_frontend_builds(self):
+        script = (ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
+
+        for expected in (
+            "local_node_version_ok",
+            "install_local_node_runtime",
+            "DEPLOY_NODE_VERSION:-22.12.0",
+            "node-v${node_version}-linux-${node_arch}.tar.xz",
+            "Frontend build requires Node.js 20.19+ or 22.12+",
+        ):
+            self.assertIn(expected, script)
+
     def test_production_docs_and_examples_include_audit_anchor_and_runtime_env_requirements(self):
         hardening = (ROOT / "docs/OBSERVABILITY_PRODUCTION_HARDENING.md").read_text(encoding="utf-8")
         manifest_example = (ROOT / "deploy/production/online.env.example").read_text(encoding="utf-8")
