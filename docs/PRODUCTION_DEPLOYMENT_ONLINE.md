@@ -146,12 +146,32 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - does **not** build the image remotely
 - when used standalone, also installs and verifies the Iran sync-health sampler before service startup
 
-### 11. `healthcheck`
+### 11. Shared-table seed guard
+- after the Iran stack is deployed, the release flow runs `scripts/inspect_shared_sync_state.py` inside the Iran migration container
+- automatic current-state seed runs only when the Iran database is classified as `fresh`
+- `IRAN_SHARED_DATA_MODE=reset` forces a confirmed backup/reset before seeding, even if the inspector classifies the host as fresh with only baseline/system rows
+- `fresh` means the user/business/non-system chat signal tables are empty; baseline/system rows such as the mandatory channel or `market_runtime_state` do not by themselves block fresh classification
+- if existing project data is detected, the script does not change Iran data automatically
+- for existing data, choose one of:
+  - `skip`: keep Iran database rows unchanged and continue deploy
+  - `reset`: take a `pg_dump` backup, truncate shared tables plus `change_log`, then seed current shared-table state from foreign
+  - `abort`: stop release without changing Iran data
+- non-interactive reset requires `IRAN_SHARED_DATA_MODE=reset` plus `IRAN_SHARED_RESET_CONFIRM=RESET_IRAN_SHARED_DATA`
+- after a successful seed, the script marks pre-seed foreign shared backlog as synced up to the seed cutoff, clears only Iran seed-generated mandatory/system backlog, and requires both sync-health endpoints to report zero unsynced changes
+
+Standalone commands:
+
+```bash
+make production-online-inspect-shared MANIFEST=/root/secure-envs/trading-bot/online.env
+make production-online-seed-shared MANIFEST=/root/secure-envs/trading-bot/online.env
+```
+
+### 12. `healthcheck`
 - retries the local API endpoint on the Iran host with backoff until it becomes ready
 - optionally retries the public HTTPS endpoint with backoff until it becomes ready
 - verifies that the sync-health sampler timer is installed and active on both foreign and Iran
 
-### 12. Observability post-release operator steps
+### 13. Observability post-release operator steps
 - install the audit anchor timer on the foreign host:
   - `make audit-anchor-monitor-install`
 - verify the compact anchor export path:
@@ -176,6 +196,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 8. Iran bootstrap currently assumes the transferred package bundle contains all required `.deb` files for the target distro family.
 9. The foreign host must have root-level access to install missing packages when `docker`, `npm`, or `pip` are absent.
 10. S3 support has been removed from the production deploy flow and from the generated env files.
+11. Existing Iran shared data still requires an operator decision; the script intentionally fails closed instead of guessing whether old data should be preserved or replaced.
 
 ## Next step after this test phase
 

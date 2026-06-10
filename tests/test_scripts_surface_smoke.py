@@ -13,6 +13,7 @@ PYTHON_SCRIPTS = (
     'scripts/create_superadmin.py',
     'scripts/dev_admin.py',
     'scripts/free_deleted_user.py',
+    'scripts/inspect_shared_sync_state.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
     'scripts/run_observability_gate.py',

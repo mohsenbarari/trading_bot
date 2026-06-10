@@ -133,8 +133,21 @@ class ObservabilityConfigTests(unittest.TestCase):
             "check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote",
             "ensure_runtime_env_file",
             "validate_observability_release_inputs",
+            "handle_iran_shared_data",
+            "inspect_shared_sync_state.py",
+            "seed_shared_sync_tables.py",
+            "IRAN_SHARED_RESET_CONFIRM_TEXT",
+            "RESET_IRAN_SHARED_DATA",
+            "backup_iran_database_before_shared_reset",
+            "TRUNCATE TABLE change_log",
+            "verify_shared_sync_health_clean",
+            "unsynced_change_log_count",
         ):
             self.assertIn(expected, script)
+
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("production-online-inspect-shared", makefile)
+        self.assertIn("production-online-seed-shared", makefile)
 
     def test_production_release_script_enforces_modern_node_for_frontend_builds(self):
         script = (ROOT / "scripts/production_deploy_online.sh").read_text(encoding="utf-8")
