@@ -5,6 +5,11 @@ import argparse
 from collections import OrderedDict
 from pathlib import Path
 
+try:
+    from deploy_config import parse_env_file
+except ModuleNotFoundError:  # pragma: no cover - used when imported as scripts.render_runtime_envs
+    from scripts.deploy_config import parse_env_file
+
 
 COMMON_RUNTIME_KEYS = (
     "BOT_TOKEN",
@@ -33,6 +38,11 @@ COMMON_RUNTIME_KEYS = (
     "GRAFANA_ALERT_EMAIL_ADDRESSES",
 )
 
+OPTIONAL_RUNTIME_KEYS = {
+    "CHANNEL_INVITE_LINK",
+    "ERROR_TRACKING_DSN",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render foreign and Iran runtime env files.")
@@ -44,17 +54,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--foreign-server-domain", required=True)
     parser.add_argument("--iran-server-url", required=True)
     parser.add_argument("--iran-server-domain", required=True)
+    parser.add_argument("--source-env-file", help="Optional runtime env source file. Environment variables override file values.")
     parser.add_argument("--metrics-backend", default="memory")
     parser.add_argument("--audit-trail-path", default="/app/audit_trail/audit.jsonl")
     return parser.parse_args()
 
-def collect_runtime_values() -> dict[str, str]:
+def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]:
     import os
 
+    source_values = parse_env_file(Path(source_env_file)) if source_env_file else {}
     values: dict[str, str] = {}
     missing: list[str] = []
     for key in COMMON_RUNTIME_KEYS:
-        value = os.environ.get(key)
+        value = os.environ.get(key, source_values.get(key))
+        if value is None and key in OPTIONAL_RUNTIME_KEYS:
+            value = ""
         if value is None:
             missing.append(key)
             continue
@@ -102,7 +116,7 @@ def write_env_file(path: str, payload: OrderedDict[str, str]) -> None:
 
 def main() -> int:
     args = parse_args()
-    values = collect_runtime_values()
+    values = collect_runtime_values(args.source_env_file)
 
     write_env_file(
         args.local_output,
