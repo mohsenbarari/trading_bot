@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_runtime_envs.py"
+RELEASE_ARTIFACT_RENDERER="$PROJECT_DIR/scripts/render_release_artifacts.py"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -481,6 +482,7 @@ load_manifest() {
     esac
     RSYNC_SSH="ssh -p $IRAN_SSH_PORT -o StrictHostKeyChecking=no"
     RELEASE_TMP_DIR="$LOCAL_PROJECT_DIR/tmp/production-release"
+    RELEASE_ARTIFACT_DIR="$RELEASE_TMP_DIR/artifacts"
     REMOTE_IMAGE_BUNDLE="$IRAN_DEPLOY_BASE_DIR/releases/trading-bot-images.tar"
 }
 
@@ -650,7 +652,9 @@ check_local() {
     [[ -f "$LOCAL_PROJECT_DIR/docker-compose.iran.yml" ]] || die "docker-compose.iran.yml missing"
     [[ -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" ]] || die "Dockerfile.iran missing"
     [[ -f "$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template" ]] || die "Nginx template missing"
+    [[ -f "$RELEASE_ARTIFACT_RENDERER" ]] || die "Release artifact renderer missing: $RELEASE_ARTIFACT_RENDERER"
     ensure_runtime_env_file
+    render_release_artifacts
     validate_observability_release_inputs
     log "Local checks passed"
 }
@@ -749,14 +753,18 @@ $post_bootstrap_guard"
     log "Iran host bootstrap complete"
 }
 
-render_nginx_config() {
+render_release_artifacts() {
     local template="$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template"
-    local output="$PROJECT_DIR/tmp/iran-online-nginx.conf"
-    sed \
-        -e "s#__SERVER_NAME__#$IRAN_APP_DOMAIN#g" \
-        -e "s#__APP_ROOT__#$IRAN_PROJECT_DIR/mini_app_dist#g" \
-        "$template" > "$output"
-    printf '%s\n' "$output"
+    mkdir -p "$RELEASE_ARTIFACT_DIR"
+    python3 "$RELEASE_ARTIFACT_RENDERER" \
+        --manifest "$MANIFEST_PATH" \
+        --template "$template" \
+        --output-dir "$RELEASE_ARTIFACT_DIR" >/dev/null
+}
+
+render_nginx_config() {
+    render_release_artifacts
+    printf '%s\n' "$RELEASE_ARTIFACT_DIR/iran-online-nginx.conf"
 }
 
 configure_nginx() {
@@ -787,12 +795,8 @@ $cert_renewal_guard"
 }
 
 hosts_block() {
-    cat <<EOF
-# trading-bot-production-hosts START
-$FOREIGN_PUBLIC_IP $FOREIGN_PUBLIC_DOMAIN
-$IRAN_PUBLIC_IP $IRAN_PUBLIC_DOMAIN
-# trading-bot-production-hosts END
-EOF
+    render_release_artifacts
+    cat "$RELEASE_ARTIFACT_DIR/hosts.block"
 }
 
 replace_hosts_block_local() {
