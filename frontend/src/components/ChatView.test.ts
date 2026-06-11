@@ -5458,6 +5458,8 @@ describe('ChatView.vue', () => {
     Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
     container.scrollTop = 24
 
+    expect(hooks.getOlderMessagesPrefetchThreshold(container)).toBe(340)
+
     hooks.state.isInitialChatOpenSettling.value = true
     await wrapper.get('.messages-container').trigger('scroll')
     await flushPromises()
@@ -5471,6 +5473,48 @@ describe('ChatView.vue', () => {
 
     expect(chatViewMocks.loadOlderMessagesMock).toHaveBeenCalledWith(55)
     expect(container.scrollTop).toBe(244)
+
+    wrapper.unmount()
+  })
+
+  it('prefetches older messages before the scroll reaches the loaded top', async () => {
+    chatViewMocks.hasOlderMessagesValue = true
+    chatViewMocks.loadOlderMessagesMock.mockResolvedValue(2)
+    chatViewMocks.messagesSeed = [buildMessage({ id: 71 })]
+
+    const wrapper = await mountChatView({
+      targetUserId: 55,
+      targetUserName: 'Target User',
+    }, {
+      ChatMessageItem: {
+        props: ['msg'],
+        template: '<div :id="`msg-${msg.id}`" class="scroll-message">{{ msg.id }}</div>',
+      },
+    })
+    await flushPromises()
+
+    const container = wrapper.get('.messages-container').element as HTMLElement
+    const hooks = getChatViewTestHooks(wrapper)
+    let scrollHeight = 1600
+    Object.defineProperty(container, 'clientHeight', { configurable: true, get: () => 600 })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    hooks.state.isInitialChatOpenSettling.value = false
+
+    expect(hooks.getOlderMessagesPrefetchThreshold(container)).toBe(510)
+
+    container.scrollTop = 540
+    await wrapper.get('.messages-container').trigger('scroll')
+    await flushPromises()
+    expect(chatViewMocks.loadOlderMessagesMock).not.toHaveBeenCalled()
+
+    container.scrollTop = 500
+    const scrollPromise = wrapper.get('.messages-container').trigger('scroll')
+    scrollHeight = 1900
+    await scrollPromise
+    await flushPromises()
+
+    expect(chatViewMocks.loadOlderMessagesMock).toHaveBeenCalledWith(55)
+    expect(container.scrollTop).toBe(800)
 
     wrapper.unmount()
   })

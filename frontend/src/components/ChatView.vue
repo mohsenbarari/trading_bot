@@ -759,8 +759,18 @@ const {
   sendTypingSignal
 } = wsLogic
 
-const LOAD_OLDER_TRIGGER_PX = 96
+const MIN_LOAD_OLDER_PREFETCH_PX = 240
+const MAX_LOAD_OLDER_PREFETCH_PX = 720
+const LOAD_OLDER_PREFETCH_VIEWPORT_RATIO = 0.85
 const PROGRAMMATIC_SCROLL_PAGINATION_SUPPRESS_MS = 8000
+
+function getOlderMessagesPrefetchThreshold(container: HTMLElement) {
+  const viewportLead = Math.round(container.clientHeight * LOAD_OLDER_PREFETCH_VIEWPORT_RATIO)
+  return Math.max(
+    MIN_LOAD_OLDER_PREFETCH_PX,
+    Math.min(MAX_LOAD_OLDER_PREFETCH_PX, viewportLead),
+  )
+}
 
 function captureMessagesContainerMetrics(container = messagesContainer.value): MessagesContainerMetrics | null {
   if (!container) return null
@@ -945,7 +955,7 @@ const handleMessagesScroll = async () => {
     return
   }
 
-  if (container.scrollTop > LOAD_OLDER_TRIGGER_PX) {
+  if (container.scrollTop > getOlderMessagesPrefetchThreshold(container)) {
     return
   }
 
@@ -3915,6 +3925,7 @@ defineExpose({
     handleCancelDownload,
     closeLocationModal,
     captureMessagesContainerMetrics,
+    getOlderMessagesPrefetchThreshold,
     syncMessagesContainerMetrics,
     handleMessagesContainerResize,
     releaseInitialOpenBottomLockForUserScroll,
