@@ -10,7 +10,7 @@ from aiogram import Bot
 from core.config import settings
 from core.events import _get_sync_redis
 from core.sync_push import push_sync_direct
-from datetime import datetime
+from core.utils import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ async def send_telegram_message(chat_id: int, text: str, parse_mode: str = "Mark
             "chat_id": chat_id,
             "text": text,
             "parse_mode": parse_mode,
-            "timestamp": datetime.utcnow().timestamp()
+            "timestamp": utc_now_naive().timestamp()
         }
         
         # Direct Push only (no Redis backup for notifications to avoid double-send)

@@ -93,6 +93,22 @@ def _target_is_in_cooldown(target_url: str) -> bool:
         return True
 
 
+def _peer_response_is_success(response) -> bool:
+    if getattr(response, "status_code", None) != 200:
+        return False
+    try:
+        payload = response.json()
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    try:
+        errors = int(payload.get("errors") or 0)
+    except (TypeError, ValueError):
+        return False
+    return payload.get("status") in {"success", "ok"} and errors == 0
+
+
 def _do_push(payload: dict, target_url: str, api_key: str):
     """
     Synchronous HTTP push — runs in thread pool.
@@ -122,11 +138,11 @@ def _do_push(payload: dict, target_url: str, api_key: str):
             }
         )
 
-        if response.status_code == 200:
+        if _peer_response_is_success(response):
             _clear_target_cooldown(target_url)
             logger.info(f"⚡ Direct push OK: {payload.get('table')}:{payload.get('id')}")
         else:
-            _mark_target_cooldown(target_url, f"HTTP {response.status_code}")
+            _mark_target_cooldown(target_url, f"peer rejected status={response.status_code}")
             logger.warning(f"⚡ Direct push failed ({response.status_code}), sync_worker will retry")
 
     except Exception as e:

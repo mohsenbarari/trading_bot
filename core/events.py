@@ -14,13 +14,14 @@ Sync flow (optimized):
 import json
 import logging
 from typing import Any, Dict
+from datetime import datetime
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 import redis.asyncio as redis
 from core.redis import pool
 from sqlalchemy.sql import text
-from datetime import datetime
 import hashlib
+from core.utils import utc_now_naive
 
 logger = logging.getLogger(__name__)
 
@@ -51,20 +52,23 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
     try:
         json_data = json.dumps(data, default=str)
         data_hash = hashlib.sha256(json_data.encode()).hexdigest()
+        now = utc_now_naive()
 
         # 1. Insert into change_log (same transaction as the triggering change)
         sql = text("""
             INSERT INTO change_log (operation, table_name, record_id, data, timestamp, hash, synced, verified, created_at)
             VALUES (:op, :tbl, :rid, :data, :ts, :hash, false, false, NOW())
+            RETURNING id
         """)
-        connection.execute(sql, {
+        result = connection.execute(sql, {
             "op": operation,
             "tbl": table_name,
             "rid": record_id,
             "data": json_data,
-            "ts": datetime.utcnow(),
+            "ts": now,
             "hash": data_hash
         })
+        change_log_id = _extract_change_log_id(result)
 
         # Build sync payload
         payload = {
@@ -74,8 +78,10 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
             "id": record_id,
             "data": data,
             "hash": data_hash,
-            "timestamp": datetime.utcnow().timestamp()
+            "timestamp": now.timestamp()
         }
+        if change_log_id is not None:
+            payload["change_log_id"] = change_log_id
         payload_json = json.dumps(payload, default=str)
 
         # 2. Push to Redis queue (persistent connection — backup for sync_worker retry)
@@ -97,6 +103,17 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
 
     except Exception as e:
         logger.error(f"❌ Error logging change for {table_name}:{record_id}: {e}")
+
+
+def _extract_change_log_id(result) -> int | None:
+    try:
+        value = result.scalar_one_or_none()
+    except Exception:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def publish_event_sync(event_type: str, data: Dict[str, Any]) -> None:
@@ -953,7 +970,7 @@ def setup_notification_events():
             "user_id": target.user_id,
             "message": target.message,
             "is_read": target.is_read,
-            "created_at": (target.created_at or datetime.utcnow()).isoformat(),
+            "created_at": (target.created_at or utc_now_naive()).isoformat(),
             "level": level,
             "category": category,
         }
@@ -994,7 +1011,7 @@ def setup_admin_message_events():
     from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
 
     def market_message_payload(target):
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utc_now_naive().isoformat()
         return {
             "id": target.id,
             "content": target.content,
@@ -1008,7 +1025,7 @@ def setup_admin_message_events():
         }
 
     def broadcast_message_payload(target):
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utc_now_naive().isoformat()
         return {
             "id": target.id,
             "content": target.content,
@@ -1098,5 +1115,3 @@ def setup_all_events():
 
 # Alias for main.py / startup
 setup_event_listeners = setup_all_events
-
-
