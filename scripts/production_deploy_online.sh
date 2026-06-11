@@ -408,6 +408,7 @@ IRAN_CONNECTIVITY_MODE=ask
 IRAN_SKIP_FOREIGN_DEPLOY=0
 IRAN_HOSTS_SYNC_ENABLED=1
 IRAN_FORCE_RELEASE_REFRESH=0
+IRAN_ALLOW_DIRTY_RELEASE=0
 IRAN_SHARED_DATA_MODE=auto
 IRAN_SHARED_SEED_BATCH_SIZE=50
 IRAN_SHARED_RESET_CONFIRM=
@@ -496,6 +497,7 @@ load_manifest() {
     IRAN_SSH_AUTH_METHOD="${IRAN_SSH_AUTH_METHOD,,}"
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
     IRAN_FORCE_RELEASE_REFRESH="${IRAN_FORCE_RELEASE_REFRESH:-0}"
+    IRAN_ALLOW_DIRTY_RELEASE="${IRAN_ALLOW_DIRTY_RELEASE:-0}"
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
@@ -702,6 +704,20 @@ ensure_local_tools() {
     need_cmd sed
 }
 
+ensure_clean_release_tree() {
+    if [[ "$IRAN_ALLOW_DIRTY_RELEASE" == "1" ]]; then
+        log "IRAN_ALLOW_DIRTY_RELEASE=1; allowing production release from a dirty working tree."
+        return 0
+    fi
+
+    local status_output
+    status_output="$(git -C "$LOCAL_PROJECT_DIR" status --porcelain --untracked-files=all)"
+    if [[ -n "$status_output" ]]; then
+        printf '%s\n' "$status_output" | sed -n '1,40p' >&2
+        die "Production release requires a clean git working tree because rsync deploys local files. Commit, stash, or set IRAN_ALLOW_DIRTY_RELEASE=1 explicitly."
+    fi
+}
+
 local_node_version_ok() {
     local version major minor
     command -v node >/dev/null 2>&1 || return 1
@@ -814,6 +830,7 @@ check_local() {
     ensure_local_runtime_packages
     ensure_local_tools
     [[ "$(id -u)" -eq 0 ]] || die "This release script must be run as root so it can update /etc/hosts and manage Docker."
+    ensure_clean_release_tree
     ssh_iran "echo connected-to-\$(hostname)"
     detect_runtime_metadata
     [[ -f "$LOCAL_PROJECT_DIR/requirements.txt" ]] || die "requirements.txt missing"

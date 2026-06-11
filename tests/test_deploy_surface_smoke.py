@@ -111,6 +111,21 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'deploy.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_deploy_script_keeps_foreign_rebuild_steps_cache_aware(self):
+        deploy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')
+
+        for expected in (
+            'PIP_BOOTSTRAP_REQUIREMENTS',
+            'DEPLOY_FORCE_REBUILD',
+            'frontend_build_signature',
+            'Frontend build inputs unchanged. Skipping npm install/build.',
+            'foreign_image_signature',
+            'Foreign Docker image inputs unchanged. Skipping docker build.',
+            'python3 -m pip download -r "$PIP_BOOTSTRAP_REQUIREMENTS"',
+            'python3 -m pip download -r "$PROJECT_DIR/requirements.txt"',
+        ):
+            self.assertIn(expected, deploy_script)
+
     def test_makefile_parses_with_noop_status_target(self):
         if shutil.which('make') is None:
             self.skipTest('make is not installed')

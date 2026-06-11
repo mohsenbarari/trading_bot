@@ -11,12 +11,17 @@ set -e
 PROJECT_DIR="/root/trading-bot/trading_bot"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
+DEPLOY_STATE_DIR="$PROJECT_DIR/tmp/deploy-state"
+FRONTEND_SIGNATURE_FILE="$DEPLOY_STATE_DIR/frontend-build.signature"
+FOREIGN_IMAGE_SIGNATURE_FILE="$DEPLOY_STATE_DIR/foreign-image.signature"
+PIP_BOOTSTRAP_REQUIREMENTS="$PROJECT_DIR/deploy/production/pip-bootstrap-requirements.txt"
 TIMEZONE_SCRIPT="$PROJECT_DIR/scripts/ensure_host_timezone.sh"
 SYNC_RECOVERY_SCRIPT="$PROJECT_DIR/scripts/recover_cross_server_sync.sh"
 DEPLOY_CONFIG_SCRIPT="$PROJECT_DIR/scripts/deploy_config.py"
 FOREIGN_HOST_TIMEZONE="${FOREIGN_HOST_TIMEZONE:-UTC}"
 IRAN_HOST_TIMEZONE="${IRAN_HOST_TIMEZONE:-UTC}"
 AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY="${AUTO_SYNC_RECOVERY_ON_FULL_DEPLOY:-1}"
+DEPLOY_FORCE_REBUILD="${DEPLOY_FORCE_REBUILD:-${IRAN_FORCE_RELEASE_REFRESH:-0}}"
 LOCAL_COMPOSE_CMD=""
 
 normalize_arch() {
@@ -57,6 +62,10 @@ append_pip_platform_args() {
                 "--platform" "any"
             ;;
     esac
+}
+
+hash_release_inputs() {
+    sha256sum | cut -d' ' -f1
 }
 
 IRAN_HOST="${IRAN_HOST:-}"
@@ -230,6 +239,71 @@ EOF
     wait "$cmd_pid"
 }
 
+hash_file_or_dir() {
+    local rel="$1"
+    local path="$PROJECT_DIR/$rel"
+    if [[ -f "$path" ]]; then
+        sha256sum "$path" | sed "s#  $PROJECT_DIR/#  #"
+    elif [[ -d "$path" ]]; then
+        (cd "$PROJECT_DIR" && find "$rel" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+    fi
+}
+
+frontend_build_signature() {
+    {
+        printf 'node=%s\n' "$(node -p 'process.versions.node' 2>/dev/null || true)"
+        printf 'npm=%s\n' "$(npm --version 2>/dev/null || true)"
+        env | LC_ALL=C sort | grep -E '^(VITE_|BASE_URL=|NODE_ENV=)' || true
+        local rel
+        for rel in \
+            frontend/package.json \
+            frontend/package-lock.json \
+            frontend/vite.config.ts \
+            frontend/tsconfig.json \
+            frontend/tsconfig.app.json \
+            frontend/tsconfig.node.json \
+            frontend/postcss.config.js \
+            frontend/tailwind.config.js \
+            frontend/index.html \
+            frontend/public \
+            frontend/src
+        do
+            hash_file_or_dir "$rel"
+        done
+    } | hash_release_inputs
+}
+
+foreign_image_signature() {
+    {
+        printf 'docker_image=%s\n' "trading_bot_base"
+        local rel
+        for rel in \
+            Dockerfile \
+            .dockerignore \
+            requirements.txt \
+            pip_packages \
+            api \
+            bot \
+            core \
+            src \
+            migrations \
+            models \
+            templates \
+            fonts \
+            alembic.ini \
+            main.py \
+            manage.py \
+            run_bot.py \
+            schemas.py \
+            seed_fake_data.py \
+            scripts \
+            mini_app_dist
+        do
+            hash_file_or_dir "$rel"
+        done
+    } | hash_release_inputs
+}
+
 # ==========================================
 # Auto Cleanup Logic (Every 10 deploys)
 # ==========================================
@@ -275,6 +349,15 @@ print_header "🚀 Deploy: $TARGET"
 # ==========================================
 build_frontend() {
     print_header "📦 Building Frontend"
+    mkdir -p "$DEPLOY_STATE_DIR"
+    local frontend_signature
+    frontend_signature="$(frontend_build_signature)"
+    if [ "$DEPLOY_FORCE_REBUILD" != "1" ] && [ -f "$FRONTEND_SIGNATURE_FILE" ] && [ "$(cat "$FRONTEND_SIGNATURE_FILE")" = "$frontend_signature" ] && [ -f "$DIST_DIR/index.html" ]; then
+        echo "✅ Frontend build inputs unchanged. Skipping npm install/build."
+        chmod -R 755 "$DIST_DIR"
+        cd "$PROJECT_DIR"
+        return 0
+    fi
     run_with_local_resource_guard "Frontend build" bash -lc "cd \"$FRONTEND_DIR\" && if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS=\"--max-old-space-size=1024\" npm run build"
 
     if [ ! -d "$DIST_DIR" ]; then
@@ -283,6 +366,7 @@ build_frontend() {
     fi
 
     chmod -R 755 "$DIST_DIR"
+    echo "$frontend_signature" > "$FRONTEND_SIGNATURE_FILE"
     echo "✅ Frontend build successful!"
     cd "$PROJECT_DIR"
 }
@@ -295,16 +379,33 @@ prepare_pip_packages() {
     
     HASH_FILE="$PROJECT_DIR/pip_packages/.requirements_hash"
     LOCAL_ARCH="$(normalize_arch "$(dpkg --print-architecture)")"
-    CURRENT_HASH="$(md5sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)-$LOCAL_ARCH"
+    CURRENT_HASH="$(
+        {
+            md5sum "$PROJECT_DIR/requirements.txt"
+            if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
+                md5sum "$PIP_BOOTSTRAP_REQUIREMENTS"
+            fi
+        } | md5sum | cut -d' ' -f1
+    )-$LOCAL_ARCH"
     
-    if [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
+    if [ "$DEPLOY_FORCE_REBUILD" = "1" ] || [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
         echo "🔄 requirements.txt changed or packages missing. Downloading..."
         mkdir -p "$PROJECT_DIR/pip_packages"
         rm -f "$PROJECT_DIR"/pip_packages/*.whl "$PROJECT_DIR/pip_packages/.requirements_hash" 2>/dev/null || true
         mapfile -t PIP_PLATFORM_ARGS < <(append_pip_platform_args "$LOCAL_ARCH")
+
+        if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
+            python3 -m pip download -r "$PIP_BOOTSTRAP_REQUIREMENTS" \
+                -d "$PROJECT_DIR/pip_packages/" \
+                --python-version 311 \
+                --implementation cp \
+                --abi cp311 \
+                "${PIP_PLATFORM_ARGS[@]}" \
+                --only-binary=:all:
+        fi
         
         # Download for Python 3.11 (Docker image version)
-        pip download -r "$PROJECT_DIR/requirements.txt" \
+        python3 -m pip download -r "$PROJECT_DIR/requirements.txt" \
             -d "$PROJECT_DIR/pip_packages/" \
             --python-version 311 \
             --implementation cp \
@@ -390,8 +491,16 @@ deploy_foreign() {
     ensure_local_host_timezone
     resolve_local_compose_cmd
 
-    echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
-    run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
+    mkdir -p "$DEPLOY_STATE_DIR"
+    local image_signature
+    image_signature="$(foreign_image_signature)"
+    if [ "$DEPLOY_FORCE_REBUILD" != "1" ] && [ -f "$FOREIGN_IMAGE_SIGNATURE_FILE" ] && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] && docker image inspect trading_bot_base >/dev/null 2>&1; then
+        echo "✅ Foreign Docker image inputs unchanged. Skipping docker build."
+    else
+        echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
+        run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
+        echo "$image_signature" > "$FOREIGN_IMAGE_SIGNATURE_FILE"
+    fi
 
     echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
     echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
