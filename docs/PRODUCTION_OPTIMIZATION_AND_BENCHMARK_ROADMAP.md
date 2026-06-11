@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P7 trading core, market, and bot workloads complete; Stage P8 is next.
+Status: Stage P8 non-messenger frontend UX benchmark complete; Stage P9 is next.
 
 Last updated: 2026-06-11
 
@@ -20,7 +20,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P5` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T105109Z/summary.md`: targeted workers benchmark passed; worker matrix kept Iran at `API_WORKERS=8` after 8/12/16 comparison |
 | `P6` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T113726Z/summary.md`: targeted sync benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T113726Z/sync-p6/summary.md`: propagation, partial-failure guard, and sync-worker recovery scenarios passed with clean final health on both servers |
 | `P7` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T121537Z/summary.md`: targeted trading benchmark passed; `tmp/production-benchmark/20260611T121537Z/trading-p7/summary.md`: bot text offer, parser, offer create/list/expire, trade execution, notification fanout, and race scenario measured on Iran with clean final health |
-| `P8`-`P11` | Pending | Execute in order after P7 |
+| `P8` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T131305Z/summary.md`: targeted frontend benchmark passed; `tmp/production-benchmark/20260611T131305Z/frontend-p8/summary.md`: login, dashboard, own/public/customer profile, market, notifications, and admin user-management routes measured on Iran with zero gate failures, zero warnings, bounded list gates, and clean final health |
+| `P9`-`P11` | Pending | Execute in order after P8 |
 
 ## Current Baseline Known From Live Checks
 
@@ -39,6 +40,7 @@ Current Iran production-class host:
 | Static/media path | Iran Nginx serves immutable frontend assets directly with `Cache-Control: public, max-age=31536000, immutable` and `X-Static-Delivery: nginx`; service worker/manifest stay no-cache; raw `/uploads/` is blocked; protected chat media stays behind `/api/chat/files/{file_id}` token authorization |
 | Cross-server sync | P6 targeted sync benchmark passed on both directions; partial receive errors are no longer accepted as success; final foreign/Iran sync-health was clean |
 | Trading money path | P7 targeted benchmark runs isolated synthetic users/offers/trades on Iran, waits for sync-health clean, cleans both servers, and records bot/parser/offer/trade/notification/race latency |
+| Frontend UX path | P8 targeted benchmark runs isolated synthetic users/accountants/customers/offers/trades/notifications on Iran, measures non-Messenger route usability/DOM/heap/network/list bounds, cleans both servers, and verifies final sync-health |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -374,6 +376,32 @@ Acceptance:
 
 - No major route has unbounded list rendering at production-like row counts.
 - Customer/profile/market UI stays within the baseline-regression budget.
+
+Completion notes:
+
+- Added `scripts/frontend_ux_probe_worker.py`, an in-container helper that creates isolated synthetic users, coworkers, accountants, customers, customer/accountant relations, offers, trades, and notifications with a unique `P8_FRONTEND_<timestamp>_` prefix.
+- Added `scripts/report_frontend_ux_benchmark.py`, a host-level orchestrator that prepares the synthetic fixture on Iran, runs the browser probe against `https://coin.gold-trade.ir`, cleans both servers, removes prefix-matching change-log and Redis queue residue, records final sync-health, and writes a dedicated artifact under `tmp/production-benchmark/<timestamp>/frontend-p8/`.
+- Added `scripts/run_frontend_ux_benchmark.mjs`, a Playwright/Chromium mobile-viewport probe for login, dashboard, own profile, market, notifications, admin user management, public user profile, and customer public profile routes.
+- Wired the production benchmark runner with `PROFILE=frontend`. The profile now selects the focused P8 route/list benchmark by default, while the older long/mutating frontend E2E matrix remains opt-in.
+- The runner tracks first usable time, DOM nodes, JS heap, request counts, failed responses, console errors, and route-specific list/card counts. Synthetic `mark-all-read` aborts caused only by the benchmark closing its browser context are recorded as ignored failed requests rather than route failures.
+- Final targeted artifact: `tmp/production-benchmark/20260611T131305Z/summary.md`; `frontend_ux_benchmark` passed in `63.759s` with `0` required failures.
+- P8 scenario artifact: `tmp/production-benchmark/20260611T131305Z/frontend-p8/summary.md`.
+- Measured route usability on Iran:
+  - Login: `1377.216ms`, DOM `69`, heap `2.6MB`.
+  - Dashboard: `2129.926ms`, DOM `129`, heap `2.97MB`.
+  - Own profile: `3798.96ms`, DOM `839`, heap `4.34MB`, with `50` project users, `12` accountants, `24` customers, and `8` trade cards rendered after section actions.
+  - Market: `1478.665ms`, DOM `87`, heap `3.02MB`.
+  - Notifications: `2585.097ms`, DOM `440`, heap `3.34MB`.
+  - Admin user management: `2722.171ms`, DOM `1125`, heap `4.15MB`, with bounded `100` visible user rows.
+  - Public profile: `2478.513ms`, DOM `214`, heap `3.45MB`.
+  - Customer public profile: `2465.017ms`, DOM `216`, heap `3.44MB`.
+- Bounded-list gates passed: project users first page `25`, project users after load-more `50`, admin user manager `100`.
+- Cleanup after the final run removed `98` synthetic users, `12` accountant relations, `24` customer relations, `26` offers, `8` trades, `12` notifications, `7` prefix-matching change-log rows, and `7` prefix-matching Redis retry entries on Iran. Final foreign/Iran sync-health reported zero unsynced changes and empty Redis sync queues.
+
+Rollback:
+
+- No production runtime tuning value changed in P8. If the benchmark tooling must be removed, revert the P8 commit and run `make production-online-sync`.
+- If a future interrupted run leaves synthetic rows behind, run `frontend_ux_probe_worker.py cleanup --prefix <P8 prefix>` inside both app containers, then verify `make sync-health` and `make sync-health-iran`.
 
 ### Stage P9 - Observability, Audit, and Alert Readiness
 
