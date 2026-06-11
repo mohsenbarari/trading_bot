@@ -20,6 +20,9 @@ from scripts.capture_production_baseline import (
     DEFAULT_ARTIFACT_ROOT,
     REMAINING_STAGES,
     display_path,
+    compose_probe_script,
+    quote_remote,
+    remote_args,
     run_command,
     utc_iso,
     utc_stamp,
@@ -41,6 +44,7 @@ class BenchmarkTask:
     bottleneck_class: str
     modes: tuple[str, ...] = ("quick", "targeted", "full")
     long_running: bool = False
+    mutating: bool = False
     required: bool = True
 
 
@@ -54,9 +58,32 @@ def _python_script(script: str, *args: str) -> list[str]:
     return [sys.executable, script, *args]
 
 
-def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, artifact_root: Path) -> list[BenchmarkTask]:
+def _iran_compose_args(settings: dict[str, str], body: str) -> list[str]:
+    command = f"cd {quote_remote(settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
+    return remote_args(settings, command)
+
+
+def _iran_python_script(settings: dict[str, str], script: str, *args: str) -> list[str]:
+    quoted = " ".join(shlex_quote(item) for item in ("python", script, *args))
+    return _iran_compose_args(settings, f"exec -T app {quoted}")
+
+
+def shlex_quote(value: str) -> str:
+    import shlex
+
+    return shlex.quote(value)
+
+
+def build_tasks(
+    *,
+    settings: dict[str, str],
+    manifest: str | None,
+    stamp: str,
+    artifact_root: Path,
+    target: str,
+) -> list[BenchmarkTask]:
     manifest_args = ["--manifest", manifest] if manifest else []
-    return [
+    tasks = [
         BenchmarkTask(
             task_id="baseline_capture",
             surface_id="B00/B08",
@@ -76,16 +103,6 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
             modes=("quick", "targeted", "full"),
         ),
         BenchmarkTask(
-            task_id="foreign_api_config",
-            surface_id="B01",
-            label="Foreign public API config health latency",
-            profile="api",
-            command=["curl", "-fsS", "--max-time", "15", _health_url(settings, role="foreign")],
-            timeout_seconds=30,
-            bottleneck_class="api_health",
-            modes=("quick", "targeted", "full"),
-        ),
-        BenchmarkTask(
             task_id="iran_api_config",
             surface_id="B01",
             label="Iran public API config health latency",
@@ -96,14 +113,15 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
             modes=("quick", "targeted", "full"),
         ),
         BenchmarkTask(
-            task_id="sync_health_foreign",
-            surface_id="B08",
-            label="Foreign sync-health endpoint",
-            profile="sync",
-            command=["make", "sync-health"],
-            timeout_seconds=45,
-            bottleneck_class="cross_server_sync",
+            task_id="foreign_peer_api_config",
+            surface_id="B01",
+            label="Foreign peer public API config health latency",
+            profile="api",
+            command=["curl", "-fsS", "--max-time", "15", _health_url(settings, role="foreign")],
+            timeout_seconds=30,
+            bottleneck_class="peer_api_health",
             modes=("quick", "targeted", "full"),
+            required=False,
         ),
         BenchmarkTask(
             task_id="sync_health_iran",
@@ -116,11 +134,22 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
             modes=("quick", "targeted", "full"),
         ),
         BenchmarkTask(
+            task_id="sync_health_foreign_peer",
+            surface_id="B08",
+            label="Foreign peer sync-health endpoint",
+            profile="sync",
+            command=["make", "sync-health"],
+            timeout_seconds=45,
+            bottleneck_class="cross_server_sync",
+            modes=("quick", "targeted", "full"),
+            required=False,
+        ),
+        BenchmarkTask(
             task_id="observability_overhead",
             surface_id="B10",
-            label="Structured logging overhead",
+            label="Structured logging overhead inside Iran app container",
             profile="observability",
-            command=_python_script("scripts/measure_logging_overhead.py", "--iterations", "5000", "--budget-us", "1000"),
+            command=_iran_python_script(settings, "scripts/measure_logging_overhead.py", "--iterations", "5000", "--budget-us", "1000"),
             timeout_seconds=45,
             bottleneck_class="observability_overhead",
             modes=("quick", "targeted", "full"),
@@ -128,9 +157,9 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
         BenchmarkTask(
             task_id="metrics_targets",
             surface_id="B10",
-            label="Metrics target contract render",
+            label="Metrics target contract render inside Iran app container",
             profile="observability",
-            command=_python_script("scripts/render_metrics_targets.py"),
+            command=_iran_python_script(settings, "scripts/render_metrics_targets.py", "--server-mode", "iran", "--compose-file", "docker-compose.iran.yml"),
             timeout_seconds=30,
             bottleneck_class="metrics_contract",
             modes=("quick", "targeted", "full"),
@@ -158,9 +187,9 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
         BenchmarkTask(
             task_id="messenger_query_plans",
             surface_id="B05/B06",
-            label="Messenger DB query plan benchmark",
+            label="Messenger DB query plan benchmark inside Iran app container",
             profile="db",
-            command=_python_script("scripts/report_messenger_query_plans.py", "--json"),
+            command=_iran_python_script(settings, "scripts/report_messenger_query_plans.py", "--json"),
             timeout_seconds=120,
             bottleneck_class="database_query_plan",
             modes=("targeted", "full"),
@@ -168,12 +197,13 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
         BenchmarkTask(
             task_id="observability_gate",
             surface_id="B10",
-            label="Focused observability regression gate",
+            label="Focused local observability regression gate",
             profile="observability",
             command=["make", "observability-gate"],
             timeout_seconds=180,
             bottleneck_class="observability_regression",
             modes=("targeted", "full"),
+            required=False,
         ),
         BenchmarkTask(
             task_id="frontend_e2e_chromium",
@@ -185,6 +215,7 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
             bottleneck_class="frontend_ux_runtime",
             modes=("targeted", "full"),
             long_running=True,
+            mutating=True,
         ),
         BenchmarkTask(
             task_id="messenger_full",
@@ -196,12 +227,26 @@ def build_tasks(*, settings: dict[str, str], manifest: str | None, stamp: str, a
             bottleneck_class="messenger_full_stack",
             modes=("full",),
             long_running=True,
+            mutating=True,
         ),
     ]
+    if target != "iran":
+        return tasks
+    return tasks
 
 
-def task_selected(task: BenchmarkTask, *, mode: str, profile: str | None, include_long: bool, skip_long: bool) -> bool:
+def task_selected(
+    task: BenchmarkTask,
+    *,
+    mode: str,
+    profile: str | None,
+    include_long: bool,
+    skip_long: bool,
+    include_mutating: bool,
+) -> bool:
     if mode not in task.modes:
+        return False
+    if task.mutating and not include_mutating:
         return False
     if mode == "targeted" and profile and task.profile != profile:
         return False
@@ -229,6 +274,7 @@ def normalize_result(task: BenchmarkTask, result: dict[str, Any]) -> dict[str, A
         "bottleneck_class": task.bottleneck_class,
         "required": task.required,
         "long_running": task.long_running,
+        "mutating": task.mutating,
         "status": status,
     }
 
@@ -291,14 +337,34 @@ def write_summary(path: Path, *, metadata: dict[str, Any], results: list[dict[st
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_run_artifacts(
+    *,
+    run_dir: Path,
+    metadata: dict[str, Any],
+    results: list[dict[str, Any]],
+    skipped: list[dict[str, Any]],
+) -> None:
+    payload = {
+        "metadata": metadata,
+        "surface_summary": build_surface_summary([item for item in results if item.get("status") != "planned"]),
+        "results": results,
+        "skipped": skipped,
+    }
+    write_json(run_dir / "metadata.json", metadata)
+    write_json(run_dir / "results.json", payload)
+    write_summary(run_dir / "summary.md", metadata=metadata, results=results, skipped=skipped)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production benchmark orchestration harness.")
     parser.add_argument("--mode", choices=("quick", "targeted", "full"), default="quick")
     parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, frontend.")
+    parser.add_argument("--target", choices=("iran",), default="iran", help="Production benchmark target host.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))
     parser.add_argument("--timestamp", default=None)
     parser.add_argument("--include-long", action="store_true", help="Allow long-running tasks in targeted mode.")
+    parser.add_argument("--include-mutating", action="store_true", help="Allow data-mutating benchmark suites. Do not use on production.")
     parser.add_argument("--skip-long", action="store_true", help="Skip long-running tasks even in full mode.")
     parser.add_argument("--allow-failures", action="store_true", help="Exit 0 even when required tasks fail.")
     parser.add_argument("--dry-run", action="store_true", help="Write planned tasks without executing them.")
@@ -314,10 +380,17 @@ def main(argv: list[str] | None = None) -> int:
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     settings = resolve_deploy_settings(manifest_path=args.manifest)
-    tasks = build_tasks(settings=settings, manifest=args.manifest, stamp=stamp, artifact_root=artifact_root)
+    tasks = build_tasks(settings=settings, manifest=args.manifest, stamp=stamp, artifact_root=artifact_root, target=args.target)
     selected = [
         task for task in tasks
-        if task_selected(task, mode=args.mode, profile=args.profile, include_long=args.include_long, skip_long=args.skip_long)
+        if task_selected(
+            task,
+            mode=args.mode,
+            profile=args.profile,
+            include_long=args.include_long,
+            skip_long=args.skip_long,
+            include_mutating=args.include_mutating,
+        )
     ]
     selected_ids = {task.task_id for task in selected}
     skipped = [
@@ -326,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
             "surface_id": task.surface_id,
             "profile": task.profile,
             "long_running": task.long_running,
+            "mutating": task.mutating,
             "reason": "not selected by mode/profile/long-running flags",
         }
         for task in tasks
@@ -341,9 +415,11 @@ def main(argv: list[str] | None = None) -> int:
         "started_at": utc_iso(),
         "mode": args.mode,
         "profile": args.profile,
+        "target": args.target,
         "artifact_dir": display_path(run_dir),
         "git_sha": git_sha,
         "include_long": bool(args.include_long),
+        "include_mutating": bool(args.include_mutating),
         "skip_long": bool(args.skip_long),
         "dry_run": bool(args.dry_run),
         "task_count": len(selected),
@@ -361,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
                     "bottleneck_class": task.bottleneck_class,
                     "required": task.required,
                     "long_running": task.long_running,
+                    "mutating": task.mutating,
                     "status": "planned",
                     "command": " ".join(task.command),
                     "exit_code": None,
@@ -369,21 +446,28 @@ def main(argv: list[str] | None = None) -> int:
             )
     else:
         for task in selected:
+            print(f"[production-benchmark] starting {task.task_id}: {task.label}", flush=True)
+            write_json(run_dir / "current-task.json", {
+                "task_id": task.task_id,
+                "surface_id": task.surface_id,
+                "label": task.label,
+                "started_at": utc_iso(),
+            })
             result = run_command(name=task.task_id, args=task.command, logs_dir=logs_dir, timeout=task.timeout_seconds)
-            results.append(normalize_result(task, result))
+            normalized = normalize_result(task, result)
+            results.append(normalized)
+            print(
+                f"[production-benchmark] finished {task.task_id}: "
+                f"{normalized['status']} ({normalized['duration_seconds']}s)",
+                flush=True,
+            )
+            metadata["finished_at"] = utc_iso()
+            metadata["failed_required_count"] = sum(1 for item in results if item.get("status") == "failed")
+            write_run_artifacts(run_dir=run_dir, metadata=metadata, results=results, skipped=skipped)
 
     metadata["finished_at"] = utc_iso()
     metadata["failed_required_count"] = sum(1 for item in results if item.get("status") == "failed")
-
-    payload = {
-        "metadata": metadata,
-        "surface_summary": build_surface_summary([item for item in results if item.get("status") != "planned"]),
-        "results": results,
-        "skipped": skipped,
-    }
-    write_json(run_dir / "metadata.json", metadata)
-    write_json(run_dir / "results.json", payload)
-    write_summary(run_dir / "summary.md", metadata=metadata, results=results, skipped=skipped)
+    write_run_artifacts(run_dir=run_dir, metadata=metadata, results=results, skipped=skipped)
 
     print(json.dumps({
         "artifact_dir": display_path(run_dir),

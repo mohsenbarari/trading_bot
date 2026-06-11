@@ -15,18 +15,29 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         settings = {
             "FOREIGN_SERVER_URL": "https://foreign.example",
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
         }
-        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"))
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
         selected = [
             task.task_id
             for task in tasks
-            if runner.task_selected(task, mode="quick", profile=None, include_long=False, skip_long=False)
+            if runner.task_selected(
+                task,
+                mode="quick",
+                profile=None,
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
         ]
 
         self.assertIn("baseline_capture", selected)
-        self.assertIn("foreign_api_config", selected)
         self.assertIn("iran_api_config", selected)
-        self.assertIn("sync_health_foreign", selected)
+        self.assertIn("foreign_peer_api_config", selected)
+        self.assertIn("sync_health_iran", selected)
         self.assertIn("observability_overhead", selected)
         self.assertNotIn("frontend_e2e_chromium", selected)
         self.assertNotIn("messenger_full", selected)
@@ -35,15 +46,53 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         settings = {
             "FOREIGN_SERVER_URL": "https://foreign.example",
             "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
         }
-        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"))
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
         selected = [
             task.task_id
             for task in tasks
-            if runner.task_selected(task, mode="targeted", profile="observability", include_long=False, skip_long=False)
+            if runner.task_selected(
+                task,
+                mode="targeted",
+                profile="observability",
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
         ]
 
         self.assertEqual(selected, ["observability_overhead", "metrics_targets", "observability_gate"])
+
+    def test_full_mode_skips_mutating_tasks_by_default(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="full",
+                profile=None,
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
+        ]
+
+        self.assertIn("messenger_query_plans", selected)
+        self.assertNotIn("frontend_e2e_chromium", selected)
+        self.assertNotIn("messenger_full", selected)
 
     def test_dry_run_writes_results_without_executing_benchmark_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

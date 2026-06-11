@@ -29,6 +29,16 @@ SAFE_CODE_KEYS = {
     "status",
 }
 
+SAFE_INTEGRITY_HASH_KEYS = {
+    "audit-event-hash",
+    "audit-previous-hash",
+    "event-hash",
+    "previous-hash",
+    "output-sha256",
+    "sha256",
+    "trail-sha256",
+}
+
 SENSITIVE_EXACT_KEYS = {
     "access-token",
     "access_token",
@@ -136,6 +146,10 @@ def is_sensitive_key(key: str) -> bool:
     return any(_matches_sensitive_key_part(normalized, part) for part in SENSITIVE_KEY_PARTS)
 
 
+def is_safe_integrity_hash_key(key: str) -> bool:
+    return key.lower().replace("_", "-") in SAFE_INTEGRITY_HASH_KEYS
+
+
 def mask_mobile(value: str) -> str:
     masked = _MOBILE_RE.sub(r"\1****\2", value)
     return _IRAN_MOBILE_VARIANT_RE.sub(REDACTED_MOBILE, masked)
@@ -169,7 +183,11 @@ def redact(value: Any) -> Any:
         redacted: dict[str, Any] = {}
         for key, nested in value.items():
             key_str = str(key)
-            redacted[key_str] = REDACTED if is_sensitive_key(key_str) else redact(nested)
+            normalized_key = key_str.lower().replace("_", "-")
+            if is_safe_integrity_hash_key(key_str):
+                redacted[key_str] = nested
+            else:
+                redacted[key_str] = REDACTED if is_sensitive_key(key_str) else redact(nested)
         return redacted
     if isinstance(value, (list, tuple, set, frozenset)):
         return [redact(item) for item in value]
