@@ -1127,14 +1127,42 @@ prepare_pip_packages() {
     fi
 }
 
-build_context_signature() {
+hash_context_entry() {
     local context_dir="$1"
+    local rel_path="$2"
+    local path="$context_dir/$rel_path"
+
+    if [[ -f "$path" ]]; then
+        (cd "$context_dir" && sha256sum "$rel_path")
+    elif [[ -d "$path" ]]; then
+        (cd "$context_dir" && find "$rel_path" -type f -print0 | LC_ALL=C sort -z | xargs -r -0 sha256sum)
+    fi
+}
+
+build_image_bundle_signature() {
+    local context_dir="$1"
+    local rel_path
+
     {
+        printf 'signature_scope=%s\n' "iran-base-image-v2"
         printf 'iran_image_platform=%s\n' "$IRAN_IMAGE_PLATFORM"
         printf 'iran_host_arch=%s\n' "$IRAN_HOST_ARCH"
+        printf 'python_base_image=%s\n' "python:3.11-slim-bullseye"
         printf 'postgres_image=%s\n' "postgres:15-alpine"
         printf 'redis_image=%s\n' "redis:7-alpine"
-        find "$context_dir" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+        # Iran compose bind-mounts runtime code. Refresh the heavy image bundle
+        # only when base-image dependencies or non-mounted image assets change.
+        for rel_path in \
+            Dockerfile.iran \
+            .dockerignore \
+            requirements.txt \
+            deploy/production/pip-bootstrap-requirements.txt \
+            pip_packages \
+            fonts \
+            templates
+        do
+            hash_context_entry "$context_dir" "$rel_path"
+        done
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -1198,10 +1226,16 @@ build_release() {
     rsync -a --delete \
         --exclude '.git' \
         --exclude '.github' \
+        --exclude '.env' \
+        --exclude '.env.*' \
+        --exclude '.deploy_count' \
         --exclude '.venv' \
         --exclude '.vscode' \
         --exclude '__pycache__' \
         --exclude '*.pyc' \
+        --exclude 'app_logs.txt' \
+        --exclude 'repomix-output.xml' \
+        --exclude 'docs' \
         --exclude 'frontend' \
         --exclude 'node_modules' \
         --exclude 'tests' \
@@ -1213,7 +1247,7 @@ build_release() {
     rsync -a --delete "$iran_pip_dir/" "$iran_context_dir/pip_packages/"
 
     local image_signature
-    image_signature="$(build_context_signature "$iran_context_dir")"
+    image_signature="$(build_image_bundle_signature "$iran_context_dir")"
     if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && -s "$LOCAL_IMAGE_BUNDLE" && -f "$LOCAL_IMAGE_SIGNATURE_FILE" && "$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")" == "$image_signature" ]]; then
         log "Docker image bundle already matches current build inputs; skipping image build/save."
         return 0

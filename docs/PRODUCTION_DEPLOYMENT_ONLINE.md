@@ -92,7 +92,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - host-native foreign image path via `deploy.sh foreign`
   - `trading_bot_base_iran` for the detected Iran target architecture
 - skips the frontend `npm ci` / `npm run build` step when the frontend source/config/env signature matches and `mini_app_dist/index.html` already exists
-- skips the Iran Docker image build/save step when the prepared build context signature matches the existing local image bundle
+- skips the Iran Docker image build/save step when the Iran base-image signature matches the existing local image bundle; this signature tracks Dockerfile/dependency/wheelhouse and non-mounted image assets instead of volatile runtime files such as `.env`, `.deploy_count`, docs, or logs
 - use `IRAN_FORCE_RELEASE_REFRESH=1` when the cached frontend, wheel, or image artifacts must be rebuilt deliberately
 - `deploy.sh foreign` uses the same frontend and wheelhouse signatures so the foreign deploy step no longer rewrites the production wheelhouse hash on every run
 - prepares a loadable Docker bundle containing:
