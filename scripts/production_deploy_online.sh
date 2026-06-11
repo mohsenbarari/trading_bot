@@ -217,6 +217,27 @@ docker info >/dev/null
 EOF
 }
 
+remote_bootstrap_ready_guard() {
+    cat <<'EOF'
+set -euo pipefail
+for cmd in curl gpg rsync jq pigz nginx certbot python3 docker; do
+  command -v "$cmd" >/dev/null 2>&1 || exit 1
+done
+python3 -m pip --version >/dev/null 2>&1 || exit 1
+python3 - <<'PY' >/dev/null 2>&1 || exit 1
+import setuptools
+import wheel
+PY
+if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+  exit 1
+fi
+docker info >/dev/null 2>&1 || exit 1
+systemctl is-active --quiet nginx || exit 1
+timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+[ "$timezone" = "UTC" ] || exit 1
+EOF
+}
+
 remote_docker_cleanup_guard() {
     cat <<'EOF'
 docker_cleanup_packages=""
@@ -386,6 +407,7 @@ IRAN_ENABLE_UFW=0
 IRAN_CONNECTIVITY_MODE=ask
 IRAN_SKIP_FOREIGN_DEPLOY=0
 IRAN_HOSTS_SYNC_ENABLED=1
+IRAN_FORCE_RELEASE_REFRESH=0
 IRAN_SHARED_DATA_MODE=auto
 IRAN_SHARED_SEED_BATCH_SIZE=50
 IRAN_SHARED_RESET_CONFIRM=
@@ -473,6 +495,7 @@ load_manifest() {
     IRAN_LOCAL_API_URL="${IRAN_LOCAL_API_URL:-http://127.0.0.1:8000/api/config}"
     IRAN_SSH_AUTH_METHOD="${IRAN_SSH_AUTH_METHOD,,}"
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
+    IRAN_FORCE_RELEASE_REFRESH="${IRAN_FORCE_RELEASE_REFRESH:-0}"
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
@@ -513,6 +536,12 @@ load_manifest() {
     RELEASE_TMP_DIR="$LOCAL_PROJECT_DIR/tmp/production-release"
     RELEASE_ARTIFACT_DIR="$RELEASE_TMP_DIR/artifacts"
     REMOTE_IMAGE_BUNDLE="$IRAN_DEPLOY_BASE_DIR/releases/trading-bot-images.tar"
+    REMOTE_IMAGE_BUNDLE_SHA="$REMOTE_IMAGE_BUNDLE.sha256"
+    REMOTE_RELEASE_STATE_DIR="$IRAN_DEPLOY_BASE_DIR/releases/state"
+    REMOTE_IMAGE_LOADED_SIGNATURE="$REMOTE_RELEASE_STATE_DIR/docker-images.loaded.signature"
+    LOCAL_IMAGE_BUNDLE="$RELEASE_TMP_DIR/docker-images.tar"
+    LOCAL_IMAGE_SIGNATURE_FILE="$RELEASE_TMP_DIR/docker-images.signature"
+    LOCAL_FRONTEND_SIGNATURE_FILE="$RELEASE_TMP_DIR/frontend-build.signature"
 }
 
 ssh_iran() {
@@ -529,6 +558,10 @@ read_env_value() {
     local line
     line="$(grep -E "^${key}=" "$env_path" | tail -n 1 || true)"
     printf '%s' "${line#*=}"
+}
+
+file_sha256() {
+    sha256sum "$1" | awk '{print $1}'
 }
 
 require_env_value() {
@@ -665,6 +698,7 @@ ensure_local_tools() {
     need_cmd git
     need_cmd python3
     need_cmd md5sum
+    need_cmd sha256sum
     need_cmd sed
 }
 
@@ -837,6 +871,8 @@ apt-get -o Acquire::Retries=5 -y --download-only -o Dir::Cache::archives=/bundle
 
 bootstrap_iran() {
     log "Bootstrapping the Iran host"
+    local bootstrap_ready_guard
+    bootstrap_ready_guard="$(remote_bootstrap_ready_guard)"
     local post_bootstrap_guard
     post_bootstrap_guard="$(remote_post_bootstrap_guard)"
     local docker_cleanup_guard
@@ -844,6 +880,10 @@ bootstrap_iran() {
     local docker_service_guard
     docker_service_guard="$(remote_docker_service_guard)"
     ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$IRAN_PROJECT_DIR'"
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" ]] && ssh_iran "$bootstrap_ready_guard"; then
+        log "Iran bootstrap prerequisites already satisfied; skipping package upload/install."
+        return 0
+    fi
     if [[ "$IRAN_APT_BUNDLE_MODE" == "same-arch" ]]; then
         prepare_iran_package_bundle
         scp_iran "$RELEASE_TMP_DIR/iran-packages.tar.gz" "$IRAN_SSH_TARGET:$IRAN_DEPLOY_BASE_DIR/releases/iran-packages.tar.gz"
@@ -1034,7 +1074,7 @@ prepare_pip_packages() {
     current_hash="$hash_material"
     mkdir -p "$output_dir"
     local needs_refresh=0
-    if [[ ! -f "$hash_file" || "$(cat "$hash_file")" != "$current_hash" ]]; then
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" == "1" || ! -f "$hash_file" || "$(cat "$hash_file")" != "$current_hash" ]]; then
         needs_refresh=1
     fi
     if [[ "$needs_refresh" == "0" && "$target_arch" == "$LOCAL_HOST_ARCH" ]]; then
@@ -1065,16 +1105,70 @@ prepare_pip_packages() {
             "${pip_platform_args[@]}" \
             --only-binary=:all:
         printf '%s' "$current_hash" > "$hash_file"
+    else
+        log "Wheel cache already matches requirements for arch=$target_arch; skipping rebuild."
+    fi
+}
+
+build_context_signature() {
+    local context_dir="$1"
+    {
+        printf 'iran_image_platform=%s\n' "$IRAN_IMAGE_PLATFORM"
+        printf 'iran_host_arch=%s\n' "$IRAN_HOST_ARCH"
+        printf 'postgres_image=%s\n' "postgres:15-alpine"
+        printf 'redis_image=%s\n' "redis:7-alpine"
+        find "$context_dir" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+    } | sha256sum | cut -d' ' -f1
+}
+
+frontend_build_signature() {
+    {
+        printf 'node=%s\n' "$(node -p 'process.versions.node' 2>/dev/null || true)"
+        printf 'npm=%s\n' "$(npm --version 2>/dev/null || true)"
+        env | LC_ALL=C sort | grep -E '^(VITE_|BASE_URL=|NODE_ENV=)' || true
+        local rel path
+        for rel in \
+            package.json \
+            package-lock.json \
+            vite.config.ts \
+            tsconfig.json \
+            tsconfig.app.json \
+            tsconfig.node.json \
+            postcss.config.js \
+            tailwind.config.js \
+            index.html \
+            public \
+            src
+        do
+            path="$LOCAL_FRONTEND_DIR/$rel"
+            if [[ -f "$path" ]]; then
+                sha256sum "$path" | sed "s#  $LOCAL_FRONTEND_DIR/#  #"
+            elif [[ -d "$path" ]]; then
+                (cd "$LOCAL_FRONTEND_DIR" && find "$rel" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+            fi
+        done
+    } | sha256sum | cut -d' ' -f1
+}
+
+ensure_frontend_dist() {
+    if [[ "$IRAN_SKIP_FRONTEND_BUILD" != "1" ]]; then
+        local frontend_signature
+        frontend_signature="$(frontend_build_signature)"
+        if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && -f "$LOCAL_FRONTEND_SIGNATURE_FILE" && "$(cat "$LOCAL_FRONTEND_SIGNATURE_FILE")" == "$frontend_signature" && -f "$LOCAL_DIST_DIR/index.html" ]]; then
+            log "Frontend dist already matches current build inputs; skipping npm build."
+            return 0
+        fi
+        log "Building frontend locally"
+        (cd "$LOCAL_FRONTEND_DIR" && if [[ -f package-lock.json ]]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS="--max-old-space-size=1024" npm run build)
+        mkdir -p "$RELEASE_TMP_DIR"
+        printf '%s\n' "$frontend_signature" > "$LOCAL_FRONTEND_SIGNATURE_FILE"
+    else
+        log "Skipping frontend build because IRAN_SKIP_FRONTEND_BUILD=1"
     fi
 }
 
 build_release() {
-    if [[ "$IRAN_SKIP_FRONTEND_BUILD" != "1" ]]; then
-        log "Building frontend locally"
-        (cd "$LOCAL_FRONTEND_DIR" && if [[ -f package-lock.json ]]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS="--max-old-space-size=1024" npm run build)
-    else
-        log "Skipping frontend build because IRAN_SKIP_FRONTEND_BUILD=1"
-    fi
+    ensure_frontend_dist
     prepare_pip_packages "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages" "$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
@@ -1101,13 +1195,20 @@ build_release() {
         "$LOCAL_PROJECT_DIR/" "$iran_context_dir/"
     rsync -a --delete "$iran_pip_dir/" "$iran_context_dir/pip_packages/"
 
+    local image_signature
+    image_signature="$(build_context_signature "$iran_context_dir")"
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && -s "$LOCAL_IMAGE_BUNDLE" && -f "$LOCAL_IMAGE_SIGNATURE_FILE" && "$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")" == "$image_signature" ]]; then
+        log "Docker image bundle already matches current build inputs; skipping image build/save."
+        return 0
+    fi
+
     log "Building Docker images for Iran platform=$IRAN_IMAGE_PLATFORM"
     ensure_buildx_for_target
     if [[ "$LOCAL_HOST_ARCH" == "$IRAN_HOST_ARCH" ]]; then
         docker pull "postgres:15-alpine" >/dev/null
         docker pull "redis:7-alpine" >/dev/null
         docker build -f "$iran_context_dir/Dockerfile.iran" -t trading_bot_base_iran "$iran_context_dir"
-        docker save trading_bot_base_iran postgres:15-alpine redis:7-alpine -o "$RELEASE_TMP_DIR/docker-images.tar"
+        docker save trading_bot_base_iran postgres:15-alpine redis:7-alpine -o "$LOCAL_IMAGE_BUNDLE"
     else
         docker pull --platform "$IRAN_IMAGE_PLATFORM" postgres:15-alpine >/dev/null
         docker tag postgres:15-alpine "postgres:15-alpine-iran-$IRAN_HOST_ARCH"
@@ -1115,8 +1216,9 @@ build_release() {
         docker tag redis:7-alpine "redis:7-alpine-iran-$IRAN_HOST_ARCH"
         docker buildx build --platform "$IRAN_IMAGE_PLATFORM" -f "$iran_context_dir/Dockerfile.iran" -t trading_bot_base_iran --output "type=docker,dest=$RELEASE_TMP_DIR/trading_bot_base_iran.tar" "$iran_context_dir"
         docker load -i "$RELEASE_TMP_DIR/trading_bot_base_iran.tar" >/dev/null
-        docker save trading_bot_base_iran "postgres:15-alpine-iran-$IRAN_HOST_ARCH" "redis:7-alpine-iran-$IRAN_HOST_ARCH" -o "$RELEASE_TMP_DIR/docker-images.tar"
+        docker save trading_bot_base_iran "postgres:15-alpine-iran-$IRAN_HOST_ARCH" "redis:7-alpine-iran-$IRAN_HOST_ARCH" -o "$LOCAL_IMAGE_BUNDLE"
     fi
+    printf '%s\n' "$image_signature" > "$LOCAL_IMAGE_SIGNATURE_FILE"
     log "Local release build complete"
 }
 
@@ -1276,7 +1378,7 @@ sync_project() {
     log "Syncing production payload to the Iran host"
     ensure_runtime_env_file
     local staging_dir="$IRAN_PROJECT_DIR"
-    ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$staging_dir'"
+    ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR' '$IRAN_DEPLOY_BASE_DIR/releases' '$REMOTE_RELEASE_STATE_DIR' '$staging_dir'"
     rsync -avz --delete \
         --exclude '.git' \
         --exclude '.github' \
@@ -1294,8 +1396,17 @@ sync_project() {
         --exclude 'map_data' \
         -e "$RSYNC_SSH" \
         "$LOCAL_PROJECT_DIR/" "$IRAN_SSH_TARGET:$staging_dir/"
-    rsync -avz --delete -e "$RSYNC_SSH" \
-        "$LOCAL_PROJECT_DIR/pip_packages/" "$IRAN_SSH_TARGET:$staging_dir/pip_packages/"
+    local local_pip_hash_file="$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
+    local remote_pip_hash=""
+    if [[ -f "$local_pip_hash_file" ]]; then
+        remote_pip_hash="$(ssh_iran "cat '$staging_dir/pip_packages/.requirements_hash' 2>/dev/null || true")"
+    fi
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && -f "$local_pip_hash_file" && "$remote_pip_hash" == "$(cat "$local_pip_hash_file")" ]]; then
+        log "Remote pip wheelhouse already matches requirements; skipping pip package sync."
+    else
+        rsync -avz --delete -e "$RSYNC_SSH" \
+            "$LOCAL_PROJECT_DIR/pip_packages/" "$IRAN_SSH_TARGET:$staging_dir/pip_packages/"
+    fi
     rsync -avz --delete -e "$RSYNC_SSH" \
         "$LOCAL_DIST_DIR/" "$IRAN_SSH_TARGET:$staging_dir/mini_app_dist/"
     scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
@@ -1303,23 +1414,50 @@ sync_project() {
 }
 
 ship_images() {
-    local bundle="$RELEASE_TMP_DIR/docker-images.tar"
+    local bundle="$LOCAL_IMAGE_BUNDLE"
     [[ -f "$bundle" ]] || die "Docker image bundle missing: $bundle"
+    local bundle_sha remote_bundle_sha
+    bundle_sha="$(file_sha256 "$bundle")"
+    remote_bundle_sha="$(ssh_iran "cat '$REMOTE_IMAGE_BUNDLE_SHA' 2>/dev/null || true")"
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && "$remote_bundle_sha" == "$bundle_sha" ]] && ssh_iran "[ -s '$REMOTE_IMAGE_BUNDLE' ]"; then
+        log "Docker image bundle already exists on Iran with matching checksum; skipping upload."
+        return 0
+    fi
     log "Uploading Docker image bundle to the Iran host"
+    ssh_iran "mkdir -p '$IRAN_DEPLOY_BASE_DIR/releases' '$REMOTE_RELEASE_STATE_DIR'"
     scp_iran "$bundle" "$IRAN_SSH_TARGET:$REMOTE_IMAGE_BUNDLE"
+    ssh_iran "printf '%s\n' '$bundle_sha' > '$REMOTE_IMAGE_BUNDLE_SHA'"
     log "Docker image bundle upload complete"
 }
 
 load_images() {
+    local bundle="$LOCAL_IMAGE_BUNDLE"
+    [[ -f "$bundle" ]] || die "Docker image bundle missing: $bundle"
+    local image_signature remote_loaded_signature
+    if [[ -f "$LOCAL_IMAGE_SIGNATURE_FILE" ]]; then
+        image_signature="$(cat "$LOCAL_IMAGE_SIGNATURE_FILE")"
+    else
+        image_signature="$(file_sha256 "$bundle")"
+    fi
+    remote_loaded_signature="$(ssh_iran "cat '$REMOTE_IMAGE_LOADED_SIGNATURE' 2>/dev/null || true")"
+    if [[ "$IRAN_FORCE_RELEASE_REFRESH" != "1" && "$remote_loaded_signature" == "$image_signature" ]]; then
+        if ssh_iran "docker image inspect trading_bot_base_iran:latest >/dev/null 2>&1 && docker image inspect postgres:15-alpine >/dev/null 2>&1 && docker image inspect redis:7-alpine >/dev/null 2>&1"; then
+            log "Docker images already loaded on Iran with matching signature; skipping docker load."
+            return 0
+        fi
+        log "Docker image load signature matched but one or more images are missing; reloading bundle."
+    fi
     log "Loading transferred Docker images on the Iran host"
     ssh_iran "set -euo pipefail
+mkdir -p '$REMOTE_RELEASE_STATE_DIR'
 docker load -i '$REMOTE_IMAGE_BUNDLE'
 if docker image inspect 'postgres:15-alpine-iran-$IRAN_HOST_ARCH' >/dev/null 2>&1; then
   docker tag 'postgres:15-alpine-iran-$IRAN_HOST_ARCH' 'postgres:15-alpine'
 fi
 if docker image inspect 'redis:7-alpine-iran-$IRAN_HOST_ARCH' >/dev/null 2>&1; then
   docker tag 'redis:7-alpine-iran-$IRAN_HOST_ARCH' 'redis:7-alpine'
-fi"
+fi
+printf '%s\n' '$image_signature' > '$REMOTE_IMAGE_LOADED_SIGNATURE'"
     log "Docker images loaded on the Iran host"
 }
 

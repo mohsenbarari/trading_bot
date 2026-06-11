@@ -89,6 +89,9 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - builds:
   - host-native foreign image path via `deploy.sh foreign`
   - `trading_bot_base_iran` for the detected Iran target architecture
+- skips the frontend `npm ci` / `npm run build` step when the frontend source/config/env signature matches and `mini_app_dist/index.html` already exists
+- skips the Iran Docker image build/save step when the prepared build context signature matches the existing local image bundle
+- use `IRAN_FORCE_RELEASE_REFRESH=1` when the cached frontend, wheel, or image artifacts must be rebuilt deliberately
 - prepares a loadable Docker bundle containing:
   - `trading_bot_base_iran`
   - `postgres:15-alpine`
@@ -102,6 +105,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - if `yes`, it continues with the Iran-online flow
 
 ### 4. `bootstrap-iran`
+- skips package transfer/install entirely when the Iran host already has the required Docker/Compose/Nginx/Certbot/Python tooling, Docker is healthy, Nginx is active, and timezone is UTC
 - prepares a package bundle on the foreign server when foreign and Iran share the same Debian architecture
 - invalidates and rebuilds that bundle automatically when the bootstrap package set changes
 - transfers the bundle over SSH
@@ -122,7 +126,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 ### 6. `sync-project`
 - rsyncs the production payload to the Iran server
 - copies the private Iran runtime `.env` file
-- syncs the prepared `pip_packages/` wheelhouse for the runtime image build context
+- syncs the prepared `pip_packages/` wheelhouse only when the remote `.requirements_hash` differs from the local requirements signature
 
 ### 7. `configure-nginx`
 - renders a domain-aware Nginx config from the template
@@ -136,8 +140,9 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - can be skipped with `IRAN_SKIP_CERTBOT=1`
 
 ### 9. `ship-images` + `load-images`
-- uploads the prepared Docker image bundle to the Iran host
-- runs `docker load` on the Iran host
+- uploads the prepared Docker image bundle only when the remote tar checksum differs or the tar is missing
+- runs `docker load` only when the remote loaded-image signature differs or a required image tag is missing
+- use `IRAN_FORCE_RELEASE_REFRESH=1` when a deliberate frontend rebuild, image rebuild, re-upload, or re-load is required despite matching signatures
 
 ### 10. `deploy-iran`
 - detects whether Iran provides `docker compose` or `docker-compose`

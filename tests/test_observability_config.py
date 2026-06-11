@@ -148,6 +148,17 @@ class ObservabilityConfigTests(unittest.TestCase):
             "docker rm -f \\$ids",
             "trading_bot_sync_worker",
             "trading_bot_migration",
+            "IRAN_FORCE_RELEASE_REFRESH",
+            "remote_bootstrap_ready_guard",
+            "Iran bootstrap prerequisites already satisfied; skipping package upload/install.",
+            "Remote pip wheelhouse already matches requirements; skipping pip package sync.",
+            "Docker image bundle already matches current build inputs; skipping image build/save.",
+            "Docker image bundle already exists on Iran with matching checksum; skipping upload.",
+            "Docker images already loaded on Iran with matching signature; skipping docker load.",
+            "docker-images.loaded.signature",
+            "frontend_build_signature",
+            "Frontend dist already matches current build inputs; skipping npm build.",
+            "frontend-build.signature",
         ):
             self.assertIn(expected, script)
 
