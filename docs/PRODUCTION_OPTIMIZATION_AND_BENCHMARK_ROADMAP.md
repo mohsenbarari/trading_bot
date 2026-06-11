@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P4 Nginx, static assets, and media delivery complete; Stage P5 is next.
+Status: Stage P5 worker and pool recalibration complete; Stage P6 is next.
 
 Last updated: 2026-06-11
 
@@ -17,7 +17,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P2` | Complete on 2026-06-11 | Iran DB backup `p2-postgres-tuning-20260611T090824Z.sql`; `tmp/production-benchmark/20260611T092543Z/summary.md`: targeted DB benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T091935Z/summary.md`: quick benchmark passed 7/7 tasks; foreign/Iran sync-health clean after system-seed backlog cleanup |
 | `P3` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T094159Z/summary.md`: Redis durability benchmark passed 1/1 after live Redis restart probe; `tmp/production-benchmark/20260611T094110Z/summary.md`: quick benchmark passed 7/7; foreign/Iran sync-health clean |
 | `P4` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T095946Z/summary.md`: targeted static benchmark passed 1/1 after live Iran Nginx refresh; `tmp/production-benchmark/20260611T100027Z/summary.md`: quick benchmark passed 8/8; foreign/Iran sync-health clean |
-| `P5`-`P11` | Pending | Execute in order after P4 |
+| `P5` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T105109Z/summary.md`: targeted workers benchmark passed; worker matrix kept Iran at `API_WORKERS=8` after 8/12/16 comparison |
+| `P6`-`P11` | Pending | Execute in order after P5 |
 
 ## Current Baseline Known From Live Checks
 
@@ -257,6 +258,24 @@ Acceptance:
 
 - A higher worker count is accepted only if it improves p95/p99 or throughput without raising DB pressure unsafely.
 - If results are flat, keep `8` workers and record the rejected candidate as evidence.
+
+Completion notes:
+
+- Added `scripts/report_worker_http_benchmark.py`, a redaction-safe authenticated HTTP benchmark that runs inside the Iran app container and covers `/api/auth/me`, chat conversations, chat poll, active/my offers, and trade history. It records p50/p95/p99, error rate, DB connection samples, active worker/pool settings, and explicitly notes that FastAPI auth may refresh the sampled user's `last_seen_at` once.
+- Added `scripts/run_worker_pool_matrix.py` and wired it into `PROFILE=workers` in `scripts/run_production_benchmark.py`. The matrix backs up Iran `.env`, changes only `API_WORKERS`, recreates only the app service with `--no-deps`, runs the benchmark, records Docker stats snapshots, then restores the original `.env` and app service.
+- Hardened the matrix runner for Iran's Docker Compose v1 behavior: app restarts use `up -d --no-deps app` to avoid the known `ContainerConfig` recreate failure on `migration`, and `docker-compose exec` is run with stdin redirected from `/dev/null` so remote `bash -s` scripts continue through marker emission and cleanup.
+- Hardened `scripts/recover_cross_server_sync.sh` for the same Iran Docker Compose v1 constraint: recovery now recreates only `sync_worker` with `--no-deps` on both servers instead of touching DB/Redis dependencies.
+- Final targeted artifact: `tmp/production-benchmark/20260611T105109Z/summary.md`; `worker_pool_matrix` passed in `85.543s`.
+- Result summary:
+  - `8` workers: `109.834` RPS, p95 `436.647ms`, p99 `624.062ms`, error rate `0.0`, peak DB connections `28/400`, estimated SQLAlchemy ceiling `126`, peak RSS about `1.84GiB`.
+  - `12` workers: `92.336` RPS, p95 `493.984ms`, p99 `572.297ms`, error rate `0.0`, peak DB connections `32/400`, estimated SQLAlchemy ceiling `182`, peak RSS about `2.68GiB`.
+  - `16` workers: `88.527` RPS, p95 `505.096ms`, p99 `592.376ms`, error rate `0.0`, peak DB connections `33/400`, estimated SQLAlchemy ceiling `238`, peak RSS about `3.51GiB`.
+- Decision: keep Iran at `API_WORKERS=8`. Higher worker counts stayed DB-safe but reduced throughput, increased p95 latency, and consumed more CPU/RSS, so they did not clear the acceptance gate.
+- Post-run live state verified on Iran: `.env` restored to `API_WORKERS=8`, `trading_bot_app` is healthy, no P5 benchmark/sampler process remains running, `make sync-recover` drained the three auth `last_seen_at` user updates created by the benchmark, and both `make sync-health` / `make sync-health-iran` report zero backlog.
+
+Rollback:
+
+- No production tuning value changed. If a future P5 run leaves a worker override behind, restore the `.env.p5-worker-matrix-<timestamp>.bak` file on Iran and recreate only app with `docker-compose -f docker-compose.iran.yml up -d --no-deps app`.
 
 ### Stage P6 - Cross-Server Sync and Recovery Hardening
 
