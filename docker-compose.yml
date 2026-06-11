@@ -3,12 +3,16 @@ services:
     image: trading_bot_base
     container_name: trading_bot_app
     restart: always
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+    command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}"
     environment:
       TZ: UTC
       TRADING_BOT_SERVICE: api
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
       AUDIT_TRAIL_PATH: ${AUDIT_TRAIL_PATH:-/app/audit_trail/audit.jsonl}
+      API_WORKERS: ${API_WORKERS:-2}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
 
     volumes:
       - ${CERTS_HOST_PATH:-/root/cert/ip}:/app/certs  # Mount Host Certs
@@ -49,6 +53,9 @@ services:
       TZ: UTC
       TRADING_BOT_SERVICE: bot
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
     volumes:
       - .:/app
     env_file:
@@ -68,6 +75,9 @@ services:
       TZ: UTC
       TRADING_BOT_SERVICE: sync_worker
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
     volumes:
       - ./api:/app/api
       - ./bot:/app/bot
@@ -93,6 +103,9 @@ services:
     command: [ "python", "manage.py" ]
     environment:
       TZ: UTC
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
     volumes:
       - .:/app
     env_file:

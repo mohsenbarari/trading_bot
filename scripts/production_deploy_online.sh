@@ -1095,7 +1095,9 @@ ensure_runtime_env_file() {
             --foreign-server-url "$FOREIGN_SERVER_URL" \
             --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
             --iran-server-url "$IRAN_SERVER_URL" \
-            --iran-server-domain "$IRAN_SERVER_DOMAIN"
+            --iran-server-domain "$IRAN_SERVER_DOMAIN" \
+            --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
+            --iran-api-workers "${IRAN_API_WORKERS:-4}"
         chmod 600 "$local_env_path" || true
         chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
         log "Rendered runtime env files from source env: $source_env_path"
@@ -1186,7 +1188,9 @@ ensure_runtime_env_file() {
         --foreign-server-url "$FOREIGN_SERVER_URL" \
         --foreign-server-domain "$FOREIGN_SERVER_DOMAIN" \
         --iran-server-url "$IRAN_SERVER_URL" \
-        --iran-server-domain "$IRAN_SERVER_DOMAIN"
+        --iran-server-domain "$IRAN_SERVER_DOMAIN" \
+        --foreign-api-workers "${FOREIGN_API_WORKERS:-2}" \
+        --iran-api-workers "${IRAN_API_WORKERS:-4}"
 
     chmod 600 "$local_env_path" || true
     chmod 600 "$IRAN_ENV_SOURCE_PATH" || true

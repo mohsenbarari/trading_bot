@@ -1,4 +1,5 @@
 import unittest
+import asyncio
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -18,51 +19,20 @@ class _AsyncSessionContext:
 
 
 class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
-    async def test_lifespan_starts_expected_tasks_on_iran_and_closes_redis(self):
-        created = []
-
-        async def connectivity_monitor_loop():
-            return None
-
-        async def offer_expiry_loop():
-            return None
-
-        async def market_schedule_loop():
-            return None
-
-        async def session_expiry_loop():
-            return None
-
-        async def user_account_status_loop():
-            return None
-
-        def fake_create_task(coro):
-            name = getattr(getattr(coro, "cr_code", None), "co_name", "unknown")
-            created.append(name)
-            try:
-                coro.send(None)
-            except StopIteration:
-                pass
-            finally:
-                if hasattr(coro, "close"):
-                    coro.close()
-            return SimpleNamespace()
-
+    async def test_lifespan_starts_background_leader_and_closes_redis(self):
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        redis_client = AsyncMock()
+
+        def start_leader(client):
+            return asyncio.create_task(asyncio.sleep(3600))
 
         with patch.object(main.settings, "server_mode", "iran"), patch("main.init_db", new=AsyncMock()) as init_db_mock, patch(
-            "main.init_redis", new=AsyncMock()
+            "main.init_redis", new=AsyncMock(return_value=redis_client)
         ) as init_redis_mock, patch("main.close_redis", new=AsyncMock()) as close_redis_mock, patch(
             "main.setup_event_listeners"
         ) as setup_mock, patch("main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
             "main.ensure_mandatory_channel_rollout", new=AsyncMock()
-        ) as rollout_mock, patch("main.connectivity_monitor_loop", new=connectivity_monitor_loop), patch(
-            "main.offer_expiry_loop", new=offer_expiry_loop
-        ), patch("main.market_schedule_loop", new=market_schedule_loop), patch(
-            "main.session_expiry_loop", new=session_expiry_loop
-        ), patch(
-            "main.user_account_status_loop", new=user_account_status_loop
-        ), patch("main.asyncio.create_task", side_effect=fake_create_task):
+        ) as rollout_mock, patch("main._start_background_leader_task", side_effect=start_leader) as leader_mock:
             async with main.lifespan(main.app):
                 pass
 
@@ -72,63 +42,53 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         rollout_mock.assert_awaited_once_with(session)
         session.commit.assert_awaited_once()
         close_redis_mock.assert_awaited_once()
-        self.assertEqual(len(created), 5)
-        self.assertIn("market_schedule_loop", created)
-        self.assertIn("user_account_status_loop", created)
+        leader_mock.assert_called_once_with(redis_client)
 
-    async def test_lifespan_skips_connectivity_monitor_outside_iran(self):
-        created = []
-
-        async def connectivity_monitor_loop():
-            return None
-
-        async def offer_expiry_loop():
-            return None
-
-        async def market_schedule_loop():
-            return None
-
-        async def session_expiry_loop():
-            return None
-
-        async def user_account_status_loop():
-            return None
-
-        def fake_create_task(coro):
-            name = getattr(getattr(coro, "cr_code", None), "co_name", "unknown")
-            created.append(name)
-            try:
-                coro.send(None)
-            except StopIteration:
-                pass
-            finally:
-                if hasattr(coro, "close"):
-                    coro.close()
-            return SimpleNamespace()
-
-        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
-
+    async def test_background_job_factories_include_connectivity_only_on_iran(self):
         with patch.object(main.settings, "server_mode", "foreign"), patch("main.init_db", new=AsyncMock()), patch(
             "main.init_redis", new=AsyncMock()
-        ), patch("main.close_redis", new=AsyncMock()), patch("main.setup_event_listeners"), patch(
-            "main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)
-        ), patch("main.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
-            "main.connectivity_monitor_loop", new=connectivity_monitor_loop
-        ), patch("main.offer_expiry_loop", new=offer_expiry_loop), patch(
-            "main.market_schedule_loop", new=market_schedule_loop
-        ), patch(
-            "main.session_expiry_loop", new=session_expiry_loop
-        ), patch(
-            "main.user_account_status_loop", new=user_account_status_loop
-        ), patch("main.asyncio.create_task", side_effect=fake_create_task):
-            async with main.lifespan(main.app):
-                pass
+        ):
+            foreign_jobs = [name for name, _ in main._background_job_factories()]
+        with patch.object(main.settings, "server_mode", "iran"):
+            iran_jobs = [name for name, _ in main._background_job_factories()]
 
-        rollout_mock.assert_awaited_once_with(session)
-        session.commit.assert_awaited_once()
-        self.assertEqual(len(created), 4)
-        self.assertIn("market_schedule_loop", created)
-        self.assertIn("user_account_status_loop", created)
+        self.assertNotIn("connectivity_monitor", foreign_jobs)
+        self.assertIn("connectivity_monitor", iran_jobs)
+        self.assertIn("market_schedule", foreign_jobs)
+        self.assertIn("user_account_status", iran_jobs)
+
+    async def test_background_leader_starts_jobs_and_releases_lock_on_cancel(self):
+        class FakeRedis:
+            def __init__(self):
+                self.set_calls = []
+                self.eval_calls = []
+
+            async def set(self, *args, **kwargs):
+                self.set_calls.append((args, kwargs))
+                return True
+
+            async def eval(self, *args):
+                self.eval_calls.append(args)
+                return 1
+
+        redis_client = FakeRedis()
+        job_started = asyncio.Event()
+
+        async def demo_job():
+            job_started.set()
+            await asyncio.Event().wait()
+
+        with patch.object(main.settings, "server_mode", "foreign"), patch(
+            "main._background_job_factories", return_value=[("demo", demo_job)]
+        ):
+            task = asyncio.create_task(main._run_background_leader(redis_client))
+            await asyncio.wait_for(job_started.wait(), timeout=1)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        self.assertEqual(redis_client.set_calls[0][0][0], main.BACKGROUND_LEADER_LOCK_KEY)
+        self.assertTrue(redis_client.set_calls[0][1]["nx"])
+        self.assertTrue(any(call[0] == main.BACKGROUND_LEADER_RELEASE_SCRIPT for call in redis_client.eval_calls))
 
     async def test_lifespan_rolls_back_mandatory_rollout_failures(self):
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())

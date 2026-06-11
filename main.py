@@ -1,6 +1,8 @@
 import logging
 import ipaddress
+import os
 import time
+import uuid
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
@@ -38,6 +40,19 @@ configure_logging("api")
 logger = logging.getLogger(__name__)
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
+BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
+BACKGROUND_LEADER_REFRESH_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], ARGV[2])
+end
+return 0
+"""
+BACKGROUND_LEADER_RELEASE_SCRIPT = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
 
 
 def _is_loopback_client(client_host: str | None) -> bool:
@@ -56,12 +71,119 @@ def _is_metrics_request_allowed(request: Request) -> bool:
         return True
     return _is_loopback_client(request.client.host if request.client else None)
 
+
+def _background_job_factories():
+    jobs = [
+        ("offer_expiry", offer_expiry_loop),
+        ("market_schedule", market_schedule_loop),
+        ("session_expiry", session_expiry_loop),
+        ("user_account_status", user_account_status_loop),
+    ]
+    if settings.server_mode == "iran":
+        jobs.insert(0, ("connectivity_monitor", connectivity_monitor_loop))
+    return jobs
+
+
+async def _cancel_background_jobs(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _run_background_leader(redis_client) -> None:
+    token = f"{os.getpid()}:{uuid.uuid4().hex}"
+    ttl_seconds = max(30, int(settings.background_leader_lock_ttl_seconds))
+    refresh_seconds = max(5, int(settings.background_leader_lock_refresh_seconds))
+    retry_seconds = max(1, int(settings.background_leader_retry_seconds))
+
+    while True:
+        tasks: list[asyncio.Task] = []
+        acquired_lock = False
+        try:
+            acquired = await redis_client.set(
+                BACKGROUND_LEADER_LOCK_KEY,
+                token,
+                ex=ttl_seconds,
+                nx=True,
+            )
+            if not acquired:
+                await asyncio.sleep(retry_seconds)
+                continue
+            acquired_lock = True
+
+            jobs = _background_job_factories()
+            logger.info(
+                "API worker acquired background leader lock",
+                extra={
+                    "event": "background.leader.acquired",
+                    "worker_pid": os.getpid(),
+                    "job_names": [name for name, _ in jobs],
+                    "lock_ttl_seconds": ttl_seconds,
+                },
+            )
+            tasks = [asyncio.create_task(factory()) for _, factory in jobs]
+
+            while True:
+                await asyncio.sleep(refresh_seconds)
+                refreshed = await redis_client.eval(
+                    BACKGROUND_LEADER_REFRESH_SCRIPT,
+                    1,
+                    BACKGROUND_LEADER_LOCK_KEY,
+                    token,
+                    ttl_seconds,
+                )
+                if int(refreshed or 0) != 1:
+                    logger.warning(
+                        "API worker lost background leader lock; stopping singleton jobs",
+                        extra={
+                            "event": "background.leader.lost",
+                            "worker_pid": os.getpid(),
+                        },
+                    )
+                    break
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Background leader loop failed",
+                extra={
+                    "event": "background.leader.error",
+                    "worker_pid": os.getpid(),
+                },
+            )
+        finally:
+            await _cancel_background_jobs(tasks)
+            if acquired_lock:
+                try:
+                    await redis_client.eval(
+                        BACKGROUND_LEADER_RELEASE_SCRIPT,
+                        1,
+                        BACKGROUND_LEADER_LOCK_KEY,
+                        token,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to release background leader lock",
+                        extra={
+                            "event": "background.leader.release_failed",
+                            "worker_pid": os.getpid(),
+                        },
+                    )
+        await asyncio.sleep(retry_seconds)
+
+
+def _start_background_leader_task(redis_client) -> asyncio.Task:
+    return asyncio.create_task(_run_background_leader(redis_client))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting up...")
     await init_db()
-    await init_redis()
+    redis_client = await init_redis()
     setup_event_listeners()
 
     async with AsyncSessionLocal() as session:
@@ -71,22 +193,16 @@ async def lifespan(app: FastAPI):
         except Exception:
             await session.rollback()
             raise
-    
-    # Start connectivity monitor task (Iran only)
-    if settings.server_mode == "iran":
-        asyncio.create_task(connectivity_monitor_loop())
-    
-    # Start offer auto-expiry background task
-    asyncio.create_task(offer_expiry_loop())
-    asyncio.create_task(market_schedule_loop())
-    asyncio.create_task(session_expiry_loop())
-    asyncio.create_task(user_account_status_loop())
-    
-    yield
-    
-    # Shutdown
-    logger.info("🛑 Shutting down...")
-    await close_redis()
+    background_leader_task = _start_background_leader_task(redis_client)
+
+    try:
+        yield
+    finally:
+        # Shutdown
+        logger.info("🛑 Shutting down...")
+        background_leader_task.cancel()
+        await asyncio.gather(background_leader_task, return_exceptions=True)
+        await close_redis()
 
 app = FastAPI(
     title="Trading Bot API",
