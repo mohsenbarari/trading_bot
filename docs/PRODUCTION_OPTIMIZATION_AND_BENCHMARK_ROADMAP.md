@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P9 observability, audit, and alert readiness complete; Stage P10 is next.
+Status: Stage P10 deployment, restart, backup, and rollback benchmark complete; Stage P11 is next.
 
 Last updated: 2026-06-11
 
@@ -22,7 +22,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P7` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T121537Z/summary.md`: targeted trading benchmark passed; `tmp/production-benchmark/20260611T121537Z/trading-p7/summary.md`: bot text offer, parser, offer create/list/expire, trade execution, notification fanout, and race scenario measured on Iran with clean final health |
 | `P8` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T131305Z/summary.md`: targeted frontend benchmark passed; `tmp/production-benchmark/20260611T131305Z/frontend-p8/summary.md`: login, dashboard, own/public/customer profile, market, notifications, and admin user-management routes measured on Iran with zero gate failures, zero warnings, bounded list gates, and clean final health |
 | `P9` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T133318Z/summary.md`: targeted observability benchmark passed; `tmp/production-benchmark/20260611T133318Z/observability-p9/summary.md`: logging overhead, metrics target contract, durable audit anchor export, anchor shipper local relay, sync-health sampler timers, artifact hygiene scan, and focused observability gate passed with clean final health |
-| `P10`-`P11` | Pending | Execute in order after P9 |
+| `P10` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T134805Z/summary.md`: targeted deployment benchmark passed; `tmp/production-benchmark/20260611T134805Z/deployment-p10/summary.md`: release phase timings, pg_dump backup, app/sync-worker/Redis/PostgreSQL restart probes, rollback notes, and final foreign/Iran sync-health passed |
+| `P11` | Pending | Final release gate |
 
 ## Current Baseline Known From Live Checks
 
@@ -43,6 +44,7 @@ Current Iran production-class host:
 | Trading money path | P7 targeted benchmark runs isolated synthetic users/offers/trades on Iran, waits for sync-health clean, cleans both servers, and records bot/parser/offer/trade/notification/race latency |
 | Frontend UX path | P8 targeted benchmark runs isolated synthetic users/accountants/customers/offers/trades/notifications on Iran, measures non-Messenger route usability/DOM/heap/network/list bounds, cleans both servers, and verifies final sync-health |
 | Observability readiness | P9 targeted benchmark runs structured logging overhead, metrics contract, durable audit anchor export, anchor shipper relay, required sync sampler timer checks, artifact sensitive-data scan, and focused observability regression gate |
+| Deployment/restart readiness | P10 targeted benchmark runs a full foreign-controlled release rehearsal, records phase timings, creates a pre-probe Iran `pg_dump` backup, restarts app/sync-worker/Redis/PostgreSQL in controlled order, and verifies final foreign/Iran sync-health |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -463,6 +465,24 @@ Acceptance:
 - Release duration and downtime windows are recorded.
 - Recovery commands are validated, not just documented.
 - Rollback requirements are explicit before the release candidate is approved.
+
+Completion notes:
+
+- Added `scripts/report_deployment_restart_benchmark.py`, a Stage P10 orchestrator that runs the production release rehearsal with `IRAN_CONNECTIVITY_MODE=yes` and `IRAN_SHARED_DATA_MODE=skip`, parses timestamped release logs into per-phase durations, and writes `deployment-p10` artifacts.
+- Added `make production-deployment-restart` and wired `PROFILE=deployment` so targeted/full production benchmarks include the P10 deployment/restart/rollback gate. Quick mode keeps only the lightweight production healthcheck.
+- Before controlled restart probes, the benchmark creates an Iran PostgreSQL dump on the host and records its path, size, and sha256. The final P10 run created `/srv/trading-bot/backups/p10-deployment-20260611T134805Z.sql`, size `227148` bytes, sha256 `521bebdc271d0d9b36129c957c0073aa30349f33bd16aeeacfc28a2154796a65`.
+- Final targeted artifact: `tmp/production-benchmark/20260611T134805Z/summary.md`; `deployment_restart_benchmark` passed in `523.533s` with `0` required failures.
+- P10 scenario artifact: `tmp/production-benchmark/20260611T134805Z/deployment-p10/summary.md`.
+- Measured release phase durations: local validation `6.0s`, foreign deploy `129.0s`, build `168.0s`, sync `12.0s`, image ship `50.0s`, image load `45.0s`, Iran deploy `11.0s`, shared data `0.0s` skipped by explicit mode, final health `14.0s`. Total production release subprocess duration was `474.41s`.
+- Controlled restart probes passed on Iran: app recovered through `/api/config` in `10.003s`, sync-worker reached container-running in `11.334s`, Redis recovered through Redis ping plus `/api/config` in `1.284s`, and PostgreSQL recovered through `pg_isready` plus `/api/config` in `3.083s`.
+- The release stderr contained two transient `curl: (56) Recv failure: Connection reset by peer` lines while the new app container was coming up; final health, restart probes, and sync-health all passed, so this is recorded as a startup-window observation rather than a gate failure.
+- Final foreign/Iran sync-health reported zero unsynced changes and empty Redis sync queues.
+
+Rollback:
+
+- Revert the P10 tooling commit and run `make production-online-sync` if the benchmark tooling itself must be removed.
+- If a release rollback is needed, run `make production-online-deploy && make production-online-health` after restoring the intended git/image state.
+- If a DB restore is required, stop app/sync-worker first, restore the recorded pg_dump backup into PostgreSQL, restart app/sync-worker, then verify `make sync-health` and `make sync-health-iran`.
 
 ### Stage P11 - Final Release Gate
 

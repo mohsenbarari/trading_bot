@@ -134,7 +134,6 @@ POSTGRES_SETTINGS = (
     "effective_io_concurrency",
 )
 REMAINING_STAGES = (
-    "P10 - Deployment, restart, backup, and rollback benchmark",
     "P11 - Final release gate",
 )
 

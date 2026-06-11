@@ -40,6 +40,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         self.assertIn("sync_health_iran", selected)
         self.assertIn("observability_overhead", selected)
         self.assertIn("static_delivery_headers", selected)
+        self.assertIn("production_healthcheck", selected)
         self.assertNotIn("frontend_e2e_chromium", selected)
         self.assertNotIn("messenger_full", selected)
 
@@ -95,11 +96,38 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         self.assertIn("messenger_query_plans", selected)
         self.assertIn("market_trade_query_plans", selected)
         self.assertIn("observability_readiness", selected)
+        self.assertIn("deployment_restart_benchmark", selected)
         self.assertNotIn("observability_overhead", selected)
         self.assertNotIn("metrics_targets", selected)
+        self.assertNotIn("production_healthcheck", selected)
         self.assertNotIn("trading_core_benchmark", selected)
         self.assertNotIn("frontend_e2e_chromium", selected)
         self.assertNotIn("messenger_full", selected)
+
+    def test_targeted_deployment_profile_runs_p10_benchmark(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="targeted",
+                profile="deployment",
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
+        ]
+
+        self.assertEqual(selected, ["deployment_restart_benchmark"])
 
     def test_targeted_db_profile_checks_runtime_tuning_before_query_plans(self) -> None:
         settings = {
