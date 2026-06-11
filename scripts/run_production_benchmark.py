@@ -258,6 +258,26 @@ def build_tasks(
             modes=("targeted", "full"),
         ),
         BenchmarkTask(
+            task_id="trading_core_benchmark",
+            surface_id="B04/B06/B09",
+            label="Stage P7 trading core, market, bot, notification, and race benchmark",
+            profile="trading",
+            command=[
+                sys.executable,
+                "scripts/report_trading_core_benchmark.py",
+                *manifest_args,
+                "--timestamp",
+                stamp,
+                "--artifact-root",
+                str(artifact_root),
+                "--json",
+            ],
+            timeout_seconds=900,
+            bottleneck_class="trading_core_market_bot",
+            modes=("targeted", "full"),
+            mutating=True,
+        ),
+        BenchmarkTask(
             task_id="worker_pool_matrix",
             surface_id="B01/B02/B04/B05",
             label="Stage P5 authenticated/chat worker-count matrix on Iran",
@@ -334,7 +354,8 @@ def task_selected(
 ) -> bool:
     if mode not in task.modes:
         return False
-    if task.mutating and not include_mutating:
+    targeted_safe_mutating_profile = mode == "targeted" and profile == "trading" and task.profile == "trading"
+    if task.mutating and not include_mutating and not targeted_safe_mutating_profile:
         return False
     if mode == "targeted" and profile and task.profile != profile:
         return False
@@ -446,7 +467,7 @@ def write_run_artifacts(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production benchmark orchestration harness.")
     parser.add_argument("--mode", choices=("quick", "targeted", "full"), default="quick")
-    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, static, workers, frontend.")
+    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, static, workers, trading, frontend.")
     parser.add_argument("--target", choices=("iran",), default="iran", help="Production benchmark target host.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))

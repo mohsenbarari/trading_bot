@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P6 cross-server sync and recovery hardening complete; Stage P7 is next.
+Status: Stage P7 trading core, market, and bot workloads complete; Stage P8 is next.
 
 Last updated: 2026-06-11
 
@@ -19,7 +19,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P4` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T095946Z/summary.md`: targeted static benchmark passed 1/1 after live Iran Nginx refresh; `tmp/production-benchmark/20260611T100027Z/summary.md`: quick benchmark passed 8/8; foreign/Iran sync-health clean |
 | `P5` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T105109Z/summary.md`: targeted workers benchmark passed; worker matrix kept Iran at `API_WORKERS=8` after 8/12/16 comparison |
 | `P6` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T113726Z/summary.md`: targeted sync benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T113726Z/sync-p6/summary.md`: propagation, partial-failure guard, and sync-worker recovery scenarios passed with clean final health on both servers |
-| `P7`-`P11` | Pending | Execute in order after P6 |
+| `P7` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T121537Z/summary.md`: targeted trading benchmark passed; `tmp/production-benchmark/20260611T121537Z/trading-p7/summary.md`: bot text offer, parser, offer create/list/expire, trade execution, notification fanout, and race scenario measured on Iran with clean final health |
+| `P8`-`P11` | Pending | Execute in order after P7 |
 
 ## Current Baseline Known From Live Checks
 
@@ -37,6 +38,7 @@ Current Iran production-class host:
 | Redis | AOF enabled with `appendfsync=everysec`; RDB status ok; `maxmemory=0` intentionally left unbounded until alert thresholds are defined; `maxmemory-policy=noeviction` |
 | Static/media path | Iran Nginx serves immutable frontend assets directly with `Cache-Control: public, max-age=31536000, immutable` and `X-Static-Delivery: nginx`; service worker/manifest stay no-cache; raw `/uploads/` is blocked; protected chat media stays behind `/api/chat/files/{file_id}` token authorization |
 | Cross-server sync | P6 targeted sync benchmark passed on both directions; partial receive errors are no longer accepted as success; final foreign/Iran sync-health was clean |
+| Trading money path | P7 targeted benchmark runs isolated synthetic users/offers/trades on Iran, waits for sync-health clean, cleans both servers, and records bot/parser/offer/trade/notification/race latency |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -333,6 +335,30 @@ Acceptance:
 - Exactly one winner in race scenarios.
 - No duplicate trade, duplicate notification, or stale offer state.
 - p95/p99 latency and error rate are recorded under controlled concurrency.
+
+Completion notes:
+
+- Added `scripts/trading_core_probe_worker.py`, an in-container helper that creates isolated synthetic users/offers/trades with a unique `P7_TRADING_<timestamp>_` prefix and cleans related users, mandatory chat memberships, offers, trades, notifications, change logs, and Redis counters.
+- Added `scripts/report_trading_core_benchmark.py`, a host-level orchestrator that runs the P7 worker on Iran, waits for foreign/Iran sync-health to become clean after mutation, cleans synthetic data on both servers, and writes a dedicated artifact under `tmp/production-benchmark/<timestamp>/trading-p7/`.
+- Wired the benchmark runner with `PROFILE=trading`. The profile is marked mutating, remains excluded from full mode unless explicitly allowed, but is permitted when directly targeted because it has its own cleanup and sync-health gates.
+- The probe exercises the shared bot/web offer parser, bot text-offer handler with Telegram/network boundaries mocked locally, API offer create/list/expire paths, API trade execution, DB-backed notification fanout, and a concurrent race against one wholesale offer.
+- Final targeted artifact: `tmp/production-benchmark/20260611T121537Z/summary.md`; `trading_core_benchmark` passed in `103.541s` with `0` required failures.
+- P7 scenario artifact: `tmp/production-benchmark/20260611T121537Z/trading-p7/summary.md`.
+- Measured latencies on Iran:
+  - Bot text-offer handler: p50 `9.181ms`, p95 `120.152ms`.
+  - Parser: p50 `1.548ms`, p95 `2.462ms`, p99 `27.795ms`.
+  - Offer create: p50 `45.529ms`, p95 `305.486ms`.
+  - Offer list: p50 `19.862ms`, p95 `28.168ms`.
+  - Offer expire: p50 `22.360ms`, p95 `30.056ms`.
+  - Trade execute: p50 `139.593ms`, p95 `309.076ms`, with `3` samples.
+  - Notification fanout: p50 `41.820ms`, p95 `54.778ms`.
+- Race scenario: `4` simultaneous attempts against one offer produced exactly `1` winner, exactly `1` persisted trade, offer status `completed`, remaining quantity `0`, and race p95 `379.430ms`.
+- Cleanup after the final run removed the synthetic rows from both servers. Final foreign/Iran sync-health reported zero unsynced changes and empty Redis sync queues.
+
+Rollback:
+
+- No production tuning value changed in P7. If the benchmark tooling must be removed, revert the P7 commit and run `make production-online-sync`.
+- If a future interrupted run leaves synthetic rows behind, run `trading_core_probe_worker.py cleanup --prefix <P7 prefix>` inside both app containers, then verify `make sync-health` and `make sync-health-iran`.
 
 ### Stage P8 - Frontend UX Performance Beyond Messenger
 
