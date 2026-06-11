@@ -39,6 +39,11 @@ class PostgresRuntimeReportTests(unittest.TestCase):
         self.assertTrue(budget["estimated_within_limit"])
         self.assertTrue(budget["current_within_limit"])
 
+    def test_skip_settings_check_option_is_available_for_operational_alerts(self):
+        args = report.parse_args(["--skip-settings-check"])
+
+        self.assertTrue(args.skip_settings_check)
+
 
 if __name__ == "__main__":
     unittest.main()

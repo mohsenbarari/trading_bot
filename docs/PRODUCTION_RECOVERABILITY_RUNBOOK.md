@@ -31,6 +31,19 @@ Run the recoverability report with live health and sync checks:
 make production-recoverability-report
 ```
 
+Evaluate the current operational alert thresholds for PostgreSQL, Redis, sync,
+disk usage, and backup freshness:
+
+```bash
+make production-alerts
+```
+
+Install the 5-minute host-level alert sampler on the foreign host:
+
+```bash
+make production-alerts-monitor-install
+```
+
 Run a DB restore smoke test in a temporary PostgreSQL container on the Iran host:
 
 ```bash
@@ -113,6 +126,11 @@ make sync-health-iran
    `.env` files on both hosts before reopening traffic.
 
 ## Alerts That Must Be Treated As Serious
+
+`make production-alerts` evaluates these thresholds against both production
+hosts and writes an artifact under `tmp/production-benchmark/<timestamp>/`.
+The systemd sampler writes the latest JSON snapshot to
+`/var/lib/trading-bot-observability/production-alerts-latest.json`.
 
 | Signal | Warning | Critical |
 | --- | --- | --- |

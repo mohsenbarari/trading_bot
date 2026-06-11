@@ -58,6 +58,8 @@ make observability-overhead
 make observability-readiness
 make production-deployment-restart
 make production-release-gate
+make production-alerts
+make production-alerts-monitor-install
 make production-backup-iran
 make production-backup-all
 make production-recoverability-report
@@ -108,12 +110,18 @@ For production-hardening checks:
   P0-P10 evidence validation, current manifest identity checks, live health and
   sync-health, Messenger readiness, observability minimums, backup/rollback
   evidence, and accepted-warning ownership.
+- `make production-alerts` evaluates operational alert thresholds for
+  PostgreSQL connections/idle transactions, Redis memory/AOF, sync backlog/lag,
+  disk usage, and backup freshness on both production hosts.
+- `make production-alerts-monitor-install` installs a 5-minute host-level
+  sampler that writes the latest JSON snapshot to
+  `/var/lib/trading-bot-observability/production-alerts-latest.json`.
 - `make production-backup-iran` creates an operational Iran backup with
   PostgreSQL, Redis, uploads, and audit-trail artifacts plus SHA-256 manifests.
 - `make production-backup-all` creates the same backup set on both foreign and
   Iran hosts.
-- `make production-recoverability-report` runs the live health/sync
-  recoverability checks and writes artifacts under `tmp/production-benchmark/`.
+- `make production-recoverability-report` runs live health/sync plus production
+  alert threshold checks and writes artifacts under `tmp/production-benchmark/`.
 - `make production-recoverability-drill` creates a fresh Iran backup and restores
   the database dump into a temporary PostgreSQL container as a smoke test without
   touching the production database.
