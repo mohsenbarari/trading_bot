@@ -26,6 +26,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "CHANNEL_INVITE_LINK": "https://t.me/example",
             "SMSIR_API_KEY": "sms-key",
             "SMSIR_LINE_NUMBER": "3000",
+            "SMSIR_OTP_TEMPLATE_ID": "123456",
+            "SMSIR_OTP_TEMPLATE_PARAMETER": "Code",
             "ERROR_TRACKING_DSN": "dsn",
             "TRUSTED_PROXY_CIDRS": "127.0.0.1/32,::1/128,10.0.0.0/24",
             "OBSERVABILITY_TELEGRAM_USER_HASH_SALT": "salt",
@@ -168,11 +170,15 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)
             self.assertIn("FOREIGN_SERVER_URL=https://coin.362514.ir", iran_lines)
+            self.assertIn("SMSIR_OTP_TEMPLATE_ID=123456", iran_lines)
+            self.assertIn("SMSIR_OTP_TEMPLATE_PARAMETER=Code", iran_lines)
 
     def test_collect_runtime_values_reads_non_shell_safe_source_env_and_allows_overrides(self):
         values = self.sample_values()
         values.pop("CHANNEL_INVITE_LINK")
         values.pop("ERROR_TRACKING_DSN")
+        values.pop("SMSIR_OTP_TEMPLATE_ID")
+        values.pop("SMSIR_OTP_TEMPLATE_PARAMETER")
         values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_WARNING_RECEIVER"] = "Trading Bot Production Email"
@@ -189,6 +195,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         self.assertEqual(collected["CHANNEL_INVITE_LINK"], "")
         self.assertEqual(collected["ERROR_TRACKING_DSN"], "")
+        self.assertEqual(collected["SMSIR_OTP_TEMPLATE_ID"], "")
+        self.assertEqual(collected["SMSIR_OTP_TEMPLATE_PARAMETER"], "Code")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
         self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")

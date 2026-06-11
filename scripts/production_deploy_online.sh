@@ -1167,6 +1167,8 @@ ensure_runtime_env_file() {
     local channel_invite_link=""
     local smsir_api_key=""
     local smsir_line_number=""
+    local smsir_otp_template_id=""
+    local smsir_otp_template_parameter="Code"
     local error_tracking_dsn=""
     local trusted_proxy_cidrs="127.0.0.1/32,::1/128"
     local observability_telegram_user_hash_salt=""
@@ -1194,6 +1196,8 @@ ensure_runtime_env_file() {
     prompt_value channel_invite_link "CHANNEL_INVITE_LINK"
     prompt_value smsir_api_key "SMSIR_API_KEY" "" 1
     prompt_value smsir_line_number "SMSIR_LINE_NUMBER"
+    prompt_value smsir_otp_template_id "SMSIR_OTP_TEMPLATE_ID"
+    prompt_value smsir_otp_template_parameter "SMSIR_OTP_TEMPLATE_PARAMETER" "$smsir_otp_template_parameter"
     prompt_value error_tracking_dsn "ERROR_TRACKING_DSN"
     prompt_value trusted_proxy_cidrs "TRUSTED_PROXY_CIDRS" "$trusted_proxy_cidrs"
     prompt_value observability_telegram_user_hash_salt "OBSERVABILITY_TELEGRAM_USER_HASH_SALT" "" 1
@@ -1219,6 +1223,8 @@ ensure_runtime_env_file() {
     CHANNEL_INVITE_LINK="$channel_invite_link" \
     SMSIR_API_KEY="$smsir_api_key" \
     SMSIR_LINE_NUMBER="$smsir_line_number" \
+    SMSIR_OTP_TEMPLATE_ID="$smsir_otp_template_id" \
+    SMSIR_OTP_TEMPLATE_PARAMETER="$smsir_otp_template_parameter" \
     ERROR_TRACKING_DSN="$error_tracking_dsn" \
     TRUSTED_PROXY_CIDRS="$trusted_proxy_cidrs" \
     OBSERVABILITY_TELEGRAM_USER_HASH_SALT="$observability_telegram_user_hash_salt" \
