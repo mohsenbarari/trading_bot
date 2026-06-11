@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue';
 import { apiFetch } from '../utils/auth';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
+import { formatIranDateTime } from '../utils/iranTime';
 
 const props = defineProps<{
   apiBaseUrl: string;
@@ -138,15 +139,13 @@ function toLocalDisplayLink(link: string | null | undefined): string {
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return 'نامشخص';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('fa-IR', {
+  return formatIranDateTime(value, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  });
+  }) || value;
 }
 
 async function readErrorDetail(resp: Response, fallback: string): Promise<string> {
