@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P5 worker and pool recalibration complete; Stage P6 is next.
+Status: Stage P6 cross-server sync and recovery hardening complete; Stage P7 is next.
 
 Last updated: 2026-06-11
 
@@ -18,7 +18,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P3` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T094159Z/summary.md`: Redis durability benchmark passed 1/1 after live Redis restart probe; `tmp/production-benchmark/20260611T094110Z/summary.md`: quick benchmark passed 7/7; foreign/Iran sync-health clean |
 | `P4` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T095946Z/summary.md`: targeted static benchmark passed 1/1 after live Iran Nginx refresh; `tmp/production-benchmark/20260611T100027Z/summary.md`: quick benchmark passed 8/8; foreign/Iran sync-health clean |
 | `P5` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T105109Z/summary.md`: targeted workers benchmark passed; worker matrix kept Iran at `API_WORKERS=8` after 8/12/16 comparison |
-| `P6`-`P11` | Pending | Execute in order after P5 |
+| `P6` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T113726Z/summary.md`: targeted sync benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T113726Z/sync-p6/summary.md`: propagation, partial-failure guard, and sync-worker recovery scenarios passed with clean final health on both servers |
+| `P7`-`P11` | Pending | Execute in order after P6 |
 
 ## Current Baseline Known From Live Checks
 
@@ -35,6 +36,7 @@ Current Iran production-class host:
 | PostgreSQL | Iran P2 profile active: `shared_buffers=8GB`, `effective_cache_size=80GB`, `work_mem=8MB`, `maintenance_work_mem=512MB`, `random_page_cost=1.2`, `effective_io_concurrency=200`, `checkpoint_timeout=15min`, `max_wal_size=8GB`, `min_wal_size=1GB`, `wal_buffers=16MB` |
 | Redis | AOF enabled with `appendfsync=everysec`; RDB status ok; `maxmemory=0` intentionally left unbounded until alert thresholds are defined; `maxmemory-policy=noeviction` |
 | Static/media path | Iran Nginx serves immutable frontend assets directly with `Cache-Control: public, max-age=31536000, immutable` and `X-Static-Delivery: nginx`; service worker/manifest stay no-cache; raw `/uploads/` is blocked; protected chat media stays behind `/api/chat/files/{file_id}` token authorization |
+| Cross-server sync | P6 targeted sync benchmark passed on both directions; partial receive errors are no longer accepted as success; final foreign/Iran sync-health was clean |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -293,6 +295,27 @@ Acceptance:
 - Shared-table sync health is clean on both servers after every scenario.
 - No historical replay bug or false-success partial result is accepted.
 - Recovery time is recorded in the benchmark summary.
+
+Completion notes:
+
+- Added `scripts/sync_probe_worker.py` for redaction-safe synthetic sync probes against `market_schedule_overrides`, invalid change-log guard probes, cleanup, and health checks inside the app container.
+- Added `scripts/report_cross_server_sync_benchmark.py` and wired `PROFILE=sync` targeted/full benchmark coverage through `scripts/run_production_benchmark.py`.
+- Hardened `core/events.log_change()` so queued sync payloads include `change_log_id` when available, letting the worker mark the exact accepted change-log entry delivered.
+- Hardened `core/sync_worker.py` and `core/sync_push.py` so peer `/api/sync/receive` is success only when HTTP status, JSON body status, and `errors == 0` all agree. HTTP 200 responses with partial/errors are now retried and kept unsynced.
+- Replaced the remaining active `datetime.utcnow()` call sites touched by the sync/event path with the project's UTC helper.
+- Live targeted sync artifact: `tmp/production-benchmark/20260611T113726Z/summary.md`; it passed `sync_health_iran`, `sync_health_foreign_peer`, and `cross_server_sync_benchmark` with `0` required failures.
+- P6 scenario artifact: `tmp/production-benchmark/20260611T113726Z/sync-p6/summary.md`.
+- Measured propagation:
+  - Foreign to Iran insert latency `6.231s`, delete latency `6.117s`.
+  - Iran to foreign insert latency `7.960s`, delete latency `7.601s`.
+- Partial-failure guard result: synthetic invalid `chat_members` resync returned HTTP `200` with payload `errors=1`, but the change-log entry remained `synced=false` and `verified=false`; after guarded cleanup, both health checks returned clean.
+- Sync-worker recovery result: with the foreign sync worker stopped, the synthetic change stayed dirty; after restart, peer visibility took `6.282s`, health became clean after `7.352s`, and total recovery was `14.228s`.
+- Final state: `cleanup_after` deleted no leftover probe rows or invalid change logs, and final foreign/Iran health reported zero unsynced changes plus empty Redis sync queues.
+
+Rollback:
+
+- The runtime hardening is intentionally conservative. If it must be rolled back, revert the P6 commit and redeploy both servers; this restores the previous looser sync-success interpretation.
+- Do not roll back only the benchmark scripts while keeping runtime hardening, because future benchmark summaries would no longer cover the active sync behavior.
 
 ### Stage P7 - Trading Core, Market, and Bot Workloads
 

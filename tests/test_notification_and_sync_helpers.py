@@ -140,7 +140,10 @@ class SyncPushHelperTests(unittest.TestCase):
                 recorded["url"] = url
                 recorded["content"] = content
                 recorded["headers"] = headers
-                return SimpleNamespace(status_code=200)
+                return SimpleNamespace(
+                    status_code=200,
+                    json=lambda: {"status": "success", "processed": 1, "errors": 0},
+                )
 
         payload = {"table": "offers", "id": 8}
         timestamp = 1_700_000_222
@@ -166,7 +169,11 @@ class SyncPushHelperTests(unittest.TestCase):
     def test_do_push_swallows_failed_responses_and_transport_errors(self):
         class FailingResponseClient:
             def post(self, url, content, headers):
-                return SimpleNamespace(status_code=500, text="boom")
+                return SimpleNamespace(status_code=500, text="boom", json=lambda: {"status": "error", "errors": 1})
+
+        class PartialResponseClient:
+            def post(self, url, content, headers):
+                return SimpleNamespace(status_code=200, text="partial", json=lambda: {"status": "partial", "errors": 1})
 
         class ExplodingClient:
             def post(self, url, content, headers):
@@ -175,6 +182,14 @@ class SyncPushHelperTests(unittest.TestCase):
         with patch("core.sync_push._get_client", return_value=FailingResponseClient()), \
              patch("core.config.settings.sync_direct_push_cooldown_seconds", 60.0), \
              patch("core.sync_push.time.monotonic", return_value=100.0):
+            sync_push._do_push({"id": 1}, "https://peer.example", "secret")
+            self.assertTrue(sync_push._target_is_in_cooldown("https://peer.example"))
+
+        sync_push._clear_target_cooldown("https://peer.example")
+
+        with patch("core.sync_push._get_client", return_value=PartialResponseClient()), \
+             patch("core.config.settings.sync_direct_push_cooldown_seconds", 60.0), \
+             patch("core.sync_push.time.monotonic", return_value=150.0):
             sync_push._do_push({"id": 1}, "https://peer.example", "secret")
             self.assertTrue(sync_push._target_is_in_cooldown("https://peer.example"))
 

@@ -197,6 +197,31 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
 
         self.assertEqual(selected, ["worker_pool_matrix"])
 
+    def test_targeted_sync_profile_runs_health_and_p6_benchmark(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="targeted",
+                profile="sync",
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
+        ]
+
+        self.assertEqual(selected, ["sync_health_iran", "sync_health_foreign_peer", "cross_server_sync_benchmark"])
+
     def test_dry_run_writes_results_without_executing_benchmark_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with contextlib.redirect_stdout(io.StringIO()):

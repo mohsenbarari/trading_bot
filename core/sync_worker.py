@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import httpx
 import redis.asyncio as redis
+from sqlalchemy import update
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
@@ -24,6 +25,12 @@ class SyncDeliveryError(Exception):
         self.response_summary = response_summary
 
 
+class SyncDeliveryMarkerError(Exception):
+    def __init__(self, *, error_type: str):
+        super().__init__("sync delivery marker failed")
+        self.error_type = error_type
+
+
 def summarize_queue_payload(payload: str) -> dict:
     payload_bytes = payload.encode("utf-8", errors="replace")
     return {
@@ -36,12 +43,88 @@ def summarize_peer_response(response) -> dict:
     body = getattr(response, "text", "") or ""
     body_bytes = str(body).encode("utf-8", errors="replace")
     headers = getattr(response, "headers", {}) or {}
-    return {
+    summary = {
         "status_code": getattr(response, "status_code", None),
         "peer_response_size_bytes": len(body_bytes),
         "peer_response_sha256": hashlib.sha256(body_bytes).hexdigest()[:16] if body_bytes else None,
         "peer_content_type": headers.get("content-type") if hasattr(headers, "get") else None,
     }
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        summary.update(
+            {
+                "peer_sync_status": payload.get("status"),
+                "peer_sync_processed": payload.get("processed"),
+                "peer_sync_errors": payload.get("errors"),
+            }
+        )
+    return summary
+
+
+def peer_response_is_success(response) -> bool:
+    if getattr(response, "status_code", None) != 200:
+        return False
+    try:
+        payload = response.json()
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    try:
+        error_count = int(payload.get("errors") or 0)
+    except (TypeError, ValueError):
+        return False
+    return payload.get("status") in {"success", "ok"} and error_count == 0
+
+
+def _coerce_positive_int(value) -> int | None:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return None
+    return coerced if coerced > 0 else None
+
+
+async def mark_change_log_delivered(item: dict) -> int:
+    """Mark the local change_log row delivered only after the peer accepts it.
+
+    New queue payloads include change_log_id, so the marker updates one exact row.
+    Older queued payloads fall back to table/id/operation/hash matching.
+    """
+    from core.db import AsyncSessionLocal
+    from models.change_log import ChangeLog
+
+    change_log_id = _coerce_positive_int(item.get("change_log_id"))
+    async with AsyncSessionLocal() as db:
+        conditions = [ChangeLog.synced.is_(False)]
+        if change_log_id is not None:
+            conditions.append(ChangeLog.id == change_log_id)
+        else:
+            record_id = _coerce_positive_int(item.get("id"))
+            table_name = item.get("table")
+            operation = item.get("operation")
+            item_hash = item.get("hash")
+            if not table_name or not operation or record_id is None or not item_hash:
+                return 0
+            conditions.extend(
+                [
+                    ChangeLog.table_name == table_name,
+                    ChangeLog.record_id == record_id,
+                    ChangeLog.operation == operation,
+                    ChangeLog.hash == item_hash,
+                ]
+            )
+
+        result = await db.execute(
+            update(ChangeLog)
+            .where(*conditions)
+            .values(synced=True, verified=True)
+        )
+        await db.commit()
+        return int(result.rowcount or 0)
 
 
 def queue_poll_order(iteration: int) -> list[str]:
@@ -154,7 +237,11 @@ async def main():
                     with job_context("sync_worker", iteration=iteration, origin_queue=origin_queue, sync_item_hash=item_hash) as run_id:
                         response = await send_sync_item(client, data, target_url, api_key)
                     
-                        if response.status_code == 200:
+                        if peer_response_is_success(response):
+                            try:
+                                marked_count = await mark_change_log_delivered(data)
+                            except Exception as marker_err:
+                                raise SyncDeliveryMarkerError(error_type=type(marker_err).__name__) from marker_err
                             logger.info(
                                 "✅ Sync item delivered to peer.",
                                 extra={
@@ -163,17 +250,31 @@ async def main():
                                     "run_id": run_id,
                                     "iteration": iteration,
                                     "status_code": response.status_code,
+                                    "marked_change_logs": marked_count,
                                     "duration_ms": duration_ms_since(start_time),
                                 },
                             )
-                            # TODO: Update DB status (mark verified/synced)
-                            # This requires async db session access
                         else:
                             raise SyncDeliveryError(
                                 status_code=response.status_code,
                                 response_summary=summarize_peer_response(response),
                             )
 
+                except SyncDeliveryMarkerError as marker_err:
+                    logger.error(
+                        "❌ Sync delivery marker failed after peer acceptance",
+                        extra={
+                            "event": "job.item.marker_failed",
+                            "job_name": "sync_worker",
+                            "run_id": run_id,
+                            "iteration": iteration,
+                            "duration_ms": duration_ms_since(start_time),
+                            "sync_item_hash": item_hash,
+                            "error_type": marker_err.error_type,
+                        },
+                    )
+                    await r.rpush(retry_queue, payload)
+                    await asyncio.sleep(1)
                 except SyncDeliveryError as delivery_err:
                     logger.error(
                         "❌ Sync delivery rejected by peer",

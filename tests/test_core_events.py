@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
@@ -31,6 +32,14 @@ class _FakeSyncRedis:
         self.publish_calls.append((channel, payload))
         if self._publish_error:
             raise self._publish_error
+
+
+class _FakeInsertResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
 
 
 def _capture_listeners(registry):
@@ -307,11 +316,17 @@ class CoreEventsTests(unittest.TestCase):
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
             'core.sync_push.push_sync_direct'
         ) as push_sync_direct:
+            connection.execute.return_value = _FakeInsertResult(42)
             events.log_change(connection, 'offers', 5, 'INSERT', {'id': 5})
 
         connection.execute.assert_called_once()
         self.assertEqual(sync_redis.lpush_calls[0][0], 'sync:outbound')
+        queued_payload = json.loads(sync_redis.lpush_calls[0][1])
+        self.assertEqual(queued_payload["change_log_id"], 42)
+        self.assertEqual(queued_payload["table"], "offers")
+        self.assertEqual(queued_payload["id"], 5)
         push_sync_direct.assert_called_once()
+        self.assertEqual(push_sync_direct.call_args.args[0]["change_log_id"], 42)
 
         sync_redis = _FakeSyncRedis(lpush_error=RuntimeError('redis down'))
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
