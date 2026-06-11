@@ -240,6 +240,31 @@ def build_tasks(
             modes=("targeted", "full"),
         ),
         BenchmarkTask(
+            task_id="worker_pool_matrix",
+            surface_id="B01/B02/B04/B05",
+            label="Stage P5 authenticated/chat worker-count matrix on Iran",
+            profile="workers",
+            command=[
+                sys.executable,
+                "scripts/run_worker_pool_matrix.py",
+                *manifest_args,
+                "--workers",
+                "8,12,16",
+                "--requests",
+                "180",
+                "--concurrency",
+                "18",
+                "--timestamp",
+                stamp,
+                "--artifact-root",
+                str(artifact_root),
+                "--json",
+            ],
+            timeout_seconds=1200,
+            bottleneck_class="api_worker_db_pressure",
+            modes=("targeted", "full"),
+        ),
+        BenchmarkTask(
             task_id="observability_gate",
             surface_id="B10",
             label="Focused local observability regression gate",
@@ -403,7 +428,7 @@ def write_run_artifacts(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production benchmark orchestration harness.")
     parser.add_argument("--mode", choices=("quick", "targeted", "full"), default="quick")
-    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, static, frontend.")
+    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, static, workers, frontend.")
     parser.add_argument("--target", choices=("iran",), default="iran", help="Production benchmark target host.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))

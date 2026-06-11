@@ -134,7 +134,6 @@ POSTGRES_SETTINGS = (
     "effective_io_concurrency",
 )
 REMAINING_STAGES = (
-    "P5 - Worker and pool recalibration",
     "P6 - Cross-server sync and recovery hardening",
     "P7 - Trading core, market, and bot workloads",
     "P8 - Frontend UX performance beyond Messenger",

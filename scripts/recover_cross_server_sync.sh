@@ -130,10 +130,11 @@ start_sync_workers() {
     (
         cd "$PROJECT_DIR"
         compose_cmd="$(local_compose_cmd)"
-        $compose_cmd up -d sync_worker >/dev/null
+        $compose_cmd rm -sf sync_worker >/dev/null 2>&1 || docker rm -f trading_bot_sync_worker >/dev/null 2>&1 || true
+        $compose_cmd up -d --no-deps sync_worker >/dev/null
     )
     ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
-        "cd '$IRAN_PROJECT_DIR' && if docker compose version >/dev/null 2>&1; then compose_cmd='docker compose'; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd='docker-compose'; else echo 'No Docker Compose command is available on the Iran host.' >&2; exit 1; fi; \$compose_cmd -f docker-compose.iran.yml up -d sync_worker >/dev/null"
+        "cd '$IRAN_PROJECT_DIR' && if docker compose version >/dev/null 2>&1; then compose_cmd='docker compose'; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd='docker-compose'; else echo 'No Docker Compose command is available on the Iran host.' >&2; exit 1; fi; \$compose_cmd -f docker-compose.iran.yml rm -sf sync_worker >/dev/null 2>&1 || docker rm -f trading_bot_sync_worker >/dev/null 2>&1 || true; \$compose_cmd -f docker-compose.iran.yml up -d --no-deps sync_worker >/dev/null"
 }
 
 parse_processed() {
