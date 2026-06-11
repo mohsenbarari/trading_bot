@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections import OrderedDict
 from pathlib import Path
 
@@ -43,6 +44,18 @@ OPTIONAL_RUNTIME_KEYS = {
     "ERROR_TRACKING_DSN",
 }
 
+PERFORMANCE_RUNTIME_DEFAULTS = OrderedDict(
+    (
+        ("DB_POOL_SIZE", "15"),
+        ("DB_MAX_OVERFLOW", "10"),
+        ("DB_POOL_RECYCLE_SECONDS", "3600"),
+        ("DB_POOL_PRE_PING", "true"),
+        ("BACKGROUND_LEADER_LOCK_TTL_SECONDS", "90"),
+        ("BACKGROUND_LEADER_LOCK_REFRESH_SECONDS", "30"),
+        ("BACKGROUND_LEADER_RETRY_SECONDS", "10"),
+    )
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render foreign and Iran runtime env files.")
@@ -57,6 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-env-file", help="Optional runtime env source file. Environment variables override file values.")
     parser.add_argument("--metrics-backend", default="memory")
     parser.add_argument("--audit-trail-path", default="/app/audit_trail/audit.jsonl")
+    parser.add_argument("--foreign-api-workers", default=os.environ.get("FOREIGN_API_WORKERS", "2"))
+    parser.add_argument("--iran-api-workers", default=os.environ.get("IRAN_API_WORKERS", "4"))
     return parser.parse_args()
 
 def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]:
@@ -73,6 +88,8 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
             missing.append(key)
             continue
         values[key] = value
+    for key, default in PERFORMANCE_RUNTIME_DEFAULTS.items():
+        values[key] = os.environ.get(key, source_values.get(key, default))
     if missing:
         missing_list = ", ".join(missing)
         raise SystemExit(f"Missing required runtime env inputs: {missing_list}")
@@ -89,14 +106,18 @@ def build_runtime_env(
     iran_server_domain: str,
     metrics_backend: str,
     audit_trail_path: str,
+    api_workers: str,
     values: dict[str, str],
 ) -> OrderedDict[str, str]:
     rendered = OrderedDict()
     rendered["SERVER_MODE"] = role
+    rendered["API_WORKERS"] = str(api_workers)
     for key in COMMON_RUNTIME_KEYS[:6]:
         rendered[key] = values[key]
     rendered["FRONTEND_URL"] = frontend_url
     for key in COMMON_RUNTIME_KEYS[6:]:
+        rendered[key] = values[key]
+    for key in PERFORMANCE_RUNTIME_DEFAULTS:
         rendered[key] = values[key]
     rendered["TRADING_BOT_METRICS_BACKEND"] = metrics_backend
     rendered["AUDIT_TRAIL_PATH"] = audit_trail_path
@@ -129,6 +150,7 @@ def main() -> int:
             iran_server_domain=args.iran_server_domain,
             metrics_backend=args.metrics_backend,
             audit_trail_path=args.audit_trail_path,
+            api_workers=args.foreign_api_workers,
             values=values,
         ),
     )
@@ -143,6 +165,7 @@ def main() -> int:
             iran_server_domain=args.iran_server_domain,
             metrics_backend=args.metrics_backend,
             audit_trail_path=args.audit_trail_path,
+            api_workers=args.iran_api_workers,
             values=values,
         ),
     )

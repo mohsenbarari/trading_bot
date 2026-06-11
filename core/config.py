@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     grafana_alert_warning_receiver: str | None = None
     grafana_alert_webhook_url: str | None = None
     grafana_alert_email_addresses: str | None = None
+    api_workers: int = 2
+    db_pool_size: int = 15
+    db_max_overflow: int = 10
+    db_pool_recycle_seconds: int = 3600
+    db_pool_pre_ping: bool = True
+    background_leader_lock_ttl_seconds: int = 90
+    background_leader_lock_refresh_seconds: int = 30
+    background_leader_retry_seconds: int = 10
 
     database_url: str
     sync_database_url: str

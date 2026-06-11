@@ -34,6 +34,13 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "GRAFANA_ALERT_WARNING_RECEIVER": "warning",
             "GRAFANA_ALERT_WEBHOOK_URL": "https://alerts.example/api",
             "GRAFANA_ALERT_EMAIL_ADDRESSES": "ops@example.com",
+            "DB_POOL_SIZE": "15",
+            "DB_MAX_OVERFLOW": "10",
+            "DB_POOL_RECYCLE_SECONDS": "3600",
+            "DB_POOL_PRE_PING": "true",
+            "BACKGROUND_LEADER_LOCK_TTL_SECONDS": "90",
+            "BACKGROUND_LEADER_LOCK_REFRESH_SECONDS": "30",
+            "BACKGROUND_LEADER_RETRY_SECONDS": "10",
         }
 
     def test_build_runtime_env_switches_role_and_frontend_url(self):
@@ -47,6 +54,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             iran_server_domain="coin.gold-trade.ir",
             metrics_backend="memory",
             audit_trail_path="/app/audit.jsonl",
+            api_workers="2",
             values=values,
         )
         iran = build_runtime_env(
@@ -58,13 +66,17 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             iran_server_domain="coin.gold-trade.ir",
             metrics_backend="memory",
             audit_trail_path="/app/audit.jsonl",
+            api_workers="4",
             values=values,
         )
 
         self.assertEqual(foreign["SERVER_MODE"], "foreign")
         self.assertEqual(iran["SERVER_MODE"], "iran")
+        self.assertEqual(foreign["API_WORKERS"], "2")
+        self.assertEqual(iran["API_WORKERS"], "4")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
+        self.assertEqual(iran["DB_POOL_SIZE"], "15")
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
 
@@ -91,6 +103,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "https://coin.gold-trade.ir",
                 "--iran-server-domain",
                 "coin.gold-trade.ir",
+                "--foreign-api-workers",
+                "2",
+                "--iran-api-workers",
+                "4",
             ]
             with patch.dict(os.environ, values, clear=False):
                 with patch("sys.argv", argv):
@@ -101,6 +117,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
+            self.assertIn("API_WORKERS=2", foreign_lines)
+            self.assertIn("API_WORKERS=4", iran_lines)
+            self.assertIn("DB_POOL_SIZE=15", iran_lines)
             self.assertIn("FRONTEND_URL=https://coin.362514.ir", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)

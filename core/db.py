@@ -3,10 +3,10 @@
 تنظیمات اتصال به دیتابیس با SQLAlchemy Async
 
 Connection Pool:
-- pool_size: تعداد اتصالات دائمی در pool (پیش‌فرض: 10)
-- max_overflow: تعداد اتصالات اضافی در ترافیک بالا (پیش‌فرض: 20)
+- DB_POOL_SIZE: تعداد اتصالات دائمی در pool برای هر process
+- DB_MAX_OVERFLOW: تعداد اتصالات اضافی در ترافیک بالا برای هر process
 - pool_pre_ping: بررسی سلامت اتصال قبل از استفاده (برای جلوگیری از خطاهای stale connection)
-- pool_recycle: بازسازی اتصالات هر N ثانیه (برای جلوگیری از timeout سمت DB)
+- DB_POOL_RECYCLE_SECONDS: بازسازی اتصالات هر N ثانیه
 
 در محیط production با چند worker، کل اتصالات = pool_size × workers
 مثال: 10 pool × 4 workers = 40 اتصال همزمان به Postgres
@@ -21,21 +21,10 @@ __all__ = ["engine", "AsyncSessionLocal", "get_db", "init_db"]
 # ===== Engine با Connection Pool =====
 engine = create_async_engine(
     settings.database_url,
-    
-    # تعداد اتصالات دائمی در pool (per uvicorn worker)
-    # با 2 worker: 40 × 2 = 80 اتصال دائمی، + overflow 20×2 = 40 → جمع 120، زیر PG max_connections=500
-    pool_size=40,
-    
-    # تعداد اتصالات اضافی در صورت نیاز (بالاتر از pool_size)
-    max_overflow=20,
-    
-    # بررسی سلامت اتصال قبل از استفاده
-    # اگر اتصال stale باشد، یک اتصال جدید می‌سازد
-    pool_pre_ping=True,
-    
-    # بازسازی اتصالات هر 1 ساعت (PostgreSQL timeout معمولاً 8 ساعت است)
-    pool_recycle=3600,
-    
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_pre_ping=settings.db_pool_pre_ping,
+    pool_recycle=settings.db_pool_recycle_seconds,
     # لاگ کردن کوئری‌ها (فقط برای debug)
     echo=False,
 )
