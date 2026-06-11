@@ -156,6 +156,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - `skip`: keep Iran database rows unchanged and continue deploy
   - `reset`: take a `pg_dump` backup, truncate shared tables plus `change_log`, then seed current shared-table state from foreign
   - `abort`: stop release without changing Iran data
+- in the interactive prompt for existing data, pressing Enter uses the safe default `skip`
 - non-interactive reset requires `IRAN_SHARED_DATA_MODE=reset` plus `IRAN_SHARED_RESET_CONFIRM=RESET_IRAN_SHARED_DATA`
 - after a successful seed, the script marks pre-seed foreign shared backlog as synced up to the seed cutoff, clears only Iran seed-generated mandatory/system backlog, and requires both sync-health endpoints to report zero unsynced changes
 
