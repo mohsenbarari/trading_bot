@@ -182,7 +182,7 @@ class ObservabilityConfigTests(unittest.TestCase):
 
         self.assertIn("local_compose_cmd()", recover_script)
         self.assertIn("command -v docker-compose", recover_script)
-        self.assertIn("$compose_cmd -f docker-compose.iran.yml up -d sync_worker", recover_script)
+        self.assertIn("$compose_cmd -f docker-compose.iran.yml up -d --no-deps sync_worker", recover_script)
         self.assertIn("read_env_value()", recover_script)
         self.assertNotIn("source \"$PROJECT_DIR/.env\"", recover_script)
         for expected_table in ("chat_members", "market_runtime_state", "admin_market_messages"):

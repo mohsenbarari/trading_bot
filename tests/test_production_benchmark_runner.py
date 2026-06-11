@@ -66,7 +66,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
             )
         ]
 
-        self.assertEqual(selected, ["observability_overhead", "metrics_targets", "observability_gate"])
+        self.assertEqual(selected, ["observability_readiness", "observability_gate"])
 
     def test_full_mode_skips_mutating_tasks_by_default(self) -> None:
         settings = {
@@ -94,6 +94,9 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         self.assertIn("postgres_runtime_tuning", selected)
         self.assertIn("messenger_query_plans", selected)
         self.assertIn("market_trade_query_plans", selected)
+        self.assertIn("observability_readiness", selected)
+        self.assertNotIn("observability_overhead", selected)
+        self.assertNotIn("metrics_targets", selected)
         self.assertNotIn("trading_core_benchmark", selected)
         self.assertNotIn("frontend_e2e_chromium", selected)
         self.assertNotIn("messenger_full", selected)

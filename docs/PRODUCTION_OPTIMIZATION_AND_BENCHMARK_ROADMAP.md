@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P8 non-messenger frontend UX benchmark complete; Stage P9 is next.
+Status: Stage P9 observability, audit, and alert readiness complete; Stage P10 is next.
 
 Last updated: 2026-06-11
 
@@ -21,7 +21,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P6` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T113726Z/summary.md`: targeted sync benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T113726Z/sync-p6/summary.md`: propagation, partial-failure guard, and sync-worker recovery scenarios passed with clean final health on both servers |
 | `P7` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T121537Z/summary.md`: targeted trading benchmark passed; `tmp/production-benchmark/20260611T121537Z/trading-p7/summary.md`: bot text offer, parser, offer create/list/expire, trade execution, notification fanout, and race scenario measured on Iran with clean final health |
 | `P8` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T131305Z/summary.md`: targeted frontend benchmark passed; `tmp/production-benchmark/20260611T131305Z/frontend-p8/summary.md`: login, dashboard, own/public/customer profile, market, notifications, and admin user-management routes measured on Iran with zero gate failures, zero warnings, bounded list gates, and clean final health |
-| `P9`-`P11` | Pending | Execute in order after P8 |
+| `P9` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T133318Z/summary.md`: targeted observability benchmark passed; `tmp/production-benchmark/20260611T133318Z/observability-p9/summary.md`: logging overhead, metrics target contract, durable audit anchor export, anchor shipper local relay, sync-health sampler timers, artifact hygiene scan, and focused observability gate passed with clean final health |
+| `P10`-`P11` | Pending | Execute in order after P9 |
 
 ## Current Baseline Known From Live Checks
 
@@ -41,6 +42,7 @@ Current Iran production-class host:
 | Cross-server sync | P6 targeted sync benchmark passed on both directions; partial receive errors are no longer accepted as success; final foreign/Iran sync-health was clean |
 | Trading money path | P7 targeted benchmark runs isolated synthetic users/offers/trades on Iran, waits for sync-health clean, cleans both servers, and records bot/parser/offer/trade/notification/race latency |
 | Frontend UX path | P8 targeted benchmark runs isolated synthetic users/accountants/customers/offers/trades/notifications on Iran, measures non-Messenger route usability/DOM/heap/network/list bounds, cleans both servers, and verifies final sync-health |
+| Observability readiness | P9 targeted benchmark runs structured logging overhead, metrics contract, durable audit anchor export, anchor shipper relay, required sync sampler timer checks, artifact sensitive-data scan, and focused observability regression gate |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -418,6 +420,25 @@ Acceptance:
 - Logging overhead remains under the configured budget.
 - No benchmark artifact contains raw secrets or sensitive payloads.
 - Observability timers are active where production requires them.
+
+Completion notes:
+
+- Added `scripts/check_observability_timer.py`, a host-level timer/cron checker used for sync-health sampler and audit-anchor timer readiness on both foreign and Iran hosts.
+- Added `scripts/write_observability_audit_probe.py`, which appends a non-sensitive `observability_readiness_probe` audit event so a production host with no previous audit trail can still prove durable audit storage and anchor export.
+- Added `scripts/report_observability_readiness.py`, a Stage P9 orchestrator that runs the readiness checks on the Iran target, writes `observability-p9` artifacts, and fails closed on dirty sync-health, missing required timers, non-durable audit anchors, invalid metrics contract, excessive logging overhead, or sensitive artifact scan findings.
+- Added `make observability-readiness` and wired `PROFILE=observability` so targeted/full production benchmarks run the P9 readiness report plus the focused local observability regression gate. Quick mode still keeps the lightweight standalone logging-overhead and metrics-target probes.
+- Final targeted artifact: `tmp/production-benchmark/20260611T133318Z/summary.md`; `observability_readiness` passed in `30.186s` and `observability_gate` passed in `12.566s`.
+- P9 scenario artifact: `tmp/production-benchmark/20260611T133318Z/observability-p9/summary.md`.
+- Structured logging overhead on Iran: `329.12us/event` against a `1000.0us` budget, acceptable `True`.
+- Metrics contract: backend `memory`, with cross-service authoritative source explicitly documented as `loki_logs_until_explicit_multi_surface_scrape_is_deployed`; API metrics are marked single-process scope, while bot and sync-worker remain logs-only under the current backend.
+- Durable audit anchor: the readiness probe created a non-sensitive audit event, exported anchor head `d4942167-f794-4076-b6ce-c398bb159d77`, verified `2` durable audit-trail records, and shipped the compact anchor line to the local relay artifact.
+- Required sync-health sampler timers were active on both foreign and Iran. Audit anchor export/shipper timers reported `not_required` because no production anchor sink is configured in the manifest yet; the direct export and shipper code paths were still verified.
+- Sensitive artifact scan found `0` blocked patterns. Final foreign/Iran sync-health reported zero unsynced changes and empty Redis sync queues.
+
+Rollback:
+
+- No production runtime tuning value changed in P9. If the benchmark tooling must be removed, revert the P9 commit and run `make production-online-sync`.
+- The only durable side effect is the non-sensitive audit readiness probe event in the append-only audit trail; it should not be deleted because audit trails are intentionally immutable.
 
 ### Stage P10 - Deployment, Restart, Backup, and Rollback Benchmark
 
