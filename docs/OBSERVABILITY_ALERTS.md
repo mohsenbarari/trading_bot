@@ -227,17 +227,49 @@ First checks:
 - `make sync-recover`
 - Follow `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md#sync-retry-queue-non-empty`.
 
-## Not Fully Covered Yet
+### Production DB/Redis/disk/backup threshold sampler
 
-The following initial-alert goals require infrastructure metrics exporters and are intentionally deferred to Stage 11 production hardening:
+Trigger:
+- `make production-alerts` reports `warning` or `critical`.
+- The host-level timer installed by `make production-alerts-monitor-install`
+  writes a warning/critical latest JSON snapshot.
 
-- Disk usage high.
+First checks:
+- Read `/var/lib/trading-bot-observability/production-alerts-latest.json`.
+- Run:
+
+```bash
+make production-alerts
+make production-recoverability-report
+```
+
+Covered signals:
+- PostgreSQL connection count and old `idle in transaction` sessions.
+- Redis memory and AOF write/rewrite status.
+- Foreign/Iran sync backlog, lag, retry queue, and outbound queue.
+- Host disk usage.
+- Latest backup status, required artifact presence, and backup freshness.
+
+Important limitation:
+- This sampler is a release-safe operational alert layer. It is not a
+  Prometheus/node-exporter replacement and it does not provide historical
+  time-series aggregation by itself.
+
+## Still Not Fully Covered By Exporters
+
+The following goals still require infrastructure metrics exporters or a
+dedicated collector if we want full Grafana time-series alerting:
+
 - Memory pressure.
 - CPU saturation.
-- DB connection pool pressure.
-- Redis memory pressure.
+- Per-container CPU/RSS pressure.
+- DB/Redis long-term trend dashboards.
+- Alertmanager-grade routing/escalation beyond the current Grafana/Loki rules
+  and host-level sampler.
 
-The current Stage 8 coverage can still surface DB/Redis/app failures through logs, but it is not a substitute for node/container exporters.
+The current Stage 8 coverage plus `production-alerts` can surface the most
+important DB/Redis/sync/disk/backup production risks, but it is not a substitute
+for node/container exporters.
 
 ## Alert Payload Rules
 

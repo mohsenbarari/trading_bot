@@ -110,6 +110,14 @@ def write_markdown(path: Path, payload: dict[str, Any]) -> None:
             lines.append(f"  - restore smoke: `{(result.get('restore_smoke') or {}).get('status')}`")
             for item in result.get("files") or []:
                 lines.append(f"  - `{item.get('kind')}`: `{item.get('path')}` ({item.get('bytes')} bytes)")
+    if payload.get("alerts"):
+        lines.extend(["", "## Production Alerts", ""])
+        lines.append(f"- status: `{payload['alerts'].get('status')}`")
+        for alert in payload["alerts"].get("alerts") or []:
+            lines.append(
+                f"- `{alert.get('severity')}` `{alert.get('role')}` `{alert.get('component')}` "
+                f"`{alert.get('metric')}`: {alert.get('summary')}"
+            )
     if payload.get("failures"):
         lines.extend(["", "## Failures", ""])
         lines.extend(f"- {item}" for item in payload["failures"])
@@ -131,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
     warnings: list[str] = []
     backup_payload: dict[str, Any] | None = None
+    alerts_payload: dict[str, Any] | None = None
 
     runbook = {"path": display_path(RUNBOOK_PATH), "status": "present" if RUNBOOK_PATH.exists() else "missing"}
     if runbook["status"] != "present":
@@ -178,6 +187,27 @@ def main(argv: list[str] | None = None) -> int:
             checks.append({"name": name, "status": "passed" if command_ok(result) else "failed", **result})
             if not command_ok(result):
                 failures.append(f"{name} failed")
+        alerts_args = [
+            sys.executable,
+            "scripts/report_production_alerts.py",
+            "--manifest",
+            settings["DEPLOY_MANIFEST"],
+            "--timestamp",
+            stamp,
+            "--json",
+        ]
+        alerts_result = run_command(name="production_alerts", args=alerts_args, logs_dir=logs_dir, timeout=300)
+        checks.append({"name": "production_alerts", "status": "passed" if command_ok(alerts_result) else "failed", **alerts_result})
+        try:
+            alerts_payload = parse_json_output((logs_dir / "production_alerts.stdout.log").read_text(encoding="utf-8"))
+            if alerts_payload.get("status") == "warning":
+                warnings.append("production alerts report has warnings")
+            elif alerts_payload.get("status") == "critical":
+                failures.append("production alerts report has critical alerts")
+        except Exception as exc:
+            failures.append(f"production alerts JSON could not be parsed: {exc}")
+        if not command_ok(alerts_result):
+            failures.append("production alerts command failed")
 
     status = "passed" if not failures else "failed"
     payload: dict[str, Any] = {
@@ -188,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         "runbook": runbook,
         "checks": checks,
         "backup": backup_payload,
+        "alerts": alerts_payload,
         "warnings": warnings,
         "failures": failures,
     }

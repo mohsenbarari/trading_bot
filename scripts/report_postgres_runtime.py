@@ -79,6 +79,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Emit JSON. This is the default for benchmark use.")
     parser.add_argument("--no-fail", action="store_true", help="Exit 0 even when checks fail.")
     parser.add_argument("--connection-limit-ratio", type=float, default=0.8)
+    parser.add_argument(
+        "--skip-settings-check",
+        action="store_true",
+        help="Collect settings but do not fail/report unhealthy on profile mismatches.",
+    )
     return parser.parse_args(argv)
 
 
@@ -191,9 +196,31 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
             connection_states = {str(state or "none"): int(count) for state, count in cursor.fetchall()}
             cursor.execute("select count(*) from pg_stat_activity")
             current_connections = int(cursor.fetchone()[0])
+            cursor.execute(
+                """
+                select
+                    count(*) filter (
+                        where state = 'idle in transaction'
+                    ) as idle_in_transaction_count,
+                    count(*) filter (
+                        where state = 'idle in transaction'
+                        and state_change is not null
+                        and now() - state_change > interval '3 minutes'
+                    ) as idle_in_transaction_old_count,
+                    coalesce(
+                        extract(epoch from max(now() - state_change) filter (
+                            where state = 'idle in transaction'
+                            and state_change is not null
+                        )),
+                        0
+                    ) as idle_in_transaction_max_age_seconds
+                from pg_stat_activity
+                """
+            )
+            idle_row = cursor.fetchone()
 
     checks = evaluate_settings(actual, expected)
-    settings_ok = all(check.ok for check in checks)
+    settings_ok = True if args.skip_settings_check else all(check.ok for check in checks)
     max_connections = int(actual.get("max_connections", expected["max_connections"]))
     budget = build_connection_budget(
         max_connections=max_connections,
@@ -204,11 +231,17 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "profile": args.expected_profile,
         "settings_ok": settings_ok,
+        "settings_check_skipped": bool(args.skip_settings_check),
         "connections_ok": connections_ok,
         "ok": settings_ok and connections_ok,
         "settings": [asdict(check) for check in checks],
         "connection_states": connection_states,
         "connection_budget": budget,
+        "idle_in_transaction": {
+            "count": int(idle_row[0] or 0),
+            "old_count": int(idle_row[1] or 0),
+            "max_age_seconds": float(idle_row[2] or 0),
+        },
     }
 
 
@@ -217,6 +250,7 @@ def format_human_report(report: dict[str, Any]) -> str:
         "PostgreSQL runtime tuning:",
         f"- profile: {report['profile']}",
         f"- settings_ok: {report['settings_ok']}",
+        f"- settings_check_skipped: {report.get('settings_check_skipped', False)}",
         f"- connections_ok: {report['connections_ok']}",
     ]
     for item in report["settings"]:
@@ -228,6 +262,12 @@ def format_human_report(report: dict[str, Any]) -> str:
         f"current={budget['current_connections']} max={budget['max_connections']} "
         f"estimated_sqlalchemy_ceiling={budget['estimated_sqlalchemy_ceiling']} "
         f"safe_limit={budget['safe_connection_limit']}"
+    )
+    idle = report.get("idle_in_transaction") or {}
+    lines.append(
+        "- idle in transaction: "
+        f"count={idle.get('count')} old_count={idle.get('old_count')} "
+        f"max_age_seconds={idle.get('max_age_seconds')}"
     )
     return "\n".join(lines)
 
