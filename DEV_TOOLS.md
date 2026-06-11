@@ -56,6 +56,7 @@ make observability-down
 make observability-logs
 make observability-overhead
 make observability-readiness
+make production-deployment-restart
 make audit-log-export
 ```
 
@@ -91,6 +92,10 @@ For production-hardening checks:
 - `make observability-readiness` runs the production P9 readiness report for
   logging overhead, metrics-target contract, audit-anchor export/ship, required
   sync sampler timers, artifact hygiene, and sync-health.
+- `make production-deployment-restart` runs the production P10 deployment gate:
+  full release phase timing, pre-probe PostgreSQL backup creation, controlled
+  app/sync-worker/Redis/PostgreSQL restart probes, rollback notes, and final
+  sync-health.
 - `make audit-log-export` exports audit logs from local Loki to
   `tmp/audit-log-exports/*.jsonl`. Pass Loki/query/window overrides through
   `ARGS`, for example:

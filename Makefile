@@ -13,7 +13,7 @@ IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>
 SSH_IRAN_OPTS = -o StrictHostKeyChecking=no -p $(IRAN_SSH_PORT)
 IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-deployment-restart production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
 
 help:
 	@echo ""
@@ -85,6 +85,7 @@ help:
 	@echo "  make production-benchmark-targeted PROFILE=<name> - Run one production benchmark profile"
 	@echo "  make production-benchmark-full - Run the full production benchmark harness"
 	@echo "  make production-release       - Run the full foreign-controlled production release flow"
+	@echo "  make production-deployment-restart - Run the Stage P10 deploy/restart/backup benchmark"
 	@echo "  make production-online-help   - Show the production release helper usage"
 	@echo "  make production-online-check  - Validate the production deploy manifest and SSH access"
 	@echo "  make production-online-bootstrap - Install Iran host prerequisites over SSH"
@@ -285,6 +286,9 @@ messenger-surface-report:
 
 production-release:
 	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env}
+
+production-deployment-restart:
+	@python3 scripts/report_deployment_restart_benchmark.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
 
 production-online-help:
 	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} help
