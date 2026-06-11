@@ -67,6 +67,38 @@ ROLE_PERFORMANCE_DEFAULTS = {
     },
 }
 
+POSTGRES_TUNING_DEFAULTS = OrderedDict(
+    (
+        ("POSTGRES_MAX_CONNECTIONS", "500"),
+        ("POSTGRES_SHARED_BUFFERS", "128MB"),
+        ("POSTGRES_EFFECTIVE_CACHE_SIZE", "4GB"),
+        ("POSTGRES_WORK_MEM", "4MB"),
+        ("POSTGRES_MAINTENANCE_WORK_MEM", "64MB"),
+        ("POSTGRES_RANDOM_PAGE_COST", "4"),
+        ("POSTGRES_EFFECTIVE_IO_CONCURRENCY", "1"),
+        ("POSTGRES_CHECKPOINT_TIMEOUT", "5min"),
+        ("POSTGRES_MAX_WAL_SIZE", "1GB"),
+        ("POSTGRES_MIN_WAL_SIZE", "80MB"),
+        ("POSTGRES_WAL_BUFFERS", "4MB"),
+    )
+)
+
+ROLE_POSTGRES_TUNING_DEFAULTS = {
+    "foreign": {},
+    "iran": {
+        "POSTGRES_SHARED_BUFFERS": "8GB",
+        "POSTGRES_EFFECTIVE_CACHE_SIZE": "80GB",
+        "POSTGRES_WORK_MEM": "8MB",
+        "POSTGRES_MAINTENANCE_WORK_MEM": "512MB",
+        "POSTGRES_RANDOM_PAGE_COST": "1.2",
+        "POSTGRES_EFFECTIVE_IO_CONCURRENCY": "200",
+        "POSTGRES_CHECKPOINT_TIMEOUT": "15min",
+        "POSTGRES_MAX_WAL_SIZE": "8GB",
+        "POSTGRES_MIN_WAL_SIZE": "1GB",
+        "POSTGRES_WAL_BUFFERS": "16MB",
+    },
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render foreign and Iran runtime env files.")
@@ -106,6 +138,14 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
         for key, default in defaults.items():
             role_key = f"{prefix}_{key}"
             values[role_key] = os.environ.get(role_key, source_values.get(role_key, default))
+    for key, default in POSTGRES_TUNING_DEFAULTS.items():
+        values[key] = os.environ.get(key, source_values.get(key, default))
+    for role, defaults in ROLE_POSTGRES_TUNING_DEFAULTS.items():
+        prefix = role.upper()
+        for key, fallback in POSTGRES_TUNING_DEFAULTS.items():
+            role_key = f"{prefix}_{key}"
+            default = defaults.get(key, fallback)
+            values[role_key] = os.environ.get(role_key, source_values.get(role_key, default))
     if missing:
         missing_list = ", ".join(missing)
         raise SystemExit(f"Missing required runtime env inputs: {missing_list}")
@@ -135,6 +175,8 @@ def build_runtime_env(
         rendered[key] = values[key]
     role_prefix = role.upper()
     for key in PERFORMANCE_RUNTIME_DEFAULTS:
+        rendered[key] = values.get(f"{role_prefix}_{key}", values[key])
+    for key in POSTGRES_TUNING_DEFAULTS:
         rendered[key] = values.get(f"{role_prefix}_{key}", values[key])
     rendered["TRADING_BOT_METRICS_BACKEND"] = metrics_backend
     rendered["AUDIT_TRAIL_PATH"] = audit_trail_path

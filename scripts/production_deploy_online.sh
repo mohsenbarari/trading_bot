@@ -539,6 +539,48 @@ require_env_value() {
     [[ -n "$value" ]] || die "Missing required env value '$key' in $env_path"
 }
 
+export_runtime_renderer_overrides() {
+    local key
+    local keys=(
+        DB_POOL_SIZE
+        DB_MAX_OVERFLOW
+        IRAN_DB_POOL_SIZE
+        IRAN_DB_MAX_OVERFLOW
+        DB_POOL_RECYCLE_SECONDS
+        DB_POOL_PRE_PING
+        BACKGROUND_LEADER_LOCK_TTL_SECONDS
+        BACKGROUND_LEADER_LOCK_REFRESH_SECONDS
+        BACKGROUND_LEADER_RETRY_SECONDS
+        POSTGRES_MAX_CONNECTIONS
+        POSTGRES_SHARED_BUFFERS
+        POSTGRES_EFFECTIVE_CACHE_SIZE
+        POSTGRES_WORK_MEM
+        POSTGRES_MAINTENANCE_WORK_MEM
+        POSTGRES_RANDOM_PAGE_COST
+        POSTGRES_EFFECTIVE_IO_CONCURRENCY
+        POSTGRES_CHECKPOINT_TIMEOUT
+        POSTGRES_MAX_WAL_SIZE
+        POSTGRES_MIN_WAL_SIZE
+        POSTGRES_WAL_BUFFERS
+        IRAN_POSTGRES_MAX_CONNECTIONS
+        IRAN_POSTGRES_SHARED_BUFFERS
+        IRAN_POSTGRES_EFFECTIVE_CACHE_SIZE
+        IRAN_POSTGRES_WORK_MEM
+        IRAN_POSTGRES_MAINTENANCE_WORK_MEM
+        IRAN_POSTGRES_RANDOM_PAGE_COST
+        IRAN_POSTGRES_EFFECTIVE_IO_CONCURRENCY
+        IRAN_POSTGRES_CHECKPOINT_TIMEOUT
+        IRAN_POSTGRES_MAX_WAL_SIZE
+        IRAN_POSTGRES_MIN_WAL_SIZE
+        IRAN_POSTGRES_WAL_BUFFERS
+    )
+    for key in "${keys[@]}"; do
+        if [[ -v "$key" ]]; then
+            export "$key"
+        fi
+    done
+}
+
 validate_observability_env_file() {
     local env_path="$1"
     local role_label="$2"
@@ -1086,6 +1128,7 @@ ensure_runtime_env_file() {
 
     if [[ -n "$source_env_path" ]]; then
         mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
+        export_runtime_renderer_overrides
         python3 "$RUNTIME_ENV_RENDERER" \
             --source-env-file "$source_env_path" \
             --local-output "$local_env_path" \
