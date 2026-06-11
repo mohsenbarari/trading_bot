@@ -2,6 +2,7 @@
 import { ChevronDown, Megaphone, PencilLine, Pin, PinOff, Users } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { apiFetch } from '../utils/auth'
+import { formatIranDateTime } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
 
 type AdminMarketMessage = {
@@ -60,11 +61,10 @@ const selectedBroadcastCount = computed(() => selectedBroadcastLabels.value.leng
 
 function formatDate(value: string | undefined) {
   if (!value) return ''
-  return new Intl.DateTimeFormat('fa-IR-u-ca-persian', {
+  return formatIranDateTime(value, {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'Asia/Tehran',
-  }).format(new Date(value))
+  }) || value
 }
 
 function targetLabel(key: string) {
