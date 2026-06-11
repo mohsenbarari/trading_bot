@@ -90,6 +90,22 @@ class RenderReleaseArtifactsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not be identical"):
             derive_release_values(manifest)
 
+    def test_production_nginx_template_serves_assets_directly_and_blocks_raw_uploads(self):
+        manifest = self.write_file("online.env", self.manifest_content())
+        template = str(Path(__file__).resolve().parents[1] / "deploy/production/nginx-iran-online.conf.template")
+
+        values = derive_release_values(manifest)
+        nginx = render_nginx_config(values, template)
+
+        self.assertIn("root /srv/trading-bot/current/mini_app_dist;", nginx)
+        self.assertIn("location /assets/", nginx)
+        self.assertIn('add_header X-Static-Delivery "nginx" always;', nginx)
+        self.assertIn('add_header Cache-Control "public, max-age=31536000, immutable" always;', nginx)
+        self.assertIn("location @stale_js_chunk", nginx)
+        self.assertIn("location /uploads/", nginx)
+        self.assertIn("return 404;", nginx)
+        self.assertNotIn("location /assets/ {\n        proxy_pass http://127.0.0.1:8000;", nginx)
+
 
 if __name__ == "__main__":
     unittest.main()

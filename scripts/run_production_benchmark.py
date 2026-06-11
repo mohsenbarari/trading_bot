@@ -165,6 +165,21 @@ def build_tasks(
             modes=("quick", "targeted", "full"),
         ),
         BenchmarkTask(
+            task_id="static_delivery_headers",
+            surface_id="B01/B06",
+            label="Public Nginx static/cache/protected-media delivery probe",
+            profile="static",
+            command=[
+                sys.executable,
+                "scripts/report_static_delivery.py",
+                *manifest_args,
+                "--json",
+            ],
+            timeout_seconds=45,
+            bottleneck_class="nginx_static_delivery",
+            modes=("quick", "targeted", "full"),
+        ),
+        BenchmarkTask(
             task_id="redis_runtime_durability",
             surface_id="B08",
             label="Redis durability settings and queue state inside Iran app container",
@@ -388,7 +403,7 @@ def write_run_artifacts(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production benchmark orchestration harness.")
     parser.add_argument("--mode", choices=("quick", "targeted", "full"), default="quick")
-    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, frontend.")
+    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, static, frontend.")
     parser.add_argument("--target", choices=("iran",), default="iran", help="Production benchmark target host.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))

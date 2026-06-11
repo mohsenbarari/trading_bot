@@ -42,22 +42,17 @@ server {
     listen 80;
     server_name ${IRAN_APP_DOMAIN};
     client_max_body_size 50M;
+    root ${DIST_DIR};
+    index index.html;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
-    # Frontend (Vue.js static files)
-    location / {
-        root ${DIST_DIR};
-        try_files \$uri \$uri/ /index.html;
-        
-        # Cache static assets
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
+    location = /metrics {
+        deny all;
+        return 404;
     }
 
     # API proxying to Docker container
@@ -70,7 +65,7 @@ server {
         
         # WebSocket support
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
     }
 
@@ -88,22 +83,73 @@ server {
         proxy_buffering off;
     }
 
-    # Assets served by FastAPI
-    location /assets/ {
-        proxy_pass http://127.0.0.1:8000;
-        expires 1y;
-        add_header Cache-Control "public, immutable";
+    # Frontend static assets served directly by Nginx
+    location ~ ^/assets/.*\.js$ {
+        try_files \$uri @stale_js_chunk;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
     }
 
-    # Uploads
+    location /assets/ {
+        try_files \$uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /manifest.webmanifest {
+        try_files \$uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /sw.js {
+        try_files \$uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /share-target-sw.js {
+        try_files \$uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location ~ ^/workbox-[A-Za-z0-9_-]+\.js$ {
+        try_files \$uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    # Raw uploads are not public. Chat media stays behind /api/chat/files auth.
     location /uploads/ {
-        proxy_pass http://127.0.0.1:8000;
+        access_log off;
+        return 404;
+    }
+
+    location @stale_js_chunk {
+        internal;
+        default_type application/javascript;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+        return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
     }
 
     # Favicon
     location /favicon.ico {
-        root ${DIST_DIR};
+        try_files \$uri =404;
         access_log off;
+    }
+
+    # Frontend routing (Vue SPA)
+    location / {
+        try_files \$uri \$uri/ /index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
     }
 }
 EOF
