@@ -1,12 +1,20 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: draft execution contract for the first production release window.
+Status: Stage P0 complete; Stage P1 is next.
 
 Last updated: 2026-06-11
 
 This roadmap exists because the project is close to release. From this point on,
 production optimization must be measured, reversible, and tied to release safety.
 No broad tuning should be accepted only because it is theoretically faster.
+
+## Execution Status
+
+| Stage | Status | Evidence |
+| --- | --- | --- |
+| `P0` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T080030Z/baseline/summary.md`: 28 commands, 0 failed, foreign sync-health clean, Iran sync-health clean |
+| `P1` | Next | Full-product benchmark harness not started |
+| `P2`-`P11` | Pending | Blocked until the first full-product benchmark baseline exists |
 
 ## Current Baseline Known From Live Checks
 
