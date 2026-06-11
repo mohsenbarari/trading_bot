@@ -13,7 +13,16 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from deploy_config import resolve_deploy_settings
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+for import_path in (PROJECT_ROOT, CURRENT_DIR):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
+
+try:
+    from scripts.deploy_config import resolve_deploy_settings
+except ModuleNotFoundError:
+    from deploy_config import resolve_deploy_settings
 
 
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
@@ -57,9 +66,11 @@ def fetch_sync_health(url: str, api_key: str) -> dict:
 
 
 def build_iran_ssh_command(args: argparse.Namespace) -> list[str]:
-    ssh_cmd = ["ssh", "-p", str(args.iran_port)]
-    for option in args.ssh_option:
+    ssh_cmd = ["ssh"]
+    for option in getattr(args, "ssh_option", ["StrictHostKeyChecking=no"]):
         ssh_cmd.extend(["-o", option])
+    if hasattr(args, "iran_port"):
+        ssh_cmd.extend(["-p", str(args.iran_port)])
     remote = (
         f"cd {shlex.quote(args.iran_dir)} && "
         "set -a; [ ! -f .env ] || . ./.env; set +a; "

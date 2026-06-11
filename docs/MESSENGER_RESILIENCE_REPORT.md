@@ -278,4 +278,3 @@
 - Notes:
   - Resilience evidence is anchored to the official comparison artifacts plus the mapped automation for this surface.
   - Use the failure artifacts listed above first when a regression reproduces in S07/S09/S10/S11 or the corresponding parity suites.
-

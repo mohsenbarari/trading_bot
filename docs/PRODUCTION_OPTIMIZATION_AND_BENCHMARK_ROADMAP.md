@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P1 harness complete; the first long/full baseline is still required before Stage P2.
+Status: Stage P1 safe production baseline complete; Stage P2 is next.
 
 Last updated: 2026-06-11
 
@@ -13,8 +13,9 @@ No broad tuning should be accepted only because it is theoretically faster.
 | Stage | Status | Evidence |
 | --- | --- | --- |
 | `P0` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T080030Z/baseline/summary.md`: 28 commands, 0 failed, foreign sync-health clean, Iran sync-health clean |
-| `P1` | Harness complete on 2026-06-11; full run pending | `tmp/production-benchmark/20260611T081127Z/summary.md`: quick mode ran 7 tasks, 0 failed; `make production-benchmark-full` is available but the long/full baseline has not been executed yet |
-| `P2`-`P11` | Pending | Blocked until the first long/full-product benchmark baseline exists |
+| `P1` | Safe production baseline complete on 2026-06-11 | `tmp/production-benchmark/20260611T083854Z/summary.md`: full mode ran 11 read-only/safe tasks against the Iran target, 0 required failures, clean foreign/Iran sync-health after cleanup |
+| `P2` | Next | PostgreSQL production tuning can start from the safe production baseline |
+| `P3`-`P11` | Pending | Execute in order after P2 |
 
 ## Current Baseline Known From Live Checks
 
@@ -46,6 +47,7 @@ Current Iran production-class host:
 8. Prefer direct measurement over generic advice. PgBouncer is not accepted for production until it wins under this project's workload.
 9. Keep logs and benchmark artifacts redacted. No passwords, OTPs, tokens, phone numbers, captions, message bodies, or signed URLs in artifacts.
 10. A stage is complete only when its focused benchmark and rollback note are recorded.
+11. Data-mutating browser/E2E suites must not run against production unless explicitly requested with a dedicated cleanup plan; the default production benchmark runner excludes them.
 
 ## Roadmap Stages
 
@@ -99,7 +101,7 @@ Changes:
 
 Acceptance:
 
-- The full-product benchmark can run without touching real production user data.
+- The full-product benchmark can run without touching real production user data. Production mode excludes mutating suites by default.
 - The summary reports pass/fail, deltas, and the bottleneck class per surface.
 - The runner fails closed on fixture cleanup errors.
 - The first full baseline is recorded before Stage P2 begins.
@@ -381,7 +383,7 @@ After three stable full runs, convert these relative gates into absolute per-sur
 ## Recommended Immediate Order
 
 1. Implement Stage P0 and P1 first.
-2. Run the first `full` benchmark against the current 8-worker direct-Postgres setup.
+2. Run the first safe `full` benchmark against the current 8-worker direct-Postgres setup.
 3. Apply PostgreSQL tuning in Stage P2.
 4. Run targeted DB and full-product quick benchmark.
 5. Apply Redis durability in Stage P3.

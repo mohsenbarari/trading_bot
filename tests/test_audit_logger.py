@@ -23,14 +23,15 @@ class AuditLoggerTests(unittest.TestCase):
             configure_logging("audit-test")
 
         set_request_context(request_id="req-audit-1", actor_id=42, actor_role="مدیر ارشد", client_ip="127.0.0.1")
-        audit_log(
-            "user.update",
-            target_type="user",
-            target_id=7,
-            before_summary={"role": "عادی"},
-            after_summary={"role": "مدیر میانی", "password": "new-secret"},
-            reason="operator requested password=unsafe",
-        )
+        with patch("core.audit_sink._audit_trail_path", return_value=None):
+            audit_log(
+                "user.update",
+                target_type="user",
+                target_id=7,
+                before_summary={"role": "عادی"},
+                after_summary={"role": "مدیر میانی", "password": "new-secret"},
+                reason="operator requested password=unsafe",
+            )
 
         payload = json.loads(stream.getvalue().strip())
         self.assertEqual(payload["logger"], "audit")
@@ -58,15 +59,16 @@ class AuditLoggerTests(unittest.TestCase):
             configure_logging("audit-test")
 
         set_request_context(actor_id=1, actor_role="ignored")
-        audit_log(
-            "session.reject",
-            target_type="session_login_request",
-            target_id="request-1",
-            result="unexpected",
-            actor_id=99,
-            actor_role="مدیر میانی",
-            extra={"refresh_token": "secret-refresh", "status_code": 403},
-        )
+        with patch("core.audit_sink._audit_trail_path", return_value=None):
+            audit_log(
+                "session.reject",
+                target_type="session_login_request",
+                target_id="request-1",
+                result="unexpected",
+                actor_id=99,
+                actor_role="مدیر میانی",
+                extra={"refresh_token": "secret-refresh", "status_code": 403},
+            )
 
         payload = json.loads(stream.getvalue().strip())
         self.assertEqual(payload["actor_id"], 99)

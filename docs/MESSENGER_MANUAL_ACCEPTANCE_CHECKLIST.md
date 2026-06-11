@@ -225,4 +225,3 @@ Checklist:
 Notes:
 - Reviewed during the benchmark closure pass on 2026-05-31 against the official comparison artifacts and mapped automation.
 - No remaining benchmark-only blocker is recorded for this surface after the L5/L6 evidence pass.
-

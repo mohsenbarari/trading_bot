@@ -65,6 +65,21 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertEqual(redact(f"token={token}"), f"token={REDACTED}")
         self.assertEqual(redact(f"raw {token}"), f"raw {REDACTED_JWT}")
 
+    def test_redact_preserves_integrity_hash_fields(self):
+        hash_value = "21f13ee3385597725cf7e7b578ac042f54b012c5dc735d235a60206dd67e24ca"
+
+        redacted = redact({
+            "audit_event_hash": hash_value,
+            "event_hash": hash_value,
+            "trail_sha256": hash_value,
+            "message": f"national 0079059744 hash {hash_value}",
+        })
+
+        self.assertEqual(redacted["audit_event_hash"], hash_value)
+        self.assertEqual(redacted["event_hash"], hash_value)
+        self.assertEqual(redacted["trail_sha256"], hash_value)
+        self.assertIn(REDACTED_NATIONAL_ID, redacted["message"])
+
     def test_redact_masks_iranian_pii_signed_urls_and_file_names(self):
         signed_url = (
             "https://cdn.example.test/private/report.pdf?"

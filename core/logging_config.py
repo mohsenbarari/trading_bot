@@ -9,7 +9,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any
 
-from core.log_redaction import REDACTED, is_sensitive_key, redact
+from core.log_redaction import REDACTED, is_safe_integrity_hash_key, is_sensitive_key, redact
 from core.request_context import get_request_context
 
 SERVICE_NAME = "app"
@@ -93,7 +93,10 @@ class JsonLogFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _RESERVED_RECORD_ATTRS or key.startswith("_") or key in payload:
                 continue
-            payload[key] = REDACTED if is_sensitive_key(key) else redact(value)
+            if is_safe_integrity_hash_key(key):
+                payload[key] = value
+            else:
+                payload[key] = REDACTED if is_sensitive_key(key) else redact(value)
 
         if record.exc_info:
             payload["exception"] = {
