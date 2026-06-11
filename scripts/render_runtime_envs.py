@@ -29,6 +29,8 @@ COMMON_RUNTIME_KEYS = (
     "CHANNEL_INVITE_LINK",
     "SMSIR_API_KEY",
     "SMSIR_LINE_NUMBER",
+    "SMSIR_OTP_TEMPLATE_ID",
+    "SMSIR_OTP_TEMPLATE_PARAMETER",
     "ERROR_TRACKING_DSN",
     "TRUSTED_PROXY_CIDRS",
     "OBSERVABILITY_TELEGRAM_USER_HASH_SALT",
@@ -39,9 +41,11 @@ COMMON_RUNTIME_KEYS = (
     "GRAFANA_ALERT_EMAIL_ADDRESSES",
 )
 
-OPTIONAL_RUNTIME_KEYS = {
-    "CHANNEL_INVITE_LINK",
-    "ERROR_TRACKING_DSN",
+OPTIONAL_RUNTIME_DEFAULTS = {
+    "CHANNEL_INVITE_LINK": "",
+    "ERROR_TRACKING_DSN": "",
+    "SMSIR_OTP_TEMPLATE_ID": "",
+    "SMSIR_OTP_TEMPLATE_PARAMETER": "Code",
 }
 
 PERFORMANCE_RUNTIME_DEFAULTS = OrderedDict(
@@ -134,8 +138,8 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
     missing: list[str] = []
     for key in COMMON_RUNTIME_KEYS:
         value = os.environ.get(key, source_values.get(key))
-        if value is None and key in OPTIONAL_RUNTIME_KEYS:
-            value = ""
+        if value is None and key in OPTIONAL_RUNTIME_DEFAULTS:
+            value = OPTIONAL_RUNTIME_DEFAULTS[key]
         if value is None:
             missing.append(key)
             continue
