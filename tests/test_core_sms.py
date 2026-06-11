@@ -106,19 +106,19 @@ class CoreSmsTests(unittest.TestCase):
         patches = self.configured_smsir()
         with patches[0], patches[1], patches[2], patches[3], patch.object(
             sms.settings, "smsir_otp_template_id", "123456"
-        ), patch.object(sms.settings, "smsir_otp_template_parameter", "Code"), patch(
+        ), patch.object(sms.settings, "smsir_otp_template_parameter", "CODE"), patch(
             "core.sms.httpx.post", return_value=response
         ) as post_mock:
             self.assertTrue(sms.send_otp_sms("+989120000000", "12345"))
 
         post_mock.assert_called_once()
-        self.assertEqual(post_mock.call_args.args[0], "https://api.sms.ir/v1/send/verify")
+        self.assertEqual(post_mock.call_args.args[0], "https://api.sms.ir/v1/send/verify/")
         self.assertEqual(
             post_mock.call_args.kwargs["json"],
             {
-                "mobile": "09120000000",
-                "templateId": 123456,
-                "parameters": [{"name": "Code", "value": "12345"}],
+                "Mobile": "09120000000",
+                "TemplateId": 123456,
+                "Parameters": [{"name": "CODE", "value": "12345"}],
             },
         )
 
