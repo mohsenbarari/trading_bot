@@ -40,6 +40,7 @@ from core.services.session_service import (
     hash_token,
     publish_session_revocation,
 )
+from core.session_authority import assert_login_allowed_for_server
 from core.services.user_account_status_service import get_user_account_status, is_user_global_web_locked
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
@@ -790,6 +791,7 @@ async def switch_test_account(
 
 async def request_otp(
     request: OTPRequest,
+    raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -814,6 +816,9 @@ async def request_otp(
 
     if get_user_account_status(result).value == "inactive":
         _raise_inactive_account_error()
+
+    login_home_server = _login_home_server(raw_request)
+    await assert_login_allowed_for_server(db, result, requested_server=login_home_server)
 
     # Rate limiting
     redis = await get_redis()
@@ -883,6 +888,8 @@ async def request_otp(
 @router.post("/resend-otp-sms", response_model=dict)
 async def resend_otp_sms(
     request: OTPRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     ارسال مجدد کد فعال از طریق پیامک (Fallback).
@@ -902,6 +909,16 @@ async def resend_otp_sms(
          # Session expired
          logger.warning(f"Resend failed for {mobile}: OTP code not found or expired")
          raise HTTPException(status_code=400, detail="کد تایید منقضی شده است. لطفاً مجدد درخواست دهید.")
+
+    stmt = select(User).where(User.mobile_number == mobile)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+    if user.is_deleted or get_user_account_status(user).value == "inactive":
+        _raise_inactive_account_error()
+
+    login_home_server = _login_home_server(raw_request)
+    await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
          
     # Rate limit for SMS resend (prevent spamming button)
     sms_limit_key = f"sms_limit:{mobile}"
@@ -963,11 +980,20 @@ async def verify_otp(
         await redis.delete(otp_key)
         await redis.delete(f"otp_limit:{mobile}")
         _raise_inactive_account_error()
-        
+
+    login_home_server = _login_home_server(raw_request)
+    try:
+        await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            await redis.delete(otp_key)
+            await redis.delete(f"otp_limit:{mobile}")
+        raise
+
     # پاک کردن کد OTP
     await redis.delete(otp_key)
     await redis.delete(f"otp_limit:{mobile}")
-    
+
     # Generate tokens
     access_token_expires = timedelta(minutes=60)
     refresh_token_expires = timedelta(days=30)
@@ -979,7 +1005,6 @@ async def verify_otp(
     
     # Session management
     device_info = _extract_device_info(raw_request)
-    login_home_server = _login_home_server(raw_request)
     user.home_server = login_home_server
     session_result = await handle_login_session(
         db, user, refresh_token,
@@ -1075,6 +1100,7 @@ async def webapp_login(
         device_info["platform"] = Platform.TELEGRAM_MINI_APP
         device_info["device_name"] = "Telegram Mini App"
         login_home_server = SERVER_FOREIGN
+        await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
         user.home_server = login_home_server
         
         session_result = await handle_login_session(

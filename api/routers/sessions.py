@@ -42,6 +42,10 @@ from core.services.session_service import (
     get_effective_max_sessions,
     provision_session_for_login_request,
 )
+from core.session_authority import (
+    inspect_local_session_authority,
+    verify_session_authority_signature,
+)
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.single_session_recovery_service import (
     approve_recovery_request,
@@ -107,6 +111,11 @@ class LoginRequestAction(BaseModel):
 
 class MaxSessionsUpdate(BaseModel):
     max_sessions: int
+
+
+class InternalSessionAuthorityCheck(BaseModel):
+    user_id: int
+    source_server: Optional[str] = None
 
 
 def session_to_dict(s: UserSession) -> dict:
@@ -513,6 +522,29 @@ async def _ensure_recovery_admin_access(
 
 
 # --- Endpoints ---
+
+@router.post("/internal/authority-check")
+async def internal_session_authority_check(
+    payload: InternalSessionAuthorityCheck,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await request.body()
+    if not verify_session_authority_signature(
+        body,
+        timestamp=request.headers.get("X-Timestamp"),
+        signature=request.headers.get("X-Signature"),
+        api_key=request.headers.get("X-API-Key"),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal signature")
+
+    stmt = select(User).where(User.id == payload.user_id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return await inspect_local_session_authority(db, user)
+
 
 @router.get("/login-requests/pending", response_model=List[dict])
 async def get_pending_requests(
