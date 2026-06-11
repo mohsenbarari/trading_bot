@@ -1281,6 +1281,15 @@ wait_args=''
 if [ '$IRAN_DEPLOY_WITH_WAIT' = '1' ] && [ \"\$compose_cmd\" = 'docker compose' ]; then
   wait_args='--wait --wait-timeout 180'
 fi
+for service in app sync_worker migration; do
+  ids=\"\$(docker ps -aq --filter label=com.docker.compose.service=\$service --filter label=com.docker.compose.project=current)\"
+  if [ -n \"\$ids\" ]; then
+    docker rm -f \$ids >/dev/null 2>&1 || true
+  fi
+done
+for container_name in trading_bot_app trading_bot_sync_worker trading_bot_migration; do
+  docker rm -f \"\$container_name\" >/dev/null 2>&1 || true
+done
 eval \"\$compose_cmd -f docker-compose.iran.yml up -d \$wait_args\"
 eval \"\$compose_cmd -f docker-compose.iran.yml ps\""
     log "Iran deploy step complete"

@@ -142,6 +142,10 @@ class ObservabilityConfigTests(unittest.TestCase):
             "TRUNCATE TABLE change_log",
             "verify_shared_sync_health_clean",
             "unsynced_change_log_count",
+            "docker ps -aq --filter label=com.docker.compose.service=\\$service",
+            "docker rm -f \\$ids",
+            "trading_bot_sync_worker",
+            "trading_bot_migration",
         ):
             self.assertIn(expected, script)
 
@@ -198,6 +202,9 @@ class ObservabilityConfigTests(unittest.TestCase):
 
         self.assertIn('trading_bot_service: str = "app"', config)
         self.assertIn('trading_bot_metrics_backend: str = "memory"', config)
+        self.assertIn("api_workers: int = 2", config)
+        self.assertIn("db_pool_size: int = 15", config)
+        self.assertIn("background_leader_lock_ttl_seconds: int = 90", config)
 
 
 if __name__ == "__main__":
