@@ -165,6 +165,16 @@ def build_tasks(
             modes=("quick", "targeted", "full"),
         ),
         BenchmarkTask(
+            task_id="redis_runtime_durability",
+            surface_id="B08",
+            label="Redis durability settings and queue state inside Iran app container",
+            profile="redis",
+            command=_iran_python_script(settings, "scripts/report_redis_runtime.py", "--json"),
+            timeout_seconds=45,
+            bottleneck_class="redis_durability",
+            modes=("targeted", "full"),
+        ),
+        BenchmarkTask(
             task_id="production_healthcheck",
             surface_id="B11",
             label="Production deploy healthcheck wrapper",
@@ -378,7 +388,7 @@ def write_run_artifacts(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production benchmark orchestration harness.")
     parser.add_argument("--mode", choices=("quick", "targeted", "full"), default="quick")
-    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, frontend.")
+    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, frontend.")
     parser.add_argument("--target", choices=("iran",), default="iran", help="Production benchmark target host.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))

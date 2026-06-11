@@ -166,6 +166,16 @@ services:
   redis:
     image: redis:7-alpine
     container_name: trading_bot_redis
+    command:
+      - redis-server
+      - --appendonly
+      - ${REDIS_APPENDONLY:-yes}
+      - --appendfsync
+      - ${REDIS_APPENDFSYNC:-everysec}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-0}
+      - --maxmemory-policy
+      - ${REDIS_MAXMEMORY_POLICY:-noeviction}
     environment:
       TZ: UTC
     volumes:

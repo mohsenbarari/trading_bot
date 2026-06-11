@@ -573,6 +573,10 @@ export_runtime_renderer_overrides() {
         IRAN_POSTGRES_MAX_WAL_SIZE
         IRAN_POSTGRES_MIN_WAL_SIZE
         IRAN_POSTGRES_WAL_BUFFERS
+        REDIS_APPENDONLY
+        REDIS_APPENDFSYNC
+        REDIS_MAXMEMORY
+        REDIS_MAXMEMORY_POLICY
     )
     for key in "${keys[@]}"; do
         if [[ -v "$key" ]]; then

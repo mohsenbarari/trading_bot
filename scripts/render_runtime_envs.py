@@ -83,6 +83,15 @@ POSTGRES_TUNING_DEFAULTS = OrderedDict(
     )
 )
 
+REDIS_DURABILITY_DEFAULTS = OrderedDict(
+    (
+        ("REDIS_APPENDONLY", "yes"),
+        ("REDIS_APPENDFSYNC", "everysec"),
+        ("REDIS_MAXMEMORY", "0"),
+        ("REDIS_MAXMEMORY_POLICY", "noeviction"),
+    )
+)
+
 ROLE_POSTGRES_TUNING_DEFAULTS = {
     "foreign": {},
     "iran": {
@@ -146,6 +155,8 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
             role_key = f"{prefix}_{key}"
             default = defaults.get(key, fallback)
             values[role_key] = os.environ.get(role_key, source_values.get(role_key, default))
+    for key, default in REDIS_DURABILITY_DEFAULTS.items():
+        values[key] = os.environ.get(key, source_values.get(key, default))
     if missing:
         missing_list = ", ".join(missing)
         raise SystemExit(f"Missing required runtime env inputs: {missing_list}")
@@ -178,6 +189,8 @@ def build_runtime_env(
         rendered[key] = values.get(f"{role_prefix}_{key}", values[key])
     for key in POSTGRES_TUNING_DEFAULTS:
         rendered[key] = values.get(f"{role_prefix}_{key}", values[key])
+    for key in REDIS_DURABILITY_DEFAULTS:
+        rendered[key] = values[key]
     rendered["TRADING_BOT_METRICS_BACKEND"] = metrics_backend
     rendered["AUDIT_TRAIL_PATH"] = audit_trail_path
     rendered["FOREIGN_SERVER_URL"] = foreign_server_url
