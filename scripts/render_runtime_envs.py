@@ -56,6 +56,17 @@ PERFORMANCE_RUNTIME_DEFAULTS = OrderedDict(
     )
 )
 
+ROLE_PERFORMANCE_DEFAULTS = {
+    "foreign": {
+        "DB_POOL_SIZE": "15",
+        "DB_MAX_OVERFLOW": "10",
+    },
+    "iran": {
+        "DB_POOL_SIZE": "8",
+        "DB_MAX_OVERFLOW": "6",
+    },
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render foreign and Iran runtime env files.")
@@ -71,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--metrics-backend", default="memory")
     parser.add_argument("--audit-trail-path", default="/app/audit_trail/audit.jsonl")
     parser.add_argument("--foreign-api-workers", default=os.environ.get("FOREIGN_API_WORKERS", "2"))
-    parser.add_argument("--iran-api-workers", default=os.environ.get("IRAN_API_WORKERS", "4"))
+    parser.add_argument("--iran-api-workers", default=os.environ.get("IRAN_API_WORKERS", "8"))
     return parser.parse_args()
 
 def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]:
@@ -90,6 +101,11 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
         values[key] = value
     for key, default in PERFORMANCE_RUNTIME_DEFAULTS.items():
         values[key] = os.environ.get(key, source_values.get(key, default))
+    for role, defaults in ROLE_PERFORMANCE_DEFAULTS.items():
+        prefix = role.upper()
+        for key, default in defaults.items():
+            role_key = f"{prefix}_{key}"
+            values[role_key] = os.environ.get(role_key, source_values.get(role_key, default))
     if missing:
         missing_list = ", ".join(missing)
         raise SystemExit(f"Missing required runtime env inputs: {missing_list}")
@@ -117,8 +133,9 @@ def build_runtime_env(
     rendered["FRONTEND_URL"] = frontend_url
     for key in COMMON_RUNTIME_KEYS[6:]:
         rendered[key] = values[key]
+    role_prefix = role.upper()
     for key in PERFORMANCE_RUNTIME_DEFAULTS:
-        rendered[key] = values[key]
+        rendered[key] = values.get(f"{role_prefix}_{key}", values[key])
     rendered["TRADING_BOT_METRICS_BACKEND"] = metrics_backend
     rendered["AUDIT_TRAIL_PATH"] = audit_trail_path
     rendered["FOREIGN_SERVER_URL"] = foreign_server_url

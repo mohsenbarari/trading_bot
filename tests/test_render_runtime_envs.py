@@ -36,6 +36,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "GRAFANA_ALERT_EMAIL_ADDRESSES": "ops@example.com",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
+            "IRAN_DB_POOL_SIZE": "8",
+            "IRAN_DB_MAX_OVERFLOW": "6",
             "DB_POOL_RECYCLE_SECONDS": "3600",
             "DB_POOL_PRE_PING": "true",
             "BACKGROUND_LEADER_LOCK_TTL_SECONDS": "90",
@@ -66,17 +68,20 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             iran_server_domain="coin.gold-trade.ir",
             metrics_backend="memory",
             audit_trail_path="/app/audit.jsonl",
-            api_workers="4",
+            api_workers="8",
             values=values,
         )
 
         self.assertEqual(foreign["SERVER_MODE"], "foreign")
         self.assertEqual(iran["SERVER_MODE"], "iran")
         self.assertEqual(foreign["API_WORKERS"], "2")
-        self.assertEqual(iran["API_WORKERS"], "4")
+        self.assertEqual(iran["API_WORKERS"], "8")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
-        self.assertEqual(iran["DB_POOL_SIZE"], "15")
+        self.assertEqual(foreign["DB_POOL_SIZE"], "15")
+        self.assertEqual(foreign["DB_MAX_OVERFLOW"], "10")
+        self.assertEqual(iran["DB_POOL_SIZE"], "8")
+        self.assertEqual(iran["DB_MAX_OVERFLOW"], "6")
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
 
@@ -106,7 +111,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
                 "--foreign-api-workers",
                 "2",
                 "--iran-api-workers",
-                "4",
+                "8",
             ]
             with patch.dict(os.environ, values, clear=False):
                 with patch("sys.argv", argv):
@@ -118,8 +123,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("SERVER_MODE=foreign", foreign_lines)
             self.assertIn("SERVER_MODE=iran", iran_lines)
             self.assertIn("API_WORKERS=2", foreign_lines)
-            self.assertIn("API_WORKERS=4", iran_lines)
-            self.assertIn("DB_POOL_SIZE=15", iran_lines)
+            self.assertIn("API_WORKERS=8", iran_lines)
+            self.assertIn("DB_POOL_SIZE=8", iran_lines)
+            self.assertIn("DB_MAX_OVERFLOW=6", iran_lines)
+            self.assertIn("DB_POOL_SIZE=15", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.362514.ir", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)
