@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P1 safe production baseline complete; Stage P2 is next.
+Status: Stage P2 PostgreSQL production tuning complete; Stage P3 is next.
 
 Last updated: 2026-06-11
 
@@ -14,7 +14,7 @@ No broad tuning should be accepted only because it is theoretically faster.
 | --- | --- | --- |
 | `P0` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T080030Z/baseline/summary.md`: 28 commands, 0 failed, foreign sync-health clean, Iran sync-health clean |
 | `P1` | Safe production baseline complete on 2026-06-11 | `tmp/production-benchmark/20260611T083854Z/summary.md`: full mode ran 11 read-only/safe tasks against the Iran target, 0 required failures, clean foreign/Iran sync-health after cleanup |
-| `P2` | Next | PostgreSQL production tuning can start from the safe production baseline |
+| `P2` | Complete on 2026-06-11 | Iran DB backup `p2-postgres-tuning-20260611T090824Z.sql`; `tmp/production-benchmark/20260611T092543Z/summary.md`: targeted DB benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T091935Z/summary.md`: quick benchmark passed 7/7 tasks; foreign/Iran sync-health clean after system-seed backlog cleanup |
 | `P3`-`P11` | Pending | Execute in order after P2 |
 
 ## Current Baseline Known From Live Checks
@@ -29,11 +29,11 @@ Current Iran production-class host:
 | API workers | Iran defaults to `API_WORKERS=8` |
 | DB pool | Iran defaults to `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6` |
 | DB connections | Direct PostgreSQL outperformed temporary PgBouncer in the authenticated/chat benchmark |
-| PostgreSQL | Still mostly default tuning: `shared_buffers=128MB`, `effective_cache_size=4GB`, `work_mem=4MB` |
+| PostgreSQL | Iran P2 profile active: `shared_buffers=8GB`, `effective_cache_size=80GB`, `work_mem=8MB`, `maintenance_work_mem=512MB`, `random_page_cost=1.2`, `effective_io_concurrency=200`, `checkpoint_timeout=15min`, `max_wal_size=8GB`, `min_wal_size=1GB`, `wal_buffers=16MB` |
 | Redis | AOF disabled; RDB snapshots enabled; `maxmemory=0`; `maxmemory-policy=noeviction` |
 | Static/media path | Nginx still proxies several asset/media paths through the app instead of using a fully optimized static/media path |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
-| Full-product benchmark | Missing; must be added before further broad optimization |
+| Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
 ## Principles
 
@@ -136,6 +136,36 @@ Acceptance:
 - PostgreSQL connection count remains below the safe pool budget.
 - No sync backlog remains after restart.
 - Rollback is documented as the previous DB command/settings.
+
+Completion notes:
+
+- Applied conservative Iran-only PostgreSQL tuning through `docker-compose.iran.yml` with env-driven defaults, keeping the direct PostgreSQL architecture.
+- Added runtime env rendering for PostgreSQL tuning keys so production manifests/source env files can override the defaults without code edits.
+- Added `scripts/report_postgres_runtime.py` and wired it into `make production-benchmark-targeted PROFILE=db`; the probe verifies active PostgreSQL settings and the current/estimated connection budget inside the Iran app container.
+- Added `scripts/report_market_trade_query_plans.py` to keep the P2 DB benchmark from being Messenger-only; it runs read-only EXPLAIN ANALYZE probes for active offers, recent trades, and user-specific offer/trade history when samples exist.
+- Mounted `./scripts:/app/scripts` in app/sync-worker containers so runtime benchmark probes can run after rsync-only deploys without requiring a Docker image rebuild.
+- Backup before DB recreate: `/srv/trading-bot/backups/p2-postgres-tuning-20260611T090824Z.sql` on the Iran host.
+- Pre-change DB artifact: `tmp/production-benchmark/20260611T085932Z/summary.md` passed `messenger_query_plans` in `6.766s`.
+- Final post-change DB artifact: `tmp/production-benchmark/20260611T092543Z/summary.md` passed `postgres_runtime_tuning` in `2.507s`, `messenger_query_plans` in `6.631s`, and `market_trade_query_plans` in `3.096s`.
+- Active connection budget after tuning: `17` current PostgreSQL connections, estimated SQLAlchemy ceiling `126`, safe limit `400` under `max_connections=500`.
+- Current market/trade data set had no user-specific offer/trade samples, so `user_offers_history` and `user_trade_history` were skipped; `active_offers_feed` and `recent_trades_feed` both used index scans with sub-millisecond execution.
+- Quick production benchmark artifact: `tmp/production-benchmark/20260611T091935Z/summary.md` passed all `7` safe tasks against Iran.
+- `make sync-health` and `make sync-health-iran` were clean after marking only mandatory/system seed backlog entries (`chats=1`, `chat_members=49`) as synced.
+- Operational note: Iran currently uses legacy `docker-compose 1.29.2`; DB recreate hit the known `ContainerConfig` failure and was recovered by removing only the exited DB container while preserving the named PostgreSQL volume.
+
+Rollback:
+
+- Either revert this P2 commit and sync/recreate Iran DB-dependent services, or keep the code and set the Iran runtime env values back to the old profile before recreating DB:
+  `POSTGRES_SHARED_BUFFERS=128MB`,
+  `POSTGRES_EFFECTIVE_CACHE_SIZE=4GB`,
+  `POSTGRES_WORK_MEM=4MB`,
+  `POSTGRES_MAINTENANCE_WORK_MEM=64MB`,
+  `POSTGRES_RANDOM_PAGE_COST=4`,
+  `POSTGRES_EFFECTIVE_IO_CONCURRENCY=1`,
+  `POSTGRES_CHECKPOINT_TIMEOUT=5min`,
+  `POSTGRES_MAX_WAL_SIZE=1GB`,
+  `POSTGRES_MIN_WAL_SIZE=80MB`,
+  `POSTGRES_WAL_BUFFERS=4MB`.
 
 ### Stage P3 - Redis Durability and Queue Safety
 

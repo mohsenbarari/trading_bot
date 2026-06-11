@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     db_pool_recycle_seconds: int = 3600
     db_pool_pre_ping: bool = True
+    postgres_max_connections: int = 500
+    postgres_shared_buffers: str = "128MB"
+    postgres_effective_cache_size: str = "4GB"
+    postgres_work_mem: str = "4MB"
+    postgres_maintenance_work_mem: str = "64MB"
+    postgres_random_page_cost: float = 4.0
+    postgres_effective_io_concurrency: int = 1
+    postgres_checkpoint_timeout: str = "5min"
+    postgres_max_wal_size: str = "1GB"
+    postgres_min_wal_size: str = "80MB"
+    postgres_wal_buffers: str = "4MB"
     background_leader_lock_ttl_seconds: int = 90
     background_leader_lock_refresh_seconds: int = 30
     background_leader_retry_seconds: int = 10

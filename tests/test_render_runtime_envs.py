@@ -43,6 +43,27 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "BACKGROUND_LEADER_LOCK_TTL_SECONDS": "90",
             "BACKGROUND_LEADER_LOCK_REFRESH_SECONDS": "30",
             "BACKGROUND_LEADER_RETRY_SECONDS": "10",
+            "POSTGRES_MAX_CONNECTIONS": "500",
+            "POSTGRES_SHARED_BUFFERS": "128MB",
+            "POSTGRES_EFFECTIVE_CACHE_SIZE": "4GB",
+            "POSTGRES_WORK_MEM": "4MB",
+            "POSTGRES_MAINTENANCE_WORK_MEM": "64MB",
+            "POSTGRES_RANDOM_PAGE_COST": "4",
+            "POSTGRES_EFFECTIVE_IO_CONCURRENCY": "1",
+            "POSTGRES_CHECKPOINT_TIMEOUT": "5min",
+            "POSTGRES_MAX_WAL_SIZE": "1GB",
+            "POSTGRES_MIN_WAL_SIZE": "80MB",
+            "POSTGRES_WAL_BUFFERS": "4MB",
+            "IRAN_POSTGRES_SHARED_BUFFERS": "8GB",
+            "IRAN_POSTGRES_EFFECTIVE_CACHE_SIZE": "80GB",
+            "IRAN_POSTGRES_WORK_MEM": "8MB",
+            "IRAN_POSTGRES_MAINTENANCE_WORK_MEM": "512MB",
+            "IRAN_POSTGRES_RANDOM_PAGE_COST": "1.2",
+            "IRAN_POSTGRES_EFFECTIVE_IO_CONCURRENCY": "200",
+            "IRAN_POSTGRES_CHECKPOINT_TIMEOUT": "15min",
+            "IRAN_POSTGRES_MAX_WAL_SIZE": "8GB",
+            "IRAN_POSTGRES_MIN_WAL_SIZE": "1GB",
+            "IRAN_POSTGRES_WAL_BUFFERS": "16MB",
         }
 
     def test_build_runtime_env_switches_role_and_frontend_url(self):
@@ -82,6 +103,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(foreign["DB_MAX_OVERFLOW"], "10")
         self.assertEqual(iran["DB_POOL_SIZE"], "8")
         self.assertEqual(iran["DB_MAX_OVERFLOW"], "6")
+        self.assertEqual(foreign["POSTGRES_SHARED_BUFFERS"], "128MB")
+        self.assertEqual(iran["POSTGRES_SHARED_BUFFERS"], "8GB")
+        self.assertEqual(iran["POSTGRES_EFFECTIVE_CACHE_SIZE"], "80GB")
+        self.assertEqual(iran["POSTGRES_WORK_MEM"], "8MB")
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
 
@@ -126,6 +151,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("API_WORKERS=8", iran_lines)
             self.assertIn("DB_POOL_SIZE=8", iran_lines)
             self.assertIn("DB_MAX_OVERFLOW=6", iran_lines)
+            self.assertIn("POSTGRES_SHARED_BUFFERS=8GB", iran_lines)
+            self.assertIn("POSTGRES_EFFECTIVE_CACHE_SIZE=80GB", iran_lines)
+            self.assertIn("POSTGRES_SHARED_BUFFERS=128MB", foreign_lines)
             self.assertIn("DB_POOL_SIZE=15", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.362514.ir", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)
