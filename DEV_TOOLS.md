@@ -55,6 +55,7 @@ make observability-up
 make observability-down
 make observability-logs
 make observability-overhead
+make observability-readiness
 make audit-log-export
 ```
 
@@ -87,6 +88,9 @@ For production-hardening checks:
 
 - `make observability-overhead` measures local structured logging overhead and
   fails if the default per-event budget is exceeded.
+- `make observability-readiness` runs the production P9 readiness report for
+  logging overhead, metrics-target contract, audit-anchor export/ship, required
+  sync sampler timers, artifact hygiene, and sync-health.
 - `make audit-log-export` exports audit logs from local Loki to
   `tmp/audit-log-exports/*.jsonl`. Pass Loki/query/window overrides through
   `ARGS`, for example:

@@ -260,6 +260,30 @@ If the budget fails:
 3. Keep stack traces only for captured errors.
 4. Re-run the overhead check before deploying.
 
+## Production Observability Readiness
+
+Stage P9 adds a single production readiness report:
+
+```bash
+make observability-readiness
+```
+
+The report is also wired into the production benchmark runner through
+`PROFILE=observability`. It verifies:
+
+- structured logging overhead against the configured budget
+- the explicit memory-backend metrics contract
+- durable audit-trail anchor export
+- audit-anchor shipper behavior through a local relay artifact
+- required sync-health sampler timers on both foreign and Iran hosts
+- benchmark artifact hygiene for blocked sensitive patterns
+- clean foreign and Iran sync-health
+
+Audit anchor export/shipper timers are reported as optional until a production
+anchor sink is configured. Once `AUDIT_ANCHOR_*` deployment values point to a
+real restricted sink, operators should install and monitor those timers as part
+of the release checklist.
+
 ## Metrics Backend Policy
 
 R2 chooses the conservative production-safe default:
