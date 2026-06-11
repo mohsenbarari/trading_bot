@@ -137,6 +137,13 @@ def command_display(args: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in args)
 
 
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def run_command(
     *,
     name: str,
@@ -177,8 +184,8 @@ def run_command(
         "exit_code": returncode,
         "duration_seconds": elapsed,
         "timed_out": timed_out,
-        "stdout_path": str(stdout_path.relative_to(REPO_ROOT)),
-        "stderr_path": str(stderr_path.relative_to(REPO_ROOT)),
+        "stdout_path": display_path(stdout_path),
+        "stderr_path": display_path(stderr_path),
     }
 
 
@@ -299,7 +306,7 @@ def write_summary(
         "",
         f"- Captured at: `{metadata['captured_at']}`",
         f"- Git SHA: `{metadata.get('git_sha', 'unknown')}`",
-        f"- Artifact dir: `{artifact_dir.relative_to(REPO_ROOT)}`",
+        f"- Artifact dir: `{display_path(artifact_dir)}`",
         f"- Commands: `{len(command_results)}` total, `{len(failed)}` failed",
         f"- Sync health clean: `{sync_summary.get('clean', False)}`",
         "",
@@ -425,7 +432,7 @@ def main() -> int:
     )
 
     print(json.dumps({
-        "artifact_dir": str(artifact_dir.relative_to(REPO_ROOT)),
+        "artifact_dir": display_path(artifact_dir),
         "sync_health_clean": sync_summary["clean"],
         "failed_commands": [item["name"] for item in results if item["exit_code"] != 0],
     }, ensure_ascii=False, sort_keys=True))

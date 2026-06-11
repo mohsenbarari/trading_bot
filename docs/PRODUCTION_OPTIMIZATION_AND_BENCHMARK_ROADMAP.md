@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P0 complete; Stage P1 is next.
+Status: Stage P1 harness complete; the first long/full baseline is still required before Stage P2.
 
 Last updated: 2026-06-11
 
@@ -13,8 +13,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | Stage | Status | Evidence |
 | --- | --- | --- |
 | `P0` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T080030Z/baseline/summary.md`: 28 commands, 0 failed, foreign sync-health clean, Iran sync-health clean |
-| `P1` | Next | Full-product benchmark harness not started |
-| `P2`-`P11` | Pending | Blocked until the first full-product benchmark baseline exists |
+| `P1` | Harness complete on 2026-06-11; full run pending | `tmp/production-benchmark/20260611T081127Z/summary.md`: quick mode ran 7 tasks, 0 failed; `make production-benchmark-full` is available but the long/full baseline has not been executed yet |
+| `P2`-`P11` | Pending | Blocked until the first long/full-product benchmark baseline exists |
 
 ## Current Baseline Known From Live Checks
 
