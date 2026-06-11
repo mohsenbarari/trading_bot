@@ -114,30 +114,11 @@ async def create_invitation(
     # Send SMS based on connectivity
     is_connected = await is_internet_connected()
     
-    # Always send two links as requested by user
-    # Text is handled inside send_invitation_sms
-    # We send the direct links, or short link if preferred?
-    # User wanted two links. Let's send the direct links to avoid extra redirect if possible,
-    # OR send the short link if we implement the landing page.
-    # User said: "send both links".
-    
-    # Let's send the direct links for now.
-    # If we want a landing page (short_link), we can use that too.
-    
-    # Actually, sending two long links in SMS is bad.
-    # Let's send the short_link for the landing page which has both buttons?
-    # User rejected landing page idea initially but then accepted "send two links".
-    # Sending two long links in one SMS might fail or cost 3-4 segments.
-    # Short link is best.
-    
-    # But wait, user said: "send both links: one web, one telegram".
-    # So we must send both.
-    
     send_invitation_sms(
         mobile=mobile,
         account_name=invite.account_name,
         bot_link=bot_link,
-        web_link=short_link
+        web_link=web_link
     )
     
     return {

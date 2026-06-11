@@ -121,7 +121,7 @@ Store UTC → display Iran time (Asia/Tehran) + Jalali calendar. Persian numeral
 - Plain SMS uses SMS.ir REST `POST /v1/send/bulk` with `X-API-KEY`, `lineNumber`, `messageText`, and `mobiles`.
 - OTP SMS uses SMS.ir Verify `POST /v1/send/verify` when `SMSIR_OTP_TEMPLATE_ID` is configured; otherwise it falls back to plain SMS.
 - Required env: `SMSIR_API_KEY`, `SMSIR_LINE_NUMBER`. Optional Verify env: `SMSIR_OTP_TEMPLATE_ID`, `SMSIR_OTP_TEMPLATE_PARAMETER` (default `Code`).
-- Invitation SMS: bot link + web link; keep it under 3 UCS-2 segments (~161 chars).
+- Invitation SMS is temporarily web-only: send the direct `/register?token=...` link and do not include Telegram text or `t.me` links in the SMS body. Keep it under 3 UCS-2 segments (~161 chars).
 
 ## Core Services
 
@@ -188,6 +188,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-06-11 18:38 UTC | Codex | **Invitation SMS Telegram Link Temporarily Removed**: Changed `send_invitation_sms()` to keep the caller-compatible `bot_link` argument but omit Telegram text and `t.me` URLs from the SMS body, sending only the web registration link. Updated invitation creation to pass the direct `/register?token=...` URL into SMS instead of the `/i/{short_code}` landing page that still exposes Telegram registration actions, and added focused SMS/invitation router regressions. |
 | 2026-06-11 17:19 UTC | Codex | **Cross-Server Login Session Authority Guard Added**: Kept `user_sessions` local and added `core.session_authority` plus signed `/api/sessions/internal/authority-check` so a non-home server must ask the user's `home_server` before generating OTP, resending OTP SMS, verifying OTP, or creating Telegram WebApp sessions. Remote active sessions now fail closed with the Persian active-session/logout-first message; expired active sessions are deactivated on the authoritative home check and zero-active responses allow controlled home transfer on successful verify. Added focused auth/session-authority tests and compile/diff validation. |
 | 2026-06-11 16:21 UTC | Codex | **Messenger Older Message Prefetch Improved**: Investigated slow old-message loading in direct/group/channel chats and found the API/store pagination path already uses indexed `before_id` queries with duplicate-load guards, but `ChatView.vue` only requested older pages within `96px` of the loaded top. Replaced the fixed top-only trigger with a bounded viewport-based prefetch threshold (`240-720px`, `0.85x` viewport), preserving the existing scroll-anchor restoration after prepends. Added Vitest coverage for early prefetch, no premature load above the threshold, and stable anchor restoration. |
 | 2026-06-11 15:40 UTC | Codex | Hardened the production release shared-data prompt after an Iran release stopped at `Action [skip/reset/abort]:` with empty input. Existing Iran shared data now treats Enter as the safe default `skip`, keeping rows unchanged and continuing deploy; `reset` still requires the existing explicit reset confirmation. Updated production deployment docs and string coverage in `tests/test_observability_config.py`. |

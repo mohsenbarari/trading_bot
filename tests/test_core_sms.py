@@ -153,7 +153,8 @@ class CoreSmsTests(unittest.TestCase):
 
         message = send_sms_mock.call_args.args[1]
         self.assertIn("demo", message)
-        self.assertIn("https://t.me/demo", message)
+        self.assertNotIn("https://t.me/demo", message)
+        self.assertNotIn("تلگرام", message)
         self.assertIn("https://app.example/register", message)
 
     def test_send_accountant_invitation_sms_formats_message_and_delegates(self):

@@ -192,15 +192,15 @@ def send_invitation_sms(
     web_link: str,
 ) -> bool:
     """
-    Send invitation SMS with both Telegram bot and web registration links.
-    Text encourages Telegram registration as the primary method.
+    Send invitation SMS with the web registration link only.
+
+    bot_link is kept in the signature for caller compatibility while Telegram
+    registration links are temporarily paused in SMS content.
     """
     message = (
         f"{account_name} عزیز\n"
         f"دعوت عضویت سامانه معاملاتی\n"
-        f"تلگرام:\n"
-        f"{bot_link}\n"
-        f"وب:\n"
+        f"ثبت‌نام از طریق وب:\n"
         f"{web_link}"
     )
     return send_sms(mobile, message)

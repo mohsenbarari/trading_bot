@@ -154,7 +154,7 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
             mobile="09120000000",
             account_name="user1",
             bot_link="https://t.me/test_bot?start=INV-NEW",
-            web_link="https://frontend.test/i/SHORTNEW",
+            web_link="https://frontend.test/register?token=INV-NEW",
         )
         self.assertEqual(result["token"], "INV-NEW")
         self.assertEqual(result["link"], "https://t.me/test_bot?start=INV-NEW")
