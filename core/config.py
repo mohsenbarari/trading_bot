@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     smsir_line_number: int | None = None
     smsir_base_url: str = "https://api.sms.ir"
     smsir_timeout_seconds: float = 10.0
-    smsir_otp_template_id: str | None = None
-    smsir_otp_template_parameter: str = "Code"
+    smsir_otp_template_id: str | None = "232000"
+    smsir_otp_template_parameter: str = "CODE"
     
     class Config:
         env_file = ".env"
