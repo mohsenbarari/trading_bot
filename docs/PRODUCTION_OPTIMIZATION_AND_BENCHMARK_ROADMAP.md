@@ -1,6 +1,8 @@
 # Production Optimization and Benchmark Roadmap
 
 Status: Complete through Stage P11; release readiness gate passed with accepted warnings.
+Post-P11 recoverability tooling is available for operational backups, restore
+smoke tests, and live recovery readiness reports.
 
 Last updated: 2026-06-11
 
@@ -46,6 +48,7 @@ Current Iran production-class host:
 | Observability readiness | P9 targeted benchmark runs structured logging overhead, metrics contract, durable audit anchor export, anchor shipper relay, required sync sampler timer checks, artifact sensitive-data scan, and focused observability regression gate |
 | Deployment/restart readiness | P10 targeted benchmark runs a full foreign-controlled release rehearsal, records phase timings, creates a pre-probe Iran `pg_dump` backup, restarts app/sync-worker/Redis/PostgreSQL in controlled order, and verifies final foreign/Iran sync-health |
 | Final release gate | P11 validates all P0-P10 evidence, current manifest identity, live production health, live foreign/Iran sync-health, Messenger readiness, observability minimums, backup/rollback evidence, and accepted-warning ownership |
+| Recoverability operations | `make production-backup-iran`, `make production-backup-all`, `make production-recoverability-report`, and `make production-recoverability-drill` provide post-P11 operational backup and DB restore-smoke evidence |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 

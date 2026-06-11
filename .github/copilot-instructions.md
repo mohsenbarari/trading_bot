@@ -18,6 +18,7 @@
 - **Bot**: aiogram 3.10 (long-polling, FSM)
 - **Frontend**: Vue 3 + TypeScript + Tailwind CSS + Vite (PWA)
 - **Deploy**: `make up` → `deploy.sh all` (builds frontend, rsyncs to Iran, Docker rebuild both, auto-starts sync workers, runs cross-server recovery)
+- **Production recoverability**: `make production-backup-iran` creates DB/Redis/uploads/audit backup artifacts; `make production-recoverability-drill` verifies the DB dump in a temporary PostgreSQL container without touching production.
 
 ### Docker Services (Foreign)
 `app` (FastAPI:8000), `bot` (aiogram polling), `sync_worker`, `migration` (alembic), `db` (postgres:15), `redis` (redis:7), `adminer` (127.0.0.1:8080)
@@ -185,6 +186,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-06-11 15:20 UTC | Codex | Added post-P11 production recoverability tooling: `scripts/run_production_backup.py` creates DB/Redis/uploads/audit backup manifests with SHA-256 evidence, `scripts/report_production_recoverability.py` runs live recovery checks and optional DB restore smoke in a temporary PostgreSQL container, `docs/PRODUCTION_RECOVERABILITY_RUNBOOK.md` documents RPO/RTO, backup, restore, rollback, and alert handling, and Make targets expose the operator workflow. Validated with `make production-recoverability-drill`; artifact `tmp/production-benchmark/20260611T151834Z/recoverability` passed with Iran DB/Redis/uploads/audit backup artifacts, DB restore-smoke `passed` (`29` tables), production health passed, and foreign/Iran sync-health passed. |
 | 2026-02-25 | Antigravity | Refactored `ChatView.vue` into `ChatHeader.vue`, `ChatInputBar.vue`, `ChatMessageItem.vue`, and `ChatContextMenu.vue` for modularity. |
 | 2026-02-26 | Antigravity | Established the Assistant Collaboration Protocol and Change History tracking. |
 | 2026-02-27 05:45 UTC | Antigravity | Refactored `ChatView.vue` monolithic logic into four modular composables (`useChatMedia`, `useChatWebSocket`, `useChatMessages`, `useChatScroll`) to significantly reduce file size and improve maintainability. |

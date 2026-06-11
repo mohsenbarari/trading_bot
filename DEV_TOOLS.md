@@ -58,6 +58,10 @@ make observability-overhead
 make observability-readiness
 make production-deployment-restart
 make production-release-gate
+make production-backup-iran
+make production-backup-all
+make production-recoverability-report
+make production-recoverability-drill
 make audit-log-export
 ```
 
@@ -81,10 +85,13 @@ docs/OBSERVABILITY_DASHBOARDS.md
 docs/OBSERVABILITY_ALERTS.md
 docs/OBSERVABILITY_ERROR_TRACKING.md
 docs/CROSS_SERVER_SYNC_OBSERVABILITY.md
+docs/PRODUCTION_RECOVERABILITY_RUNBOOK.md
 ```
 
 The runbook covers failed login tracing, websocket disconnects, media upload
 failures, trade actions, worker failures, and alert investigation.
+The recoverability runbook covers RPO/RTO, production backup contents, restore
+drills, rollback flow, and incident handling.
 
 For production-hardening checks:
 
@@ -101,6 +108,15 @@ For production-hardening checks:
   P0-P10 evidence validation, current manifest identity checks, live health and
   sync-health, Messenger readiness, observability minimums, backup/rollback
   evidence, and accepted-warning ownership.
+- `make production-backup-iran` creates an operational Iran backup with
+  PostgreSQL, Redis, uploads, and audit-trail artifacts plus SHA-256 manifests.
+- `make production-backup-all` creates the same backup set on both foreign and
+  Iran hosts.
+- `make production-recoverability-report` runs the live health/sync
+  recoverability checks and writes artifacts under `tmp/production-benchmark/`.
+- `make production-recoverability-drill` creates a fresh Iran backup and restores
+  the database dump into a temporary PostgreSQL container as a smoke test without
+  touching the production database.
 - `make audit-log-export` exports audit logs from local Loki to
   `tmp/audit-log-exports/*.jsonl`. Pass Loki/query/window overrides through
   `ARGS`, for example:
