@@ -27,6 +27,8 @@ cat > "$SITE_PATH" <<'EOF'
 server {
     server_name coin.362514.ir;
     client_max_body_size 50M;
+    root /root/trading-bot/trading_bot/mini_app_dist;
+    index index.html;
 
     # API and realtime traffic continue to flow through the app container.
     location = /metrics {
@@ -48,32 +50,60 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
-    # Large hashed JS chunks can be truncated for Electron/Chromium clients if
-    # Nginx spills proxied asset responses to temp files. Keep this branch fully
-    # streamed so login boot stays stable in the VS Code integrated browser too.
-    location /assets/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_http_version 1.1;
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_max_temp_file_size 0;
-        gzip off;
-
-        expires 1y;
-        add_header Cache-Control "public, immutable";
+    # Hashed frontend assets are immutable and should not consume API workers.
+    location ~ ^/assets/.*\.js$ {
+        try_files $uri @stale_js_chunk;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
     }
 
+    location /assets/ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /manifest.webmanifest {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /share-target-sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location ~ ^/workbox-[A-Za-z0-9_-]+\.js$ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    # Raw uploads are not public. Chat media stays behind /api/chat/files auth.
     location /uploads/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+        return 404;
+    }
+
+    location @stale_js_chunk {
+        internal;
+        default_type application/javascript;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+        return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
     }
 
     # Keep the default SPA/app serving path proxied to the FastAPI container.

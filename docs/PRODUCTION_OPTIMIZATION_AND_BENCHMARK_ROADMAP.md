@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P3 Redis durability and queue safety complete; Stage P4 is next.
+Status: Stage P4 Nginx, static assets, and media delivery complete; Stage P5 is next.
 
 Last updated: 2026-06-11
 
@@ -16,7 +16,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P1` | Safe production baseline complete on 2026-06-11 | `tmp/production-benchmark/20260611T083854Z/summary.md`: full mode ran 11 read-only/safe tasks against the Iran target, 0 required failures, clean foreign/Iran sync-health after cleanup |
 | `P2` | Complete on 2026-06-11 | Iran DB backup `p2-postgres-tuning-20260611T090824Z.sql`; `tmp/production-benchmark/20260611T092543Z/summary.md`: targeted DB benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T091935Z/summary.md`: quick benchmark passed 7/7 tasks; foreign/Iran sync-health clean after system-seed backlog cleanup |
 | `P3` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T094159Z/summary.md`: Redis durability benchmark passed 1/1 after live Redis restart probe; `tmp/production-benchmark/20260611T094110Z/summary.md`: quick benchmark passed 7/7; foreign/Iran sync-health clean |
-| `P4`-`P11` | Pending | Execute in order after P3 |
+| `P4` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T095946Z/summary.md`: targeted static benchmark passed 1/1 after live Iran Nginx refresh; `tmp/production-benchmark/20260611T100027Z/summary.md`: quick benchmark passed 8/8; foreign/Iran sync-health clean |
+| `P5`-`P11` | Pending | Execute in order after P4 |
 
 ## Current Baseline Known From Live Checks
 
@@ -32,7 +33,7 @@ Current Iran production-class host:
 | DB connections | Direct PostgreSQL outperformed temporary PgBouncer in the authenticated/chat benchmark |
 | PostgreSQL | Iran P2 profile active: `shared_buffers=8GB`, `effective_cache_size=80GB`, `work_mem=8MB`, `maintenance_work_mem=512MB`, `random_page_cost=1.2`, `effective_io_concurrency=200`, `checkpoint_timeout=15min`, `max_wal_size=8GB`, `min_wal_size=1GB`, `wal_buffers=16MB` |
 | Redis | AOF enabled with `appendfsync=everysec`; RDB status ok; `maxmemory=0` intentionally left unbounded until alert thresholds are defined; `maxmemory-policy=noeviction` |
-| Static/media path | Nginx still proxies several asset/media paths through the app instead of using a fully optimized static/media path |
+| Static/media path | Iran Nginx serves immutable frontend assets directly with `Cache-Control: public, max-age=31536000, immutable` and `X-Static-Delivery: nginx`; service worker/manifest stay no-cache; raw `/uploads/` is blocked; protected chat media stays behind `/api/chat/files/{file_id}` token authorization |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -219,6 +220,28 @@ Acceptance:
 - Asset requests no longer consume API worker capacity.
 - Frontend boot benchmark improves or remains stable.
 - Protected media remains inaccessible without valid authorization.
+
+Completion notes:
+
+- Updated the production Iran Nginx template so hashed frontend assets are served directly from `mini_app_dist` instead of being proxied through FastAPI.
+- Added explicit static-delivery headers for benchmarkability: `X-Static-Delivery: nginx` on direct frontend static responses.
+- Preserved the stale PWA JS chunk recovery behavior by adding an internal `@stale_js_chunk` Nginx fallback for missing `/assets/*.js` requests.
+- Kept service worker and manifest responses no-cache while allowing hashed assets and Workbox chunks to use long immutable caching.
+- Changed raw `/uploads/` public access to `404`; chat/media files remain protected through `/api/chat/files/{file_id}` and still return `401` without a token.
+- Updated legacy/standalone Nginx setup files for Iran and foreign so future manual setup does not reintroduce proxied asset delivery.
+- Added `scripts/report_static_delivery.py` and wired `PROFILE=static` into the production benchmark runner. The probe checks immutable asset headers, service-worker/manifest cache policy, raw upload blocking, and protected chat media authorization.
+- Backed up the live Iran Nginx site before applying the change: `/etc/nginx/sites-available/trading-bot.p4-backup-20260611T095816Z`.
+- Applied the Nginx change live on Iran, then immediately ran the certbot/redirect step. `nginx -t` passed and certbot confirmed HTTPS for `https://coin.gold-trade.ir`.
+- Targeted static benchmark artifact: `tmp/production-benchmark/20260611T095946Z/summary.md`; it passed `static_delivery_headers` in `2.117s`.
+- Quick production benchmark artifact: `tmp/production-benchmark/20260611T100027Z/summary.md`; it passed all `8` safe tasks, including the new static delivery task.
+- `make sync-health`, `make sync-health-iran`, and `make production-online-health` were clean after the Nginx refresh.
+
+Rollback:
+
+- Restore the live backup on Iran if needed:
+  `cp /etc/nginx/sites-available/trading-bot.p4-backup-20260611T095816Z /etc/nginx/sites-available/trading-bot && nginx -t && systemctl reload nginx`.
+- Alternatively revert this P4 commit, run `make production-online-sync`, then run `configure-nginx` and `issue-cert` together so HTTPS remains valid.
+- Do not expose `/uploads/` directly during rollback unless a separate media-authorization/X-Accel stage proves the protected path end-to-end.
 
 ### Stage P5 - Worker and Pool Recalibration After DB/Redis Tuning
 

@@ -7,6 +7,9 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
 
+    root __APP_ROOT__;
+    index index.html;
+
     location = /metrics {
         deny all;
         return 404;
@@ -38,27 +41,63 @@ server {
         proxy_buffering off;
     }
 
+    location ~ ^/assets/.*\.js$ {
+        try_files $uri @stale_js_chunk;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
     location /assets/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        expires 1y;
-        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /manifest.webmanifest {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /share-target-sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location ~ ^/workbox-[A-Za-z0-9_-]+\.js$ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
     }
 
     location /uploads/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+        return 404;
+    }
+
+    location @stale_js_chunk {
+        internal;
+        default_type application/javascript;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+        return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
     }
 
     location / {
-        root __APP_ROOT__;
         try_files $uri $uri/ /index.html;
-        add_header Cache-Control "no-store, no-cache, must-revalidate";
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
     }
 }

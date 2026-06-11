@@ -134,7 +134,6 @@ POSTGRES_SETTINGS = (
     "effective_io_concurrency",
 )
 REMAINING_STAGES = (
-    "P4 - Nginx, static assets, and media delivery",
     "P5 - Worker and pool recalibration",
     "P6 - Cross-server sync and recovery hardening",
     "P7 - Trading core, market, and bot workloads",
