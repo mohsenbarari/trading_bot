@@ -94,6 +94,7 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         self.assertIn("postgres_runtime_tuning", selected)
         self.assertIn("messenger_query_plans", selected)
         self.assertIn("market_trade_query_plans", selected)
+        self.assertNotIn("trading_core_benchmark", selected)
         self.assertNotIn("frontend_e2e_chromium", selected)
         self.assertNotIn("messenger_full", selected)
 
@@ -221,6 +222,56 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
         ]
 
         self.assertEqual(selected, ["sync_health_iran", "sync_health_foreign_peer", "cross_server_sync_benchmark"])
+
+    def test_targeted_trading_profile_runs_p7_without_global_mutating_flag(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="targeted",
+                profile="trading",
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
+        ]
+
+        self.assertEqual(selected, ["trading_core_benchmark"])
+
+    def test_full_mode_can_include_trading_when_mutating_is_explicit(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="full",
+                profile=None,
+                include_long=False,
+                skip_long=False,
+                include_mutating=True,
+            )
+        ]
+
+        self.assertIn("trading_core_benchmark", selected)
 
     def test_dry_run_writes_results_without_executing_benchmark_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
