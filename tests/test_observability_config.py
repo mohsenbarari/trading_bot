@@ -142,6 +142,8 @@ class ObservabilityConfigTests(unittest.TestCase):
             "TRUNCATE TABLE change_log",
             "verify_shared_sync_health_clean",
             "unsynced_change_log_count",
+            "Action [skip/reset/abort] (default: skip):",
+            '${action:-skip}',
             "docker ps -aq --filter label=com.docker.compose.service=\\$service",
             "docker rm -f \\$ids",
             "trading_bot_sync_worker",

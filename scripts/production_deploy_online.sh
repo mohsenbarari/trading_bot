@@ -1522,12 +1522,12 @@ decide_existing_shared_data_action() {
     echo
     echo "Iran shared tables contain existing project data."
     echo "Choose one action:"
-    echo "  skip  - keep Iran data unchanged and continue deploy"
+    echo "  skip  - keep Iran data unchanged and continue deploy (default)"
     echo "  reset - pg_dump backup, reset shared tables, then seed current state from foreign"
     echo "  abort - stop release without changing Iran data"
     local action=""
-    read -r -p "Action [skip/reset/abort]: " action
-    action="$(printf '%s' "${action:-}" | tr '[:upper:]' '[:lower:]')"
+    read -r -p "Action [skip/reset/abort] (default: skip): " action
+    action="$(printf '%s' "${action:-skip}" | tr '[:upper:]' '[:lower:]')"
     case "$action" in
         skip|reset|abort) printf '%s\n' "$action" ;;
         *) die "Unsupported shared-data action: $action" ;;
