@@ -256,6 +256,27 @@ def build_tasks(
             modes=("targeted", "full"),
         ),
         BenchmarkTask(
+            task_id="final_release_gate",
+            surface_id="B00/B01/B05/B08/B10/B11",
+            label="Stage P11 final production release readiness gate",
+            profile="release",
+            command=[
+                sys.executable,
+                "scripts/report_final_release_gate.py",
+                *manifest_args,
+                "--timestamp",
+                stamp,
+                "--artifact-root",
+                str(artifact_root),
+                "--report-out",
+                "docs/PRODUCTION_RELEASE_READINESS_REPORT.md",
+                "--json",
+            ],
+            timeout_seconds=360,
+            bottleneck_class="release_readiness_gate",
+            modes=("targeted",),
+        ),
+        BenchmarkTask(
             task_id="messenger_report",
             surface_id="B05",
             label="Messenger benchmark artifact integration report",
@@ -531,7 +552,7 @@ def write_run_artifacts(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the production benchmark orchestration harness.")
     parser.add_argument("--mode", choices=("quick", "targeted", "full"), default="quick")
-    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, messenger, db, redis, static, workers, trading, frontend.")
+    parser.add_argument("--profile", help="Targeted profile: baseline, api, sync, observability, deployment, release, messenger, db, redis, static, workers, trading, frontend.")
     parser.add_argument("--target", choices=("iran",), default="iran", help="Production benchmark target host.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))

@@ -57,6 +57,7 @@ make observability-logs
 make observability-overhead
 make observability-readiness
 make production-deployment-restart
+make production-release-gate
 make audit-log-export
 ```
 
@@ -96,6 +97,10 @@ For production-hardening checks:
   full release phase timing, pre-probe PostgreSQL backup creation, controlled
   app/sync-worker/Redis/PostgreSQL restart probes, rollback notes, and final
   sync-health.
+- `make production-release-gate` runs the production P11 final release gate:
+  P0-P10 evidence validation, current manifest identity checks, live health and
+  sync-health, Messenger readiness, observability minimums, backup/rollback
+  evidence, and accepted-warning ownership.
 - `make audit-log-export` exports audit logs from local Loki to
   `tmp/audit-log-exports/*.jsonl`. Pass Loki/query/window overrides through
   `ARGS`, for example:

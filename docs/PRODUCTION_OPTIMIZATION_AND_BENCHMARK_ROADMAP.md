@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P10 deployment, restart, backup, and rollback benchmark complete; Stage P11 is next.
+Status: Complete through Stage P11; release readiness gate passed with accepted warnings.
 
 Last updated: 2026-06-11
 
@@ -23,7 +23,7 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P8` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T131305Z/summary.md`: targeted frontend benchmark passed; `tmp/production-benchmark/20260611T131305Z/frontend-p8/summary.md`: login, dashboard, own/public/customer profile, market, notifications, and admin user-management routes measured on Iran with zero gate failures, zero warnings, bounded list gates, and clean final health |
 | `P9` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T133318Z/summary.md`: targeted observability benchmark passed; `tmp/production-benchmark/20260611T133318Z/observability-p9/summary.md`: logging overhead, metrics target contract, durable audit anchor export, anchor shipper local relay, sync-health sampler timers, artifact hygiene scan, and focused observability gate passed with clean final health |
 | `P10` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T134805Z/summary.md`: targeted deployment benchmark passed; `tmp/production-benchmark/20260611T134805Z/deployment-p10/summary.md`: release phase timings, pg_dump backup, app/sync-worker/Redis/PostgreSQL restart probes, rollback notes, and final foreign/Iran sync-health passed |
-| `P11` | Pending | Final release gate |
+| `P11` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T141830Z/summary.md`: targeted release benchmark passed; `tmp/production-benchmark/20260611T141830Z/final-release-p11/summary.md`: 16/16 required checks passed, required pass rate 100.0%, warning-adjusted score 92.0/100, live health/sync clean, and four accepted warnings recorded with owner and release note |
 
 ## Current Baseline Known From Live Checks
 
@@ -45,6 +45,7 @@ Current Iran production-class host:
 | Frontend UX path | P8 targeted benchmark runs isolated synthetic users/accountants/customers/offers/trades/notifications on Iran, measures non-Messenger route usability/DOM/heap/network/list bounds, cleans both servers, and verifies final sync-health |
 | Observability readiness | P9 targeted benchmark runs structured logging overhead, metrics contract, durable audit anchor export, anchor shipper relay, required sync sampler timer checks, artifact sensitive-data scan, and focused observability regression gate |
 | Deployment/restart readiness | P10 targeted benchmark runs a full foreign-controlled release rehearsal, records phase timings, creates a pre-probe Iran `pg_dump` backup, restarts app/sync-worker/Redis/PostgreSQL in controlled order, and verifies final foreign/Iran sync-health |
+| Final release gate | P11 validates all P0-P10 evidence, current manifest identity, live production health, live foreign/Iran sync-health, Messenger readiness, observability minimums, backup/rollback evidence, and accepted-warning ownership |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
 
@@ -497,6 +498,31 @@ Acceptance:
 - Backup/restore and rollback notes exist.
 - Messenger benchmark remains green or accepted debt is explicitly documented.
 - No high-risk infrastructure change is merged without targeted benchmark evidence.
+
+Completion notes:
+
+- Added `scripts/report_final_release_gate.py`, a Stage P11 final gate that validates every P0-P10 artifact, checks the production deployment manifest identity fields, runs fresh `check-local`, production health, and foreign/Iran sync-health probes, verifies Messenger release readiness from redacted summary artifacts, checks P9 observability minimums, and checks P10 backup/restart/rollback evidence.
+- Added `make production-release-gate` and wired `PROFILE=release` into the production benchmark runner. The runner writes both the standard benchmark artifact and `docs/PRODUCTION_RELEASE_READINESS_REPORT.md`.
+- Final targeted artifact: `tmp/production-benchmark/20260611T141830Z/summary.md`; `final_release_gate` passed in `18.415s` with `0` required failures.
+- P11 scenario artifact: `tmp/production-benchmark/20260611T141830Z/final-release-p11/summary.md`.
+- Final report: `docs/PRODUCTION_RELEASE_READINESS_REPORT.md`.
+- Required checks: `16/16`; required pass rate `100.0%`; warning-adjusted score `92.0/100`; accepted warnings `4`.
+- Live production health passed. Fresh foreign and Iran sync-health both reported zero unsynced changes and empty Redis sync queues.
+- Messenger release readiness passed: `14/14` surfaces measured, blocked surfaces `0`. Median comparison deltas showed list-ready improved on `9/12` scenarios, chat-ready improved on `12/12`, DOM nodes improved on `12/12`, JS heap improved on `7/12`, and context-menu latency remains accepted debt with `1/12` scenarios improved and `11/12` worse.
+- Observability minimums passed: structured logging overhead `329.12us/event` under the `1000us` budget, metrics contract documented, durable audit anchor export verified, and sync sampler timers active. The memory metrics backend and non-immutable audit anchor sink remain accepted warnings with owners and release notes.
+- Backup/rollback evidence passed: P10 backup `/srv/trading-bot/backups/p10-deployment-20260611T134805Z.sql`, size `227148` bytes, sha256 `521bebdc271d0d9b36129c957c0073aa30349f33bd16aeeacfc28a2154796a65`; app/sync-worker/Redis/PostgreSQL restart probes passed; rollback commands are recorded.
+
+Final accepted warnings:
+
+- `messenger_context_menu_latency_debt`: owner `Messenger performance`; release note says context-menu latency is accepted as post-release performance debt because chat-ready, DOM, heap, and surface readiness are green.
+- `messenger_raw_performance_artifact_contains_synthetic_tokens`: owner `Release engineering`; release note says raw `tmp/messenger-benchmark/performance-results.json` must not be published, and only redacted comparison/surface artifacts should be used.
+- `metrics_memory_backend_is_not_aggregate`: owner `Observability/monitoring`; release note says memory metrics remain process-local and Loki/sync-health samplers are the production cross-service source until a real aggregator/exporter is approved.
+- `audit_anchor_sink_not_immutable_retention`: owner `Observability/ops`; release note says audit anchor export/shipper paths exist but compliance-grade immutable remote retention is deferred until a dedicated sink is provisioned.
+
+Rollback:
+
+- P11 added benchmark/reporting tooling only; no runtime setting was changed.
+- If P11 tooling must be removed, revert the P11 commit and run `make production-online-sync`.
 
 ## Full-Product Benchmark Surface Map
 

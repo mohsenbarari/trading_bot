@@ -129,6 +129,31 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
 
         self.assertEqual(selected, ["deployment_restart_benchmark"])
 
+    def test_targeted_release_profile_runs_p11_gate(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="targeted",
+                profile="release",
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
+        ]
+
+        self.assertEqual(selected, ["final_release_gate"])
+
     def test_targeted_db_profile_checks_runtime_tuning_before_query_plans(self) -> None:
         settings = {
             "FOREIGN_SERVER_URL": "https://foreign.example",
