@@ -22,6 +22,7 @@ class DeployConfigTests(unittest.TestCase):
                     "IRAN_SSH_PORT=2202",
                     "IRAN_PROJECT_DIR=/srv/custom/current",
                     "IRAN_POSTGRES_SHARED_BUFFERS=8GB",
+                    "REDIS_APPENDONLY=yes",
                 ]
             )
         )
@@ -35,6 +36,7 @@ class DeployConfigTests(unittest.TestCase):
         self.assertEqual(resolved["IRAN_DIR"], "/srv/custom/current")
         self.assertEqual(resolved["IRAN_SSH_TARGET"], "deploy@203.0.113.50")
         self.assertEqual(resolved["IRAN_POSTGRES_SHARED_BUFFERS"], "8GB")
+        self.assertEqual(resolved["REDIS_APPENDONLY"], "yes")
 
     def test_resolve_deploy_settings_prefers_environment_over_manifest(self):
         manifest = self.write_manifest(

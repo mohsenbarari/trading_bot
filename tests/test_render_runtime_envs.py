@@ -64,6 +64,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "IRAN_POSTGRES_MAX_WAL_SIZE": "8GB",
             "IRAN_POSTGRES_MIN_WAL_SIZE": "1GB",
             "IRAN_POSTGRES_WAL_BUFFERS": "16MB",
+            "REDIS_APPENDONLY": "yes",
+            "REDIS_APPENDFSYNC": "everysec",
+            "REDIS_MAXMEMORY": "0",
+            "REDIS_MAXMEMORY_POLICY": "noeviction",
         }
 
     def test_build_runtime_env_switches_role_and_frontend_url(self):
@@ -107,6 +111,9 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["POSTGRES_SHARED_BUFFERS"], "8GB")
         self.assertEqual(iran["POSTGRES_EFFECTIVE_CACHE_SIZE"], "80GB")
         self.assertEqual(iran["POSTGRES_WORK_MEM"], "8MB")
+        self.assertEqual(iran["REDIS_APPENDONLY"], "yes")
+        self.assertEqual(iran["REDIS_APPENDFSYNC"], "everysec")
+        self.assertEqual(iran["REDIS_MAXMEMORY_POLICY"], "noeviction")
         self.assertEqual(foreign["FOREIGN_SERVER_DOMAIN"], "coin.362514.ir")
         self.assertEqual(iran["IRAN_SERVER_DOMAIN"], "coin.gold-trade.ir")
 
@@ -154,6 +161,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("POSTGRES_SHARED_BUFFERS=8GB", iran_lines)
             self.assertIn("POSTGRES_EFFECTIVE_CACHE_SIZE=80GB", iran_lines)
             self.assertIn("POSTGRES_SHARED_BUFFERS=128MB", foreign_lines)
+            self.assertIn("REDIS_APPENDONLY=yes", iran_lines)
+            self.assertIn("REDIS_APPENDFSYNC=everysec", iran_lines)
             self.assertIn("DB_POOL_SIZE=15", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.362514.ir", foreign_lines)
             self.assertIn("FRONTEND_URL=https://coin.gold-trade.ir", iran_lines)

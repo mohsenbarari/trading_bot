@@ -1,6 +1,6 @@
 # Production Optimization and Benchmark Roadmap
 
-Status: Stage P2 PostgreSQL production tuning complete; Stage P3 is next.
+Status: Stage P3 Redis durability and queue safety complete; Stage P4 is next.
 
 Last updated: 2026-06-11
 
@@ -15,7 +15,8 @@ No broad tuning should be accepted only because it is theoretically faster.
 | `P0` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T080030Z/baseline/summary.md`: 28 commands, 0 failed, foreign sync-health clean, Iran sync-health clean |
 | `P1` | Safe production baseline complete on 2026-06-11 | `tmp/production-benchmark/20260611T083854Z/summary.md`: full mode ran 11 read-only/safe tasks against the Iran target, 0 required failures, clean foreign/Iran sync-health after cleanup |
 | `P2` | Complete on 2026-06-11 | Iran DB backup `p2-postgres-tuning-20260611T090824Z.sql`; `tmp/production-benchmark/20260611T092543Z/summary.md`: targeted DB benchmark passed 3/3 tasks; `tmp/production-benchmark/20260611T091935Z/summary.md`: quick benchmark passed 7/7 tasks; foreign/Iran sync-health clean after system-seed backlog cleanup |
-| `P3`-`P11` | Pending | Execute in order after P2 |
+| `P3` | Complete on 2026-06-11 | `tmp/production-benchmark/20260611T094159Z/summary.md`: Redis durability benchmark passed 1/1 after live Redis restart probe; `tmp/production-benchmark/20260611T094110Z/summary.md`: quick benchmark passed 7/7; foreign/Iran sync-health clean |
+| `P4`-`P11` | Pending | Execute in order after P3 |
 
 ## Current Baseline Known From Live Checks
 
@@ -30,7 +31,7 @@ Current Iran production-class host:
 | DB pool | Iran defaults to `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6` |
 | DB connections | Direct PostgreSQL outperformed temporary PgBouncer in the authenticated/chat benchmark |
 | PostgreSQL | Iran P2 profile active: `shared_buffers=8GB`, `effective_cache_size=80GB`, `work_mem=8MB`, `maintenance_work_mem=512MB`, `random_page_cost=1.2`, `effective_io_concurrency=200`, `checkpoint_timeout=15min`, `max_wal_size=8GB`, `min_wal_size=1GB`, `wal_buffers=16MB` |
-| Redis | AOF disabled; RDB snapshots enabled; `maxmemory=0`; `maxmemory-policy=noeviction` |
+| Redis | AOF enabled with `appendfsync=everysec`; RDB status ok; `maxmemory=0` intentionally left unbounded until alert thresholds are defined; `maxmemory-policy=noeviction` |
 | Static/media path | Nginx still proxies several asset/media paths through the app instead of using a fully optimized static/media path |
 | Messenger benchmark | Mature dedicated Messenger comparison harness already exists |
 | Full-product benchmark | Safe read-only harness active; mutation-heavy suites are opt-in only |
@@ -183,6 +184,24 @@ Acceptance:
 - Redis restart does not lose the synthetic queue probe.
 - Sync health remains clean after Redis restart.
 - Realtime latency does not regress beyond the benchmark gate.
+
+Completion notes:
+
+- Enabled Redis AOF for both compose profiles through env-driven settings: `REDIS_APPENDONLY=yes`, `REDIS_APPENDFSYNC=everysec`, `REDIS_MAXMEMORY=0`, and `REDIS_MAXMEMORY_POLICY=noeviction`.
+- Kept `maxmemory-policy=noeviction` because sync/realtime queue loss is worse than a visible write failure.
+- Left `REDIS_MAXMEMORY=0` intentionally. Live Iran Redis memory was only about `1.43M`, and a bounded cap should be introduced only after Redis memory alerting and realistic queue high-water data exist.
+- Added runtime-env, manifest, and benchmark support for Redis durability keys so production overrides flow through the same deployment surface as PostgreSQL tuning.
+- Added `scripts/report_redis_runtime.py` for runtime Redis settings/persistence/queue reporting and `scripts/probe_redis_persistence.py` for non-sensitive synthetic persistence probes.
+- Live Iran synthetic probe key `p3:redis:persistence:20260611T0940Z` was written, Redis was restarted, the item was verified after restart, and the key was cleaned up.
+- Final Redis benchmark artifact: `tmp/production-benchmark/20260611T094159Z/summary.md`; it passed `redis_runtime_durability` in `2.476s` with `appendonly=yes`, `appendfsync=everysec`, `aof_enabled=1`, `aof_last_write_status=ok`, and empty `sync:outbound` / `sync:retry` queues.
+- Quick production benchmark after the Redis restart: `tmp/production-benchmark/20260611T094110Z/summary.md`; it passed all `7` safe tasks against Iran.
+- `make sync-health`, `make sync-health-iran`, and `make production-online-health` were clean after the Redis restart/probe.
+
+Rollback:
+
+- Set `REDIS_APPENDONLY=no` in the runtime env or manifest-rendered env, then recreate only Redis-dependent services as needed.
+- Keep `REDIS_MAXMEMORY_POLICY=noeviction` during rollback unless a separate queue-loss risk review explicitly approves another policy.
+- If a compose-v1 recreate issue appears on Iran, remove only the Redis container while preserving the named Redis volume, then run `docker-compose -f docker-compose.iran.yml up -d redis`.
 
 ### Stage P4 - Nginx, Static Assets, and Media Delivery
 
@@ -416,8 +435,8 @@ After three stable full runs, convert these relative gates into absolute per-sur
 2. Run the first safe `full` benchmark against the current 8-worker direct-Postgres setup.
 3. Apply PostgreSQL tuning in Stage P2.
 4. Run targeted DB and full-product quick benchmark.
-5. Apply Redis durability in Stage P3.
-6. Run targeted sync/realtime benchmark.
-7. Continue to Nginx/static optimization only after the baseline numbers are trustworthy.
+5. Stage P3 Redis durability is complete.
+6. Start Stage P4 Nginx/static/media delivery optimization.
+7. Run targeted static/media benchmark plus quick production benchmark after P4.
 
 This order is deliberate: PostgreSQL, Redis, Nginx, and worker tuning are all useful, but near release the benchmark harness is the control system that prevents optimization work from becoming untraceable risk.

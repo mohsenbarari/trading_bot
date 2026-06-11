@@ -82,6 +82,10 @@ SAFE_MANIFEST_KEYS = (
     "IRAN_POSTGRES_MAX_WAL_SIZE",
     "IRAN_POSTGRES_MIN_WAL_SIZE",
     "IRAN_POSTGRES_WAL_BUFFERS",
+    "REDIS_APPENDONLY",
+    "REDIS_APPENDFSYNC",
+    "REDIS_MAXMEMORY",
+    "REDIS_MAXMEMORY_POLICY",
 )
 RUNTIME_ENV_KEYS = (
     "API_WORKERS",
@@ -100,6 +104,10 @@ RUNTIME_ENV_KEYS = (
     "POSTGRES_MAX_WAL_SIZE",
     "POSTGRES_MIN_WAL_SIZE",
     "POSTGRES_WAL_BUFFERS",
+    "REDIS_APPENDONLY",
+    "REDIS_APPENDFSYNC",
+    "REDIS_MAXMEMORY",
+    "REDIS_MAXMEMORY_POLICY",
     "BACKGROUND_LEADER_LOCK_TTL_SECONDS",
     "BACKGROUND_LEADER_LOCK_REFRESH_SECONDS",
     "BACKGROUND_LEADER_RETRY_SECONDS",
@@ -126,7 +134,6 @@ POSTGRES_SETTINGS = (
     "effective_io_concurrency",
 )
 REMAINING_STAGES = (
-    "P3 - Redis durability and queue safety",
     "P4 - Nginx, static assets, and media delivery",
     "P5 - Worker and pool recalibration",
     "P6 - Cross-server sync and recovery hardening",
