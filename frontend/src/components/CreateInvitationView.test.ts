@@ -39,7 +39,10 @@ function installExecCommand(result: boolean | Error) {
   return execCommand
 }
 
-async function mountView(props: Partial<{ apiBaseUrl: string; jwtToken: string | null }> = {}) {
+async function mountView(
+  props: Partial<{ apiBaseUrl: string; jwtToken: string | null }> = {},
+  options: { clearInitialFetch?: boolean } = {},
+) {
   const wrapper = mount(CreateInvitationView, {
     props: {
       apiBaseUrl: '',
@@ -48,6 +51,9 @@ async function mountView(props: Partial<{ apiBaseUrl: string; jwtToken: string |
     },
   })
   await flushPromises()
+  if (options.clearInitialFetch !== false) {
+    createInvitationMocks.apiFetchMock.mockClear()
+  }
   return wrapper
 }
 
@@ -60,8 +66,18 @@ async function fillInviteForm(wrapper: ReturnType<typeof mount>, mobile = '09123
 describe('CreateInvitationView.vue', () => {
   beforeEach(() => {
     createInvitationMocks.apiFetchMock.mockReset()
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') {
+        return Promise.resolve(makeJsonResponse([]))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
     vi.useFakeTimers()
     installClipboard(vi.fn().mockResolvedValue(undefined))
+    Object.defineProperty(window, 'confirm', {
+      configurable: true,
+      value: vi.fn(() => true),
+    })
     localStorage.clear()
   })
 
@@ -258,6 +274,68 @@ describe('CreateInvitationView.vue', () => {
 
     expect(roleOptions).toEqual(['تماشا', 'عادی'])
     expect((wrapper.get('#role').element as HTMLSelectElement).value).toBe('عادی')
+  })
+
+  it('loads pending invitations and renders their direct web registration links', async () => {
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string) => {
+      if (url === '/api/invitations/pending') {
+        return Promise.resolve(makeJsonResponse([
+          {
+            id: 12,
+            account_name: 'pending-user',
+            mobile_number: '09120000000',
+            role: 'عادی',
+            web_link: 'https://coin.gold-trade.ir/register?token=INV-PENDING',
+            short_link: 'https://coin.gold-trade.ir/i/SHORT12',
+            expires_at: '2026-06-12T10:00:00',
+            created_at: '2026-06-11T10:00:00',
+          },
+        ]))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+
+    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending')
+    expect(wrapper.text()).toContain('pending-user')
+    expect(wrapper.text()).toContain('09120000000')
+    const pendingInput = wrapper.get('.pending-link-row input[readonly]').element as HTMLInputElement
+    expect(pendingInput.value).toBe(`${window.location.origin}/register?token=INV-PENDING`)
+  })
+
+  it('deletes a pending invitation after confirmation and removes it from the list', async () => {
+    createInvitationMocks.apiFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/invitations/pending') {
+        return Promise.resolve(makeJsonResponse([
+          {
+            id: 12,
+            account_name: 'pending-user',
+            mobile_number: '09120000000',
+            role: 'عادی',
+            web_link: 'https://coin.gold-trade.ir/register?token=INV-PENDING',
+            expires_at: '2026-06-12T10:00:00',
+            created_at: '2026-06-11T10:00:00',
+          },
+        ]))
+      }
+      if (url === '/api/invitations/pending/12' && init?.method === 'DELETE') {
+        return Promise.resolve(makeJsonResponse({}, true, 204))
+      }
+      return Promise.reject(new Error(`Unexpected API call: ${url}`))
+    })
+
+    const wrapper = await mountView({}, { clearInitialFetch: false })
+
+    expect(wrapper.text()).toContain('pending-user')
+
+    await wrapper.get('.delete-pending-btn').trigger('click')
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledWith('دعوت‌نامه pending-user حذف شود؟')
+    expect(createInvitationMocks.apiFetchMock).toHaveBeenCalledWith('/api/invitations/pending/12', { method: 'DELETE' })
+    expect(wrapper.text()).not.toContain('pending-user')
+    expect(wrapper.text()).toContain('دعوت‌نامه pending وجود ندارد.')
   })
 
   it('shows a fallback copy error for the Telegram link when execCommand returns false', async () => {

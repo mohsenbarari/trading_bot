@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { apiFetch } from '../utils/auth';
 import { getInvitableRoleOptions } from '../utils/adminAccess';
 
@@ -7,6 +7,17 @@ const props = defineProps<{
   apiBaseUrl: string;
   jwtToken: string | null;
 }>();
+
+interface PendingInvitation {
+  id: number;
+  account_name: string;
+  mobile_number: string;
+  role: string;
+  web_link: string;
+  short_link?: string | null;
+  expires_at: string;
+  created_at?: string | null;
+}
 
 // emit دیگر استفاده نمی‌شود
 // const emit = defineEmits(['invite-created']);
@@ -26,6 +37,17 @@ const inviteLink = ref('');
 const webLink = ref('');
 const copyMessage = ref('');
 const webCopyMessage = ref('');
+const pendingInvitations = ref<PendingInvitation[]>([]);
+const pendingLoading = ref(false);
+const pendingError = ref('');
+const pendingDeleteId = ref<number | null>(null);
+const pendingCopyState = reactive<Record<number, string>>({});
+
+onMounted(() => {
+  if (props.jwtToken) {
+    void loadPendingInvitations();
+  }
+});
 
 function resetForm() {
   invite.account_name = '';
@@ -35,6 +57,7 @@ function resetForm() {
   inviteLink.value = '';
   webLink.value = '';
   copyMessage.value = '';
+  webCopyMessage.value = '';
 }
 
 function fallbackCopyTextToClipboard(text: string, isWeb: boolean = false) {
@@ -103,6 +126,116 @@ function copyWebLink() {
   });
 }
 
+function toLocalDisplayLink(link: string | null | undefined): string {
+  if (!link) return '';
+  try {
+    const url = new URL(link);
+    return `${window.location.origin}${url.pathname}${url.search}`;
+  } catch {
+    return link;
+  }
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return 'نامشخص';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('fa-IR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+async function readErrorDetail(resp: Response, fallback: string): Promise<string> {
+  try {
+    const data = await resp.json();
+    return data.detail || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function loadPendingInvitations() {
+  if (!props.jwtToken) {
+    pendingInvitations.value = [];
+    return;
+  }
+
+  pendingLoading.value = true;
+  pendingError.value = '';
+  try {
+    const resp = await apiFetch('/api/invitations/pending');
+    if (!resp.ok) {
+      throw new Error(await readErrorDetail(resp, 'خطا در دریافت دعوت‌نامه‌های pending'));
+    }
+    const data = await resp.json();
+    pendingInvitations.value = Array.isArray(data) ? data : [];
+  } catch (e: any) {
+    pendingError.value = e.message || 'خطا در دریافت دعوت‌نامه‌های pending';
+  } finally {
+    pendingLoading.value = false;
+  }
+}
+
+function fallbackCopyPendingLink(text: string, invitationId: number) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.style.top = '0';
+  textArea.style.left = '0';
+  textArea.style.position = 'fixed';
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    pendingCopyState[invitationId] = document.execCommand('copy') ? 'کپی شد!' : 'خطا';
+  } catch {
+    pendingCopyState[invitationId] = 'خطا';
+  }
+
+  document.body.removeChild(textArea);
+  setTimeout(() => { pendingCopyState[invitationId] = ''; }, 2000);
+}
+
+function copyPendingWebLink(invitation: PendingInvitation) {
+  const link = toLocalDisplayLink(invitation.web_link);
+  if (!link) return;
+  if (!navigator.clipboard) {
+    fallbackCopyPendingLink(link, invitation.id);
+    return;
+  }
+
+  navigator.clipboard.writeText(link).then(() => {
+    pendingCopyState[invitation.id] = 'کپی شد!';
+    setTimeout(() => { pendingCopyState[invitation.id] = ''; }, 2000);
+  }, () => {
+    pendingCopyState[invitation.id] = 'خطا';
+    setTimeout(() => { pendingCopyState[invitation.id] = ''; }, 2000);
+  });
+}
+
+async function deletePendingInvitation(invitation: PendingInvitation) {
+  const confirmed = window.confirm(`دعوت‌نامه ${invitation.account_name} حذف شود؟`);
+  if (!confirmed) return;
+
+  pendingDeleteId.value = invitation.id;
+  pendingError.value = '';
+  try {
+    const resp = await apiFetch(`/api/invitations/pending/${invitation.id}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      throw new Error(await readErrorDetail(resp, 'خطا در حذف دعوت‌نامه'));
+    }
+    pendingInvitations.value = pendingInvitations.value.filter((item) => item.id !== invitation.id);
+  } catch (e: any) {
+    pendingError.value = e.message || 'خطا در حذف دعوت‌نامه';
+  } finally {
+    pendingDeleteId.value = null;
+  }
+}
+
 async function createInvite() {
   if (!props.jwtToken) {
     resultMessage.value = '❌ خطا: شما احراز هویت نشده‌اید.';
@@ -147,6 +280,7 @@ async function createInvite() {
     }
     
     resultMessage.value = '✅ لینک دعوت با موفقیت ایجاد شد.';
+    await loadPendingInvitations();
     
     // emit('invite-created', plainTextMessage); // (حذف شد)
     
@@ -217,6 +351,48 @@ function normalizeMobile(mobile: string): string {
         </button>
       </div>
     </div>
+
+    <section class="pending-section" aria-labelledby="pending-invitations-title">
+      <div class="pending-header">
+        <div>
+          <h3 id="pending-invitations-title">دعوت‌نامه‌های pending</h3>
+          <p>{{ pendingInvitations.length }} دعوت‌نامه فعال</p>
+        </div>
+        <button type="button" class="pending-refresh-btn" :disabled="pendingLoading" @click="loadPendingInvitations">
+          {{ pendingLoading ? 'در حال دریافت...' : 'به‌روزرسانی' }}
+        </button>
+      </div>
+
+      <div v-if="pendingError" class="pending-error">{{ pendingError }}</div>
+      <div v-if="pendingLoading && !pendingInvitations.length" class="pending-state">در حال دریافت دعوت‌نامه‌ها...</div>
+      <div v-else-if="!pendingInvitations.length" class="pending-state empty">دعوت‌نامه pending وجود ندارد.</div>
+      <div v-else class="pending-list">
+        <div v-for="pending in pendingInvitations" :key="pending.id" class="pending-row">
+          <div class="pending-main">
+            <div class="pending-title">{{ pending.account_name }}</div>
+            <div class="pending-meta">
+              <span>{{ pending.mobile_number }}</span>
+              <span>{{ pending.role }}</span>
+              <span>انقضا: {{ formatDateTime(pending.expires_at) }}</span>
+            </div>
+            <div class="pending-link-row">
+              <input type="text" :value="toLocalDisplayLink(pending.web_link)" readonly @click="copyPendingWebLink(pending)" />
+              <button type="button" class="pending-copy-btn" @click="copyPendingWebLink(pending)">
+                {{ pendingCopyState[pending.id] || 'کپی لینک' }}
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="delete-pending-btn"
+            :disabled="pendingDeleteId === pending.id"
+            @click="deletePendingInvitation(pending)"
+          >
+            {{ pendingDeleteId === pending.id ? 'در حال حذف...' : 'حذف' }}
+          </button>
+        </div>
+      </div>
+    </section>
 
   </div>
 </template>
@@ -300,5 +476,138 @@ input:focus, select:focus {
 .link-label {
   font-size: 0.78rem; font-weight: 700; color: #374151;
   margin-bottom: 0.375rem;
+}
+
+.pending-section {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(245, 158, 11, 0.16);
+}
+.pending-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.875rem;
+}
+.pending-header h3 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+.pending-header p {
+  margin: 0.25rem 0 0;
+  color: #6b7280;
+  font-size: 0.75rem;
+}
+.pending-refresh-btn,
+.delete-pending-btn,
+.pending-copy-btn {
+  border: 0;
+  border-radius: 0.625rem;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.5rem 0.75rem;
+  white-space: nowrap;
+}
+.pending-refresh-btn {
+  background: white;
+  color: #374151;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+}
+.pending-refresh-btn:disabled,
+.delete-pending-btn:disabled,
+.pending-copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.pending-error {
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.75rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 0.78rem;
+}
+.pending-state {
+  padding: 0.875rem;
+  border-radius: 0.875rem;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 0.8rem;
+  text-align: center;
+}
+.pending-list {
+  display: grid;
+  gap: 0.75rem;
+}
+.pending-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.875rem;
+  border: 1px solid rgba(245, 158, 11, 0.14);
+  border-radius: 0.875rem;
+  background: rgba(255, 255, 255, 0.74);
+}
+.pending-title {
+  color: #111827;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+.pending-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 0.625rem;
+  margin-top: 0.35rem;
+  color: #6b7280;
+  font-size: 0.74rem;
+}
+.pending-link-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.625rem;
+}
+.pending-link-row input[type="text"] {
+  width: 0;
+  flex: 1 1 0;
+  direction: ltr;
+  font-family: monospace;
+  font-size: 0.76rem;
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.75rem;
+}
+.pending-copy-btn {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  color: white;
+}
+.delete-pending-btn {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+@media (max-width: 540px) {
+  .pending-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .pending-refresh-btn {
+    width: 100%;
+  }
+  .pending-row {
+    grid-template-columns: 1fr;
+  }
+  .delete-pending-btn {
+    width: 100%;
+  }
+  .pending-link-row {
+    flex-direction: column;
+  }
 }
 </style>
