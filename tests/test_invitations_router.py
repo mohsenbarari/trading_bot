@@ -8,8 +8,10 @@ from fastapi import HTTPException
 from api.routers.invitations import (
     InvitationCreate,
     create_invitation,
+    delete_pending_invitation,
     generate_short_code,
     generate_token,
+    list_pending_invitations,
     lookup_invitation,
     validate_invitation,
 )
@@ -23,12 +25,19 @@ class FakeExecuteResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._value
+
 
 class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
         self.refresh = AsyncMock()
+        self.delete = AsyncMock()
         self.added = []
 
     async def execute(self, _stmt):
@@ -159,6 +168,78 @@ class InvitationsRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["token"], "INV-NEW")
         self.assertEqual(result["link"], "https://t.me/test_bot?start=INV-NEW")
         self.assertEqual(result["short_link"], "https://frontend.test/i/SHORTNEW")
+
+    async def test_list_pending_invitations_serializes_active_general_invites(self):
+        admin = SimpleNamespace(id=1, role=UserRole.SUPER_ADMIN)
+        invitation = SimpleNamespace(
+            id=7,
+            account_name="user1",
+            mobile_number="09120000000",
+            role=UserRole.WATCH,
+            token="INV-PENDING",
+            short_code="SHORT7",
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+            created_at=datetime.utcnow(),
+            created_by_id=1,
+        )
+        db = FakeDB([FakeExecuteResult([invitation])])
+
+        with patch.object(
+            __import__("api.routers.invitations", fromlist=["settings"]).settings,
+            "bot_username",
+            "test_bot",
+        ), patch.object(
+            __import__("api.routers.invitations", fromlist=["settings"]).settings,
+            "frontend_url",
+            "https://frontend.test",
+        ):
+            result = await list_pending_invitations(db=db, admin=admin)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], 7)
+        self.assertEqual(result[0]["account_name"], "user1")
+        self.assertEqual(result[0]["web_link"], "https://frontend.test/register?token=INV-PENDING")
+        self.assertEqual(result[0]["short_link"], "https://frontend.test/i/SHORT7")
+
+    async def test_delete_pending_invitation_deletes_only_manageable_pending_general_invites(self):
+        admin = SimpleNamespace(id=9, role=UserRole.MIDDLE_MANAGER)
+        invitation = SimpleNamespace(
+            id=3,
+            token="INV-DELETE",
+            created_by_id=9,
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+        )
+        db = FakeDB([FakeExecuteResult(invitation)])
+
+        result = await delete_pending_invitation(3, db=db, admin=admin)
+
+        self.assertIsNone(result)
+        db.delete.assert_awaited_once_with(invitation)
+        db.commit.assert_awaited_once()
+
+        used_invitation = SimpleNamespace(
+            id=4,
+            token="INV-USED",
+            created_by_id=9,
+            is_used=True,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await delete_pending_invitation(4, db=FakeDB([FakeExecuteResult(used_invitation)]), admin=admin)
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        foreign_invitation = SimpleNamespace(
+            id=5,
+            token="INV-OTHER",
+            created_by_id=99,
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+        )
+        with self.assertRaises(HTTPException) as exc_info:
+            await delete_pending_invitation(5, db=FakeDB([FakeExecuteResult(foreign_invitation)]), admin=admin)
+        self.assertEqual(exc_info.exception.status_code, 404)
 
     async def test_lookup_invitation_handles_error_states_and_success(self):
         with self.assertRaises(HTTPException) as exc_info:

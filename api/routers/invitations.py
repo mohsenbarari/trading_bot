@@ -5,7 +5,6 @@ from pydantic import BaseModel
 import secrets
 import string
 from datetime import datetime, timedelta
-from typing import Optional
 
 from core.db import get_db
 from core.utils import utc_now_naive
@@ -20,7 +19,7 @@ from core.services.customer_relation_service import (
 from models.invitation import Invitation
 from models.user import User, UserRole
 from core.config import settings
-from api.deps import get_current_user, verify_admin_user
+from api.deps import verify_admin_user
 from core.sms import send_invitation_sms
 from core.connectivity import is_internet_connected
 
@@ -37,13 +36,107 @@ class InvitationResponse(BaseModel):
     short_link: str | None
     expires_at: datetime
 
+
+class PendingInvitationResponse(BaseModel):
+    id: int
+    account_name: str
+    mobile_number: str
+    role: UserRole
+    token: str
+    short_code: str | None
+    web_link: str
+    short_link: str | None
+    expires_at: datetime
+    created_at: datetime | None
+    created_by_id: int | None
+
 def generate_token():
     return "INV-" + secrets.token_hex(16)
+
 
 def generate_short_code():
     # 8-char random string (alphanumeric)
     chars = string.ascii_letters + string.digits
     return ''.join(secrets.choice(chars) for _ in range(8))
+
+
+def build_invitation_links(invitation: Invitation) -> tuple[str, str, str | None]:
+    bot_link = f"https://t.me/{settings.bot_username}?start={invitation.token}"
+    web_link = f"{settings.frontend_url}/register?token={invitation.token}"
+    short_link = f"{settings.frontend_url}/i/{invitation.short_code}" if invitation.short_code else None
+    return bot_link, web_link, short_link
+
+
+def serialize_pending_invitation(invitation: Invitation) -> dict:
+    _bot_link, web_link, short_link = build_invitation_links(invitation)
+    return {
+        "id": invitation.id,
+        "account_name": invitation.account_name,
+        "mobile_number": invitation.mobile_number,
+        "role": invitation.role,
+        "token": invitation.token,
+        "short_code": invitation.short_code,
+        "web_link": web_link,
+        "short_link": short_link,
+        "expires_at": invitation.expires_at,
+        "created_at": invitation.created_at,
+        "created_by_id": invitation.created_by_id,
+    }
+
+
+def pending_invitation_select(now: datetime):
+    return select(Invitation).where(
+        Invitation.token.like("INV-%"),
+        Invitation.is_used == False,
+        Invitation.expires_at > now,
+    )
+
+
+def can_manage_invitation(admin: User, invitation: Invitation) -> bool:
+    if getattr(admin, "role", None) == UserRole.SUPER_ADMIN:
+        return True
+    return invitation.created_by_id == admin.id
+
+
+@router.get("/pending", response_model=list[PendingInvitationResponse])
+async def list_pending_invitations(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(verify_admin_user),
+):
+    now = utc_now_naive()
+    stmt = (
+        pending_invitation_select(now)
+        .order_by(Invitation.created_at.desc(), Invitation.id.desc())
+        .limit(100)
+    )
+    if getattr(admin, "role", None) != UserRole.SUPER_ADMIN:
+        stmt = stmt.where(Invitation.created_by_id == admin.id)
+
+    invitations = list((await db.execute(stmt)).scalars().all())
+    return [serialize_pending_invitation(invitation) for invitation in invitations]
+
+
+@router.delete("/pending/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pending_invitation(
+    invitation_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(verify_admin_user),
+):
+    stmt = select(Invitation).where(Invitation.id == invitation_id)
+    invitation = (await db.execute(stmt)).scalar_one_or_none()
+    if (
+        not invitation
+        or not str(invitation.token or "").startswith("INV-")
+        or not can_manage_invitation(admin, invitation)
+    ):
+        raise HTTPException(status_code=404, detail="دعوت‌نامه پیدا نشد")
+
+    if invitation.is_used or invitation.expires_at <= utc_now_naive():
+        raise HTTPException(status_code=400, detail="دعوت‌نامه pending نیست")
+
+    await db.delete(invitation)
+    await db.commit()
+    return None
 
 @router.post("/", response_model=InvitationResponse)
 async def create_invitation(
@@ -77,9 +170,7 @@ async def create_invitation(
     active_inv = (await db.execute(stmt)).scalar_one_or_none()
     if active_inv:
         # Return existing active invitation
-        bot_link = f"https://t.me/{settings.bot_username}?start={active_inv.token}"
-        web_link = f"{settings.frontend_url}/register?token={active_inv.token}"
-        short_link = f"{settings.frontend_url}/i/{active_inv.short_code}" if active_inv.short_code else None
+        bot_link, _web_link, short_link = build_invitation_links(active_inv)
         
         return {
             "token": active_inv.token,
@@ -107,9 +198,7 @@ async def create_invitation(
     await db.commit()
     await db.refresh(new_inv)
     
-    bot_link = f"https://t.me/{settings.bot_username}?start={token}"
-    web_link = f"{settings.frontend_url}/register?token={token}"
-    short_link = f"{settings.frontend_url}/i/{short_code}"
+    bot_link, web_link, short_link = build_invitation_links(new_inv)
     
     # Send SMS based on connectivity
     is_connected = await is_internet_connected()
