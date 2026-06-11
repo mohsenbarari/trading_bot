@@ -80,6 +80,8 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - `TRUSTED_PROXY_CIDRS`
   - `OBSERVABILITY_TELEGRAM_USER_HASH_SALT`
   - non-local Grafana alert receivers / webhook / email targets
+- blocks the release on a dirty git working tree because the payload sync uses local rsync, not only committed Git state
+- use `IRAN_ALLOW_DIRTY_RELEASE=1` only for an intentional emergency deploy from uncommitted local files
 - the same validation now runs before standalone deploy subcommands too, because `check-local` is shared by `deploy-foreign`, `bootstrap-iran`, `build-release`, `sync-project`, `deploy-iran`, and `healthcheck`
 
 ### 2. Local build + local foreign deploy
@@ -92,6 +94,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
 - skips the frontend `npm ci` / `npm run build` step when the frontend source/config/env signature matches and `mini_app_dist/index.html` already exists
 - skips the Iran Docker image build/save step when the prepared build context signature matches the existing local image bundle
 - use `IRAN_FORCE_RELEASE_REFRESH=1` when the cached frontend, wheel, or image artifacts must be rebuilt deliberately
+- `deploy.sh foreign` uses the same frontend and wheelhouse signatures so the foreign deploy step no longer rewrites the production wheelhouse hash on every run
 - prepares a loadable Docker bundle containing:
   - `trading_bot_base_iran`
   - `postgres:15-alpine`
