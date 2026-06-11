@@ -314,6 +314,26 @@ def build_tasks(
             required=False,
         ),
         BenchmarkTask(
+            task_id="frontend_ux_benchmark",
+            surface_id="B03/B04/B10",
+            label="Stage P8 non-messenger frontend UX, bounded list, route, heap, DOM, and network benchmark",
+            profile="frontend",
+            command=[
+                sys.executable,
+                "scripts/report_frontend_ux_benchmark.py",
+                *manifest_args,
+                "--timestamp",
+                stamp,
+                "--artifact-root",
+                str(artifact_root),
+                "--json",
+            ],
+            timeout_seconds=600,
+            bottleneck_class="frontend_ux_runtime",
+            modes=("targeted", "full"),
+            mutating=True,
+        ),
+        BenchmarkTask(
             task_id="frontend_e2e_chromium",
             surface_id="B03/B08",
             label="Frontend Chromium Playwright smoke",
@@ -354,7 +374,13 @@ def task_selected(
 ) -> bool:
     if mode not in task.modes:
         return False
-    targeted_safe_mutating_profile = mode == "targeted" and profile == "trading" and task.profile == "trading"
+    targeted_safe_mutating_profile = (
+        mode == "targeted"
+        and (
+            (profile == "trading" and task.profile == "trading")
+            or (profile == "frontend" and task.task_id == "frontend_ux_benchmark")
+        )
+    )
     if task.mutating and not include_mutating and not targeted_safe_mutating_profile:
         return False
     if mode == "targeted" and profile and task.profile != profile:

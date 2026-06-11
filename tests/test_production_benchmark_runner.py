@@ -273,6 +273,32 @@ class ProductionBenchmarkRunnerTests(unittest.TestCase):
 
         self.assertIn("trading_core_benchmark", selected)
 
+    def test_targeted_frontend_profile_runs_p8_without_full_e2e_by_default(self) -> None:
+        settings = {
+            "FOREIGN_SERVER_URL": "https://foreign.example",
+            "IRAN_HEALTHCHECK_URL": "https://iran.example/api/config",
+            "IRAN_HOST": "192.0.2.10",
+            "IRAN_PROJECT_DIR": "/srv/app",
+            "IRAN_SSH_PORT": "22",
+            "IRAN_SSH_USER": "root",
+        }
+        tasks = runner.build_tasks(settings=settings, manifest=None, stamp="test", artifact_root=Path("tmp"), target="iran")
+        selected = [
+            task.task_id
+            for task in tasks
+            if runner.task_selected(
+                task,
+                mode="targeted",
+                profile="frontend",
+                include_long=False,
+                skip_long=False,
+                include_mutating=False,
+            )
+        ]
+
+        self.assertEqual(selected, ["frontend_ux_benchmark"])
+        self.assertNotIn("frontend_e2e_chromium", selected)
+
     def test_dry_run_writes_results_without_executing_benchmark_tasks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             with contextlib.redirect_stdout(io.StringIO()):
