@@ -35,6 +35,39 @@ function makeRelation(overrides: Record<string, unknown> = {}) {
   }
 }
 
+async function mountModal() {
+  const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
+  const wrapper = mount(OwnerAccountantManagerModal, {
+    global: {
+      stubs: {
+        teleport: true,
+      },
+    },
+  })
+  await flushPromises()
+  return wrapper
+}
+
+async function openCreatePanel(wrapper: any) {
+  await wrapper.findAll('.accountant-main-menu-header')[0].trigger('click')
+  await flushPromises()
+}
+
+async function openRelationsPanel(wrapper: any) {
+  await wrapper.findAll('.accountant-main-menu-header')[1].trigger('click')
+  await flushPromises()
+}
+
+async function openFirstAccountantDetail(wrapper: any) {
+  await wrapper.get('.accountant-settings-btn').trigger('click')
+  await flushPromises()
+}
+
+async function openDetailSection(wrapper: any, index: number) {
+  await wrapper.findAll('.detail-accordion > .ds-accordion-header')[index].trigger('click')
+  await flushPromises()
+}
+
 describe('OwnerAccountantManagerModal.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
@@ -50,26 +83,10 @@ describe('OwnerAccountantManagerModal.vue', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
-  async function openCreatePanel(wrapper: any) {
-    await wrapper.get('.open-create-category').trigger('click')
-    await flushPromises()
-  }
-
-  async function openRelationsPanel(wrapper: any) {
-    await wrapper.get('.open-relations-category').trigger('click')
-    await flushPromises()
-  }
-
-  async function backToCategories(wrapper: any) {
-    const backButton = wrapper.findAll('button').find((button: any) => button.text().includes('بازگشت به دسته‌ها'))
-    expect(backButton).toBeTruthy()
-    await backButton!.trigger('click')
-    await flushPromises()
-  }
-
-  it('loads relations and creates a new accountant relation', async () => {
+  it('loads relations and creates a new accountant relation in the direct accordion flow', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation()]))
     apiFetchMock.mockResolvedValueOnce(makeResponse(makeRelation({
       id: 2,
@@ -79,22 +96,16 @@ describe('OwnerAccountantManagerModal.vue', () => {
       duty_description: 'گزارش‌گیری',
     })))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
+    const wrapper = await mountModal()
 
-    await flushPromises()
-    expect(wrapper.text()).toContain('دسته‌بندی مدیریت حسابداران')
+    expect(wrapper.text()).toContain('حسابداران')
+    expect(wrapper.text()).not.toContain('دسته‌بندی مدیریت حسابداران')
+
     await openRelationsPanel(wrapper)
+    expect(wrapper.text()).toContain('دعوت‌نامه‌های در انتظار')
     expect(wrapper.text()).toContain('حسابدار اول')
     expect(wrapper.text()).toContain('مهلت ثبت نام: 1 روز')
 
-    await backToCategories(wrapper)
     await openCreatePanel(wrapper)
     await wrapper.get('.create-account-name').setValue('acc2')
     await wrapper.get('.create-display-name').setValue('حسابدار دوم')
@@ -112,61 +123,64 @@ describe('OwnerAccountantManagerModal.vue', () => {
         duty_description: 'گزارش‌گیری',
       }),
     })
+    expect(wrapper.text()).toContain('دعوت حسابدار ثبت شد.')
     expect(wrapper.text()).toContain('حسابدار دوم')
   })
 
-  it('edits and cancels a pending accountant relation', async () => {
-    const initialRelation = makeRelation()
-    const updatedRelation = makeRelation({
-      relation_display_name: 'حسابدار اول',
+  it('edits an active accountant in the detail page and cancels a pending invitation', async () => {
+    const pendingRelation = makeRelation()
+    const activeRelation = makeRelation({
+      id: 8,
+      status: 'active',
+      accountant_user_id: 18,
+      accountant_account_name: 'acc-active',
+      global_account_name: 'acc-active',
+      relation_display_name: 'حسابدار فعال',
+      registration_link: null,
+      activated_at: '2026-01-02T08:00:00',
+    })
+    const updatedRelation = {
+      ...activeRelation,
       duty_description: 'مدیریت ثبت‌ها',
-    })
+    }
 
-    apiFetchMock.mockResolvedValueOnce(makeResponse([initialRelation]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse([pendingRelation, activeRelation]))
     apiFetchMock.mockResolvedValueOnce(makeResponse(updatedRelation))
-    apiFetchMock.mockResolvedValueOnce(makeResponse({ ...updatedRelation, status: 'revoked' }))
+    apiFetchMock.mockResolvedValueOnce(makeResponse({ ...pendingRelation, status: 'revoked' }))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     await openRelationsPanel(wrapper)
 
-    await wrapper.get('.start-edit').trigger('click')
+    await openFirstAccountantDetail(wrapper)
     await wrapper.get('.edit-duty-description').setValue('مدیریت ثبت‌ها')
     await wrapper.get('.save-edit').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', {
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8', {
       method: 'PATCH',
       body: JSON.stringify({
         duty_description: 'مدیریت ثبت‌ها',
       }),
     })
-    expect(wrapper.text()).toContain('حسابدار اول')
+    expect(wrapper.text()).toContain('اطلاعات حسابدار به‌روزرسانی شد.')
 
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(wrapper.text()).toContain('مهلت ثبت نام: 23:59:59')
-
+    await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
+    await flushPromises()
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/1', {
       method: 'DELETE',
     })
+    expect(wrapper.text()).toContain('دعوت حسابدار لغو شد.')
     expect(wrapper.text()).not.toContain('حسابدار اول')
   })
 
-  it('unlinks active accountant relations through the same delete endpoint', async () => {
+  it('unlinks active accountant relations from the detail danger section', async () => {
     const activeRelation = makeRelation({
       id: 8,
       status: 'active',
+      accountant_user_id: 18,
       accountant_account_name: 'acc-active',
       relation_display_name: 'حسابدار فعال',
       registration_link: null,
@@ -176,17 +190,10 @@ describe('OwnerAccountantManagerModal.vue', () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([activeRelation]))
     apiFetchMock.mockResolvedValueOnce(makeResponse({ ...activeRelation, status: 'deleted' }))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     await openRelationsPanel(wrapper)
+    await openFirstAccountantDetail(wrapper)
+    await openDetailSection(wrapper, 2)
 
     expect(wrapper.find('.unlink-active').exists()).toBe(true)
     await wrapper.get('.unlink-active').trigger('click')
@@ -199,7 +206,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(wrapper.text()).not.toContain('حسابدار فعال')
   })
 
-  it('lets owners view and terminate active accountant sessions', async () => {
+  it('lets owners view and terminate active accountant sessions from the detail page', async () => {
     const activeRelation = makeRelation({
       id: 8,
       status: 'active',
@@ -232,24 +239,15 @@ describe('OwnerAccountantManagerModal.vue', () => {
     }))
     apiFetchMock.mockResolvedValueOnce(makeResponse([]))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     await openRelationsPanel(wrapper)
-    await wrapper.get('.toggle-sessions').trigger('click')
-    await flushPromises()
+    await openFirstAccountantDetail(wrapper)
+    await openDetailSection(wrapper, 1)
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/accountants/owner-relations/8/sessions', {
       method: 'GET',
     })
-    expect(wrapper.text()).toContain('نشست‌های فعال حسابدار')
+    expect(wrapper.text()).toContain('نشست حسابدار')
     expect(wrapper.text()).toContain('Chrome')
 
     await wrapper.get('.terminate-session').trigger('click')
@@ -263,7 +261,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.')
   })
 
-  it('supports silent refresh, form reset, copy-link feedback, and close emit', async () => {
+  it('supports form reset, copy-link feedback, and close emit', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([
       makeRelation(),
       makeRelation({
@@ -274,23 +272,13 @@ describe('OwnerAccountantManagerModal.vue', () => {
         registration_link: null,
       }),
     ]))
-    apiFetchMock.mockResolvedValueOnce(makeResponse([]))
 
     const clipboardWrite = vi.fn().mockResolvedValue(undefined)
     Object.assign(navigator, {
       clipboard: { writeText: clipboardWrite },
     })
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     await openCreatePanel(wrapper)
 
     await wrapper.get('.create-account-name').setValue('acc-temp')
@@ -304,29 +292,21 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-duty-description').element as HTMLTextAreaElement).value).toBe('')
 
-    await backToCategories(wrapper)
     await openRelationsPanel(wrapper)
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
     expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
     expect(wrapper.text()).toContain('کپی شد')
-    expect(wrapper.text()).toContain('این حسابدار با @acc2 فعال است.')
 
     await vi.advanceTimersByTimeAsync(1800)
-    expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
+    expect(wrapper.text()).toContain('کپی لینک')
 
-    await wrapper.get('.refresh-relations').trigger('click')
-    await flushPromises()
-
-    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/accountants/owner-relations')
-    expect(wrapper.text()).toContain('هنوز هیچ حسابداری برای این مالک ثبت نشده است.')
-
-    await wrapper.get('.accountant-manager-close').trigger('click')
+    await wrapper.get('.accountant-manager-back').trigger('click')
     expect(wrapper.emitted('close')).toEqual([[]])
   })
 
-  it('renders lifecycle copy for active and terminal relation states', async () => {
+  it('renders lifecycle copy inside accountant detail pages', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([
       makeRelation({
         id: 2,
@@ -356,43 +336,50 @@ describe('OwnerAccountantManagerModal.vue', () => {
       }),
     ]))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     await openRelationsPanel(wrapper)
 
+    await openFirstAccountantDetail(wrapper)
     expect(wrapper.text()).toContain('این رابطه فعال شده است.')
-    expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
-    expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
-    expect(wrapper.text()).toContain('این رابطه حذف شده است.')
 
-    wrapper.unmount()
+    await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.accountant-settings-btn')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
+
+    await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.accountant-settings-btn')[2].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
+
+    await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('.accountant-settings-btn')[3].trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('این رابطه حذف شده است.')
   })
 
   it('shows fallback and detail errors for load, create, edit, cancel, and copy failures', async () => {
     apiFetchMock.mockRejectedValueOnce(new Error('خطای شبکه'))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     expect(wrapper.text()).toContain('خطای شبکه')
 
     apiFetchMock.mockReset()
-    apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation()]))
+    apiFetchMock.mockResolvedValueOnce(makeResponse([
+      makeRelation(),
+      makeRelation({
+        id: 8,
+        status: 'active',
+        accountant_user_id: 18,
+        accountant_account_name: 'acc-active',
+        relation_display_name: 'حسابدار فعال',
+        registration_link: null,
+        activated_at: '2026-01-02T08:00:00',
+      }),
+    ]))
     apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'ایجاد نشد' }, false))
     apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'ویرایش نشد' }, false))
     apiFetchMock.mockResolvedValueOnce(makeResponse({ detail: 'لغو نشد' }, false))
@@ -401,15 +388,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
       clipboard: { writeText: clipboardWrite },
     })
 
-    const secondWrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const secondWrapper = await mountModal()
     await openCreatePanel(secondWrapper)
 
     await secondWrapper.get('.create-account-name').setValue('acc3')
@@ -419,19 +398,15 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await flushPromises()
     expect(secondWrapper.text()).toContain('ایجاد نشد')
 
-    await backToCategories(secondWrapper)
     await openRelationsPanel(secondWrapper)
-    await secondWrapper.get('.start-edit').trigger('click')
+    await openFirstAccountantDetail(secondWrapper)
     await secondWrapper.get('.edit-duty-description').setValue('تغییر')
     await secondWrapper.get('.save-edit').trigger('click')
     await flushPromises()
     expect(secondWrapper.text()).toContain('ویرایش نشد')
 
-    const cancelEditButton = secondWrapper.findAll('button').find((button) => button.text().includes('انصراف'))
-    expect(cancelEditButton).toBeTruthy()
-    await cancelEditButton!.trigger('click')
+    await secondWrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
     await flushPromises()
-
     await secondWrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
     expect(secondWrapper.text()).toContain('لغو نشد')
@@ -441,30 +416,12 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect(secondWrapper.text()).toContain('کپی لینک ثبت‌نام ممکن نشد.')
   })
 
-  it('cancels edit mode and respects a rejected pending-cancel confirmation', async () => {
+  it('respects a rejected pending-cancel confirmation', async () => {
     vi.mocked(window.confirm).mockReturnValue(false)
     apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation()]))
 
-    const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
-    const wrapper = mount(OwnerAccountantManagerModal, {
-      global: {
-        stubs: {
-          teleport: true,
-        },
-      },
-    })
-
-    await flushPromises()
+    const wrapper = await mountModal()
     await openRelationsPanel(wrapper)
-
-    await wrapper.get('.start-edit').trigger('click')
-    await wrapper.get('.edit-duty-description').setValue('توضیح جدید')
-    const cancelEditButton = wrapper.findAll('button').find((button) => button.text().includes('انصراف'))
-    expect(cancelEditButton).toBeTruthy()
-    await cancelEditButton!.trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.edit-duty-description').exists()).toBe(false)
 
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
