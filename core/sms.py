@@ -101,19 +101,19 @@ def _configured_otp_template_id() -> int | None:
 
 
 def _send_verify_sms(mobile: str, code: str, template_id: int) -> bool:
-    parameter_name = (settings.smsir_otp_template_parameter or "CODE").strip() or "CODE"
+    parameter_name = (settings.smsir_otp_template_parameter or "Code").strip() or "Code"
     normalized_mobile = _normalize_mobile(mobile)
     payload = {
-        "Mobile": normalized_mobile,
-        "TemplateId": template_id,
-        "Parameters": [
+        "mobile": normalized_mobile,
+        "templateId": template_id,
+        "parameters": [
             {
                 "name": parameter_name,
                 "value": str(code),
             }
         ],
     }
-    data = _post_smsir("v1/send/verify/", payload)
+    data = _post_smsir("v1/send/verify", payload)
     if data is None:
         return False
 
