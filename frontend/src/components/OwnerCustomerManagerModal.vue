@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { BarChart3, ChevronLeft, ReceiptText, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
@@ -116,6 +116,7 @@ const isSavingEdit = ref(false)
 const error = ref('')
 const notice = ref('')
 const detailSaveNotice = ref('')
+const viewportToast = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 const copiedRelationId = ref<number | null>(null)
 const openSessionsRelationId = ref<number | null>(null)
 const sessionsByRelationId = ref<Record<number, CustomerSessionSummary[]>>({})
@@ -144,6 +145,7 @@ const openSections = reactive({
 })
 let countdownTimer: number | null = null
 let commissionHoldTimer: number | null = null
+let viewportToastTimer: number | null = null
 
 function parseApiError(payload: unknown, fallback: string) {
   if (typeof payload === 'object' && payload && 'detail' in payload) {
@@ -165,6 +167,27 @@ function toggleSection(section: keyof typeof openSections) {
 
 function clearDetailEditState() {
   Object.assign(detailEditForm, makeEmptyDetailEditForm())
+}
+
+function showViewportToast(type: 'success' | 'error' | 'info', text: string, timeoutMs = 4200) {
+  viewportToast.value = { type, text }
+  if (viewportToastTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(viewportToastTimer)
+  }
+  viewportToastTimer = typeof window !== 'undefined'
+    ? window.setTimeout(() => {
+        viewportToast.value = null
+        viewportToastTimer = null
+      }, timeoutMs)
+    : null
+}
+
+function clearViewportToast() {
+  viewportToast.value = null
+  if (viewportToastTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(viewportToastTimer)
+  }
+  viewportToastTimer = null
 }
 
 function normalizeLatinDigits(value: string) {
@@ -421,18 +444,7 @@ async function loadRelations() {
   error.value = ''
 
   try {
-    const response = await apiFetch('/api/customers/owner-relations')
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'دریافت لیست مشتریان ناموفق بود.'))
-    }
-    relations.value = Array.isArray(payload) ? payload : []
-    if (openSessionsRelationId.value !== null) {
-      const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
-      if (!openRelation || openRelation.status !== 'active' || !openRelation.customer_user_id) {
-        openSessionsRelationId.value = null
-      }
-    }
+    applyRelationsSnapshot(await fetchRelationsSnapshot())
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست مشتریان ناموفق بود.'
   } finally {
@@ -542,6 +554,53 @@ function buildDetailUpdatePayload(relation: CustomerRelation) {
   return payload
 }
 
+function applyRelationsSnapshot(snapshot: CustomerRelation[]) {
+  relations.value = snapshot
+  if (openSessionsRelationId.value !== null) {
+    const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
+    if (!openRelation || openRelation.status !== 'active' || !openRelation.customer_user_id) {
+      openSessionsRelationId.value = null
+    }
+  }
+}
+
+async function fetchRelationsSnapshot(options: { retryNetwork?: boolean } = {}) {
+  const response = await apiFetch('/api/customers/owner-relations', {
+    retryNetwork: options.retryNetwork ?? true,
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(parseApiError(payload, 'دریافت لیست مشتریان ناموفق بود.'))
+  }
+  return Array.isArray(payload) ? payload as CustomerRelation[] : []
+}
+
+function relationMatchesDetailPayload(relation: CustomerRelation, payload: ReturnType<typeof buildDetailUpdatePayload>) {
+  return Object.entries(payload).every(([key, expected]) => {
+    const current = relation[key as keyof CustomerRelation]
+    if (expected == null) {
+      return current == null
+    }
+    if (typeof expected === 'number') {
+      return Number(current) === expected
+    }
+    return current === expected
+  })
+}
+
+function isNetworkMutationError(err: any) {
+  return err?.message === 'NetworkError' ||
+    err?.message === 'خطا در ارتباط با سرور.' ||
+    err?.message?.toLowerCase?.().includes('network')
+}
+
+async function recoverSavedDetailAfterNetworkError(relationId: number, payload: ReturnType<typeof buildDetailUpdatePayload>) {
+  const snapshot = await fetchRelationsSnapshot({ retryNetwork: false })
+  applyRelationsSnapshot(snapshot)
+  const updated = snapshot.find((relation) => relation.id === relationId)
+  return Boolean(updated && relationMatchesDetailPayload(updated, payload))
+}
+
 async function createRelation() {
   if (isSubmitting.value) return
   isSubmitting.value = true
@@ -581,6 +640,7 @@ async function saveDetailEdit() {
   if (!Object.keys(payload).length) {
     notice.value = 'تغییری برای ذخیره انتخاب نشده است.'
     detailSaveNotice.value = notice.value
+    showViewportToast('info', notice.value)
     return
   }
 
@@ -610,14 +670,29 @@ async function saveDetailEdit() {
     isSavingEdit.value = false
     notice.value = 'تنظیمات مشتری با موفقیت ذخیره شد.'
     detailSaveNotice.value = notice.value
-    await nextTick()
-    if (typeof shellRef.value?.scrollTo === 'function') {
-      shellRef.value.scrollTo({ top: 0, behavior: 'smooth' })
-    }
+    showViewportToast('success', notice.value)
   } catch (err: any) {
+    if (isNetworkMutationError(err)) {
+      try {
+        const recovered = await recoverSavedDetailAfterNetworkError(relation.id, payload)
+        if (recovered) {
+          error.value = ''
+          notice.value = 'تنظیمات مشتری با موفقیت ذخیره شد.'
+          detailSaveNotice.value = notice.value
+          clearDetailEditState()
+          showViewportToast('success', notice.value)
+          return
+        }
+      } catch {
+        // The mutation result could not be verified; keep the visible message concise below.
+      }
+    }
     error.value = err?.name === 'AbortError'
       ? 'ذخیره تنظیمات بیش از حد انتظار طول کشید. اگر تغییرات اعمال شده‌اند، صفحه مشتری را دوباره باز کنید.'
-      : err?.message || 'ویرایش مشتری ناموفق بود.'
+      : isNetworkMutationError(err)
+        ? 'ارتباط با سرور هنگام تأیید ذخیره قطع شد. تغییرات را دوباره بررسی کنید.'
+        : err?.message || 'ویرایش مشتری ناموفق بود.'
+    showViewportToast('error', error.value)
   } finally {
     if (timeoutId !== null) {
       window.clearTimeout(timeoutId)
@@ -784,11 +859,21 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopCountdownTimer()
   stopCommissionHold()
+  clearViewportToast()
 })
 </script>
 
 <template>
   <Teleport to="body">
+    <div
+      v-if="viewportToast"
+      class="customer-viewport-toast"
+      :class="`customer-viewport-toast--${viewportToast.type}`"
+      role="status"
+      aria-live="polite"
+    >
+      {{ viewportToast.text }}
+    </div>
     <div class="customer-manager-backdrop" @click.self="emit('close')">
       <div ref="shellRef" class="customer-manager-shell">
         <div class="customer-manager-header">
@@ -1418,6 +1503,42 @@ onBeforeUnmount(() => {
 .customer-banner.error {
   background: rgba(239, 68, 68, 0.14);
   color: #b91c1c;
+}
+
+.customer-viewport-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  z-index: 1305;
+  width: min(520px, calc(100vw - 28px));
+  transform: translateX(-50%);
+  border-radius: 18px;
+  padding: 0.85rem 1rem;
+  direction: rtl;
+  text-align: right;
+  font-size: 0.88rem;
+  font-weight: 850;
+  line-height: 1.8;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.customer-viewport-toast--success {
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: rgba(240, 253, 244, 0.96);
+  color: #047857;
+}
+
+.customer-viewport-toast--error {
+  border: 1px solid rgba(239, 68, 68, 0.26);
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
+}
+
+.customer-viewport-toast--info {
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(255, 251, 235, 0.96);
+  color: #92400e;
 }
 
 .card-with-help {
