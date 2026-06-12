@@ -117,7 +117,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
   async function openCustomerDetail(wrapper: any, text = 'مشتری ویژه') {
     const card = wrapper.findAll('.customer-card').find((node: any) => node.text().includes(text))
     expect(card).toBeTruthy()
-    await card!.get('.manage-customer').trigger('click')
+    await card!.get('.customer-settings-btn').trigger('click')
     await flushPromises()
   }
 
@@ -138,6 +138,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.find('.customer-manager-close').exists()).toBe(false)
     expect(wrapper.find('.customer-summary-strip').exists()).toBe(false)
     expect(wrapper.find('.refresh-relations').exists()).toBe(false)
+    expect(wrapper.find('.customer-menu-note').exists()).toBe(false)
+    expect(wrapper.find('.manage-customer').exists()).toBe(false)
     expect(wrapper.text()).toContain('افزودن مشتری جدید')
     expect(wrapper.text()).toContain('مدیریت مشتریان')
     expect(wrapper.text()).not.toContain('مشتریان فعال و در انتظار')
@@ -214,12 +216,14 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await openRelationsPanel(wrapper)
 
     expect(wrapper.find('button.terminate-session').exists()).toBe(false)
-    expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
+    expect(wrapper.text()).toContain('دعوت‌نامه‌های در انتظار')
+    expect(wrapper.text()).toContain('منقضی کردن دعوت')
+    expect(wrapper.text()).toContain('کپی لینک')
 
     wrapper.unmount()
   })
 
-  it('orders pending and active relations first and renders status-specific copy', async () => {
+  it('separates pending invitations from manageable customers and keeps customer cards compact', async () => {
     apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/api/customers/owner-relations' && !options?.method) {
         return makeResponse([expiredRelation, activeRelation, pendingRelation, deletedRelation])
@@ -234,12 +238,15 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
+    expect(wrapper.findAll('.pending-invitation-card strong').map((node) => node.text())).toEqual(['مشتری ویژه'])
     const titles = wrapper.findAll('.customer-card h5').map((node) => node.text())
-    expect(titles).toEqual(['مشتری ویژه', 'مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
+    expect(titles).toEqual(['مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
     expect(wrapper.text()).toContain('مهلت این دعوت تمام شده و در انتظار همگام سازی وضعیت است.')
-    expect(wrapper.text()).toContain('این مشتری با @customer18 در سطح 2 فعال است.')
-    expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
-    expect(wrapper.text()).toContain('این رابطه حذف شده است.')
+    expect(wrapper.text()).not.toContain('این مشتری با @customer18 در سطح 2 فعال است.')
+    expect(wrapper.text()).not.toContain('مهلت این دعوت به پایان رسیده است.')
+    expect(wrapper.text()).not.toContain('این رابطه حذف شده است.')
+    expect(wrapper.text()).toContain('منقضی‌شده')
+    expect(wrapper.text()).toContain('حذف‌شده')
 
     await openCustomerDetail(wrapper, '@customer18')
     await openDetailAccordion(wrapper, 'نشست مشتری')
@@ -249,7 +256,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.text()).not.toContain('نشست‌های فعال مشتری')
     expect(wrapper.findAll('.customer-card h5')[0]!.text()).toBe('مشتری ویژه')
-    expect(wrapper.text()).toContain('در انتظار ثبت‌نام')
+    expect(wrapper.text()).toContain('دعوت‌نامه‌های در انتظار')
 
     wrapper.unmount()
   })
@@ -391,7 +398,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await vi.advanceTimersByTimeAsync(1800)
     await flushPromises()
 
-    expect(wrapper.get('.copy-link').text()).toBe('کپی لینک ثبت‌نام')
+    expect(wrapper.get('.copy-link').text()).toBe('کپی لینک')
 
     wrapper.unmount()
   })
@@ -413,9 +420,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    await openCustomerDetail(wrapper)
-    await openDetailAccordion(wrapper, 'قطع رابطه')
-    await wrapper.get('.cancel-pending').trigger('click')
+    await wrapper.get('.expire-pending-invitation').trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
@@ -525,7 +530,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     wrapper.unmount()
   })
 
-  it('renders multi-day pending countdowns, revoked copy, and unknown session badges without terminating on cancelled confirm', async () => {
+  it('renders multi-day pending countdowns, revoked status, and unknown session badges without terminating on cancelled confirm', async () => {
     vi.setSystemTime(new Date('2026-05-21T12:00:00Z'))
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const longPendingRelation = {
@@ -576,7 +581,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await openRelationsPanel(wrapper)
 
     expect(wrapper.text()).toContain('2 روز و 01:02:03')
-    expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
+    expect(wrapper.text()).not.toContain('این دعوت توسط مالک لغو شده است.')
+    expect(wrapper.text()).toContain('لغوشده')
 
     await openCustomerDetail(wrapper, 'مشتری نشست‌دار')
     await openDetailAccordion(wrapper, 'نشست مشتری')
@@ -692,9 +698,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     await backToCategories(wrapper)
     await openRelationsPanel(wrapper)
-    await openCustomerDetail(wrapper, '@pending_customer')
-    await openDetailAccordion(wrapper, 'قطع رابطه')
-    await wrapper.get('.cancel-pending').trigger('click')
+    await wrapper.get('.expire-pending-invitation').trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
