@@ -4,6 +4,7 @@ from unittest.mock import patch
 import httpx
 
 from core import sms
+from scripts.smsir_verify_probe import build_verify_payload, endpoint_for_style
 
 
 def smsir_response(status_code=200, payload=None):
@@ -106,19 +107,19 @@ class CoreSmsTests(unittest.TestCase):
         patches = self.configured_smsir()
         with patches[0], patches[1], patches[2], patches[3], patch.object(
             sms.settings, "smsir_otp_template_id", "123456"
-        ), patch.object(sms.settings, "smsir_otp_template_parameter", "CODE"), patch(
+        ), patch.object(sms.settings, "smsir_otp_template_parameter", "Code"), patch(
             "core.sms.httpx.post", return_value=response
         ) as post_mock:
             self.assertTrue(sms.send_otp_sms("+989120000000", "12345"))
 
         post_mock.assert_called_once()
-        self.assertEqual(post_mock.call_args.args[0], "https://api.sms.ir/v1/send/verify/")
+        self.assertEqual(post_mock.call_args.args[0], "https://api.sms.ir/v1/send/verify")
         self.assertEqual(
             post_mock.call_args.kwargs["json"],
             {
-                "Mobile": "09120000000",
-                "TemplateId": 123456,
-                "Parameters": [{"name": "CODE", "value": "12345"}],
+                "mobile": "09120000000",
+                "templateId": 123456,
+                "parameters": [{"name": "Code", "value": "12345"}],
             },
         )
 
@@ -139,6 +140,44 @@ class CoreSmsTests(unittest.TestCase):
             self.assertFalse(sms.send_otp_sms("09120000000", "12345"))
 
         post_mock.assert_not_called()
+
+    def test_smsir_verify_probe_builds_package_style_payload(self):
+        payload = build_verify_payload(
+            mobile="۰۹۳۷۰۰۰۰۰۰۰",
+            code="12345",
+            template_id=232000,
+            parameter_name="CODE",
+            payload_style="package",
+        )
+
+        self.assertEqual(endpoint_for_style("package"), "v1/send/verify/")
+        self.assertEqual(
+            payload,
+            {
+                "Mobile": "09370000000",
+                "TemplateId": 232000,
+                "Parameters": [{"name": "CODE", "value": "12345"}],
+            },
+        )
+
+    def test_smsir_verify_probe_builds_rest_style_payload(self):
+        payload = build_verify_payload(
+            mobile="+989370000000",
+            code="12345",
+            template_id=232000,
+            parameter_name="CODE",
+            payload_style="rest",
+        )
+
+        self.assertEqual(endpoint_for_style("rest"), "v1/send/verify")
+        self.assertEqual(
+            payload,
+            {
+                "mobile": "09370000000",
+                "templateId": 232000,
+                "parameters": [{"name": "CODE", "value": "12345"}],
+            },
+        )
 
     def test_send_invitation_sms_formats_message_and_delegates(self):
         with patch("core.sms.send_sms", return_value=True) as send_sms_mock:
