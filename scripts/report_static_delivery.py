@@ -141,6 +141,7 @@ def collect_report(*, base_url: str, dist_dir: Path) -> dict[str, Any]:
             expected_status=200,
             required_headers={
                 "cache-control": ("no-cache",),
+                "content-type": ("application/manifest+json",),
                 STATIC_DELIVERY_HEADER: ("nginx",),
             },
             require_body=True,
