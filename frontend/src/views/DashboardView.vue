@@ -4,13 +4,28 @@ import { useRouter } from 'vue-router'
 import { Bell, Store, LogOut, AlertTriangle, Ban, Users } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
-import { formatIranDateTime, getIranHour, parseIranDisplayDate } from '../utils/iranTime'
+import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
+
+interface DashboardTrade {
+  id: number
+  trade_type: string
+  commodity_name: string
+  quantity: number
+  price: number
+  responder_user_id: number | null
+  offer_user_name?: string | null
+  responder_user_name?: string | null
+  counterparty_name?: string | null
+}
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
 const user = ref<any>(null)
 const loading = ref(true)
+const todayTrades = ref<DashboardTrade[]>([])
+const todayTradesLoading = ref(false)
+const todayTradesError = ref('')
 const isSwitchModalOpen = ref(false)
 const switchUsers = ref<any[]>([])
 const switchLoading = ref(false)
@@ -82,6 +97,77 @@ const currentSwitchUserLabel = computed(() => {
   if (!user.value) return ''
   return user.value.full_name || user.value.account_name || ''
 })
+
+const tradeHistoryPerspectiveUserId = computed(() => {
+  if (!user.value) return null
+  const ownerUserId = Number(user.value.accountant_owner_user_id)
+  if (user.value.is_accountant === true && Number.isInteger(ownerUserId) && ownerUserId > 0) {
+    return ownerUserId
+  }
+  const currentUserId = Number(user.value.id)
+  return Number.isInteger(currentUserId) && currentUserId > 0 ? currentUserId : null
+})
+
+function getTodayIranGregorianDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: IRAN_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const year = parts.find((part) => part.type === 'year')?.value || '1970'
+  const month = parts.find((part) => part.type === 'month')?.value || '01'
+  const day = parts.find((part) => part.type === 'day')?.value || '01'
+  return `${year}-${month}-${day}`
+}
+
+function formatDashboardNumber(value: number | string | null | undefined) {
+  const normalized = Number(value)
+  return Number.isFinite(normalized) ? normalized.toLocaleString('fa-IR') : '۰'
+}
+
+function getTradeCounterpartyLabel(trade: DashboardTrade) {
+  if (typeof trade.counterparty_name === 'string' && trade.counterparty_name.trim()) {
+    return trade.counterparty_name
+  }
+  return Number(trade.responder_user_id) === Number(tradeHistoryPerspectiveUserId.value)
+    ? trade.offer_user_name || 'نامشخص'
+    : trade.responder_user_name || 'نامشخص'
+}
+
+function getTradeTypeForPerspective(trade: DashboardTrade) {
+  const tradeType = String(trade.trade_type || '').toLowerCase()
+  const isPerspectiveResponder = Number(trade.responder_user_id) === Number(tradeHistoryPerspectiveUserId.value)
+  if (tradeType !== 'buy' && tradeType !== 'sell') return 'unknown'
+  return isPerspectiveResponder ? tradeType : (tradeType === 'buy' ? 'sell' : 'buy')
+}
+
+function getTradeTypeLabel(trade: DashboardTrade) {
+  const type = getTradeTypeForPerspective(trade)
+  if (type === 'buy') return 'خرید'
+  if (type === 'sell') return 'فروش'
+  return 'نامشخص'
+}
+
+async function loadTodayTrades() {
+  const today = getTodayIranGregorianDate()
+  todayTradesLoading.value = true
+  todayTradesError.value = ''
+
+  try {
+    const response = await apiFetch(`/api/trades/my?from_date=${today}&to_date=${today}&limit=20`)
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(payload?.detail || 'دریافت معاملات امروز ناموفق بود')
+    }
+    todayTrades.value = Array.isArray(payload) ? payload as DashboardTrade[] : []
+  } catch (error: any) {
+    todayTrades.value = []
+    todayTradesError.value = error?.message || 'دریافت معاملات امروز ناموفق بود'
+  } finally {
+    todayTradesLoading.value = false
+  }
+}
 
 function hasTestAccountSwitchClaim() {
   const token = localStorage.getItem('auth_token')
@@ -188,6 +274,7 @@ async function fetchUser() {
     const res = await apiFetch('/api/auth/me')
     if (res.ok) {
       user.value = await res.json()
+      void loadTodayTrades()
     }
     // 401 handling is automatic via apiFetch → forceLogout
   } catch (e) {
@@ -324,6 +411,53 @@ onBeforeUnmount(() => {
             <small>بدون OTP و خروج، بین اکانت‌های موجود جابه‌جا شوید</small>
           </span>
         </button>
+
+        <section class="today-trades-card" aria-label="تاریخچه معاملات امروز">
+          <div class="today-trades-header">
+            <div>
+              <h2>معاملات امروز</h2>
+              <p>تاریخچه روز جاری بر اساس زمان ایران</p>
+            </div>
+            <button
+              type="button"
+              class="today-trades-refresh"
+              :disabled="todayTradesLoading"
+              @click="loadTodayTrades"
+            >
+              بروزرسانی
+            </button>
+          </div>
+
+          <div v-if="todayTradesLoading" class="today-trades-state">در حال دریافت معاملات...</div>
+          <div v-else-if="todayTradesError" class="today-trades-state today-trades-state--error">
+            {{ todayTradesError }}
+          </div>
+          <div v-else-if="todayTrades.length === 0" class="today-trades-state">
+            امروز معامله‌ای ثبت نشده است.
+          </div>
+          <div v-else class="today-trades-scroll">
+            <div class="today-trades-table" role="table" aria-label="معاملات امروز">
+              <div class="today-trades-row today-trades-row--head" role="row">
+                <span role="columnheader">طرف مقابل معامله</span>
+                <span role="columnheader">نوع معامله</span>
+                <span role="columnheader">کالا</span>
+                <span role="columnheader">تعداد</span>
+                <span role="columnheader">فی</span>
+              </div>
+              <div v-for="trade in todayTrades" :key="trade.id" class="today-trades-row" role="row">
+                <span class="today-trades-counterparty" role="cell">{{ getTradeCounterpartyLabel(trade) }}</span>
+                <span role="cell">
+                  <span class="today-trade-type" :class="`today-trade-type--${getTradeTypeForPerspective(trade)}`">
+                    {{ getTradeTypeLabel(trade) }}
+                  </span>
+                </span>
+                <span role="cell">{{ trade.commodity_name || 'نامشخص' }}</span>
+                <span role="cell">{{ formatDashboardNumber(trade.quantity) }}</span>
+                <span role="cell">{{ formatDashboardNumber(trade.price) }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
 
       </main>
 
@@ -608,6 +742,138 @@ onBeforeUnmount(() => {
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-sm);
   line-height: 1.5;
+}
+
+/* ═══ Today Trades ═══ */
+.today-trades-card {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.today-trades-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.today-trades-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--ds-text-primary);
+}
+
+.today-trades-header p {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  color: var(--ds-text-secondary);
+  line-height: 1.5;
+}
+
+.today-trades-refresh {
+  flex-shrink: 0;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.45rem 0.75rem;
+  cursor: pointer;
+}
+
+.today-trades-refresh:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
+.today-trades-state {
+  padding: 1.15rem;
+  color: var(--ds-text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.today-trades-state--error {
+  color: var(--ds-danger-600);
+}
+
+.today-trades-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.today-trades-table {
+  min-width: 620px;
+  display: flex;
+  flex-direction: column;
+}
+
+.today-trades-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.5fr) minmax(88px, 0.72fr) minmax(116px, 1fr) minmax(76px, 0.62fr) minmax(96px, 0.76fr);
+  align-items: center;
+  column-gap: 0.65rem;
+  padding: 0.72rem 1rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  color: var(--ds-text-primary);
+  font-size: 0.82rem;
+}
+
+.today-trades-row:last-child {
+  border-bottom: none;
+}
+
+.today-trades-row--head {
+  background: rgba(248, 250, 252, 0.94);
+  color: var(--ds-text-secondary);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.today-trades-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-trades-counterparty {
+  font-weight: 700;
+}
+
+.today-trade-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 0.18rem 0.48rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.today-trade-type--buy {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+}
+
+.today-trade-type--sell {
+  background: rgba(220, 38, 38, 0.1);
+  color: #b91c1c;
+}
+
+.today-trade-type--unknown {
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--ds-text-secondary);
 }
 
 /* ═══ Hero Button ═══ */
