@@ -137,6 +137,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.find('.customer-manager-back').exists()).toBe(true)
     expect(wrapper.find('.customer-manager-close').exists()).toBe(false)
     expect(wrapper.find('.customer-summary-strip').exists()).toBe(false)
+    expect(wrapper.find('.refresh-relations').exists()).toBe(false)
     expect(wrapper.text()).toContain('افزودن مشتری جدید')
     expect(wrapper.text()).toContain('مدیریت مشتریان')
     expect(wrapper.text()).not.toContain('مشتریان فعال و در انتظار')
@@ -218,24 +219,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
     wrapper.unmount()
   })
 
-  it('orders pending and active relations first, renders status-specific copy, and clears stale open sessions after refresh', async () => {
-    const refreshedPendingForActiveId = {
-      ...pendingRelation,
-      id: 11,
-      management_name: 'مشتری ویژه',
-      invitation_account_name: 'customer18_pending',
-      registration_link: 'https://example.com/register/token-11',
-      created_at: '2026-05-23T12:00:00Z',
-    }
-
-    let relationsCallCount = 0
+  it('orders pending and active relations first and renders status-specific copy', async () => {
     apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/api/customers/owner-relations' && !options?.method) {
-        relationsCallCount += 1
-        if (relationsCallCount === 1) {
-          return makeResponse([expiredRelation, activeRelation, pendingRelation, deletedRelation])
-        }
-        return makeResponse([refreshedPendingForActiveId, expiredRelation, deletedRelation])
+        return makeResponse([expiredRelation, activeRelation, pendingRelation, deletedRelation])
       }
       if (url === '/api/customers/owner-relations/11/sessions' && options?.method === 'GET') {
         return makeResponse([])
@@ -259,9 +246,6 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
     await backToCategories(wrapper)
-
-    await wrapper.get('.refresh-relations').trigger('click')
-    await flushPromises()
 
     expect(wrapper.text()).not.toContain('نشست‌های فعال مشتری')
     expect(wrapper.findAll('.customer-card h5')[0]!.text()).toBe('مشتری ویژه')
