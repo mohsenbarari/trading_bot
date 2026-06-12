@@ -602,8 +602,11 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('handles the PWA install prompt flow and falls back to alerting when no prompt is available', async () => {
-    const alertMock = vi.spyOn(window, 'alert').mockImplementation(() => {})
+  it('hides the login install button for native install prompt browsers and shows manual fallback otherwise', async () => {
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36',
+    })
     const promptEvent = {
       preventDefault: vi.fn(),
       prompt: vi.fn(),
@@ -613,27 +616,32 @@ describe('LoginView.vue', () => {
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
-    ;(window as any).deferredPrompt = promptEvent
-    window.dispatchEvent(new Event('pwa-install-ready'))
-    await flushPromises()
-
-    await findButtonByText(wrapper, 'نصب اپلیکیشن').trigger('click')
-    await flushPromises()
-
-    expect(promptEvent.prompt).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
 
-    window.dispatchEvent(new Event('appinstalled'))
+    window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), promptEvent))
     await flushPromises()
+
+    expect(promptEvent.preventDefault).toHaveBeenCalled()
+    expect(promptEvent.prompt).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
 
-    ;(window as any).deferredPrompt = null
+    wrapper.unmount()
+
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0',
+    })
+
     const fallbackWrapper = mount(LoginView)
+    expect(fallbackWrapper.text()).toContain('نصب اپلیکیشن')
+
     await findButtonByText(fallbackWrapper, 'نصب اپلیکیشن').trigger('click')
-    expect(alertMock).toHaveBeenCalled()
+    await flushPromises()
+
+    expect(fallbackWrapper.text()).toContain('راهنمای نصب دستی')
+    expect(fallbackWrapper.text()).toContain('Chrome یا Edge')
 
     fallbackWrapper.unmount()
-    wrapper.unmount()
   })
 
   it('surfaces request, resend, and verify error branches without leaving the current flow', async () => {
@@ -1054,9 +1062,11 @@ describe('LoginView.vue', () => {
     const vm = wrapper.vm as any
 
     expect(wrapper.text()).toContain('نصب اپلیکیشن')
-    vm.isIOS = true
     await (wrapper.vm as any).$nextTick()
-    expect(wrapper.text()).toContain('برای نصب در iOS')
+    expect(wrapper.text()).toContain('راهنمای نصب در آیفون')
+    expect(wrapper.text()).toContain('سایت را در Safari باز کنید')
+    expect(wrapper.text()).toContain('Add to Home Screen')
+    expect(wrapper.text()).toContain('از آیکن Gold روی Home Screen وارد شوید')
 
     vm.step = 'otp'
     await vi.advanceTimersByTimeAsync(100)
