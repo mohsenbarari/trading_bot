@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import DashboardView from './DashboardView.vue'
+import { applyMarketRuntimePatch, resetMarketRuntimeForTests } from '../composables/useMarketRuntime'
 
 const dashboardViewMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
@@ -53,6 +54,7 @@ describe('DashboardView.vue', () => {
     dashboardViewMocks.forceLogoutMock.mockReset()
     dashboardViewMocks.locationAssignMock.mockReset()
     dashboardViewMocks.notificationStore.appNotifications = []
+    resetMarketRuntimeForTests()
     localStorage.clear()
     vi.stubGlobal('location', {
       ...window.location,
@@ -112,6 +114,37 @@ describe('DashboardView.vue', () => {
 
     await wrapper.get('.hero-btn').trigger('click')
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalled()
+  })
+
+  it('styles the market entry for closed hours while keeping the market page reachable', async () => {
+    applyMarketRuntimePatch({
+      is_open: false,
+      active_web_notice_visible: true,
+      offers_since_last_open: 0,
+      last_transition_at: '2026-06-12T10:00:00Z',
+      next_transition_at: '2026-06-13T06:00:00Z',
+    })
+    dashboardViewMocks.apiFetchMock.mockResolvedValue(
+      makeJsonResponse({
+        id: 17,
+        full_name: 'کاربر بازار',
+        account_name: 'market17',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      }),
+    )
+
+    const wrapper = await mountView()
+    const marketButton = wrapper.get('.hero-btn')
+
+    expect(marketButton.classes()).toContain('hero-btn--closed')
+    expect(marketButton.text()).toContain('بازار بسته')
+    expect(marketButton.text()).toContain('فعلاً امکان ثبت لفظ جدید وجود ندارد')
+
+    await marketButton.trigger('click')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenCalledWith('/market')
   })
 
   it('hides the market entry button for accountants', async () => {
