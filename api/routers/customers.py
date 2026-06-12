@@ -39,12 +39,19 @@ def build_customer_registration_link(invitation_token: str) -> str | None:
     return f"{frontend_url}/register?token={invitation_token}"
 
 
+def get_loaded_relation_customer_user(relation):
+    if hasattr(relation, "__dict__"):
+        return relation.__dict__.get("customer_user")
+    return getattr(relation, "customer_user", None)
+
+
 def serialize_customer_relation(relation, invitation=None) -> dict:
+    customer_user = get_loaded_relation_customer_user(relation)
     return {
         "id": relation.id,
         "owner_user_id": relation.owner_user_id,
         "customer_user_id": relation.customer_user_id,
-        "customer_account_name": getattr(getattr(relation, "customer_user", None), "account_name", None),
+        "customer_account_name": getattr(customer_user, "account_name", None),
         "invitation_account_name": getattr(invitation, "account_name", None),
         "mobile_number": getattr(invitation, "mobile_number", None),
         "management_name": relation.management_name,
@@ -262,6 +269,11 @@ async def update_my_customer(
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
         update_data=payload.model_dump(exclude_unset=True),
+    )
+    relation = await get_owner_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation.id,
     )
     invitation_map = await load_customer_relation_invitation_map(db, [relation.invitation_token])
     audit_log(

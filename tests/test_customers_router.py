@@ -15,6 +15,7 @@ from api.routers.customers import (
     get_my_customer_trade_stats,
     list_my_customers,
     list_my_customer_sessions,
+    serialize_customer_relation,
     terminate_my_customer_session,
     unlink_my_customer,
     update_my_customer,
@@ -49,6 +50,12 @@ class ExecuteDB:
         if isinstance(value, FakeExecuteResult):
             return value
         return FakeExecuteResult(value)
+
+
+class LazyCustomerRelation(SimpleNamespace):
+    @property
+    def customer_user(self):
+        raise AssertionError("serializer must not lazy-load customer_user")
 
 
 class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
@@ -184,6 +191,24 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["registration_link"], "https://app.example/register?token=CUST-token")
 
     async def test_update_owner_customer_returns_serialized_relation(self):
+        stale_relation = SimpleNamespace(
+            id=9,
+            owner_user_id=7,
+            customer_user_id=12,
+            management_name="مشتری ارشد",
+            customer_tier=CustomerTier.TIER_2,
+            commission_rate=0.8,
+            min_trade_quantity=2,
+            max_trade_quantity=8,
+            max_daily_trades=4,
+            max_daily_commodity_volume=25,
+            status="active",
+            invitation_token="CUST-token",
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            activated_at=datetime.utcnow(),
+            deleted_at=None,
+            created_at=datetime.utcnow(),
+        )
         relation = SimpleNamespace(
             id=9,
             owner_user_id=7,
@@ -214,8 +239,11 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.customers.update_owner_customer_relation",
-            new=AsyncMock(return_value=relation),
+            new=AsyncMock(return_value=stale_relation),
         ) as update_mock, patch(
+            "api.routers.customers.get_owner_customer_relation",
+            new=AsyncMock(return_value=relation),
+        ) as reload_mock, patch(
             "api.routers.customers.load_customer_relation_invitation_map",
             new=AsyncMock(return_value={"CUST-token": invitation}),
         ), patch(
@@ -225,8 +253,36 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             result = await update_my_customer(9, payload, context=context, db=FakeDB())
 
         update_mock.assert_awaited_once()
+        reload_mock.assert_awaited_once_with(unittest.mock.ANY, owner_user_id=7, relation_id=9)
         self.assertEqual(update_mock.await_args.kwargs["update_data"]["commission_rate"], 0.8)
         self.assertEqual(result["management_name"], "مشتری ارشد")
+        self.assertEqual(result["customer_account_name"], "cust1")
+
+    async def test_serialize_customer_relation_does_not_trigger_async_lazy_customer_load(self):
+        relation = LazyCustomerRelation(
+            id=9,
+            owner_user_id=7,
+            customer_user_id=12,
+            management_name="مشتری ارشد",
+            customer_tier=CustomerTier.TIER_2,
+            commission_rate=0.8,
+            min_trade_quantity=2,
+            max_trade_quantity=8,
+            max_daily_trades=4,
+            max_daily_commodity_volume=25,
+            status="active",
+            invitation_token="CUST-token",
+            expires_at=datetime.utcnow() + timedelta(days=2),
+            activated_at=datetime.utcnow(),
+            deleted_at=None,
+            created_at=datetime.utcnow(),
+        )
+        invitation = SimpleNamespace(account_name="cust1", mobile_number="09120000000")
+
+        result = serialize_customer_relation(relation, invitation=invitation)
+
+        self.assertIsNone(result["customer_account_name"])
+        self.assertEqual(result["invitation_account_name"], "cust1")
 
     async def test_get_my_customer_trade_stats_uses_historical_trade_prices(self):
         relation = SimpleNamespace(
