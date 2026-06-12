@@ -410,6 +410,10 @@ const orderedRelations = computed(() => {
   })
 })
 
+const pendingInvitationRelations = computed(() => orderedRelations.value.filter((relation) => relation.status === 'pending'))
+
+const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
+
 async function loadRelations() {
   isLoading.value = true
   error.value = ''
@@ -786,7 +790,6 @@ onBeforeUnmount(() => {
                 <h4>افزودن مشتری جدید</h4>
               </div>
               <div class="accordion-header-actions">
-                <span class="customer-menu-note">دعوت و تنظیمات اولیه</span>
                 <HelpPopover
                   button-test="customer-create-help"
                   note-test="customer-create-help-note"
@@ -921,7 +924,6 @@ onBeforeUnmount(() => {
                 <h4>مدیریت مشتریان</h4>
               </div>
               <div class="accordion-header-actions">
-                <span class="customer-menu-note">لیست، ویرایش، آمار</span>
                 <HelpPopover
                   button-test="customer-list-help"
                   note-test="customer-list-help-note"
@@ -953,33 +955,6 @@ onBeforeUnmount(() => {
                     <ChevronLeft :size="20" class="ds-accordion-icon" />
                   </div>
                   <div v-show="openSections.detailOverview" class="ds-accordion-body customer-accordion-body">
-                    <div class="customer-meta-grid detail-metric-grid">
-                      <div class="meta-item metric-card">
-                        <span class="meta-label">سطح مشتری</span>
-                        <span class="meta-value">{{ getCustomerTierLabel(selectedRelation.customer_tier) }}</span>
-                      </div>
-                      <div class="meta-item metric-card">
-                        <span class="meta-label">کمیسیون</span>
-                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.commission_rate, '%') }}</span>
-                      </div>
-                      <div class="meta-item metric-card">
-                        <span class="meta-label">حداقل معامله</span>
-                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.min_trade_quantity) }}</span>
-                      </div>
-                      <div class="meta-item metric-card">
-                        <span class="meta-label">حداکثر معامله</span>
-                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.max_trade_quantity) }}</span>
-                      </div>
-                      <div class="meta-item metric-card">
-                        <span class="meta-label">سقف معاملات روزانه</span>
-                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.max_daily_trades) }}</span>
-                      </div>
-                      <div class="meta-item metric-card">
-                        <span class="meta-label">سقف حجم روزانه</span>
-                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.max_daily_commodity_volume) }}</span>
-                      </div>
-                    </div>
-
                     <div class="form-subpanel">
                       <div class="form-subpanel-head">
                         <h5>ویرایش سریع</h5>
@@ -1208,14 +1183,43 @@ onBeforeUnmount(() => {
               <div v-else-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
               <div v-else-if="orderedRelations.length === 0" class="customer-empty">هنوز مشتری فعالی یا دعوت در انتظار ثبت نشده است.</div>
 
-              <div v-else class="customer-list">
+              <div v-else class="customer-management-stack">
+                <section v-if="pendingInvitationRelations.length" class="pending-invitations-panel">
+                  <div class="pending-invitations-head">
+                    <div>
+                      <h5>دعوت‌نامه‌های در انتظار</h5>
+                      <p>فقط دعوت‌هایی که هنوز توسط مشتری تکمیل نشده‌اند نمایش داده می‌شوند.</p>
+                    </div>
+                    <span>{{ pendingInvitationRelations.length.toLocaleString('fa-IR') }}</span>
+                  </div>
+                  <article
+                    v-for="relation in pendingInvitationRelations"
+                    :key="`pending-${relation.id}`"
+                    class="pending-invitation-card"
+                  >
+                    <div class="pending-invitation-main">
+                      <strong>{{ relation.management_name }}</strong>
+                      <span>@{{ getRelationAccountName(relation) }}</span>
+                      <p>{{ getRelationStateText(relation) }}</p>
+                    </div>
+                    <div class="pending-invitation-actions">
+                      <button v-if="relation.registration_link" type="button" class="secondary-btn copy-link" @click="copyRegistrationLink(relation)">
+                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                      </button>
+                      <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
+                        منقضی کردن دعوت
+                      </button>
+                    </div>
+                  </article>
+                </section>
+
+                <div v-if="manageableRelations.length" class="customer-list">
                 <article
-                  v-for="relation in orderedRelations"
+                  v-for="relation in manageableRelations"
                   :key="relation.id"
                   class="customer-card"
                 >
                   <div class="customer-card-head customer-card-head--manage">
-                    <button type="button" class="primary-btn manage-customer" @click="openCustomerDetail(relation)">مدیریت</button>
                     <div class="customer-card-main">
                       <div class="customer-card-title-row">
                         <div class="customer-identity-block">
@@ -1249,15 +1253,15 @@ onBeforeUnmount(() => {
                           <strong>{{ formatMaybeNumber(relation.max_daily_trades) }}</strong>
                         </span>
                       </div>
-                      <p v-if="getRelationStateText(relation)" class="customer-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
+                      <div class="customer-card-footer">
+                        <button type="button" class="primary-btn customer-settings-btn" @click="openCustomerDetail(relation)">
+                          تنظیمات مشتری
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div v-if="relation.status === 'pending' && relation.registration_link" class="customer-actions">
-                    <button type="button" class="secondary-btn copy-link" @click="copyRegistrationLink(relation)">
-                      {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
-                    </button>
-                  </div>
                 </article>
+                </div>
               </div>
             </div>
           </div>
@@ -1291,7 +1295,7 @@ onBeforeUnmount(() => {
   padding: 22px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0.625rem;
 }
 
 .customer-manager-header {
@@ -1520,7 +1524,7 @@ onBeforeUnmount(() => {
 
 .customer-main-menu-header {
   display: grid;
-  grid-template-columns: minmax(9rem, 1fr) minmax(0, auto);
+  grid-template-columns: minmax(9rem, 1fr) auto;
   align-items: center;
   direction: rtl;
 }
@@ -1544,22 +1548,8 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-.customer-menu-note {
-  max-width: clamp(6.2rem, 28vw, 12rem);
-  overflow: hidden;
-  color: #6b7280;
-  direction: rtl;
-  font-size: 0.7rem;
-  font-weight: 650;
-  line-height: 1.45;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .customer-main-menu-header .accordion-header-actions {
   min-width: 0;
-  max-width: clamp(7.5rem, 36vw, 13.5rem);
   gap: 0.38rem;
   justify-content: flex-end;
 }
@@ -1587,7 +1577,7 @@ onBeforeUnmount(() => {
 .customer-accordion-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0.625rem;
 }
 
 .customer-section-icon,
@@ -1617,13 +1607,13 @@ onBeforeUnmount(() => {
 .customer-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 0.625rem;
 }
 
 .customer-form-sections {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 0.625rem;
 }
 
 .customer-form-sections--compact {
@@ -1635,13 +1625,13 @@ onBeforeUnmount(() => {
 }
 
 .form-subpanel {
-  border-radius: 20px;
+  border-radius: 1rem;
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(248, 250, 252, 0.72);
-  padding: 14px;
+  padding: 0.8rem;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0.625rem;
 }
 
 .form-subpanel--compact {
@@ -1780,10 +1770,110 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
+.customer-management-stack,
 .customer-list {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 0.625rem;
+}
+
+.pending-invitations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.16);
+  background: rgba(255, 251, 235, 0.72);
+}
+
+.pending-invitations-head,
+.pending-invitation-card,
+.pending-invitation-actions,
+.customer-card-footer {
+  display: flex;
+  align-items: center;
+}
+
+.pending-invitations-head {
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pending-invitations-head h5,
+.pending-invitations-head p,
+.pending-invitation-main p {
+  margin: 0;
+}
+
+.pending-invitations-head h5 {
+  color: #92400e;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.pending-invitations-head p {
+  color: #64748b;
+  font-size: 0.7rem;
+  line-height: 1.7;
+}
+
+.pending-invitations-head > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.pending-invitation-card {
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.62rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.pending-invitation-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.pending-invitation-main strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invitation-main span {
+  color: #64748b;
+  direction: ltr;
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.pending-invitation-main p {
+  color: #b45309;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.65;
+}
+
+.pending-invitation-actions {
+  flex: 0 0 auto;
+  gap: 0.45rem;
 }
 
 .customer-card {
@@ -1806,17 +1896,6 @@ onBeforeUnmount(() => {
 
 .customer-card-head--manage {
   align-items: center;
-}
-
-.manage-customer {
-  flex: 0 0 auto;
-  order: -1;
-  min-width: 74px;
-  min-height: 2.5rem;
-  padding: 0 12px;
-  border-radius: 12px;
-  font-size: 0.78rem;
-  box-shadow: none;
 }
 
 .customer-card-main {
@@ -1930,6 +2009,10 @@ onBeforeUnmount(() => {
   gap: 0.42rem;
 }
 
+.customer-mobile-number {
+  grid-column: 1 / -1;
+}
+
 .customer-info-pill {
   display: inline-flex;
   align-items: center;
@@ -1962,26 +2045,23 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.customer-state-copy {
-  margin: 0;
-  color: #64748b;
-  font-size: 0.72rem;
-  font-weight: 650;
-  line-height: 1.7;
+.customer-mobile-number strong {
+  overflow: visible;
+  direction: ltr;
+  text-align: left;
+  text-overflow: clip;
 }
 
-.customer-state-copy.status-pending {
-  color: #b45309;
+.customer-card-footer {
+  justify-content: flex-start;
 }
 
-.customer-state-copy.status-active {
-  color: #047857;
-}
-
-.customer-state-copy.status-expired,
-.customer-state-copy.status-revoked,
-.customer-state-copy.status-deleted {
-  color: #b91c1c;
+.customer-settings-btn {
+  min-height: 2.35rem;
+  padding: 0 0.85rem;
+  border-radius: 0.85rem;
+  box-shadow: none;
+  font-size: 0.76rem;
 }
 
 .session-panel {
@@ -2258,7 +2338,7 @@ onBeforeUnmount(() => {
     border-radius: 24px 24px 0 0;
     min-height: 100%;
     padding: 12px 20px 22px;
-    gap: 10px;
+    gap: 0.625rem;
   }
 
   .panel-title-row,
@@ -2303,22 +2383,12 @@ onBeforeUnmount(() => {
   }
 
   .customer-main-menu-header {
-    grid-template-columns: minmax(8.6rem, 1fr) minmax(0, 7.7rem);
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 3.85rem;
   }
 
   .customer-menu-title h4 {
     font-size: 0.88rem;
-  }
-
-  .customer-menu-note {
-    max-width: 5.8rem;
-    font-size: 0.66rem;
-    line-height: 1.35;
-  }
-
-  .customer-main-menu-header .accordion-header-actions {
-    max-width: 7.7rem;
   }
 
   .customer-card {
@@ -2329,13 +2399,6 @@ onBeforeUnmount(() => {
     flex-direction: row;
     align-items: flex-start;
     gap: 0.5rem;
-  }
-
-  .manage-customer {
-    min-width: 66px;
-    min-height: 2.35rem;
-    padding: 0 10px;
-    font-size: 0.72rem;
   }
 
   .customer-card-title-row {
@@ -2350,6 +2413,21 @@ onBeforeUnmount(() => {
 
   .customer-card-meta-pills {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pending-invitation-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pending-invitation-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pending-invitation-actions > button,
+  .customer-settings-btn {
+    width: 100%;
   }
 }
 </style>
