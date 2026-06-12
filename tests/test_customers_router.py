@@ -301,8 +301,8 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
                 quantity=2,
                 commodity_id=1,
                 commodity=SimpleNamespace(name="طلا"),
-                price=100_500_000,
-                offer=SimpleNamespace(price=100_000_000),
+                price=100_500,
+                offer=SimpleNamespace(price=100_000),
             ),
             SimpleNamespace(
                 trade_number=10002,
@@ -312,8 +312,8 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
                 quantity=3,
                 commodity_id=1,
                 commodity=SimpleNamespace(name="طلا"),
-                price=99_500_000,
-                offer=SimpleNamespace(price=100_000_000),
+                price=99_500,
+                offer=SimpleNamespace(price=100_000),
             ),
             SimpleNamespace(
                 trade_number=10003,
@@ -359,10 +359,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             offer_user_id=7,
             responder_user_id=18,
             actor_user_id=18,
-            quantity=3,
+            quantity=23,
             commodity_id=1,
             commodity=SimpleNamespace(name="طلا"),
-            price=100_500,
+            price=50_800,
             offer=None,
         )
         owner_source_leg = SimpleNamespace(
@@ -371,9 +371,9 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             offer_user_id=99,
             responder_user_id=7,
             actor_user_id=18,
-            quantity=3,
+            quantity=23,
             commodity_id=1,
-            price=100_000,
+            price=50_000,
         )
         db = ExecuteDB(
             FakeExecuteResult(relation),
@@ -390,10 +390,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
             result = await get_my_customer_trade_stats(11, days=7, context=context, db=db)
 
         self.assertEqual(result["trade_count"], 1)
-        self.assertEqual(result["total_quantity"], 3)
-        self.assertEqual(result["commission_profit_toman"], 1_500)
+        self.assertEqual(result["total_quantity"], 23)
+        self.assertEqual(result["commission_profit_toman"], 18_400_000)
         self.assertEqual(result["commodities"][0]["commodity_name"], "طلا")
-        self.assertIn("زنجیره معامله", result["profit_calculation_note"])
+        self.assertIn("تومان کامل", result["profit_calculation_note"])
 
     async def test_list_my_customer_sessions_returns_active_customer_sessions(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))

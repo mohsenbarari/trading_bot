@@ -30,6 +30,7 @@ from models.session import UserSession
 
 router = APIRouter()
 CUSTOMER_STATS_PERIOD_DAYS = {1, 3, 7, 30, 90, 180}
+CUSTOMER_COMMISSION_PRICE_UNIT_TOMAN = 1000
 
 
 def build_customer_registration_link(invitation_token: str) -> str | None:
@@ -212,7 +213,7 @@ def calculate_customer_trade_commission_profit(
     )
     if quantity <= 0 or trade_price is None or base_price is None:
         return 0
-    return abs(trade_price - base_price) * quantity
+    return abs(trade_price - base_price) * quantity * CUSTOMER_COMMISSION_PRICE_UNIT_TOMAN
 
 
 async def ensure_owner_context(context: EffectiveOwnerActor, db: AsyncSession) -> None:
@@ -514,7 +515,7 @@ async def get_my_customer_trade_stats(
         "total_quantity": total_quantity,
         "commission_profit_toman": commission_profit,
         "commodities": commodities,
-        "profit_calculation_note": "سود از اختلاف قیمت ثبت‌شده در معامله مشتری و قیمت اصلی همان زنجیره معامله محاسبه می‌شود.",
+        "profit_calculation_note": "سود از اختلاف قیمت ثبت‌شده در معامله مشتری و قیمت اصلی همان زنجیره، با تبدیل واحد قیمت بازار به تومان کامل محاسبه می‌شود.",
     }
 
 
