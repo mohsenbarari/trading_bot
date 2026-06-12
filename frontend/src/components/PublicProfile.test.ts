@@ -1702,7 +1702,8 @@ describe('PublicProfile.vue', () => {
 
     expect(wrapper.text()).toContain('لیست همکاران')
     expect(wrapper.text()).toContain('لیست حسابداران')
-    expect(wrapper.text()).toContain('لیست مشتریان')
+    expect(wrapper.text()).not.toContain('لیست مشتریان')
+    expect(wrapper.find('[data-test="public-profile-customers-help"]').exists()).toBe(false)
     const accountantAccordion = wrapper.findAll('.ds-accordion').find((node) => node.text().includes('لیست حسابداران'))
     expect(accountantAccordion?.classes()).not.toContain('open')
 
@@ -1712,8 +1713,6 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('با انتخاب نام هر همکار')
     await wrapper.get('[data-test="public-profile-accountants-help"]').trigger('click')
     expect(wrapper.text()).toContain('عنوان هر ردیف همان نام نمایشی رابطه است')
-    await wrapper.get('[data-test="public-profile-customers-help"]').trigger('click')
-    expect(wrapper.text()).toContain('مشتریان ثبت‌شده زیر این مالک')
     await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
     expect(wrapper.text()).toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
   })

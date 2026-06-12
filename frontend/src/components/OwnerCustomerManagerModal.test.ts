@@ -140,6 +140,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.find('.refresh-relations').exists()).toBe(false)
     expect(wrapper.find('.customer-menu-note').exists()).toBe(false)
     expect(wrapper.find('.manage-customer').exists()).toBe(false)
+    expect(wrapper.text()).toContain('مشتریان')
+    expect(wrapper.text()).not.toContain('مشتریان مالک')
+    expect(wrapper.text()).not.toContain('مدیریت ارتباطات')
+    expect(wrapper.findAll('.customer-panel > .ds-accordion.open')).toHaveLength(0)
     expect(wrapper.text()).toContain('افزودن مشتری جدید')
     expect(wrapper.text()).toContain('مدیریت مشتریان')
     expect(wrapper.text()).not.toContain('مشتریان فعال و در انتظار')
@@ -370,8 +374,9 @@ describe('OwnerCustomerManagerModal.vue', () => {
       max_daily_trades: 7,
       max_daily_commodity_volume: 150,
     })
-    expect(wrapper.text()).toContain('اطلاعات مشتری به‌روزرسانی شد.')
+    expect(wrapper.text()).toContain('تنظیمات مشتری با موفقیت ذخیره شد.')
     expect(wrapper.text()).toContain('سطح 1')
+    expect(wrapper.get('.save-edit').text()).toBe('ذخیره تغییرات')
 
     wrapper.unmount()
   })
