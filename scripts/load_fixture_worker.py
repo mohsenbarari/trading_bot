@@ -242,6 +242,19 @@ async def cleanup(prefix: str) -> dict[str, Any]:
                 )
             ).scalars().all()
         ]
+        chat_member_ids = [
+            int(value)
+            for value in (
+                await db.execute(
+                    select(ChatMember.id).where(
+                        or_(
+                            ChatMember.user_id.in_(user_ids or [-1]),
+                            ChatMember.chat_id.in_(chat_ids or [-1]),
+                        )
+                    )
+                )
+            ).scalars().all()
+        ]
         accountant_relation_ids = [
             int(value)
             for value in (
@@ -376,9 +389,9 @@ async def cleanup(prefix: str) -> dict[str, Any]:
             deleted["notifications"] = int(
                 (await db.execute(delete(Notification).where(Notification.id.in_(notification_ids)))).rowcount or 0
             )
-        if user_ids:
+        if chat_member_ids:
             deleted["chat_members"] = int(
-                (await db.execute(delete(ChatMember).where(ChatMember.user_id.in_(user_ids)))).rowcount or 0
+                (await db.execute(delete(ChatMember).where(ChatMember.id.in_(chat_member_ids)))).rowcount or 0
             )
         if message_ids:
             deleted["messages"] = int((await db.execute(delete(Message).where(Message.id.in_(message_ids)))).rowcount or 0)
@@ -416,7 +429,7 @@ async def cleanup(prefix: str) -> dict[str, Any]:
                 WHERE data::text LIKE :prefix_like
                    OR (table_name = 'users' AND record_id = ANY(:user_ids))
                    OR (table_name = 'chats' AND record_id = ANY(:chat_ids))
-                   OR (table_name = 'chat_members' AND record_id = ANY(:chat_member_user_ids))
+                   OR (table_name = 'chat_members' AND record_id = ANY(:chat_member_ids))
                    OR (table_name = 'messages' AND record_id = ANY(:message_ids))
                    OR (table_name = 'conversations' AND record_id = ANY(:conversation_ids))
                    OR (table_name = 'offers' AND record_id = ANY(:offer_ids))
@@ -430,7 +443,7 @@ async def cleanup(prefix: str) -> dict[str, Any]:
                 "prefix_like": prefix_like,
                 "user_ids": user_ids or [-1],
                 "chat_ids": chat_ids or [-1],
-                "chat_member_user_ids": user_ids or [-1],
+                "chat_member_ids": chat_member_ids or [-1],
                 "message_ids": message_ids or [-1],
                 "conversation_ids": conversation_ids or [-1],
                 "offer_ids": offer_ids or [-1],

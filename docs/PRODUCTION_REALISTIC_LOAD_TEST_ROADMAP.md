@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L1 complete. Stage L2 is next.
+Status: Stage L2 in progress.
 
 Last updated: 2026-06-12
 
@@ -411,6 +411,9 @@ Current implementation status:
   tokens, and the raw auth pool is written only to
   `/srv/trading-bot-loadtest/auth/<prefix>auth-pool.json` on the load-runner
   with restricted permissions.
+- Cleanup deletes chat memberships by both synthetic user id and synthetic chat
+  id, so group/channel fixtures with mixed members can be removed without
+  leaving foreign-key residue.
 - Live execution should happen after the new scripts are present on the Iran
   server through `make production-release` or the appropriate production sync
   path.
