@@ -191,10 +191,17 @@ class CoreSmsTests(unittest.TestCase):
             )
 
         message = send_sms_mock.call_args.args[1]
-        self.assertIn("demo", message)
+        self.assertEqual(
+            message,
+            (
+                "کاربر گرامی شما بعنوان معامله گر به سامانه معاملاتی دعوت شدین.\n"
+                "برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
+                "https://app.example/register"
+            ),
+        )
+        self.assertNotIn("demo", message)
         self.assertNotIn("https://t.me/demo", message)
         self.assertNotIn("تلگرام", message)
-        self.assertIn("https://app.example/register", message)
 
     def test_send_accountant_invitation_sms_formats_message_and_delegates(self):
         with patch("core.sms.send_sms", return_value=True) as send_sms_mock:
@@ -208,8 +215,15 @@ class CoreSmsTests(unittest.TestCase):
 
         args = send_sms_mock.call_args.args
         self.assertEqual(args[0], "09120000000")
-        self.assertIn("accountant demo", args[1])
-        self.assertIn("https://app.example/accountant-register", args[1])
+        self.assertEqual(
+            args[1],
+            (
+                "کاربر گرامی شما بعنوان حسابدار به سامانه معاملاتی دعوت شدین\n"
+                "برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
+                "https://app.example/accountant-register"
+            ),
+        )
+        self.assertNotIn("accountant demo", args[1])
 
     def test_send_customer_invitation_sms_formats_message_and_delegates(self):
         with patch("core.sms.send_sms", return_value=True) as send_sms_mock:
@@ -223,8 +237,15 @@ class CoreSmsTests(unittest.TestCase):
 
         args = send_sms_mock.call_args.args
         self.assertEqual(args[0], "09120000000")
-        self.assertIn("customer alias", args[1])
-        self.assertIn("https://app.example/customer-register", args[1])
+        self.assertEqual(
+            args[1],
+            (
+                "کاربر گرامی شما بعنوان مشتری به سامانه معاملاتی دعوت شدین\n"
+                "برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
+                "https://app.example/customer-register"
+            ),
+        )
+        self.assertNotIn("customer alias", args[1])
 
 
 if __name__ == "__main__":

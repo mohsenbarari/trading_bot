@@ -198,9 +198,8 @@ def send_invitation_sms(
     registration links are temporarily paused in SMS content.
     """
     message = (
-        f"{account_name} عزیز\n"
-        f"دعوت عضویت سامانه معاملاتی\n"
-        f"ثبت‌نام از طریق وب:\n"
+        f"کاربر گرامی شما بعنوان معامله گر به سامانه معاملاتی دعوت شدین.\n"
+        f"برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
         f"{web_link}"
     )
     return send_sms(mobile, message)
@@ -213,9 +212,8 @@ def send_accountant_invitation_sms(
 ) -> bool:
     """Send accountant invitation SMS with a web-only registration link."""
     message = (
-        f"{relation_display_name} عزیز\n"
-        f"دعوت ثبت‌نام حسابدار سامانه معاملاتی\n"
-        f"تکمیل ثبت‌نام فقط از طریق وب‌اپ انجام می‌شود:\n"
+        f"کاربر گرامی شما بعنوان حسابدار به سامانه معاملاتی دعوت شدین\n"
+        f"برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
         f"{web_link}"
     )
     return send_sms(mobile, message)
@@ -228,9 +226,8 @@ def send_customer_invitation_sms(
 ) -> bool:
     """Send customer invitation SMS with a web-only registration link."""
     message = (
-        f"{management_name} عزیز\n"
-        f"دعوت ثبت‌نام مشتری سامانه معاملاتی\n"
-        f"تکمیل ثبت‌نام فقط از طریق وب‌اپ انجام می‌شود:\n"
+        f"کاربر گرامی شما بعنوان مشتری به سامانه معاملاتی دعوت شدین\n"
+        f"برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
         f"{web_link}"
     )
     return send_sms(mobile, message)
