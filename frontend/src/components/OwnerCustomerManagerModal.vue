@@ -111,7 +111,6 @@ function makeEmptyDetailEditForm() {
 
 const relations = ref<CustomerRelation[]>([])
 const isLoading = ref(true)
-const isRefreshing = ref(false)
 const isSubmitting = ref(false)
 const isSavingEdit = ref(false)
 const error = ref('')
@@ -411,12 +410,8 @@ const orderedRelations = computed(() => {
   })
 })
 
-async function loadRelations(options?: { silent?: boolean }) {
-  if (options?.silent) {
-    isRefreshing.value = true
-  } else {
-    isLoading.value = true
-  }
+async function loadRelations() {
+  isLoading.value = true
   error.value = ''
 
   try {
@@ -436,7 +431,6 @@ async function loadRelations(options?: { silent?: boolean }) {
     error.value = err?.message || 'دریافت لیست مشتریان ناموفق بود.'
   } finally {
     isLoading.value = false
-    isRefreshing.value = false
   }
 }
 
@@ -934,9 +928,6 @@ onBeforeUnmount(() => {
                   label="راهنمای لیست مشتریان"
                   text="برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید."
                 />
-                <button type="button" class="ghost-btn ghost-btn--inline refresh-relations" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
-                  {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
-                </button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
@@ -1225,33 +1216,40 @@ onBeforeUnmount(() => {
                 >
                   <div class="customer-card-head customer-card-head--manage">
                     <button type="button" class="primary-btn manage-customer" @click="openCustomerDetail(relation)">مدیریت</button>
-                    <div class="customer-identity-block">
-                      <h5>{{ relation.management_name }}</h5>
-                      <p class="customer-account-name">@{{ getRelationAccountName(relation) }}</p>
-                      <p v-if="relation.mobile_number" class="customer-mobile-number">{{ relation.mobile_number }}</p>
+                    <div class="customer-card-main">
+                      <div class="customer-card-title-row">
+                        <div class="customer-identity-block">
+                          <h5>{{ relation.management_name }}</h5>
+                          <p class="customer-account-name">@{{ getRelationAccountName(relation) }}</p>
+                        </div>
+                        <div class="customer-card-head-side">
+                          <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
+                          <span class="customer-tier-pill" :class="`tier-${relation.customer_tier}`">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
+                        </div>
+                      </div>
+                      <div class="customer-card-meta-pills">
+                        <span v-if="relation.mobile_number" class="customer-info-pill customer-mobile-number">
+                          <span>موبایل</span>
+                          <strong>{{ relation.mobile_number }}</strong>
+                        </span>
+                        <span class="customer-info-pill">
+                          <span>کمیسیون</span>
+                          <strong>{{ formatMaybeNumber(relation.commission_rate, '%') }}</strong>
+                        </span>
+                        <span class="customer-info-pill">
+                          <span>حداقل</span>
+                          <strong>{{ formatMaybeNumber(relation.min_trade_quantity) }}</strong>
+                        </span>
+                        <span class="customer-info-pill">
+                          <span>حداکثر</span>
+                          <strong>{{ formatMaybeNumber(relation.max_trade_quantity) }}</strong>
+                        </span>
+                        <span class="customer-info-pill">
+                          <span>سقف روزانه</span>
+                          <strong>{{ formatMaybeNumber(relation.max_daily_trades) }}</strong>
+                        </span>
+                      </div>
                       <p v-if="getRelationStateText(relation)" class="customer-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
-                    </div>
-                    <div class="customer-card-head-side">
-                      <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
-                      <span class="customer-tier-pill" :class="`tier-${relation.customer_tier}`">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
-                    </div>
-                  </div>
-                  <div class="customer-meta-grid">
-                    <div class="meta-item">
-                      <span class="meta-label">کمیسیون</span>
-                      <span class="meta-value">{{ formatMaybeNumber(relation.commission_rate, '%') }}</span>
-                    </div>
-                    <div class="meta-item">
-                      <span class="meta-label">حداقل معامله</span>
-                      <span class="meta-value">{{ formatMaybeNumber(relation.min_trade_quantity) }}</span>
-                    </div>
-                    <div class="meta-item">
-                      <span class="meta-label">حداکثر معامله</span>
-                      <span class="meta-value">{{ formatMaybeNumber(relation.max_trade_quantity) }}</span>
-                    </div>
-                    <div class="meta-item">
-                      <span class="meta-label">سقف روزانه</span>
-                      <span class="meta-value">{{ formatMaybeNumber(relation.max_daily_trades) }}</span>
                     </div>
                   </div>
                   <div v-if="relation.status === 'pending' && relation.registration_link" class="customer-actions">
@@ -1505,13 +1503,13 @@ onBeforeUnmount(() => {
 }
 
 .customer-panel--accordion .ds-accordion-header {
-  gap: 0.72rem;
-  min-height: 3.4rem;
-  padding: 0.78rem 0.9rem;
+  gap: 0.6rem;
+  min-height: 3.28rem;
+  padding: 0.72rem 0.82rem;
 }
 
 .customer-panel--accordion .ds-accordion-header-info {
-  gap: 0.72rem;
+  gap: 0.58rem;
 }
 
 .customer-panel--accordion .ds-accordion-header-info h4,
@@ -1521,27 +1519,37 @@ onBeforeUnmount(() => {
 }
 
 .customer-main-menu-header {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(0, auto);
   align-items: center;
+  direction: rtl;
 }
 
 .customer-menu-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
   min-width: 0;
 }
 
 .customer-menu-title h4 {
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.96rem;
+  font-family: inherit;
+  font-size: 0.88rem;
   font-weight: 850;
+  letter-spacing: 0;
+  line-height: 1.6;
 }
 
 .customer-menu-note {
-  max-width: 13rem;
+  max-width: clamp(6.2rem, 28vw, 12rem);
   overflow: hidden;
   color: #6b7280;
   direction: rtl;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 650;
   line-height: 1.45;
   text-align: right;
@@ -1549,10 +1557,31 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.customer-main-menu-header .accordion-header-actions {
+  min-width: 0;
+  max-width: clamp(7.5rem, 36vw, 13.5rem);
+  gap: 0.38rem;
+  justify-content: flex-end;
+}
+
 .form-subpanel--accordion .ds-accordion-header-info p {
   margin: 3px 0 0;
-  font-size: 0.84rem;
+  font-size: 0.74rem;
+  line-height: 1.55;
   color: #64748b;
+}
+
+.form-subpanel--accordion .ds-accordion-header-info h5,
+.detail-accordion .ds-accordion-header-info h4 {
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.detail-accordion .ds-accordion-header-info p {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 0.74rem;
+  line-height: 1.6;
 }
 
 .customer-accordion-body {
@@ -1754,24 +1783,25 @@ onBeforeUnmount(() => {
 .customer-list {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 9px;
 }
 
 .customer-card {
-  border-radius: 22px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
-  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 251, 235, 0.72));
+  padding: 0.7rem;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 0.6rem;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
 }
 
 .customer-card-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
 }
 
 .customer-card-head--manage {
@@ -1781,13 +1811,36 @@ onBeforeUnmount(() => {
 .manage-customer {
   flex: 0 0 auto;
   order: -1;
+  min-width: 74px;
+  min-height: 2.5rem;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  box-shadow: none;
+}
+
+.customer-card-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.48rem;
+}
+
+.customer-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .customer-card-head-side {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .customer-identity-block {
@@ -1798,31 +1851,35 @@ onBeforeUnmount(() => {
 }
 
 .customer-card-head h5 {
-  margin: 0 0 4px;
-  font-size: 1rem;
+  margin: 0;
+  overflow: hidden;
   color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .customer-account-name {
   margin: 0;
   color: #64748b;
   direction: ltr;
+  font-size: 0.72rem;
   text-align: right;
 }
 
 .customer-mobile-number {
-  margin: 0;
-  font-size: 0.8rem;
-  color: #94a3b8;
   direction: ltr;
-  text-align: right;
+  text-align: left;
 }
 
 .customer-status-badge {
   border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 0.8rem;
+  padding: 4px 9px;
+  font-size: 0.7rem;
   font-weight: 800;
+  line-height: 1.5;
 }
 
 .customer-status-badge.status-pending {
@@ -1839,10 +1896,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
-  padding: 0 12px;
+  min-height: 25px;
+  padding: 0 9px;
   border-radius: 999px;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   font-weight: 800;
 }
 
@@ -1867,11 +1924,50 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.customer-card-meta-pills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.8rem, 1fr));
+  gap: 0.42rem;
+}
+
+.customer-info-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 2rem;
+  gap: 0.42rem;
+  padding: 0.28rem 0.52rem;
+  border-radius: 0.78rem;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.customer-info-pill span {
+  color: #94a3b8;
+  font-weight: 750;
+}
+
+.customer-info-pill strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .customer-state-copy {
   margin: 0;
-  font-size: 0.82rem;
-  font-weight: 700;
-  line-height: 1.8;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.7;
 }
 
 .customer-state-copy.status-pending {
@@ -2166,7 +2262,6 @@ onBeforeUnmount(() => {
   }
 
   .panel-title-row,
-  .customer-card-head,
   .session-panel-header,
   .session-item {
     flex-direction: column;
@@ -2208,17 +2303,53 @@ onBeforeUnmount(() => {
   }
 
   .customer-main-menu-header {
-    flex-wrap: nowrap;
-    min-height: 4.3rem;
+    grid-template-columns: minmax(8.6rem, 1fr) minmax(0, 7.7rem);
+    min-height: 3.85rem;
   }
 
   .customer-menu-title h4 {
-    font-size: 1rem;
+    font-size: 0.88rem;
   }
 
   .customer-menu-note {
-    max-width: 7rem;
-    font-size: 0.7rem;
+    max-width: 5.8rem;
+    font-size: 0.66rem;
+    line-height: 1.35;
+  }
+
+  .customer-main-menu-header .accordion-header-actions {
+    max-width: 7.7rem;
+  }
+
+  .customer-card {
+    padding: 0.62rem;
+  }
+
+  .customer-card-head {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .manage-customer {
+    min-width: 66px;
+    min-height: 2.35rem;
+    padding: 0 10px;
+    font-size: 0.72rem;
+  }
+
+  .customer-card-title-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .customer-card-head-side {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .customer-card-meta-pills {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
