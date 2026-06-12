@@ -110,6 +110,10 @@ For production-hardening checks:
   P0-P10 evidence validation, current manifest identity checks, live health and
   sync-health, Messenger readiness, observability minimums, backup/rollback
   evidence, and accepted-warning ownership.
+- `make production-load-realistic ARGS="--dry-run --json"` validates the Stage L3
+  realistic mixed k6 workload contract without hitting production. Real load
+  runs require `LOAD_RUNNER_HOST` and should start from the later Stage L5 smoke
+  profile.
 - `make production-alerts` evaluates operational alert thresholds for
   PostgreSQL connections/idle transactions, Redis memory/AOF, sync backlog/lag,
   disk usage, and backup freshness on both production hosts.

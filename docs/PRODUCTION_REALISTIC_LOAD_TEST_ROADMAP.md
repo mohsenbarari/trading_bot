@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L2 complete. Stage L3 is next.
+Status: Stage L3 complete. Stage L4 is next.
 
 Last updated: 2026-06-12
 
@@ -18,7 +18,8 @@ same time.
 | `L0` | Complete on 2026-06-12 | Contract, safety inventory, persona endpoint map, restricted endpoint list, synthetic mutation inventory, and Stage L1 credential requirements are recorded in this document. No production load was generated. |
 | `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@87.107.3.22`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
 | `L2` | Complete on 2026-06-12 | Default `make production-load-fixtures` prepare-and-cleanup passed against Iran/load-runner with artifact `tmp/production-benchmark/20260612T193743Z/load-fixtures/`: 161 synthetic users, 80 direct pairs, 12 groups, 3 channels, 60 offers, 20 trades, auth-pool upload, clean pre/post sync-health, and successful Iran/foreign/load-runner cleanup. |
-| `L3`-`L11` | Pending | k6 mixed harness, observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
+| `L3` | Complete on 2026-06-12 | Added the mixed k6 harness, production runner, and make target. Dry-run artifact `tmp/production-benchmark/20260612T195338Z/load-realistic/` passed without touching production and validated scenario weights, manifest-derived Iran URL, runtime flags, and threshold contract. |
+| `L4`-`L11` | Pending | observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
 
@@ -444,6 +445,40 @@ Acceptance:
 - Local dry-run can list scenarios without hitting production.
 - Smoke profile can run at low RPS.
 - k6 thresholds reflect the official gates.
+
+Commands:
+
+```bash
+make production-load-realistic ARGS="--dry-run --json"
+```
+
+For a real low-RPS run from the Stage L1 load-runner:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> \
+LOAD_RUNNER_JUMP_HOST=root@<iran-ip> \
+LOAD_RUNNER_PASSWORD=<load-runner-password> \
+TARGET_RPS=50 \
+DURATION=2m \
+LOAD_PROFILE=smoke \
+make production-load-realistic
+```
+
+Implementation status:
+
+- `scripts/load/k6_realistic_mix.js` defines the persona-weighted workload:
+  market, offers, trades, Messenger text/media, profile, notifications, and
+  admin read-only pressure.
+- `scripts/report_production_realistic_load.py` writes
+  `tmp/production-benchmark/<timestamp>/load-realistic/`, supports dry-run,
+  prepares/cleans L2 fixtures for non-dry-runs, uploads the k6 script to the
+  load-runner, and downloads `k6-summary.json`.
+- `make production-load-realistic` is the operator entrypoint.
+- Default live flags are conservative: `LOAD_PROFILE=smoke`,
+  `TARGET_RPS=50`, `INCLUDE_MEDIA=0`, and `INCLUDE_MUTATIONS=0`; official
+  mutating/media pressure is enabled explicitly in later stages.
+- Final dry-run artifact:
+  `tmp/production-benchmark/20260612T195338Z/load-realistic/`.
 
 ## Stage L4 - Observability Sampler During Load
 
