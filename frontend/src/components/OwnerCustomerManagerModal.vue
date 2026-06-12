@@ -411,18 +411,6 @@ const orderedRelations = computed(() => {
   })
 })
 
-const summaryStats = computed(() => {
-  const pending = relations.value.filter((relation) => relation.status === 'pending').length
-  const active = relations.value.filter((relation) => relation.status === 'active').length
-  const archived = relations.value.length - pending - active
-  return {
-    total: relations.value.length,
-    pending,
-    active,
-    archived: Math.max(0, archived),
-  }
-})
-
 async function loadRelations(options?: { silent?: boolean }) {
   if (options?.silent) {
     isRefreshing.value = true
@@ -783,52 +771,28 @@ onBeforeUnmount(() => {
     <div class="customer-manager-backdrop" @click.self="emit('close')">
       <div class="customer-manager-shell">
         <div class="customer-manager-header">
-          <div>
+          <button type="button" class="customer-manager-back" aria-label="بازگشت" @click="emit('close')">
+            <ChevronLeft :size="24" />
+          </button>
+          <div class="customer-manager-title">
             <p class="customer-manager-kicker">مدیریت ارتباطات</p>
             <h3>مشتریان مالک</h3>
           </div>
-          <HelpPopover
-            button-test="customer-manager-help"
-            note-test="customer-manager-help-note"
-            label="راهنمای مدیریت مشتریان"
-            text="این لیست فقط مشتریان فعال و در انتظار ثبت‌نام را نشان می‌دهد. نام کاربری، نام مدیریتی و موبایل بعد از ایجاد ثابت می‌مانند و در ویرایش فقط سطح و محدودیت‌های معاملاتی تغییر می‌کند."
-          />
-          <button type="button" class="customer-manager-close" @click="emit('close')">بستن</button>
+          <span class="customer-manager-header-spacer" aria-hidden="true"></span>
         </div>
 
         <div v-if="notice" class="customer-banner success">{{ notice }}</div>
         <div v-if="error" class="customer-banner error">{{ error }}</div>
 
-        <section class="customer-summary-strip" aria-label="خلاصه وضعیت مشتریان">
-          <article class="summary-card">
-            <span class="summary-label">کل رابطه‌ها</span>
-            <strong class="summary-value">{{ summaryStats.total }}</strong>
-          </article>
-          <article class="summary-card summary-card--active">
-            <span class="summary-label">فعال</span>
-            <strong class="summary-value">{{ summaryStats.active }}</strong>
-          </article>
-          <article class="summary-card summary-card--pending">
-            <span class="summary-label">در انتظار</span>
-            <strong class="summary-value">{{ summaryStats.pending }}</strong>
-          </article>
-          <article class="summary-card summary-card--archived">
-            <span class="summary-label">آرشیوی</span>
-            <strong class="summary-value">{{ summaryStats.archived }}</strong>
-          </article>
-        </section>
-
         <section class="customer-panel customer-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.create }">
-            <div class="ds-accordion-header" @click="toggleSection('create')">
-              <div class="ds-accordion-header-info">
+            <div class="ds-accordion-header customer-main-menu-header" @click="toggleSection('create')">
+              <div class="ds-accordion-header-info customer-menu-title">
                 <UserPlus :size="18" class="customer-section-icon" />
-                <div>
-                  <h4>افزودن مشتری جدید</h4>
-                  <p>دعوت و تنظیمات اولیه مشتری را یک‌جا ثبت کنید.</p>
-                </div>
+                <h4>افزودن مشتری جدید</h4>
               </div>
               <div class="accordion-header-actions">
+                <span class="customer-menu-note">دعوت و تنظیمات اولیه</span>
                 <HelpPopover
                   button-test="customer-create-help"
                   note-test="customer-create-help-note"
@@ -957,15 +921,13 @@ onBeforeUnmount(() => {
 
         <section class="customer-panel customer-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.relations }">
-            <div class="ds-accordion-header" @click="toggleSection('relations')">
-              <div class="ds-accordion-header-info">
+            <div class="ds-accordion-header customer-main-menu-header" @click="toggleSection('relations')">
+              <div class="ds-accordion-header-info customer-menu-title">
                 <Users :size="18" class="customer-section-icon" />
-                <div>
-                  <h4>مشتریان فعال و در انتظار</h4>
-                  <p>رابطه‌ها، وضعیت‌ها و اقدام‌های مدیریتی هر مشتری</p>
-                </div>
+                <h4>مدیریت مشتریان</h4>
               </div>
               <div class="accordion-header-actions">
+                <span class="customer-menu-note">لیست، ویرایش، آمار</span>
                 <HelpPopover
                   button-test="customer-list-help"
                   note-test="customer-list-help-note"
@@ -1331,18 +1293,25 @@ onBeforeUnmount(() => {
   padding: 22px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
 .customer-manager-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  min-height: 74px;
+  gap: 12px;
+  direction: ltr;
+}
+
+.customer-manager-title {
+  text-align: center;
+  direction: rtl;
 }
 
 .customer-manager-kicker {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-size: 0.78rem;
   font-weight: 700;
   color: #d97706;
@@ -1354,7 +1323,7 @@ onBeforeUnmount(() => {
   color: #111827;
 }
 
-.customer-manager-close,
+.customer-manager-back,
 .ghost-btn,
 .primary-btn,
 .secondary-btn,
@@ -1367,7 +1336,26 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.customer-manager-close,
+.customer-manager-back {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.customer-manager-header-spacer {
+  width: 44px;
+  height: 44px;
+}
+
 .ghost-btn,
 .secondary-btn {
   background: rgba(148, 163, 184, 0.14);
@@ -1504,72 +1492,63 @@ onBeforeUnmount(() => {
   color: #92400e;
 }
 
-.customer-summary-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.summary-card {
-  border-radius: 20px;
-  padding: 14px 16px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.summary-card--active {
-  background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(240, 253, 244, 0.98));
-}
-
-.summary-card--pending {
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 247, 237, 0.98));
-}
-
-.summary-card--archived {
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98));
-}
-
-.summary-label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #64748b;
-}
-
-.summary-value {
-  font-size: 1.35rem;
-  line-height: 1;
-  color: #0f172a;
-}
-
 .customer-panel {
-  border-radius: 24px;
+  border-radius: 1rem;
 }
 
 .customer-panel--accordion .ds-accordion {
-  border-radius: 24px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(255, 255, 255, 0.82);
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
   overflow: hidden;
+  box-shadow: 0 10px 28px rgba(245, 158, 11, 0.08);
 }
 
 .customer-panel--accordion .ds-accordion-header {
-  gap: 14px;
+  gap: 0.72rem;
+  min-height: 3.4rem;
+  padding: 0.78rem 0.9rem;
 }
 
 .customer-panel--accordion .ds-accordion-header-info {
-  gap: 12px;
+  gap: 0.72rem;
 }
 
 .customer-panel--accordion .ds-accordion-header-info h4,
 .form-subpanel--accordion .ds-accordion-header-info h5 {
   margin: 0;
-  color: #0f172a;
+  color: #92400e;
 }
 
-.customer-panel--accordion .ds-accordion-header-info p,
+.customer-main-menu-header {
+  align-items: center;
+}
+
+.customer-menu-title {
+  min-width: 0;
+}
+
+.customer-menu-title h4 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.96rem;
+  font-weight: 850;
+}
+
+.customer-menu-note {
+  max-width: 13rem;
+  overflow: hidden;
+  color: #6b7280;
+  direction: rtl;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.45;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .form-subpanel--accordion .ds-accordion-header-info p {
   margin: 3px 0 0;
   font-size: 0.84rem;
@@ -2182,10 +2161,10 @@ onBeforeUnmount(() => {
     width: 100%;
     border-radius: 24px 24px 0 0;
     min-height: 100%;
-    padding: 18px 14px 22px;
+    padding: 12px 20px 22px;
+    gap: 10px;
   }
 
-  .customer-manager-header,
   .panel-title-row,
   .customer-card-head,
   .session-panel-header,
@@ -2193,7 +2172,6 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
-  .customer-summary-strip,
   .customer-form-sections,
   .customer-form-grid,
   .customer-meta-grid,
@@ -2220,16 +2198,27 @@ onBeforeUnmount(() => {
 
   .panel-actions > button,
   .customer-actions > button,
-  .customer-manager-close,
   .ghost-btn,
   .ghost-btn--inline {
     width: 100%;
   }
 
   .accordion-header-actions {
-    width: 100%;
     justify-content: flex-start;
-    flex-wrap: wrap;
+  }
+
+  .customer-main-menu-header {
+    flex-wrap: nowrap;
+    min-height: 4.3rem;
+  }
+
+  .customer-menu-title h4 {
+    font-size: 1rem;
+  }
+
+  .customer-menu-note {
+    max-width: 7rem;
+    font-size: 0.7rem;
   }
 }
 </style>
