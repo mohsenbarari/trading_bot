@@ -25,6 +25,9 @@ class StaticSurfaceSmokeTests(unittest.TestCase):
         self.assertEqual(manifest['name'], 'Gold')
         self.assertEqual(manifest['share_target']['action'], '/share-receive')
         self.assertGreaterEqual(len(manifest['icons']), 2)
+        icon_purposes = {icon.get('purpose') for icon in manifest['icons']}
+        self.assertIn('any', icon_purposes)
+        self.assertIn('maskable', icon_purposes)
 
     def test_template_and_font_assets_exist_and_are_non_empty(self):
         template_path = REPO_ROOT / 'templates' / '404.html'
