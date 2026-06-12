@@ -16,7 +16,7 @@ same time.
 | Stage | Status | Evidence |
 | --- | --- | --- |
 | `L0` | Complete on 2026-06-12 | Contract, safety inventory, persona endpoint map, restricted endpoint list, synthetic mutation inventory, and Stage L1 credential requirements are recorded in this document. No production load was generated. |
-| `L1` | Next | Load-runner bootstrap requires the third server SSH host/IP, SSH user, and authentication method. |
+| `L1` | In progress | `scripts/bootstrap_load_runner.sh` and `make production-load-runner-bootstrap` are available. Remote execution requires the third server SSH host/IP, SSH user, and authentication method. |
 | `L2`-`L11` | Pending | Fixture/auth pool, k6 mixed harness, observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
@@ -283,11 +283,29 @@ Goal: prepare the third server as the only host that generates load.
 
 Changes:
 
-- SSH into the load-runner host.
-- Install `k6`, `curl`, `jq`, and minimal helper dependencies.
-- Verify DNS/TLS/network path to the Iran domain.
-- Create a non-repo runtime env file for load-test secrets.
-- Record load-runner CPU/RAM/network baseline.
+- SSH into the load-runner host with `scripts/bootstrap_load_runner.sh`.
+- Install or verify `k6`, `curl`, `jq`, `gnupg`, and minimal apt dependencies.
+- Set the load-runner timezone to UTC when the host allows it.
+- Verify DNS/TLS/network path from the load-runner to the Iran health URL.
+- Create a remote load-test workspace under `/srv/trading-bot-loadtest` by default.
+- Record load-runner CPU/RAM/disk/route/tool baseline.
+- Copy remote bootstrap artifacts back into
+  `tmp/production-benchmark/<timestamp>/load-runner-bootstrap/`.
+
+Command:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> make production-load-runner-bootstrap
+```
+
+Optional overrides:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> \
+LOAD_RUNNER_SSH_PORT=22 \
+ARGS="--remote-dir /srv/trading-bot-loadtest" \
+make production-load-runner-bootstrap
+```
 
 Acceptance:
 
@@ -300,6 +318,11 @@ Needs from operator:
 
 - load-runner SSH host/IP
 - SSH user/auth
+
+Current implementation status:
+
+- Bootstrap command surface exists.
+- Remote run is pending credentials.
 
 ## Stage L2 - Synthetic Fixture and Auth Pool
 
