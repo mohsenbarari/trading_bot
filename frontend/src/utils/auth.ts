@@ -223,7 +223,12 @@ export function forceLogout() {
     window.location.href = '/login';
 }
 
-export async function apiFetch(url: string, options: RequestInit = {}) {
+type ApiFetchOptions = RequestInit & {
+    retryNetwork?: boolean;
+};
+
+export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
+    const { retryNetwork = true, ...requestOptions } = options;
     let retries = 0;
     let didRefresh = false;
 
@@ -232,7 +237,7 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 
         const headers = {
             'Content-Type': 'application/json',
-            ...(options.headers || {}),
+            ...(requestOptions.headers || {}),
         } as any;
 
         if (token) {
@@ -240,7 +245,7 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
         }
 
         const config = {
-            ...options,
+            ...requestOptions,
             headers
         };
 
@@ -328,16 +333,17 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
 
             return response;
         } catch (error: any) {
-            // Is this a network fetch drop?
-            if (
-                error.name === 'TypeError' || 
-                error.message?.includes('Failed to fetch') || 
+            const isRetryableNetworkError =
+                error.name === 'TypeError' ||
+                error.message?.includes('Failed to fetch') ||
                 error.message?.toLowerCase().includes('network') ||
                 error.message === 'NetworkError' ||
                 error.message === 'خطا در ارتباط با سرور.' ||
                 error.message?.includes('fetch dynamically imported module') ||
-                error.message?.includes('Load failed')
-            ) {
+                error.message?.includes('Load failed');
+
+            // Is this a network fetch drop?
+            if (retryNetwork && isRetryableNetworkError) {
                 isAppConnecting.value = true;
                 retries++;
                 console.warn(`[apiFetch] Connection lost. Retrying (${retries})...`);

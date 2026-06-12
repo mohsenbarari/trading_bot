@@ -499,6 +499,21 @@ describe('auth utils', () => {
     warnSpy.mockRestore()
   })
 
+  it('apiFetch can disable network retry for non-idempotent mutations', async () => {
+    localStorage.setItem('auth_token', 'auth-token')
+    fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: 'temporary failure' }, 502, false))
+
+    const { apiFetch, isAppConnecting } = await import(authModulePath)
+
+    await expect(apiFetch('/api/mutation', {
+      method: 'PATCH',
+      body: JSON.stringify({ value: 1 }),
+      retryNetwork: false,
+    })).rejects.toThrow('NetworkError')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(isAppConnecting.value).toBe(false)
+  })
+
   it('apiFetchJson returns null for 204 and surfaces response details on failures', async () => {
     fetchMock
       .mockResolvedValueOnce(makeJsonResponse(null, 204))
