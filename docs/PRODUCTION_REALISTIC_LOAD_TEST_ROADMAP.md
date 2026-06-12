@@ -17,7 +17,8 @@ same time.
 | --- | --- | --- |
 | `L0` | Complete on 2026-06-12 | Contract, safety inventory, persona endpoint map, restricted endpoint list, synthetic mutation inventory, and Stage L1 credential requirements are recorded in this document. No production load was generated. |
 | `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@87.107.3.22`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
-| `L2`-`L11` | Pending | Fixture/auth pool, k6 mixed harness, observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
+| `L2` | In progress | `scripts/load_fixture_worker.py`, `scripts/report_production_load_fixtures.py`, and `make production-load-fixtures` are available for synthetic fixture/auth-pool setup and cleanup. A live Stage L2 prepare/cleanup run still requires the new scripts to be synced/deployed to the Iran app container. |
+| `L3`-`L11` | Pending | k6 mixed harness, observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
 
@@ -364,6 +365,55 @@ Acceptance:
 - Cleanup is idempotent.
 - Sync-health is clean after fixture creation and after cleanup.
 - No real user data is modified.
+
+Command:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> \
+LOAD_RUNNER_JUMP_HOST=root@<iran-ip> \
+LOAD_RUNNER_PASSWORD=<load-runner-password> \
+make production-load-fixtures
+```
+
+Default action is `prepare-and-cleanup`: it proves fixture creation, uploads the
+auth pool to the load-runner, waits for sync-health, then removes synthetic data
+from both hosts and deletes the load-runner auth-pool file.
+
+For Stage L3 setup, keep fixtures by running:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> \
+LOAD_RUNNER_JUMP_HOST=root@<iran-ip> \
+LOAD_RUNNER_PASSWORD=<load-runner-password> \
+ARGS="--action prepare" \
+make production-load-fixtures
+```
+
+For cleanup of a known prefix:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> \
+LOAD_RUNNER_JUMP_HOST=root@<iran-ip> \
+LOAD_RUNNER_PASSWORD=<load-runner-password> \
+ARGS="--action cleanup --prefix loadtest_<timestamp>_" \
+make production-load-fixtures
+```
+
+Current implementation status:
+
+- `scripts/load_fixture_worker.py` runs inside the app container and creates or
+  cleans only rows matching the exact `loadtest_*` prefix.
+- `scripts/report_production_load_fixtures.py` orchestrates Iran prepare,
+  load-runner auth-pool upload, sync-health gates, Iran/foreign cleanup, and
+  redacted artifacts.
+- `make production-load-fixtures` is the operator entrypoint.
+- Auth tokens are not written to repo artifacts; local logs/results redact
+  tokens, and the raw auth pool is written only to
+  `/srv/trading-bot-loadtest/auth/<prefix>auth-pool.json` on the load-runner
+  with restricted permissions.
+- Live execution should happen after the new scripts are present on the Iran
+  server through `make production-release` or the appropriate production sync
+  path.
 
 ## Stage L3 - k6 Mixed Scenario Harness
 
