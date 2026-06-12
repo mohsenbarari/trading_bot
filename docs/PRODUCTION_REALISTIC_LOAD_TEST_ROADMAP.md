@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L0 complete. Stage L1 is next.
+Status: Stage L1 complete. Stage L2 is next.
 
 Last updated: 2026-06-12
 
@@ -16,7 +16,7 @@ same time.
 | Stage | Status | Evidence |
 | --- | --- | --- |
 | `L0` | Complete on 2026-06-12 | Contract, safety inventory, persona endpoint map, restricted endpoint list, synthetic mutation inventory, and Stage L1 credential requirements are recorded in this document. No production load was generated. |
-| `L1` | In progress | `scripts/bootstrap_load_runner.sh` and `make production-load-runner-bootstrap` are available. Remote execution requires the third server SSH host/IP, SSH user, and authentication method. |
+| `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@87.107.3.22`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
 | `L2`-`L11` | Pending | Fixture/auth pool, k6 mixed harness, observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
@@ -307,6 +307,24 @@ ARGS="--remote-dir /srv/trading-bot-loadtest" \
 make production-load-runner-bootstrap
 ```
 
+If the load-runner is reachable only through the Iran host:
+
+```bash
+LOAD_RUNNER_HOST=root@<load-runner-ip> \
+LOAD_RUNNER_JUMP_HOST=root@<iran-ip> \
+LOAD_RUNNER_PASSWORD=<load-runner-password> \
+make production-load-runner-bootstrap
+```
+
+Do not commit or write the load-runner password to repo files. Pass it only as
+runtime environment input when the bootstrap command is executed.
+
+If the load-runner cannot reach the k6 apt/GitHub endpoints directly, the
+bootstrap script seeds a pinned k6 archive from the current host through the SSH
+jump path. Repeated runs skip that seed upload when `k6` already exists on the
+load-runner. Set `LOAD_RUNNER_SEED_K6_ARCHIVE=0` only when the load-runner has
+reliable direct access to the k6 package source.
+
 Acceptance:
 
 - `k6 version` works on the load-runner.
@@ -321,8 +339,9 @@ Needs from operator:
 
 Current implementation status:
 
-- Bootstrap command surface exists.
-- Remote run is pending credentials.
+- Completed against `root@45.129.39.182` through `root@87.107.3.22`.
+- Final artifact: `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`.
+- Result: `passed`, Iran health HTTP `200`, `k6 v0.49.0`, `jq-1.7`, `curl 8.5.0`.
 
 ## Stage L2 - Synthetic Fixture and Auth Pool
 
