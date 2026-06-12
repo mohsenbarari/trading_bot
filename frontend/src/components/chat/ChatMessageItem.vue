@@ -124,16 +124,16 @@
           </button>
           
           <!-- 1. Downloaded, Uploading, or Local Render -->
-          <template v-if="isCached || msg.local_blob_url">
+          <template v-if="mediaRenderUrl">
             <div class="absolute inset-0 w-full h-full flex items-center justify-center">
               <img v-if="msg.message_type === 'image'"
                     v-show="!mediaTransferState.isSendingBusy || thumbnail"
                     :data-media-msg-id="msg.id"
-                   :src="msg.local_blob_url || cachedUrl"
+                   :src="mediaRenderUrl"
                   alt="تصویر" draggable="false" class="msg-media-content w-full h-full object-cover absolute inset-0 block" />
                    
               <div v-else-if="msg.message_type === 'video'" class="absolute inset-0 w-full h-full">
-                  <video v-show="!mediaTransferState.isSendingBusy" :src="msg.local_blob_url || cachedUrl" draggable="false"
+                  <video v-show="!mediaTransferState.isSendingBusy" :src="mediaRenderUrl" draggable="false"
                        class="w-full h-full object-cover absolute inset-0 block" autoplay muted loop playsinline></video>
                 <div v-if="!mediaTransferState.isSendingBusy" class="video-play-indicator">
                   <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
@@ -574,7 +574,7 @@ const mediaFileId = computed(() => getFileId(props.msg.content, parsedContent.va
 const mediaCaption = computed(() => getMediaCaptionText(props.msg.message_type, props.msg.content, parsedContent.value))
 
 const cachedUrl = computed(() => props.imageCache[mediaFileId.value] || '')
-const isCached = computed(() => Boolean(cachedUrl.value))
+const mediaRenderUrl = computed(() => cachedUrl.value || props.msg.local_blob_url || '')
 const thumbnail = computed(() => getImageThumbnail(props.msg.content, parsedContent.value))
 const formattedTime = computed(() => formatTime(props.msg.created_at))
 const SINGLE_MEDIA_MAX_WIDTH = 320
@@ -1383,7 +1383,7 @@ const albumLayoutItems = computed(() => {
     const dimensions = resolveMessageMediaDimensions(message, parsedItemContent)
     const fileId = getFileId(message.content, parsedItemContent)
     const cachedMediaUrl = fileId ? props.imageCache[fileId] : ''
-    const resolvedMediaUrl = message.local_blob_url || cachedMediaUrl || ''
+    const resolvedMediaUrl = cachedMediaUrl || message.local_blob_url || ''
     const previewUrl = parsedItemContent?.thumbnail || ''
 
     return {

@@ -802,6 +802,57 @@ describe('ChatMessageItem.vue', () => {
     expect(uploadingMediaWrapper.emitted('cancel-send')).toHaveLength(1)
   })
 
+  it('prefers the current media cache over a stale local blob URL after upload hydration', () => {
+    const wrapper = mountMediaMessage({
+      local_blob_url: 'blob:revoked-local-preview',
+    }, {
+      imageCache: { 'image-71': 'blob:fresh-cached-media' },
+    })
+
+    expect(wrapper.get('img.msg-media-content').attributes('src')).toBe('blob:fresh-cached-media')
+
+    const albumWrapper = mount(ChatMessageItem, {
+      props: {
+        msg: {
+          id: 72,
+          sender_id: 7,
+          content: JSON.stringify({ file_id: 'image-72', album_id: 'album-72', album_index: 0 }),
+          message_type: 'image',
+          created_at: '2026-05-12T10:00:00.000Z',
+          is_deleted: false,
+          reactions: [],
+          local_blob_url: 'blob:revoked-album-preview',
+        },
+        currentUserId: 7,
+        selectedUserName: 'Ali',
+        selectedMessages: [],
+        imageCache: { 'image-72': 'blob:fresh-album-cache' },
+        isSelectionMode: false,
+        isAlbum: true,
+        albumItems: [{
+          id: 72,
+          sender_id: 7,
+          content: JSON.stringify({ file_id: 'image-72', album_id: 'album-72', album_index: 0 }),
+          message_type: 'image',
+          created_at: '2026-05-12T10:00:00.000Z',
+          is_deleted: false,
+          reactions: [],
+          local_blob_url: 'blob:revoked-album-preview',
+        }],
+      },
+      global: {
+        stubs: {
+          ChatAlbumLayout: {
+            props: ['items'],
+            template: '<div class="album-layout-stub">{{ items[0].url }}</div>',
+          },
+        },
+      },
+    })
+
+    expect(albumWrapper.text()).toContain('blob:fresh-album-cache')
+  })
+
   it('treats optimistic sent messages as sending only until upload handoff is marked pending', () => {
     const sendingWrapper = mountTextMessage({
       id: -111,
