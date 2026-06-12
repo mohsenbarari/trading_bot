@@ -414,6 +414,9 @@ Current implementation status:
 - Cleanup deletes chat memberships by both synthetic user id and synthetic chat
   id, so group/channel fixtures with mixed members can be removed without
   leaving foreign-key residue.
+- Prepare aligns local integer sequences for fixture tables before inserts,
+  because cross-server seed/sync may import explicit ids and leave PostgreSQL
+  sequences behind `MAX(id)`.
 - Live execution should happen after the new scripts are present on the Iran
   server through `make production-release` or the appropriate production sync
   path.

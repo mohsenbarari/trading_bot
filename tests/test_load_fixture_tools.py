@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.load_fixture_worker import mobile_for, redact_auth_pool
+from scripts.load_fixture_worker import SEQUENCE_ALIGNMENT_TABLES, mobile_for, redact_auth_pool
 from scripts.report_production_load_fixtures import build_scp_opts, build_ssh_opts, redact_payload
 
 
@@ -46,6 +46,10 @@ class LoadFixtureToolsTests(unittest.TestCase):
         self.assertIn("-J", ssh_opts)
         self.assertIn("root@iran.example:2200", ssh_opts)
         self.assertIn("ProxyJump=root@iran.example:2200", scp_opts)
+
+    def test_sequence_alignment_covers_fixture_integer_tables(self):
+        for table_name in ("users", "chat_members", "messages", "offers", "trades"):
+            self.assertIn(table_name, SEQUENCE_ALIGNMENT_TABLES)
 
 
 if __name__ == "__main__":
