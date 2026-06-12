@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ChevronLeft, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
+import { ChevronLeft, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
@@ -10,7 +10,7 @@ const emit = defineEmits<{
 }>()
 
 type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
-type ActivePanel = 'create' | 'relations' | null
+type DetailSection = 'detailOverview' | 'detailSessions' | 'detailDanger'
 
 interface AccountantRelation {
   id: number
@@ -65,29 +65,32 @@ function makeEmptyEditForm() {
 
 const relations = ref<AccountantRelation[]>([])
 const isLoading = ref(true)
-const isRefreshing = ref(false)
 const isSubmitting = ref(false)
 const isSavingEdit = ref(false)
-const editingRelationId = ref<number | null>(null)
 const error = ref('')
 const notice = ref('')
+const detailSaveNotice = ref('')
+const viewportToast = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 const copiedRelationId = ref<number | null>(null)
 const openSessionsRelationId = ref<number | null>(null)
 const sessionsByRelationId = ref<Record<number, AccountantSessionSummary[]>>({})
 const loadingSessionsRelationId = ref<number | null>(null)
 const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
-const activePanel = ref<ActivePanel>(null)
+const selectedRelationId = ref<number | null>(null)
 
 const createForm = reactive(makeEmptyCreateForm())
 const editForm = reactive(makeEmptyEditForm())
 const openSections = reactive({
-  create: true,
-  createIdentity: true,
-  createDuty: true,
-  relations: true,
+  create: false,
+  createDuty: false,
+  relations: false,
+  detailOverview: false,
+  detailSessions: false,
+  detailDanger: false,
 })
 let countdownTimer: number | null = null
+let viewportToastTimer: number | null = null
 
 function parseApiError(payload: unknown, fallback: string) {
   if (typeof payload === 'object' && payload && 'detail' in payload) {
@@ -112,17 +115,29 @@ function toggleSection(section: keyof typeof openSections) {
   openSections[section] = !openSections[section]
 }
 
-function openPanel(panel: Exclude<ActivePanel, null>) {
-  activePanel.value = panel
-}
-
-function backToCategories() {
-  activePanel.value = null
-}
-
 function clearEditState() {
-  editingRelationId.value = null
   Object.assign(editForm, makeEmptyEditForm())
+}
+
+function showViewportToast(type: 'success' | 'error' | 'info', text: string, timeoutMs = 4200) {
+  viewportToast.value = { type, text }
+  if (viewportToastTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(viewportToastTimer)
+  }
+  viewportToastTimer = typeof window !== 'undefined'
+    ? window.setTimeout(() => {
+        viewportToast.value = null
+        viewportToastTimer = null
+      }, timeoutMs)
+    : null
+}
+
+function clearViewportToast() {
+  viewportToast.value = null
+  if (viewportToastTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(viewportToastTimer)
+  }
+  viewportToastTimer = null
 }
 
 function formatDateTime(value: string | null) {
@@ -201,6 +216,11 @@ function getRelationStateText(relation: AccountantRelation) {
   return ''
 }
 
+const selectedRelation = computed(() => {
+  if (selectedRelationId.value == null) return null
+  return relations.value.find((relation) => relation.id === selectedRelationId.value) ?? null
+})
+
 function refreshCurrentTime() {
   currentTimeMs.value = Date.now()
 }
@@ -241,24 +261,12 @@ const orderedRelations = computed(() => {
   })
 })
 
-const summaryStats = computed(() => {
-  const pending = relations.value.filter((relation) => relation.status === 'pending').length
-  const active = relations.value.filter((relation) => relation.status === 'active').length
-  const archived = relations.value.length - pending - active
-  return {
-    total: relations.value.length,
-    pending,
-    active,
-    archived: Math.max(0, archived),
-  }
-})
+const pendingInvitationRelations = computed(() => orderedRelations.value.filter((relation) => relation.status === 'pending'))
 
-async function loadRelations(options?: { silent?: boolean }) {
-  if (options?.silent) {
-    isRefreshing.value = true
-  } else {
-    isLoading.value = true
-  }
+const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
+
+async function loadRelations() {
+  isLoading.value = true
   error.value = ''
 
   try {
@@ -274,11 +282,14 @@ async function loadRelations(options?: { silent?: boolean }) {
         openSessionsRelationId.value = null
       }
     }
+    if (selectedRelationId.value !== null && !relations.value.some((relation) => relation.id === selectedRelationId.value)) {
+      selectedRelationId.value = null
+      clearEditState()
+    }
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست حسابداران ناموفق بود.'
   } finally {
     isLoading.value = false
-    isRefreshing.value = false
   }
 }
 
@@ -305,16 +316,6 @@ async function loadSessionsForRelation(relationId: number) {
       loadingSessionsRelationId.value = null
     }
   }
-}
-
-async function toggleSessionPanel(relation: AccountantRelation) {
-  if (relation.status !== 'active' || !relation.accountant_user_id) return
-  if (openSessionsRelationId.value === relation.id) {
-    openSessionsRelationId.value = null
-    return
-  }
-  openSessionsRelationId.value = relation.id
-  await loadSessionsForRelation(relation.id)
 }
 
 async function terminateAccountantSession(relation: AccountantRelation, session: AccountantSessionSummary) {
@@ -345,13 +346,6 @@ async function terminateAccountantSession(relation: AccountantRelation, session:
   }
 }
 
-function startEditing(relation: AccountantRelation) {
-  editingRelationId.value = relation.id
-  editForm.duty_description = relation.duty_description || ''
-  notice.value = ''
-  error.value = ''
-}
-
 async function createRelation() {
   if (isSubmitting.value) return
   isSubmitting.value = true
@@ -375,7 +369,7 @@ async function createRelation() {
     relations.value = [payload as AccountantRelation, ...relations.value.filter((item) => item.id !== (payload as AccountantRelation).id)]
     resetCreateForm()
     notice.value = 'دعوت حسابدار ثبت شد.'
-    activePanel.value = 'relations'
+    openSections.relations = true
   } catch (err: any) {
     error.value = err?.message || 'ایجاد حسابدار ناموفق بود.'
   } finally {
@@ -383,14 +377,16 @@ async function createRelation() {
   }
 }
 
-async function saveEdit(relationId: number) {
-  if (isSavingEdit.value) return
+async function saveDetailEdit() {
+  const relation = selectedRelation.value
+  if (!relation || isSavingEdit.value) return
   isSavingEdit.value = true
   error.value = ''
   notice.value = ''
+  detailSaveNotice.value = ''
 
   try {
-    const response = await apiFetch(`/api/accountants/owner-relations/${relationId}`, {
+    const response = await apiFetch(`/api/accountants/owner-relations/${relation.id}`, {
       method: 'PATCH',
       body: JSON.stringify({
         duty_description: normalizeDutyDescription(editForm.duty_description),
@@ -402,10 +398,13 @@ async function saveEdit(relationId: number) {
     }
     const updated = payload as AccountantRelation
     relations.value = relations.value.map((item) => (item.id === updated.id ? updated : item))
-    clearEditState()
     notice.value = 'اطلاعات حسابدار به‌روزرسانی شد.'
+    detailSaveNotice.value = notice.value
+    editForm.duty_description = updated.duty_description || ''
+    showViewportToast('success', notice.value)
   } catch (err: any) {
     error.value = err?.message || 'ویرایش حسابدار ناموفق بود.'
+    showViewportToast('error', error.value)
   } finally {
     isSavingEdit.value = false
   }
@@ -432,8 +431,12 @@ async function unlinkRelation(relation: AccountantRelation) {
       throw new Error(parseApiError(payload, isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.'))
     }
     relations.value = relations.value.filter((item) => item.id !== relation.id)
-    if (editingRelationId.value === relation.id) {
+    if (selectedRelationId.value === relation.id) {
+      selectedRelationId.value = null
       clearEditState()
+    }
+    if (openSessionsRelationId.value === relation.id) {
+      openSessionsRelationId.value = null
     }
     notice.value = isPending ? 'دعوت حسابدار لغو شد.' : 'ارتباط حسابدار قطع شد و دسترسی او غیرفعال گردید.'
   } catch (err: any) {
@@ -456,6 +459,33 @@ async function copyRegistrationLink(relation: AccountantRelation) {
   }
 }
 
+function openAccountantDetail(relation: AccountantRelation) {
+  selectedRelationId.value = relation.id
+  editForm.duty_description = relation.duty_description || ''
+  error.value = ''
+  notice.value = ''
+  detailSaveNotice.value = ''
+  openSections.detailOverview = true
+  openSections.detailSessions = false
+  openSections.detailDanger = false
+}
+
+function backToAccountantList() {
+  selectedRelationId.value = null
+  clearEditState()
+  detailSaveNotice.value = ''
+}
+
+async function toggleDetailSection(section: DetailSection) {
+  openSections[section] = !openSections[section]
+  const relation = selectedRelation.value
+  if (!relation || !openSections[section]) return
+  if (section === 'detailSessions' && relation.status === 'active' && relation.accountant_user_id) {
+    openSessionsRelationId.value = relation.id
+    await loadSessionsForRelation(relation.id)
+  }
+}
+
 onMounted(() => {
   startCountdownTimer()
   void loadRelations()
@@ -463,83 +493,42 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopCountdownTimer()
+  clearViewportToast()
 })
 </script>
 
 <template>
   <Teleport to="body">
+    <div
+      v-if="viewportToast"
+      class="accountant-viewport-toast"
+      :class="`accountant-viewport-toast--${viewportToast.type}`"
+      role="status"
+      aria-live="polite"
+    >
+      {{ viewportToast.text }}
+    </div>
     <div class="accountant-manager-backdrop" @click.self="emit('close')">
       <div class="accountant-manager-shell">
         <div class="accountant-manager-header">
-          <div>
-            <p class="accountant-manager-kicker">مدیریت ارتباطات</p>
-            <h3>حسابداران مالک</h3>
+          <button type="button" class="accountant-manager-back" aria-label="بازگشت" @click="emit('close')">
+            <ChevronLeft :size="24" />
+          </button>
+          <div class="accountant-manager-title">
+            <h3>حسابداران</h3>
           </div>
-          <HelpPopover
-            button-test="accountant-manager-help"
-            note-test="accountant-manager-help-note"
-            label="راهنمای مدیریت حسابداران"
-            text="این لیست فقط حسابداران فعال و در انتظار ثبت‌نام را نشان می‌دهد. در ویرایش فقط شرح وظیفه قابل تغییر است."
-          />
-          <button type="button" class="accountant-manager-close" @click="emit('close')">بستن</button>
+          <span class="accountant-manager-header-spacer" aria-hidden="true"></span>
         </div>
 
+        <div v-if="notice" class="accountant-banner success">{{ notice }}</div>
         <div v-if="error" class="accountant-banner error">{{ error }}</div>
-        <div v-else-if="notice" class="accountant-banner success">{{ notice }}</div>
 
-        <section class="accountant-summary-strip" aria-label="خلاصه وضعیت حسابداران">
-          <article class="summary-card">
-            <span class="summary-label">کل رابطه‌ها</span>
-            <strong class="summary-value">{{ summaryStats.total }}</strong>
-          </article>
-          <article class="summary-card summary-card--active">
-            <span class="summary-label">فعال</span>
-            <strong class="summary-value">{{ summaryStats.active }}</strong>
-          </article>
-          <article class="summary-card summary-card--pending">
-            <span class="summary-label">در انتظار</span>
-            <strong class="summary-value">{{ summaryStats.pending }}</strong>
-          </article>
-          <article class="summary-card summary-card--archived">
-            <span class="summary-label">آرشیوی</span>
-            <strong class="summary-value">{{ summaryStats.archived }}</strong>
-          </article>
-        </section>
-
-        <section v-if="activePanel === null" class="manager-category-menu card-with-help" aria-label="دسته‌بندی مدیریت حسابداران">
-          <HelpPopover
-            floating
-            button-test="accountant-category-menu-help"
-            note-test="accountant-category-menu-help-note"
-            label="راهنمای دسته‌بندی حسابداران"
-            text="ابتدا دسته مورد نظر را انتخاب کنید. سپس زیرمنوهای همان دسته، مثل مشخصات پایه یا شرح وظیفه، نمایش داده می‌شود."
-          />
-          <div class="manager-category-heading">دسته‌بندی مدیریت حسابداران</div>
-          <button type="button" class="menu-button settings-btn open-create-category" @click="openPanel('create')">
-            <span class="menu-button-icon"><UserPlus :size="18" /></span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">افزودن حسابدار</span>
-              <span class="menu-button-note">ثبت دعوت، مشخصات پایه و شرح وظیفه حسابدار</span>
-            </span>
-          </button>
-          <button type="button" class="menu-button settings-btn open-relations-category" @click="openPanel('relations')">
-            <span class="menu-button-icon"><Users :size="18" /></span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">مدیریت حسابداران</span>
-              <span class="menu-button-note">{{ summaryStats.total.toLocaleString('fa-IR') }} رابطه ثبت‌شده، شامل فعال، در انتظار و آرشیوی</span>
-            </span>
-          </button>
-        </section>
-
-        <section v-if="activePanel === 'create'" class="accountant-panel accountant-panel--accordion">
+        <section class="accountant-panel accountant-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.create }">
-            <div class="ds-accordion-header" @click="toggleSection('create')">
-              <div class="ds-accordion-header-info">
+            <div class="ds-accordion-header accountant-main-menu-header" @click="toggleSection('create')">
+              <div class="ds-accordion-header-info accountant-menu-title">
                 <UserPlus :size="18" class="accountant-section-icon" />
-                <div>
-                  <h4>افزودن حسابدار جدید</h4>
-                  <p>دعوت حسابدار و شرح نقش او را مرحله‌بندی شده ثبت کنید.</p>
-                </div>
+                <h4>افزودن حسابدار جدید</h4>
               </div>
               <div class="accordion-header-actions">
                 <HelpPopover
@@ -548,41 +537,30 @@ onBeforeUnmount(() => {
                   label="راهنمای افزودن حسابدار"
                   text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
                 />
-                <button type="button" class="ghost-btn ghost-btn--inline" @click.stop="backToCategories">بازگشت به دسته‌ها</button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
 
             <div v-show="openSections.create" class="ds-accordion-body accountant-accordion-body">
               <div class="accountant-form-sections accountant-form-sections--stacked">
-                <section class="form-subpanel form-subpanel--accordion">
-                  <div class="ds-accordion" :class="{ open: openSections.createIdentity }">
-                    <div class="ds-accordion-header" @click.stop="toggleSection('createIdentity')">
-                      <div class="ds-accordion-header-info">
-                        <UserPlus :size="16" class="accountant-subsection-icon" />
-                        <div>
-                          <h5>مشخصات پایه</h5>
-                          <p>نام کاربری، عنوان نمایشی و شماره موبایل حسابدار</p>
-                        </div>
-                      </div>
-                      <ChevronLeft :size="18" class="ds-accordion-icon" />
-                    </div>
-                    <div v-show="openSections.createIdentity" class="ds-accordion-body">
-                      <div class="accountant-form-grid">
-                        <label class="field-block">
-                          <span>نام کاربری جهانی</span>
-                          <input v-model="createForm.account_name" class="accountant-input create-account-name" type="text" placeholder="accountant_01" />
-                        </label>
-                        <label class="field-block">
-                          <span>نام نمایشی رابطه</span>
-                          <input v-model="createForm.relation_display_name" class="accountant-input create-display-name" type="text" placeholder="حسابدار فروش" />
-                        </label>
-                        <label class="field-block">
-                          <span>شماره موبایل</span>
-                          <input v-model="createForm.mobile_number" class="accountant-input create-mobile-number" type="tel" inputmode="numeric" placeholder="09120000000" />
-                        </label>
-                      </div>
-                    </div>
+                <section class="form-subpanel">
+                  <div class="form-subpanel-head">
+                    <h5>مشخصات حسابدار</h5>
+                    <p>نام کاربری، عنوان نمایشی و شماره موبایل حسابدار را وارد کنید.</p>
+                  </div>
+                  <div class="accountant-form-grid">
+                    <label class="field-block">
+                      <span>نام کاربری جهانی</span>
+                      <input v-model.trim="createForm.account_name" class="accountant-input create-account-name" type="text" placeholder="accountant_01" />
+                    </label>
+                    <label class="field-block">
+                      <span>نام نمایشی رابطه</span>
+                      <input v-model.trim="createForm.relation_display_name" class="accountant-input create-display-name" type="text" placeholder="حسابدار فروش" />
+                    </label>
+                    <label class="field-block">
+                      <span>شماره موبایل</span>
+                      <input v-model.trim="createForm.mobile_number" class="accountant-input create-mobile-number" type="tel" inputmode="numeric" placeholder="09120000000" />
+                    </label>
                   </div>
                 </section>
 
@@ -618,174 +596,225 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section v-if="activePanel === 'relations'" class="accountant-panel accountant-panel--accordion">
+        <section class="accountant-panel accountant-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.relations }">
-            <div class="ds-accordion-header" @click="toggleSection('relations')">
-              <div class="ds-accordion-header-info">
+            <div class="ds-accordion-header accountant-main-menu-header" @click="toggleSection('relations')">
+              <div class="ds-accordion-header-info accountant-menu-title">
                 <Users :size="18" class="accountant-section-icon" />
-                <div>
-                  <h4>حسابداران فعال و در انتظار</h4>
-                  <p>رابطه‌ها، وضعیت ثبت‌نام، شرح وظیفه و نشست‌های حسابداران</p>
-                </div>
+                <h4>مدیریت حسابداران</h4>
               </div>
               <div class="accordion-header-actions">
                 <HelpPopover
                   button-test="accountant-list-help"
                   note-test="accountant-list-help-note"
                   label="راهنمای لیست حسابداران"
-                  :text="`${orderedRelations.length.toLocaleString('fa-IR')} مورد فعال یا در انتظار ثبت‌نام در این لیست وجود دارد.`"
+                  text="برای حسابدار فعال می‌توانید شرح وظیفه، نشست‌ها و قطع ارتباط را از صفحه تنظیمات مدیریت کنید."
                 />
-                <button type="button" class="ghost-btn ghost-btn--inline refresh-relations" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
-                  {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
-                </button>
-                <button type="button" class="ghost-btn ghost-btn--inline" @click.stop="backToCategories">بازگشت به دسته‌ها</button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
 
             <div v-show="openSections.relations" class="ds-accordion-body accountant-accordion-body">
-              <div v-if="isLoading" class="accountant-loading">در حال دریافت حسابداران...</div>
-              <div v-else-if="orderedRelations.length === 0" class="accountant-empty">
-            هنوز هیچ حسابداری برای این مالک ثبت نشده است.
-              </div>
-              <div v-else class="accountant-list">
-            <article v-for="relation in orderedRelations" :key="relation.id" class="accountant-card" :class="`status-${relation.status}`">
-              <div class="accountant-card-head">
-                <div class="accountant-identity-block">
-                  <h5>{{ relation.relation_display_name }}</h5>
-                  <p class="accountant-global-name">@{{ relation.global_account_name }}</p>
-                  <p class="accountant-mobile-number">{{ relation.mobile_number }}</p>
-                </div>
-                <span class="accountant-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
-              </div>
-
-              <div class="accountant-meta-grid">
-                <div class="meta-item">
-                  <span class="meta-label">کاربر لینک‌شده</span>
-                  <span class="meta-value">{{ relation.accountant_account_name || 'هنوز ثبت‌نام نشده' }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">ایجاد</span>
-                  <span class="meta-value">{{ formatDateTime(relation.created_at) }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">فعال‌سازی</span>
-                  <span class="meta-value">{{ formatDateTime(relation.activated_at) }}</span>
-                </div>
-                <div v-if="relation.status === 'pending'" class="meta-item">
-                  <span class="meta-label">انقضا</span>
-                  <span class="meta-value">{{ formatDateTime(relation.expires_at) }}</span>
-                </div>
-              </div>
-
-              <p v-if="getRelationStateText(relation)" class="accountant-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
-              <p v-if="relation.duty_description" class="accountant-duty">{{ relation.duty_description }}</p>
-
-              <div v-if="editingRelationId === relation.id" class="edit-panel">
-                <label class="field-block">
-                  <span>شرح وظیفه قابل ویرایش</span>
-                  <textarea v-model="editForm.duty_description" class="accountant-input accountant-textarea edit-duty-description" rows="3"></textarea>
-                </label>
-                <div class="panel-actions compact">
-                  <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="clearEditState">انصراف</button>
-                  <button type="button" class="primary-btn save-edit" :disabled="isSavingEdit" @click="saveEdit(relation.id)">
-                    {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
-                  </button>
-                </div>
-              </div>
-              <div v-else class="accountant-actions">
-                <button type="button" class="secondary-btn start-edit" @click="startEditing(relation)">ویرایش</button>
-                <button
-                  v-if="relation.status === 'active' && relation.accountant_user_id"
-                  type="button"
-                  class="secondary-btn toggle-sessions"
-                  @click="toggleSessionPanel(relation)"
-                >
-                  {{ openSessionsRelationId === relation.id ? 'بستن نشست‌ها' : 'نشست‌های فعال' }}
-                </button>
-                <button
-                  v-if="relation.status === 'pending' && relation.registration_link"
-                  type="button"
-                  class="secondary-btn copy-link"
-                  @click="copyRegistrationLink(relation)"
-                >
-                  {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
-                </button>
-                <button
-                  v-if="relation.status === 'pending'"
-                  type="button"
-                  class="danger-btn cancel-pending"
-                  @click="unlinkRelation(relation)"
-                >
-                  لغو دعوت
-                </button>
-                <button
-                  v-if="relation.status === 'active'"
-                  type="button"
-                  class="danger-btn unlink-active"
-                  @click="unlinkRelation(relation)"
-                >
-                  قطع ارتباط
-                </button>
-              </div>
-
-              <div v-if="relation.status === 'active' && openSessionsRelationId === relation.id" class="session-panel">
-                <div class="session-panel-header">
+              <div v-if="selectedRelation" class="accountant-detail-page">
+                <div class="accountant-detail-topbar">
+                  <button type="button" class="ghost-btn ghost-btn--inline" @click="backToAccountantList">بازگشت به لیست</button>
                   <div>
-                    <h6>نشست‌های فعال حسابدار</h6>
+                    <h4>{{ selectedRelation.relation_display_name }}</h4>
+                    <p>@{{ selectedRelation.global_account_name }}</p>
                   </div>
-                  <HelpPopover
-                    button-test="accountant-sessions-help"
-                    note-test="accountant-sessions-help-note"
-                    label="راهنمای نشست‌های حسابدار"
-                    text="نشست‌های فعال این حسابدار را می‌توانید ببینید و هر نشست را جداگانه خاتمه دهید."
-                  />
-                  <button
-                    type="button"
-                    class="ghost-btn refresh-sessions"
-                    :disabled="loadingSessionsRelationId === relation.id"
-                    @click="loadSessionsForRelation(relation.id)"
-                  >
-                    {{ loadingSessionsRelationId === relation.id ? 'در حال نوسازی...' : 'نوسازی' }}
-                  </button>
                 </div>
 
-                <div v-if="loadingSessionsRelationId === relation.id" class="accountant-loading session-loading">
-                  در حال دریافت نشست‌های حسابدار...
-                </div>
-                <div v-else-if="!getRelationSessions(relation.id).length" class="accountant-empty session-empty">
-                  در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.
-                </div>
-                <ul v-else class="session-list">
-                  <li v-for="session in getRelationSessions(relation.id)" :key="session.id" class="session-item">
-                    <div class="session-item-main">
-                      <div class="session-item-top">
-                        <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
-                        <div class="session-badges">
-                          <span v-if="session.is_primary" class="session-badge primary">primary</span>
-                          <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
-                          <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
-                        </div>
-                      </div>
-                      <div class="session-item-meta">
-                        <span>آخرین فعالیت: {{ formatDateTime(session.last_active_at) }}</span>
-                        <span>شروع نشست: {{ formatDateTime(session.created_at) }}</span>
-                        <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
+                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailOverview }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailOverview')">
+                    <div class="ds-accordion-header-info">
+                      <SlidersHorizontal :size="18" class="accountant-section-icon" />
+                      <div>
+                        <h4>مشخصات و شرح وظیفه</h4>
+                        <p>وضعیت، زمان‌ها و شرح وظیفه قابل ویرایش حسابدار</p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      class="danger-btn terminate-session"
-                      :disabled="terminatingSessionId === session.id"
-                      @click="terminateAccountantSession(relation, session)"
-                    >
-                      {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
-                    </button>
-                  </li>
-                </ul>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailOverview" class="ds-accordion-body accountant-accordion-body">
+                    <div class="accountant-meta-grid">
+                      <div class="meta-item">
+                        <span class="meta-label">وضعیت</span>
+                        <span class="meta-value">{{ statusLabel(selectedRelation.status) }}</span>
+                      </div>
+                      <div class="meta-item">
+                        <span class="meta-label">کاربر لینک‌شده</span>
+                        <span class="meta-value">{{ selectedRelation.accountant_account_name || 'هنوز ثبت‌نام نشده' }}</span>
+                      </div>
+                      <div class="meta-item">
+                        <span class="meta-label">موبایل</span>
+                        <span class="meta-value accountant-mobile-value">{{ selectedRelation.mobile_number }}</span>
+                      </div>
+                      <div class="meta-item">
+                        <span class="meta-label">ایجاد</span>
+                        <span class="meta-value">{{ formatDateTime(selectedRelation.created_at) }}</span>
+                      </div>
+                      <div class="meta-item">
+                        <span class="meta-label">فعال‌سازی</span>
+                        <span class="meta-value">{{ formatDateTime(selectedRelation.activated_at) }}</span>
+                      </div>
+                      <div v-if="selectedRelation.status === 'pending'" class="meta-item">
+                        <span class="meta-label">انقضا</span>
+                        <span class="meta-value">{{ formatDateTime(selectedRelation.expires_at) }}</span>
+                      </div>
+                    </div>
+                    <p v-if="getRelationStateText(selectedRelation)" class="accountant-state-copy" :class="`status-${selectedRelation.status}`">{{ getRelationStateText(selectedRelation) }}</p>
+                    <div class="form-subpanel">
+                      <div class="form-subpanel-head">
+                        <h5>ویرایش شرح وظیفه</h5>
+                        <p>شرح وظیفه حسابدار را برای تفکیک نقش او در گروه کاری به‌روزرسانی کنید.</p>
+                      </div>
+                      <label class="field-block">
+                        <span>شرح وظیفه</span>
+                        <textarea v-model="editForm.duty_description" class="accountant-input accountant-textarea edit-duty-description" rows="3" :placeholder="selectedRelation.duty_description || 'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'"></textarea>
+                      </label>
+                      <div class="panel-actions compact">
+                        <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="editForm.duty_description = selectedRelation.duty_description || ''">بازنشانی</button>
+                        <button type="button" class="primary-btn save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
+                          {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
+                        </button>
+                      </div>
+                      <p v-if="detailSaveNotice" class="detail-save-feedback success">{{ detailSaveNotice }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailSessions }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailSessions')">
+                    <div class="ds-accordion-header-info">
+                      <ShieldCheck :size="18" class="accountant-section-icon" />
+                      <div>
+                        <h4>نشست حسابدار</h4>
+                        <p>مشاهده و منقضی کردن نشست‌های فعال حسابدار</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailSessions" class="ds-accordion-body accountant-accordion-body">
+                    <div v-if="selectedRelation.status !== 'active' || !selectedRelation.accountant_user_id" class="accountant-empty">نشست فقط برای حسابدار فعال قابل مدیریت است.</div>
+                    <div v-else-if="loadingSessionsRelationId === selectedRelation.id" class="accountant-loading session-loading">در حال دریافت نشست‌های حسابدار...</div>
+                    <div v-else-if="!getRelationSessions(selectedRelation.id).length" class="accountant-empty session-empty">در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.</div>
+                    <ul v-else class="session-list">
+                      <li v-for="session in getRelationSessions(selectedRelation.id)" :key="session.id" class="session-item">
+                        <div class="session-item-main">
+                          <div class="session-item-top">
+                            <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
+                            <div class="session-badges">
+                              <span v-if="session.is_primary" class="session-badge primary">primary</span>
+                              <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
+                              <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
+                            </div>
+                          </div>
+                          <div class="session-item-meta">
+                            <span>آخرین فعالیت: {{ formatDateTime(session.last_active_at) }}</span>
+                            <span>شروع نشست: {{ formatDateTime(session.created_at) }}</span>
+                            <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
+                          </div>
+                        </div>
+                        <button type="button" class="danger-btn terminate-session" :disabled="terminatingSessionId === session.id" @click="terminateAccountantSession(selectedRelation, session)">
+                          {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                        </button>
+                      </li>
+                    </ul>
+                    <div v-if="selectedRelation.status === 'active' && selectedRelation.accountant_user_id" class="panel-actions compact">
+                      <button type="button" class="ghost-btn refresh-sessions" :disabled="loadingSessionsRelationId === selectedRelation.id" @click="loadSessionsForRelation(selectedRelation.id)">نوسازی نشست‌ها</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion danger-accordion" :class="{ open: openSections.detailDanger }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailDanger')">
+                    <div class="ds-accordion-header-info">
+                      <Users :size="18" class="accountant-section-icon" />
+                      <div>
+                        <h4>قطع رابطه با حسابدار</h4>
+                        <p>غیرفعال کردن رابطه و دسترسی حسابدار</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailDanger" class="ds-accordion-body accountant-accordion-body">
+                    <p class="danger-copy">این عملیات رابطه حسابدار را غیرفعال می‌کند و نشست‌های مربوط به او باید جداگانه مدیریت شوند.</p>
+                    <button v-if="selectedRelation.status === 'active'" type="button" class="danger-btn unlink-active" @click="unlinkRelation(selectedRelation)">قطع ارتباط با حسابدار</button>
+                    <button v-else-if="selectedRelation.status === 'pending'" type="button" class="danger-btn cancel-pending" @click="unlinkRelation(selectedRelation)">لغو دعوت حسابدار</button>
+                    <div v-else class="accountant-empty">این رابطه در وضعیت قابل قطع نیست.</div>
+                  </div>
+                </div>
               </div>
-            </article>
-          </div>
+
+              <div v-else-if="isLoading" class="accountant-loading">در حال دریافت لیست حسابداران...</div>
+              <div v-else-if="orderedRelations.length === 0" class="accountant-empty">هنوز حسابداری برای این مالک ثبت نشده است.</div>
+
+              <div v-else class="accountant-management-stack">
+                <section v-if="pendingInvitationRelations.length" class="pending-invitations-panel">
+                  <div class="pending-invitations-head">
+                    <div>
+                      <h5>دعوت‌نامه‌های در انتظار</h5>
+                      <p>فقط دعوت‌هایی که هنوز توسط حسابدار تکمیل نشده‌اند نمایش داده می‌شوند.</p>
+                    </div>
+                    <span>{{ pendingInvitationRelations.length.toLocaleString('fa-IR') }}</span>
+                  </div>
+                  <article v-for="relation in pendingInvitationRelations" :key="`pending-${relation.id}`" class="pending-invitation-card">
+                    <div class="pending-invitation-main">
+                      <strong>{{ relation.relation_display_name }}</strong>
+                      <span>@{{ relation.global_account_name }}</span>
+                      <p>{{ getRelationStateText(relation) }}</p>
+                    </div>
+                    <div class="pending-invitation-actions">
+                      <button v-if="relation.registration_link" type="button" class="secondary-btn copy-link" @click="copyRegistrationLink(relation)">
+                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                      </button>
+                      <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
+                        منقضی کردن دعوت
+                      </button>
+                    </div>
+                  </article>
+                </section>
+
+                <div v-if="manageableRelations.length" class="accountant-list">
+                  <article v-for="relation in manageableRelations" :key="relation.id" class="accountant-card">
+                    <div class="accountant-card-head accountant-card-head--manage">
+                      <div class="accountant-card-main">
+                        <div class="accountant-card-title-row">
+                          <div class="accountant-identity-block">
+                            <h5>{{ relation.relation_display_name }}</h5>
+                            <p class="accountant-global-name">@{{ relation.global_account_name }}</p>
+                          </div>
+                          <span class="accountant-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
+                        </div>
+                        <div class="accountant-card-meta-pills">
+                          <span class="accountant-info-pill accountant-mobile-number">
+                            <span>موبایل</span>
+                            <strong>{{ relation.mobile_number }}</strong>
+                          </span>
+                          <span class="accountant-info-pill">
+                            <span>کاربر لینک‌شده</span>
+                            <strong>{{ relation.accountant_account_name || 'ثبت‌نام نشده' }}</strong>
+                          </span>
+                          <span class="accountant-info-pill">
+                            <span>ایجاد</span>
+                            <strong>{{ formatDateTime(relation.created_at) }}</strong>
+                          </span>
+                          <span class="accountant-info-pill">
+                            <span>فعال‌سازی</span>
+                            <strong>{{ formatDateTime(relation.activated_at) }}</strong>
+                          </span>
+                        </div>
+                        <p v-if="relation.duty_description" class="accountant-duty compact-duty">{{ relation.duty_description }}</p>
+                        <div class="accountant-card-footer">
+                          <button type="button" class="primary-btn accountant-settings-btn" @click="openAccountantDetail(relation)">
+                            تنظیمات حسابدار
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -841,7 +870,6 @@ onBeforeUnmount(() => {
   color: #111827;
 }
 
-.accountant-manager-close,
 .ghost-btn,
 .primary-btn,
 .secondary-btn,
@@ -854,7 +882,6 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.accountant-manager-close,
 .ghost-btn,
 .secondary-btn {
   background: rgba(148, 163, 184, 0.14);
@@ -892,143 +919,6 @@ onBeforeUnmount(() => {
 .accountant-banner.error {
   background: rgba(239, 68, 68, 0.14);
   color: #b91c1c;
-}
-
-.card-with-help {
-  position: relative;
-}
-
-.manager-category-menu {
-  padding: 1rem;
-  padding-left: 3.8rem;
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  border-radius: 1.25rem;
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
-  display: flex;
-  flex-direction: column;
-  gap: 0.625rem;
-}
-
-.manager-category-heading {
-  margin-bottom: 0.7rem;
-  padding-right: 0.2rem;
-  font-size: 0.8rem;
-  font-weight: 800;
-  color: #92400e;
-}
-
-.menu-button {
-  width: 100%;
-  min-height: 3.4rem;
-  padding: 0.78rem 0.9rem;
-  font-size: 0.85rem;
-  font-weight: 850;
-  background: rgba(255, 255, 255, 0.94);
-  color: #1f2937;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 1rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.72rem;
-  transition: all 0.2s;
-  text-align: right;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.menu-button:hover {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: #fffbeb;
-}
-
-.menu-button:active {
-  transform: scale(0.98);
-}
-
-.menu-button-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.8rem;
-  background: rgba(245, 158, 11, 0.12);
-  color: #92400e;
-  flex: 0 0 auto;
-}
-
-.menu-button-copy {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.18rem;
-}
-
-.menu-button-label {
-  flex: 1;
-  min-width: 0;
-}
-
-.menu-button-note {
-  font-size: 0.72rem;
-  line-height: 1.55;
-  font-weight: 600;
-  color: #6b7280;
-}
-
-.settings-btn {
-  background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
-  color: #92400e !important;
-  border-color: rgba(245, 158, 11, 0.2) !important;
-}
-
-.settings-btn .menu-button-icon {
-  background: rgba(245, 158, 11, 0.12);
-  color: #92400e;
-}
-
-.accountant-summary-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.summary-card {
-  border-radius: 20px;
-  padding: 14px 16px;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.summary-card--active {
-  background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(240, 253, 244, 0.98));
-}
-
-.summary-card--pending {
-  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 247, 237, 0.98));
-}
-
-.summary-card--archived {
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98));
-}
-
-.summary-label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #64748b;
-}
-
-.summary-value {
-  font-size: 1.35rem;
-  line-height: 1;
-  color: #0f172a;
 }
 
 .accountant-panel {
@@ -1419,6 +1309,458 @@ onBeforeUnmount(() => {
   border-top: 1px dashed rgba(148, 163, 184, 0.4);
 }
 
+.accountant-manager-shell {
+  width: min(1040px, 100%);
+  gap: 0.625rem;
+}
+
+.accountant-manager-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  min-height: 74px;
+  gap: 12px;
+  direction: ltr;
+}
+
+.accountant-manager-title {
+  text-align: center;
+  direction: rtl;
+}
+
+.accountant-manager-back {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #334155;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  cursor: pointer;
+}
+
+.accountant-manager-header-spacer {
+  width: 44px;
+  height: 44px;
+}
+
+.accountant-viewport-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  z-index: 1305;
+  width: min(520px, calc(100vw - 28px));
+  transform: translateX(-50%);
+  border-radius: 18px;
+  padding: 0.85rem 1rem;
+  direction: rtl;
+  text-align: right;
+  font-size: 0.88rem;
+  font-weight: 850;
+  line-height: 1.8;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.accountant-viewport-toast--success {
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: rgba(240, 253, 244, 0.96);
+  color: #047857;
+}
+
+.accountant-viewport-toast--error {
+  border: 1px solid rgba(239, 68, 68, 0.26);
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
+}
+
+.accountant-viewport-toast--info {
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(255, 251, 235, 0.96);
+  color: #92400e;
+}
+
+.accountant-panel {
+  border-radius: 1rem;
+}
+
+.accountant-panel--accordion .ds-accordion {
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  overflow: hidden;
+  box-shadow: 0 10px 28px rgba(245, 158, 11, 0.08);
+}
+
+.accountant-panel--accordion .ds-accordion-header {
+  gap: 0.6rem;
+  min-height: 3.28rem;
+  padding: 0.72rem 0.82rem;
+}
+
+.accountant-panel--accordion .ds-accordion-header-info {
+  gap: 0.58rem;
+}
+
+.accountant-panel--accordion .ds-accordion-header-info h4,
+.form-subpanel--accordion .ds-accordion-header-info h5 {
+  color: #92400e;
+}
+
+.accountant-main-menu-header {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) auto;
+  align-items: center;
+  direction: rtl;
+}
+
+.accountant-menu-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.accountant-menu-title h4 {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 1.6;
+}
+
+.accountant-main-menu-header .accordion-header-actions {
+  min-width: 0;
+  gap: 0.38rem;
+  justify-content: flex-end;
+}
+
+.accountant-accordion-body,
+.accountant-management-stack,
+.accountant-list,
+.accountant-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.form-subpanel {
+  border-radius: 1rem;
+  padding: 0.8rem;
+  gap: 0.625rem;
+}
+
+.form-subpanel-head h5 {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+  color: #0f172a;
+}
+
+.form-subpanel-head p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.accountant-form-grid,
+.accountant-meta-grid {
+  gap: 0.625rem;
+}
+
+.pending-invitations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.16);
+  background: rgba(255, 251, 235, 0.72);
+}
+
+.pending-invitations-head,
+.pending-invitation-card,
+.pending-invitation-actions,
+.accountant-card-footer {
+  display: flex;
+  align-items: center;
+}
+
+.pending-invitations-head {
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pending-invitations-head h5,
+.pending-invitations-head p,
+.pending-invitation-main p {
+  margin: 0;
+}
+
+.pending-invitations-head h5 {
+  color: #92400e;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+
+.pending-invitations-head p {
+  color: #64748b;
+  font-size: 0.7rem;
+  line-height: 1.7;
+}
+
+.pending-invitations-head > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.pending-invitation-card {
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.62rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.pending-invitation-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.pending-invitation-main strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-invitation-main span {
+  color: #64748b;
+  direction: ltr;
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+.pending-invitation-main p {
+  color: #b45309;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.65;
+}
+
+.pending-invitation-actions {
+  flex: 0 0 auto;
+  gap: 0.45rem;
+}
+
+.accountant-card {
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 251, 235, 0.72));
+  padding: 0.7rem;
+  gap: 0.6rem;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
+}
+
+.accountant-card-head {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
+}
+
+.accountant-card-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.48rem;
+}
+
+.accountant-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.accountant-card-head h5 {
+  margin: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.86rem;
+  font-weight: 850;
+  line-height: 1.6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountant-global-name {
+  font-size: 0.72rem;
+}
+
+.accountant-status-badge {
+  padding: 4px 9px;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.accountant-card-meta-pills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.8rem, 1fr));
+  gap: 0.42rem;
+}
+
+.accountant-mobile-number {
+  grid-column: 1 / -1;
+}
+
+.accountant-info-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 2rem;
+  gap: 0.42rem;
+  padding: 0.28rem 0.52rem;
+  border-radius: 0.78rem;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.accountant-info-pill span {
+  color: #94a3b8;
+  font-weight: 750;
+}
+
+.accountant-info-pill strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountant-mobile-number strong,
+.accountant-mobile-value {
+  overflow: visible;
+  direction: ltr;
+  text-align: left;
+  text-overflow: clip;
+}
+
+.accountant-card-footer {
+  justify-content: flex-start;
+}
+
+.accountant-settings-btn {
+  min-height: 2.35rem;
+  padding: 0 0.85rem;
+  border-radius: 0.85rem;
+  box-shadow: none;
+  font-size: 0.76rem;
+}
+
+.compact-duty {
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.78rem;
+  font-size: 0.72rem;
+  line-height: 1.7;
+}
+
+.accountant-detail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border-radius: 1.1rem;
+  background: rgba(255, 251, 235, 0.72);
+  border: 1px solid rgba(245, 158, 11, 0.14);
+}
+
+.accountant-detail-topbar h4,
+.accountant-detail-topbar p {
+  margin: 0;
+}
+
+.accountant-detail-topbar p {
+  color: #64748b;
+  direction: ltr;
+  text-align: right;
+}
+
+.detail-accordion {
+  border-radius: 1.15rem;
+  overflow: hidden;
+}
+
+.detail-accordion .ds-accordion-header-info h4 {
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.detail-accordion .ds-accordion-header-info p {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 0.74rem;
+  line-height: 1.6;
+}
+
+.detail-save-feedback {
+  margin: 0;
+  padding: 0.62rem 0.75rem;
+  border-radius: 0.9rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
+.detail-save-feedback.success {
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.danger-accordion {
+  border-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+.danger-copy {
+  margin: 0;
+  color: #991b1b;
+  line-height: 1.8;
+  font-weight: 700;
+}
+
 @media (max-width: 720px) {
   .accountant-manager-backdrop {
     padding: 0;
@@ -1428,20 +1770,24 @@ onBeforeUnmount(() => {
     width: 100%;
     border-radius: 24px 24px 0 0;
     min-height: 100%;
-    padding: 18px 14px 22px;
+    padding: 12px 20px 22px;
+    gap: 0.625rem;
   }
 
-  .accountant-manager-header,
   .panel-title-row,
   .accountant-card-head {
     flex-direction: column;
   }
 
-  .accountant-summary-strip,
   .accountant-form-sections,
   .accountant-form-grid,
   .accountant-meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .accountant-detail-topbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .panel-actions,
@@ -1451,16 +1797,57 @@ onBeforeUnmount(() => {
 
   .panel-actions > button,
   .accountant-actions > button,
-  .accountant-manager-close,
   .ghost-btn,
   .ghost-btn--inline {
     width: 100%;
   }
 
   .accordion-header-actions {
-    width: 100%;
     justify-content: flex-start;
-    flex-wrap: wrap;
+  }
+
+  .accountant-main-menu-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 3.85rem;
+  }
+
+  .accountant-menu-title h4 {
+    font-size: 0.88rem;
+  }
+
+  .accountant-card {
+    padding: 0.62rem;
+  }
+
+  .accountant-card-head {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .accountant-card-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .accountant-card-meta-pills {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pending-invitation-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pending-invitation-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pending-invitation-actions > button,
+  .accountant-settings-btn {
+    width: 100%;
   }
 
   .session-panel-header,
