@@ -1,15 +1,17 @@
 import uuid
+from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 import schemas
 from api.deps import get_effective_owner_actor_context
 from core.audit_logger import audit_log
 from core.config import settings
 from core.db import get_db
+from core.utils import utc_now_naive
 from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.customer_relation_service import (
     create_owner_customer_relation,
@@ -22,10 +24,12 @@ from core.services.customer_relation_service import (
 from core.services.session_service import get_active_sessions, logout_session
 from core.sms import send_customer_invitation_sms
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
+from models.trade import Trade, TradeStatus
 from models.session import UserSession
 
 
 router = APIRouter()
+CUSTOMER_STATS_PERIOD_DAYS = {1, 3, 7, 30, 90, 180}
 
 
 def build_customer_registration_link(invitation_token: str) -> str | None:
@@ -112,6 +116,26 @@ async def get_active_owner_customer_relation(
     customer_user = relation.customer_user
     if relation.customer_user_id is None or customer_user is None or customer_user.is_deleted:
         raise HTTPException(status_code=400, detail="برای این مشتری نشست فعالی قابل مدیریت نیست")
+    return relation
+
+
+async def get_owner_customer_relation(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    relation_id: int,
+) -> CustomerRelation:
+    stmt = (
+        select(CustomerRelation)
+        .options(joinedload(CustomerRelation.customer_user))
+        .where(
+            CustomerRelation.id == relation_id,
+            CustomerRelation.owner_user_id == owner_user_id,
+        )
+    )
+    relation = (await db.execute(stmt)).scalar_one_or_none()
+    if relation is None:
+        raise HTTPException(status_code=404, detail="رابطه مشتری یافت نشد")
     return relation
 
 
@@ -252,6 +276,84 @@ async def update_my_customer(
         **audit_actor_context(context),
     )
     return serialize_customer_relation(relation, invitation=invitation_map.get(relation.invitation_token))
+
+
+@router.get("/owner-relations/{relation_id}/trade-stats", response_model=schemas.CustomerTradeStatsRead)
+async def get_my_customer_trade_stats(
+    relation_id: int,
+    days: int = Query(7, description="Allowed values: 1, 3, 7, 30, 90, 180"),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
+):
+    await ensure_owner_context(context, db)
+    if days not in CUSTOMER_STATS_PERIOD_DAYS:
+        raise HTTPException(status_code=400, detail="بازه آمار مشتری نامعتبر است")
+
+    relation = await get_owner_customer_relation(
+        db,
+        owner_user_id=context.owner_user.id,
+        relation_id=relation_id,
+    )
+    if relation.deleted_at is not None or relation.status != CustomerRelationStatus.ACTIVE or relation.customer_user_id is None:
+        raise HTTPException(status_code=400, detail="آمار فقط برای مشتری فعال قابل محاسبه است")
+
+    to_date = utc_now_naive()
+    from_date = to_date - timedelta(days=days)
+    stmt = (
+        select(Trade)
+        .options(selectinload(Trade.offer), selectinload(Trade.commodity))
+        .where(
+            Trade.status == TradeStatus.COMPLETED,
+            Trade.created_at >= from_date,
+            Trade.created_at <= to_date,
+            or_(
+                Trade.offer_user_id == relation.customer_user_id,
+                Trade.responder_user_id == relation.customer_user_id,
+            ),
+        )
+        .order_by(Trade.created_at.desc(), Trade.id.desc())
+    )
+    trades = list((await db.execute(stmt)).scalars().all())
+
+    commodity_totals: dict[int, dict[str, int | str]] = {}
+    total_quantity = 0
+    commission_profit = 0
+    for trade in trades:
+        quantity = int(getattr(trade, "quantity", 0) or 0)
+        total_quantity += quantity
+        commodity_id = int(getattr(trade, "commodity_id", 0) or 0)
+        commodity_name = getattr(getattr(trade, "commodity", None), "name", None) or "نامشخص"
+        bucket = commodity_totals.setdefault(
+            commodity_id,
+            {
+                "commodity_id": commodity_id,
+                "commodity_name": commodity_name,
+                "total_quantity": 0,
+            },
+        )
+        bucket["total_quantity"] = int(bucket["total_quantity"]) + quantity
+
+        offer_price = getattr(getattr(trade, "offer", None), "price", None)
+        trade_price = getattr(trade, "price", None)
+        if offer_price is not None and trade_price is not None and quantity > 0:
+            commission_profit += abs(int(trade_price) - int(offer_price)) * quantity
+
+    commodities = sorted(
+        commodity_totals.values(),
+        key=lambda item: (-int(item["total_quantity"]), str(item["commodity_name"])),
+    )
+    return {
+        "relation_id": relation.id,
+        "customer_user_id": relation.customer_user_id,
+        "period_days": days,
+        "from_date": from_date,
+        "to_date": to_date,
+        "trade_count": len(trades),
+        "total_quantity": total_quantity,
+        "commission_profit_toman": commission_profit,
+        "commodities": commodities,
+        "profit_calculation_note": "سود از اختلاف قیمت معامله و قیمت اصلی لفظ همان معامله محاسبه می‌شود.",
+    }
 
 
 @router.get("/owner-relations/{relation_id}/sessions", response_model=list[schemas.CustomerSessionRead])

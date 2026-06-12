@@ -400,6 +400,25 @@ class CustomerRelationRead(BaseModel):
         from_attributes = True
 
 
+class CustomerTradeStatsCommodityRead(BaseModel):
+    commodity_id: int
+    commodity_name: str
+    total_quantity: int
+
+
+class CustomerTradeStatsRead(BaseModel):
+    relation_id: int
+    customer_user_id: int
+    period_days: int
+    from_date: datetime
+    to_date: datetime
+    trade_count: int
+    total_quantity: int
+    commission_profit_toman: int
+    commodities: list[CustomerTradeStatsCommodityRead]
+    profit_calculation_note: str
+
+
 class CustomerSessionRead(BaseModel):
     id: str
     device_name: str

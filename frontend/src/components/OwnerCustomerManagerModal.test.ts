@@ -99,19 +99,32 @@ describe('OwnerCustomerManagerModal.vue', () => {
   }
 
   async function openCreatePanel(wrapper: any) {
-    await wrapper.get('.open-create-category').trigger('click')
     await flushPromises()
   }
 
   async function openRelationsPanel(wrapper: any) {
-    await wrapper.get('.open-relations-category').trigger('click')
     await flushPromises()
   }
 
   async function backToCategories(wrapper: any) {
-    const backButton = wrapper.findAll('button').find((button: any) => button.text().includes('بازگشت به دسته‌ها'))
-    expect(backButton).toBeTruthy()
-    await backButton!.trigger('click')
+    const backButton = wrapper.findAll('button').find((button: any) => button.text().includes('بازگشت به لیست'))
+    if (backButton) {
+      await backButton.trigger('click')
+    }
+    await flushPromises()
+  }
+
+  async function openCustomerDetail(wrapper: any, text = 'مشتری ویژه') {
+    const card = wrapper.findAll('.customer-card').find((node: any) => node.text().includes(text))
+    expect(card).toBeTruthy()
+    await card!.get('.manage-customer').trigger('click')
+    await flushPromises()
+  }
+
+  async function openDetailAccordion(wrapper: any, label: string) {
+    const accordion = wrapper.findAll('.detail-accordion').find((node: any) => node.text().includes(label))
+    expect(accordion).toBeTruthy()
+    await accordion!.get('.ds-accordion-header').trigger('click')
     await flushPromises()
   }
 
@@ -153,7 +166,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     await flushPromises()
     await openRelationsPanel(wrapper)
-    await wrapper.get('button.toggle-sessions').trigger('click')
+    await openCustomerDetail(wrapper)
+    await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/11/sessions', { method: 'GET' })
@@ -182,7 +196,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    expect(wrapper.find('button.toggle-sessions').exists()).toBe(false)
+    expect(wrapper.find('button.terminate-session').exists()).toBe(false)
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
 
     wrapper.unmount()
@@ -219,19 +233,21 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const titles = wrapper.findAll('.customer-card h5').map((node) => node.text())
     expect(titles).toEqual(['مشتری ویژه', 'مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
-    expect(wrapper.text()).toMatch(/مهلت ثبت نام:|انقضا/)
+    expect(wrapper.text()).toContain('مهلت این دعوت تمام شده و در انتظار همگام سازی وضعیت است.')
     expect(wrapper.text()).toContain('این مشتری با @customer18 در سطح 2 فعال است.')
     expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
     expect(wrapper.text()).toContain('این رابطه حذف شده است.')
 
-    await wrapper.findAll('button.toggle-sessions')[0]!.trigger('click')
+    await openCustomerDetail(wrapper, '@customer18')
+    await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
-    expect(wrapper.find('.session-panel').exists()).toBe(true)
+    expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
+    await backToCategories(wrapper)
 
     await wrapper.get('.refresh-relations').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.session-panel').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('نشست‌های فعال مشتری')
     expect(wrapper.findAll('.customer-card h5')[0]!.text()).toBe('مشتری ویژه')
     expect(wrapper.text()).toContain('در انتظار ثبت‌نام')
 
@@ -265,7 +281,6 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openCreatePanel(wrapper)
 
-    await wrapper.get('.create-account-name').setValue('fresh_customer')
     await wrapper.get('.create-management-name').setValue('مشتری تازه')
     await wrapper.get('.create-mobile-number').setValue('09125550000')
     await wrapper.get('.create-tier-select').setValue('tier2')
@@ -281,7 +296,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     const postCall = apiFetchMock.mock.calls.find(([url, options]) => url === '/api/customers/owner-relations' && options?.method === 'POST')
     expect(postCall).toBeTruthy()
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
-      account_name: 'fresh_customer',
+      account_name: 'customer_09125550000',
       management_name: 'مشتری تازه',
       mobile_number: '09125550000',
       customer_tier: 'tier2',
@@ -293,9 +308,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     })
     expect(wrapper.text()).toContain('دعوت مشتری ثبت شد.')
     expect(wrapper.text()).toContain('مشتری تازه')
-    await backToCategories(wrapper)
-    await openCreatePanel(wrapper)
-    expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('.create-management-name').element as HTMLInputElement).value).toBe('')
     expect(wrapper.find('.create-commission-rate').exists()).toBe(false)
 
     wrapper.unmount()
@@ -326,8 +339,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    await wrapper.get('.start-edit').trigger('click')
-    expect((wrapper.get('.edit-commission-rate').element as HTMLInputElement).value).toBe('0.5')
+    await openCustomerDetail(wrapper)
+    expect((wrapper.get('.edit-commission-rate').element as HTMLInputElement).placeholder).toBe('0.5')
 
     await wrapper.get('.edit-tier-select').setValue('tier1')
     await flushPromises()
@@ -351,7 +364,6 @@ describe('OwnerCustomerManagerModal.vue', () => {
       max_daily_commodity_volume: 150,
     })
     expect(wrapper.text()).toContain('اطلاعات مشتری به‌روزرسانی شد.')
-    expect(wrapper.find('.edit-panel').exists()).toBe(false)
     expect(wrapper.text()).toContain('سطح 1')
 
     wrapper.unmount()
@@ -401,13 +413,15 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
+    await openCustomerDetail(wrapper)
+    await openDetailAccordion(wrapper, 'قطع رابطه')
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
     expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/12', { method: 'DELETE' })
     expect(wrapper.text()).toContain('دعوت مشتری لغو شد.')
-    expect(wrapper.text()).toContain('هنوز مشتری فعالی یا دعوت pending ثبت نشده است.')
+    expect(wrapper.text()).toContain('هنوز مشتری فعالی یا دعوت در انتظار ثبت نشده است.')
 
     wrapper.unmount()
   })
@@ -432,16 +446,17 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    await wrapper.get('.toggle-sessions').trigger('click')
+    await openCustomerDetail(wrapper)
+    await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
-    expect(wrapper.find('.session-panel').exists()).toBe(true)
+    expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
 
+    await openDetailAccordion(wrapper, 'قطع رابطه')
     await wrapper.get('.unlink-active').trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('ارتباط مشتری مشتری ویژه قطع شود؟ این عملیات دسترسی مشتری را کامل غیرفعال می‌کند.')
     expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations/11', { method: 'DELETE' })
-    expect(wrapper.find('.session-panel').exists()).toBe(false)
     expect(wrapper.text()).toContain('ارتباط مشتری قطع شد و دسترسی او غیرفعال گردید.')
 
     wrapper.unmount()
@@ -468,7 +483,6 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openCreatePanel(wrapper)
 
-    await wrapper.get('.create-account-name').setValue('duplicate_customer')
     await wrapper.get('.create-management-name').setValue('مشتری تکراری')
     await wrapper.get('.create-mobile-number').setValue('09121110000')
     await wrapper.get('.submit-create').trigger('click')
@@ -476,7 +490,6 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.text()).toContain('این نام کاربری قبلاً ثبت شده است.')
 
-    await backToCategories(wrapper)
     await openRelationsPanel(wrapper)
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
@@ -502,11 +515,11 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    await wrapper.get('.toggle-sessions').trigger('click')
+    await openCustomerDetail(wrapper)
+    await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
 
     expect(wrapper.find('.customer-banner.error').text()).toBe('دریافت نشست‌های مشتری شکست خورد.')
-    expect(wrapper.find('.session-panel').exists()).toBe(true)
     expect(wrapper.find('.session-empty').text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
 
     wrapper.unmount()
@@ -565,7 +578,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.text()).toContain('2 روز و 01:02:03')
     expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
 
-    await wrapper.get('.toggle-sessions').trigger('click')
+    await openCustomerDetail(wrapper, 'مشتری نشست‌دار')
+    await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
 
     expect(wrapper.text()).toContain('دستگاه ناشناس')
@@ -605,7 +619,6 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openCreatePanel(wrapper)
 
-    await wrapper.get('.create-account-name').setValue('tier2_customer')
     await wrapper.get('.create-management-name').setValue('مشتری سطح دو')
     await wrapper.get('.create-mobile-number').setValue('09127770000')
     await wrapper.get('.create-tier-select').setValue('tier2')
@@ -617,12 +630,10 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     await wrapper.findAll('.panel-actions .secondary-btn')[0]!.trigger('click')
 
-    expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-management-name').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-tier-select').element as HTMLSelectElement).value).toBe('tier1')
 
-    await backToCategories(wrapper)
     await openRelationsPanel(wrapper)
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
@@ -659,23 +670,19 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    await wrapper.get('.toggle-sessions').trigger('click')
+    await openCustomerDetail(wrapper, '@customer18')
+    await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
     expect(wrapper.text()).toContain('نشست‌های مشتری در دسترس نیست.')
 
-    await wrapper.findAll('.start-edit')[1]!.trigger('click')
+    await openDetailAccordion(wrapper, 'مشخصات و محدودیت‌ها')
+    await wrapper.get('.edit-min-trade').setValue('3')
     await wrapper.get('.save-edit').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('ویرایش مشتری ناموفق بود.')
-    expect(wrapper.find('.edit-panel').exists()).toBe(true)
 
-    await wrapper.get('.edit-panel .secondary-btn').trigger('click')
-    expect(wrapper.find('.edit-panel').exists()).toBe(false)
-
-    await backToCategories(wrapper)
     await openCreatePanel(wrapper)
-    await wrapper.get('.create-account-name').setValue('broken_customer')
     await wrapper.get('.create-management-name').setValue('مشتری خطادار')
     await wrapper.get('.create-mobile-number').setValue('09129990000')
     await wrapper.get('.submit-create').trigger('click')
@@ -685,11 +692,14 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     await backToCategories(wrapper)
     await openRelationsPanel(wrapper)
+    await openCustomerDetail(wrapper, '@pending_customer')
+    await openDetailAccordion(wrapper, 'قطع رابطه')
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
     expect(wrapper.text()).toContain('لغو دعوت مشتری ناموفق بود.')
+    await backToCategories(wrapper)
     expect(wrapper.findAll('.customer-card h5').map((node) => node.text())).toContain('مشتری ویژه')
 
     wrapper.unmount()
