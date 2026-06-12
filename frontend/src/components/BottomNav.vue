@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Home, Store, User, MessageCircle, Shield, Menu, X } from 'lucide-vue-next'
 import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
 import { useNotificationStore } from '../stores/notifications'
+import { isMarketRuntimeClosed, startMarketRuntimeUpdates, stopMarketRuntimeUpdates } from '../composables/useMarketRuntime'
 
 const route = useRoute()
 const isExpanded = ref(false)
@@ -128,12 +129,18 @@ onMounted(async () => {
   loadFabPosition()
   const token = localStorage.getItem('auth_token')
   if (!token) return
+  startMarketRuntimeUpdates()
   void primeCurrentUserSummary()
+})
+
+onUnmounted(() => {
+  stopMarketRuntimeUpdates()
 })
 
 const userRole = computed(() => currentUserSummary.value?.role || '')
 const isAdmin = computed(() => isAdminRole(userRole.value))
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const isMarketClosed = computed(() => isMarketRuntimeClosed.value)
 
 const baseItems = [
   { name: 'dashboard', label: 'خانه', icon: Home, path: '/' },
@@ -166,7 +173,12 @@ function toggleNav() {
           <span class="nav-label">{{ item.label }}</span>
           <span class="soon-dot"></span>
         </div>
-        <router-link v-else :to="item.path" class="nav-item" :class="{ active: route.name === item.name }">
+        <router-link
+          v-else
+          :to="item.path"
+          class="nav-item"
+          :class="{ active: route.name === item.name, 'market-closed': item.name === 'market' && isMarketClosed }"
+        >
           <div class="nav-icon-wrap" :class="{ 'icon-active': route.name === item.name }">
             <component :is="item.icon" :size="22" :stroke-width="route.name === item.name ? 2.5 : 1.8" />
             
@@ -176,7 +188,10 @@ function toggleNav() {
               {{ notificationStore.chatUnreadCount > 99 ? '99+' : notificationStore.chatUnreadCount }}
             </div>
           </div>
-          <span class="nav-label">{{ item.label }}</span>
+          <span class="nav-label" :class="{ 'nav-label--market': item.name === 'market' && isMarketClosed }">
+            <span>{{ item.label }}</span>
+            <span v-if="item.name === 'market' && isMarketClosed" class="market-closed-text">بسته</span>
+          </span>
         </router-link>
       </template>
     </div>
@@ -197,7 +212,13 @@ function toggleNav() {
             <component :is="item.icon" :size="20" />
             <span>{{ item.label }}</span>
           </div>
-          <router-link v-else :to="item.path" class="fab-item" :class="{ active: route.name === item.name }" @click="isExpanded = false">
+          <router-link
+            v-else
+            :to="item.path"
+            class="fab-item"
+            :class="{ active: route.name === item.name, 'market-closed': item.name === 'market' && isMarketClosed }"
+            @click="isExpanded = false"
+          >
             <div class="relative">
               <component :is="item.icon" :size="20" />
               <!-- Unread Badge for FAB menu -->
@@ -206,7 +227,10 @@ function toggleNav() {
                  {{ notificationStore.chatUnreadCount > 9 ? '9+' : notificationStore.chatUnreadCount }}
               </div>
             </div>
-            <span>{{ item.label }}</span>
+            <span class="fab-label">
+              <span>{{ item.label }}</span>
+              <span v-if="item.name === 'market' && isMarketClosed" class="fab-market-closed-text">بسته</span>
+            </span>
           </router-link>
         </template>
       </div>
@@ -293,8 +317,32 @@ function toggleNav() {
 }
 
 .nav-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0.9rem;
   font-size: 0.6rem;
   font-weight: 600;
+  line-height: 1.1;
+}
+
+.nav-label--market {
+  gap: 0.05rem;
+}
+
+.market-closed-text {
+  color: var(--ds-danger-600);
+  font-size: 0.56rem;
+  font-weight: 800;
+}
+
+.nav-item.market-closed .nav-icon-wrap {
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-600);
+}
+
+.nav-item.market-closed.active {
+  color: var(--ds-danger-600);
 }
 
 .soon-dot {
@@ -460,9 +508,34 @@ function toggleNav() {
   color: var(--ds-primary-600);
   background: var(--ds-primary-50);
 }
+.fab-item.market-closed {
+  color: var(--ds-danger-600);
+}
+.fab-item.market-closed.active {
+  background: var(--ds-danger-50);
+}
 .fab-item.disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.fab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.fab-market-closed-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.36rem;
+  border-radius: 999px;
+  background: var(--ds-danger-50);
+  color: var(--ds-danger-700);
+  font-size: 0.66rem;
+  font-weight: 800;
 }
 
 /* ═══ Transitions ═══ */

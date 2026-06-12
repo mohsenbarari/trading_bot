@@ -123,6 +123,55 @@ describe('BottomNav.vue', () => {
     wrapper.unmount()
   })
 
+  it('shows a red closed marker on the market navigation item when the market is closed', async () => {
+    localStorage.setItem('auth_token', 'jwt-token')
+    apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/trading-settings/market-state') {
+        return {
+          ok: true,
+          json: async () => ({
+            is_open: false,
+            active_web_notice_visible: true,
+            offers_since_last_open: 0,
+            last_transition_at: '2026-06-12T10:00:00Z',
+            next_transition_at: '2026-06-13T06:00:00Z',
+          }),
+        }
+      }
+      if (path === '/api/auth/me') {
+        return {
+          ok: true,
+          json: async () => ({ id: 3, role: 'عادی', account_name: 'market-user' }),
+        }
+      }
+      return { ok: true, json: async () => null }
+    })
+
+    const currentUserModule = await import('../utils/currentUser')
+    currentUserModule.clearCurrentUserSummary()
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a v-bind="$attrs" :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await nextTick()
+
+    const marketItem = wrapper.get('.nav-item.market-closed')
+    expect(marketItem.text()).toContain('بازار')
+    expect(marketItem.get('.market-closed-text').text()).toBe('بسته')
+
+    wrapper.unmount()
+  })
+
   it('restores the persisted FAB position for messenger and ignores malformed stored coordinates', async () => {
     routeState.name = 'messenger'
     localStorage.setItem('fab_position', JSON.stringify({ x: 88, y: 144 }))

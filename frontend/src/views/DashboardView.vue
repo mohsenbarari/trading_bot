@@ -5,6 +5,7 @@ import { Bell, Store, LogOut, AlertTriangle, Ban, Users } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, parseIranDisplayDate } from '../utils/iranTime'
+import { marketRuntime } from '../composables/useMarketRuntime'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -27,6 +28,14 @@ const isRestricted = computed(() => {
 
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
 const isAccountant = computed(() => user.value?.is_accountant === true)
+const isMarketOpen = computed(() => marketRuntime.value.is_open)
+const isMarketClosed = computed(() => !isMarketOpen.value)
+const marketEntryStatusLabel = computed(() => (isMarketOpen.value ? 'بازار باز' : 'بازار بسته'))
+const marketEntrySubtitle = computed(() => (
+  isMarketOpen.value
+    ? 'مشاهده و ثبت لفظ‌های خرید و فروش'
+    : 'فعلاً امکان ثبت لفظ جدید وجود ندارد'
+))
 
 const isGloballyLockedAccount = computed(() => Boolean(user.value?.global_web_locked_at))
 
@@ -278,15 +287,26 @@ onBeforeUnmount(() => {
       <main class="main-section">
 
         <!-- Market Entry — Hero Button -->
-        <button v-if="!isAccountant" class="hero-btn" :disabled="isInactiveAccount" @click="openMarket">
+        <button
+          v-if="!isAccountant"
+          class="hero-btn"
+          :class="{ 'hero-btn--open': isMarketOpen, 'hero-btn--closed': isMarketClosed }"
+          :disabled="isInactiveAccount"
+          @click="openMarket"
+        >
           <div class="hero-btn-bg"></div>
           <div class="hero-btn-content">
             <div class="hero-icon">
               <Store :size="32" />
             </div>
             <div class="hero-text">
-              <span class="hero-title">ورود به بازار</span>
-              <span class="hero-subtitle">مشاهده و ثبت لفظ‌های خرید و فروش</span>
+              <span class="hero-title-row">
+                <span class="hero-title">ورود به بازار</span>
+                <span class="hero-status-pill" :class="isMarketOpen ? 'hero-status-pill--open' : 'hero-status-pill--closed'">
+                  {{ marketEntryStatusLabel }}
+                </span>
+              </span>
+              <span class="hero-subtitle">{{ marketEntrySubtitle }}</span>
             </div>
           </div>
           <div class="hero-arrow">←</div>
@@ -596,22 +616,33 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 126px;
   padding: 1.5rem;
   border-radius: var(--ds-radius-xl);
   border: none;
   cursor: pointer;
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 0.2s;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 .hero-btn:active {
   transform: scale(0.98);
+}
+.hero-btn:hover {
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
 }
 
 .hero-btn-bg {
   position: absolute;
   inset: 0;
   background: var(--ds-gradient-primary);
+}
+.hero-btn--open .hero-btn-bg {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 58%, #16a34a 125%);
+}
+.hero-btn--closed .hero-btn-bg {
+  background: linear-gradient(135deg, #991b1b 0%, #dc2626 54%, #334155 128%);
 }
 .hero-btn-bg::after {
   content: '';
@@ -631,6 +662,8 @@ onBeforeUnmount(() => {
   gap: 1rem;
   position: relative;
   z-index: 1;
+  min-width: 0;
+  flex: 1;
 }
 
 .hero-icon {
@@ -649,17 +682,47 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   text-align: right;
+  min-width: 0;
+}
+.hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
 }
 .hero-title {
   font-size: var(--ds-font-2xl);
   font-weight: 800;
   color: white;
+  line-height: 1.25;
+}
+.hero-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.55rem;
+  padding: 0.18rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: white;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.hero-status-pill--open {
+  background: rgba(22, 163, 74, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(187, 247, 208, 0.22);
+}
+.hero-status-pill--closed {
+  background: rgba(254, 226, 226, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(254, 202, 202, 0.18);
 }
 .hero-subtitle {
   font-size: var(--ds-font-sm);
-  color: rgba(255,255,255,0.8);
+  color: rgba(255,255,255,0.84);
   margin-top: 0.15rem;
   font-weight: 500;
+  line-height: 1.55;
 }
 
 .hero-arrow {
@@ -668,6 +731,7 @@ onBeforeUnmount(() => {
   color: rgba(255,255,255,0.6);
   font-size: 1.5rem;
   font-weight: 300;
+  flex-shrink: 0;
   animation: arrowBounce 2s ease-in-out infinite;
 }
 @keyframes arrowBounce {
