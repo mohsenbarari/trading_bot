@@ -230,6 +230,7 @@ describe('TradingSettings.vue', () => {
       }),
     )
     expect(wrapper.text()).toContain('تنظیمات با موفقیت ذخیره شد')
+    expect(wrapper.get('.settings-viewport-toast--success').text()).toBe('تنظیمات با موفقیت ذخیره شد')
     expect((inputs[1]!.element as HTMLInputElement).value).toBe('')
     expect(inputs[1]!.attributes('placeholder')).toBe('30')
     expect((inputs[8]!.element as HTMLInputElement).value).toBe('')
@@ -327,6 +328,7 @@ describe('TradingSettings.vue', () => {
 
     expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/reset', { method: 'POST' })
     expect(wrapper.text()).toContain('تنظیمات به مقادیر پیش‌فرض بازنشانی شد')
+    expect(wrapper.get('.settings-viewport-toast--success').text()).toBe('تنظیمات به مقادیر پیش‌فرض بازنشانی شد')
 
     tradingSettingsMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       const method = options?.method || 'GET'

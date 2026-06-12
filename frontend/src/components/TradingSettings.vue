@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { apiFetch } from '../utils/auth'
 import { Loader2, ChevronLeft, Save, RotateCcw, Mail, ClipboardList, Clock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
 import { formatIranDateTime } from '../utils/iranTime'
@@ -14,6 +14,8 @@ const loading = ref(true)
 const saving = ref(false)
 const message = ref('')
 const messageType = ref<'success' | 'danger'>('success')
+const viewportToast = ref<{ type: 'success' | 'danger'; text: string } | null>(null)
+let viewportToastTimer: number | null = null
 
 const openSections = ref({
   invitation: false,
@@ -44,6 +46,27 @@ const defaultVals = {
 type EditableSettingKey = keyof typeof defaultVals
 
 const editableSettingKeys = Object.keys(defaultVals) as EditableSettingKey[]
+
+const showViewportToast = (type: 'success' | 'danger', text: string, timeoutMs = 4200) => {
+  viewportToast.value = { type, text }
+  if (viewportToastTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(viewportToastTimer)
+  }
+  viewportToastTimer = typeof window !== 'undefined'
+    ? window.setTimeout(() => {
+        viewportToast.value = null
+        viewportToastTimer = null
+      }, timeoutMs)
+    : null
+}
+
+const clearViewportToast = () => {
+  viewportToast.value = null
+  if (viewportToastTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(viewportToastTimer)
+  }
+  viewportToastTimer = null
+}
 
 const defaultSchedule = {
   market_schedule_enabled: false,
@@ -312,9 +335,11 @@ const saveSettings = async () => {
     
     message.value = 'تنظیمات با موفقیت ذخیره شد'
     messageType.value = 'success'
+    showViewportToast('success', message.value)
   } catch (error: any) {
     message.value = error.message || 'خطا در ذخیره تنظیمات'
     messageType.value = 'danger'
+    showViewportToast('danger', message.value)
   } finally {
     saving.value = false
   }
@@ -337,9 +362,11 @@ const resetSettings = async () => {
     
     message.value = 'تنظیمات به مقادیر پیش‌فرض بازنشانی شد'
     messageType.value = 'success'
+    showViewportToast('success', message.value)
   } catch (error) {
     message.value = 'خطا در بازنشانی تنظیمات'
     messageType.value = 'danger'
+    showViewportToast('danger', message.value)
   } finally {
     saving.value = false
   }
@@ -350,10 +377,23 @@ onMounted(() => {
   loadMarketState()
   loadOverrides()
 })
+
+onBeforeUnmount(() => {
+  clearViewportToast()
+})
 </script>
 
 <template>
   <div class="trading-settings ds-page-content">
+    <div
+      v-if="viewportToast"
+      class="settings-viewport-toast"
+      :class="`settings-viewport-toast--${viewportToast.type}`"
+      role="status"
+      aria-live="polite"
+    >
+      {{ viewportToast.text }}
+    </div>
     
     <div v-if="loading" class="ds-loading-state">
        <Loader2 class="ds-spinner" :size="32" />
@@ -718,6 +758,36 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.settings-viewport-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 50%;
+  z-index: 1305;
+  width: min(520px, calc(100vw - 28px));
+  transform: translateX(-50%);
+  border-radius: 18px;
+  padding: 0.85rem 1rem;
+  direction: rtl;
+  text-align: right;
+  font-size: 0.88rem;
+  font-weight: 850;
+  line-height: 1.8;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.settings-viewport-toast--success {
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: rgba(240, 253, 244, 0.96);
+  color: #047857;
+}
+
+.settings-viewport-toast--danger {
+  border: 1px solid rgba(239, 68, 68, 0.26);
+  background: rgba(254, 242, 242, 0.96);
+  color: #b91c1c;
 }
 
 .section-icon {
