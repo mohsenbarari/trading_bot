@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { BarChart3, ChevronLeft, ReceiptText, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
@@ -127,14 +127,15 @@ const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
 const selectedRelationId = ref<number | null>(null)
 const statsPeriodDays = ref(7)
+const shellRef = ref<HTMLElement | null>(null)
 
 const createForm = reactive(makeEmptyCreateForm())
 const detailEditForm = reactive(makeEmptyDetailEditForm())
 const openSections = reactive({
-  create: true,
-  createLimits: true,
-  relations: true,
-  detailOverview: true,
+  create: false,
+  createLimits: false,
+  relations: false,
+  detailOverview: false,
   detailTrades: false,
   detailStats: false,
   detailSessions: false,
@@ -597,7 +598,11 @@ async function saveDetailEdit() {
     const updated = responsePayload as CustomerRelation
     relations.value = relations.value.map((item) => (item.id === updated.id ? updated : item))
     clearDetailEditState()
-    notice.value = 'اطلاعات مشتری به‌روزرسانی شد.'
+    notice.value = 'تنظیمات مشتری با موفقیت ذخیره شد.'
+    await nextTick()
+    if (typeof shellRef.value?.scrollTo === 'function') {
+      shellRef.value.scrollTo({ top: 0, behavior: 'smooth' })
+    }
   } catch (err: any) {
     error.value = err?.message || 'ویرایش مشتری ناموفق بود.'
   } finally {
@@ -767,14 +772,13 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div class="customer-manager-backdrop" @click.self="emit('close')">
-      <div class="customer-manager-shell">
+      <div ref="shellRef" class="customer-manager-shell">
         <div class="customer-manager-header">
           <button type="button" class="customer-manager-back" aria-label="بازگشت" @click="emit('close')">
             <ChevronLeft :size="24" />
           </button>
           <div class="customer-manager-title">
-            <p class="customer-manager-kicker">مدیریت ارتباطات</p>
-            <h3>مشتریان مالک</h3>
+            <h3>مشتریان</h3>
           </div>
           <span class="customer-manager-header-spacer" aria-hidden="true"></span>
         </div>

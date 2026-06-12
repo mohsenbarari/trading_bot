@@ -349,7 +349,7 @@ const targetCustomerHistoryContext = computed(() => {
   };
 });
 const showCustomerListSection = computed(() => {
-  return customerProfileContext.value === null && customerRelations.value.length > 0 && (showOwnerSections.value || viewerIsSuperAdmin.value);
+  return !isOwnProfile.value && customerProfileContext.value === null && customerRelations.value.length > 0 && viewerIsSuperAdmin.value;
 });
 const viewerIsDisplayedOwnerAccountant = computed(() => {
   const viewerUserId = Number(props.viewerUserId);
@@ -1570,15 +1570,15 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           <div class="ds-accordion-header" @click="openSections.customers = !openSections.customers">
             <div class="ds-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
-              <h2>{{ showOwnerSections ? 'لیست مشتریان' : 'مشتریان این مالک' }}</h2>
+              <h2>مشتریان این مالک</h2>
             </div>
             <div class="accordion-header-actions">
               <ChevronLeft :size="20" class="ds-accordion-icon" />
               <HelpPopover
                 button-test="public-profile-customers-help"
                 note-test="public-profile-customers-help-note"
-                label="راهنمای لیست مشتریان"
-                text="این لیست مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به مالک، حسابداران همان مالک و مدیر ارشد محدود است."
+                label="راهنمای مشتریان این مالک"
+                text="این بخش مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به حسابداران همان مالک و مدیر ارشد محدود است."
               />
             </div>
           </div>
