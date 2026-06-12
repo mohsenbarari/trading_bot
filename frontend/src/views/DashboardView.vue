@@ -13,6 +13,7 @@ interface DashboardTrade {
   commodity_name: string
   quantity: number
   price: number
+  offer_user_id: number | null
   responder_user_id: number | null
   offer_user_name?: string | null
   responder_user_name?: string | null
@@ -121,6 +122,18 @@ function getTodayIranGregorianDate() {
   return `${year}-${month}-${day}`
 }
 
+function normalizeDashboardUserId(value: unknown) {
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+function isTradeParticipantForPerspective(trade: DashboardTrade) {
+  const perspectiveUserId = normalizeDashboardUserId(tradeHistoryPerspectiveUserId.value)
+  if (perspectiveUserId === null) return false
+  return normalizeDashboardUserId(trade.offer_user_id) === perspectiveUserId
+    || normalizeDashboardUserId(trade.responder_user_id) === perspectiveUserId
+}
+
 function formatDashboardNumber(value: number | string | null | undefined) {
   const normalized = Number(value)
   return Number.isFinite(normalized) ? normalized.toLocaleString('fa-IR') : '۰'
@@ -160,7 +173,9 @@ async function loadTodayTrades() {
     if (!response.ok) {
       throw new Error(payload?.detail || 'دریافت معاملات امروز ناموفق بود')
     }
-    todayTrades.value = Array.isArray(payload) ? payload as DashboardTrade[] : []
+    todayTrades.value = Array.isArray(payload)
+      ? (payload as DashboardTrade[]).filter(isTradeParticipantForPerspective)
+      : []
   } catch (error: any) {
     todayTrades.value = []
     todayTradesError.value = error?.message || 'دریافت معاملات امروز ناموفق بود'

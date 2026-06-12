@@ -119,11 +119,22 @@ describe('DashboardView.vue', () => {
         {
           id: 101,
           trade_type: 'buy',
+          offer_user_id: 44,
           responder_user_id: 12,
           counterparty_name: 'حسین رضایی',
           commodity_name: 'سکه',
           quantity: 3,
           price: 123000,
+        },
+        {
+          id: 102,
+          trade_type: 'sell',
+          offer_user_id: 77,
+          responder_user_id: 88,
+          counterparty_name: 'نباید دیده شود',
+          commodity_name: 'امام',
+          quantity: 40,
+          price: 170000,
         },
       ],
     })
@@ -140,6 +151,7 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-card').text()).toContain('حسین رضایی')
     expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
     expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
+    expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
@@ -221,6 +233,7 @@ describe('DashboardView.vue', () => {
         {
           id: 181,
           trade_type: 'sell',
+          offer_user_id: 19,
           responder_user_id: 44,
           counterparty_name: 'طرف مالک',
           commodity_name: 'طلای آب‌شده',
