@@ -93,6 +93,128 @@ def audit_actor_context(context: EffectiveOwnerActor) -> dict:
     }
 
 
+def _coerce_optional_int(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trade_price(trade) -> int | None:
+    return _coerce_optional_int(getattr(trade, "price", None))
+
+
+def _trade_user_id(trade, field_name: str) -> int | None:
+    return _coerce_optional_int(getattr(trade, field_name, None))
+
+
+def _same_trade_context(left_trade, right_trade) -> bool:
+    if _coerce_optional_int(getattr(left_trade, "commodity_id", None)) != _coerce_optional_int(
+        getattr(right_trade, "commodity_id", None)
+    ):
+        return False
+    if _coerce_optional_int(getattr(left_trade, "quantity", None)) != _coerce_optional_int(
+        getattr(right_trade, "quantity", None)
+    ):
+        return False
+
+    left_actor_id = _coerce_optional_int(getattr(left_trade, "actor_user_id", None))
+    right_actor_id = _coerce_optional_int(getattr(right_trade, "actor_user_id", None))
+    if left_actor_id is not None and right_actor_id is not None and left_actor_id != right_actor_id:
+        return False
+    return True
+
+
+def _nearest_chain_trade_price(
+    trade,
+    *,
+    owner_user_id: int,
+    after_current_trade: bool,
+    expected_owner_field: str,
+    chain_candidates: list[Trade],
+) -> int | None:
+    trade_number = _coerce_optional_int(getattr(trade, "trade_number", None))
+    if trade_number is None:
+        return None
+
+    matches = []
+    for candidate in chain_candidates:
+        candidate_trade_number = _coerce_optional_int(getattr(candidate, "trade_number", None))
+        if candidate_trade_number is None or candidate_trade_number == trade_number:
+            continue
+        if after_current_trade and candidate_trade_number <= trade_number:
+            continue
+        if not after_current_trade and candidate_trade_number >= trade_number:
+            continue
+        if _trade_user_id(candidate, expected_owner_field) != owner_user_id:
+            continue
+        if not _same_trade_context(trade, candidate):
+            continue
+        candidate_price = _trade_price(candidate)
+        if candidate_price is not None:
+            matches.append((candidate_trade_number, candidate_price))
+
+    if not matches:
+        return None
+
+    matches.sort(key=lambda item: item[0], reverse=not after_current_trade)
+    return matches[0][1]
+
+
+def _historical_customer_base_price(
+    trade,
+    *,
+    owner_user_id: int,
+    customer_user_id: int,
+    chain_candidates: list[Trade],
+) -> int | None:
+    offer_price = _coerce_optional_int(getattr(getattr(trade, "offer", None), "price", None))
+    if offer_price is not None:
+        return offer_price
+
+    offer_user_id = _trade_user_id(trade, "offer_user_id")
+    responder_user_id = _trade_user_id(trade, "responder_user_id")
+    if offer_user_id == owner_user_id and responder_user_id == customer_user_id:
+        return _nearest_chain_trade_price(
+            trade,
+            owner_user_id=owner_user_id,
+            after_current_trade=False,
+            expected_owner_field="responder_user_id",
+            chain_candidates=chain_candidates,
+        )
+    if offer_user_id == customer_user_id and responder_user_id == owner_user_id:
+        return _nearest_chain_trade_price(
+            trade,
+            owner_user_id=owner_user_id,
+            after_current_trade=True,
+            expected_owner_field="offer_user_id",
+            chain_candidates=chain_candidates,
+        )
+    return None
+
+
+def calculate_customer_trade_commission_profit(
+    trade,
+    *,
+    owner_user_id: int,
+    customer_user_id: int,
+    chain_candidates: list[Trade],
+) -> int:
+    quantity = _coerce_optional_int(getattr(trade, "quantity", None)) or 0
+    trade_price = _trade_price(trade)
+    base_price = _historical_customer_base_price(
+        trade,
+        owner_user_id=owner_user_id,
+        customer_user_id=customer_user_id,
+        chain_candidates=chain_candidates,
+    )
+    if quantity <= 0 or trade_price is None or base_price is None:
+        return 0
+    return abs(trade_price - base_price) * quantity
+
+
 async def ensure_owner_context(context: EffectiveOwnerActor, db: AsyncSession) -> None:
     if context.is_accountant_context:
         raise HTTPException(status_code=403, detail="Accountants cannot manage owner customers")
@@ -326,6 +448,32 @@ async def get_my_customer_trade_stats(
         .order_by(Trade.created_at.desc(), Trade.id.desc())
     )
     trades = list((await db.execute(stmt)).scalars().all())
+    trade_numbers = [
+        trade_number
+        for trade_number in (_coerce_optional_int(getattr(trade, "trade_number", None)) for trade in trades)
+        if trade_number is not None
+    ]
+    chain_candidates: list[Trade] = []
+    if trade_numbers:
+        nearby_trade_numbers = {
+            candidate_trade_number
+            for trade_number in trade_numbers
+            for candidate_trade_number in range(trade_number - 3, trade_number + 4)
+            if candidate_trade_number > 0
+        }
+        chain_stmt = (
+            select(Trade)
+            .where(
+                Trade.status == TradeStatus.COMPLETED,
+                Trade.trade_number.in_(nearby_trade_numbers),
+                or_(
+                    Trade.offer_user_id == relation.owner_user_id,
+                    Trade.responder_user_id == relation.owner_user_id,
+                ),
+            )
+            .order_by(Trade.trade_number.asc())
+        )
+        chain_candidates = list((await db.execute(chain_stmt)).scalars().all())
 
     commodity_totals: dict[int, dict[str, int | str]] = {}
     total_quantity = 0
@@ -345,10 +493,12 @@ async def get_my_customer_trade_stats(
         )
         bucket["total_quantity"] = int(bucket["total_quantity"]) + quantity
 
-        offer_price = getattr(getattr(trade, "offer", None), "price", None)
-        trade_price = getattr(trade, "price", None)
-        if offer_price is not None and trade_price is not None and quantity > 0:
-            commission_profit += abs(int(trade_price) - int(offer_price)) * quantity
+        commission_profit += calculate_customer_trade_commission_profit(
+            trade,
+            owner_user_id=relation.owner_user_id,
+            customer_user_id=relation.customer_user_id,
+            chain_candidates=chain_candidates,
+        )
 
     commodities = sorted(
         commodity_totals.values(),
@@ -364,7 +514,7 @@ async def get_my_customer_trade_stats(
         "total_quantity": total_quantity,
         "commission_profit_toman": commission_profit,
         "commodities": commodities,
-        "profit_calculation_note": "سود از اختلاف قیمت معامله و قیمت اصلی لفظ همان معامله محاسبه می‌شود.",
+        "profit_calculation_note": "سود از اختلاف قیمت ثبت‌شده در معامله مشتری و قیمت اصلی همان زنجیره معامله محاسبه می‌شود.",
     }
 
 

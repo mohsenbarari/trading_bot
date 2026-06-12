@@ -294,6 +294,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         )
         trades = [
             SimpleNamespace(
+                trade_number=10001,
+                offer_user_id=99,
+                responder_user_id=18,
+                actor_user_id=18,
                 quantity=2,
                 commodity_id=1,
                 commodity=SimpleNamespace(name="طلا"),
@@ -301,6 +305,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
                 offer=SimpleNamespace(price=100_000_000),
             ),
             SimpleNamespace(
+                trade_number=10002,
+                offer_user_id=18,
+                responder_user_id=99,
+                actor_user_id=18,
                 quantity=3,
                 commodity_id=1,
                 commodity=SimpleNamespace(name="طلا"),
@@ -308,6 +316,10 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
                 offer=SimpleNamespace(price=100_000_000),
             ),
             SimpleNamespace(
+                trade_number=10003,
+                offer_user_id=99,
+                responder_user_id=18,
+                actor_user_id=18,
                 quantity=1,
                 commodity_id=2,
                 commodity=SimpleNamespace(name="سکه"),
@@ -315,7 +327,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
                 offer=SimpleNamespace(price=200_000),
             ),
         ]
-        db = ExecuteDB(FakeExecuteResult(relation), FakeExecuteResult(values=trades))
+        db = ExecuteDB(FakeExecuteResult(relation), FakeExecuteResult(values=trades), FakeExecuteResult(values=[]))
         context = SimpleNamespace(
             is_accountant_context=False,
             owner_user=SimpleNamespace(id=7),
@@ -332,6 +344,56 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["commodities"][0]["total_quantity"], 5)
         self.assertEqual(result["commodities"][1]["commodity_name"], "سکه")
         self.assertIn("اختلاف قیمت", result["profit_calculation_note"])
+
+    async def test_get_my_customer_trade_stats_uses_chain_leg_price_for_tier2_customer_profit(self):
+        relation = SimpleNamespace(
+            id=11,
+            owner_user_id=7,
+            customer_user_id=18,
+            deleted_at=None,
+            status=CustomerRelationStatus.ACTIVE,
+        )
+        customer_trade = SimpleNamespace(
+            trade_number=10002,
+            offer_id=None,
+            offer_user_id=7,
+            responder_user_id=18,
+            actor_user_id=18,
+            quantity=3,
+            commodity_id=1,
+            commodity=SimpleNamespace(name="طلا"),
+            price=100_500,
+            offer=None,
+        )
+        owner_source_leg = SimpleNamespace(
+            trade_number=10001,
+            offer_id=77,
+            offer_user_id=99,
+            responder_user_id=7,
+            actor_user_id=18,
+            quantity=3,
+            commodity_id=1,
+            price=100_000,
+        )
+        db = ExecuteDB(
+            FakeExecuteResult(relation),
+            FakeExecuteResult(values=[customer_trade]),
+            FakeExecuteResult(values=[owner_source_leg]),
+        )
+        context = SimpleNamespace(
+            is_accountant_context=False,
+            owner_user=SimpleNamespace(id=7),
+            actor_user=SimpleNamespace(id=7),
+        )
+
+        with patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)):
+            result = await get_my_customer_trade_stats(11, days=7, context=context, db=db)
+
+        self.assertEqual(result["trade_count"], 1)
+        self.assertEqual(result["total_quantity"], 3)
+        self.assertEqual(result["commission_profit_toman"], 1_500)
+        self.assertEqual(result["commodities"][0]["commodity_name"], "طلا")
+        self.assertIn("زنجیره معامله", result["profit_calculation_note"])
 
     async def test_list_my_customer_sessions_returns_active_customer_sessions(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
