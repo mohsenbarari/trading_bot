@@ -52,6 +52,20 @@ class LoadFixtureError(RuntimeError):
     pass
 
 
+SEQUENCE_ALIGNMENT_TABLES = (
+    "users",
+    "accountant_relations",
+    "customer_relations",
+    "chats",
+    "chat_members",
+    "messages",
+    "conversations",
+    "offers",
+    "trades",
+    "notifications",
+)
+
+
 @dataclass(frozen=True)
 class FixturePlan:
     normal_users: int = 80
@@ -159,6 +173,37 @@ async def cleanup_sync_queue_entries(prefix: str) -> dict[str, int]:
     finally:
         await client.aclose()
     return deleted
+
+
+async def align_integer_sequences(db) -> dict[str, int]:
+    """Advance local sequences after cross-server sync imports explicit ids."""
+    aligned: dict[str, int] = {}
+    for table_name in SEQUENCE_ALIGNMENT_TABLES:
+        await db.execute(
+            text(
+                f"""
+                DO $$
+                DECLARE
+                    seq_name text;
+                    next_value bigint;
+                BEGIN
+                    seq_name := pg_get_serial_sequence('{table_name}', 'id');
+                    IF seq_name IS NOT NULL THEN
+                        SELECT GREATEST(COALESCE(MAX(id), 0) + 1, 1)
+                        INTO next_value
+                        FROM {table_name};
+                        EXECUTE format('SELECT setval(%L::regclass, %s, false)', seq_name, next_value);
+                    END IF;
+                END
+                $$;
+                """
+            )
+        )
+        result = await db.execute(
+            text(f"SELECT GREATEST(COALESCE(MAX(id), 0) + 1, 1) AS next_value FROM {table_name}")
+        )
+        aligned[table_name] = int(result.scalar_one() or 1)
+    return aligned
 
 
 async def cleanup(prefix: str) -> dict[str, Any]:
@@ -486,6 +531,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
     token_expiry = timedelta(minutes=max(30, plan.token_minutes))
 
     async with AsyncSessionLocal() as db:
+        sequence_next_values = await align_integer_sequences(db)
         super_admin = make_user(prefix, "super_admin", 1, role=UserRole.SUPER_ADMIN)
         middle_admins = [
             make_user(prefix, "middle_admin", 100 + index, role=UserRole.MIDDLE_MANAGER)
@@ -829,6 +875,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
                 "trades": len(trade_summaries),
                 "notifications": plan.notifications,
             },
+            "sequence_next_values": sequence_next_values,
             "auth_pool": auth_pool,
         }
 
