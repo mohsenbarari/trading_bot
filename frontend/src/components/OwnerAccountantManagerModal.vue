@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { ChevronLeft, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
@@ -78,6 +79,12 @@ const currentTimeMs = ref(Date.now())
 
 const createForm = reactive(makeEmptyCreateForm())
 const editForm = reactive(makeEmptyEditForm())
+const openSections = reactive({
+  create: true,
+  createIdentity: true,
+  createDuty: true,
+  relations: true,
+})
 let countdownTimer: number | null = null
 
 function parseApiError(payload: unknown, fallback: string) {
@@ -97,6 +104,10 @@ function normalizeDutyDescription(value: string) {
 
 function resetCreateForm() {
   Object.assign(createForm, makeEmptyCreateForm())
+}
+
+function toggleSection(section: keyof typeof openSections) {
+  openSections[section] = !openSections[section]
 }
 
 function clearEditState() {
@@ -218,6 +229,18 @@ const orderedRelations = computed(() => {
     if (statusDiff !== 0) return statusDiff
     return String(right.created_at).localeCompare(String(left.created_at))
   })
+})
+
+const summaryStats = computed(() => {
+  const pending = relations.value.filter((relation) => relation.status === 'pending').length
+  const active = relations.value.filter((relation) => relation.status === 'active').length
+  const archived = relations.value.length - pending - active
+  return {
+    total: relations.value.length,
+    pending,
+    active,
+    archived: Math.max(0, archived),
+  }
 })
 
 async function loadRelations(options?: { silent?: boolean }) {
@@ -453,81 +476,152 @@ onBeforeUnmount(() => {
         <div v-if="error" class="accountant-banner error">{{ error }}</div>
         <div v-else-if="notice" class="accountant-banner success">{{ notice }}</div>
 
-        <section class="accountant-panel create-panel">
-          <div class="panel-title-row">
-            <div>
-              <h4>افزودن حسابدار جدید</h4>
+        <section class="accountant-summary-strip" aria-label="خلاصه وضعیت حسابداران">
+          <article class="summary-card">
+            <span class="summary-label">کل رابطه‌ها</span>
+            <strong class="summary-value">{{ summaryStats.total }}</strong>
+          </article>
+          <article class="summary-card summary-card--active">
+            <span class="summary-label">فعال</span>
+            <strong class="summary-value">{{ summaryStats.active }}</strong>
+          </article>
+          <article class="summary-card summary-card--pending">
+            <span class="summary-label">در انتظار</span>
+            <strong class="summary-value">{{ summaryStats.pending }}</strong>
+          </article>
+          <article class="summary-card summary-card--archived">
+            <span class="summary-label">آرشیوی</span>
+            <strong class="summary-value">{{ summaryStats.archived }}</strong>
+          </article>
+        </section>
+
+        <section class="accountant-panel accountant-panel--accordion">
+          <div class="ds-accordion" :class="{ open: openSections.create }">
+            <div class="ds-accordion-header" @click="toggleSection('create')">
+              <div class="ds-accordion-header-info">
+                <UserPlus :size="18" class="accountant-section-icon" />
+                <div>
+                  <h4>افزودن حسابدار جدید</h4>
+                  <p>دعوت حسابدار و شرح نقش او را مرحله‌بندی شده ثبت کنید.</p>
+                </div>
+              </div>
+              <div class="accordion-header-actions">
+                <HelpPopover
+                  button-test="accountant-create-help"
+                  note-test="accountant-create-help-note"
+                  label="راهنمای افزودن حسابدار"
+                  text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
+                />
+                <ChevronLeft :size="20" class="ds-accordion-icon" />
+              </div>
             </div>
-            <HelpPopover
-              button-test="accountant-create-help"
-              note-test="accountant-create-help-note"
-              label="راهنمای افزودن حسابدار"
-              text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
-            />
-            <button type="button" class="ghost-btn" :disabled="isRefreshing" @click="loadRelations({ silent: true })">
-              {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
-            </button>
-          </div>
 
-          <div class="accountant-form-grid">
-            <label class="field-block">
-              <span>نام کاربری جهانی</span>
-              <input v-model="createForm.account_name" class="accountant-input create-account-name" type="text" placeholder="accountant_01" />
-            </label>
-            <label class="field-block">
-              <span>نام نمایشی رابطه</span>
-              <input v-model="createForm.relation_display_name" class="accountant-input create-display-name" type="text" placeholder="حسابدار فروش" />
-            </label>
-            <label class="field-block">
-              <span>شماره موبایل</span>
-              <input v-model="createForm.mobile_number" class="accountant-input create-mobile-number" type="tel" inputmode="numeric" placeholder="09120000000" />
-            </label>
-            <label class="field-block full-width">
-              <span>شرح وظیفه</span>
-              <textarea v-model="createForm.duty_description" class="accountant-input accountant-textarea create-duty-description" rows="3" placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"></textarea>
-            </label>
-          </div>
+            <div v-show="openSections.create" class="ds-accordion-body accountant-accordion-body">
+              <div class="accountant-form-sections accountant-form-sections--stacked">
+                <section class="form-subpanel form-subpanel--accordion">
+                  <div class="ds-accordion" :class="{ open: openSections.createIdentity }">
+                    <div class="ds-accordion-header" @click.stop="toggleSection('createIdentity')">
+                      <div class="ds-accordion-header-info">
+                        <UserPlus :size="16" class="accountant-subsection-icon" />
+                        <div>
+                          <h5>مشخصات پایه</h5>
+                          <p>نام کاربری، عنوان نمایشی و شماره موبایل حسابدار</p>
+                        </div>
+                      </div>
+                      <ChevronLeft :size="18" class="ds-accordion-icon" />
+                    </div>
+                    <div v-show="openSections.createIdentity" class="ds-accordion-body">
+                      <div class="accountant-form-grid">
+                        <label class="field-block">
+                          <span>نام کاربری جهانی</span>
+                          <input v-model="createForm.account_name" class="accountant-input create-account-name" type="text" placeholder="accountant_01" />
+                        </label>
+                        <label class="field-block">
+                          <span>نام نمایشی رابطه</span>
+                          <input v-model="createForm.relation_display_name" class="accountant-input create-display-name" type="text" placeholder="حسابدار فروش" />
+                        </label>
+                        <label class="field-block">
+                          <span>شماره موبایل</span>
+                          <input v-model="createForm.mobile_number" class="accountant-input create-mobile-number" type="tel" inputmode="numeric" placeholder="09120000000" />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-          <div class="panel-actions">
-            <button type="button" class="secondary-btn" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن</button>
-            <button type="button" class="primary-btn submit-create" :disabled="isSubmitting" @click="createRelation">
-              {{ isSubmitting ? 'در حال ثبت...' : 'ثبت حسابدار' }}
-            </button>
+                <section class="form-subpanel form-subpanel--accordion">
+                  <div class="ds-accordion" :class="{ open: openSections.createDuty }">
+                    <div class="ds-accordion-header" @click.stop="toggleSection('createDuty')">
+                      <div class="ds-accordion-header-info">
+                        <SlidersHorizontal :size="16" class="accountant-subsection-icon" />
+                        <div>
+                          <h5>شرح وظیفه</h5>
+                          <p>اختیاری، برای تفکیک نقش حسابداران در گروه کاری</p>
+                        </div>
+                      </div>
+                      <ChevronLeft :size="18" class="ds-accordion-icon" />
+                    </div>
+                    <div v-show="openSections.createDuty" class="ds-accordion-body">
+                      <label class="field-block">
+                        <span>شرح وظیفه</span>
+                        <textarea v-model="createForm.duty_description" class="accountant-input accountant-textarea create-duty-description" rows="3" placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"></textarea>
+                      </label>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div class="panel-actions">
+                <button type="button" class="secondary-btn" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن</button>
+                <button type="button" class="primary-btn submit-create" :disabled="isSubmitting" @click="createRelation">
+                  {{ isSubmitting ? 'در حال ثبت...' : 'ثبت حسابدار' }}
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
-        <section class="accountant-panel list-panel">
-          <div class="panel-title-row">
-            <div>
-              <h4>لیست حسابداران</h4>
+        <section class="accountant-panel accountant-panel--accordion">
+          <div class="ds-accordion" :class="{ open: openSections.relations }">
+            <div class="ds-accordion-header" @click="toggleSection('relations')">
+              <div class="ds-accordion-header-info">
+                <Users :size="18" class="accountant-section-icon" />
+                <div>
+                  <h4>حسابداران فعال و در انتظار</h4>
+                  <p>رابطه‌ها، وضعیت ثبت‌نام، شرح وظیفه و نشست‌های حسابداران</p>
+                </div>
+              </div>
+              <div class="accordion-header-actions">
+                <HelpPopover
+                  button-test="accountant-list-help"
+                  note-test="accountant-list-help-note"
+                  label="راهنمای لیست حسابداران"
+                  :text="`${orderedRelations.length.toLocaleString('fa-IR')} مورد فعال یا در انتظار ثبت‌نام در این لیست وجود دارد.`"
+                />
+                <button type="button" class="ghost-btn ghost-btn--inline" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
+                  {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
+                </button>
+                <ChevronLeft :size="20" class="ds-accordion-icon" />
+              </div>
             </div>
-            <HelpPopover
-              button-test="accountant-list-help"
-              note-test="accountant-list-help-note"
-              label="راهنمای لیست حسابداران"
-              :text="`${orderedRelations.length.toLocaleString('fa-IR')} مورد فعال یا در انتظار ثبت‌نام در این لیست وجود دارد.`"
-            />
-          </div>
 
-          <div v-if="isLoading" class="accountant-loading">در حال دریافت حسابداران...</div>
-          <div v-else-if="orderedRelations.length === 0" class="accountant-empty">
+            <div v-show="openSections.relations" class="ds-accordion-body accountant-accordion-body">
+              <div v-if="isLoading" class="accountant-loading">در حال دریافت حسابداران...</div>
+              <div v-else-if="orderedRelations.length === 0" class="accountant-empty">
             هنوز هیچ حسابداری برای این مالک ثبت نشده است.
-          </div>
-          <div v-else class="accountant-list">
+              </div>
+              <div v-else class="accountant-list">
             <article v-for="relation in orderedRelations" :key="relation.id" class="accountant-card" :class="`status-${relation.status}`">
               <div class="accountant-card-head">
-                <div>
+                <div class="accountant-identity-block">
                   <h5>{{ relation.relation_display_name }}</h5>
                   <p class="accountant-global-name">@{{ relation.global_account_name }}</p>
+                  <p class="accountant-mobile-number">{{ relation.mobile_number }}</p>
                 </div>
                 <span class="accountant-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
               </div>
 
               <div class="accountant-meta-grid">
-                <div class="meta-item">
-                  <span class="meta-label">موبایل</span>
-                  <span class="meta-value">{{ relation.mobile_number }}</span>
-                </div>
                 <div class="meta-item">
                   <span class="meta-label">کاربر لینک‌شده</span>
                   <span class="meta-value">{{ relation.accountant_account_name || 'هنوز ثبت‌نام نشده' }}</span>
@@ -654,6 +748,8 @@ onBeforeUnmount(() => {
               </div>
             </article>
           </div>
+            </div>
+          </div>
         </section>
       </div>
     </div>
@@ -760,6 +856,46 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.accountant-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-card {
+  border-radius: 20px;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summary-card--active {
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.98), rgba(240, 253, 244, 0.98));
+}
+
+.summary-card--pending {
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.98), rgba(255, 247, 237, 0.98));
+}
+
+.summary-card--archived {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98));
+}
+
+.summary-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748b;
+}
+
+.summary-value {
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #0f172a;
+}
+
 .accountant-panel {
   border-radius: 24px;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -768,6 +904,60 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.accountant-panel--accordion {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: block;
+}
+
+.accountant-panel--accordion .ds-accordion {
+  border-radius: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+  overflow: hidden;
+}
+
+.accountant-panel--accordion .ds-accordion-header {
+  gap: 14px;
+}
+
+.accountant-panel--accordion .ds-accordion-header-info {
+  gap: 12px;
+}
+
+.accountant-panel--accordion .ds-accordion-header-info h4,
+.form-subpanel--accordion .ds-accordion-header-info h5 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.accountant-panel--accordion .ds-accordion-header-info p,
+.form-subpanel--accordion .ds-accordion-header-info p {
+  margin: 3px 0 0;
+  font-size: 0.84rem;
+  color: #64748b;
+}
+
+.accountant-accordion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.accountant-section-icon,
+.accountant-subsection-icon {
+  color: #d97706;
+}
+
+.accordion-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  direction: ltr;
 }
 
 .panel-title-row {
@@ -793,6 +983,37 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.accountant-form-sections {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.form-subpanel {
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(248, 250, 252, 0.72);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-subpanel--accordion {
+  padding: 0;
+  overflow: hidden;
+}
+
+.form-subpanel--accordion .ds-accordion {
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+}
+
+.form-subpanel--accordion .ds-accordion-body {
+  padding-top: 2px;
 }
 
 .field-block {
@@ -838,6 +1059,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.ghost-btn--inline {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 .panel-actions.compact {
   justify-content: flex-start;
 }
@@ -878,9 +1104,24 @@ onBeforeUnmount(() => {
   color: #0f172a;
 }
 
+.accountant-identity-block {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .accountant-global-name {
   margin: 0;
   color: #64748b;
+  direction: ltr;
+  text-align: right;
+}
+
+.accountant-mobile-number {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
   direction: ltr;
   text-align: right;
 }
@@ -1061,6 +1302,8 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
+  .accountant-summary-strip,
+  .accountant-form-sections,
   .accountant-form-grid,
   .accountant-meta-grid {
     grid-template-columns: 1fr;
@@ -1074,8 +1317,15 @@ onBeforeUnmount(() => {
   .panel-actions > button,
   .accountant-actions > button,
   .accountant-manager-close,
-  .ghost-btn {
+  .ghost-btn,
+  .ghost-btn--inline {
     width: 100%;
+  }
+
+  .accordion-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .session-panel-header,
