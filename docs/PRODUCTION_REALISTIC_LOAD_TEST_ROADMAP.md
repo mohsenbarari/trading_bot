@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L2 in progress.
+Status: Stage L2 complete. Stage L3 is next.
 
 Last updated: 2026-06-12
 
@@ -17,7 +17,7 @@ same time.
 | --- | --- | --- |
 | `L0` | Complete on 2026-06-12 | Contract, safety inventory, persona endpoint map, restricted endpoint list, synthetic mutation inventory, and Stage L1 credential requirements are recorded in this document. No production load was generated. |
 | `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@87.107.3.22`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
-| `L2` | In progress | `scripts/load_fixture_worker.py`, `scripts/report_production_load_fixtures.py`, and `make production-load-fixtures` are available for synthetic fixture/auth-pool setup and cleanup. A live Stage L2 prepare/cleanup run still requires the new scripts to be synced/deployed to the Iran app container. |
+| `L2` | Complete on 2026-06-12 | Default `make production-load-fixtures` prepare-and-cleanup passed against Iran/load-runner with artifact `tmp/production-benchmark/20260612T193743Z/load-fixtures/`: 161 synthetic users, 80 direct pairs, 12 groups, 3 channels, 60 offers, 20 trades, auth-pool upload, clean pre/post sync-health, and successful Iran/foreign/load-runner cleanup. |
 | `L3`-`L11` | Pending | k6 mixed harness, observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
@@ -417,9 +417,8 @@ Current implementation status:
 - Prepare aligns local integer sequences for fixture tables before inserts,
   because cross-server seed/sync may import explicit ids and leave PostgreSQL
   sequences behind `MAX(id)`.
-- Live execution should happen after the new scripts are present on the Iran
-  server through `make production-release` or the appropriate production sync
-  path.
+- Live default execution passed on 2026-06-12 with artifact
+  `tmp/production-benchmark/20260612T193743Z/load-fixtures/`.
 
 ## Stage L3 - k6 Mixed Scenario Harness
 
