@@ -366,6 +366,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const patchCall = apiFetchMock.mock.calls.find(([url, options]) => url === '/api/customers/owner-relations/11' && options?.method === 'PATCH')
     expect(patchCall).toBeTruthy()
+    expect((patchCall?.[1] as any)?.retryNetwork).toBe(false)
+    expect((patchCall?.[1] as any)?.signal).toBeTruthy()
     expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({
       customer_tier: 'tier1',
       commission_rate: null,
@@ -375,6 +377,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
       max_daily_commodity_volume: 150,
     })
     expect(wrapper.text()).toContain('تنظیمات مشتری با موفقیت ذخیره شد.')
+    expect(wrapper.get('.detail-save-feedback').text()).toBe('تنظیمات مشتری با موفقیت ذخیره شد.')
     expect(wrapper.text()).toContain('سطح 1')
     expect(wrapper.get('.save-edit').text()).toBe('ذخیره تغییرات')
 

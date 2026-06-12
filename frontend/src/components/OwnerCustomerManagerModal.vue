@@ -115,6 +115,7 @@ const isSubmitting = ref(false)
 const isSavingEdit = ref(false)
 const error = ref('')
 const notice = ref('')
+const detailSaveNotice = ref('')
 const copiedRelationId = ref<number | null>(null)
 const openSessionsRelationId = ref<number | null>(null)
 const sessionsByRelationId = ref<Record<number, CustomerSessionSummary[]>>({})
@@ -579,17 +580,25 @@ async function saveDetailEdit() {
   const payload = buildDetailUpdatePayload(relation)
   if (!Object.keys(payload).length) {
     notice.value = 'تغییری برای ذخیره انتخاب نشده است.'
+    detailSaveNotice.value = notice.value
     return
   }
 
   isSavingEdit.value = true
   error.value = ''
   notice.value = ''
+  detailSaveNotice.value = ''
+  const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const timeoutId = typeof window !== 'undefined' && abortController
+    ? window.setTimeout(() => abortController.abort(), 15000)
+    : null
 
   try {
     const response = await apiFetch(`/api/customers/owner-relations/${relation.id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
+      retryNetwork: false,
+      ...(abortController ? { signal: abortController.signal } : {}),
     })
     const responsePayload = await response.json().catch(() => null)
     if (!response.ok) {
@@ -598,14 +607,21 @@ async function saveDetailEdit() {
     const updated = responsePayload as CustomerRelation
     relations.value = relations.value.map((item) => (item.id === updated.id ? updated : item))
     clearDetailEditState()
+    isSavingEdit.value = false
     notice.value = 'تنظیمات مشتری با موفقیت ذخیره شد.'
+    detailSaveNotice.value = notice.value
     await nextTick()
     if (typeof shellRef.value?.scrollTo === 'function') {
       shellRef.value.scrollTo({ top: 0, behavior: 'smooth' })
     }
   } catch (err: any) {
-    error.value = err?.message || 'ویرایش مشتری ناموفق بود.'
+    error.value = err?.name === 'AbortError'
+      ? 'ذخیره تنظیمات بیش از حد انتظار طول کشید. اگر تغییرات اعمال شده‌اند، صفحه مشتری را دوباره باز کنید.'
+      : err?.message || 'ویرایش مشتری ناموفق بود.'
   } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId)
+    }
     isSavingEdit.value = false
   }
 }
@@ -660,6 +676,7 @@ function openCustomerDetail(relation: CustomerRelation) {
   clearDetailEditState()
   error.value = ''
   notice.value = ''
+  detailSaveNotice.value = ''
   openSections.detailOverview = true
   openSections.detailTrades = false
   openSections.detailStats = false
@@ -670,6 +687,7 @@ function openCustomerDetail(relation: CustomerRelation) {
 function backToCustomerList() {
   selectedRelationId.value = null
   clearDetailEditState()
+  detailSaveNotice.value = ''
 }
 
 async function loadCustomerTrades(relationId: number, options?: { force?: boolean }) {
@@ -1034,6 +1052,7 @@ onBeforeUnmount(() => {
                           {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
                         </button>
                       </div>
+                      <p v-if="detailSaveNotice" class="detail-save-feedback success">{{ detailSaveNotice }}</p>
                     </div>
                   </div>
                 </div>
@@ -1765,6 +1784,21 @@ onBeforeUnmount(() => {
 
 .panel-actions.compact {
   justify-content: flex-start;
+}
+
+.detail-save-feedback {
+  margin: 0;
+  padding: 0.62rem 0.75rem;
+  border-radius: 0.9rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.7;
+}
+
+.detail-save-feedback.success {
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
 }
 
 .customer-loading,
