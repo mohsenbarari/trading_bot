@@ -128,6 +128,22 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
   }
 
+  it('uses the profile-style customer menu shell without close or relationship summary cards', async () => {
+    apiFetchMock.mockResolvedValue(makeResponse([activeRelation, pendingRelation]))
+
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(wrapper.find('.customer-manager-back').exists()).toBe(true)
+    expect(wrapper.find('.customer-manager-close').exists()).toBe(false)
+    expect(wrapper.find('.customer-summary-strip').exists()).toBe(false)
+    expect(wrapper.text()).toContain('افزودن مشتری جدید')
+    expect(wrapper.text()).toContain('مدیریت مشتریان')
+    expect(wrapper.text()).not.toContain('مشتریان فعال و در انتظار')
+
+    wrapper.unmount()
+  })
+
   it('loads and terminates customer sessions for an active customer', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     let sessionListCallCount = 0
