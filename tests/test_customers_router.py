@@ -12,6 +12,7 @@ from api.routers.customers import (
     create_my_customer,
     get_active_customer_session,
     get_active_owner_customer_relation,
+    get_my_customer_trade_stats,
     list_my_customers,
     list_my_customer_sessions,
     terminate_my_customer_session,
@@ -26,11 +27,15 @@ class FakeDB:
 
 
 class FakeExecuteResult:
-    def __init__(self, value):
+    def __init__(self, value=None, values=None):
         self.value = value
+        self.values = list(values or [])
 
     def scalar_one_or_none(self):
         return self.value
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: self.values)
 
 
 class ExecuteDB:
@@ -40,7 +45,10 @@ class ExecuteDB:
     async def execute(self, _stmt):
         if not self.values:
             raise AssertionError("Unexpected execute() call")
-        return FakeExecuteResult(self.values.pop(0))
+        value = self.values.pop(0)
+        if isinstance(value, FakeExecuteResult):
+            return value
+        return FakeExecuteResult(value)
 
 
 class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
@@ -220,9 +228,58 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(update_mock.await_args.kwargs["update_data"]["commission_rate"], 0.8)
         self.assertEqual(result["management_name"], "مشتری ارشد")
 
+    async def test_get_my_customer_trade_stats_uses_historical_trade_prices(self):
+        relation = SimpleNamespace(
+            id=11,
+            owner_user_id=7,
+            customer_user_id=18,
+            deleted_at=None,
+            status=CustomerRelationStatus.ACTIVE,
+        )
+        trades = [
+            SimpleNamespace(
+                quantity=2,
+                commodity_id=1,
+                commodity=SimpleNamespace(name="طلا"),
+                price=100_500_000,
+                offer=SimpleNamespace(price=100_000_000),
+            ),
+            SimpleNamespace(
+                quantity=3,
+                commodity_id=1,
+                commodity=SimpleNamespace(name="طلا"),
+                price=99_500_000,
+                offer=SimpleNamespace(price=100_000_000),
+            ),
+            SimpleNamespace(
+                quantity=1,
+                commodity_id=2,
+                commodity=SimpleNamespace(name="سکه"),
+                price=200_000,
+                offer=SimpleNamespace(price=200_000),
+            ),
+        ]
+        db = ExecuteDB(FakeExecuteResult(relation), FakeExecuteResult(values=trades))
+        context = SimpleNamespace(
+            is_accountant_context=False,
+            owner_user=SimpleNamespace(id=7),
+            actor_user=SimpleNamespace(id=7),
+        )
+
+        with patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)):
+            result = await get_my_customer_trade_stats(11, days=7, context=context, db=db)
+
+        self.assertEqual(result["trade_count"], 3)
+        self.assertEqual(result["total_quantity"], 6)
+        self.assertEqual(result["commission_profit_toman"], 2_500_000)
+        self.assertEqual(result["commodities"][0]["commodity_name"], "طلا")
+        self.assertEqual(result["commodities"][0]["total_quantity"], 5)
+        self.assertEqual(result["commodities"][1]["commodity_name"], "سکه")
+        self.assertIn("اختلاف قیمت", result["profit_calculation_note"])
+
     async def test_list_my_customer_sessions_returns_active_customer_sessions(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
-        relation = SimpleNamespace(customer_user_id=12)
+        relation = SimpleNamespace(id=9, customer_user_id=12)
         sessions = [
             SimpleNamespace(
                 id="session-1",
@@ -349,7 +406,7 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_terminate_my_customer_session_logs_out_selected_customer_session(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
-        relation = SimpleNamespace(customer_user_id=12)
+        relation = SimpleNamespace(id=9, customer_user_id=12)
         session = SimpleNamespace(id=uuid.UUID("11111111-1111-1111-1111-111111111111"))
         promoted = SimpleNamespace(id=uuid.UUID("22222222-2222-2222-2222-222222222222"))
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ChevronLeft, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
+import { BarChart3, ChevronLeft, ReceiptText, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
@@ -11,7 +11,7 @@ const emit = defineEmits<{
 
 type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
 type CustomerTier = 'tier1' | 'tier2'
-type ActivePanel = 'create' | 'relations' | null
+type DetailSection = 'detailOverview' | 'detailTrades' | 'detailStats' | 'detailSessions' | 'detailDanger'
 
 interface CustomerRelation {
   id: number
@@ -54,13 +54,43 @@ interface CustomerSessionTerminateResponse {
   promoted_primary_session_id: string | null
 }
 
+interface CustomerTradeSummary {
+  id: number
+  trade_number: number
+  trade_type: string
+  commodity_name: string
+  quantity: number
+  price: number
+  status: string
+  counterparty_name?: string | null
+  created_at: string
+}
+
+interface CustomerTradeStatsCommodity {
+  commodity_id: number
+  commodity_name: string
+  total_quantity: number
+}
+
+interface CustomerTradeStats {
+  relation_id: number
+  customer_user_id: number
+  period_days: number
+  from_date: string
+  to_date: string
+  trade_count: number
+  total_quantity: number
+  commission_profit_toman: number
+  commodities: CustomerTradeStatsCommodity[]
+  profit_calculation_note: string
+}
+
 function makeEmptyCreateForm() {
   return {
-    account_name: '',
     management_name: '',
     mobile_number: '',
     customer_tier: 'tier1' as CustomerTier,
-    commission_rate: '',
+    commission_rate: '0.50',
     min_trade_quantity: '',
     max_trade_quantity: '',
     max_daily_trades: '',
@@ -68,9 +98,9 @@ function makeEmptyCreateForm() {
   }
 }
 
-function makeEmptyEditForm() {
+function makeEmptyDetailEditForm() {
   return {
-    customer_tier: 'tier1' as CustomerTier,
+    customer_tier: '',
     commission_rate: '',
     min_trade_quantity: '',
     max_trade_quantity: '',
@@ -84,26 +114,35 @@ const isLoading = ref(true)
 const isRefreshing = ref(false)
 const isSubmitting = ref(false)
 const isSavingEdit = ref(false)
-const editingRelationId = ref<number | null>(null)
 const error = ref('')
 const notice = ref('')
 const copiedRelationId = ref<number | null>(null)
 const openSessionsRelationId = ref<number | null>(null)
 const sessionsByRelationId = ref<Record<number, CustomerSessionSummary[]>>({})
+const tradesByRelationId = ref<Record<number, CustomerTradeSummary[]>>({})
+const statsByRelationId = ref<Record<number, CustomerTradeStats>>({})
 const loadingSessionsRelationId = ref<number | null>(null)
+const loadingTradesRelationId = ref<number | null>(null)
+const loadingStatsRelationId = ref<number | null>(null)
 const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
-const activePanel = ref<ActivePanel>(null)
+const selectedRelationId = ref<number | null>(null)
+const statsPeriodDays = ref(7)
 
 const createForm = reactive(makeEmptyCreateForm())
-const editForm = reactive(makeEmptyEditForm())
+const detailEditForm = reactive(makeEmptyDetailEditForm())
 const openSections = reactive({
   create: true,
-  createIdentity: true,
   createLimits: true,
   relations: true,
+  detailOverview: true,
+  detailTrades: false,
+  detailStats: false,
+  detailSessions: false,
+  detailDanger: false,
 })
 let countdownTimer: number | null = null
+let commissionHoldTimer: number | null = null
 
 function parseApiError(payload: unknown, fallback: string) {
   if (typeof payload === 'object' && payload && 'detail' in payload) {
@@ -123,18 +162,37 @@ function toggleSection(section: keyof typeof openSections) {
   openSections[section] = !openSections[section]
 }
 
-function openPanel(panel: Exclude<ActivePanel, null>) {
-  activePanel.value = panel
+function clearDetailEditState() {
+  Object.assign(detailEditForm, makeEmptyDetailEditForm())
 }
 
-function backToCategories() {
-  activePanel.value = null
+function normalizeLatinDigits(value: string) {
+  const persian = '۰۱۲۳۴۵۶۷۸۹'
+  const arabic = '٠١٢٣٤٥٦٧٨٩'
+  return String(value || '')
+    .replace(/[۰-۹]/g, (digit) => String(persian.indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String(arabic.indexOf(digit)))
 }
 
-function clearEditState() {
-  editingRelationId.value = null
-  Object.assign(editForm, makeEmptyEditForm())
-}
+const generatedCreateAccountName = computed(() => {
+  const mobileDigits = normalizeLatinDigits(createForm.mobile_number).replace(/\D/g, '')
+  return mobileDigits ? `customer_${mobileDigits}` : ''
+})
+
+const selectedRelation = computed(() => {
+  if (selectedRelationId.value == null) return null
+  return relations.value.find((relation) => relation.id === selectedRelationId.value) ?? null
+})
+
+const selectedRelationTrades = computed(() => {
+  const relationId = selectedRelation.value?.id
+  return relationId == null ? [] : tradesByRelationId.value[relationId] ?? []
+})
+
+const selectedRelationStats = computed(() => {
+  const relationId = selectedRelation.value?.id
+  return relationId == null ? null : statsByRelationId.value[relationId] ?? null
+})
 
 function formatDateTime(value: string | null) {
   if (!value) return '---'
@@ -219,6 +277,71 @@ function getCustomerTierLabel(tier: CustomerTier) {
 function formatMaybeNumber(value: number | null, suffix = '') {
   if (value == null) return '---'
   return `${value}${suffix}`
+}
+
+function formatPlainNumber(value: number, fractionDigits = 2) {
+  const fixed = value.toFixed(fractionDigits)
+  return fixed.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
+}
+
+function formatMoneyToman(value: number | null | undefined) {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount) || amount <= 0) return '۰ تومان'
+  if (amount >= 1_000_000) {
+    return `${formatPlainNumber(amount / 1_000_000)} میلیون تومان`
+  }
+  if (amount >= 1_000) {
+    return `${formatPlainNumber(amount / 1_000, 1)} هزار تومان`
+  }
+  return `${Math.round(amount).toLocaleString('fa-IR')} تومان`
+}
+
+function normalizeCommissionRate(value: string | number | null | undefined) {
+  const normalized = Number(normalizeLatinDigits(String(value ?? '')).replace(',', '.'))
+  if (!Number.isFinite(normalized)) return 0
+  return Math.min(100, Math.max(0, normalized))
+}
+
+function formatCommissionRate(value: string | number | null | undefined) {
+  return normalizeCommissionRate(value).toFixed(2)
+}
+
+function getCommissionPreviewText(value: string | number | null | undefined) {
+  const amount = 100_000_000 * normalizeCommissionRate(value) / 100
+  return `نرخ کمیسیون شما به ازای هر ۱۰۰ میلیون ${formatMoneyToman(amount)} می‌باشد.`
+}
+
+const createCommissionPreview = computed(() => getCommissionPreviewText(createForm.commission_rate))
+
+function adjustCreateCommission(delta: number) {
+  createForm.commission_rate = formatCommissionRate(normalizeCommissionRate(createForm.commission_rate) + delta)
+}
+
+function adjustDetailCommission(delta: number) {
+  const baseValue = detailEditForm.commission_rate || selectedRelation.value?.commission_rate || '0.50'
+  detailEditForm.commission_rate = formatCommissionRate(normalizeCommissionRate(baseValue) + delta)
+}
+
+function startCommissionHold(delta: number, target: 'create' | 'detail' = 'create') {
+  stopCommissionHold()
+  const adjust = target === 'detail' ? adjustDetailCommission : adjustCreateCommission
+  adjust(delta)
+  if (typeof window === 'undefined') return
+  commissionHoldTimer = window.setInterval(() => adjust(delta), 160)
+}
+
+function stopCommissionHold() {
+  if (commissionHoldTimer === null || typeof window === 'undefined') return
+  window.clearInterval(commissionHoldTimer)
+  commissionHoldTimer = null
+}
+
+function getLimitPlaceholder(value: number | null) {
+  return value == null ? 'بدون محدودیت' : String(value)
+}
+
+function getCommissionPlaceholder(relation: CustomerRelation) {
+  return relation.commission_rate == null ? '0.50' : String(relation.commission_rate)
 }
 
 function getRelationStateText(relation: CustomerRelation) {
@@ -392,31 +515,43 @@ async function terminateCustomerSession(relation: CustomerRelation, session: Cus
   }
 }
 
-function startEditing(relation: CustomerRelation) {
-  editingRelationId.value = relation.id
-  editForm.customer_tier = relation.customer_tier
-  editForm.commission_rate = relation.commission_rate == null ? '' : String(relation.commission_rate)
-  editForm.min_trade_quantity = relation.min_trade_quantity == null ? '' : String(relation.min_trade_quantity)
-  editForm.max_trade_quantity = relation.max_trade_quantity == null ? '' : String(relation.max_trade_quantity)
-  editForm.max_daily_trades = relation.max_daily_trades == null ? '' : String(relation.max_daily_trades)
-  editForm.max_daily_commodity_volume = relation.max_daily_commodity_volume == null ? '' : String(relation.max_daily_commodity_volume)
-  if (editForm.customer_tier !== 'tier2') {
-    editForm.commission_rate = ''
-  }
-  notice.value = ''
-  error.value = ''
-}
-
 function handleCreateTierChange() {
-  if (createForm.customer_tier !== 'tier2') {
-    createForm.commission_rate = ''
+  if (createForm.customer_tier === 'tier2') {
+    createForm.commission_rate = createForm.commission_rate || '0.50'
+  } else {
+    createForm.commission_rate = '0.50'
   }
 }
 
-function handleEditTierChange() {
-  if (editForm.customer_tier !== 'tier2') {
-    editForm.commission_rate = ''
+function buildDetailUpdatePayload(relation: CustomerRelation) {
+  const payload: Record<string, string | number | null> = {}
+  const requestedTier = detailEditForm.customer_tier as CustomerTier | ''
+  const nextTier = requestedTier || relation.customer_tier
+  if (requestedTier && requestedTier !== relation.customer_tier) {
+    payload.customer_tier = requestedTier
   }
+
+  const commissionInput = String(detailEditForm.commission_rate || '').trim()
+  if (nextTier === 'tier2' && commissionInput) {
+    payload.commission_rate = normalizeCommissionRate(commissionInput)
+  } else if (requestedTier === 'tier1') {
+    payload.commission_rate = null
+  }
+
+  const numericFields = [
+    'min_trade_quantity',
+    'max_trade_quantity',
+    'max_daily_trades',
+    'max_daily_commodity_volume',
+  ] as const
+  for (const field of numericFields) {
+    const rawValue = String(detailEditForm[field] || '').trim()
+    if (rawValue) {
+      payload[field] = normalizeOptionalNumber(rawValue)
+    }
+  }
+
+  return payload
 }
 
 async function createRelation() {
@@ -429,7 +564,7 @@ async function createRelation() {
     const response = await apiFetch('/api/customers/owner-relations', {
       method: 'POST',
       body: JSON.stringify({
-        account_name: createForm.account_name,
+        account_name: generatedCreateAccountName.value,
         management_name: createForm.management_name,
         mobile_number: createForm.mobile_number,
         ...buildCustomerPayload(createForm),
@@ -443,7 +578,7 @@ async function createRelation() {
     relations.value = [created, ...relations.value.filter((item) => item.id !== created.id)]
     resetCreateForm()
     notice.value = 'دعوت مشتری ثبت شد.'
-    activePanel.value = 'relations'
+    openSections.relations = true
   } catch (err: any) {
     error.value = err?.message || 'ایجاد مشتری ناموفق بود.'
   } finally {
@@ -451,24 +586,31 @@ async function createRelation() {
   }
 }
 
-async function saveEdit(relationId: number) {
-  if (isSavingEdit.value) return
+async function saveDetailEdit() {
+  const relation = selectedRelation.value
+  if (!relation || isSavingEdit.value) return
+  const payload = buildDetailUpdatePayload(relation)
+  if (!Object.keys(payload).length) {
+    notice.value = 'تغییری برای ذخیره انتخاب نشده است.'
+    return
+  }
+
   isSavingEdit.value = true
   error.value = ''
   notice.value = ''
 
   try {
-    const response = await apiFetch(`/api/customers/owner-relations/${relationId}`, {
+    const response = await apiFetch(`/api/customers/owner-relations/${relation.id}`, {
       method: 'PATCH',
-      body: JSON.stringify(buildCustomerPayload(editForm)),
+      body: JSON.stringify(payload),
     })
-    const payload = await response.json().catch(() => null)
+    const responsePayload = await response.json().catch(() => null)
     if (!response.ok) {
-      throw new Error(parseApiError(payload, 'ویرایش مشتری ناموفق بود.'))
+      throw new Error(parseApiError(responsePayload, 'ویرایش مشتری ناموفق بود.'))
     }
-    const updated = payload as CustomerRelation
+    const updated = responsePayload as CustomerRelation
     relations.value = relations.value.map((item) => (item.id === updated.id ? updated : item))
-    clearEditState()
+    clearDetailEditState()
     notice.value = 'اطلاعات مشتری به‌روزرسانی شد.'
   } catch (err: any) {
     error.value = err?.message || 'ویرایش مشتری ناموفق بود.'
@@ -498,9 +640,6 @@ async function unlinkRelation(relation: CustomerRelation) {
       throw new Error(parseApiError(payload, isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.'))
     }
     relations.value = relations.value.filter((item) => item.id !== relation.id)
-    if (editingRelationId.value === relation.id) {
-      clearEditState()
-    }
     if (openSessionsRelationId.value === relation.id) {
       openSessionsRelationId.value = null
     }
@@ -525,6 +664,109 @@ async function copyRegistrationLink(relation: CustomerRelation) {
   }
 }
 
+function openCustomerDetail(relation: CustomerRelation) {
+  selectedRelationId.value = relation.id
+  clearDetailEditState()
+  error.value = ''
+  notice.value = ''
+  openSections.detailOverview = true
+  openSections.detailTrades = false
+  openSections.detailStats = false
+  openSections.detailSessions = false
+  openSections.detailDanger = false
+}
+
+function backToCustomerList() {
+  selectedRelationId.value = null
+  clearDetailEditState()
+}
+
+async function loadCustomerTrades(relationId: number, options?: { force?: boolean }) {
+  const relation = relations.value.find((item) => item.id === relationId)
+  if (!relation?.customer_user_id) return
+  if (!options?.force && tradesByRelationId.value[relationId]) return
+  loadingTradesRelationId.value = relationId
+  error.value = ''
+  try {
+    const response = await apiFetch(`/api/trades/with/${relation.customer_user_id}?limit=20`)
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'دریافت معاملات مشتری ناموفق بود.'))
+    }
+    tradesByRelationId.value = {
+      ...tradesByRelationId.value,
+      [relationId]: Array.isArray(payload) ? (payload as CustomerTradeSummary[]) : [],
+    }
+  } catch (err: any) {
+    error.value = err?.message || 'دریافت معاملات مشتری ناموفق بود.'
+  } finally {
+    if (loadingTradesRelationId.value === relationId) {
+      loadingTradesRelationId.value = null
+    }
+  }
+}
+
+async function loadCustomerStats(relationId: number, options?: { force?: boolean }) {
+  const relation = relations.value.find((item) => item.id === relationId)
+  if (!relation?.customer_user_id) return
+  if (!options?.force && statsByRelationId.value[relationId]?.period_days === statsPeriodDays.value) return
+  loadingStatsRelationId.value = relationId
+  error.value = ''
+  try {
+    const response = await apiFetch(`/api/customers/owner-relations/${relationId}/trade-stats?days=${statsPeriodDays.value}`)
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseApiError(payload, 'دریافت آمار مشتری ناموفق بود.'))
+    }
+    statsByRelationId.value = {
+      ...statsByRelationId.value,
+      [relationId]: payload as CustomerTradeStats,
+    }
+  } catch (err: any) {
+    error.value = err?.message || 'دریافت آمار مشتری ناموفق بود.'
+  } finally {
+    if (loadingStatsRelationId.value === relationId) {
+      loadingStatsRelationId.value = null
+    }
+  }
+}
+
+async function toggleDetailSection(section: DetailSection) {
+  openSections[section] = !openSections[section]
+  const relation = selectedRelation.value
+  if (!relation || !openSections[section]) return
+  if (section === 'detailTrades') {
+    await loadCustomerTrades(relation.id)
+  } else if (section === 'detailStats') {
+    await loadCustomerStats(relation.id)
+  } else if (section === 'detailSessions' && relation.status === 'active' && relation.customer_user_id) {
+    openSessionsRelationId.value = relation.id
+    await loadSessionsForRelation(relation.id)
+  }
+}
+
+async function setStatsPeriod(days: number) {
+  statsPeriodDays.value = days
+  const relation = selectedRelation.value
+  if (relation) {
+    await loadCustomerStats(relation.id, { force: true })
+  }
+}
+
+function formatTradeType(type: string) {
+  if (type === 'buy') return 'خرید'
+  if (type === 'sell') return 'فروش'
+  return type || 'نامشخص'
+}
+
+function formatTradeStatus(status: string) {
+  if (status === 'completed') return 'تکمیل‌شده'
+  if (status === 'pending') return 'در انتظار'
+  if (status === 'cancelled') return 'لغوشده'
+  if (status === 'confirmed') return 'تاییدشده'
+  return status || 'نامشخص'
+}
+
 onMounted(() => {
   startCountdownTimer()
   void loadRelations()
@@ -532,6 +774,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopCountdownTimer()
+  stopCommissionHold()
 })
 </script>
 
@@ -575,32 +818,7 @@ onBeforeUnmount(() => {
           </article>
         </section>
 
-        <section v-if="activePanel === null" class="manager-category-menu card-with-help" aria-label="دسته‌بندی مدیریت مشتریان">
-          <HelpPopover
-            floating
-            button-test="customer-category-menu-help"
-            note-test="customer-category-menu-help-note"
-            label="راهنمای دسته‌بندی مشتریان"
-            text="ابتدا دسته مورد نظر را انتخاب کنید. سپس زیرمنوهای همان دسته، مثل مشخصات پایه یا محدودیت‌ها، نمایش داده می‌شود."
-          />
-          <div class="manager-category-heading">دسته‌بندی مدیریت مشتریان</div>
-          <button type="button" class="menu-button settings-btn open-create-category" @click="openPanel('create')">
-            <span class="menu-button-icon"><UserPlus :size="18" /></span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">افزودن مشتری</span>
-              <span class="menu-button-note">ثبت دعوت، مشخصات پایه، سطح و محدودیت‌های معاملاتی</span>
-            </span>
-          </button>
-          <button type="button" class="menu-button settings-btn open-relations-category" @click="openPanel('relations')">
-            <span class="menu-button-icon"><Users :size="18" /></span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">مدیریت مشتریان</span>
-              <span class="menu-button-note">{{ summaryStats.total.toLocaleString('fa-IR') }} رابطه ثبت‌شده، شامل فعال، در انتظار و آرشیوی</span>
-            </span>
-          </button>
-        </section>
-
-        <section v-if="activePanel === 'create'" class="customer-panel customer-panel--accordion">
+        <section class="customer-panel customer-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.create }">
             <div class="ds-accordion-header" @click="toggleSection('create')">
               <div class="ds-accordion-header-info">
@@ -617,51 +835,73 @@ onBeforeUnmount(() => {
                   label="راهنمای افزودن مشتری"
                   text="دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید."
                 />
-                <button type="button" class="ghost-btn ghost-btn--inline" @click.stop="backToCategories">بازگشت به دسته‌ها</button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
             <div v-show="openSections.create" class="ds-accordion-body customer-accordion-body">
               <div class="customer-form-sections customer-form-sections--stacked">
-                <section class="form-subpanel form-subpanel--accordion">
-                  <div class="ds-accordion" :class="{ open: openSections.createIdentity }">
-                    <div class="ds-accordion-header" @click.stop="toggleSection('createIdentity')">
-                      <div class="ds-accordion-header-info">
-                        <UserPlus :size="16" class="customer-subsection-icon" />
-                        <div>
-                          <h5>مشخصات پایه</h5>
-                          <p>اطلاعات هویتی و سطح دسترسی مشتری</p>
-                        </div>
+                <section class="form-subpanel">
+                  <div class="form-subpanel-head">
+                    <h5>مشخصات مشتری</h5>
+                    <p>نام مشتری، شماره موبایل و سطح دسترسی را وارد کنید.</p>
+                  </div>
+                  <div class="customer-form-grid create-main-grid">
+                    <label class="field-block">
+                      <span>نام مشتری</span>
+                      <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="مثلاً علی رضایی" />
+                    </label>
+                    <label class="field-block">
+                      <span>شماره موبایل</span>
+                      <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
+                    </label>
+                    <label class="field-block">
+                      <span>سطح مشتری</span>
+                      <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
+                        <option value="tier1">سطح 1</option>
+                        <option value="tier2">سطح 2</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div v-if="createForm.customer_tier === 'tier2'" class="commission-panel">
+                    <label class="field-block commission-field">
+                      <span>درصد کمیسیون</span>
+                      <div class="commission-input-shell">
+                        <button
+                          type="button"
+                          class="commission-step-btn"
+                          @pointerdown.prevent="startCommissionHold(-0.01)"
+                          @pointerup="stopCommissionHold"
+                          @pointerleave="stopCommissionHold"
+                          @pointercancel="stopCommissionHold"
+                          @click.prevent
+                        >
+                          -
+                        </button>
+                        <input
+                          v-model.trim="createForm.commission_rate"
+                          class="customer-input create-commission-rate commission-input"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          inputmode="decimal"
+                          placeholder="0.50"
+                        />
+                        <button
+                          type="button"
+                          class="commission-step-btn"
+                          @pointerdown.prevent="startCommissionHold(0.01)"
+                          @pointerup="stopCommissionHold"
+                          @pointerleave="stopCommissionHold"
+                          @pointercancel="stopCommissionHold"
+                          @click.prevent
+                        >
+                          +
+                        </button>
                       </div>
-                      <ChevronLeft :size="18" class="ds-accordion-icon" />
-                    </div>
-                    <div v-show="openSections.createIdentity" class="ds-accordion-body">
-                      <div class="customer-form-grid">
-                        <label class="field-block">
-                          <span>نام کاربری</span>
-                          <input v-model.trim="createForm.account_name" class="customer-input create-account-name" type="text" placeholder="customer_user" />
-                        </label>
-                        <label class="field-block">
-                          <span>نام مدیریتی</span>
-                          <input v-model.trim="createForm.management_name" class="customer-input create-management-name" type="text" placeholder="نام نمایشی مشتری" />
-                        </label>
-                        <label class="field-block">
-                          <span>شماره موبایل</span>
-                          <input v-model.trim="createForm.mobile_number" class="customer-input create-mobile-number" type="tel" inputmode="numeric" placeholder="0912xxxxxxx" />
-                        </label>
-                        <label class="field-block">
-                          <span>سطح مشتری</span>
-                          <select v-model="createForm.customer_tier" class="customer-input create-tier-select" @change="handleCreateTierChange">
-                            <option value="tier1">سطح 1</option>
-                            <option value="tier2">سطح 2</option>
-                          </select>
-                        </label>
-                        <label v-if="createForm.customer_tier === 'tier2'" class="field-block">
-                          <span>درصد کمیسیون</span>
-                          <input v-model.trim="createForm.commission_rate" class="customer-input create-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
-                        </label>
-                      </div>
-                    </div>
+                    </label>
+                    <p class="commission-preview">{{ createCommissionPreview }}</p>
                   </div>
                 </section>
 
@@ -682,18 +922,22 @@ onBeforeUnmount(() => {
                         <label class="field-block">
                           <span>حداقل مقدار معامله</span>
                           <input v-model.trim="createForm.min_trade_quantity" class="customer-input create-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <small>کمترین تعداد قابل معامله برای این مشتری در هر معامله.</small>
                         </label>
                         <label class="field-block">
                           <span>حداکثر مقدار معامله</span>
                           <input v-model.trim="createForm.max_trade_quantity" class="customer-input create-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <small>بیشترین تعداد مجاز در هر معامله تکی.</small>
                         </label>
                         <label class="field-block">
                           <span>سقف معاملات روزانه</span>
                           <input v-model.trim="createForm.max_daily_trades" class="customer-input create-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <small>حداکثر تعداد معامله‌ای که مشتری در یک روز می‌تواند انجام دهد.</small>
                         </label>
                         <label class="field-block">
                           <span>سقف حجم روزانه</span>
                           <input v-model.trim="createForm.max_daily_commodity_volume" class="customer-input create-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
+                          <small>حداکثر مجموع تعداد کالا در معاملات روزانه مشتری.</small>
                         </label>
                       </div>
                     </div>
@@ -711,7 +955,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section v-if="activePanel === 'relations'" class="customer-panel customer-panel--accordion">
+        <section class="customer-panel customer-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.relations }">
             <div class="ds-accordion-header" @click="toggleSection('relations')">
               <div class="ds-accordion-header-info">
@@ -731,13 +975,285 @@ onBeforeUnmount(() => {
                 <button type="button" class="ghost-btn ghost-btn--inline refresh-relations" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
                   {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
                 </button>
-                <button type="button" class="ghost-btn ghost-btn--inline" @click.stop="backToCategories">بازگشت به دسته‌ها</button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
             <div v-show="openSections.relations" class="ds-accordion-body customer-accordion-body">
-              <div v-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
-              <div v-else-if="orderedRelations.length === 0" class="customer-empty">هنوز مشتری فعالی یا دعوت pending ثبت نشده است.</div>
+              <div v-if="selectedRelation" class="customer-detail-page">
+                <div class="customer-detail-topbar">
+                  <button type="button" class="ghost-btn ghost-btn--inline" @click="backToCustomerList">بازگشت به لیست</button>
+                  <div>
+                    <h4>{{ selectedRelation.management_name }}</h4>
+                    <p>@{{ getRelationAccountName(selectedRelation) }}</p>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailOverview }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailOverview')">
+                    <div class="ds-accordion-header-info">
+                      <SlidersHorizontal :size="18" class="customer-section-icon" />
+                      <div>
+                        <h4>مشخصات و محدودیت‌ها</h4>
+                        <p>سطح، کمیسیون و محدودیت‌های فعلی مشتری</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailOverview" class="ds-accordion-body customer-accordion-body">
+                    <div class="customer-meta-grid detail-metric-grid">
+                      <div class="meta-item metric-card">
+                        <span class="meta-label">سطح مشتری</span>
+                        <span class="meta-value">{{ getCustomerTierLabel(selectedRelation.customer_tier) }}</span>
+                      </div>
+                      <div class="meta-item metric-card">
+                        <span class="meta-label">کمیسیون</span>
+                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.commission_rate, '%') }}</span>
+                      </div>
+                      <div class="meta-item metric-card">
+                        <span class="meta-label">حداقل معامله</span>
+                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.min_trade_quantity) }}</span>
+                      </div>
+                      <div class="meta-item metric-card">
+                        <span class="meta-label">حداکثر معامله</span>
+                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.max_trade_quantity) }}</span>
+                      </div>
+                      <div class="meta-item metric-card">
+                        <span class="meta-label">سقف معاملات روزانه</span>
+                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.max_daily_trades) }}</span>
+                      </div>
+                      <div class="meta-item metric-card">
+                        <span class="meta-label">سقف حجم روزانه</span>
+                        <span class="meta-value">{{ formatMaybeNumber(selectedRelation.max_daily_commodity_volume) }}</span>
+                      </div>
+                    </div>
+
+                    <div class="form-subpanel">
+                      <div class="form-subpanel-head">
+                        <h5>ویرایش سریع</h5>
+                        <p>مقادیر فعلی به صورت placeholder نمایش داده شده‌اند؛ فقط فیلدهای تغییر یافته ذخیره می‌شوند.</p>
+                      </div>
+                      <div class="customer-form-grid compact-grid">
+                        <label class="field-block">
+                          <span>سطح مشتری</span>
+                          <select v-model="detailEditForm.customer_tier" class="customer-input edit-tier-select">
+                            <option value="">بدون تغییر ({{ getCustomerTierLabel(selectedRelation.customer_tier) }})</option>
+                            <option value="tier1">سطح 1</option>
+                            <option value="tier2">سطح 2</option>
+                          </select>
+                        </label>
+                        <label v-if="(detailEditForm.customer_tier || selectedRelation.customer_tier) === 'tier2'" class="field-block">
+                          <span>درصد کمیسیون</span>
+                          <div class="commission-input-shell">
+                            <button
+                              type="button"
+                              class="commission-step-btn"
+                              @pointerdown.prevent="startCommissionHold(-0.01, 'detail')"
+                              @pointerup="stopCommissionHold"
+                              @pointerleave="stopCommissionHold"
+                              @pointercancel="stopCommissionHold"
+                              @click.prevent
+                            >
+                              -
+                            </button>
+                            <input
+                              v-model.trim="detailEditForm.commission_rate"
+                              class="customer-input edit-commission-rate commission-input"
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.01"
+                              inputmode="decimal"
+                              :placeholder="getCommissionPlaceholder(selectedRelation)"
+                            />
+                            <button
+                              type="button"
+                              class="commission-step-btn"
+                              @pointerdown.prevent="startCommissionHold(0.01, 'detail')"
+                              @pointerup="stopCommissionHold"
+                              @pointerleave="stopCommissionHold"
+                              @pointercancel="stopCommissionHold"
+                              @click.prevent
+                            >
+                              +
+                            </button>
+                          </div>
+                          <small class="commission-preview compact">{{ getCommissionPreviewText(detailEditForm.commission_rate || selectedRelation.commission_rate || '0.50') }}</small>
+                        </label>
+                        <label class="field-block">
+                          <span>حداقل مقدار معامله</span>
+                          <input v-model.trim="detailEditForm.min_trade_quantity" class="customer-input edit-min-trade" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.min_trade_quantity)" />
+                        </label>
+                        <label class="field-block">
+                          <span>حداکثر مقدار معامله</span>
+                          <input v-model.trim="detailEditForm.max_trade_quantity" class="customer-input edit-max-trade" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.max_trade_quantity)" />
+                        </label>
+                        <label class="field-block">
+                          <span>سقف معاملات روزانه</span>
+                          <input v-model.trim="detailEditForm.max_daily_trades" class="customer-input edit-max-daily-trades" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.max_daily_trades)" />
+                        </label>
+                        <label class="field-block">
+                          <span>سقف حجم روزانه</span>
+                          <input v-model.trim="detailEditForm.max_daily_commodity_volume" class="customer-input edit-max-daily-volume" type="number" min="0" step="1" :placeholder="getLimitPlaceholder(selectedRelation.max_daily_commodity_volume)" />
+                        </label>
+                      </div>
+                      <div class="panel-actions compact">
+                        <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="clearDetailEditState">پاک کردن تغییرات</button>
+                        <button type="button" class="primary-btn save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
+                          {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailTrades }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailTrades')">
+                    <div class="ds-accordion-header-info">
+                      <ReceiptText :size="18" class="customer-section-icon" />
+                      <div>
+                        <h4>معاملات</h4>
+                        <p>آخرین معاملات مشتری، مشابه تاریخچه معاملات</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailTrades" class="ds-accordion-body customer-accordion-body">
+                    <div v-if="!selectedRelation.customer_user_id" class="customer-empty">این دعوت هنوز به کاربر فعال وصل نشده است.</div>
+                    <div v-else-if="loadingTradesRelationId === selectedRelation.id" class="customer-loading">در حال دریافت معاملات...</div>
+                    <div v-else-if="selectedRelationTrades.length === 0" class="customer-empty">معامله‌ای برای این مشتری ثبت نشده است.</div>
+                    <div v-else class="trade-list">
+                      <article v-for="trade in selectedRelationTrades" :key="trade.id" class="trade-row">
+                        <div>
+                          <strong>#{{ trade.trade_number }} - {{ trade.commodity_name }}</strong>
+                          <p>{{ formatTradeType(trade.trade_type) }} · {{ formatTradeStatus(trade.status) }} · {{ trade.created_at }}</p>
+                        </div>
+                        <div class="trade-row-values">
+                          <span>{{ trade.quantity.toLocaleString('fa-IR') }} عدد</span>
+                          <span>{{ formatMoneyToman(trade.price) }}</span>
+                        </div>
+                      </article>
+                    </div>
+                    <div class="panel-actions compact">
+                      <button type="button" class="ghost-btn refresh-trades" :disabled="loadingTradesRelationId === selectedRelation.id" @click="loadCustomerTrades(selectedRelation.id, { force: true })">
+                        نوسازی معاملات
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailStats }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailStats')">
+                    <div class="ds-accordion-header-info">
+                      <BarChart3 :size="18" class="customer-section-icon" />
+                      <div>
+                        <h4>آمار</h4>
+                        <p>تعداد معاملات، حجم کالا و سود کمیسیون در بازه انتخابی</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailStats" class="ds-accordion-body customer-accordion-body">
+                    <div class="stats-periods">
+                      <button v-for="days in [1, 3, 7, 30, 90, 180]" :key="days" type="button" class="history-chip" :class="{ active: statsPeriodDays === days }" @click="setStatsPeriod(days)">
+                        {{ days === 1 ? '۱ روز' : days === 3 ? '۳ روز' : days === 7 ? '۱ هفته' : days === 30 ? '۱ ماه' : days === 90 ? '۳ ماه' : '۶ ماه' }}
+                      </button>
+                    </div>
+                    <div v-if="!selectedRelation.customer_user_id" class="customer-empty">این دعوت هنوز به کاربر فعال وصل نشده است.</div>
+                    <div v-else-if="loadingStatsRelationId === selectedRelation.id" class="customer-loading">در حال محاسبه آمار...</div>
+                    <div v-else-if="!selectedRelationStats" class="customer-empty">برای مشاهده آمار، یک بازه را انتخاب کنید.</div>
+                    <div v-else class="stats-report">
+                      <div class="customer-meta-grid detail-metric-grid">
+                        <div class="meta-item metric-card">
+                          <span class="meta-label">تعداد معاملات</span>
+                          <span class="meta-value">{{ selectedRelationStats.trade_count.toLocaleString('fa-IR') }}</span>
+                        </div>
+                        <div class="meta-item metric-card">
+                          <span class="meta-label">مجموع تعداد کالا</span>
+                          <span class="meta-value">{{ selectedRelationStats.total_quantity.toLocaleString('fa-IR') }}</span>
+                        </div>
+                        <div class="meta-item metric-card profit-card">
+                          <span class="meta-label">سود کمیسیون</span>
+                          <span class="meta-value">{{ formatMoneyToman(selectedRelationStats.commission_profit_toman) }}</span>
+                        </div>
+                      </div>
+                      <div class="commodity-breakdown">
+                        <h5>جزئیات کالاها</h5>
+                        <p v-if="selectedRelationStats.commodities.length === 0">در این بازه معامله‌ای ثبت نشده است.</p>
+                        <div v-for="commodity in selectedRelationStats.commodities" :key="commodity.commodity_id" class="commodity-row">
+                          <span>{{ commodity.commodity_name }}</span>
+                          <strong>{{ commodity.total_quantity.toLocaleString('fa-IR') }} عدد</strong>
+                        </div>
+                      </div>
+                      <p class="stats-note">{{ selectedRelationStats.profit_calculation_note }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailSessions }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailSessions')">
+                    <div class="ds-accordion-header-info">
+                      <ShieldCheck :size="18" class="customer-section-icon" />
+                      <div>
+                        <h4>نشست مشتری</h4>
+                        <p>مشاهده و منقضی کردن نشست‌های فعال مشتری</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailSessions" class="ds-accordion-body customer-accordion-body">
+                    <div v-if="selectedRelation.status !== 'active' || !selectedRelation.customer_user_id" class="customer-empty">نشست فقط برای مشتری فعال قابل مدیریت است.</div>
+                    <div v-else-if="loadingSessionsRelationId === selectedRelation.id" class="customer-loading session-loading">در حال دریافت نشست‌های مشتری...</div>
+                    <div v-else-if="!getRelationSessions(selectedRelation.id).length" class="customer-empty session-empty">در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.</div>
+                    <ul v-else class="session-list">
+                      <li v-for="session in getRelationSessions(selectedRelation.id)" :key="session.id" class="session-item">
+                        <div class="session-item-main">
+                          <div class="session-item-top">
+                            <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
+                            <div class="session-badges">
+                              <span v-if="session.is_primary" class="session-badge primary">primary</span>
+                              <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
+                              <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
+                            </div>
+                          </div>
+                          <div class="session-item-meta">
+                            <span>آخرین فعالیت: {{ formatDateTime(session.last_active_at) }}</span>
+                            <span>شروع نشست: {{ formatDateTime(session.created_at) }}</span>
+                            <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
+                          </div>
+                        </div>
+                        <button type="button" class="danger-btn terminate-session" :disabled="terminatingSessionId === session.id" @click="terminateCustomerSession(selectedRelation, session)">
+                          {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                        </button>
+                      </li>
+                    </ul>
+                    <div v-if="selectedRelation.status === 'active' && selectedRelation.customer_user_id" class="panel-actions compact">
+                      <button type="button" class="ghost-btn refresh-sessions" :disabled="loadingSessionsRelationId === selectedRelation.id" @click="loadSessionsForRelation(selectedRelation.id)">نوسازی نشست‌ها</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="detail-accordion ds-accordion danger-accordion" :class="{ open: openSections.detailDanger }">
+                  <div class="ds-accordion-header" @click="toggleDetailSection('detailDanger')">
+                    <div class="ds-accordion-header-info">
+                      <Users :size="18" class="customer-section-icon" />
+                      <div>
+                        <h4>قطع رابطه با مشتری</h4>
+                        <p>غیرفعال کردن رابطه و دسترسی مشتری</p>
+                      </div>
+                    </div>
+                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                  </div>
+                  <div v-show="openSections.detailDanger" class="ds-accordion-body customer-accordion-body">
+                    <p class="danger-copy">این عملیات رابطه این مشتری را غیرفعال می‌کند و باید فقط در صورت اطمینان انجام شود.</p>
+                    <button v-if="selectedRelation.status === 'active'" type="button" class="danger-btn unlink-active" @click="unlinkRelation(selectedRelation)">قطع ارتباط با مشتری</button>
+                    <button v-else-if="selectedRelation.status === 'pending'" type="button" class="danger-btn cancel-pending" @click="unlinkRelation(selectedRelation)">لغو دعوت مشتری</button>
+                    <div v-else class="customer-empty">این رابطه در وضعیت قابل قطع نیست.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else-if="isLoading" class="customer-loading">در حال دریافت لیست مشتریان...</div>
+              <div v-else-if="orderedRelations.length === 0" class="customer-empty">هنوز مشتری فعالی یا دعوت در انتظار ثبت نشده است.</div>
 
               <div v-else class="customer-list">
                 <article
@@ -745,200 +1261,46 @@ onBeforeUnmount(() => {
                   :key="relation.id"
                   class="customer-card"
                 >
-              <div class="customer-card-head">
-                <div class="customer-identity-block">
-                  <h5>{{ relation.management_name }}</h5>
-                  <p class="customer-account-name">@{{ getRelationAccountName(relation) }}</p>
-                  <p v-if="relation.mobile_number" class="customer-mobile-number">{{ relation.mobile_number }}</p>
-                </div>
-                <div class="customer-card-head-side">
-                  <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
-                  <span class="customer-tier-pill" :class="`tier-${relation.customer_tier}`">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
-                </div>
-              </div>
-
-              <div class="customer-meta-grid">
-                <div class="meta-item">
-                  <span class="meta-label">کمیسیون</span>
-                  <span class="meta-value">{{ formatMaybeNumber(relation.commission_rate, '%') }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">حداقل معامله</span>
-                  <span class="meta-value">{{ formatMaybeNumber(relation.min_trade_quantity) }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">حداکثر معامله</span>
-                  <span class="meta-value">{{ formatMaybeNumber(relation.max_trade_quantity) }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">سقف معاملات روزانه</span>
-                  <span class="meta-value">{{ formatMaybeNumber(relation.max_daily_trades) }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">سقف حجم روزانه</span>
-                  <span class="meta-value">{{ formatMaybeNumber(relation.max_daily_commodity_volume) }}</span>
-                </div>
-                <div v-if="relation.status === 'active'" class="meta-item">
-                  <span class="meta-label">فعال‌سازی</span>
-                  <span class="meta-value">{{ formatDateTime(relation.activated_at) }}</span>
-                </div>
-                <div v-if="relation.status === 'pending'" class="meta-item">
-                  <span class="meta-label">انقضا</span>
-                  <span class="meta-value">{{ formatDateTime(relation.expires_at) }}</span>
-                </div>
-              </div>
-
-              <p v-if="getRelationStateText(relation)" class="customer-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
-
-              <div v-if="editingRelationId === relation.id" class="edit-panel">
-                <div class="customer-form-sections customer-form-sections--compact">
-                  <section class="form-subpanel form-subpanel--compact">
-                    <div class="form-subpanel-head">
-                      <h5>تنظیمات سطح</h5>
-                      <p>سطح و کمیسیون</p>
+                  <div class="customer-card-head customer-card-head--manage">
+                    <button type="button" class="primary-btn manage-customer" @click="openCustomerDetail(relation)">مدیریت</button>
+                    <div class="customer-identity-block">
+                      <h5>{{ relation.management_name }}</h5>
+                      <p class="customer-account-name">@{{ getRelationAccountName(relation) }}</p>
+                      <p v-if="relation.mobile_number" class="customer-mobile-number">{{ relation.mobile_number }}</p>
+                      <p v-if="getRelationStateText(relation)" class="customer-state-copy" :class="`status-${relation.status}`">{{ getRelationStateText(relation) }}</p>
                     </div>
-                    <div class="customer-form-grid compact-grid">
-                      <label class="field-block">
-                        <span>سطح مشتری</span>
-                        <select v-model="editForm.customer_tier" class="customer-input edit-tier-select" @change="handleEditTierChange">
-                          <option value="tier1">سطح 1</option>
-                          <option value="tier2">سطح 2</option>
-                        </select>
-                      </label>
-                      <label v-if="editForm.customer_tier === 'tier2'" class="field-block">
-                        <span>درصد کمیسیون</span>
-                        <input v-model.trim="editForm.commission_rate" class="customer-input edit-commission-rate" type="number" min="0" max="100" step="0.01" placeholder="0.50" />
-                      </label>
+                    <div class="customer-card-head-side">
+                      <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>
+                      <span class="customer-tier-pill" :class="`tier-${relation.customer_tier}`">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
                     </div>
-                  </section>
-
-                  <section class="form-subpanel form-subpanel--compact">
-                    <div class="form-subpanel-head">
-                      <h5>محدودیت‌ها</h5>
-                      <p>مقادیر اختیاری برای این رابطه</p>
-                    </div>
-                    <div class="customer-form-grid compact-grid">
-                      <label class="field-block">
-                        <span>حداقل مقدار معامله</span>
-                        <input v-model.trim="editForm.min_trade_quantity" class="customer-input edit-min-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-                      </label>
-                      <label class="field-block">
-                        <span>حداکثر مقدار معامله</span>
-                        <input v-model.trim="editForm.max_trade_quantity" class="customer-input edit-max-trade" type="number" min="0" step="1" placeholder="اختیاری" />
-                      </label>
-                      <label class="field-block">
-                        <span>سقف معاملات روزانه</span>
-                        <input v-model.trim="editForm.max_daily_trades" class="customer-input edit-max-daily-trades" type="number" min="0" step="1" placeholder="اختیاری" />
-                      </label>
-                      <label class="field-block">
-                        <span>سقف حجم روزانه</span>
-                        <input v-model.trim="editForm.max_daily_commodity_volume" class="customer-input edit-max-daily-volume" type="number" min="0" step="1" placeholder="اختیاری" />
-                      </label>
-                    </div>
-                  </section>
-                </div>
-                <div class="panel-actions compact">
-                  <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="clearEditState">انصراف</button>
-                  <button type="button" class="primary-btn save-edit" :disabled="isSavingEdit" @click="saveEdit(relation.id)">
-                    {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
-                  </button>
-                </div>
-              </div>
-              <div v-else class="customer-actions">
-                <button type="button" class="secondary-btn start-edit" @click="startEditing(relation)">ویرایش</button>
-                <button
-                  v-if="relation.status === 'active' && relation.customer_user_id"
-                  type="button"
-                  class="secondary-btn toggle-sessions"
-                  @click="toggleSessionPanel(relation)"
-                >
-                  {{ openSessionsRelationId === relation.id ? 'بستن نشست‌ها' : 'نشست‌های فعال' }}
-                </button>
-                <button
-                  v-if="relation.status === 'pending' && relation.registration_link"
-                  type="button"
-                  class="secondary-btn copy-link"
-                  @click="copyRegistrationLink(relation)"
-                >
-                  {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
-                </button>
-                <button
-                  v-if="relation.status === 'pending'"
-                  type="button"
-                  class="danger-btn cancel-pending"
-                  @click="unlinkRelation(relation)"
-                >
-                  لغو دعوت
-                </button>
-                <button
-                  v-if="relation.status === 'active'"
-                  type="button"
-                  class="danger-btn unlink-active"
-                  @click="unlinkRelation(relation)"
-                >
-                  قطع ارتباط
-                </button>
-              </div>
-
-              <div v-if="relation.status === 'active' && openSessionsRelationId === relation.id" class="session-panel">
-                <div class="session-panel-header">
-                  <div>
-                    <h6>نشست‌های فعال مشتری</h6>
                   </div>
-                  <HelpPopover
-                    button-test="customer-sessions-help"
-                    note-test="customer-sessions-help-note"
-                    label="راهنمای نشست‌های مشتری"
-                    text="نشست‌های فعال این مشتری را می‌توانید ببینید و هر نشست را جداگانه خاتمه دهید."
-                  />
-                  <button
-                    type="button"
-                    class="ghost-btn refresh-sessions"
-                    :disabled="loadingSessionsRelationId === relation.id"
-                    @click="loadSessionsForRelation(relation.id)"
-                  >
-                    {{ loadingSessionsRelationId === relation.id ? 'در حال نوسازی...' : 'نوسازی' }}
-                  </button>
-                </div>
-
-                <div v-if="loadingSessionsRelationId === relation.id" class="customer-loading session-loading">
-                  در حال دریافت نشست‌های مشتری...
-                </div>
-                <div v-else-if="!getRelationSessions(relation.id).length" class="customer-empty session-empty">
-                  در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.
-                </div>
-                <ul v-else class="session-list">
-                  <li v-for="session in getRelationSessions(relation.id)" :key="session.id" class="session-item">
-                    <div class="session-item-main">
-                      <div class="session-item-top">
-                        <strong>{{ session.device_name || 'دستگاه ناشناس' }}</strong>
-                        <div class="session-badges">
-                          <span v-if="session.is_primary" class="session-badge primary">primary</span>
-                          <span class="session-badge neutral">{{ formatSessionPlatform(session.platform) }}</span>
-                          <span class="session-badge neutral">{{ formatHomeServer(session.home_server) }}</span>
-                        </div>
-                      </div>
-                      <div class="session-item-meta">
-                        <span>آخرین فعالیت: {{ formatDateTime(session.last_active_at) }}</span>
-                        <span>شروع نشست: {{ formatDateTime(session.created_at) }}</span>
-                        <span v-if="session.device_ip">IP: {{ session.device_ip }}</span>
-                      </div>
+                  <div class="customer-meta-grid">
+                    <div class="meta-item">
+                      <span class="meta-label">کمیسیون</span>
+                      <span class="meta-value">{{ formatMaybeNumber(relation.commission_rate, '%') }}</span>
                     </div>
-                    <button
-                      type="button"
-                      class="danger-btn terminate-session"
-                      :disabled="terminatingSessionId === session.id"
-                      @click="terminateCustomerSession(relation, session)"
-                    >
-                      {{ terminatingSessionId === session.id ? 'در حال پایان...' : 'پایان نشست' }}
+                    <div class="meta-item">
+                      <span class="meta-label">حداقل معامله</span>
+                      <span class="meta-value">{{ formatMaybeNumber(relation.min_trade_quantity) }}</span>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">حداکثر معامله</span>
+                      <span class="meta-value">{{ formatMaybeNumber(relation.max_trade_quantity) }}</span>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">سقف روزانه</span>
+                      <span class="meta-value">{{ formatMaybeNumber(relation.max_daily_trades) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="relation.status === 'pending' && relation.registration_link" class="customer-actions">
+                    <button type="button" class="secondary-btn copy-link" @click="copyRegistrationLink(relation)">
+                      {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
                     </button>
-                  </li>
-                </ul>
+                  </div>
+                </article>
               </div>
-            </article>
             </div>
           </div>
-        </div>
         </section>
       </div>
     </div>
@@ -1315,6 +1677,12 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+.field-block small {
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.7;
+}
+
 .field-block span,
 .meta-label {
   font-size: 0.84rem;
@@ -1331,6 +1699,57 @@ onBeforeUnmount(() => {
   padding: 0 14px;
   font: inherit;
   color: #0f172a;
+}
+
+.commission-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.94), rgba(255, 247, 237, 0.92));
+}
+
+.commission-input-shell {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.commission-input {
+  text-align: center;
+  direction: ltr;
+}
+
+.commission-step-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0;
+  border-radius: 0.8rem;
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+  font-size: 1.15rem;
+  font-weight: 900;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.commission-preview {
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.9rem;
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.8;
+}
+
+.commission-preview.compact {
+  display: block;
+  padding: 0.55rem 0.65rem;
 }
 
 .panel-actions,
@@ -1374,6 +1793,15 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.customer-card-head--manage {
+  align-items: center;
+}
+
+.manage-customer {
+  flex: 0 0 auto;
+  order: -1;
 }
 
 .customer-card-head-side {
@@ -1608,6 +2036,143 @@ onBeforeUnmount(() => {
   border-top: 1px dashed rgba(148, 163, 184, 0.4);
 }
 
+.customer-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.customer-detail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border-radius: 1.1rem;
+  background: rgba(255, 251, 235, 0.72);
+  border: 1px solid rgba(245, 158, 11, 0.14);
+}
+
+.customer-detail-topbar h4,
+.customer-detail-topbar p {
+  margin: 0;
+}
+
+.customer-detail-topbar p {
+  color: #64748b;
+  direction: ltr;
+  text-align: right;
+}
+
+.detail-accordion {
+  border-radius: 1.15rem;
+  overflow: hidden;
+}
+
+.detail-metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card {
+  min-height: 5rem;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.profit-card {
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.95), rgba(220, 252, 231, 0.84));
+}
+
+.trade-list,
+.stats-report,
+.commodity-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.trade-row,
+.commodity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.trade-row p,
+.commodity-breakdown h5,
+.commodity-breakdown p,
+.stats-note,
+.danger-copy {
+  margin: 0;
+}
+
+.trade-row p,
+.stats-note {
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.trade-row-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  color: #0f172a;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.stats-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.history-chip {
+  border: 0;
+  min-height: 2.15rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: #475569;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.history-chip.active {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  color: #fff;
+}
+
+.commodity-breakdown {
+  padding: 0.85rem;
+  border-radius: 1rem;
+  background: rgba(248, 250, 252, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.commodity-row strong {
+  color: #0f172a;
+}
+
+.danger-accordion {
+  border-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+.danger-copy {
+  color: #991b1b;
+  line-height: 1.8;
+  font-weight: 700;
+}
+
 @media (max-width: 720px) {
   .customer-manager-backdrop {
     padding: 0;
@@ -1632,8 +2197,20 @@ onBeforeUnmount(() => {
   .customer-form-sections,
   .customer-form-grid,
   .customer-meta-grid,
-  .compact-grid {
+  .compact-grid,
+  .detail-metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .customer-detail-topbar,
+  .trade-row,
+  .commodity-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .trade-row-values {
+    align-items: flex-start;
   }
 
   .panel-actions,
