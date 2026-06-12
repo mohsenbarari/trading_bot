@@ -100,6 +100,7 @@ server {
 
     location = /manifest.webmanifest {
         try_files \$uri =404;
+        default_type application/manifest+json;
         add_header Cache-Control "no-cache, no-store, must-revalidate" always;
         add_header X-Static-Delivery "nginx" always;
     }

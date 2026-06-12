@@ -75,6 +75,7 @@ class StaticDeliveryReportTests(unittest.TestCase):
                         "status": 200,
                         "headers": {
                             "cache-control": "no-cache, no-store, must-revalidate",
+                            "content-type": "application/manifest+json",
                             "x-static-delivery": "nginx",
                         },
                         "body_bytes": 9,
