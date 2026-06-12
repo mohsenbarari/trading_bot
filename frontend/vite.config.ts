@@ -18,7 +18,15 @@ export default defineConfig({
         // network without going through the navigation fallback.
         navigateFallbackDenylist: [/^\/api\//, /^\/share-receive/],
       },
-      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png', 'share-target-sw.js', 'upload-background-sw.js'],
+      includeAssets: [
+        'favicon.ico',
+        'pwa-192x192.png',
+        'pwa-512x512.png',
+        'pwa-maskable-192x192.png',
+        'pwa-maskable-512x512.png',
+        'share-target-sw.js',
+        'upload-background-sw.js',
+      ],
       manifest: {
         id: '/?source=pwa',
         name: 'Gold',
@@ -35,13 +43,25 @@ export default defineConfig({
             src: '/pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
           },
           {
             src: '/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: '/pwa-maskable-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'maskable'
+          },
+          {
+            src: '/pwa-maskable-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ],
         share_target: {
