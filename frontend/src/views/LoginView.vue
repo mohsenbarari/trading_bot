@@ -18,13 +18,31 @@ type LoginStep =
   | 'recovery_rejected'
   | 'recovery_expired'
 
+function isIOSUserAgent(userAgent: string) {
+  const normalized = userAgent.toLowerCase()
+  return /iphone|ipad|ipod/.test(normalized)
+}
+
+function isInAppBrowser(userAgent: string) {
+  const normalized = userAgent.toLowerCase()
+  return /instagram|fbav|fban|telegram|line|micromessenger|; wv\)/.test(normalized)
+}
+
+function isLikelyBeforeInstallPromptBrowser(userAgent: string) {
+  const normalized = userAgent.toLowerCase()
+  if (isIOSUserAgent(normalized) || isInAppBrowser(normalized)) return false
+  return /chrome|chromium|crmo|edg\/|edga|opr\/|opera|samsungbrowser/.test(normalized)
+}
+
+const initialUserAgent = typeof window !== 'undefined' ? window.navigator.userAgent.toLowerCase() : ''
+
 const step = ref<LoginStep>('mobile')
 const loading = ref(false)
 const error = ref('')
 const isStandalone = ref(false)
-const showInstallBtn = ref(false)
-const deferredPrompt = ref<any>(null)
-const isIOS = ref(false)
+const supportsNativeInstallPrompt = ref(isLikelyBeforeInstallPromptBrowser(initialUserAgent))
+const showManualInstallGuide = ref(isIOSUserAgent(initialUserAgent))
+const isIOS = ref(isIOSUserAgent(initialUserAgent))
 const isInstalled = ref(false)
 
 // OTP Timer State
@@ -586,22 +604,18 @@ function restartLoginFlow() {
   step.value = 'mobile'
 }
 
+const shouldShowManualInstallEntry = computed(() => (
+  !isStandalone.value &&
+  !isInstalled.value &&
+  !supportsNativeInstallPrompt.value
+))
+
+const manualInstallGuideTitle = computed(() => (
+  isIOS.value ? 'راهنمای نصب در آیفون' : 'راهنمای نصب دستی'
+))
+
 function installPWA() {
-  const prompt = deferredPrompt.value || (window as any).deferredPrompt
-  
-  if (prompt) {
-    prompt.prompt()
-    prompt.userChoice.then((choiceResult: any) => {
-      if (choiceResult.outcome === 'accepted') {
-        showInstallBtn.value = false
-        isInstalled.value = true
-      }
-      deferredPrompt.value = null;
-      (window as any).deferredPrompt = null;
-    })
-  } else {
-    alert('برای نصب اپلیکیشن، لطفاً از منوی مرورگر (سه نقطه) گزینه Install App یا Add to Home Screen را انتخاب کنید.')
-  }
+  showManualInstallGuide.value = true
 }
 
 const isDevMode = window.location.hostname === 'localhost' || 
@@ -630,34 +644,45 @@ async function startDevLogin() {
   }
 }
 
+let beforeInstallPromptHandler: ((event: Event) => void) | null = null
+let pwaInstallReadyHandler: (() => void) | null = null
+let appInstalledHandler: (() => void) | null = null
+
 onMounted(() => {
-  if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
+  const isStandaloneDisplay = typeof window.matchMedia === 'function'
+    && window.matchMedia('(display-mode: standalone)').matches
+  if (isStandaloneDisplay || (window.navigator as any).standalone === true) {
     isStandalone.value = true
   }
 
   const userAgent = window.navigator.userAgent.toLowerCase()
-  isIOS.value = /iphone|ipad|ipod/.test(userAgent)
+  isIOS.value = isIOSUserAgent(userAgent)
+  supportsNativeInstallPrompt.value = isLikelyBeforeInstallPromptBrowser(userAgent)
+  showManualInstallGuide.value = isIOS.value
 
-  window.addEventListener('beforeinstallprompt', (e) => {
+  beforeInstallPromptHandler = (e: Event) => {
     e.preventDefault()
-    deferredPrompt.value = e
-    showInstallBtn.value = true
-  })
+    supportsNativeInstallPrompt.value = true
+    showManualInstallGuide.value = false
+  }
+  window.addEventListener('beforeinstallprompt', beforeInstallPromptHandler)
   
-  window.addEventListener('pwa-install-ready', () => {
-    if ((window as any).deferredPrompt) {
-       deferredPrompt.value = (window as any).deferredPrompt
-       showInstallBtn.value = true
+  pwaInstallReadyHandler = () => {
+    if ((window as any).deferredPrompt && !isIOS.value) {
+      supportsNativeInstallPrompt.value = true
+      showManualInstallGuide.value = false
     }
-  })
+  }
+  window.addEventListener('pwa-install-ready', pwaInstallReadyHandler)
   
-  window.addEventListener('appinstalled', () => {
+  appInstalledHandler = () => {
     isInstalled.value = true
-  })
+  }
+  window.addEventListener('appinstalled', appInstalledHandler)
   
-  if ((window as any).deferredPrompt) {
-     deferredPrompt.value = (window as any).deferredPrompt
-     showInstallBtn.value = true
+  if ((window as any).deferredPrompt && !isIOS.value) {
+    supportsNativeInstallPrompt.value = true
+    showManualInstallGuide.value = false
   }
 })
 
@@ -713,6 +738,9 @@ watch(() => form.mobile, (newVal) => {
 onUnmounted(() => {
   if (ac) ac.abort();
   if (timerInterval) clearInterval(timerInterval)
+  if (beforeInstallPromptHandler) window.removeEventListener('beforeinstallprompt', beforeInstallPromptHandler)
+  if (pwaInstallReadyHandler) window.removeEventListener('pwa-install-ready', pwaInstallReadyHandler)
+  if (appInstalledHandler) window.removeEventListener('appinstalled', appInstalledHandler)
   stopApprovalPolling()
   stopRecoveryPolling()
   clearBackStack()
@@ -791,14 +819,27 @@ function goBackToMobile() {
             </button>
 
             <!-- PWA PROMOTION -->
-            <div v-if="!isStandalone && !isInstalled" class="pt-6 border-t border-gray-100/50 space-y-4">
+            <div v-if="shouldShowManualInstallEntry" class="pt-6 border-t border-gray-100/50 space-y-4">
                 <button @click="installPWA" class="w-full py-3.5 px-4 bg-gradient-to-r from-amber-50 to-orange-50 text-amber-800 font-bold rounded-xl border border-amber-200/50 hover:bg-amber-100 transition-all flex items-center justify-center gap-3 shadow-sm hover:shadow-md">
                    <Download class="w-5 h-5"/>
                    <span>نصب اپلیکیشن</span>
                 </button>
 
-                <div v-if="isIOS" class="text-xs text-gray-500 text-center bg-gray-50/50 p-3 rounded-xl">
-                  برای نصب در iOS: دکمه <span class="text-blue-500 font-bold">Share</span> و سپس <span class="font-bold">Add to Home Screen</span> را بزنید.
+                <div v-if="showManualInstallGuide" class="text-xs text-gray-600 bg-gray-50/70 p-3 rounded-xl border border-gray-100 leading-6 text-right space-y-2">
+                  <p class="font-bold text-gray-700">{{ manualInstallGuideTitle }}</p>
+                  <template v-if="isIOS">
+                    <p>برای نصب در iPhone یا iPad، نصب مستقیم از داخل Chrome یا مرورگر داخلی تلگرام انجام نمی‌شود. سایت را در Safari باز کنید و این مراحل را انجام دهید:</p>
+                    <ol class="list-decimal list-inside space-y-1">
+                      <li>آدرس سایت را کپی کنید و در Safari باز کنید.</li>
+                      <li>در نوار پایین Safari دکمه Share، یعنی مربع با فلش رو به بالا، را بزنید.</li>
+                      <li>در فهرست باز شده کمی پایین بروید و Add to Home Screen را انتخاب کنید.</li>
+                      <li>نام Gold را تایید کنید و از بالای صفحه Add را بزنید.</li>
+                      <li>بعد از نصب، از آیکن Gold روی Home Screen وارد شوید تا برنامه بدون نوار مرورگر باز شود.</li>
+                    </ol>
+                  </template>
+                  <template v-else>
+                    <p>این مرورگر نصب مستقیم داخل صفحه را پشتیبانی نمی‌کند. برای نصب شبیه اپ، سایت را با Chrome یا Edge باز کنید؛ یا از منوی مرورگر گزینه Add to Home Screen / Install App را انتخاب کنید.</p>
+                  </template>
                 </div>
             </div>
           </div>
