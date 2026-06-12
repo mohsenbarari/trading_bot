@@ -168,21 +168,19 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         actor_offer_trade = SimpleNamespace(offer_user_id=22, responder_user_id=99, actor_user_id=11)
         actor_responder_trade = SimpleNamespace(offer_user_id=99, responder_user_id=22, actor_user_id=11)
         relation_map = {11: SimpleNamespace(owner_user_id=22)}
-        self.assertEqual(
+        self.assertIsNone(
             trades._resolve_trade_history_subject_prefix(
                 trade=actor_offer_trade,
                 history_target_user_id=11,
                 customer_relation_map=relation_map,
-            ),
-            "offer_user",
+            )
         )
-        self.assertEqual(
+        self.assertIsNone(
             trades._resolve_trade_history_subject_prefix(
                 trade=actor_responder_trade,
                 history_target_user_id=11,
                 customer_relation_map=relation_map,
-            ),
-            "responder_user",
+            )
         )
         self.assertIsNone(
             trades._resolve_trade_history_subject_prefix(
@@ -190,6 +188,14 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                 history_target_user_id=11,
                 customer_relation_map={11: SimpleNamespace(owner_user_id=None)},
             )
+        )
+        self.assertEqual(
+            trades._resolve_trade_history_subject_prefix(
+                trade=SimpleNamespace(offer_user_id=22, responder_user_id=11, actor_user_id=11),
+                history_target_user_id=11,
+                customer_relation_map=relation_map,
+            ),
+            "responder_user",
         )
 
     async def test_load_trade_customer_relation_map_preserves_historical_relations_when_requested(self):
@@ -383,8 +389,8 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             ),
             history_target_user_id=11,
         )
-        self.assertEqual(customer_view_response.counterparty_user_id, 99)
-        self.assertEqual(customer_view_response.counterparty_name, "outsider-account")
+        self.assertIsNone(customer_view_response.counterparty_user_id)
+        self.assertIsNone(customer_view_response.counterparty_name)
         self.assertFalse(customer_view_response.customer_context_visible)
 
         event_payload = trades._build_trade_created_event_payload(

@@ -311,7 +311,6 @@ def _build_my_trades_query(
         or_(
             Trade.offer_user_id == owner_user_id,
             Trade.responder_user_id == owner_user_id,
-            Trade.actor_user_id == owner_user_id,
         )
     )
     return _apply_trade_history_filters(
@@ -346,7 +345,6 @@ async def _build_trades_with_user_query(
             or_(
                 Trade.offer_user_id == other_user_id,
                 Trade.responder_user_id == other_user_id,
-                Trade.actor_user_id == other_user_id,
             )
         )
     else:
@@ -403,19 +401,11 @@ async def _viewer_can_access_trade_history_row(
     if viewer_owner_user_id is not None and viewer_owner_user_id in participant_user_ids:
         return True
 
-    actor_user_id = _coerce_trade_user_id(getattr(trade, "actor_user_id", None))
-    if viewer_owner_user_id is not None and actor_user_id == viewer_owner_user_id:
-        return True
-
     for participant_user_id in participant_user_ids:
         relation = await get_active_customer_relation_for_customer(db, participant_user_id)
         if _viewer_can_access_customer_history_relation(relation=relation, context=context):
             return True
 
-    if actor_user_id is not None:
-        actor_relation = await get_active_customer_relation_for_customer(db, actor_user_id)
-        if _viewer_can_access_customer_history_relation(relation=actor_relation, context=context):
-            return True
     return False
 
 
@@ -865,19 +855,6 @@ def _resolve_trade_history_subject_prefix(
     if offer_user_id == target_user_id:
         return "offer_user"
     if responder_user_id == target_user_id:
-        return "responder_user"
-
-    actor_user_id = _coerce_trade_user_id(getattr(trade, "actor_user_id", None))
-    if actor_user_id != target_user_id or not customer_relation_map:
-        return None
-
-    actor_relation = customer_relation_map.get(actor_user_id)
-    actor_owner_user_id = _coerce_trade_user_id(getattr(actor_relation, "owner_user_id", None))
-    if actor_owner_user_id is None:
-        return None
-    if offer_user_id == actor_owner_user_id and responder_user_id != actor_owner_user_id:
-        return "offer_user"
-    if responder_user_id == actor_owner_user_id and offer_user_id != actor_owner_user_id:
         return "responder_user"
     return None
 
