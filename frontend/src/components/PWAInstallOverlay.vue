@@ -1,36 +1,72 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import { usePWAInstall } from '../utils/pwaInstall'
 
 const { isInstallable, isInstalled, installApp } = usePWAInstall()
 const showOverlay = ref(false)
+const isPromptDelayElapsed = ref(false)
+let promptDelayTimer: number | undefined
+
+const PROMPT_DISMISSED_KEY = 'pwa_install_prompt_dismissed_at_v2'
+const PROMPT_DISMISS_TTL_MS = 24 * 60 * 60 * 1000
 
 // تشخیص سیستم‌عامل برای نمایش راهنمای اختصاصی
 const isIOS = computed(() => {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 })
 
-onMounted(() => {
-  const lastDismissed = localStorage.getItem('pwa_prompt_dismissed')
-  const now = Date.now()
-  
-  setTimeout(() => {
-    // در اندروید/دسکتاپ از isInstallable استفاده می‌کنیم (Chrome/Edge)
-    // در iOS چون رویداد beforeinstallprompt نداریم، همیشه دکمه راهنما را نشان می‌دهیم اگر نصب نشده باشد
-    const shouldShowForAndroid = isInstallable.value && !isInstalled.value
-    const shouldShowForIOS = isIOS.value && !isInstalled.value && !((window.navigator as any).standalone)
+const wasRecentlyDismissed = () => {
+  const lastDismissed = localStorage.getItem(PROMPT_DISMISSED_KEY)
+  if (!lastDismissed) return false
 
-    if (shouldShowForAndroid || shouldShowForIOS) {
-        if (!lastDismissed || (now - parseInt(lastDismissed)) > 24 * 60 * 60 * 1000) {
-            showOverlay.value = true
-        }
-    }
+  const timestamp = Number.parseInt(lastDismissed, 10)
+  if (Number.isNaN(timestamp)) return false
+
+  return Date.now() - timestamp <= PROMPT_DISMISS_TTL_MS
+}
+
+const maybeShowOverlay = () => {
+  if (!isPromptDelayElapsed.value) return
+  if (isInstalled.value) {
+    showOverlay.value = false
+    return
+  }
+
+  // در اندروید/دسکتاپ از isInstallable استفاده می‌کنیم (Chrome/Edge).
+  // در iOS چون رویداد beforeinstallprompt نداریم، فقط راهنمای نصب نشان می‌دهیم.
+  const shouldShowForAndroid = isInstallable.value
+  const shouldShowForIOS = isIOS.value && !((window.navigator as any).standalone)
+
+  if ((shouldShowForAndroid || shouldShowForIOS) && !wasRecentlyDismissed()) {
+    showOverlay.value = true
+  }
+}
+
+const handleInstallReady = () => {
+  maybeShowOverlay()
+}
+
+onMounted(() => {
+  window.addEventListener('pwa-install-ready', handleInstallReady)
+
+  promptDelayTimer = window.setTimeout(() => {
+    isPromptDelayElapsed.value = true
+    maybeShowOverlay()
   }, 3000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pwa-install-ready', handleInstallReady)
+  if (promptDelayTimer !== undefined) window.clearTimeout(promptDelayTimer)
+})
+
+watch([() => isInstallable.value, () => isInstalled.value], () => {
+  maybeShowOverlay()
 })
 
 const dismiss = () => {
     showOverlay.value = false
-    localStorage.setItem('pwa_prompt_dismissed', Date.now().toString())
+    localStorage.setItem(PROMPT_DISMISSED_KEY, Date.now().toString())
 }
 
 const handleInstall = async () => {

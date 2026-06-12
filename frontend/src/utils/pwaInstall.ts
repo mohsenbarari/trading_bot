@@ -7,7 +7,9 @@ const isInstalled = ref(false)
 if (typeof window !== 'undefined') {
   // Check if already installed
   window.addEventListener('load', () => {
-    if ((window.navigator as any).standalone || window.matchMedia('(display-mode: standalone)').matches) {
+    const isStandaloneDisplay = typeof window.matchMedia === 'function'
+      && window.matchMedia('(display-mode: standalone)').matches
+    if ((window.navigator as any).standalone || isStandaloneDisplay) {
       isInstalled.value = true
     }
   })
@@ -17,14 +19,17 @@ if (typeof window !== 'undefined') {
     e.preventDefault()
     // Stash the event so it can be triggered later.
     deferredPrompt.value = e
+    ;(window as any).deferredPrompt = e
     // Update UI notify the user they can install the PWA
     isInstallable.value = true
+    window.dispatchEvent(new Event('pwa-install-ready'))
     console.log('PWA: Ready to install')
   })
 
   window.addEventListener('appinstalled', () => {
     // Clear the deferredPrompt so it can be garbage collected
     deferredPrompt.value = null
+    ;(window as any).deferredPrompt = null
     isInstallable.value = false
     isInstalled.value = true
     console.log('PWA: Application installed successfully')
@@ -33,17 +38,19 @@ if (typeof window !== 'undefined') {
 
 export function usePWAInstall() {
   const installApp = async () => {
-    if (!deferredPrompt.value) return false
+    const prompt = deferredPrompt.value || (window as any).deferredPrompt
+    if (!prompt) return false
 
     // Show the install prompt
-    deferredPrompt.value.prompt()
+    prompt.prompt()
 
     // Wait for the user to respond to the prompt
-    const { outcome } = await deferredPrompt.value.userChoice
+    const { outcome } = await prompt.userChoice
     console.log(`PWA: User response to the install prompt: ${outcome}`)
 
     // We've used the prompt, and can't use it again, throw it away
     deferredPrompt.value = null
+    ;(window as any).deferredPrompt = null
     isInstallable.value = false
     
     return outcome === 'accepted'

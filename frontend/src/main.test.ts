@@ -31,6 +31,7 @@ mainMocks.createPinia.mockReturnValue({ pinia: true })
 
 vi.mock('vue', () => ({
   createApp: mainMocks.createApp,
+  ref: (value: any) => ({ value }),
 }))
 
 vi.mock('pinia', () => ({
@@ -71,6 +72,12 @@ function setTelegram(enabled: boolean) {
 
 function getFirstListener(type: string) {
   return mainMocks.listeners.get(type)?.[0]
+}
+
+function dispatchStoredListeners(type: string) {
+  for (const listener of mainMocks.listeners.get(type) ?? []) {
+    listener()
+  }
 }
 
 function getTimeoutByDelay(delay: number) {
@@ -196,7 +203,7 @@ describe('main.ts', () => {
     expect(mainMocks.telegram.expand).toHaveBeenCalled()
     expect(mainMocks.registerSW).not.toHaveBeenCalled()
 
-    getFirstListener('load')?.()
+    dispatchStoredListeners('load')
     getTimeoutByDelay(1500)?.fn()
     getTimeoutByDelay(1500)?.fn()
 
