@@ -44,6 +44,7 @@ describe('pwaInstall', () => {
   beforeEach(() => {
     stubMatchMedia(false)
     setStandalone(false)
+    delete (window as any).deferredPrompt
   })
 
   it('marks the app as installed on load when the browser is already standalone', async () => {
@@ -64,13 +65,27 @@ describe('pwaInstall', () => {
     window.dispatchEvent(installEvent)
     expect(installEvent.preventDefault).toHaveBeenCalled()
     expect(pwa.isInstallable.value).toBe(true)
+    expect((window as any).deferredPrompt).toBe(installEvent)
 
     await expect(pwa.installApp()).resolves.toBe(true)
     expect(installEvent.prompt).toHaveBeenCalledTimes(1)
     expect(pwa.isInstallable.value).toBe(false)
+    expect((window as any).deferredPrompt).toBeNull()
 
     window.dispatchEvent(new Event('appinstalled'))
     expect(pwa.isInstalled.value).toBe(true)
+  })
+
+  it('dispatches pwa-install-ready when Chrome exposes the install prompt', async () => {
+    const module = await importFreshModule()
+    module.usePWAInstall()
+    const readyListener = vi.fn()
+    const installEvent = makeBeforeInstallPromptEvent('accepted')
+
+    window.addEventListener('pwa-install-ready', readyListener, { once: true })
+    window.dispatchEvent(installEvent)
+
+    expect(readyListener).toHaveBeenCalledTimes(1)
   })
 
   it('returns false when there is no deferred prompt or the user dismisses it', async () => {

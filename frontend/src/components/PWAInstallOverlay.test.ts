@@ -8,6 +8,8 @@ const pwaOverlayMocks = vi.hoisted(() => ({
   installAppMock: vi.fn(),
 }))
 
+const PROMPT_DISMISSED_KEY = 'pwa_install_prompt_dismissed_at_v2'
+
 vi.mock('../utils/pwaInstall', () => ({
   usePWAInstall: () => ({
     isInstallable: pwaOverlayMocks.isInstallable,
@@ -53,18 +55,32 @@ describe('PWAInstallOverlay.vue', () => {
     await wrapper.get('.btn-dismiss').trigger('click')
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
-    expect(localStorage.getItem('pwa_prompt_dismissed')).toMatch(/^\d+$/)
+    expect(localStorage.getItem(PROMPT_DISMISSED_KEY)).toMatch(/^\d+$/)
   })
 
   it('does not reopen the prompt when it was dismissed less than a day ago', async () => {
     pwaOverlayMocks.isInstallable.value = true
-    localStorage.setItem('pwa_prompt_dismissed', String(Date.now()))
+    localStorage.setItem(PROMPT_DISMISSED_KEY, String(Date.now()))
 
     const wrapper = mount(PWAInstallOverlay)
     await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
+  })
+
+  it('shows the prompt when installability becomes available after the initial delay', async () => {
+    const wrapper = mount(PWAInstallOverlay)
+    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+
+    expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
+
+    pwaOverlayMocks.isInstallable.value = true
+    window.dispatchEvent(new Event('pwa-install-ready'))
+    await flushPromises()
+
+    expect(wrapper.find('.pwa-install-overlay').exists()).toBe(true)
   })
 
   it('shows the iOS guide flow and alerts instead of calling installApp', async () => {

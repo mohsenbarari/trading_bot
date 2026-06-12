@@ -4,6 +4,7 @@ import App from './App.vue'
 import router from './router'
 import './assets/main.css'
 import 'vazirmatn/Vazirmatn-font-face.css'
+import './utils/pwaInstall'
 
 
 const app = createApp(App)
