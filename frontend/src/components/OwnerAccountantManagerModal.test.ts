@@ -52,6 +52,23 @@ describe('OwnerAccountantManagerModal.vue', () => {
     vi.useRealTimers()
   })
 
+  async function openCreatePanel(wrapper: any) {
+    await wrapper.get('.open-create-category').trigger('click')
+    await flushPromises()
+  }
+
+  async function openRelationsPanel(wrapper: any) {
+    await wrapper.get('.open-relations-category').trigger('click')
+    await flushPromises()
+  }
+
+  async function backToCategories(wrapper: any) {
+    const backButton = wrapper.findAll('button').find((button: any) => button.text().includes('بازگشت به دسته‌ها'))
+    expect(backButton).toBeTruthy()
+    await backButton!.trigger('click')
+    await flushPromises()
+  }
+
   it('loads relations and creates a new accountant relation', async () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation()]))
     apiFetchMock.mockResolvedValueOnce(makeResponse(makeRelation({
@@ -72,9 +89,13 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    expect(wrapper.text()).toContain('دسته‌بندی مدیریت حسابداران')
+    await openRelationsPanel(wrapper)
     expect(wrapper.text()).toContain('حسابدار اول')
-  expect(wrapper.text()).toContain('مهلت ثبت نام: 1 روز')
+    expect(wrapper.text()).toContain('مهلت ثبت نام: 1 روز')
 
+    await backToCategories(wrapper)
+    await openCreatePanel(wrapper)
     await wrapper.get('.create-account-name').setValue('acc2')
     await wrapper.get('.create-display-name').setValue('حسابدار دوم')
     await wrapper.get('.create-mobile-number').setValue('09123333333')
@@ -115,6 +136,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.start-edit').trigger('click')
     await wrapper.get('.edit-duty-description').setValue('مدیریت ثبت‌ها')
@@ -164,6 +186,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     expect(wrapper.find('.unlink-active').exists()).toBe(true)
     await wrapper.get('.unlink-active').trigger('click')
@@ -219,6 +242,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
     await wrapper.get('.toggle-sessions').trigger('click')
     await flushPromises()
 
@@ -267,6 +291,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openCreatePanel(wrapper)
 
     await wrapper.get('.create-account-name').setValue('acc-temp')
     await wrapper.get('.create-display-name').setValue('حسابدار موقت')
@@ -279,17 +304,19 @@ describe('OwnerAccountantManagerModal.vue', () => {
     expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-duty-description').element as HTMLTextAreaElement).value).toBe('')
 
+    await backToCategories(wrapper)
+    await openRelationsPanel(wrapper)
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
     expect(clipboardWrite).toHaveBeenCalledWith('https://app.example/register?token=ACCT-token')
     expect(wrapper.text()).toContain('کپی شد')
-  expect(wrapper.text()).toContain('این حسابدار با @acc2 فعال است.')
+    expect(wrapper.text()).toContain('این حسابدار با @acc2 فعال است.')
 
     await vi.advanceTimersByTimeAsync(1800)
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
 
-    await wrapper.get('.ghost-btn').trigger('click')
+    await wrapper.get('.refresh-relations').trigger('click')
     await flushPromises()
 
     expect(apiFetchMock).toHaveBeenLastCalledWith('/api/accountants/owner-relations')
@@ -339,6 +366,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     expect(wrapper.text()).toContain('این رابطه فعال شده است.')
     expect(wrapper.text()).toContain('مهلت این دعوت به پایان رسیده است.')
@@ -382,6 +410,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openCreatePanel(secondWrapper)
 
     await secondWrapper.get('.create-account-name').setValue('acc3')
     await secondWrapper.get('.create-display-name').setValue('حسابدار سوم')
@@ -390,6 +419,8 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await flushPromises()
     expect(secondWrapper.text()).toContain('ایجاد نشد')
 
+    await backToCategories(secondWrapper)
+    await openRelationsPanel(secondWrapper)
     await secondWrapper.get('.start-edit').trigger('click')
     await secondWrapper.get('.edit-duty-description').setValue('تغییر')
     await secondWrapper.get('.save-edit').trigger('click')
@@ -424,6 +455,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.start-edit').trigger('click')
     await wrapper.get('.edit-duty-description').setValue('توضیح جدید')

@@ -10,6 +10,7 @@ const emit = defineEmits<{
 }>()
 
 type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
+type ActivePanel = 'create' | 'relations' | null
 
 interface AccountantRelation {
   id: number
@@ -76,6 +77,7 @@ const sessionsByRelationId = ref<Record<number, AccountantSessionSummary[]>>({})
 const loadingSessionsRelationId = ref<number | null>(null)
 const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
+const activePanel = ref<ActivePanel>(null)
 
 const createForm = reactive(makeEmptyCreateForm())
 const editForm = reactive(makeEmptyEditForm())
@@ -108,6 +110,14 @@ function resetCreateForm() {
 
 function toggleSection(section: keyof typeof openSections) {
   openSections[section] = !openSections[section]
+}
+
+function openPanel(panel: Exclude<ActivePanel, null>) {
+  activePanel.value = panel
+}
+
+function backToCategories() {
+  activePanel.value = null
 }
 
 function clearEditState() {
@@ -365,6 +375,7 @@ async function createRelation() {
     relations.value = [payload as AccountantRelation, ...relations.value.filter((item) => item.id !== (payload as AccountantRelation).id)]
     resetCreateForm()
     notice.value = 'دعوت حسابدار ثبت شد.'
+    activePanel.value = 'relations'
   } catch (err: any) {
     error.value = err?.message || 'ایجاد حسابدار ناموفق بود.'
   } finally {
@@ -495,7 +506,32 @@ onBeforeUnmount(() => {
           </article>
         </section>
 
-        <section class="accountant-panel accountant-panel--accordion">
+        <section v-if="activePanel === null" class="manager-category-menu card-with-help" aria-label="دسته‌بندی مدیریت حسابداران">
+          <HelpPopover
+            floating
+            button-test="accountant-category-menu-help"
+            note-test="accountant-category-menu-help-note"
+            label="راهنمای دسته‌بندی حسابداران"
+            text="ابتدا دسته مورد نظر را انتخاب کنید. سپس زیرمنوهای همان دسته، مثل مشخصات پایه یا شرح وظیفه، نمایش داده می‌شود."
+          />
+          <div class="manager-category-heading">دسته‌بندی مدیریت حسابداران</div>
+          <button type="button" class="menu-button settings-btn open-create-category" @click="openPanel('create')">
+            <span class="menu-button-icon"><UserPlus :size="18" /></span>
+            <span class="menu-button-copy">
+              <span class="menu-button-label">افزودن حسابدار</span>
+              <span class="menu-button-note">ثبت دعوت، مشخصات پایه و شرح وظیفه حسابدار</span>
+            </span>
+          </button>
+          <button type="button" class="menu-button settings-btn open-relations-category" @click="openPanel('relations')">
+            <span class="menu-button-icon"><Users :size="18" /></span>
+            <span class="menu-button-copy">
+              <span class="menu-button-label">مدیریت حسابداران</span>
+              <span class="menu-button-note">{{ summaryStats.total.toLocaleString('fa-IR') }} رابطه ثبت‌شده، شامل فعال، در انتظار و آرشیوی</span>
+            </span>
+          </button>
+        </section>
+
+        <section v-if="activePanel === 'create'" class="accountant-panel accountant-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.create }">
             <div class="ds-accordion-header" @click="toggleSection('create')">
               <div class="ds-accordion-header-info">
@@ -512,6 +548,7 @@ onBeforeUnmount(() => {
                   label="راهنمای افزودن حسابدار"
                   text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
                 />
+                <button type="button" class="ghost-btn ghost-btn--inline" @click.stop="backToCategories">بازگشت به دسته‌ها</button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
@@ -581,7 +618,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="accountant-panel accountant-panel--accordion">
+        <section v-if="activePanel === 'relations'" class="accountant-panel accountant-panel--accordion">
           <div class="ds-accordion" :class="{ open: openSections.relations }">
             <div class="ds-accordion-header" @click="toggleSection('relations')">
               <div class="ds-accordion-header-info">
@@ -598,9 +635,10 @@ onBeforeUnmount(() => {
                   label="راهنمای لیست حسابداران"
                   :text="`${orderedRelations.length.toLocaleString('fa-IR')} مورد فعال یا در انتظار ثبت‌نام در این لیست وجود دارد.`"
                 />
-                <button type="button" class="ghost-btn ghost-btn--inline" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
+                <button type="button" class="ghost-btn ghost-btn--inline refresh-relations" :disabled="isRefreshing" @click.stop="loadRelations({ silent: true })">
                   {{ isRefreshing ? 'در حال بروزرسانی...' : 'بروزرسانی لیست' }}
                 </button>
+                <button type="button" class="ghost-btn ghost-btn--inline" @click.stop="backToCategories">بازگشت به دسته‌ها</button>
                 <ChevronLeft :size="20" class="ds-accordion-icon" />
               </div>
             </div>
@@ -854,6 +892,103 @@ onBeforeUnmount(() => {
 .accountant-banner.error {
   background: rgba(239, 68, 68, 0.14);
   color: #b91c1c;
+}
+
+.card-with-help {
+  position: relative;
+}
+
+.manager-category-menu {
+  padding: 1rem;
+  padding-left: 3.8rem;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 1.25rem;
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.72), rgba(255, 255, 255, 0.96));
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.manager-category-heading {
+  margin-bottom: 0.7rem;
+  padding-right: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #92400e;
+}
+
+.menu-button {
+  width: 100%;
+  min-height: 3.4rem;
+  padding: 0.78rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 850;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1f2937;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.72rem;
+  transition: all 0.2s;
+  text-align: right;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.menu-button:hover {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: #fffbeb;
+}
+
+.menu-button:active {
+  transform: scale(0.98);
+}
+
+.menu-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.8rem;
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  flex: 0 0 auto;
+}
+
+.menu-button-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.18rem;
+}
+
+.menu-button-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-button-note {
+  font-size: 0.72rem;
+  line-height: 1.55;
+  font-weight: 600;
+  color: #6b7280;
+}
+
+.settings-btn {
+  background: linear-gradient(135deg, #fffbeb, #fef3c7) !important;
+  color: #92400e !important;
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+.settings-btn .menu-button-icon {
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
 }
 
 .accountant-summary-strip {

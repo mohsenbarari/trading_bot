@@ -98,6 +98,23 @@ describe('OwnerCustomerManagerModal.vue', () => {
     })
   }
 
+  async function openCreatePanel(wrapper: any) {
+    await wrapper.get('.open-create-category').trigger('click')
+    await flushPromises()
+  }
+
+  async function openRelationsPanel(wrapper: any) {
+    await wrapper.get('.open-relations-category').trigger('click')
+    await flushPromises()
+  }
+
+  async function backToCategories(wrapper: any) {
+    const backButton = wrapper.findAll('button').find((button: any) => button.text().includes('بازگشت به دسته‌ها'))
+    expect(backButton).toBeTruthy()
+    await backButton!.trigger('click')
+    await flushPromises()
+  }
+
   it('loads and terminates customer sessions for an active customer', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
     let sessionListCallCount = 0
@@ -135,6 +152,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     const wrapper = mountModal()
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
     await wrapper.get('button.toggle-sessions').trigger('click')
     await flushPromises()
 
@@ -162,6 +180,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     const wrapper = mountModal()
 
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     expect(wrapper.find('button.toggle-sessions').exists()).toBe(false)
     expect(wrapper.text()).toContain('کپی لینک ثبت‌نام')
@@ -196,6 +215,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     const titles = wrapper.findAll('.customer-card h5').map((node) => node.text())
     expect(titles).toEqual(['مشتری ویژه', 'مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
@@ -208,7 +228,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     expect(wrapper.find('.session-panel').exists()).toBe(true)
 
-    await wrapper.get('.ghost-btn').trigger('click')
+    await wrapper.get('.refresh-relations').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.session-panel').exists()).toBe(false)
@@ -243,6 +263,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openCreatePanel(wrapper)
 
     await wrapper.get('.create-account-name').setValue('fresh_customer')
     await wrapper.get('.create-management-name').setValue('مشتری تازه')
@@ -272,6 +293,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     })
     expect(wrapper.text()).toContain('دعوت مشتری ثبت شد.')
     expect(wrapper.text()).toContain('مشتری تازه')
+    await backToCategories(wrapper)
+    await openCreatePanel(wrapper)
     expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
     expect(wrapper.find('.create-commission-rate').exists()).toBe(false)
 
@@ -301,6 +324,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.start-edit').trigger('click')
     expect((wrapper.get('.edit-commission-rate').element as HTMLInputElement).value).toBe('0.5')
@@ -344,6 +368,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
@@ -374,6 +399,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
@@ -404,6 +430,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.toggle-sessions').trigger('click')
     await flushPromises()
@@ -439,6 +466,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openCreatePanel(wrapper)
 
     await wrapper.get('.create-account-name').setValue('duplicate_customer')
     await wrapper.get('.create-management-name').setValue('مشتری تکراری')
@@ -448,6 +476,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.text()).toContain('این نام کاربری قبلاً ثبت شده است.')
 
+    await backToCategories(wrapper)
+    await openRelationsPanel(wrapper)
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
@@ -470,6 +500,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.toggle-sessions').trigger('click')
     await flushPromises()
@@ -529,6 +560,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     expect(wrapper.text()).toContain('2 روز و 01:02:03')
     expect(wrapper.text()).toContain('این دعوت توسط مالک لغو شده است.')
@@ -571,6 +603,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openCreatePanel(wrapper)
 
     await wrapper.get('.create-account-name').setValue('tier2_customer')
     await wrapper.get('.create-management-name').setValue('مشتری سطح دو')
@@ -589,6 +622,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-tier-select').element as HTMLSelectElement).value).toBe('tier1')
 
+    await backToCategories(wrapper)
+    await openRelationsPanel(wrapper)
     await wrapper.get('.copy-link').trigger('click')
     await flushPromises()
 
@@ -622,6 +657,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     const wrapper = mountModal()
     await flushPromises()
+    await openRelationsPanel(wrapper)
 
     await wrapper.get('.toggle-sessions').trigger('click')
     await flushPromises()
@@ -637,6 +673,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await wrapper.get('.edit-panel .secondary-btn').trigger('click')
     expect(wrapper.find('.edit-panel').exists()).toBe(false)
 
+    await backToCategories(wrapper)
+    await openCreatePanel(wrapper)
     await wrapper.get('.create-account-name').setValue('broken_customer')
     await wrapper.get('.create-management-name').setValue('مشتری خطادار')
     await wrapper.get('.create-mobile-number').setValue('09129990000')
@@ -645,6 +683,8 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.text()).toContain('ایجاد مشتری ناموفق بود.')
 
+    await backToCategories(wrapper)
+    await openRelationsPanel(wrapper)
     await wrapper.get('.cancel-pending').trigger('click')
     await flushPromises()
 
