@@ -378,8 +378,49 @@ describe('OwnerCustomerManagerModal.vue', () => {
     })
     expect(wrapper.text()).toContain('تنظیمات مشتری با موفقیت ذخیره شد.')
     expect(wrapper.get('.detail-save-feedback').text()).toBe('تنظیمات مشتری با موفقیت ذخیره شد.')
+    expect(wrapper.get('.customer-viewport-toast--success').text()).toBe('تنظیمات مشتری با موفقیت ذخیره شد.')
     expect(wrapper.text()).toContain('سطح 1')
     expect(wrapper.get('.save-edit').text()).toBe('ذخیره تغییرات')
+
+    wrapper.unmount()
+  })
+
+  it('recovers customer edit saves that were applied despite a transient network error', async () => {
+    const updatedRelation = {
+      ...activeRelation,
+      customer_tier: 'tier1',
+      commission_rate: null,
+      min_trade_quantity: 4,
+    }
+    let relationLoadCount = 0
+
+    apiFetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/customers/owner-relations' && !options?.method) {
+        relationLoadCount += 1
+        return makeResponse(relationLoadCount === 1 ? [activeRelation] : [updatedRelation])
+      }
+      if (url === '/api/customers/owner-relations/11' && options?.method === 'PATCH') {
+        throw new Error('NetworkError')
+      }
+      throw new Error(`Unexpected apiFetch call: ${url}`)
+    })
+
+    const wrapper = mountModal()
+    await flushPromises()
+    await openRelationsPanel(wrapper)
+    await openCustomerDetail(wrapper)
+
+    await wrapper.get('.edit-tier-select').setValue('tier1')
+    await wrapper.get('.edit-min-trade').setValue('4')
+    await wrapper.get('.save-edit').trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/customers/owner-relations', { retryNetwork: false })
+    expect(wrapper.find('.customer-banner.error').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('NetworkError')
+    expect(wrapper.get('.customer-viewport-toast--success').text()).toBe('تنظیمات مشتری با موفقیت ذخیره شد.')
+    expect(wrapper.get('.save-edit').text()).toBe('ذخیره تغییرات')
+    expect(wrapper.text()).toContain('سطح 1')
 
     wrapper.unmount()
   })
