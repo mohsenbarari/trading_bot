@@ -1,7 +1,7 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: Planned on 2026-06-13 after RPL6. This roadmap is for targeted
-read-path optimization, not for another broad benchmark loop.
+Status: RPO0 completed and RPO1 started on 2026-06-13. This roadmap is for
+targeted read-path optimization, not for another broad benchmark loop.
 
 Last updated: 2026-06-13
 
@@ -96,8 +96,8 @@ RPL6 endpoint p95 highlights:
 
 | Stage | Status | Scope |
 | --- | --- | --- |
-| `RPO0` | Pending | Add endpoint-family attribution/read-path reporting needed for this roadmap and freeze the benchmark contract. |
-| `RPO1` | Pending | Optimize `chat_conversations` read shape without changing Messenger behavior. |
+| `RPO0` | Complete | Add endpoint-family attribution/read-path reporting needed for this roadmap and freeze the benchmark contract. |
+| `RPO1` | In Progress | Optimize `chat_conversations` read shape without changing Messenger behavior. |
 | `RPO2` | Pending | Optimize `direct_messages` and room message read pagination/projection. |
 | `RPO3` | Pending | Optimize `offers_list` and `offers_my` read paths. |
 | `RPO4` | Pending | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
@@ -147,6 +147,41 @@ Exit criteria:
 - A short, repeatable endpoint attribution report exists.
 - RPO1 can start with a clear target and baseline.
 
+Implementation:
+
+- Added `scripts/report_read_path_endpoint_attribution.py`.
+- Added `make production-read-path-attribution`.
+- The report supports existing `load-pool-matrix` artifacts and reads the
+  underlying k6 endpoint metrics so each endpoint row includes:
+  - request count;
+  - successful and failed request counts;
+  - failure rate;
+  - p50, p90, p95, p99, average, and max latency;
+  - comparison deltas against the first artifact.
+
+Validation:
+
+- Ran:
+  `make production-read-path-attribution ARGS="--json --limit 12"`.
+- Artifacts:
+  - `tmp/production-read-path-attribution/read-path-endpoint-attribution-20260613T184622Z.json`;
+  - `tmp/production-read-path-attribution/read-path-endpoint-attribution-20260613T184622Z.md`.
+- The report compared:
+  - accepted L7 artifact
+    `tmp/production-benchmark/20260613T111706Z/load-pool-matrix/`;
+  - RPL6 artifact
+    `tmp/production-benchmark/20260613T160851Z/load-pool-matrix/`.
+- Focused unit coverage added in `tests/test_read_path_endpoint_attribution.py`.
+
+RPO0 result:
+
+- RPO0 is complete.
+- `chat_conversations` remains the correct first RPO1 target:
+  - L7 p95/p99: `656.76ms` / `888.72ms`;
+  - RPL6 p95/p99: `736.51ms` / `1903.41ms`;
+  - RPL6 request count: `8155`;
+  - RPL6 failure rate: `0%`.
+
 ## Stage RPO1 - Chat Conversations Read Shape
 
 Goal:
@@ -190,6 +225,39 @@ Exit criteria:
 
 - `chat_conversations` p95 improves versus RPL6 without increasing request
   failure rate, Nginx 5xx delta, or PostgreSQL connection pressure.
+
+Implementation slice 1:
+
+- Added `build_direct_conversation_other_user_id_expr()` in
+  `core/services/chat_service.py`.
+- Extended `build_direct_conversation_list_stmt()` with optional
+  `allowed_target_ids`.
+- Updated `GET /api/chat/conversations` so customer viewers push their allowed
+  direct-target filter into SQL instead of relying only on Python-side filtering
+  after the full direct list has already been read.
+- Kept the Python-side filter as a defensive correctness layer.
+
+Correctness budget for slice 1:
+
+- Applies only when the viewer is an active customer and therefore already has
+  an explicit allowed target set.
+- Does not change non-customer conversation queries.
+- Does not remove the existing post-query visibility filter.
+- Does not cache unread or mutable per-user state.
+
+Validation for slice 1:
+
+- `python3 -m unittest tests.test_read_path_endpoint_attribution tests.test_chat_service_projection_and_send_helpers tests.test_chat_router_direct_reads`
+  passed.
+- `python3 -m py_compile scripts/report_read_path_endpoint_attribution.py core/services/chat_service.py api/routers/chat.py tests/test_read_path_endpoint_attribution.py`
+  passed.
+
+Next RPO1 decision:
+
+- Run a short targeted benchmark only after this slice is deployed.
+- If the endpoint-level result does not move materially, continue RPO1 with a
+  broader but still scoped review of room/direct projection width rather than
+  rerunning L9.
 
 ## Stage RPO2 - Message List Reads
 

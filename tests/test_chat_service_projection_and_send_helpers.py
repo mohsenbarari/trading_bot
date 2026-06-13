@@ -80,6 +80,9 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
             chat_service.build_direct_conversation_scope_condition(7).self_group()
         )
         list_sql = compile_sql(chat_service.build_direct_conversation_list_stmt(7))
+        filtered_list_sql = compile_sql(
+            chat_service.build_direct_conversation_list_stmt(7, allowed_target_ids={9, 11})
+        )
         unread_sql = compile_sql(chat_service.build_direct_unread_poll_stmt(7))
         poll_sql = compile_sql(chat_service.build_direct_poll_summary_stmt(7))
         legacy_sql = compile_sql(
@@ -99,6 +102,8 @@ class ChatServiceProjectionAndSendHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("conversations.user1_id = 7", scope_sql)
         self.assertIn("conversations.user2_id = 7", scope_sql)
         self.assertIn("DESC NULLS LAST", list_sql)
+        self.assertIn("IN (9, 11)", filtered_list_sql)
+        self.assertIn("conversations.user1_id = 7", filtered_list_sql)
         self.assertIn("> 0", unread_sql)
         self.assertIn("conversations.id AS id", poll_sql)
         self.assertIn("other_user_name", poll_sql)

@@ -195,12 +195,13 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.chat.build_allowed_customer_chat_targets",
             new=AsyncMock(return_value=[20, 44]),
-        ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt"), patch(
+        ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
             "api.routers.chat.list_room_conversations",
             new=AsyncMock(return_value=[]),
         ):
             result = await get_conversations(current_user=current_user, db=db)
 
+        stmt_mock.assert_called_once_with(91, allowed_target_ids={20, 44})
         self.assertEqual([item.other_user_id for item in result], [20])
 
     async def test_search_messages_builds_query_and_serializes(self):

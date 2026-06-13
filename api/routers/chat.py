@@ -516,7 +516,13 @@ async def get_conversations(
 ):
     """لیست مکالمات کاربر"""
     allowed_direct_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
-    stmt = build_direct_conversation_list_stmt(current_user.id)
+    if allowed_direct_target_ids is None:
+        stmt = build_direct_conversation_list_stmt(current_user.id)
+    else:
+        stmt = build_direct_conversation_list_stmt(
+            current_user.id,
+            allowed_target_ids=allowed_direct_target_ids,
+        )
     result = await db.execute(stmt)
     direct_conversations = [ConversationRead(**row) for row in result.mappings().all()]
     if allowed_direct_target_ids is not None:
