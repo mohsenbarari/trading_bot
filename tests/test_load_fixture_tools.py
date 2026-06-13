@@ -67,7 +67,7 @@ class LoadFixtureToolsTests(unittest.TestCase):
         args = runner.worker_args("iran", "prepare", "--prefix", "loadtest_case_")
         command = " ".join(args)
 
-        self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", command)
+        self.assertIn("env TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", command)
         self.assertIn("load_fixture_worker.py prepare", command)
 
     def test_cleanup_worker_keeps_direct_sync_push_default(self):
