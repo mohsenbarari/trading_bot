@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import scripts.run_stage_l_pool_matrix as pool_matrix
 from scripts.run_stage_l_pool_matrix import parse_candidates, recommend, summarize_candidate
 
 
@@ -73,6 +74,10 @@ class StageLPoolMatrixTests(unittest.TestCase):
             ]
         }
         self.assertIn("12:8", recommend(report))
+
+    def test_pool_matrix_emits_done_marker_for_teed_logs(self):
+        source = Path(pool_matrix.__file__).read_text(encoding="utf-8")
+        self.assertIn("STAGE_L_POOL_MATRIX_DONE", source)
 
 
 if __name__ == "__main__":

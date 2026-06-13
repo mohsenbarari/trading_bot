@@ -10,7 +10,14 @@ from scripts.load_fixture_worker import (
     redact_auth_pool,
     sync_queue_item_matches_cleanup,
 )
-from scripts.report_production_load_fixtures import Runner, build_scp_opts, build_ssh_opts, redact_payload, sync_worker_compose_body
+from scripts.report_production_load_fixtures import (
+    Runner,
+    build_scp_opts,
+    build_ssh_opts,
+    redact_payload,
+    sync_worker_compose_args,
+    sync_worker_compose_body,
+)
 
 
 class LoadFixtureToolsTests(unittest.TestCase):
@@ -66,6 +73,16 @@ class LoadFixtureToolsTests(unittest.TestCase):
     def test_sync_worker_pause_resume_commands_are_scoped(self):
         self.assertEqual(sync_worker_compose_body("pause"), "stop sync_worker")
         self.assertEqual(sync_worker_compose_body("resume"), "up -d --no-deps sync_worker")
+
+    def test_sync_worker_resume_removes_stale_container_before_up(self):
+        runner = Runner(
+            settings={"IRAN_HOST": "iran.example", "IRAN_PROJECT_DIR": "/srv/trading-bot/current"},
+            logs_dir=Path("/tmp"),
+        )
+        command = " ".join(sync_worker_compose_args(runner, "iran", "resume"))
+
+        self.assertIn("rm -sf sync_worker", command)
+        self.assertIn("up -d --no-deps sync_worker", command)
 
     def test_prepare_worker_disables_direct_sync_push(self):
         runner = Runner(

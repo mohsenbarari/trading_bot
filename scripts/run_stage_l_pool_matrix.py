@@ -404,7 +404,13 @@ def main(argv: list[str] | None = None) -> int:
         report = run_matrix(args)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"STAGE_L_POOL_MATRIX_DONE status=failed error={type(exc).__name__}", file=sys.stderr)
         return 1
+    print(
+        f"STAGE_L_POOL_MATRIX_DONE status={'passed' if report.get('ok') else 'failed'} "
+        f"artifact={report.get('artifact_dir')} restored={report.get('restored')}",
+        file=sys.stderr,
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
