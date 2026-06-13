@@ -42,6 +42,12 @@ class _FakeAsyncClient:
 
 
 class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        market_transition_service.invalidate_market_runtime_view_cache()
+
+    def tearDown(self):
+        market_transition_service.invalidate_market_runtime_view_cache()
+
     def test_runtime_helper_functions_cover_default_and_naive_times(self):
         evaluation = MarketScheduleEvaluation(
             is_open=True,
@@ -414,6 +420,70 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.offers_since_last_open, 0)
         self.assertIsNone(result.last_transition_at)
         self.assertIsNone(result.next_transition_at)
+
+    async def test_get_market_runtime_view_uses_short_cache_for_live_reads(self):
+        db = SimpleNamespace()
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc),
+            timezone="Asia/Tehran",
+        )
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=1,
+            last_transition_at=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+        )
+        evaluate_mock = AsyncMock(return_value=evaluation)
+        state_mock = AsyncMock(return_value=state)
+
+        with patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=evaluate_mock,
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=state_mock,
+        ):
+            first = await market_transition_service.get_market_runtime_view(db)
+            second = await market_transition_service.get_market_runtime_view(db)
+            market_transition_service.invalidate_market_runtime_view_cache()
+            third = await market_transition_service.get_market_runtime_view(db)
+
+        self.assertIs(first, second)
+        self.assertIsNot(first, third)
+        self.assertEqual(evaluate_mock.await_count, 2)
+        self.assertEqual(state_mock.await_count, 2)
+
+    async def test_get_market_runtime_view_bypasses_cache_for_explicit_time(self):
+        db = SimpleNamespace()
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+        )
+        evaluate_mock = AsyncMock(return_value=evaluation)
+        state_mock = AsyncMock(return_value=None)
+        current_time = datetime(2026, 5, 22, 12, 0, tzinfo=timezone.utc)
+
+        with patch.object(
+            market_transition_service,
+            "evaluate_current_market_schedule",
+            new=evaluate_mock,
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=state_mock,
+        ):
+            await market_transition_service.get_market_runtime_view(db, current_time=current_time)
+            await market_transition_service.get_market_runtime_view(db, current_time=current_time)
+
+        self.assertEqual(evaluate_mock.await_count, 2)
+        self.assertEqual(state_mock.await_count, 2)
 
     async def test_register_market_offer_created_hides_notice_after_second_offer(self):
         db = SimpleNamespace(commit=AsyncMock())
