@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L7 failed on the first official target attempt. Stage L7.1 DB pool diagnostics is next.
+Status: Stage L7 failed on the first official target attempt. Stage L7.1 showed that a larger DB pool removes 5xx failures but does not reach the 500 RPS target, so Stage L7.2 is endpoint-level bottleneck attribution.
 
 Last updated: 2026-06-13
 
@@ -23,7 +23,8 @@ same time.
 | `L5` | Complete on 2026-06-13 | Smoke run `TARGET_RPS=50 DURATION=2m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` passed with artifact `tmp/production-benchmark/20260613T065328Z/load-realistic/`: `6001` HTTP requests at `49.98 req/s`, request failure rate `0.27%`, checks pass rate `99.73%`, p95 `101.05ms`, p99 `436.59ms`, chat p95 `137.11ms`, market p95 `97.74ms`, profile p95 `49.18ms`, fixture prepare/cleanup passed, sampler passed with `0` Nginx 5xx and max PostgreSQL connections `36`, and final foreign/Iran sync-health remained clean (`unsynced=0`, `outbound=0`). |
 | `L6` | Complete on 2026-06-13 | Warmup run `TARGET_RPS=100 DURATION=3m` passed with artifact `tmp/production-benchmark/20260613T070616Z/load-realistic/`: `18001` HTTP requests, failure rate `0.39%`, p95 `99.29ms`, p99 `452.02ms`, sampler passed with max PostgreSQL connections `37`, max sync backlog `855`, and no Nginx 5xx in sampled windows. Warmup run `TARGET_RPS=250 DURATION=5m` passed with artifact `tmp/production-benchmark/20260613T071052Z/load-realistic/`: `74870` HTTP requests, failure rate `0.40%`, p95 `475.28ms`, p99 `829.49ms`, max PostgreSQL connections `78`, and final foreign/Iran sync-health clean. Follow-up harness cleanup fixed profile `project-users` false 403 noise and Nginx sampler repeated-window 5xx interpretation; validation artifact `tmp/production-benchmark/20260613T072713Z/load-realistic/` passed at `100 RPS / 1m` with `6001` requests, `0.00%` failures, and `100%` checks. |
 | `L7` | Blocked on 2026-06-13 | Official target run `TARGET_RPS=500 DURATION=10m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` completed but failed with artifact `tmp/production-benchmark/20260613T073228Z/load-realistic/`: `224447` HTTP requests, effective throughput `369.43 req/s`, `75553` dropped iterations, failure rate `1.24%`, p95 `19450.78ms`, p99 `30167.22ms`, sampler max PostgreSQL connections `119`, max sync backlog `1420`, and final foreign/Iran sync-health clean. Iran app logs identified the blocking error as `sqlalchemy.exc.TimeoutError: QueuePool limit of size 8 overflow 6 reached, connection timed out, timeout 30.00`, so this is a DB pool exhaustion/latency bottleneck before a clean official L7 can be accepted. |
-| `L7.1` | In progress | Added and ran `make production-load-pool-matrix` as a short diagnostic matrix against Iran. Initial artifact `tmp/production-benchmark/20260613T081541Z/load-pool-matrix/` confirmed the baseline `8:6` candidate still fails at `500 RPS / 2m` (`322.87 req/s`, p95 `17730.4ms`, Nginx 5xx delta `79`), while later candidates were invalid because fixture prepare hit a Docker Compose v1 `KeyError: ContainerConfig` while resuming Iran `sync_worker`. The fixture tool now removes stale sync-worker containers before `up -d --no-deps sync_worker`, and Stage L tools emit explicit `STAGE_L_*_DONE` markers to teed logs. |
+| `L7.1` | Complete on 2026-06-13 | Added and ran `make production-load-pool-matrix` as a short diagnostic matrix against Iran. Initial artifact `tmp/production-benchmark/20260613T081541Z/load-pool-matrix/` confirmed the baseline `8:6` candidate still fails at `500 RPS / 2m` (`322.87 req/s`, p95 `17730.4ms`, Nginx 5xx delta `79`), while later candidates were invalid because fixture prepare hit a Docker Compose v1 `KeyError: ContainerConfig` while resuming Iran `sync_worker`. After hardening stale sync-worker removal, artifact `tmp/production-benchmark/20260613T084237Z/load-pool-matrix/` completed the `8:6`, `12:8`, and `16:8` matrix: `16:8` eliminated request failures and Nginx 5xx (`0%`, delta `0`) and lowered p95 to `6900.44ms`, but effective throughput still stayed near `312 req/s` with about `20744` dropped iterations. This means DB pool exhaustion is no longer the only bottleneck; API worker/session-hold-time or specific endpoint latency must be classified next. |
+| `L7.2` | In progress | Add endpoint-level k6 trends and pool-matrix summary breakdown so the next short `16:8` diagnostic run reports slowest endpoint families instead of only global p95/p99. |
 | `L8`-`L11` | Pending | spike, soak, analysis, and release-capacity decision remain pending until L7 passes cleanly. |
 
 ## Objective
@@ -91,6 +92,50 @@ Acceptance for L7.1:
 - if all candidates still show high latency, keep the current production pool
   and classify the bottleneck as query/session-hold-time debt rather than
   solving it by raising connection counts.
+
+Latest L7.1 result:
+
+- `8:6`: `310.93 req/s`, failure `1.03%`, p95 `18524.89ms`, p99
+  `30147.88ms`, Nginx 5xx delta `61`, max PostgreSQL connections `119`.
+- `12:8`: `307.76 req/s`, failure `2.057%`, p95 `22480.44ms`, p99
+  `30484.49ms`, Nginx 5xx delta `168`, max PostgreSQL connections `167`.
+- `16:8`: `312.49 req/s`, failure `0%`, p95 `6900.44ms`, p99
+  `7351.89ms`, Nginx 5xx delta `0`, max PostgreSQL connections `199`.
+
+Decision: do not accept `16:8` as release capacity by itself. It is useful as
+the next diagnostic candidate because it removes pool timeouts, but the system
+still misses the `500 req/s` target and API workers appear saturated.
+
+## Stage L7.2 Endpoint Attribution
+
+Goal: identify which endpoint families hold API/DB sessions longest during the
+cleanest `16:8` diagnostic candidate.
+
+Changes:
+
+- k6 records per-endpoint duration trends under
+  `stage_l_endpoint_<endpoint>_duration`.
+- k6 records per-endpoint failure rates under
+  `stage_l_endpoint_<endpoint>_failed`.
+- `make production-load-pool-matrix` summaries include top endpoint latency
+  rows per candidate so the next bottleneck is visible from `summary.md` and
+  `results.json`.
+
+Suggested diagnostic run:
+
+```bash
+LOAD_RUNNER_HOST=root@45.129.39.182 \
+LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+make production-load-pool-matrix ARGS="--candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
+```
+
+Acceptance:
+
+- run is generated from the load-runner host `45.129.39.182`;
+- target remains Iran production `https://coin.gold-trade.ir` on
+  `87.107.3.22`;
+- endpoint breakdown is present in the matrix artifact;
+- no broad tuning is accepted until the slow endpoint families are classified.
 
 ## Load Generator Choice
 
