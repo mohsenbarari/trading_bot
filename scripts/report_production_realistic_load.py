@@ -212,36 +212,35 @@ class Runner:
         env: dict[str, str] | None = None,
     ) -> CommandResult:
         started = time.perf_counter()
-        completed = subprocess.run(
-            args,
-            cwd=str(REPO_ROOT),
-            text=True,
-            input=input_text,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-            env={**os.environ, **(env or {})},
-        )
+        stdout_path = self.logs_dir / f"{name}.stdout.log"
+        stderr_path = self.logs_dir / f"{name}.stderr.log"
+        with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open("w", encoding="utf-8") as stderr_handle:
+            completed = subprocess.run(
+                args,
+                cwd=str(REPO_ROOT),
+                text=True,
+                input=input_text,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                timeout=timeout,
+                check=False,
+                env={**os.environ, **(env or {})},
+            )
         duration = round(time.perf_counter() - started, 3)
         result = CommandResult(
             name=name,
             args=args,
             exit_code=completed.returncode,
             duration_seconds=duration,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=stdout_path.read_text(encoding="utf-8"),
+            stderr=stderr_path.read_text(encoding="utf-8"),
         )
-        self._write_logs(result)
+        self._record_logs(result, stdout_path=stdout_path, stderr_path=stderr_path)
         if check and result.exit_code != 0:
             raise RealisticLoadError(f"{name} failed with exit code {result.exit_code}")
         return result
 
-    def _write_logs(self, result: CommandResult) -> None:
-        stdout_path = self.logs_dir / f"{result.name}.stdout.log"
-        stderr_path = self.logs_dir / f"{result.name}.stderr.log"
-        stdout_path.write_text(result.stdout, encoding="utf-8")
-        stderr_path.write_text(result.stderr, encoding="utf-8")
+    def _record_logs(self, result: CommandResult, *, stdout_path: Path, stderr_path: Path) -> None:
         self.commands.append(
             {
                 "name": result.name,
@@ -266,6 +265,7 @@ def build_contract(args: argparse.Namespace, settings: dict[str, str] | None = N
         "pre_allocated_vus": args.pre_allocated_vus,
         "max_vus": args.max_vus,
         "load_runner_nofile": args.load_runner_nofile,
+        "load_runner_shards": args.load_runner_shards,
         "scenario_contract": SCENARIO_CONTRACT,
         "thresholds": THRESHOLD_CONTRACT,
         "k6_script": display_path(K6_SCRIPT),
@@ -337,28 +337,198 @@ def fixture_command(args: argparse.Namespace, prefix: str, action: str) -> list[
     ]
 
 
-def run_k6_command(args: argparse.Namespace, contract: dict[str, Any], paths: dict[str, str]) -> str:
+def split_rps(total_rps: int, shard_count: int) -> list[int]:
+    shard_count = max(1, int(shard_count))
+    base = total_rps // shard_count
+    remainder = total_rps % shard_count
+    return [base + (1 if index < remainder else 0) for index in range(shard_count)]
+
+
+def shard_vus_plan(
+    *,
+    total_pre_allocated_vus: int,
+    total_max_vus: int,
+    rps_by_shard: list[int],
+) -> list[dict[str, int]]:
+    shard_count = max(1, len(rps_by_shard))
+    if shard_count == 1:
+        return [{"pre_allocated_vus": total_pre_allocated_vus, "max_vus": total_max_vus}]
+    pre_allocated_split = split_rps(total_pre_allocated_vus, shard_count)
+    max_vus_split = split_rps(total_max_vus, shard_count)
+    plan: list[dict[str, int]] = []
+    for index, shard_rps in enumerate(rps_by_shard):
+        pre_allocated = max(20, int(shard_rps), int(pre_allocated_split[index]))
+        max_vus = max(100, pre_allocated, int(max_vus_split[index]))
+        plan.append({"pre_allocated_vus": pre_allocated, "max_vus": max_vus})
+    return plan
+
+
+def k6_exports(
+    args: argparse.Namespace,
+    contract: dict[str, Any],
+    paths: dict[str, str],
+    *,
+    target_rps: int,
+    shard_index: int,
+    pre_allocated_vus: int,
+    max_vus: int,
+) -> str:
     env_parts = {
         "BASE_URL": contract["base_url"],
         "API_PREFIX": "/api",
         "AUTH_POOL_PATH": paths["auth_pool"],
-        "TARGET_RPS": str(args.target_rps),
+        "TARGET_RPS": str(target_rps),
         "DURATION": args.duration,
         "LOAD_PROFILE": args.load_profile,
         "INCLUDE_MEDIA": "1" if args.include_media else "0",
         "INCLUDE_MUTATIONS": "1" if args.include_mutations else "0",
-        "PRE_ALLOCATED_VUS": str(args.pre_allocated_vus),
-        "MAX_VUS": str(args.max_vus),
+        "PRE_ALLOCATED_VUS": str(pre_allocated_vus),
+        "MAX_VUS": str(max_vus),
+        "K6_SHARD_INDEX": str(shard_index),
+        "K6_SHARD_COUNT": str(args.load_runner_shards),
     }
-    exports = " ".join(f"{key}={shlex.quote(value)}" for key, value in env_parts.items())
+    return " ".join(f"{key}={shlex.quote(value)}" for key, value in env_parts.items())
+
+
+def run_k6_command(args: argparse.Namespace, contract: dict[str, Any], paths: dict[str, str]) -> str:
+    shard_count = max(1, int(args.load_runner_shards or 1))
+    rps_by_shard = split_rps(args.target_rps, shard_count)
+    vus_plan = shard_vus_plan(
+        total_pre_allocated_vus=args.pre_allocated_vus,
+        total_max_vus=args.max_vus,
+        rps_by_shard=rps_by_shard,
+    )
     nofile = max(1024, int(args.load_runner_nofile or 1024))
-    return (
+    prelude = (
         f"mkdir -p {quote_remote(paths['artifact_dir'])} {quote_remote(paths['script_dir'])} && "
         f"cd {quote_remote(paths['root'])} && "
-        f"ulimit -n {nofile} && "
-        f"{exports} k6 run --summary-export {quote_remote(paths['summary'])} "
-        f"{quote_remote(paths['script'])}"
+        f"ulimit -n {nofile}"
     )
+    if shard_count == 1:
+        exports = k6_exports(
+            args,
+            contract,
+            paths,
+            target_rps=args.target_rps,
+            shard_index=1,
+            pre_allocated_vus=vus_plan[0]["pre_allocated_vus"],
+            max_vus=vus_plan[0]["max_vus"],
+        )
+        return (
+            f"{prelude} && "
+            f"{exports} k6 run --summary-export {quote_remote(paths['summary'])} "
+            f"{quote_remote(paths['script'])}"
+        )
+
+    parts = [prelude, "pids=''"]
+    for shard_index, shard_rps in enumerate(rps_by_shard, start=1):
+        shard_vus = vus_plan[shard_index - 1]
+        shard_summary = f"{paths['artifact_dir']}/k6-summary-shard-{shard_index}.json"
+        shard_stdout = f"{paths['artifact_dir']}/k6-stdout-shard-{shard_index}.log"
+        shard_stderr = f"{paths['artifact_dir']}/k6-stderr-shard-{shard_index}.log"
+        shard_status = f"{paths['artifact_dir']}/k6-status-shard-{shard_index}.txt"
+        exports = k6_exports(
+            args,
+            contract,
+            paths,
+            target_rps=shard_rps,
+            shard_index=shard_index,
+            pre_allocated_vus=shard_vus["pre_allocated_vus"],
+            max_vus=shard_vus["max_vus"],
+        )
+        parts.append(
+            f"(echo 'starting shard {shard_index}/{shard_count} at {shard_rps} RPS "
+            f"with {shard_vus['pre_allocated_vus']}/{shard_vus['max_vus']} VUs'; "
+            f"{exports} k6 run --summary-export {quote_remote(shard_summary)} {quote_remote(paths['script'])} "
+            f"> {quote_remote(shard_stdout)} 2> {quote_remote(shard_stderr)}; "
+            f"rc=\"$?\"; printf '%s\\n' \"$rc\" > {quote_remote(shard_status)}; exit \"$rc\") "
+            f'& pids="$pids $!"'
+        )
+    parts.append("status=0")
+    parts.append('for pid in $pids; do wait "$pid" || status=1; done')
+    parts.append(f"cat {quote_remote(paths['artifact_dir'])}/k6-status-shard-*.txt")
+    parts.append('exit "$status"')
+    return "; ".join(parts)
+
+
+def weighted_avg(values: list[tuple[float, float]]) -> float | None:
+    total_weight = sum(weight for _, weight in values)
+    if total_weight <= 0:
+        return None
+    return sum(value * weight for value, weight in values) / total_weight
+
+
+def trend_count(metric_name: str, metrics: dict[str, Any]) -> float:
+    if metric_name == "http_req_duration" or metric_name.startswith("http_req_"):
+        return float((metrics.get("http_reqs") or {}).get("count") or 0)
+    if metric_name.startswith("stage_l_endpoint_") and metric_name.endswith("_duration"):
+        endpoint = metric_name[len("stage_l_endpoint_"):-len("_duration")]
+        failed = metrics.get(f"stage_l_endpoint_{endpoint}_failed") or {}
+        return float((failed.get("passes") or 0) + (failed.get("fails") or 0))
+    return 1.0
+
+
+def merge_metric(metric_name: str, metric_values: list[dict[str, Any]], shard_metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    first = metric_values[0]
+    if "count" in first or "rate" in first:
+        return {
+            "count": sum(float(value.get("count") or 0) for value in metric_values),
+            "rate": sum(float(value.get("rate") or 0) for value in metric_values),
+        }
+    if "value" in first and ("min" in first or "max" in first):
+        return {
+            "value": sum(float(value.get("value") or 0) for value in metric_values),
+            "min": sum(float(value.get("min") or 0) for value in metric_values),
+            "max": sum(float(value.get("max") or 0) for value in metric_values),
+        }
+    if "passes" in first or "fails" in first or "value" in first:
+        passes = sum(float(value.get("passes") or 0) for value in metric_values)
+        fails = sum(float(value.get("fails") or 0) for value in metric_values)
+        total = passes + fails
+        merged: dict[str, Any] = {"passes": passes, "fails": fails, "value": passes / total if total else 0}
+        thresholds = first.get("thresholds")
+        if thresholds:
+            merged["thresholds"] = thresholds
+        return merged
+    if {"avg", "min", "max"}.intersection(first):
+        weights = [trend_count(metric_name, metrics) for metrics in shard_metrics]
+        avg_values = [
+            (float(value["avg"]), weights[index])
+            for index, value in enumerate(metric_values)
+            if value.get("avg") is not None
+        ]
+        merged = {
+            "avg": weighted_avg(avg_values),
+            "min": min((value.get("min") for value in metric_values if value.get("min") is not None), default=None),
+            "max": max((value.get("max") for value in metric_values if value.get("max") is not None), default=None),
+        }
+        for percentile in ("med", "p(90)", "p(95)", "p(99)"):
+            percentile_values = [value.get(percentile) for value in metric_values if value.get(percentile) is not None]
+            if percentile_values:
+                merged[percentile] = max(percentile_values)
+        thresholds = first.get("thresholds")
+        if thresholds:
+            merged["thresholds"] = thresholds
+        return merged
+    return first
+
+
+def merge_k6_summaries(summary_paths: list[Path], output_path: Path) -> dict[str, Any]:
+    summaries = [json.loads(path.read_text(encoding="utf-8")) for path in summary_paths]
+    shard_metrics = [summary.get("metrics") or {} for summary in summaries]
+    metric_names = sorted({name for metrics in shard_metrics for name in metrics})
+    merged_metrics: dict[str, Any] = {}
+    for name in metric_names:
+        values = [metrics[name] for metrics in shard_metrics if name in metrics]
+        if values:
+            merged_metrics[name] = merge_metric(name, values, shard_metrics)
+    merged = {
+        "root_group": summaries[0].get("root_group"),
+        "metrics": merged_metrics,
+        "stage_l_shards": [display_path(path) for path in summary_paths],
+    }
+    write_json(output_path, merged)
+    return merged
 
 
 def sampler_command(args: argparse.Namespace, sampler_dir: Path, duration_seconds: float) -> list[str]:
@@ -563,16 +733,58 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
             "remote_summary_path": paths["summary"],
             "stdout_path": display_path(logs_dir / "k6_realistic_mix.stdout.log"),
             "stderr_path": display_path(logs_dir / "k6_realistic_mix.stderr.log"),
+            "shard_count": args.load_runner_shards,
         }
-        runner.run(
-            "download_k6_summary",
-            scp_args(args, f"{args.load_runner_host}:{paths['summary']}", str(run_dir / "k6-summary.json")),
-            timeout=45,
-            check=False,
-            env=env,
-        )
-        if (run_dir / "k6-summary.json").exists():
-            payload["k6"]["summary_path"] = display_path(run_dir / "k6-summary.json")
+        if args.load_runner_shards > 1:
+            shard_entries = []
+            shard_summary_paths: list[Path] = []
+            for shard_index in range(1, args.load_runner_shards + 1):
+                remote_summary = f"{paths['artifact_dir']}/k6-summary-shard-{shard_index}.json"
+                local_summary = run_dir / f"k6-summary-shard-{shard_index}.json"
+                runner.run(
+                    f"download_k6_summary_shard_{shard_index}",
+                    scp_args(args, f"{args.load_runner_host}:{remote_summary}", str(local_summary)),
+                    timeout=45,
+                    check=False,
+                    env=env,
+                )
+                shard_entry = {
+                    "shard_index": shard_index,
+                    "remote_summary_path": remote_summary,
+                    "summary_path": display_path(local_summary) if local_summary.exists() else None,
+                }
+                if local_summary.exists():
+                    shard_summary_paths.append(local_summary)
+                for stream_name in ("stdout", "stderr"):
+                    remote_stream = f"{paths['artifact_dir']}/k6-{stream_name}-shard-{shard_index}.log"
+                    local_stream = logs_dir / f"k6_realistic_mix_shard_{shard_index}.{stream_name}.log"
+                    runner.run(
+                        f"download_k6_{stream_name}_shard_{shard_index}",
+                        scp_args(args, f"{args.load_runner_host}:{remote_stream}", str(local_stream)),
+                        timeout=45,
+                        check=False,
+                        env=env,
+                    )
+                    if local_stream.exists():
+                        shard_entry[f"{stream_name}_path"] = display_path(local_stream)
+                shard_entries.append(shard_entry)
+            payload["k6"]["shards"] = shard_entries
+            if len(shard_summary_paths) == args.load_runner_shards:
+                aggregate_path = run_dir / "k6-summary.json"
+                merge_k6_summaries(shard_summary_paths, aggregate_path)
+                payload["k6"]["summary_path"] = display_path(aggregate_path)
+            elif k6_result.exit_code == 0:
+                raise RealisticLoadError("not all k6 shard summaries were downloaded")
+        else:
+            runner.run(
+                "download_k6_summary",
+                scp_args(args, f"{args.load_runner_host}:{paths['summary']}", str(run_dir / "k6-summary.json")),
+                timeout=45,
+                check=False,
+                env=env,
+            )
+            if (run_dir / "k6-summary.json").exists():
+                payload["k6"]["summary_path"] = display_path(run_dir / "k6-summary.json")
         if k6_result.exit_code != 0:
             raise RealisticLoadError(f"k6 realistic mix failed with exit code {k6_result.exit_code}")
         payload["status"] = "passed"
@@ -627,6 +839,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pre-allocated-vus", type=int, default=int(os.environ.get("PRE_ALLOCATED_VUS", "0") or "0"))
     parser.add_argument("--max-vus", type=int, default=int(os.environ.get("MAX_VUS", "0") or "0"))
     parser.add_argument("--load-runner-nofile", type=int, default=int(os.environ.get("LOAD_RUNNER_NOFILE", "65535")))
+    parser.add_argument("--load-runner-shards", type=int, default=int(os.environ.get("LOAD_RUNNER_SHARDS", "1")))
     parser.add_argument("--load-runner-host", default=os.environ.get("LOAD_RUNNER_HOST", ""))
     parser.add_argument("--load-runner-port", default=os.environ.get("LOAD_RUNNER_SSH_PORT", "22"))
     parser.add_argument("--load-runner-jump-host", default=os.environ.get("LOAD_RUNNER_JUMP_HOST", ""))
@@ -653,6 +866,8 @@ def main(argv: list[str] | None = None) -> int:
         args.pre_allocated_vus = max(20, (args.target_rps + 1) // 2)
     if args.max_vus <= 0:
         args.max_vus = max(100, args.target_rps * 4)
+    if args.load_runner_shards <= 0:
+        args.load_runner_shards = 1
     try:
         payload = run_report(args)
     except Exception as exc:

@@ -13,6 +13,8 @@ const INCLUDE_MUTATIONS = (__ENV.INCLUDE_MUTATIONS || '0') === '1';
 const PRE_ALLOCATED_VUS = Number(__ENV.PRE_ALLOCATED_VUS || Math.max(20, Math.ceil(TARGET_RPS / 2)));
 const MAX_VUS = Number(__ENV.MAX_VUS || Math.max(100, TARGET_RPS * 4));
 const AUTH_POOL_PATH = __ENV.AUTH_POOL_PATH || '';
+const K6_SHARD_INDEX = __ENV.K6_SHARD_INDEX || '1';
+const K6_SHARD_COUNT = __ENV.K6_SHARD_COUNT || '1';
 
 const stageRequestFailed = new Rate('stage_l_request_failed');
 const stageBusinessRejections = new Counter('stage_l_business_rejections');
@@ -334,7 +336,7 @@ function offerMaker() {
       price: 100000 + (iterationId % 5000),
       is_wholesale: true,
       notes: `loadtest offer ${authPool.prefix} ${iterationId}`,
-      idempotency_key: `${authPool.prefix}k6_offer_${iterationId}`,
+      idempotency_key: `${authPool.prefix}k6_offer_s${K6_SHARD_INDEX}_${iterationId}`,
       warning_acknowledged: true,
     },
     [201],
@@ -366,7 +368,7 @@ function tradeTaker() {
     {
       offer_id: offer.offer_id,
       quantity: 1,
-      idempotency_key: `${authPool.prefix}k6_trade_${exec.scenario.iterationInTest}`,
+      idempotency_key: `${authPool.prefix}k6_trade_s${K6_SHARD_INDEX}_${exec.scenario.iterationInTest}`,
     },
     [201],
     true,
@@ -430,7 +432,7 @@ function chatMediaSender() {
     message_kind: 'single',
     expected_items: 1,
     caption_policy: 'none',
-    idempotency_key: `${authPool.prefix}k6_batch_${iterationId}`,
+    idempotency_key: `${authPool.prefix}k6_batch_s${K6_SHARD_INDEX}_${iterationId}`,
   }, [201]);
   if (batchRes.status !== 201) return;
   const batch = batchRes.json();
@@ -440,7 +442,7 @@ function chatMediaSender() {
     room_kind: roomKind,
     target_id: targetId,
     media_type: 'image',
-    file_name: `${authPool.prefix}k6_image_${iterationId}.txt`,
+    file_name: `${authPool.prefix}k6_image_s${K6_SHARD_INDEX}_${iterationId}.txt`,
     mime_type: 'text/plain',
     total_bytes: body.length,
     chunk_size: body.length,
@@ -530,6 +532,8 @@ export function setup() {
     include_media: INCLUDE_MEDIA,
     include_mutations: INCLUDE_MUTATIONS,
     target_rps: TARGET_RPS,
+    shard_index: K6_SHARD_INDEX,
+    shard_count: K6_SHARD_COUNT,
   };
 }
 

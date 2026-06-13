@@ -7,6 +7,7 @@ import scripts.run_stage_l_pool_matrix as pool_matrix
 from scripts.run_stage_l_pool_matrix import (
     apply_pool_script,
     collect_app_logs_script,
+    dropped_iteration_ratio,
     parse_candidates,
     parse_worker_candidates,
     recommend,
@@ -37,6 +38,10 @@ class StageLPoolMatrixTests(unittest.TestCase):
         script = collect_app_logs_script("/srv/trading-bot/current", tail_lines=123)
         self.assertIn("logs --no-color --tail 123 app", script)
         self.assertIn("docker logs --tail 123 trading_bot_app", script)
+
+    def test_dropped_iteration_ratio_uses_attempted_iterations(self):
+        self.assertEqual(dropped_iteration_ratio(http_reqs=1000, dropped_iterations=0), 0)
+        self.assertAlmostEqual(dropped_iteration_ratio(http_reqs=980, dropped_iterations=20), 0.02)
 
     def test_summarize_candidate_reads_k6_and_sampler_artifacts(self):
         with tempfile.TemporaryDirectory() as root:
@@ -92,6 +97,7 @@ class StageLPoolMatrixTests(unittest.TestCase):
         self.assertEqual(summary["status"], "failed")
         self.assertEqual(summary["k6"]["http_reqs"], 1000)
         self.assertEqual(summary["k6"]["p95_ms"], 800)
+        self.assertEqual(summary["k6"]["dropped_iteration_ratio"], 0)
         self.assertEqual(summary["sampler"]["max_postgres_connections"], 140)
         self.assertEqual(summary["endpoint_breakdown"][0]["endpoint"], "chat_conversations")
         self.assertEqual(summary["endpoint_breakdown"][0]["p95_ms"], 1200)
@@ -118,6 +124,55 @@ class StageLPoolMatrixTests(unittest.TestCase):
             ]
         }
         self.assertIn("12:8", recommend(report))
+
+    def test_recommend_accepts_bounded_dropped_iterations_when_latency_is_clean(self):
+        report = {
+            "target_rps": 500,
+            "candidates": [
+                {
+                    "candidate": "workers=24 pool=10:4",
+                    "summary": {
+                        "status": "passed",
+                        "k6": {
+                            "http_reqs": 59214,
+                            "rps": 491.68,
+                            "failure_rate": 0,
+                            "p95_ms": 713.79,
+                            "p99_ms": 1628.41,
+                            "dropped_iterations": 789,
+                        },
+                        "sampler": {"max_postgres_connections": 253, "max_nginx_5xx_delta_from_first_sample": 0},
+                    },
+                }
+            ],
+        }
+        recommendation = recommend(report)
+        self.assertIn("workers=24 pool=10:4", recommendation)
+        self.assertIn("bounded dropped iterations", recommendation)
+
+    def test_recommend_keeps_l7_blocked_when_dropped_ratio_exceeds_budget(self):
+        report = {
+            "target_rps": 500,
+            "candidates": [
+                {
+                    "candidate": "workers=24 pool=10:4",
+                    "summary": {
+                        "status": "passed",
+                        "k6": {
+                            "http_reqs": 56000,
+                            "rps": 491,
+                            "failure_rate": 0,
+                            "p95_ms": 700,
+                            "p99_ms": 1600,
+                            "dropped_iterations": 4000,
+                        },
+                        "sampler": {"max_postgres_connections": 253, "max_nginx_5xx_delta_from_first_sample": 0},
+                    },
+                }
+            ],
+        }
+        recommendation = recommend(report)
+        self.assertIn("Stage L7 remains blocked", recommendation)
 
     def test_recommend_keeps_l7_blocked_when_candidates_fail_official_gates(self):
         report = {

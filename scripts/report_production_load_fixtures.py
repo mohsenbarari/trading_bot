@@ -96,27 +96,61 @@ class Runner:
         env: dict[str, str] | None = None,
     ) -> CommandResult:
         started = time.perf_counter()
-        completed = subprocess.run(
-            args,
-            cwd=str(REPO_ROOT),
-            text=True,
-            input=input_text,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-            env={**os.environ, **(env or {})},
-        )
+        stdout_path = self.logs_dir / f"{name}.stdout.log"
+        stderr_path = self.logs_dir / f"{name}.stderr.log"
+        if redact_stdout_log:
+            completed = subprocess.run(
+                args,
+                cwd=str(REPO_ROOT),
+                text=True,
+                input=input_text,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+                check=False,
+                env={**os.environ, **(env or {})},
+            )
+            stdout = completed.stdout
+            stderr = completed.stderr
+            self._write_logs(
+                CommandResult(
+                    name=name,
+                    args=args,
+                    exit_code=completed.returncode,
+                    duration_seconds=round(time.perf_counter() - started, 3),
+                    stdout=stdout,
+                    stderr=stderr,
+                ),
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                redact_stdout_log=True,
+            )
+        else:
+            with stdout_path.open("w", encoding="utf-8") as stdout_handle, stderr_path.open("w", encoding="utf-8") as stderr_handle:
+                completed = subprocess.run(
+                    args,
+                    cwd=str(REPO_ROOT),
+                    text=True,
+                    input=input_text,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    timeout=timeout,
+                    check=False,
+                    env={**os.environ, **(env or {})},
+                )
+            stdout = stdout_path.read_text(encoding="utf-8")
+            stderr = stderr_path.read_text(encoding="utf-8")
         duration = round(time.perf_counter() - started, 3)
         result = CommandResult(
             name=name,
             args=args,
             exit_code=completed.returncode,
             duration_seconds=duration,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
+            stdout=stdout,
+            stderr=stderr,
         )
-        self._write_logs(result, redact_stdout_log=redact_stdout_log)
+        if not redact_stdout_log:
+            self._write_logs(result, stdout_path=stdout_path, stderr_path=stderr_path, redact_stdout_log=False)
         if check and result.exit_code != 0:
             raise LoadFixtureReportError(f"{name} failed with exit code {result.exit_code}")
         return result
@@ -135,17 +169,22 @@ class Runner:
         self.commands[-1]["json"] = redact_payload(payload)
         return payload
 
-    def _write_logs(self, result: CommandResult, *, redact_stdout_log: bool) -> None:
-        stdout_path = self.logs_dir / f"{result.name}.stdout.log"
-        stderr_path = self.logs_dir / f"{result.name}.stderr.log"
+    def _write_logs(
+        self,
+        result: CommandResult,
+        *,
+        stdout_path: Path,
+        stderr_path: Path,
+        redact_stdout_log: bool,
+    ) -> None:
         stdout = result.stdout
         if redact_stdout_log:
             try:
                 stdout = json.dumps(redact_payload(parse_last_json(result.stdout)), ensure_ascii=False, sort_keys=True) + "\n"
             except Exception:
                 stdout = "[REDACTED]\n"
-        stdout_path.write_text(stdout, encoding="utf-8")
-        stderr_path.write_text(result.stderr, encoding="utf-8")
+            stdout_path.write_text(stdout, encoding="utf-8")
+            stderr_path.write_text(result.stderr, encoding="utf-8")
         self.commands.append(
             {
                 "name": result.name,
