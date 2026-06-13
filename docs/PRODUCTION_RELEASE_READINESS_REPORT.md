@@ -55,3 +55,30 @@
 ## Failures
 
 - None
+
+## Stage L Load-Test Addendum
+
+Added on 2026-06-13 after the dedicated realistic mixed-load roadmap
+completed.
+
+Decision: `release_ready_with_limits`.
+
+Evidence:
+
+- `docs/PRODUCTION_REALISTIC_LOAD_TEST_REPORT.md`
+- L7 artifact `tmp/production-benchmark/20260613T111706Z/load-pool-matrix/`:
+  passed `500 RPS / 10m`.
+- L8 artifact `tmp/production-benchmark/20260613T115351Z/load-pool-matrix/`:
+  degraded gracefully at `750 RPS / 5m`.
+- L9 artifact `tmp/production-benchmark/20260613T123638Z/load-pool-matrix/`:
+  failed sustained `500 RPS / 30m` latency/throughput gates but recovered
+  cleanly.
+
+Release note:
+
+- The first release remains acceptable with documented operational limits.
+- Validated mixed-load capacity is `500 RPS / 10m`.
+- Sustained `500 RPS / 30m` is not yet accepted and must not be advertised as
+  supported capacity.
+- Follow-up optimization must target broad read-path latency across market,
+  Messenger, profile, relation, and admin read surfaces before rerunning L9.
