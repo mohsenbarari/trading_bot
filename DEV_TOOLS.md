@@ -111,9 +111,14 @@ For production-hardening checks:
   sync-health, Messenger readiness, observability minimums, backup/rollback
   evidence, and accepted-warning ownership.
 - `make production-load-realistic ARGS="--dry-run --json"` validates the Stage L3
-  realistic mixed k6 workload contract without hitting production. Real load
-  runs require `LOAD_RUNNER_HOST` and should start from the later Stage L5 smoke
-  profile.
+  realistic mixed k6 workload contract without hitting production. Non-dry-run
+  executions start the Stage L4 sampler by default unless
+  `ARGS="--skip-sampler"` is passed. Real load runs require `LOAD_RUNNER_HOST`
+  and should start from the later Stage L5 smoke profile.
+- `make production-load-sampler ARGS="--dry-run --json"` validates the Stage L4
+  production runtime sampler without contacting production. A live one-sample
+  diagnostic can be run with `ARGS="--sample-count 1 --roles both --json"` when
+  production SSH access is available.
 - `make production-alerts` evaluates operational alert thresholds for
   PostgreSQL connections/idle transactions, Redis memory/AOF, sync backlog/lag,
   disk usage, and backup freshness on both production hosts.
