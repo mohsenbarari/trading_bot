@@ -632,6 +632,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
         chats: list[Chat] = []
         group_summaries: list[dict[str, Any]] = []
         group_member_source = [*normal_users, *middle_admins, *accountant_users, *customer_users]
+        sequence_next_values.update(await align_integer_sequences(db, safety_gap=SEQUENCE_PREPARE_SAFETY_GAP))
         for index in range(plan.groups):
             creator = owners[index % len(owners)]
             chat = Chat(
@@ -682,6 +683,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
 
         channel_summaries: list[dict[str, Any]] = []
         channel_member_source = [*normal_users, *middle_admins, *accountant_users, *customer_users]
+        sequence_next_values.update(await align_integer_sequences(db, safety_gap=SEQUENCE_PREPARE_SAFETY_GAP))
         for index in range(plan.channels):
             chat = Chat(
                 type=ChatType.CHANNEL,

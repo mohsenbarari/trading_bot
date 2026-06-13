@@ -1,7 +1,8 @@
 import unittest
+from pathlib import Path
 
 from scripts.load_fixture_worker import SEQUENCE_ALIGNMENT_TABLES, SEQUENCE_PREPARE_SAFETY_GAP, mobile_for, redact_auth_pool
-from scripts.report_production_load_fixtures import build_scp_opts, build_ssh_opts, redact_payload, sync_worker_compose_body
+from scripts.report_production_load_fixtures import Runner, build_scp_opts, build_ssh_opts, redact_payload, sync_worker_compose_body
 
 
 class LoadFixtureToolsTests(unittest.TestCase):
@@ -57,6 +58,26 @@ class LoadFixtureToolsTests(unittest.TestCase):
     def test_sync_worker_pause_resume_commands_are_scoped(self):
         self.assertEqual(sync_worker_compose_body("pause"), "stop sync_worker")
         self.assertEqual(sync_worker_compose_body("resume"), "up -d --no-deps sync_worker")
+
+    def test_prepare_worker_disables_direct_sync_push(self):
+        runner = Runner(
+            settings={"IRAN_HOST": "iran.example", "IRAN_PROJECT_DIR": "/srv/trading-bot/current"},
+            logs_dir=Path("/tmp"),
+        )
+        args = runner.worker_args("iran", "prepare", "--prefix", "loadtest_case_")
+        command = " ".join(args)
+
+        self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", command)
+        self.assertIn("load_fixture_worker.py prepare", command)
+
+    def test_cleanup_worker_keeps_direct_sync_push_default(self):
+        runner = Runner(
+            settings={"IRAN_HOST": "iran.example", "IRAN_PROJECT_DIR": "/srv/trading-bot/current"},
+            logs_dir=Path("/tmp"),
+        )
+        args = runner.worker_args("iran", "cleanup", "--prefix", "loadtest_case_")
+
+        self.assertNotIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", " ".join(args))
 
 
 if __name__ == "__main__":
