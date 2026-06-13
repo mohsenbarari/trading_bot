@@ -1,7 +1,15 @@
 import unittest
+import json
 from pathlib import Path
 
-from scripts.load_fixture_worker import SEQUENCE_ALIGNMENT_TABLES, SEQUENCE_PREPARE_SAFETY_GAP, mobile_for, redact_auth_pool
+from scripts.load_fixture_worker import (
+    SEQUENCE_ALIGNMENT_TABLES,
+    SEQUENCE_PREPARE_SAFETY_GAP,
+    mobile_for,
+    normalize_record_ids,
+    redact_auth_pool,
+    sync_queue_item_matches_cleanup,
+)
 from scripts.report_production_load_fixtures import Runner, build_scp_opts, build_ssh_opts, redact_payload, sync_worker_compose_body
 
 
@@ -78,6 +86,25 @@ class LoadFixtureToolsTests(unittest.TestCase):
         args = runner.worker_args("iran", "cleanup", "--prefix", "loadtest_case_")
 
         self.assertNotIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", " ".join(args))
+
+    def test_sync_queue_cleanup_matches_by_prefix_or_table_record_id(self):
+        cleanup_ids = normalize_record_ids({"chat_members": [11545], "users": [10051]})
+
+        self.assertTrue(sync_queue_item_matches_cleanup("payload loadtest_case_ value", "loadtest_case_", cleanup_ids))
+        self.assertTrue(
+            sync_queue_item_matches_cleanup(
+                json.dumps({"table": "chat_members", "id": 11545}),
+                "loadtest_case_",
+                cleanup_ids,
+            )
+        )
+        self.assertFalse(
+            sync_queue_item_matches_cleanup(
+                json.dumps({"table": "chat_members", "id": 1515}),
+                "loadtest_case_",
+                cleanup_ids,
+            )
+        )
 
 
 if __name__ == "__main__":
