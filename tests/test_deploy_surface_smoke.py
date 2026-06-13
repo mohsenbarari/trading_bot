@@ -126,6 +126,18 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         ):
             self.assertIn(expected, deploy_script)
 
+    def test_nginx_setup_scripts_keep_api_proxy_off_websocket_upgrade(self):
+        for script_name in ("scripts/setup_iran_nginx.sh", "scripts/setup_foreign_nginx.sh"):
+            with self.subTest(script=script_name):
+                source = (REPO_ROOT / script_name).read_text(encoding="utf-8")
+                self.assertIn("upstream trading_bot_api", source)
+                self.assertIn("keepalive 256;", source)
+                self.assertIn("proxy_pass http://trading_bot_api;", source)
+                self.assertIn('proxy_set_header Connection "";', source)
+
+                api_block = source.split("location /api/ {", 1)[1].split("}", 1)[0]
+                self.assertNotIn('proxy_set_header Connection "upgrade";', api_block)
+
     def test_makefile_parses_with_noop_status_target(self):
         if shutil.which('make') is None:
             self.skipTest('make is not installed')

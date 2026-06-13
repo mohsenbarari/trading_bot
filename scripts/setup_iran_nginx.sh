@@ -38,6 +38,11 @@ mkdir -p "$UPLOADS_DIR"
 # 3. ایجاد کانفیگ Nginx
 echo "⚙️ ایجاد کانفیگ Nginx..."
 cat > /etc/nginx/sites-available/trading-bot <<EOF
+upstream trading_bot_api {
+    server 127.0.0.1:8000;
+    keepalive 256;
+}
+
 server {
     listen 80;
     server_name ${IRAN_APP_DOMAIN};
@@ -57,16 +62,14 @@ server {
 
     # API proxying to Docker container
     location /api/ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://trading_bot_api;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        
-        # WebSocket support
+
         proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection "";
     }
 
     # WebSocket endpoint

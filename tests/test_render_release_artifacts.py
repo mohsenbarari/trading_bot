@@ -104,6 +104,12 @@ class RenderReleaseArtifactsTests(unittest.TestCase):
         self.assertIn("location @stale_js_chunk", nginx)
         self.assertIn("location /uploads/", nginx)
         self.assertIn("return 404;", nginx)
+        self.assertIn("upstream trading_bot_api", nginx)
+        self.assertIn("keepalive 256;", nginx)
+        self.assertIn("proxy_pass http://trading_bot_api;", nginx)
+        self.assertIn('proxy_set_header Connection "";', nginx)
+        api_block = nginx.split("location /api/ {", 1)[1].split("}", 1)[0]
+        self.assertNotIn('proxy_set_header Connection "upgrade";', api_block)
         self.assertNotIn("location /assets/ {\n        proxy_pass http://127.0.0.1:8000;", nginx)
 
 
