@@ -1,6 +1,6 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0 completed, RPO1 in validation, and RPO2 started on 2026-06-13. This roadmap is for
+Status: RPO0 and RPO1 completed; RPO2 started on 2026-06-13. This roadmap is for
 targeted read-path optimization, not for another broad benchmark loop.
 
 Last updated: 2026-06-13
@@ -97,7 +97,7 @@ RPL6 endpoint p95 highlights:
 | Stage | Status | Scope |
 | --- | --- | --- |
 | `RPO0` | Complete | Add endpoint-family attribution/read-path reporting needed for this roadmap and freeze the benchmark contract. |
-| `RPO1` | In Progress | Optimize `chat_conversations` read shape without changing Messenger behavior. |
+| `RPO1` | Complete | Optimize `chat_conversations` read shape without changing Messenger behavior. |
 | `RPO2` | In Progress | Optimize `direct_messages` and room message read pagination/projection. |
 | `RPO3` | Pending | Optimize `offers_list` and `offers_my` read paths. |
 | `RPO4` | Pending | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
@@ -280,14 +280,12 @@ Result after slice 1:
 - This is enough to continue RPO1 with one more narrow read-shape slice, but
   not enough to justify a full L9 rerun by itself.
 
-Implementation slice 2:
+Attempted slice 2:
 
 - Replaced the room-conversation active-member-count correlated scalar subquery
   with one grouped aggregate subquery joined by `chat_id`.
-- This preserves member-count semantics while avoiding repeated active-member
-  counts for every visible group/channel row.
-- Unread, mention, pin, mute, can-send, mandatory-channel, and system-group
-  behavior is unchanged.
+- This preserved member-count semantics, but it was not a win on the production
+  benchmark shape.
 
 Validation for slice 2:
 
@@ -296,12 +294,31 @@ Validation for slice 2:
 - `python3 -m py_compile core/services/chat_room_service.py core/services/chat_service.py api/routers/chat.py`
   passed.
 
-Next RPO1 decision:
+Slice 2 benchmark and decision:
 
-- Deploy slice 2 and run one more short targeted benchmark with the same shape.
-- Close RPO1 if `chat_conversations` keeps the slice-1 p95 improvement and p99
-  does not regress; otherwise document the remaining p99 debt and do not expand
-  RPO1 beyond this narrow read-shape work.
+- Post-deploy artifact:
+  `tmp/production-benchmark/20260613T191155Z/load-pool-matrix`.
+- `chat_conversations` p95/p99 regressed versus slice 1:
+  - slice 1: `654.42ms` / `978.32ms`;
+  - slice 2: `696.24ms` / `1170.85ms`.
+- Request failure rate stayed `0%`, and Iran restored to
+  `API_WORKERS=8`, `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6`.
+- Decision: reject and revert slice 2. For the current data shape, the grouped
+  active-member aggregate is more expensive than the existing correlated count.
+
+RPO1 final result:
+
+- Accepted change: SQL-side direct-target visibility filtering for active
+  customer viewers.
+- Accepted benchmark artifact:
+  `tmp/production-benchmark/20260613T190022Z/load-pool-matrix`.
+- Final accepted `chat_conversations` improvement versus RPL6:
+  - p95: `736.51ms` -> `654.42ms`;
+  - p99: `1903.41ms` -> `978.32ms`.
+- Remaining debt: p99 is still above accepted L7 (`888.72ms`), so broad
+  conversation projection width remains a future debt item. It is not expanded
+  in RPO1 to avoid a higher-risk Messenger behavior change.
+- RPO1 is closed.
 
 ## Stage RPO2 - Message List Reads
 
