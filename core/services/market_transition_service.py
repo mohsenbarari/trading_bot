@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 MARKET_OPENED_CHANNEL_NOTICE = "🟢 شروع فعالیت بازار"
 MARKET_CLOSED_CHANNEL_NOTICE = "🔴 پایان فعالیت بازار"
 MARKET_RUNTIME_ADVISORY_LOCK_KEY = 202605220901
+MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS = float(
+    os.getenv("TRADING_BOT_MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS", "1.0")
+)
 
 
 @dataclass(slots=True)
@@ -50,6 +54,34 @@ class MarketRuntimeView:
     offers_since_last_open: int
     last_transition_at: datetime | None
     next_transition_at: datetime | None
+
+
+_market_runtime_view_cache: tuple[float, MarketRuntimeView] | None = None
+
+
+def invalidate_market_runtime_view_cache() -> None:
+    global _market_runtime_view_cache
+    _market_runtime_view_cache = None
+
+
+def _get_cached_market_runtime_view() -> MarketRuntimeView | None:
+    if MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS <= 0:
+        return None
+    cached = _market_runtime_view_cache
+    if cached is None:
+        return None
+    cached_at, value = cached
+    if (time.monotonic() - cached_at) <= MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS:
+        return value
+    invalidate_market_runtime_view_cache()
+    return None
+
+
+def _set_cached_market_runtime_view(value: MarketRuntimeView) -> None:
+    global _market_runtime_view_cache
+    if MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS <= 0:
+        return
+    _market_runtime_view_cache = (time.monotonic(), value)
 
 
 def _coerce_utc_now(current_time: datetime | None = None) -> datetime:
@@ -185,15 +217,23 @@ async def get_market_runtime_view(
     *,
     current_time: datetime | None = None,
 ) -> MarketRuntimeView:
+    if current_time is None:
+        cached_view = _get_cached_market_runtime_view()
+        if cached_view is not None:
+            return cached_view
+
     evaluation = await evaluate_current_market_schedule(db, current_time=current_time)
     state = await get_market_runtime_state(db)
-    return MarketRuntimeView(
+    view = MarketRuntimeView(
         is_open=evaluation.is_open,
         active_web_notice_visible=bool(getattr(state, "active_web_notice_visible", False)),
         offers_since_last_open=int(getattr(state, "offers_since_last_open", 0) or 0),
         last_transition_at=getattr(state, "last_transition_at", None),
         next_transition_at=evaluation.next_transition_at,
     )
+    if current_time is None:
+        _set_cached_market_runtime_view(view)
+    return view
 
 
 async def register_market_offer_created(
@@ -215,6 +255,7 @@ async def register_market_offer_created(
     if should_hide_notice:
         state.active_web_notice_visible = False
     await db.commit()
+    invalidate_market_runtime_view_cache()
 
     if should_hide_notice:
         try:
@@ -256,6 +297,7 @@ async def _apply_market_open_transition(
     state.offers_since_last_open = 0
     state.last_transition_at = now
     await db.commit()
+    invalidate_market_runtime_view_cache()
 
     notice_text = MARKET_OPENED_CHANNEL_NOTICE
     try:
@@ -297,6 +339,7 @@ async def _apply_market_closed_transition(
     state.offers_since_last_open = 0
     state.last_transition_at = now
     await db.commit()
+    invalidate_market_runtime_view_cache()
 
     for channel_message_id in channel_message_ids:
         try:
@@ -344,6 +387,7 @@ async def apply_market_schedule_transition(
         state = _build_initial_market_runtime_state(evaluation, current_time=current_time)
         db.add(state)
         await db.commit()
+        invalidate_market_runtime_view_cache()
         return MarketTransitionResult(changed=False, transition=None, state=state)
 
     if state.is_open == evaluation.is_open:
