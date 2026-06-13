@@ -49,6 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--include-media", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--include-mutations", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--sampler-interval-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_INTERVAL_SECONDS", "10")))
+    parser.add_argument("--post-apply-settle-seconds", type=float, default=float(os.environ.get("LOAD_POST_APPLY_SETTLE_SECONDS", "10")))
     parser.add_argument("--artifact-root", default=os.environ.get("LOAD_ARTIFACT_ROOT", str(DEFAULT_ARTIFACT_ROOT)))
     parser.add_argument("--timestamp", default=None)
     parser.add_argument("--candidate-timeout-padding-seconds", type=int, default=900)
@@ -186,6 +187,13 @@ for i in $(seq 1 90); do
 done
 echo "app did not become ready after pool matrix restore" >&2
 exit 124
+"""
+
+
+def collect_app_logs_script(project_dir: str, tail_lines: int = 5000) -> str:
+    return f"""
+{remote_compose_prelude(project_dir)}
+$compose_cmd -f docker-compose.iran.yml logs --no-color --tail {tail_lines} app || docker logs --tail {tail_lines} trading_bot_app
 """
 
 
@@ -402,13 +410,22 @@ def recommend(report: dict[str, Any]) -> str:
         return "No candidate produced k6 metrics; keep the previous production pool profile."
     viable = [
         item for item in candidates
-        if item["failure_rate"] < 0.02 and item["nginx_5xx_delta"] == 0
+        if item["status"] == "passed"
+        and item["rps"] >= float(report.get("target_rps") or 0) * 0.98
+        and item["failure_rate"] < 0.02
+        and item["p95"] < 1000
+        and item["p99"] < 2500
+        and item["dropped"] == 0
+        and item["nginx_5xx_delta"] == 0
     ]
     pool = viable or candidates
     best = min(pool, key=lambda item: (item["p95"], item["p99"], -item["rps"], item["pg"]))
     if viable:
         return f"Prefer {best['label']} for the next full L7 rerun; it had the best latency among candidates without 5xx delta."
-    return f"No candidate was clean; {best['label']} was the least-bad latency candidate, but Stage L7 remains blocked."
+    return (
+        f"No candidate passed the official L7 gates; {best['label']} had the best latency shape "
+        "among failed candidates, but Stage L7 remains blocked until failures/5xx and dropped iterations are resolved."
+    )
 
 
 def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
@@ -431,6 +448,7 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
         "worker_candidates": worker_candidates,
         "target_rps": args.target_rps,
         "duration": args.duration,
+        "post_apply_settle_seconds": args.post_apply_settle_seconds,
         "artifact_dir": display_path(matrix_dir),
         "candidates": [],
     }
@@ -467,12 +485,27 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
                     write_json(matrix_dir / "results.json", report)
                     continue
 
+                if args.post_apply_settle_seconds > 0:
+                    print(
+                        f"[stage-l7.1] settling app for {args.post_apply_settle_seconds:g}s before load",
+                        flush=True,
+                    )
+                    time.sleep(args.post_apply_settle_seconds)
+
                 print(f"[stage-l7.1] running {candidate_label} at {args.target_rps} RPS for {args.duration}", flush=True)
                 command = realistic_load_args(args, candidate_stamp)
                 run_result = run_local_command(command, timeout=candidate_timeout, env={})
                 (logs_dir / f"{candidate_label}-realistic.stdout.log").write_text(run_result["stdout"], encoding="utf-8")
                 (logs_dir / f"{candidate_label}-realistic.stderr.log").write_text(run_result["stderr"], encoding="utf-8")
                 item["run"] = {key: value for key, value in run_result.items() if key not in {"stdout", "stderr"}}
+                app_logs = run_remote_script(
+                    settings,
+                    collect_app_logs_script(settings["IRAN_PROJECT_DIR"]),
+                    timeout=120,
+                )
+                (logs_dir / f"{candidate_label}-app.stdout.log").write_text(app_logs.stdout, encoding="utf-8")
+                (logs_dir / f"{candidate_label}-app.stderr.log").write_text(app_logs.stderr, encoding="utf-8")
+                item["app_logs"] = {key: value for key, value in app_logs.__dict__.items() if key not in {"stdout", "stderr"}}
                 item["summary"] = summarize_candidate(args.artifact_root, candidate_stamp)
                 report["candidates"].append(item)
                 write_json(matrix_dir / "results.json", report)

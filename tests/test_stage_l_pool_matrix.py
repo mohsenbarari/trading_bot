@@ -4,7 +4,14 @@ import unittest
 from pathlib import Path
 
 import scripts.run_stage_l_pool_matrix as pool_matrix
-from scripts.run_stage_l_pool_matrix import apply_pool_script, parse_candidates, parse_worker_candidates, recommend, summarize_candidate
+from scripts.run_stage_l_pool_matrix import (
+    apply_pool_script,
+    collect_app_logs_script,
+    parse_candidates,
+    parse_worker_candidates,
+    recommend,
+    summarize_candidate,
+)
 
 
 class StageLPoolMatrixTests(unittest.TestCase):
@@ -25,6 +32,11 @@ class StageLPoolMatrixTests(unittest.TestCase):
         self.assertIn('"DB_POOL_SIZE": "16"', script)
         self.assertIn('"DB_MAX_OVERFLOW": "8"', script)
         self.assertIn('DB_POOL_SIZE=%s\\nDB_MAX_OVERFLOW=%s\\nAPI_WORKERS=%s', script)
+
+    def test_collect_app_logs_script_captures_before_recreate(self):
+        script = collect_app_logs_script("/srv/trading-bot/current", tail_lines=123)
+        self.assertIn("logs --no-color --tail 123 app", script)
+        self.assertIn("docker logs --tail 123 trading_bot_app", script)
 
     def test_summarize_candidate_reads_k6_and_sampler_artifacts(self):
         with tempfile.TemporaryDirectory() as root:
@@ -98,6 +110,7 @@ class StageLPoolMatrixTests(unittest.TestCase):
                 {
                     "candidate": "12:8",
                     "summary": {
+                        "status": "passed",
                         "k6": {"rps": 490, "failure_rate": 0.001, "p95_ms": 900, "p99_ms": 1700, "dropped_iterations": 0},
                         "sampler": {"max_postgres_connections": 150, "max_nginx_5xx_delta_from_first_sample": 0},
                     },
@@ -105,6 +118,30 @@ class StageLPoolMatrixTests(unittest.TestCase):
             ]
         }
         self.assertIn("12:8", recommend(report))
+
+    def test_recommend_keeps_l7_blocked_when_candidates_fail_official_gates(self):
+        report = {
+            "target_rps": 500,
+            "candidates": [
+                {
+                    "candidate": "workers=16 pool=16:8",
+                    "summary": {
+                        "status": "failed",
+                        "k6": {
+                            "rps": 483,
+                            "failure_rate": 0.07,
+                            "p95_ms": 1172,
+                            "p99_ms": 1632,
+                            "dropped_iterations": 1695,
+                        },
+                        "sampler": {"max_postgres_connections": 351, "max_nginx_5xx_delta_from_first_sample": 1037},
+                    },
+                }
+            ],
+        }
+        recommendation = recommend(report)
+        self.assertIn("Stage L7 remains blocked", recommendation)
+        self.assertIn("official L7 gates", recommendation)
 
     def test_pool_matrix_emits_done_marker_for_teed_logs(self):
         source = Path(pool_matrix.__file__).read_text(encoding="utf-8")

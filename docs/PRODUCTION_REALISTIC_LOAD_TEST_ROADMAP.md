@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L7 failed on the first official target attempt. Stage L7.1/L7.2 showed that a larger DB pool removes 5xx failures but does not reach the 500 RPS target; Stage L7.3 is a limited worker+pool diagnostic.
+Status: Stage L7 failed on the first official target attempt. Stage L7.1-L7.3 showed that larger pools and more API workers improve different symptoms but still do not pass the official 500 RPS gates; Stage L7.4 is failure-cause capture for upstream resets.
 
 Last updated: 2026-06-13
 
@@ -25,7 +25,8 @@ same time.
 | `L7` | Blocked on 2026-06-13 | Official target run `TARGET_RPS=500 DURATION=10m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` completed but failed with artifact `tmp/production-benchmark/20260613T073228Z/load-realistic/`: `224447` HTTP requests, effective throughput `369.43 req/s`, `75553` dropped iterations, failure rate `1.24%`, p95 `19450.78ms`, p99 `30167.22ms`, sampler max PostgreSQL connections `119`, max sync backlog `1420`, and final foreign/Iran sync-health clean. Iran app logs identified the blocking error as `sqlalchemy.exc.TimeoutError: QueuePool limit of size 8 overflow 6 reached, connection timed out, timeout 30.00`, so this is a DB pool exhaustion/latency bottleneck before a clean official L7 can be accepted. |
 | `L7.1` | Complete on 2026-06-13 | Added and ran `make production-load-pool-matrix` as a short diagnostic matrix against Iran. Initial artifact `tmp/production-benchmark/20260613T081541Z/load-pool-matrix/` confirmed the baseline `8:6` candidate still fails at `500 RPS / 2m` (`322.87 req/s`, p95 `17730.4ms`, Nginx 5xx delta `79`), while later candidates were invalid because fixture prepare hit a Docker Compose v1 `KeyError: ContainerConfig` while resuming Iran `sync_worker`. After hardening stale sync-worker removal, artifact `tmp/production-benchmark/20260613T084237Z/load-pool-matrix/` completed the `8:6`, `12:8`, and `16:8` matrix: `16:8` eliminated request failures and Nginx 5xx (`0%`, delta `0`) and lowered p95 to `6900.44ms`, but effective throughput still stayed near `312 req/s` with about `20744` dropped iterations. This means DB pool exhaustion is no longer the only bottleneck; API worker/session-hold-time or specific endpoint latency must be classified next. |
 | `L7.2` | Complete on 2026-06-13 | Added endpoint-level k6 trends and pool-matrix summary breakdown. Diagnostic artifact `tmp/production-benchmark/20260613T090738Z/load-pool-matrix/` ran `API_WORKERS=8`, `DB_POOL_SIZE=16`, `DB_MAX_OVERFLOW=8` at `500 RPS / 2m`: `326.39 req/s`, `0%` request failures, `0` new Nginx 5xx delta, p95 `6631.78ms`, p99 `7006.81ms`, `19074` dropped iterations, max PostgreSQL connections `199`. The slowest endpoint families were all clustered around p95 `6.5s`-`6.9s`, so the remaining bottleneck is broad API worker saturation/session-hold-time rather than a single endpoint. During load the Iran app container reached about `810%` CPU while DB connections stayed within budget. |
-| `L7.3` | In progress | Extend the reversible Stage L matrix to test API worker candidates together with the cleanest pool profile (`16:8`) so the next diagnostic can compare `API_WORKERS=8/12/16` under the same realistic 500 RPS load. |
+| `L7.3` | Complete on 2026-06-13 | Extended the reversible Stage L matrix to test API worker candidates together with pool candidates. Artifact `tmp/production-benchmark/20260613T092130Z/load-pool-matrix/` compared `API_WORKERS=8/12/16` with pool `16:8`: `8` workers stayed operationally clean but reached only `321.71 req/s` with p95 `6901.47ms`; `12` workers improved throughput to `452.29 req/s` and p95 `2980.97ms` but produced `6.897%` failures and `604` load-runner 502s; `16` workers reached `483.85 req/s` with p95 `1172.38ms` and p99 `1632.33ms`, but produced `7.342%` failures and `1037` load-runner 502s. Nginx error logs showed `recv() failed (104: Connection reset by peer) while reading response header from upstream` across high-volume endpoints, so higher workers cannot be accepted until the upstream resets are explained and removed. |
+| `L7.4` | In progress | Harden diagnostic capture so candidate app logs are saved before each app recreate and add a short post-apply settle window. Rerun the closest failing candidate (`workers=16 pool=16:8`) to capture the application-side cause of the 502/reset failures. |
 | `L8`-`L11` | Pending | spike, soak, analysis, and release-capacity decision remain pending until L7 passes cleanly. |
 
 ## Objective
@@ -178,6 +179,55 @@ Acceptance:
   and p95/p99 without new 5xx, sync residue, or unsafe DB pressure.
 - If worker scaling is flat, Stage L7 remains blocked and the next work must be
   query/session-hold-time optimization, not resource multiplication.
+
+Latest L7.3 result:
+
+- Artifact: `tmp/production-benchmark/20260613T092130Z/load-pool-matrix/`.
+- `workers=8 pool=16:8`: `321.71 req/s`, failure `0.079%`, p95
+  `6901.47ms`, p99 `11300.57ms`, dropped `19649`, max PostgreSQL
+  connections `199`, load-runner Nginx 5xx delta `0`.
+- `workers=12 pool=16:8`: `452.29 req/s`, failure `6.897%`, p95
+  `2980.97ms`, p99 `3451.96ms`, dropped `5220`, max PostgreSQL
+  connections `296`, load-runner Nginx 5xx delta `604`.
+- `workers=16 pool=16:8`: `483.85 req/s`, failure `7.342%`, p95
+  `1172.38ms`, p99 `1632.33ms`, dropped `1695`, max PostgreSQL
+  connections `351`, load-runner Nginx 5xx delta `1037`.
+- Access/error-log classification for load-runner IP `45.129.39.182` showed
+  the failures are HTTP `502` from Nginx with upstream reset messages:
+  `recv() failed (104: Connection reset by peer) while reading response header
+  from upstream`.
+- Decision: no worker/pool profile is accepted. `16` workers is the closest
+  capacity shape, but it is unstable. Stage L7 remains blocked.
+
+## Stage L7.4 Upstream Reset Capture
+
+Goal: capture enough evidence to explain why higher worker counts generate
+upstream resets under realistic load.
+
+Changes:
+
+- `make production-load-pool-matrix` captures Iran app logs for each candidate
+  before the app container is recreated for the next candidate.
+- The matrix waits briefly after applying app env changes so the diagnostic
+  does not confuse startup churn with steady-state load failures.
+- The recommendation text now requires official L7 gates before recommending a
+  candidate; failed candidates are diagnostic only.
+
+Suggested diagnostic run:
+
+```bash
+LOAD_RUNNER_HOST=root@45.129.39.182 \
+LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+make production-load-pool-matrix ARGS="--workers 16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
+```
+
+Acceptance:
+
+- app logs are present under `load-pool-matrix/logs/*-app.stdout.log`;
+- if the 502s persist, classify whether they are caused by worker crash,
+  database disconnect, process timeout, OOM/kill, or Nginx/upstream tuning;
+- if the 502s disappear with settle/log capture only, rerun the same candidate
+  once more before considering it for full L7.
 
 ## Load Generator Choice
 
