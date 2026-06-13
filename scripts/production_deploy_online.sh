@@ -982,7 +982,30 @@ issue_cert() {
     local cert_renewal_guard
     cert_renewal_guard="$(remote_cert_renewal_guard)"
     ssh_iran "set -euo pipefail
-certbot --nginx -d '$IRAN_APP_DOMAIN' --non-interactive --agree-tos --email '$IRAN_CERTBOT_EMAIL' --redirect
+domain='$IRAN_APP_DOMAIN'
+email='$IRAN_CERTBOT_EMAIL'
+cert_path=\"/etc/letsencrypt/live/\$domain/fullchain.pem\"
+run_certbot() {
+  certbot --nginx -d \"\$domain\" --non-interactive --agree-tos --email \"\$email\" --redirect --keep-until-expiring
+}
+if [ -f \"\$cert_path\" ] && openssl x509 -checkend 1814400 -noout -in \"\$cert_path\" >/dev/null 2>&1; then
+  if ! run_certbot; then
+    echo \"WARN: certbot failed for \$domain, but the existing certificate is valid for more than 21 days; continuing.\" >&2
+  fi
+else
+  certbot_status=1
+  for attempt in 1 2 3; do
+    if run_certbot; then
+      certbot_status=0
+      break
+    fi
+    echo \"WARN: certbot attempt \$attempt failed for \$domain; retrying.\" >&2
+    sleep \$((attempt * 10))
+  done
+  if [ \"\$certbot_status\" -ne 0 ]; then
+    exit \"\$certbot_status\"
+  fi
+fi
 $cert_renewal_guard"
     log "SSL certificate step completed"
 }
