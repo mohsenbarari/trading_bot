@@ -164,6 +164,31 @@ function targetList(name) {
   return authPool && authPool.targets ? authPool.targets[name] || [] : [];
 }
 
+function directPairFor(entry) {
+  const pairs = targetList('direct_pairs').filter(function (pair) {
+    return pair.sender_id === entry.user_id || pair.receiver_id === entry.user_id;
+  });
+  return randomItem(pairs);
+}
+
+function directOtherUserId(entry, pair) {
+  if (!pair) return null;
+  return pair.sender_id === entry.user_id ? pair.receiver_id : pair.sender_id;
+}
+
+function roomFor(entry, lists) {
+  const rooms = [];
+  lists.forEach(function (name) {
+    targetList(name).forEach(function (room) {
+      const memberIds = room.member_ids || [];
+      if (memberIds.indexOf(entry.user_id) !== -1) {
+        rooms.push(room);
+      }
+    });
+  });
+  return randomItem(rooms);
+}
+
 function authHeaders(entry, extra) {
   const headers = {
     Authorization: `${entry.token_type || 'bearer'} ${entry.access_token}`,
@@ -224,10 +249,10 @@ function marketWatcher() {
   const entry = tokenEntry(persona);
   if (!entry) return;
   const choices = [
-    () => getJson(persona, entry, 'trading_settings', '/trading-settings'),
+    () => getJson(persona, entry, 'trading_settings', '/trading-settings/'),
     () => getJson(persona, entry, 'market_state', '/trading-settings/market-state'),
-    () => getJson(persona, entry, 'commodities', '/commodities'),
-    () => getJson(persona, entry, 'offers_list', '/offers?limit=30'),
+    () => getJson(persona, entry, 'commodities', '/commodities/'),
+    () => getJson(persona, entry, 'offers_list', '/offers/?limit=30'),
     () => getJson(persona, entry, 'trades_my', '/trades/my?limit=20'),
     () => getJson(persona, entry, 'notifications_unread_count', '/notifications/unread-count'),
   ];
@@ -240,7 +265,7 @@ function offerMaker() {
   if (!entry) return;
   if (!INCLUDE_MUTATIONS || Math.random() < 0.65) {
     randomItem([
-      () => getJson(persona, entry, 'offers_list', '/offers?limit=30'),
+      () => getJson(persona, entry, 'offers_list', '/offers/?limit=30'),
       () => getJson(persona, entry, 'offers_my', '/offers/my?limit=30'),
     ])();
     return;
@@ -271,11 +296,13 @@ function tradeTaker() {
   const persona = 'trade_taker';
   const entry = tokenEntry(persona);
   if (!entry) return;
-  const trade = randomItem(targetList('trades'));
+  const trade = randomItem(targetList('trades').filter(function (item) {
+    return item.offer_user_id === entry.user_id || item.responder_user_id === entry.user_id;
+  }));
   const offer = randomItem(targetList('offers'));
   if (!INCLUDE_MUTATIONS || !offer || Math.random() < 0.75) {
     randomItem([
-      () => getJson(persona, entry, 'offers_list', '/offers?limit=30'),
+      () => getJson(persona, entry, 'offers_list', '/offers/?limit=30'),
       () => getJson(persona, entry, 'trades_my', '/trades/my?limit=20'),
       () => (trade ? getJson(persona, entry, 'trade_detail', `/trades/${trade.trade_id}`) : getJson(persona, entry, 'trades_my', '/trades/my?limit=20')),
     ])();
@@ -300,13 +327,14 @@ function chatTexter() {
   const persona = 'chat_texter';
   const entry = tokenEntry(persona);
   if (!entry) return;
-  const directPair = randomItem(targetList('direct_pairs'));
-  const room = randomItem(targetList('groups').concat(targetList('channels')));
+  const directPair = directPairFor(entry);
+  const otherUserId = directOtherUserId(entry, directPair);
+  const room = roomFor(entry, ['groups', 'channels']);
   if (!INCLUDE_MUTATIONS || Math.random() < 0.55) {
     randomItem([
       () => getJson(persona, entry, 'chat_conversations', '/chat/conversations'),
       () => getJson(persona, entry, 'chat_poll', '/chat/poll'),
-      () => (directPair ? getJson(persona, entry, 'direct_messages', `/chat/messages/${directPair.receiver_id}?limit=30`) : getJson(persona, entry, 'chat_conversations', '/chat/conversations')),
+      () => (otherUserId ? getJson(persona, entry, 'direct_messages', `/chat/messages/${otherUserId}?limit=30`) : getJson(persona, entry, 'chat_conversations', '/chat/conversations')),
       () => (room ? getJson(persona, entry, 'room_messages', `/chat/rooms/${room.chat_id}/messages?limit=30`) : getJson(persona, entry, 'chat_conversations', '/chat/conversations')),
     ])();
     return;
@@ -318,9 +346,9 @@ function chatTexter() {
     });
     return;
   }
-  if (directPair) {
+  if (otherUserId) {
     postJson(persona, entry, 'direct_send', '/chat/send', {
-      receiver_id: directPair.receiver_id,
+      receiver_id: otherUserId,
       content: `loadtest direct text ${authPool.prefix} ${exec.scenario.iterationInTest}`,
       message_type: 'text',
     });
@@ -335,10 +363,11 @@ function chatMediaSender() {
     chatTexter();
     return;
   }
-  const room = randomItem(targetList('groups'));
-  const directPair = randomItem(targetList('direct_pairs'));
+  const room = roomFor(entry, ['groups']);
+  const directPair = directPairFor(entry);
+  const otherUserId = directOtherUserId(entry, directPair);
   const isRoom = Boolean(room && Math.random() < 0.5);
-  const targetId = isRoom ? room.chat_id : directPair && directPair.receiver_id;
+  const targetId = isRoom ? room.chat_id : otherUserId;
   if (!targetId) {
     chatTexter();
     return;
@@ -392,7 +421,8 @@ function profileBrowser() {
   const entry = tokenEntry(persona);
   if (!entry) return;
   const publicUserId = randomItem(targetList('public_profile_user_ids'), entry.user_id);
-  const ownerId = randomItem(targetList('customer_relation_owner_ids'), entry.user_id);
+  const ownerIds = targetList('customer_relation_owner_ids');
+  const ownerId = ownerIds.indexOf(entry.user_id) !== -1 ? entry.user_id : randomItem(ownerIds, entry.user_id);
   randomItem([
     () => getJson(persona, entry, 'auth_me', '/auth/me'),
     () => getJson(persona, entry, 'users_public_search', '/users-public/search?q=loadtest&limit=20'),
@@ -409,7 +439,7 @@ function notificationUser() {
   if (!entry) return;
   if (!INCLUDE_MUTATIONS || Math.random() < 0.75) {
     randomItem([
-      () => getJson(persona, entry, 'notifications_list', '/notifications?limit=30'),
+      () => getJson(persona, entry, 'notifications_list', '/notifications/?limit=30'),
       () => getJson(persona, entry, 'notifications_unread', '/notifications/unread?limit=30'),
       () => getJson(persona, entry, 'notifications_unread_count', '/notifications/unread-count'),
     ])();
@@ -423,7 +453,7 @@ function adminLightRead() {
   const entry = tokenEntry(persona);
   if (!entry) return;
   randomItem([
-    () => getJson(persona, entry, 'admin_users', '/users?limit=30'),
+    () => getJson(persona, entry, 'admin_users', '/users/?limit=30'),
     () => getJson(persona, entry, 'admin_market_current', '/admin-messages/market/current', [200, 404]),
     () => getJson(persona, entry, 'admin_market_history', '/admin-messages/market/history?limit=20'),
     () => getJson(persona, entry, 'admin_broadcast_history', '/admin-messages/broadcasts/history?limit=20'),
