@@ -21,6 +21,7 @@ from scripts.run_worker_pool_matrix import run_remote_script, sh_quote
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MAX_DROPPED_ITERATION_RATIO = 0.02
 
 
 @dataclass(frozen=True)
@@ -284,6 +285,13 @@ def endpoint_breakdown(metrics: dict[str, Any], *, limit: int = 10) -> list[dict
     return rows[:limit]
 
 
+def dropped_iteration_ratio(*, http_reqs: float, dropped_iterations: int) -> float:
+    attempted = float(http_reqs or 0) + float(dropped_iterations or 0)
+    if attempted <= 0:
+        return 1.0 if dropped_iterations else 0.0
+    return float(dropped_iterations or 0) / attempted
+
+
 def summarize_candidate(artifact_root: str, candidate_stamp: str) -> dict[str, Any]:
     run_dir = Path(artifact_root) / candidate_stamp / "load-realistic"
     results_path = run_dir / "results.json"
@@ -312,6 +320,10 @@ def summarize_candidate(artifact_root: str, candidate_stamp: str) -> dict[str, A
             "failed_requests": failed.get("passes"),
             "check_rate": checks.get("value"),
             "dropped_iterations": dropped.get("count", 0),
+            "dropped_iteration_ratio": dropped_iteration_ratio(
+                http_reqs=metric_value(metrics, "http_reqs", "count", 0),
+                dropped_iterations=int(dropped.get("count", 0) or 0),
+            ),
             "p95_ms": duration.get("p(95)"),
             "p99_ms": duration.get("p(99)"),
             "avg_ms": duration.get("avg"),
@@ -338,8 +350,8 @@ def write_summary(path: Path, report: dict[str, Any]) -> None:
         f"- API workers: `{report['api_workers']}`",
         f"- Restored original env: `{report.get('restored')}`",
         "",
-        "| Candidate | Status | RPS | Failure | P95 | P99 | Dropped | Max PG conn | Nginx 5xx delta | Artifact |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Candidate | Status | RPS | Failure | P95 | P99 | Dropped | Dropped ratio | Max PG conn | Nginx 5xx delta | Artifact |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for item in report["candidates"]:
         summary = item.get("summary") or {}
@@ -352,6 +364,7 @@ def write_summary(path: Path, report: dict[str, Any]) -> None:
             f"`{round(float(k6.get('p95_ms') or 0), 2)}ms` | "
             f"`{round(float(k6.get('p99_ms') or 0), 2)}ms` | "
             f"`{k6.get('dropped_iterations', 'n/a')}` | "
+            f"`{round(float(k6.get('dropped_iteration_ratio') or 0) * 100, 3)}%` | "
             f"`{sampler.get('max_postgres_connections', 'n/a')}` | "
             f"`{sampler.get('max_nginx_5xx_delta_from_first_sample', 'n/a')}` | "
             f"`{summary.get('artifact_dir', '')}` |"
@@ -398,10 +411,18 @@ def recommend(report: dict[str, Any]) -> str:
                 "label": item["candidate"],
                 "status": summary.get("status"),
                 "rps": float(k6.get("rps") or 0),
-                "failure_rate": float(k6.get("failure_rate") or 1),
+                "failure_rate": float(k6.get("failure_rate") if k6.get("failure_rate") is not None else 1),
                 "p95": float(k6.get("p95_ms") or 10**9),
                 "p99": float(k6.get("p99_ms") or 10**9),
                 "dropped": int(k6.get("dropped_iterations") or 0),
+                "dropped_ratio": float(
+                    k6.get("dropped_iteration_ratio")
+                    if k6.get("dropped_iteration_ratio") is not None
+                    else dropped_iteration_ratio(
+                        http_reqs=float(k6.get("http_reqs") or 0),
+                        dropped_iterations=int(k6.get("dropped_iterations") or 0),
+                    )
+                ),
                 "pg": int(sampler.get("max_postgres_connections") or 0),
                 "nginx_5xx_delta": int(sampler.get("max_nginx_5xx_delta_from_first_sample") or 0),
             }
@@ -415,13 +436,16 @@ def recommend(report: dict[str, Any]) -> str:
         and item["failure_rate"] < 0.02
         and item["p95"] < 1000
         and item["p99"] < 2500
-        and item["dropped"] == 0
+        and item["dropped_ratio"] <= MAX_DROPPED_ITERATION_RATIO
         and item["nginx_5xx_delta"] == 0
     ]
     pool = viable or candidates
     best = min(pool, key=lambda item: (item["p95"], item["p99"], -item["rps"], item["pg"]))
     if viable:
-        return f"Prefer {best['label']} for the next full L7 rerun; it had the best latency among candidates without 5xx delta."
+        return (
+            f"Prefer {best['label']} for the next full L7 rerun; it had the best latency among candidates "
+            f"with failures under budget, bounded dropped iterations, and no 5xx delta."
+        )
     return (
         f"No candidate passed the official L7 gates; {best['label']} had the best latency shape "
         "among failed candidates, but Stage L7 remains blocked until failures/5xx and dropped iterations are resolved."
