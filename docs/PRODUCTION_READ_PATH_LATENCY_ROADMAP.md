@@ -416,3 +416,5 @@ RPL roadmap status:
 - Further work should not rerun L9 until a new narrow optimization produces a
   targeted benchmark that beats the accepted L7 shape on p95, p99, and dropped
   iteration ratio.
+- The follow-up optimization plan is tracked in
+  `docs/PRODUCTION_READ_PATH_TARGETED_OPTIMIZATION_ROADMAP.md`.
