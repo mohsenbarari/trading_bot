@@ -29,6 +29,22 @@ class StageLPoolMatrixTests(unittest.TestCase):
                             "checks": {"value": 0.999},
                             "dropped_iterations": {"count": 0},
                             "http_req_duration": {"avg": 100, "p(95)": 800, "p(99)": 1400},
+                            "stage_l_endpoint_chat_conversations_duration": {
+                                "avg": 90,
+                                "p(90)": 600,
+                                "p(95)": 1200,
+                                "p(99)": 1600,
+                                "max": 2000,
+                            },
+                            "stage_l_endpoint_chat_conversations_failed": {"value": 0.02, "passes": 2, "fails": 98},
+                            "stage_l_endpoint_offers_list_duration": {
+                                "avg": 50,
+                                "p(90)": 100,
+                                "p(95)": 200,
+                                "p(99)": 300,
+                                "max": 400,
+                            },
+                            "stage_l_endpoint_offers_list_failed": {"value": 0, "passes": 0, "fails": 100},
                         }
                     }
                 ),
@@ -53,6 +69,9 @@ class StageLPoolMatrixTests(unittest.TestCase):
         self.assertEqual(summary["k6"]["http_reqs"], 1000)
         self.assertEqual(summary["k6"]["p95_ms"], 800)
         self.assertEqual(summary["sampler"]["max_postgres_connections"], 140)
+        self.assertEqual(summary["endpoint_breakdown"][0]["endpoint"], "chat_conversations")
+        self.assertEqual(summary["endpoint_breakdown"][0]["p95_ms"], 1200)
+        self.assertEqual(summary["endpoint_breakdown"][0]["failed_requests"], 2)
 
     def test_recommend_prefers_clean_lowest_latency_candidate(self):
         report = {

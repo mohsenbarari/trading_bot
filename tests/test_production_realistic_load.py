@@ -54,6 +54,9 @@ class ProductionRealisticLoadTests(unittest.TestCase):
         self.assertIn("INCLUDE_MEDIA", source)
         self.assertIn("INCLUDE_MUTATIONS", source)
         self.assertIn("constant-arrival-rate", source)
+        self.assertIn("stage_l_endpoint_", source)
+        self.assertIn("new Trend(`stage_l_endpoint_${endpoint}_duration`, true)", source)
+        self.assertIn("new Rate(`stage_l_endpoint_${endpoint}_failed`)", source)
 
     def test_k6_project_users_uses_self_profile_to_avoid_expected_403_noise(self):
         source = Path(K6_SCRIPT).read_text(encoding="utf-8")

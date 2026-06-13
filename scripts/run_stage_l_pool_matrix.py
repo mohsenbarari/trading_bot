@@ -219,6 +219,40 @@ def metric_value(metrics: dict[str, Any], key: str, field: str, default: Any = N
     return value.get(field, default)
 
 
+def endpoint_breakdown(metrics: dict[str, Any], *, limit: int = 10) -> list[dict[str, Any]]:
+    prefix = "stage_l_endpoint_"
+    duration_suffix = "_duration"
+    failed_suffix = "_failed"
+    rows: list[dict[str, Any]] = []
+    for name, duration in metrics.items():
+        if not name.startswith(prefix) or not name.endswith(duration_suffix):
+            continue
+        endpoint = name[len(prefix):-len(duration_suffix)]
+        failed = metrics.get(f"{prefix}{endpoint}{failed_suffix}") or {}
+        rows.append(
+            {
+                "endpoint": endpoint,
+                "avg_ms": duration.get("avg"),
+                "p90_ms": duration.get("p(90)"),
+                "p95_ms": duration.get("p(95)"),
+                "p99_ms": duration.get("p(99)"),
+                "max_ms": duration.get("max"),
+                "failure_rate": failed.get("value"),
+                "failed_requests": failed.get("passes"),
+                "successful_requests": failed.get("fails"),
+            }
+        )
+    rows.sort(
+        key=lambda item: (
+            float(item.get("p95_ms") or 0),
+            float(item.get("p99_ms") or 0),
+            float(item.get("avg_ms") or 0),
+        ),
+        reverse=True,
+    )
+    return rows[:limit]
+
+
 def summarize_candidate(artifact_root: str, candidate_stamp: str) -> dict[str, Any]:
     run_dir = Path(artifact_root) / candidate_stamp / "load-realistic"
     results_path = run_dir / "results.json"
@@ -251,6 +285,7 @@ def summarize_candidate(artifact_root: str, candidate_stamp: str) -> dict[str, A
             "p99_ms": duration.get("p(99)"),
             "avg_ms": duration.get("avg"),
         }
+        summary["endpoint_breakdown"] = endpoint_breakdown(metrics)
     if sampler_path.exists():
         sampler = load_json(sampler_path)
         summary["sampler"] = sampler.get("summary")
@@ -290,6 +325,30 @@ def write_summary(path: Path, report: dict[str, Any]) -> None:
             f"`{sampler.get('max_nginx_5xx_delta_from_first_sample', 'n/a')}` | "
             f"`{summary.get('artifact_dir', '')}` |"
         )
+    if any((item.get("summary") or {}).get("endpoint_breakdown") for item in report["candidates"]):
+        lines.extend(["", "## Endpoint Latency Breakdown"])
+        for item in report["candidates"]:
+            rows = (item.get("summary") or {}).get("endpoint_breakdown") or []
+            if not rows:
+                continue
+            lines.extend(
+                [
+                    "",
+                    f"### Candidate `{item['candidate']}`",
+                    "",
+                    "| Endpoint | Failure | P95 | P99 | Avg | Max |",
+                    "| --- | ---: | ---: | ---: | ---: | ---: |",
+                ]
+            )
+            for row in rows:
+                lines.append(
+                    f"| `{row.get('endpoint')}` | "
+                    f"`{round(float(row.get('failure_rate') or 0) * 100, 3)}%` | "
+                    f"`{round(float(row.get('p95_ms') or 0), 2)}ms` | "
+                    f"`{round(float(row.get('p99_ms') or 0), 2)}ms` | "
+                    f"`{round(float(row.get('avg_ms') or 0), 2)}ms` | "
+                    f"`{round(float(row.get('max_ms') or 0), 2)}ms` |"
+                )
     if report.get("recommendation"):
         lines.extend(["", f"Recommendation: {report['recommendation']}"])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

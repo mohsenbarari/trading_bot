@@ -1,7 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import exec from 'k6/execution';
-import { Counter, Rate } from 'k6/metrics';
+import { Counter, Rate, Trend } from 'k6/metrics';
 
 const BASE_URL = (__ENV.BASE_URL || 'https://coin.gold-trade.ir').replace(/\/+$/, '');
 const API_PREFIX = (__ENV.API_PREFIX || '/api').replace(/\/+$/, '');
@@ -18,6 +18,50 @@ const stageRequestFailed = new Rate('stage_l_request_failed');
 const stageBusinessRejections = new Counter('stage_l_business_rejections');
 const stagePersonaRequests = new Counter('stage_l_persona_requests');
 const stagePersonaIterations = new Counter('stage_l_persona_iterations');
+
+const endpointMetricNames = [
+  'trading_settings',
+  'market_state',
+  'commodities',
+  'offers_list',
+  'offers_my',
+  'offers_create',
+  'trades_my',
+  'trade_detail',
+  'trades_create',
+  'notifications_unread_count',
+  'notifications_list',
+  'notifications_unread',
+  'notifications_mark_all_read',
+  'chat_conversations',
+  'direct_messages',
+  'room_messages',
+  'direct_send',
+  'room_send',
+  'chat_poll',
+  'upload_batch_create',
+  'upload_session_create',
+  'upload_chunk',
+  'upload_finalize',
+  'upload_batch_commit',
+  'auth_me',
+  'users_public_search',
+  'users_public_detail',
+  'project_users',
+  'customer_relations',
+  'accountant_relations',
+  'admin_users',
+  'admin_market_current',
+  'admin_market_history',
+  'admin_broadcast_history',
+  'admin_market_overrides',
+];
+const stageEndpointDurations = {};
+const stageEndpointFailures = {};
+endpointMetricNames.forEach(function (endpoint) {
+  stageEndpointDurations[endpoint] = new Trend(`stage_l_endpoint_${endpoint}_duration`, true);
+  stageEndpointFailures[endpoint] = new Rate(`stage_l_endpoint_${endpoint}_failed`);
+});
 
 http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 409));
 
@@ -218,6 +262,12 @@ function record(persona, endpoint, res, expected = [200], allowBusinessRejection
   check(res, {
     [`${persona} ${endpoint} status accepted`]: () => ok,
   });
+  if (stageEndpointDurations[endpoint] && res.timings && typeof res.timings.duration === 'number') {
+    stageEndpointDurations[endpoint].add(res.timings.duration, { persona, endpoint });
+  }
+  if (stageEndpointFailures[endpoint]) {
+    stageEndpointFailures[endpoint].add(!ok, { persona, endpoint });
+  }
   stageRequestFailed.add(!ok, { persona, endpoint });
   stagePersonaRequests.add(1, { persona, endpoint });
   if (res.status === 409) {
