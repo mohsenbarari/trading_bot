@@ -739,8 +739,12 @@ async def get_messages(
 ):
     """تاریخچه پیام‌ها. پشتیبانی از before_id (اسکرول به بالا) و around_id (پرش به پیام)."""
     # بررسی وجود کاربر
-    target = await db.get(User, user_id)
-    if not target:
+    target_exists = await db.scalar(
+        select(User.id)
+        .where(User.id == user_id, User.is_deleted.is_(False))
+        .limit(1)
+    )
+    if target_exists is None:
         raise HTTPException(status_code=404, detail="User not found")
 
     await _ensure_customer_can_access_direct_target(

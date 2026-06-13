@@ -1,6 +1,6 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0 completed and RPO1 started on 2026-06-13. This roadmap is for
+Status: RPO0 completed, RPO1 in validation, and RPO2 started on 2026-06-13. This roadmap is for
 targeted read-path optimization, not for another broad benchmark loop.
 
 Last updated: 2026-06-13
@@ -98,7 +98,7 @@ RPL6 endpoint p95 highlights:
 | --- | --- | --- |
 | `RPO0` | Complete | Add endpoint-family attribution/read-path reporting needed for this roadmap and freeze the benchmark contract. |
 | `RPO1` | In Progress | Optimize `chat_conversations` read shape without changing Messenger behavior. |
-| `RPO2` | Pending | Optimize `direct_messages` and room message read pagination/projection. |
+| `RPO2` | In Progress | Optimize `direct_messages` and room message read pagination/projection. |
 | `RPO3` | Pending | Optimize `offers_list` and `offers_my` read paths. |
 | `RPO4` | Pending | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
 | `RPO5` | Pending | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
@@ -252,12 +252,56 @@ Validation for slice 1:
 - `python3 -m py_compile scripts/report_read_path_endpoint_attribution.py core/services/chat_service.py api/routers/chat.py tests/test_read_path_endpoint_attribution.py`
   passed.
 
+Slice 1 benchmark:
+
+- Initial local tmux run missed the load-runner environment and only validated
+  restore behavior:
+  - artifact: `tmp/production-benchmark/20260613T185648Z/load-pool-matrix`;
+  - load status: failed with `LOAD_RUNNER_HOST is required`;
+  - Iran profile restore: passed.
+- Re-ran with the real load-runner:
+  - command shape: `500 RPS / 2m`, `API_WORKERS=24`,
+    `DB_POOL_SIZE=10`, `DB_MAX_OVERFLOW=4`, `LOAD_RUNNER_SHARDS=2`,
+    no media, no mutations;
+  - artifact: `tmp/production-benchmark/20260613T190022Z/load-pool-matrix`;
+  - `chat_conversations` p95/p99: `654.42ms` / `978.32ms`;
+  - overall p95/p99: `535.25ms` / `863.57ms`;
+  - request failure rate: `0%`;
+  - Nginx 5xx delta from first sample: `0`;
+  - Iran profile restore: `API_WORKERS=8`, `DB_POOL_SIZE=8`,
+    `DB_MAX_OVERFLOW=6`.
+
+Result after slice 1:
+
+- `chat_conversations` p95 improved materially versus RPL6
+  (`736.51ms` -> `654.42ms`) and is competitive with L7 (`656.76ms`).
+- `chat_conversations` p99 improved materially versus RPL6
+  (`1903.41ms` -> `978.32ms`) but is still above L7 (`888.72ms`).
+- This is enough to continue RPO1 with one more narrow read-shape slice, but
+  not enough to justify a full L9 rerun by itself.
+
+Implementation slice 2:
+
+- Replaced the room-conversation active-member-count correlated scalar subquery
+  with one grouped aggregate subquery joined by `chat_id`.
+- This preserves member-count semantics while avoiding repeated active-member
+  counts for every visible group/channel row.
+- Unread, mention, pin, mute, can-send, mandatory-channel, and system-group
+  behavior is unchanged.
+
+Validation for slice 2:
+
+- `python3 -m unittest tests.test_chat_room_service_room_read_models tests.test_chat_service_projection_and_send_helpers tests.test_chat_router_direct_reads`
+  passed.
+- `python3 -m py_compile core/services/chat_room_service.py core/services/chat_service.py api/routers/chat.py`
+  passed.
+
 Next RPO1 decision:
 
-- Run a short targeted benchmark only after this slice is deployed.
-- If the endpoint-level result does not move materially, continue RPO1 with a
-  broader but still scoped review of room/direct projection width rather than
-  rerunning L9.
+- Deploy slice 2 and run one more short targeted benchmark with the same shape.
+- Close RPO1 if `chat_conversations` keeps the slice-1 p95 improvement and p99
+  does not regress; otherwise document the remaining p99 debt and do not expand
+  RPO1 beyond this narrow read-shape work.
 
 ## Stage RPO2 - Message List Reads
 
@@ -300,6 +344,21 @@ Exit criteria:
 
 - Message-read p95/p99 improves versus RPL6 while keeping Messenger behavior
   unchanged.
+
+Implementation slice 1:
+
+- In `GET /api/chat/messages/{user_id}`, replaced the full `db.get(User, id)`
+  target lookup with a narrow `select(User.id)` existence check.
+- This removes a full user-row hydration from the direct-message hot read path.
+- Pagination, around-message behavior, customer visibility checks, and message
+  serialization are unchanged.
+
+Validation for slice 1:
+
+- `python3 -m unittest tests.test_chat_router_direct_reads tests.test_chat_room_service_room_read_models tests.test_chat_service_projection_and_send_helpers`
+  passed.
+- `python3 -m py_compile api/routers/chat.py core/services/chat_room_service.py core/services/chat_service.py tests/test_chat_router_direct_reads.py`
+  passed.
 
 ## Stage RPO3 - Offers Read Paths
 
