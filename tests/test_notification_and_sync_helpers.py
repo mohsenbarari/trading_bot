@@ -79,6 +79,15 @@ class SyncPushHelperTests(unittest.TestCase):
 
         executor.submit.assert_not_called()
 
+    def test_push_sync_direct_skips_when_disabled_by_env(self):
+        with patch.dict("os.environ", {"TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "1"}), \
+             patch("core.server_routing.default_peer_server_url", return_value="https://peer.example"), \
+             patch("core.config.settings.sync_api_key", "secret"), \
+             patch.object(sync_push, "_executor") as executor:
+            sync_push.push_sync_direct({"id": 1})
+
+        executor.submit.assert_not_called()
+
     def test_push_sync_direct_normalizes_url_and_submits_background_task(self):
         payload = {"table": "offers", "id": 8}
 

@@ -165,7 +165,14 @@ class Runner:
         return remote_args(self.settings, command)
 
     def worker_args(self, role: str, *script_args: str) -> list[str]:
-        body = "exec -T app " + " ".join(shlex.quote(part) for part in ("python", "scripts/load_fixture_worker.py", *script_args))
+        env_prefix = ""
+        if script_args and script_args[0] == "prepare":
+            env_prefix = "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1 "
+        body = (
+            "exec -T app "
+            + env_prefix
+            + " ".join(shlex.quote(part) for part in ("python", "scripts/load_fixture_worker.py", *script_args))
+        )
         return self.compose_args(role, body)
 
 

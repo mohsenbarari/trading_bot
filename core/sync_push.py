@@ -8,6 +8,7 @@ import time
 import hmac
 import hashlib
 import logging
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import httpx
@@ -22,6 +23,10 @@ _http_client = None
 _client_lock = threading.Lock()
 _cooldown_lock = threading.Lock()
 _target_cooldowns: dict[str, float] = {}
+
+
+def _direct_push_disabled() -> bool:
+    return os.getenv("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _get_client() -> httpx.Client:
@@ -156,6 +161,9 @@ def push_sync_direct(payload: dict):
     This runs in a background thread so it doesn't block the DB transaction.
     Falls back to sync_worker retry if push fails.
     """
+    if _direct_push_disabled():
+        return
+
     from core.config import settings
     from core.server_routing import default_peer_server_url
 
