@@ -64,6 +64,7 @@ SEQUENCE_ALIGNMENT_TABLES = (
     "trades",
     "notifications",
 )
+SEQUENCE_PREPARE_SAFETY_GAP = 10_000
 
 
 @dataclass(frozen=True)
@@ -175,34 +176,27 @@ async def cleanup_sync_queue_entries(prefix: str) -> dict[str, int]:
     return deleted
 
 
-async def align_integer_sequences(db) -> dict[str, int]:
+async def align_integer_sequences(db, *, safety_gap: int = 0) -> dict[str, int]:
     """Advance local sequences after cross-server sync imports explicit ids."""
     aligned: dict[str, int] = {}
+    safe_gap = max(0, int(safety_gap))
     for table_name in SEQUENCE_ALIGNMENT_TABLES:
-        await db.execute(
-            text(
-                f"""
-                DO $$
-                DECLARE
-                    seq_name text;
-                    next_value bigint;
-                BEGIN
-                    seq_name := pg_get_serial_sequence('{table_name}', 'id');
-                    IF seq_name IS NOT NULL THEN
-                        SELECT GREATEST(COALESCE(MAX(id), 0) + 1, 1)
-                        INTO next_value
-                        FROM {table_name};
-                        EXECUTE format('SELECT setval(%L::regclass, %s, false)', seq_name, next_value);
-                    END IF;
-                END
-                $$;
-                """
+        sequence_result = await db.execute(
+            text("SELECT pg_get_serial_sequence(:table_name, 'id')"),
+            {"table_name": table_name},
+        )
+        sequence_name = sequence_result.scalar_one_or_none()
+        max_result = await db.execute(
+            text(f"SELECT COALESCE(MAX(id), 0) AS max_id FROM {table_name}")
+        )
+        max_id = int(max_result.scalar_one() or 0)
+        next_value = max(max_id + 1 + safe_gap, 1)
+        if sequence_name:
+            await db.execute(
+                text("SELECT setval(CAST(:sequence_name AS regclass), :next_value, false)"),
+                {"sequence_name": str(sequence_name), "next_value": next_value},
             )
-        )
-        result = await db.execute(
-            text(f"SELECT GREATEST(COALESCE(MAX(id), 0) + 1, 1) AS next_value FROM {table_name}")
-        )
-        aligned[table_name] = int(result.scalar_one() or 1)
+        aligned[table_name] = next_value
     return aligned
 
 
@@ -499,6 +493,7 @@ async def cleanup(prefix: str) -> dict[str, Any]:
             },
         )
         deleted["change_logs"] = int(change_log_result.rowcount or 0)
+        sequence_next_values = await align_integer_sequences(db)
         await db.commit()
 
     redis_deleted = await cleanup_sync_queue_entries(prefix)
@@ -515,6 +510,7 @@ async def cleanup(prefix: str) -> dict[str, Any]:
         },
         "deleted": deleted,
         "redis_deleted": redis_deleted,
+        "sequence_next_values": sequence_next_values,
     }
 
 
@@ -531,7 +527,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
     token_expiry = timedelta(minutes=max(30, plan.token_minutes))
 
     async with AsyncSessionLocal() as db:
-        sequence_next_values = await align_integer_sequences(db)
+        sequence_next_values = await align_integer_sequences(db, safety_gap=SEQUENCE_PREPARE_SAFETY_GAP)
         super_admin = make_user(prefix, "super_admin", 1, role=UserRole.SUPER_ADMIN)
         middle_admins = [
             make_user(prefix, "middle_admin", 100 + index, role=UserRole.MIDDLE_MANAGER)
@@ -876,6 +872,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
                 "notifications": plan.notifications,
             },
             "sequence_next_values": sequence_next_values,
+            "sequence_safety_gap": SEQUENCE_PREPARE_SAFETY_GAP,
             "auth_pool": auth_pool,
         }
 
