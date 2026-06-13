@@ -160,15 +160,55 @@ async def collect_prefixed_chat_ids(db, prefix: str, user_ids: list[int]) -> lis
     return sorted({int(value) for value in rows.scalars().all()})
 
 
-async def cleanup_sync_queue_entries(prefix: str) -> dict[str, int]:
+def normalize_record_ids(record_ids_by_table: dict[str, list[int]] | None) -> dict[str, set[int]]:
+    normalized: dict[str, set[int]] = {}
+    for table_name, raw_ids in (record_ids_by_table or {}).items():
+        ids: set[int] = set()
+        for raw_id in raw_ids:
+            try:
+                ids.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+        if ids:
+            normalized[table_name] = ids
+    return normalized
+
+
+def sync_queue_item_matches_cleanup(item: Any, prefix: str, record_ids_by_table: dict[str, set[int]]) -> bool:
+    raw_item = item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+    if prefix in raw_item:
+        return True
+    if not record_ids_by_table:
+        return False
+    try:
+        payload = json.loads(raw_item)
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    table_name = str(payload.get("table") or "")
+    candidate_ids = record_ids_by_table.get(table_name)
+    if not candidate_ids:
+        return False
+    for key in ("id", "record_id"):
+        try:
+            if int(payload.get(key)) in candidate_ids:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+async def cleanup_sync_queue_entries(prefix: str, record_ids_by_table: dict[str, list[int]] | None = None) -> dict[str, int]:
     deleted: dict[str, int] = {}
+    cleanup_ids = normalize_record_ids(record_ids_by_table)
     client = redis.Redis(connection_pool=pool)
     try:
         for key in ("sync:outbound", "sync:retry"):
             removed = 0
             items = await client.lrange(key, 0, -1)
             for item in items:
-                if prefix in str(item):
+                if sync_queue_item_matches_cleanup(item, prefix, cleanup_ids):
                     removed += int(await client.lrem(key, 0, item) or 0)
             deleted[key] = removed
     finally:
@@ -496,7 +536,21 @@ async def cleanup(prefix: str) -> dict[str, Any]:
         sequence_next_values = await align_integer_sequences(db)
         await db.commit()
 
-    redis_deleted = await cleanup_sync_queue_entries(prefix)
+    redis_deleted = await cleanup_sync_queue_entries(
+        prefix,
+        {
+            "users": user_ids,
+            "chats": chat_ids,
+            "chat_members": chat_member_ids,
+            "messages": message_ids,
+            "conversations": conversation_ids,
+            "offers": offer_ids,
+            "trades": trade_ids,
+            "notifications": notification_ids,
+            "accountant_relations": accountant_relation_ids,
+            "customer_relations": customer_relation_ids,
+        },
+    )
     return {
         "status": "ok",
         "prefix": prefix,
