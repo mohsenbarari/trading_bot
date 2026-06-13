@@ -79,21 +79,34 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_receive_sync_data_retries_deferred_items_and_invalidates_commodity_caches(self):
         db = FakeDB()
-        items = [{"table": "commodities", "operation": "INSERT", "id": 3, "data": {"name": "gold"}}]
+        items = [
+            {"table": "commodities", "operation": "INSERT", "id": 3, "data": {"name": "gold"}},
+            {"table": "admin_market_messages", "operation": "INSERT", "id": 7, "data": {"content": "market"}},
+        ]
+        deferred_tables = set()
 
-        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=["deferred", "ok"])) as apply_mock, patch(
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers):
+            if table == "commodities" and table not in deferred_tables:
+                deferred_tables.add(table)
+                return "deferred"
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)) as apply_mock, patch(
             "api.routers.sync.settings.server_mode", "iran"
         ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
             "core.cache.invalidate_commodities_cache", new=AsyncMock()) as invalidate_cache, patch(
+            "core.cache.invalidate_admin_market_current_cache", new=AsyncMock()
+        ) as invalidate_admin_market_cache, patch(
             "bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()
         ) as invalidate_bot_cache:
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        self.assertEqual(apply_mock.await_count, 2)
+        self.assertEqual(apply_mock.await_count, 3)
         rollout_mock.assert_not_awaited()
         invalidate_cache.assert_awaited_once()
+        invalidate_admin_market_cache.assert_awaited_once()
         invalidate_bot_cache.assert_awaited_once()
-        self.assertEqual(result, {"status": "success", "processed": 1})
+        self.assertEqual(result, {"status": "success", "processed": 2})
 
     async def test_receive_sync_data_orders_accountant_relations_before_actor_stamped_offers_and_trades(self):
         db = FakeDB()

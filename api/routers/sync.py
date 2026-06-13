@@ -848,6 +848,20 @@ async def receive_sync_data(
                 await invalidate_commodity_cache()
             except Exception:
                 pass
+
+        if "admin_market_messages" in items_tables:
+            try:
+                from core.cache import invalidate_admin_market_current_cache
+                await invalidate_admin_market_current_cache()
+                logger.info("🔄 Admin market current cache invalidated after sync")
+            except Exception as e:
+                logger.error(
+                    "Failed to invalidate admin market current cache",
+                    extra={
+                        "event": "sync.admin_market_current_cache_invalidation_failed",
+                        **_summarize_exception(e),
+                    },
+                )
         
         # --- Handle Offer Publishing on Foreign Server ---
         # Uses SELECT FOR UPDATE SKIP LOCKED to prevent duplicate sends

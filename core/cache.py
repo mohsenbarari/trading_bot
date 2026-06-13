@@ -31,6 +31,9 @@ class CacheKeys:
     
     # Commodities cache (shared with bot)
     COMMODITIES_ALL = "cache:commodities:all"
+
+    # Current Super Admin market message shown on market screens
+    ADMIN_MARKET_CURRENT = "cache:admin_messages:market:current"
     
     # Price average: price_avg:{commodity_id}:{offer_type}:{quantity_range}
     @staticmethod
@@ -45,6 +48,7 @@ class CacheTTL:
     OFFER_COUNT = 30     # 30 seconds
     COMMODITIES = 300    # 5 minutes
     PRICE_AVG = 60       # 1 minute
+    ADMIN_MARKET_CURRENT = 5  # 5 seconds, invalidated/overwritten on writes
 
 
 # ===== Helper Functions =====
@@ -272,3 +276,36 @@ async def set_cached_commodities(commodities: list) -> bool:
 async def invalidate_commodities_cache() -> bool:
     """پاک کردن کش کالاها"""
     return await cache_delete(CacheKeys.COMMODITIES_ALL)
+
+
+async def get_cached_admin_market_current() -> tuple[bool, Optional[dict]]:
+    """Return cached current admin-market message state.
+
+    The boolean indicates whether Redis had a valid cache envelope. The value is
+    either the serialized message dict or None for a cached empty state.
+    """
+    cached = await cache_get(CacheKeys.ADMIN_MARKET_CURRENT)
+    if not isinstance(cached, dict):
+        return False, None
+    if cached.get("version") != 1 or "message" not in cached:
+        return False, None
+    message = cached.get("message")
+    if message is None:
+        return True, None
+    if isinstance(message, dict):
+        return True, message
+    return False, None
+
+
+async def set_cached_admin_market_current(message: Optional[dict]) -> bool:
+    """Cache the current admin-market message or the empty current state."""
+    payload = {
+        "version": 1,
+        "message": message if isinstance(message, dict) else None,
+    }
+    return await cache_set(CacheKeys.ADMIN_MARKET_CURRENT, payload, CacheTTL.ADMIN_MARKET_CURRENT)
+
+
+async def invalidate_admin_market_current_cache() -> bool:
+    """Invalidate the current admin-market message cache."""
+    return await cache_delete(CacheKeys.ADMIN_MARKET_CURRENT)

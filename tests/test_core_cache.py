@@ -17,6 +17,7 @@ class CoreCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cache.CacheKeys.active_offer_count(2), 'user:2:active_offer_count')
         self.assertEqual(cache.CacheKeys.price_average(1, 'buy', '5-10'), 'price_avg:1:buy:5-10')
         self.assertEqual(cache.CacheKeys.COMMODITIES_ALL, 'cache:commodities:all')
+        self.assertEqual(cache.CacheKeys.ADMIN_MARKET_CURRENT, 'cache:admin_messages:market:current')
 
     async def test_get_redis_handles_import_failures(self):
         with patch('core.redis.get_redis_client', side_effect=RuntimeError('down')):
@@ -115,6 +116,9 @@ class CoreCacheTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await cache.get_cached_commodities(), {'id': 1})
             self.assertTrue(await cache.set_cached_commodities([{'id': 1}]))
             self.assertTrue(await cache.invalidate_commodities_cache())
+            self.assertEqual(await cache.get_cached_admin_market_current(), (False, None))
+            self.assertTrue(await cache.set_cached_admin_market_current({'id': 2}))
+            self.assertTrue(await cache.invalidate_admin_market_current_cache())
 
         cache_get.assert_any_await('user:telegram_id:77')
         cache_set.assert_any_await('user:telegram_id:77', {'id': 1}, cache.CacheTTL.USER)
@@ -126,6 +130,33 @@ class CoreCacheTests(unittest.IsolatedAsyncioTestCase):
         cache_get.assert_any_await(cache.CacheKeys.COMMODITIES_ALL)
         cache_set.assert_any_await(cache.CacheKeys.COMMODITIES_ALL, [{'id': 1}], cache.CacheTTL.COMMODITIES)
         cache_delete.assert_any_await(cache.CacheKeys.COMMODITIES_ALL)
+        cache_get.assert_any_await(cache.CacheKeys.ADMIN_MARKET_CURRENT)
+        cache_set.assert_any_await(
+            cache.CacheKeys.ADMIN_MARKET_CURRENT,
+            {'version': 1, 'message': {'id': 2}},
+            cache.CacheTTL.ADMIN_MARKET_CURRENT,
+        )
+        cache_delete.assert_any_await(cache.CacheKeys.ADMIN_MARKET_CURRENT)
+
+    async def test_admin_market_current_cache_envelope(self):
+        with patch('core.cache.cache_get', AsyncMock(return_value=None)):
+            self.assertEqual(await cache.get_cached_admin_market_current(), (False, None))
+
+        with patch('core.cache.cache_get', AsyncMock(return_value={'version': 1, 'message': None})):
+            self.assertEqual(await cache.get_cached_admin_market_current(), (True, None))
+
+        with patch('core.cache.cache_get', AsyncMock(return_value={'version': 1, 'message': {'id': 7}})):
+            self.assertEqual(await cache.get_cached_admin_market_current(), (True, {'id': 7}))
+
+        invalid_envelopes = [
+            {'version': 1},
+            {'version': 2, 'message': {'id': 7}},
+            {'version': 1, 'message': 'bad'},
+            ['bad'],
+        ]
+        for payload in invalid_envelopes:
+            with self.subTest(payload=payload), patch('core.cache.cache_get', AsyncMock(return_value=payload)):
+                self.assertEqual(await cache.get_cached_admin_market_current(), (False, None))
 
 
 if __name__ == '__main__':
