@@ -403,3 +403,6 @@ production-load-realistic:
 
 production-load-sampler:
 	@python3 ./scripts/report_production_load_sampler.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+
+production-load-pool-matrix:
+	@python3 ./scripts/run_stage_l_pool_matrix.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}

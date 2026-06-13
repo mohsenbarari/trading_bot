@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L6 complete. Stage L7 is next.
+Status: Stage L7 failed on the first official target attempt. Stage L7.1 DB pool diagnostics is next.
 
 Last updated: 2026-06-13
 
@@ -22,7 +22,9 @@ same time.
 | `L4` | Complete on 2026-06-13 | Added the low-overhead runtime sampler, `make production-load-sampler`, and automatic sampler wiring into non-dry-run `make production-load-realistic`. Dry-run artifacts `tmp/production-benchmark/20260613T052819Z/load-sampler/` and `tmp/production-benchmark/20260613T052804Z/load-realistic/` passed without production pressure. |
 | `L5` | Complete on 2026-06-13 | Smoke run `TARGET_RPS=50 DURATION=2m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` passed with artifact `tmp/production-benchmark/20260613T065328Z/load-realistic/`: `6001` HTTP requests at `49.98 req/s`, request failure rate `0.27%`, checks pass rate `99.73%`, p95 `101.05ms`, p99 `436.59ms`, chat p95 `137.11ms`, market p95 `97.74ms`, profile p95 `49.18ms`, fixture prepare/cleanup passed, sampler passed with `0` Nginx 5xx and max PostgreSQL connections `36`, and final foreign/Iran sync-health remained clean (`unsynced=0`, `outbound=0`). |
 | `L6` | Complete on 2026-06-13 | Warmup run `TARGET_RPS=100 DURATION=3m` passed with artifact `tmp/production-benchmark/20260613T070616Z/load-realistic/`: `18001` HTTP requests, failure rate `0.39%`, p95 `99.29ms`, p99 `452.02ms`, sampler passed with max PostgreSQL connections `37`, max sync backlog `855`, and no Nginx 5xx in sampled windows. Warmup run `TARGET_RPS=250 DURATION=5m` passed with artifact `tmp/production-benchmark/20260613T071052Z/load-realistic/`: `74870` HTTP requests, failure rate `0.40%`, p95 `475.28ms`, p99 `829.49ms`, max PostgreSQL connections `78`, and final foreign/Iran sync-health clean. Follow-up harness cleanup fixed profile `project-users` false 403 noise and Nginx sampler repeated-window 5xx interpretation; validation artifact `tmp/production-benchmark/20260613T072713Z/load-realistic/` passed at `100 RPS / 1m` with `6001` requests, `0.00%` failures, and `100%` checks. |
-| `L7`-`L11` | Pending | official target, spike, soak, analysis, and release-capacity decision remain pending. |
+| `L7` | Blocked on 2026-06-13 | Official target run `TARGET_RPS=500 DURATION=10m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` completed but failed with artifact `tmp/production-benchmark/20260613T073228Z/load-realistic/`: `224447` HTTP requests, effective throughput `369.43 req/s`, `75553` dropped iterations, failure rate `1.24%`, p95 `19450.78ms`, p99 `30167.22ms`, sampler max PostgreSQL connections `119`, max sync backlog `1420`, and final foreign/Iran sync-health clean. Iran app logs identified the blocking error as `sqlalchemy.exc.TimeoutError: QueuePool limit of size 8 overflow 6 reached, connection timed out, timeout 30.00`, so this is a DB pool exhaustion/latency bottleneck before a clean official L7 can be accepted. |
+| `L7.1` | In progress | Add and run `make production-load-pool-matrix` as a short diagnostic matrix against Iran. It temporarily changes only `DB_POOL_SIZE` and `DB_MAX_OVERFLOW`, recreates the app service, runs the realistic load harness, writes artifacts under `tmp/production-benchmark/<timestamp>/load-pool-matrix/`, then restores the original Iran `.env` and app service. |
+| `L8`-`L11` | Pending | spike, soak, analysis, and release-capacity decision remain pending until L7 passes cleanly. |
 
 ## Objective
 
@@ -52,6 +54,40 @@ The test must answer these questions:
 | Static assets | Nginx direct immutable delivery |
 | Sync | Bidirectional foreign/Iran sync-health must be clean before and after |
 | Existing benchmark root | `tmp/production-benchmark/<timestamp>/` |
+
+## Stage L7.1 DB Pool Diagnostic
+
+The first official L7 attempt did not fail because one route returned bad
+business data. It failed because requests across many endpoint families timed
+out while waiting for a SQLAlchemy connection:
+
+```text
+QueuePool limit of size 8 overflow 6 reached, connection timed out, timeout 30.00
+```
+
+Stage L7.1 is intentionally narrow and reversible:
+
+```text
+make production-load-pool-matrix ARGS="--candidates 8:6,12:8,16:8 --target-rps 500 --duration 2m --json"
+```
+
+Required environment for the load runner remains the same as L7:
+
+```text
+LOAD_RUNNER_HOST=root@45.129.39.182
+LOAD_RUNNER_JUMP_HOST=root@87.107.3.22
+```
+
+Acceptance for L7.1:
+
+- Iran `.env` is restored after the matrix, even when a candidate fails.
+- `trading_bot_app` is healthy after restore.
+- final `make sync-health` and `make sync-health-iran` remain clean.
+- choose a candidate only if 5xx disappears and p95/p99 materially improve
+  without pushing PostgreSQL connections near the safe budget.
+- if all candidates still show high latency, keep the current production pool
+  and classify the bottleneck as query/session-hold-time debt rather than
+  solving it by raising connection counts.
 
 ## Load Generator Choice
 
