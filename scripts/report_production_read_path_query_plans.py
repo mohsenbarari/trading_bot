@@ -25,10 +25,13 @@ from api.routers.users_public import (  # noqa: E402
 )
 from core.db import AsyncSessionLocal  # noqa: E402
 from core.enums import ChatType, UserAccountStatus  # noqa: E402
-from core.services.chat_room_service import build_room_conversation_projection_stmt  # noqa: E402
+from core.services.chat_room_service import (  # noqa: E402
+    build_room_conversation_projection_stmt,
+    build_room_poll_summary_stmt,
+)
 from core.services.chat_service import (  # noqa: E402
     build_direct_conversation_list_stmt,
-    build_direct_unread_poll_stmt,
+    build_direct_poll_summary_stmt,
 )
 from core.utils import utc_now  # noqa: E402
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus  # noqa: E402
@@ -383,7 +386,7 @@ async def build_cases(session, args: argparse.Namespace) -> tuple[list[QueryCase
                 endpoint_family="chat_conversations",
                 name="chat_conversations_direct",
                 statement=build_direct_conversation_list_stmt(current_user.id),
-                notes="Direct portion of GET /api/chat/conversations and GET /api/chat/poll.",
+                notes="Direct portion of GET /api/chat/conversations; RPL4 chat/poll uses a separate lightweight summary query.",
             )
         )
         cases.append(
@@ -400,28 +403,20 @@ async def build_cases(session, args: argparse.Namespace) -> tuple[list[QueryCase
         cases.append(
             QueryCase(
                 endpoint_family="chat_poll",
-                name="chat_poll_direct_full",
-                statement=build_direct_conversation_list_stmt(current_user.id),
-                notes="Current poll path reads the full direct conversation projection, then filters unread rows in Python.",
+                name="chat_poll_direct_summary",
+                statement=build_direct_poll_summary_stmt(current_user.id),
+                notes="RPL4 route behavior: direct rows only when unread or muted.",
             )
         )
         cases.append(
             QueryCase(
                 endpoint_family="chat_poll",
-                name="chat_poll_rooms_full",
-                statement=build_room_conversation_projection_stmt(
+                name="chat_poll_rooms_summary",
+                statement=build_room_poll_summary_stmt(
                     current_user_id=current_user.id,
                     room_type=(ChatType.GROUP, ChatType.CHANNEL),
                 ),
-                notes="Current poll path reads group/channel conversation projections before filtering unread rows.",
-            )
-        )
-        cases.append(
-            QueryCase(
-                endpoint_family="chat_poll",
-                name="chat_poll_direct_unread_diagnostic",
-                statement=build_direct_unread_poll_stmt(current_user.id),
-                notes="Diagnostic unread-only direct query; not the current route behavior, but useful for RPL4.",
+                notes="RPL4 route behavior: room rows only when unread, mentioned, or muted.",
             )
         )
 

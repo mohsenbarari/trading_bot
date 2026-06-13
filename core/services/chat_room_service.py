@@ -115,6 +115,16 @@ class ChannelConversationSummary:
 
 
 @dataclass
+class RoomPollSummary:
+    other_user_id: int
+    other_user_name: str
+    other_user_is_deleted: bool
+    unread_count: int
+    unread_mention_count: int
+    is_muted: bool
+
+
+@dataclass
 class ChannelMemberSummary:
     user_id: int
     account_name: str
@@ -1228,6 +1238,115 @@ def build_room_conversation_projection_stmt(
         .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
     )
     return stmt
+
+
+def build_room_poll_summary_stmt(
+    *,
+    current_user_id: int,
+    room_type: ChatType | Sequence[ChatType],
+):
+    room_types = (room_type,) if isinstance(room_type, ChatType) else tuple(room_type)
+    if not room_types or any(value not in {ChatType.GROUP, ChatType.CHANNEL} for value in room_types):
+        raise ValueError("room_type must be GROUP, CHANNEL, or a sequence of them")
+    room_type_filter = Chat.type == room_types[0] if len(room_types) == 1 else Chat.type.in_(room_types)
+
+    current_member = aliased(ChatMember)
+
+    unread_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == Chat.id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member.last_read_message_id, 0),
+        )
+        .correlate(Chat, current_member)
+        .scalar_subquery()
+    )
+    unread_mention_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == Chat.id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member.last_read_message_id, 0),
+            or_(
+                Message.mention_all.is_(True),
+                text("messages.mentions::jsonb @> CAST(:user_id_str AS jsonb)").bindparams(
+                    user_id_str=str(current_user_id)
+                ),
+            ),
+        )
+        .correlate(Chat, current_member)
+        .scalar_subquery()
+    )
+    manual_unread_count = case(
+        (
+            (current_member.is_marked_unread.is_(True)) & (Chat.last_message_id.is_not(None)),
+            1,
+        ),
+        else_=0,
+    )
+    effective_unread_count = func.greatest(
+        func.coalesce(unread_count, 0),
+        manual_unread_count,
+    )
+    effective_mention_count = func.coalesce(unread_mention_count, 0)
+
+    return (
+        select(
+            Chat.id.label("chat_id"),
+            Chat.type.label("room_type"),
+            Chat.title.label("title"),
+            current_member.is_muted.label("is_muted"),
+            effective_unread_count.label("unread_count"),
+            effective_mention_count.label("unread_mention_count"),
+        )
+        .join(
+            current_member,
+            (current_member.chat_id == Chat.id)
+            & (current_member.user_id == current_user_id)
+            & (current_member.membership_status == ChatMembershipStatus.ACTIVE),
+        )
+        .where(
+            room_type_filter,
+            Chat.is_deleted.is_(False),
+            or_(
+                effective_unread_count > 0,
+                effective_mention_count > 0,
+                current_member.is_muted.is_(True),
+            ),
+        )
+        .order_by(Chat.last_message_at.desc().nullslast(), Chat.id.desc())
+    )
+
+
+def _build_room_poll_summary(row) -> RoomPollSummary:
+    chat_id = int(getattr(row, "chat_id"))
+    room_type = getattr(row, "room_type", None)
+    is_channel = room_type == ChatType.CHANNEL
+    title = getattr(row, "title", None) or (f"کانال {chat_id}" if is_channel else f"گروه {chat_id}")
+    return RoomPollSummary(
+        other_user_id=-chat_id,
+        other_user_name=title,
+        other_user_is_deleted=False,
+        unread_count=int(getattr(row, "unread_count", 0) or 0),
+        unread_mention_count=int(getattr(row, "unread_mention_count", 0) or 0),
+        is_muted=bool(getattr(row, "is_muted", False)),
+    )
+
+
+async def list_room_poll_summaries(
+    db: AsyncSession,
+    *,
+    current_user_id: int,
+) -> list[RoomPollSummary]:
+    stmt = build_room_poll_summary_stmt(
+        current_user_id=current_user_id,
+        room_type=(ChatType.GROUP, ChatType.CHANNEL),
+    )
+    result = await db.execute(stmt)
+    return [_build_room_poll_summary(row) for row in result.all()]
 
 
 async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMemberSummary]:

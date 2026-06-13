@@ -13,6 +13,7 @@ from core.services.chat_room_service import (
     list_group_messages,
     list_groups_for_user,
     list_room_conversations,
+    list_room_poll_summaries,
 )
 
 
@@ -198,6 +199,44 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(rows[1].can_send)
         self.assertEqual(rows[1].max_members, 100)
         self.assertEqual(rows[1].unread_mention_count, 2)
+
+    async def test_list_room_poll_summaries_shapes_only_poll_fields(self):
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(
+                    rows=[
+                        SimpleNamespace(
+                            chat_id=41,
+                            room_type=ChatType.GROUP,
+                            title="Desk",
+                            is_muted=False,
+                            unread_count=3,
+                            unread_mention_count=1,
+                        ),
+                        SimpleNamespace(
+                            chat_id=42,
+                            room_type=ChatType.CHANNEL,
+                            title=None,
+                            is_muted=True,
+                            unread_count=0,
+                            unread_mention_count=0,
+                        ),
+                    ]
+                )
+            ]
+        )
+
+        rows = await list_room_poll_summaries(db, current_user_id=5)
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].other_user_id, -41)
+        self.assertEqual(rows[0].other_user_name, "Desk")
+        self.assertEqual(rows[0].unread_count, 3)
+        self.assertEqual(rows[0].unread_mention_count, 1)
+        self.assertFalse(rows[0].is_muted)
+        self.assertEqual(rows[1].other_user_id, -42)
+        self.assertEqual(rows[1].other_user_name, "کانال 42")
+        self.assertTrue(rows[1].is_muted)
 
     async def test_list_group_members_shapes_creator_flag(self):
         joined_at = datetime(2026, 5, 2, 8, 0, 0)
