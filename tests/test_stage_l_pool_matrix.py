@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import scripts.run_stage_l_pool_matrix as pool_matrix
-from scripts.run_stage_l_pool_matrix import parse_candidates, recommend, summarize_candidate
+from scripts.run_stage_l_pool_matrix import apply_pool_script, parse_candidates, parse_worker_candidates, recommend, summarize_candidate
 
 
 class StageLPoolMatrixTests(unittest.TestCase):
@@ -13,6 +13,18 @@ class StageLPoolMatrixTests(unittest.TestCase):
         self.assertEqual([(item.pool_size, item.max_overflow) for item in candidates], [(8, 6), (12, 8)])
         self.assertEqual(candidates[1].label, "p12-o8")
         self.assertEqual(candidates[1].total_per_worker, 20)
+
+    def test_parse_worker_candidates_defaults_to_current_api_workers(self):
+        self.assertEqual(parse_worker_candidates(None, 8), [8])
+        self.assertEqual(parse_worker_candidates("8,12,12,16", 8), [8, 12, 16])
+
+    def test_apply_pool_script_sets_worker_and_pool_env(self):
+        candidate = parse_candidates("16:8")[0]
+        script = apply_pool_script("/srv/trading-bot/current", "stamp", candidate, 12)
+        self.assertIn('"API_WORKERS": "12"', script)
+        self.assertIn('"DB_POOL_SIZE": "16"', script)
+        self.assertIn('"DB_MAX_OVERFLOW": "8"', script)
+        self.assertIn('DB_POOL_SIZE=%s\\nDB_MAX_OVERFLOW=%s\\nAPI_WORKERS=%s', script)
 
     def test_summarize_candidate_reads_k6_and_sampler_artifacts(self):
         with tempfile.TemporaryDirectory() as root:

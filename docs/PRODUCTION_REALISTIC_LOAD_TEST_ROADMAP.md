@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L7 failed on the first official target attempt. Stage L7.1 showed that a larger DB pool removes 5xx failures but does not reach the 500 RPS target, so Stage L7.2 is endpoint-level bottleneck attribution.
+Status: Stage L7 failed on the first official target attempt. Stage L7.1/L7.2 showed that a larger DB pool removes 5xx failures but does not reach the 500 RPS target; Stage L7.3 is a limited worker+pool diagnostic.
 
 Last updated: 2026-06-13
 
@@ -24,7 +24,8 @@ same time.
 | `L6` | Complete on 2026-06-13 | Warmup run `TARGET_RPS=100 DURATION=3m` passed with artifact `tmp/production-benchmark/20260613T070616Z/load-realistic/`: `18001` HTTP requests, failure rate `0.39%`, p95 `99.29ms`, p99 `452.02ms`, sampler passed with max PostgreSQL connections `37`, max sync backlog `855`, and no Nginx 5xx in sampled windows. Warmup run `TARGET_RPS=250 DURATION=5m` passed with artifact `tmp/production-benchmark/20260613T071052Z/load-realistic/`: `74870` HTTP requests, failure rate `0.40%`, p95 `475.28ms`, p99 `829.49ms`, max PostgreSQL connections `78`, and final foreign/Iran sync-health clean. Follow-up harness cleanup fixed profile `project-users` false 403 noise and Nginx sampler repeated-window 5xx interpretation; validation artifact `tmp/production-benchmark/20260613T072713Z/load-realistic/` passed at `100 RPS / 1m` with `6001` requests, `0.00%` failures, and `100%` checks. |
 | `L7` | Blocked on 2026-06-13 | Official target run `TARGET_RPS=500 DURATION=10m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` completed but failed with artifact `tmp/production-benchmark/20260613T073228Z/load-realistic/`: `224447` HTTP requests, effective throughput `369.43 req/s`, `75553` dropped iterations, failure rate `1.24%`, p95 `19450.78ms`, p99 `30167.22ms`, sampler max PostgreSQL connections `119`, max sync backlog `1420`, and final foreign/Iran sync-health clean. Iran app logs identified the blocking error as `sqlalchemy.exc.TimeoutError: QueuePool limit of size 8 overflow 6 reached, connection timed out, timeout 30.00`, so this is a DB pool exhaustion/latency bottleneck before a clean official L7 can be accepted. |
 | `L7.1` | Complete on 2026-06-13 | Added and ran `make production-load-pool-matrix` as a short diagnostic matrix against Iran. Initial artifact `tmp/production-benchmark/20260613T081541Z/load-pool-matrix/` confirmed the baseline `8:6` candidate still fails at `500 RPS / 2m` (`322.87 req/s`, p95 `17730.4ms`, Nginx 5xx delta `79`), while later candidates were invalid because fixture prepare hit a Docker Compose v1 `KeyError: ContainerConfig` while resuming Iran `sync_worker`. After hardening stale sync-worker removal, artifact `tmp/production-benchmark/20260613T084237Z/load-pool-matrix/` completed the `8:6`, `12:8`, and `16:8` matrix: `16:8` eliminated request failures and Nginx 5xx (`0%`, delta `0`) and lowered p95 to `6900.44ms`, but effective throughput still stayed near `312 req/s` with about `20744` dropped iterations. This means DB pool exhaustion is no longer the only bottleneck; API worker/session-hold-time or specific endpoint latency must be classified next. |
-| `L7.2` | In progress | Add endpoint-level k6 trends and pool-matrix summary breakdown so the next short `16:8` diagnostic run reports slowest endpoint families instead of only global p95/p99. |
+| `L7.2` | Complete on 2026-06-13 | Added endpoint-level k6 trends and pool-matrix summary breakdown. Diagnostic artifact `tmp/production-benchmark/20260613T090738Z/load-pool-matrix/` ran `API_WORKERS=8`, `DB_POOL_SIZE=16`, `DB_MAX_OVERFLOW=8` at `500 RPS / 2m`: `326.39 req/s`, `0%` request failures, `0` new Nginx 5xx delta, p95 `6631.78ms`, p99 `7006.81ms`, `19074` dropped iterations, max PostgreSQL connections `199`. The slowest endpoint families were all clustered around p95 `6.5s`-`6.9s`, so the remaining bottleneck is broad API worker saturation/session-hold-time rather than a single endpoint. During load the Iran app container reached about `810%` CPU while DB connections stayed within budget. |
+| `L7.3` | In progress | Extend the reversible Stage L matrix to test API worker candidates together with the cleanest pool profile (`16:8`) so the next diagnostic can compare `API_WORKERS=8/12/16` under the same realistic 500 RPS load. |
 | `L8`-`L11` | Pending | spike, soak, analysis, and release-capacity decision remain pending until L7 passes cleanly. |
 
 ## Objective
@@ -136,6 +137,47 @@ Acceptance:
   `87.107.3.22`;
 - endpoint breakdown is present in the matrix artifact;
 - no broad tuning is accepted until the slow endpoint families are classified.
+
+Latest L7.2 result:
+
+- Artifact: `tmp/production-benchmark/20260613T090738Z/load-pool-matrix/`.
+- Candidate: `API_WORKERS=8`, `DB_POOL_SIZE=16`, `DB_MAX_OVERFLOW=8`.
+- Result: failed official latency/throughput gates, but clean operationally:
+  `326.39 req/s`, `0%` request failures, p95 `6631.78ms`, p99
+  `7006.81ms`, `19074` dropped iterations, max PostgreSQL connections `199`,
+  and no new Nginx 5xx delta.
+- Endpoint attribution: `offers_list`, `offers_my`, `direct_messages`,
+  `users_public_detail`, `chat_conversations`, `chat_poll`,
+  `customer_relations`, `room_messages`, `users_public_search`, and
+  `accountant_relations` all landed in roughly the same p95 band
+  (`6582ms`-`6878ms`).
+- Interpretation: this is not one pathological endpoint. Requests are broadly
+  queueing while the 8 API workers are saturated; the next reversible
+  diagnostic is worker count under the `16:8` pool profile.
+
+## Stage L7.3 Worker + Pool Diagnostic
+
+Goal: verify whether higher API worker counts improve the realistic `500 RPS`
+mixed workload once DB pool timeouts are removed.
+
+Suggested diagnostic run:
+
+```bash
+LOAD_RUNNER_HOST=root@45.129.39.182 \
+LOAD_RUNNER_JUMP_HOST=root@87.107.3.22 \
+make production-load-pool-matrix ARGS="--workers 8,12,16 --candidates 16:8 --target-rps 500 --duration 2m --load-profile target --no-include-media --no-include-mutations --json"
+```
+
+Acceptance:
+
+- Iran `.env` is restored after all candidates.
+- `trading_bot_app` is healthy after restore.
+- `16` workers must remain under the safe PostgreSQL budget; with `16:8` the
+  theoretical API ceiling is `384` connections, below the `400` safe limit.
+- A higher worker count is accepted only if it materially improves throughput
+  and p95/p99 without new 5xx, sync residue, or unsafe DB pressure.
+- If worker scaling is flat, Stage L7 remains blocked and the next work must be
+  query/session-hold-time optimization, not resource multiplication.
 
 ## Load Generator Choice
 
