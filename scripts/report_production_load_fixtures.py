@@ -316,6 +316,33 @@ def run_sync_health(runner: Runner, *, label: str, timeout: int = 60) -> dict[st
     }
 
 
+def sync_worker_compose_body(action: str) -> str:
+    if action == "pause":
+        return "stop sync_worker"
+    if action == "resume":
+        return "up -d --no-deps sync_worker"
+    raise ValueError(f"Unsupported sync worker action: {action}")
+
+
+def set_sync_workers(runner: Runner, *, action: str) -> dict[str, Any]:
+    body = sync_worker_compose_body(action)
+    results: dict[str, Any] = {}
+    for role in ("foreign", "iran"):
+        result = runner.run(
+            f"sync_worker_{action}_{role}",
+            runner.compose_args(role, body),
+            timeout=90,
+            check=False,
+        )
+        results[role] = {
+            "exit_code": result.exit_code,
+            "status": "ok" if result.exit_code == 0 else "failed",
+        }
+    if any(item["exit_code"] != 0 for item in results.values()):
+        raise LoadFixtureReportError(f"sync_worker {action} failed")
+    return {"status": "ok", "action": action, "roles": results}
+
+
 def wait_sync_clean(runner: Runner, *, label: str, attempts: int, sleep_seconds: float) -> dict[str, Any]:
     snapshots: list[dict[str, Any]] = []
     for index in range(max(1, attempts)):
@@ -421,6 +448,7 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
 
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     runner = Runner(settings=settings, logs_dir=logs_dir)
+    sync_workers_paused = False
     payload: dict[str, Any] = {
         "status": "running",
         "stage": "L2",
@@ -441,12 +469,16 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
             raise LoadFixtureReportError("sync-health is not clean before Stage L2 fixture action")
 
         if args.action in {"prepare", "prepare-and-cleanup"}:
+            payload["sync_worker_pause"] = set_sync_workers(runner, action="pause")
+            sync_workers_paused = True
             prepare_payload = runner.run_json(
                 "iran_prepare",
                 runner.worker_args("iran", *build_prepare_args(args, prefix)),
                 timeout=args.prepare_timeout,
                 redact_stdout_log=True,
             )
+            payload["sync_worker_resume"] = set_sync_workers(runner, action="resume")
+            sync_workers_paused = False
             auth_pool = prepare_payload.get("auth_pool") or {}
             payload["prepare"] = redact_payload({key: value for key, value in prepare_payload.items() if key != "auth_pool"})
             payload["auth_pool_upload"] = upload_auth_pool_to_load_runner(
@@ -536,6 +568,11 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
                 payload["failure_cleanup_error"] = str(cleanup_exc)
         raise
     finally:
+        if sync_workers_paused:
+            try:
+                payload["sync_worker_resume"] = set_sync_workers(runner, action="resume")
+            except Exception as resume_exc:
+                payload["sync_worker_resume_error"] = str(resume_exc)
         payload["finished_at"] = utc_iso()
         payload["commands"] = runner.commands
         write_json(run_dir / "results.json", redact_payload(payload))

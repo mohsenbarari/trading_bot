@@ -1,7 +1,7 @@
 import unittest
 
 from scripts.load_fixture_worker import SEQUENCE_ALIGNMENT_TABLES, SEQUENCE_PREPARE_SAFETY_GAP, mobile_for, redact_auth_pool
-from scripts.report_production_load_fixtures import build_scp_opts, build_ssh_opts, redact_payload
+from scripts.report_production_load_fixtures import build_scp_opts, build_ssh_opts, redact_payload, sync_worker_compose_body
 
 
 class LoadFixtureToolsTests(unittest.TestCase):
@@ -53,6 +53,10 @@ class LoadFixtureToolsTests(unittest.TestCase):
 
     def test_prepare_sequence_alignment_uses_safety_gap(self):
         self.assertGreaterEqual(SEQUENCE_PREPARE_SAFETY_GAP, 1000)
+
+    def test_sync_worker_pause_resume_commands_are_scoped(self):
+        self.assertEqual(sync_worker_compose_body("pause"), "stop sync_worker")
+        self.assertEqual(sync_worker_compose_body("resume"), "up -d --no-deps sync_worker")
 
 
 if __name__ == "__main__":
