@@ -1,7 +1,8 @@
 # Production Read Path Latency Roadmap
 
-Status: Stage RPL2 completed on 2026-06-13 with repeatable query-plan coverage
-for the Stage L hot read surfaces.
+Status: Stage RPL3 completed on 2026-06-13 with no production index/query
+mutation because the Iran EXPLAIN evidence did not show a clear single-query
+plan bottleneck.
 
 Last updated: 2026-06-13
 
@@ -57,7 +58,7 @@ latency under sustained concurrency.
 | `RPL0` | Complete | Artifact review and hot-surface inventory from L9. |
 | `RPL1` | Complete | Low-risk micro-cache for market runtime state; cache only live reads and invalidate after market runtime mutations. |
 | `RPL2` | Complete | Add query-plan/report coverage for the L9 hot read surfaces not already covered by P2/P7: public user search, project users, relation lists, admin users, offers list/my, and chat conversations/poll. |
-| `RPL3` | Pending | Apply index/query fixes only where RPL2 shows a clear plan problem. |
+| `RPL3` | Complete | Apply index/query fixes only where RPL2 shows a clear plan problem; closed with no index/query mutation because current Iran plans are fast and the remaining issue is read amplification/concurrency pressure. |
 | `RPL4` | Pending | Reduce polling/read amplification in Messenger and market screens where backend correctness permits it. |
 | `RPL5` | Pending | Add narrowly-scoped Redis or in-process caches for read-only/current-state endpoints such as current market/admin message reads, with explicit TTL and invalidation. |
 | `RPL6` | Pending | Rerun targeted 500RPS benchmark, then rerun L9 `500 RPS / 30m` only if targeted results improve p95/p99 materially. |
@@ -150,3 +151,65 @@ Validation:
   current small dataset, but execution times were sub-5ms; Stage RPL3 must
   decide index/query changes only after running this report on Iran production
   data and comparing row counts/plans.
+
+## Stage RPL3 - Index/Query Decision
+
+Decision:
+
+- No production index migration or endpoint query rewrite was applied in RPL3.
+- The RPL2 Iran report did not expose one clear slow query-plan problem.
+- The remaining Stage L/L9 bottleneck is still classified as broad read
+  amplification and concurrency pressure, not a single missing index.
+
+Iran evidence:
+
+```text
+generated_at: 2026-06-13T14:04:01Z
+source: docker-compose exec -T app python scripts/report_production_read_path_query_plans.py --json --statement-timeout-ms 10000
+errors: 0
+skipped: 0
+```
+
+Key execution timings from Iran:
+
+| Query case | Execution | Planning | Notes |
+| --- | ---: | ---: | --- |
+| `chat_conversations_direct` | `2.275ms` | `21.091ms` | Highest planning cost; not an index-only signal. |
+| `chat_poll_direct_full` | `1.471ms` | `10.476ms` | Current poll path reads full projection before Python unread filtering. |
+| `chat_poll_direct_unread_diagnostic` | `1.427ms` | `11.205ms` | Useful evidence for RPL4, not current route behavior. |
+| `chat_conversations_rooms` | `1.065ms` | `2.703ms` | Fast execution; contains Seq Scans on small tables. |
+| `project_users_directory` | `0.596ms` | `1.858ms` | Seq Scans present, but no slow execution on current data. |
+| `users_public_search_loadtest` | `0.507ms` | `2.028ms` | Seq Scans present, but zero result rows and fast execution. |
+| `customer_relations_list` | `0.415ms` | `1.071ms` | Fast; pending sweep remains a read-path design concern. |
+| `admin_users_list` | `0.194ms` | `0.192ms` | Uses index scan on users. |
+| `offers_list_active` | `0.204ms` | `1.141ms` | Fast on current data. |
+| `offers_my_owner_history` | `0.178ms` | `0.190ms` | Fast on current data. |
+| `admin_market_current` | `0.348ms` | `2.148ms` | Fast; remains a candidate for scoped cache in RPL5. |
+
+Why no index was added:
+
+- All measured executions are sub-3ms on current Iran production data.
+- No temp reads/writes were observed.
+- Shared read blocks were `0`, so the reported query cases were served from
+  cache and did not show disk pressure.
+- Several Seq Scans exist, but the involved tables are currently small enough
+  that PostgreSQL reasonably chooses sequential scans.
+- Adding indexes now would increase write cost, migration surface, and future
+  maintenance without evidence that it would fix the L9 p95/p99 problem.
+
+RPL3 output:
+
+- Treat index work as deferred evidence-based debt.
+- Revisit index candidates only after row counts grow or a later production
+  report shows:
+  - repeated execution time above `50ms` for an individual hot read query;
+  - temp block usage;
+  - high shared read blocks under warm cache;
+  - bad row-estimate drift with high actual rows;
+  - a Stage L targeted benchmark proving one endpoint family dominates latency.
+
+Next:
+
+- Stage RPL4 should target read amplification first, especially `chat/poll`
+  reading full direct/room conversation projections before Python unread
+  filtering.
