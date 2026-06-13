@@ -331,13 +331,28 @@ def sync_worker_compose_body(action: str) -> str:
     raise ValueError(f"Unsupported sync worker action: {action}")
 
 
+def sync_worker_compose_args(runner: Runner, role: str, action: str) -> list[str]:
+    if action != "resume":
+        return runner.compose_args(role, sync_worker_compose_body(action))
+    compose_file = "docker-compose.yml" if role == "foreign" else "docker-compose.iran.yml"
+    # Compose v1 can fail recreating stopped containers from newer image metadata
+    # with KeyError: ContainerConfig. sync_worker is stateless, so remove before up.
+    body = (
+        compose_probe_script(compose_file, "rm -sf sync_worker >/dev/null 2>&1 || true")
+        + " && "
+        + compose_probe_script(compose_file, sync_worker_compose_body(action))
+    )
+    if role == "foreign":
+        return ["bash", "-lc", f"cd {shlex.quote(str(REPO_ROOT))} && {body}"]
+    return remote_args(runner.settings, f"cd {quote_remote(runner.settings['IRAN_PROJECT_DIR'])} && {body}")
+
+
 def set_sync_workers(runner: Runner, *, action: str) -> dict[str, Any]:
-    body = sync_worker_compose_body(action)
     results: dict[str, Any] = {}
     for role in ("foreign", "iran"):
         result = runner.run(
             f"sync_worker_{action}_{role}",
-            runner.compose_args(role, body),
+            sync_worker_compose_args(runner, role, action),
             timeout=90,
             check=False,
         )

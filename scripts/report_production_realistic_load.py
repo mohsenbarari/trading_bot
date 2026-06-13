@@ -653,7 +653,12 @@ def main(argv: list[str] | None = None) -> int:
         payload = run_report(args)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"STAGE_L_REALISTIC_DONE status=failed error={type(exc).__name__}", file=sys.stderr)
         return 1
+    print(
+        f"STAGE_L_REALISTIC_DONE status={payload.get('status')} artifact={payload.get('artifact_dir')}",
+        file=sys.stderr,
+    )
     if args.json or args.dry_run or args.list_scenarios:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if payload.get("status") == "passed" else 1

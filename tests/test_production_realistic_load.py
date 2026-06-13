@@ -4,6 +4,7 @@ from pathlib import Path
 
 from scripts.report_production_realistic_load import (
     K6_SCRIPT,
+    __file__ as REALISTIC_LOAD_SCRIPT,
     SCENARIO_CONTRACT,
     THRESHOLD_CONTRACT,
     build_contract,
@@ -78,6 +79,10 @@ class ProductionRealisticLoadTests(unittest.TestCase):
         self.assertIn("0", command)
         self.assertIn("--roles", command)
         self.assertIn("both", command)
+
+    def test_realistic_load_emits_done_marker_for_teed_logs(self):
+        source = Path(REALISTIC_LOAD_SCRIPT).read_text(encoding="utf-8")
+        self.assertIn("STAGE_L_REALISTIC_DONE", source)
 
 
 if __name__ == "__main__":
