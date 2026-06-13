@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L7 failed on the first official target attempt. Stage L7.1-L7.3 showed that larger pools and more API workers improve different symptoms but still do not pass the official 500 RPS gates; Stage L7.4 is failure-cause capture for upstream resets.
+Status: Stage L7 failed on the first official target attempt. Stage L7.1-L7.4 showed that `workers=16 pool=16:8` is close on latency/throughput but still fails because of Nginx 502 upstream resets; Stage L7.5 applies a narrow Nginx API keepalive/header fix before rerunning that candidate.
 
 Last updated: 2026-06-13
 
@@ -26,7 +26,8 @@ same time.
 | `L7.1` | Complete on 2026-06-13 | Added and ran `make production-load-pool-matrix` as a short diagnostic matrix against Iran. Initial artifact `tmp/production-benchmark/20260613T081541Z/load-pool-matrix/` confirmed the baseline `8:6` candidate still fails at `500 RPS / 2m` (`322.87 req/s`, p95 `17730.4ms`, Nginx 5xx delta `79`), while later candidates were invalid because fixture prepare hit a Docker Compose v1 `KeyError: ContainerConfig` while resuming Iran `sync_worker`. After hardening stale sync-worker removal, artifact `tmp/production-benchmark/20260613T084237Z/load-pool-matrix/` completed the `8:6`, `12:8`, and `16:8` matrix: `16:8` eliminated request failures and Nginx 5xx (`0%`, delta `0`) and lowered p95 to `6900.44ms`, but effective throughput still stayed near `312 req/s` with about `20744` dropped iterations. This means DB pool exhaustion is no longer the only bottleneck; API worker/session-hold-time or specific endpoint latency must be classified next. |
 | `L7.2` | Complete on 2026-06-13 | Added endpoint-level k6 trends and pool-matrix summary breakdown. Diagnostic artifact `tmp/production-benchmark/20260613T090738Z/load-pool-matrix/` ran `API_WORKERS=8`, `DB_POOL_SIZE=16`, `DB_MAX_OVERFLOW=8` at `500 RPS / 2m`: `326.39 req/s`, `0%` request failures, `0` new Nginx 5xx delta, p95 `6631.78ms`, p99 `7006.81ms`, `19074` dropped iterations, max PostgreSQL connections `199`. The slowest endpoint families were all clustered around p95 `6.5s`-`6.9s`, so the remaining bottleneck is broad API worker saturation/session-hold-time rather than a single endpoint. During load the Iran app container reached about `810%` CPU while DB connections stayed within budget. |
 | `L7.3` | Complete on 2026-06-13 | Extended the reversible Stage L matrix to test API worker candidates together with pool candidates. Artifact `tmp/production-benchmark/20260613T092130Z/load-pool-matrix/` compared `API_WORKERS=8/12/16` with pool `16:8`: `8` workers stayed operationally clean but reached only `321.71 req/s` with p95 `6901.47ms`; `12` workers improved throughput to `452.29 req/s` and p95 `2980.97ms` but produced `6.897%` failures and `604` load-runner 502s; `16` workers reached `483.85 req/s` with p95 `1172.38ms` and p99 `1632.33ms`, but produced `7.342%` failures and `1037` load-runner 502s. Nginx error logs showed `recv() failed (104: Connection reset by peer) while reading response header from upstream` across high-volume endpoints, so higher workers cannot be accepted until the upstream resets are explained and removed. |
-| `L7.4` | In progress | Harden diagnostic capture so candidate app logs are saved before each app recreate and add a short post-apply settle window. Rerun the closest failing candidate (`workers=16 pool=16:8`) to capture the application-side cause of the 502/reset failures. |
+| `L7.4` | Complete on 2026-06-13 | Hardened diagnostic capture so candidate app logs are saved before each app recreate and added a short post-apply settle window. Artifact `tmp/production-benchmark/20260613T094038Z/load-pool-matrix/` reran `workers=16 pool=16:8`: `488.97 req/s`, p95 `826.04ms`, p99 `1356.6ms`, dropped `1119`, max PostgreSQL connections `263`, but failure remained `7.255%` with Nginx 5xx delta `1792`. App logs did not show request exceptions or OOM/restart evidence; Nginx classified the failures as upstream resets. The live Nginx config was found to send `Connection "upgrade"` on every `/api/` request instead of only websocket traffic, so Stage L7.5 is a narrow Nginx proxy fix. |
+| `L7.5` | In progress | Update production Nginx templates/scripts so normal `/api/` traffic uses an upstream keepalive pool and clears the `Connection` header, while websocket upgrade remains isolated under `/api/realtime/ws`. Apply the Nginx-only change on Iran and rerun `workers=16 pool=16:8`. |
 | `L8`-`L11` | Pending | spike, soak, analysis, and release-capacity decision remain pending until L7 passes cleanly. |
 
 ## Objective
@@ -228,6 +229,43 @@ Acceptance:
   database disconnect, process timeout, OOM/kill, or Nginx/upstream tuning;
 - if the 502s disappear with settle/log capture only, rerun the same candidate
   once more before considering it for full L7.
+
+Latest L7.4 result:
+
+- Artifact: `tmp/production-benchmark/20260613T094038Z/load-pool-matrix/`.
+- Candidate: `workers=16 pool=16:8`.
+- Result: `488.97 req/s`, failure `7.255%`, p95 `826.04ms`, p99
+  `1356.6ms`, dropped `1119`, max PostgreSQL connections `263`, Nginx 5xx
+  delta `1792`.
+- The app container did not report OOM/restart and captured app logs did not
+  show request exceptions for the load-runner traffic; sync deferred warnings
+  were present but final sync-health on both servers was clean.
+- Nginx error/access logs classified the load-runner failures as HTTP `502`
+  upstream resets.
+- Live Nginx config issue found: normal `/api/` traffic was sending
+  `proxy_set_header Connection "upgrade";`, which should be websocket-only.
+
+## Stage L7.5 Nginx API Proxy Keepalive
+
+Goal: remove avoidable reverse-proxy connection churn/reset risk before further
+worker/pool tuning.
+
+Changes:
+
+- Define an upstream keepalive pool for the API backend.
+- Route normal `/api/` traffic to that upstream with
+  `proxy_set_header Connection "";`.
+- Keep `Upgrade` / `Connection "upgrade"` only in `/api/realtime/ws`.
+- Apply the Nginx-only config change to Iran, validate `nginx -t`, reload
+  Nginx, and rerun `workers=16 pool=16:8`.
+
+Acceptance:
+
+- `nginx -t` passes on Iran before reload.
+- `/api/config` returns 200 after reload.
+- rerun reduces or removes load-runner `502` upstream resets.
+- if failures remain near 7%, classify the next blocker outside Nginx and avoid
+  further proxy tuning.
 
 ## Load Generator Choice
 

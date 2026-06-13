@@ -24,6 +24,11 @@ mkdir -p "$UPLOADS_DIR"
 
 echo "⚙️ Writing Nginx site config..."
 cat > "$SITE_PATH" <<'EOF'
+upstream trading_bot_api {
+    server 127.0.0.1:8000;
+    keepalive 256;
+}
+
 server {
     server_name coin.362514.ir;
     client_max_body_size 50M;
@@ -39,15 +44,14 @@ server {
     # Prometheus scrapes should use the app container's local loopback binding
     # or an explicit observability key, never the public reverse proxy.
     location /api/ {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://trading_bot_api;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection "";
     }
 
     # Hashed frontend assets are immutable and should not consume API workers.
@@ -109,15 +113,14 @@ server {
 
     # Keep the default SPA/app serving path proxied to the FastAPI container.
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://trading_bot_api;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection "";
     }
 
     listen 443 ssl;
