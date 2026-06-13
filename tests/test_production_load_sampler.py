@@ -24,11 +24,23 @@ class ProductionLoadSamplerTests(unittest.TestCase):
                 {
                     "hosts": [
                         {
+                            "role": "iran",
                             "postgres": {"connection_budget": {"current_connections": 42}},
                             "redis": {"memory": {"used_memory": 1234}},
                             "sync": {"unsynced_change_log_count": 7},
                             "nginx": {"access": {"status_families": {"5xx": 2}}},
                             "docker": {"collector_error": {"exit_code": 1}},
+                        }
+                    ]
+                },
+                {
+                    "hosts": [
+                        {
+                            "role": "iran",
+                            "postgres": {"connection_budget": {"current_connections": 40}},
+                            "redis": {"memory": {"used_memory": 1200}},
+                            "sync": {"unsynced_change_log_count": 6},
+                            "nginx": {"access": {"status_families": {"5xx": 5}}},
                         }
                     ]
                 },
@@ -40,7 +52,9 @@ class ProductionLoadSamplerTests(unittest.TestCase):
         self.assertEqual(summary["max_postgres_connections"], 42)
         self.assertEqual(summary["max_redis_used_memory"], 1234)
         self.assertEqual(summary["max_sync_backlog"], 7)
-        self.assertEqual(summary["nginx_5xx_count_in_log_windows"], 2)
+        self.assertEqual(summary["max_nginx_5xx_in_log_window"], 5)
+        self.assertEqual(summary["max_nginx_5xx_delta_from_first_sample"], 3)
+        self.assertEqual(summary["nginx_5xx_count_in_log_windows"], 5)
 
     def test_dry_run_writes_redacted_contract(self):
         artifact_dir = Path("tmp/test-production-load-sampler")

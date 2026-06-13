@@ -421,13 +421,11 @@ function profileBrowser() {
   const entry = tokenEntry(persona);
   if (!entry) return;
   const publicUserId = randomItem(targetList('public_profile_user_ids'), entry.user_id);
-  const ownerIds = targetList('customer_relation_owner_ids');
-  const ownerId = ownerIds.indexOf(entry.user_id) !== -1 ? entry.user_id : randomItem(ownerIds, entry.user_id);
   randomItem([
     () => getJson(persona, entry, 'auth_me', '/auth/me'),
     () => getJson(persona, entry, 'users_public_search', '/users-public/search?q=loadtest&limit=20'),
     () => getJson(persona, entry, 'users_public_detail', `/users-public/${publicUserId}`),
-    () => getJson(persona, entry, 'project_users', `/users-public/${ownerId}/project-users?limit=30`),
+    () => getJson(persona, entry, 'project_users', `/users-public/${entry.user_id}/project-users?limit=30`),
     () => getJson(persona, entry, 'customer_relations', '/customers/owner-relations'),
     () => getJson(persona, entry, 'accountant_relations', '/accountants/owner-relations'),
   ])();

@@ -224,7 +224,9 @@ def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
     max_connections = 0
     max_redis_memory = 0
     max_sync_backlog = 0
-    nginx_5xx = 0
+    max_nginx_5xx = 0
+    baseline_nginx_5xx_by_role: dict[str, int] = {}
+    max_nginx_5xx_delta = 0
     for sample in samples:
         if sample.get("collector_error"):
             collector_errors += 1
@@ -239,7 +241,11 @@ def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
             sync = host.get("sync") or {}
             max_sync_backlog = max(max_sync_backlog, int(sync.get("unsynced_change_log_count") or 0))
             families = (((host.get("nginx") or {}).get("access") or {}).get("status_families") or {})
-            nginx_5xx += int(families.get("5xx") or 0)
+            nginx_5xx = int(families.get("5xx") or 0)
+            max_nginx_5xx = max(max_nginx_5xx, nginx_5xx)
+            role = str(host.get("role") or "unknown")
+            baseline = baseline_nginx_5xx_by_role.setdefault(role, nginx_5xx)
+            max_nginx_5xx_delta = max(max_nginx_5xx_delta, max(0, nginx_5xx - baseline))
     return {
         "sample_count": len(samples),
         "host_sample_count": host_count,
@@ -247,7 +253,9 @@ def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "max_postgres_connections": max_connections,
         "max_redis_used_memory": max_redis_memory,
         "max_sync_backlog": max_sync_backlog,
-        "nginx_5xx_count_in_log_windows": nginx_5xx,
+        "max_nginx_5xx_in_log_window": max_nginx_5xx,
+        "max_nginx_5xx_delta_from_first_sample": max_nginx_5xx_delta,
+        "nginx_5xx_count_in_log_windows": max_nginx_5xx,
         "ok": collector_errors == 0,
     }
 
@@ -265,7 +273,8 @@ def write_summary(path: Path, payload: dict[str, Any]) -> None:
         f"- Max PostgreSQL connections: `{summary.get('max_postgres_connections')}`",
         f"- Max Redis used memory: `{summary.get('max_redis_used_memory')}`",
         f"- Max sync backlog: `{summary.get('max_sync_backlog')}`",
-        f"- Nginx 5xx count in sampled log windows: `{summary.get('nginx_5xx_count_in_log_windows')}`",
+        f"- Max Nginx 5xx in a sampled log window: `{summary.get('max_nginx_5xx_in_log_window')}`",
+        f"- Max Nginx 5xx delta from first sample: `{summary.get('max_nginx_5xx_delta_from_first_sample')}`",
         "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
