@@ -1,7 +1,7 @@
 # Production Read Path Latency Roadmap
 
-Status: Stage RPL1 completed on 2026-06-13 with one low-risk hot-path fix:
-short in-process caching for `/api/trading-settings/market-state`.
+Status: Stage RPL2 completed on 2026-06-13 with repeatable query-plan coverage
+for the Stage L hot read surfaces.
 
 Last updated: 2026-06-13
 
@@ -56,7 +56,7 @@ latency under sustained concurrency.
 | --- | --- | --- |
 | `RPL0` | Complete | Artifact review and hot-surface inventory from L9. |
 | `RPL1` | Complete | Low-risk micro-cache for market runtime state; cache only live reads and invalidate after market runtime mutations. |
-| `RPL2` | Pending | Add query-plan/report coverage for the L9 hot read surfaces not already covered by P2/P7: public user search, project users, relation lists, admin users, offers list/my, and chat conversations/poll. |
+| `RPL2` | Complete | Add query-plan/report coverage for the L9 hot read surfaces not already covered by P2/P7: public user search, project users, relation lists, admin users, offers list/my, and chat conversations/poll. |
 | `RPL3` | Pending | Apply index/query fixes only where RPL2 shows a clear plan problem. |
 | `RPL4` | Pending | Reduce polling/read amplification in Messenger and market screens where backend correctness permits it. |
 | `RPL5` | Pending | Add narrowly-scoped Redis or in-process caches for read-only/current-state endpoints such as current market/admin message reads, with explicit TTL and invalidation. |
@@ -100,3 +100,53 @@ Validation:
 - `git diff --check` passed.
 - Follow-up benchmark must compare endpoint p95 for `market_state` before and
   after deployment.
+
+## Stage RPL2 - Production Read-Path Query Plans
+
+Why this stage:
+
+- Stage L showed broad read-path latency rather than one hard resource limit.
+- Before adding indexes or caches, each hot read surface needs a repeatable
+  `EXPLAIN ANALYZE` entrypoint.
+- The report must mirror the Stage L endpoint parameters so future tuning is
+  measured against the same traffic contract.
+
+Change:
+
+- Added `scripts/report_production_read_path_query_plans.py`.
+- Added `make production-read-path-query-plans`.
+- The report covers:
+  - `GET /api/users-public/search?q=loadtest&limit=20`;
+  - `GET /api/users-public/{id}/project-users?limit=30`;
+  - `GET /api/accountants/owner-relations`;
+  - `GET /api/customers/owner-relations`;
+  - `GET /api/users/?limit=30`;
+  - `GET /api/offers/?limit=30`;
+  - `GET /api/offers/my?limit=30`;
+  - `GET /api/admin-messages/market/current`;
+  - `GET /api/chat/conversations`;
+  - `GET /api/chat/poll`.
+
+Correctness budget:
+
+- Read-only `EXPLAIN ANALYZE` only.
+- Default per-statement timeout: `15000ms`.
+- No route/runtime behavior changes.
+- `chat/poll` is intentionally documented as reading full direct/room
+  conversation projections and then filtering unread rows in Python. The report
+  includes a direct unread-only diagnostic query only as RPL4 evidence, not as a
+  claim about current route behavior.
+
+Validation:
+
+- `python3 -m py_compile scripts/report_production_read_path_query_plans.py`
+  passed.
+- `python3 scripts/report_production_read_path_query_plans.py --help` passed.
+- Local Compose read-only execution passed:
+  `docker compose exec -T app python scripts/report_production_read_path_query_plans.py --output-dir tmp/production-read-path-query-plans --statement-timeout-ms 10000`.
+- Local artifact:
+  `tmp/production-read-path-query-plans/production-read-path-query-plans-20260613T134858Z.json`.
+- Initial local result had no report errors. Several Seq Scans appear on the
+  current small dataset, but execution times were sub-5ms; Stage RPL3 must
+  decide index/query changes only after running this report on Iran production
+  data and comparing row counts/plans.
