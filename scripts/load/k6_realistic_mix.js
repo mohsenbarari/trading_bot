@@ -153,15 +153,24 @@ function targetList(name) {
   return authPool && authPool.targets ? authPool.targets[name] || [] : [];
 }
 
-function authHeaders(entry, extra = {}) {
-  return {
-    headers: {
-      Authorization: `${entry.token_type || 'bearer'} ${entry.access_token}`,
-      'Content-Type': 'application/json',
-      'X-Load-Test': 'stage-l3',
-      ...extra,
-    },
+function authHeaders(entry, extra) {
+  const headers = {
+    Authorization: `${entry.token_type || 'bearer'} ${entry.access_token}`,
+    'Content-Type': 'application/json',
+    'X-Load-Test': 'stage-l3',
   };
+  Object.keys(extra || {}).forEach(function (key) {
+    headers[key] = extra[key];
+  });
+  return {
+    headers: headers,
+  };
+}
+
+function requestParams(entry, persona, endpoint, extra) {
+  const params = authHeaders(entry, extra);
+  params.tags = { persona: persona, endpoint: endpoint };
+  return params;
 }
 
 function url(path) {
@@ -182,28 +191,19 @@ function record(persona, endpoint, res, expected = [200], allowBusinessRejection
 }
 
 function getJson(persona, entry, endpoint, path, expected = [200]) {
-  const res = http.get(url(path), {
-    ...authHeaders(entry),
-    tags: { persona, endpoint },
-  });
+  const res = http.get(url(path), requestParams(entry, persona, endpoint));
   record(persona, endpoint, res, expected);
   return res;
 }
 
 function postJson(persona, entry, endpoint, path, payload, expected = [200, 201], allowBusinessRejection = false) {
-  const res = http.post(url(path), JSON.stringify(payload), {
-    ...authHeaders(entry),
-    tags: { persona, endpoint },
-  });
+  const res = http.post(url(path), JSON.stringify(payload), requestParams(entry, persona, endpoint));
   record(persona, endpoint, res, expected, allowBusinessRejection);
   return res;
 }
 
 function patchJson(persona, entry, endpoint, path, payload, expected = [200, 204]) {
-  const res = http.patch(url(path), JSON.stringify(payload), {
-    ...authHeaders(entry),
-    tags: { persona, endpoint },
-  });
+  const res = http.patch(url(path), JSON.stringify(payload), requestParams(entry, persona, endpoint));
   record(persona, endpoint, res, expected);
   return res;
 }
@@ -290,7 +290,7 @@ function chatTexter() {
   const entry = tokenEntry(persona);
   if (!entry) return;
   const directPair = randomItem(targetList('direct_pairs'));
-  const room = randomItem([...targetList('groups'), ...targetList('channels')]);
+  const room = randomItem(targetList('groups').concat(targetList('channels')));
   if (!INCLUDE_MUTATIONS || Math.random() < 0.55) {
     randomItem([
       () => getJson(persona, entry, 'chat_conversations', '/chat/conversations'),
