@@ -1,8 +1,7 @@
 # Production Read Path Latency Roadmap
 
-Status: Stage RPL4 completed on 2026-06-13 by reducing Messenger
-`/api/chat/poll` read amplification without changing conversation-list
-behavior.
+Status: Stage RPL5 completed on 2026-06-13 by adding a narrow
+Redis-backed cache for the current admin market message read path.
 
 Last updated: 2026-06-13
 
@@ -60,7 +59,7 @@ latency under sustained concurrency.
 | `RPL2` | Complete | Add query-plan/report coverage for the L9 hot read surfaces not already covered by P2/P7: public user search, project users, relation lists, admin users, offers list/my, and chat conversations/poll. |
 | `RPL3` | Complete | Apply index/query fixes only where RPL2 shows a clear plan problem; closed with no index/query mutation because current Iran plans are fast and the remaining issue is read amplification/concurrency pressure. |
 | `RPL4` | Complete | Reduce polling/read amplification in Messenger and market screens where backend correctness permits it. |
-| `RPL5` | Pending | Add narrowly-scoped Redis or in-process caches for read-only/current-state endpoints such as current market/admin message reads, with explicit TTL and invalidation. |
+| `RPL5` | Complete | Add narrowly-scoped Redis or in-process caches for read-only/current-state endpoints such as current market/admin message reads, with explicit TTL and invalidation. |
 | `RPL6` | Pending | Rerun targeted 500RPS benchmark, then rerun L9 `500 RPS / 30m` only if targeted results improve p95/p99 materially. |
 
 ## Stage RPL1 - Market Runtime Micro-Cache
@@ -260,9 +259,60 @@ Validation:
     `1.427ms`, no temp blocks.
 - `git diff --check` passed.
 
+## Stage RPL5 - Current-State Cache
+
+Decision:
+
+- Cache only `GET /api/admin-messages/market/current` in this stage.
+- Do not cache unread/chat state, relation permissions, or endpoint families
+  whose correctness depends on per-user rapidly changing state.
+- Use Redis rather than in-process memory so all API workers share the same
+  current-state view.
+
+Change:
+
+- Added cache key `cache:admin_messages:market:current`.
+- Added a five-second TTL through `CacheTTL.ADMIN_MARKET_CURRENT`.
+- Stored the cache value in a versioned envelope:
+  - `{"version": 1, "message": <serialized message>}`;
+  - `{"version": 1, "message": null}` for a valid cached empty state.
+- `GET /api/admin-messages/market/current` now:
+  - returns the cached Pydantic-validated message on cache hit;
+  - returns cached `None` when no current message exists;
+  - invalidates malformed cached payloads and falls back to the database;
+  - writes the database fallback back into Redis.
+- `POST /api/admin-messages/market` overwrites the cache with the newly
+  published message.
+- `DELETE /api/admin-messages/market/current` overwrites the cache with the
+  empty state.
+- Cross-server sync invalidates this cache when an `admin_market_messages`
+  item is received.
+
+Correctness budget:
+
+- Normal writes overwrite the cache immediately.
+- Cross-server updates invalidate the cache during sync receive.
+- If Redis is unavailable, route behavior falls back to the existing database
+  path.
+- If an invalid envelope is found, the route treats it as a miss.
+- Maximum tolerated staleness is five seconds if an invalidation/write fails
+  but Redis remains reachable.
+
+Validation:
+
+- `python3 -m unittest tests.test_admin_messages_router tests.test_core_cache tests.test_sync_router_receive_basic tests.test_sync_router_remaining_paths` passed.
+- `python3 -m py_compile api/routers/admin_messages.py api/routers/sync.py core/cache.py tests/test_admin_messages_router.py tests/test_core_cache.py tests/test_sync_router_receive_basic.py` passed.
+- `git diff --check` passed.
+- Unit coverage includes:
+  - cache hit without database read;
+  - cache miss with database fallback and cache fill;
+  - cached empty current state;
+  - malformed cache invalidation;
+  - cache overwrite on publish/clear;
+  - sync invalidation for `admin_market_messages`;
+  - envelope behavior in `core.cache`.
+
 Next:
 
-- Stage RPL5 should target tightly scoped current-state caches, especially
-  reads that are naturally cacheable and already have clear invalidation points.
 - Stage RPL6 should run a targeted 500RPS benchmark before deciding whether a
   full L9 rerun is worth the cost.

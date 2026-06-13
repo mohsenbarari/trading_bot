@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -12,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.deps import get_current_user, get_db, verify_super_admin
 from api.routers.chat_schemas import MessageRead
 from core.audit_logger import audit_log
+from core.cache import (
+    get_cached_admin_market_current,
+    invalidate_admin_market_current_cache,
+    set_cached_admin_market_current,
+)
 from core.enums import NotificationCategory, NotificationLevel
 from core.events import publish_event_sync
 from core.services.admin_message_service import (
@@ -32,6 +38,7 @@ from models.user import User
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class AdminMarketMessageCreate(BaseModel):
@@ -85,6 +92,24 @@ def _serialize_market_message(message: AdminMarketMessage | None) -> AdminMarket
         published_at=message.published_at,
         created_at=message.created_at,
     )
+
+
+def _market_message_cache_payload(message: AdminMarketMessageRead | None) -> dict | None:
+    return message.model_dump(mode="json") if message is not None else None
+
+
+async def _read_cached_market_message() -> tuple[bool, AdminMarketMessageRead | None]:
+    cache_hit, cached_payload = await get_cached_admin_market_current()
+    if not cache_hit:
+        return False, None
+    if cached_payload is None:
+        return True, None
+    try:
+        return True, AdminMarketMessageRead.model_validate(cached_payload)
+    except Exception as exc:
+        logger.debug("Invalid admin-market current cache payload: %s", type(exc).__name__)
+        await invalidate_admin_market_current_cache()
+        return False, None
 
 
 def _serialize_broadcast(message: AdminBroadcastMessage) -> AdminBroadcastRead:
@@ -157,7 +182,12 @@ async def get_current_market_message(
     db: AsyncSession = Depends(get_db),
 ):
     _ = current_user
-    return _serialize_market_message(await get_current_market_management_message(db))
+    cache_hit, cached_message = await _read_cached_market_message()
+    if cache_hit:
+        return cached_message
+    message = _serialize_market_message(await get_current_market_management_message(db))
+    await set_cached_admin_market_current(_market_message_cache_payload(message))
+    return message
 
 
 @router.get("/market/history", response_model=list[AdminMarketMessageRead])
@@ -185,6 +215,7 @@ async def create_market_message(
         notified_recipients_count=len(recipient_ids),
     )
     payload = _serialize_market_message(message).model_dump(mode="json")
+    await set_cached_admin_market_current(payload)
     publish_event_sync("market:admin_message_published", payload)
     await _notify_users(
         db,
@@ -203,6 +234,7 @@ async def clear_current_market_message(
 ):
     _ = current_user
     message = await deactivate_current_market_management_message(db)
+    await set_cached_admin_market_current(None)
     publish_event_sync("market:admin_message_published", None)
     return _serialize_market_message(message)
 
