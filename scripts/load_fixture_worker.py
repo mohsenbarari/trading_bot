@@ -842,7 +842,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
                 "notification_users": [token_entry(user, persona="notification_user", expires_delta=token_expiry) for user in notification_targets[:24]],
                 "admin_light_read": [
                     token_entry(user, persona="admin_light_read", expires_delta=token_expiry)
-                    for user in [super_admin, *middle_admins[:4]]
+                    for user in [super_admin]
                 ],
             },
             "targets": {

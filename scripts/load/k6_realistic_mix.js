@@ -136,6 +136,16 @@ scenarioContract.forEach((item) => {
 });
 
 const authPool = AUTH_POOL_PATH ? JSON.parse(open(AUTH_POOL_PATH)) : null;
+const personaPoolKeys = {
+  market_watcher: 'market_watchers',
+  offer_maker: 'offer_makers',
+  trade_taker: 'trade_takers',
+  chat_texter: 'chat_texters',
+  chat_media_sender: 'chat_media_senders',
+  profile_browser: 'profile_browsers',
+  notification_user: 'notification_users',
+  admin_light_read: 'admin_light_read',
+};
 
 function randomItem(items, fallback = null) {
   if (!items || items.length === 0) {
@@ -145,7 +155,8 @@ function randomItem(items, fallback = null) {
 }
 
 function tokenEntry(persona) {
-  const entries = authPool && authPool.personas ? authPool.personas[persona] || [] : [];
+  const poolKey = personaPoolKeys[persona] || persona;
+  const entries = authPool && authPool.personas ? authPool.personas[poolKey] || [] : [];
   return randomItem(entries);
 }
 
