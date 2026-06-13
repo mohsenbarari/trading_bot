@@ -733,7 +733,14 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
             chat.last_message_id = message.id
             chat.last_message_at = now
             chats.append(chat)
-            group_summaries.append({"chat_id": int(chat.id), "member_count": len(seen), "seed_message_id": int(message.id)})
+            group_summaries.append(
+                {
+                    "chat_id": int(chat.id),
+                    "member_count": len(seen),
+                    "member_ids": sorted(seen),
+                    "seed_message_id": int(message.id),
+                }
+            )
 
         channel_summaries: list[dict[str, Any]] = []
         channel_member_source = [*normal_users, *middle_admins, *accountant_users, *customer_users]
@@ -782,7 +789,14 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
             chat.last_message_id = message.id
             chat.last_message_at = now
             chats.append(chat)
-            channel_summaries.append({"chat_id": int(chat.id), "member_count": len(seen), "seed_message_id": int(message.id)})
+            channel_summaries.append(
+                {
+                    "chat_id": int(chat.id),
+                    "member_count": len(seen),
+                    "member_ids": sorted(seen),
+                    "seed_message_id": int(message.id),
+                }
+            )
 
         commodity_rows = list((await db.execute(select(Commodity).order_by(Commodity.id.asc()).limit(5))).scalars().all())
         if not commodity_rows:
@@ -858,7 +872,14 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
             )
             db.add(trade)
             await db.flush()
-            trade_summaries.append({"trade_id": int(trade.id), "trade_number": int(trade.trade_number)})
+            trade_summaries.append(
+                {
+                    "trade_id": int(trade.id),
+                    "trade_number": int(trade.trade_number),
+                    "offer_user_id": int(maker.id),
+                    "responder_user_id": int(responder.id),
+                }
+            )
 
         notification_targets = [super_admin, *middle_admins, *normal_users, *accountant_users, *customer_users]
         for index in range(plan.notifications):
@@ -891,7 +912,7 @@ async def prepare(prefix: str, plan: FixturePlan) -> dict[str, Any]:
                 "chat_media_senders": [token_entry(user, persona="chat_media_sender", expires_delta=token_expiry) for user in normal_users[40:52]],
                 "profile_browsers": [
                     token_entry(user, persona="profile_browser", expires_delta=token_expiry)
-                    for user in [*middle_admins[:4], *normal_users[52:68], *customer_users[:8]]
+                    for user in owners[:24]
                 ],
                 "notification_users": [token_entry(user, persona="notification_user", expires_delta=token_expiry) for user in notification_targets[:24]],
                 "admin_light_read": [
