@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L5 complete. Stage L6 is next.
+Status: Stage L6 complete. Stage L7 is next.
 
 Last updated: 2026-06-13
 
@@ -21,7 +21,8 @@ same time.
 | `L3` | Complete on 2026-06-12 | Added the mixed k6 harness, production runner, and make target. Dry-run artifact `tmp/production-benchmark/20260612T195338Z/load-realistic/` passed without touching production and validated scenario weights, manifest-derived Iran URL, runtime flags, and threshold contract. |
 | `L4` | Complete on 2026-06-13 | Added the low-overhead runtime sampler, `make production-load-sampler`, and automatic sampler wiring into non-dry-run `make production-load-realistic`. Dry-run artifacts `tmp/production-benchmark/20260613T052819Z/load-sampler/` and `tmp/production-benchmark/20260613T052804Z/load-realistic/` passed without production pressure. |
 | `L5` | Complete on 2026-06-13 | Smoke run `TARGET_RPS=50 DURATION=2m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` passed with artifact `tmp/production-benchmark/20260613T065328Z/load-realistic/`: `6001` HTTP requests at `49.98 req/s`, request failure rate `0.27%`, checks pass rate `99.73%`, p95 `101.05ms`, p99 `436.59ms`, chat p95 `137.11ms`, market p95 `97.74ms`, profile p95 `49.18ms`, fixture prepare/cleanup passed, sampler passed with `0` Nginx 5xx and max PostgreSQL connections `36`, and final foreign/Iran sync-health remained clean (`unsynced=0`, `outbound=0`). |
-| `L6`-`L11` | Pending | warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
+| `L6` | Complete on 2026-06-13 | Warmup run `TARGET_RPS=100 DURATION=3m` passed with artifact `tmp/production-benchmark/20260613T070616Z/load-realistic/`: `18001` HTTP requests, failure rate `0.39%`, p95 `99.29ms`, p99 `452.02ms`, sampler passed with max PostgreSQL connections `37`, max sync backlog `855`, and no Nginx 5xx in sampled windows. Warmup run `TARGET_RPS=250 DURATION=5m` passed with artifact `tmp/production-benchmark/20260613T071052Z/load-realistic/`: `74870` HTTP requests, failure rate `0.40%`, p95 `475.28ms`, p99 `829.49ms`, max PostgreSQL connections `78`, and final foreign/Iran sync-health clean. Follow-up harness cleanup fixed profile `project-users` false 403 noise and Nginx sampler repeated-window 5xx interpretation; validation artifact `tmp/production-benchmark/20260613T072713Z/load-realistic/` passed at `100 RPS / 1m` with `6001` requests, `0.00%` failures, and `100%` checks. |
+| `L7`-`L11` | Pending | official target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
 
@@ -594,6 +595,27 @@ Acceptance:
 - PostgreSQL connection growth stays within expected range.
 - Redis and sync remain stable.
 - No cleanup residue remains.
+
+Result:
+
+- Complete: artifacts `tmp/production-benchmark/20260613T070616Z/load-realistic/`
+  and `tmp/production-benchmark/20260613T071052Z/load-realistic/`.
+- `100 RPS / 3m`: `18001` requests at `99.96 req/s`, request failure rate
+  `0.39%`, checks pass rate `99.61%`, p95 `99.29ms`, p99 `452.02ms`.
+- `250 RPS / 5m`: `74870` requests at `249.30 req/s`, request failure rate
+  `0.40%`, checks pass rate `99.59%`, p95 `475.28ms`, p99 `829.49ms`,
+  and `131` dropped iterations.
+- The `250 RPS` run exposed expected 403 noise in the k6 profile-browser
+  `project_users` path because the script sometimes requested unrelated owner
+  project-user directories. The harness now targets the selected user's own
+  project-users directory for that endpoint.
+- The sampler previously summed repeated Nginx tail windows, so the same five
+  historical foreign `/api/sync/receive` 500 lines could appear as `55`.
+  It now reports max 5xx per sampled window plus delta from the first sample.
+- Validation after both fixes passed at `100 RPS / 1m` with artifact
+  `tmp/production-benchmark/20260613T072713Z/load-realistic/`: `6001`
+  requests, `0.00%` failures, `100%` checks, profile p95 `65.08ms`, and
+  final cleanup/sync-health clean.
 
 ## Stage L7 - Official Target Run
 
