@@ -192,6 +192,13 @@ def parse_duration_seconds(value: str) -> float:
     return float(raw)
 
 
+def effective_k6_timeout(args: argparse.Namespace) -> int:
+    duration_seconds = parse_duration_seconds(args.duration)
+    padding_seconds = max(120.0, float(getattr(args, "k6_timeout_padding_seconds", 300.0)))
+    configured_timeout = int(getattr(args, "k6_timeout", 0) or 0)
+    return max(configured_timeout, int(duration_seconds + padding_seconds))
+
+
 def target_url(settings: dict[str, str], explicit: str | None) -> str:
     return (explicit or settings.get("IRAN_SERVER_URL") or settings.get("IRAN_FRONTEND_URL") or "").rstrip("/")
 
@@ -724,7 +731,7 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
         k6_result = runner.run(
             "k6_realistic_mix",
             ssh_args(args, run_k6_command(args, contract, paths)),
-            timeout=args.k6_timeout,
+            timeout=effective_k6_timeout(args),
             check=False,
             env=env,
         )
@@ -849,6 +856,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--token-minutes", type=int, default=240)
     parser.add_argument("--fixture-timeout", type=int, default=420)
     parser.add_argument("--k6-timeout", type=int, default=900)
+    parser.add_argument("--k6-timeout-padding-seconds", type=float, default=float(os.environ.get("LOAD_K6_TIMEOUT_PADDING_SECONDS", "300")))
     parser.add_argument("--sampler-interval-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_INTERVAL_SECONDS", "10")))
     parser.add_argument("--sampler-recovery-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_RECOVERY_SECONDS", "30")))
     parser.add_argument("--sampler-timeout-padding-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_TIMEOUT_PADDING_SECONDS", "60")))
