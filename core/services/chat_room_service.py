@@ -1195,14 +1195,16 @@ def build_room_conversation_projection_stmt(
         ),
         else_=0,
     )
-    active_member_count = (
-        select(func.count(ChatMember.id))
+    active_member_count_lookup = (
+        select(
+            ChatMember.chat_id.label("chat_id"),
+            func.count(ChatMember.id).label("member_count"),
+        )
         .where(
-            ChatMember.chat_id == Chat.id,
             ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
         )
-        .correlate(Chat)
-        .scalar_subquery()
+        .group_by(ChatMember.chat_id)
+        .subquery()
     )
     last_message_content = case(
         (last_message_alias.is_deleted.is_(True), "پیام حذف شد"),
@@ -1221,7 +1223,7 @@ def build_room_conversation_projection_stmt(
             last_message_content,
             last_message_alias.message_type.label("last_message_type"),
             func.greatest(func.coalesce(unread_count, 0), manual_unread_count).label("unread_count"),
-            active_member_count.label("member_count"),
+            func.coalesce(active_member_count_lookup.c.member_count, 0).label("member_count"),
             func.coalesce(unread_mention_count, 0).label("unread_mention_count"),
         )
         .join(
@@ -1231,6 +1233,7 @@ def build_room_conversation_projection_stmt(
             & (current_member.membership_status == ChatMembershipStatus.ACTIVE),
         )
         .outerjoin(last_message_alias, last_message_alias.id == Chat.last_message_id)
+        .outerjoin(active_member_count_lookup, active_member_count_lookup.c.chat_id == Chat.id)
         .where(
             room_type_filter,
             Chat.is_deleted.is_(False),

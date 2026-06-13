@@ -49,9 +49,10 @@ class FakeExecuteResult:
 
 
 class FakeDB:
-    def __init__(self, *, execute_results=None, get_map=None):
+    def __init__(self, *, execute_results=None, get_map=None, scalar_results=None):
         self.execute_results = list(execute_results or [])
         self.get_map = dict(get_map or {})
+        self.scalar_results = list(scalar_results or [])
 
     async def execute(self, _stmt):
         if not self.execute_results:
@@ -60,6 +61,11 @@ class FakeDB:
 
     async def get(self, _model, primary_key):
         return self.get_map.get(primary_key)
+
+    async def scalar(self, _stmt):
+        if self.scalar_results:
+            return self.scalar_results.pop(0)
+        raise AssertionError("Unexpected scalar() call")
 
 
 class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -224,7 +230,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_messages_raises_404_when_target_user_missing(self):
         current_user = SimpleNamespace(id=5)
-        db = FakeDB(get_map={})
+        db = FakeDB(scalar_results=[None])
 
         with self.assertRaises(HTTPException) as exc_info:
             await get_messages(user_id=9, current_user=current_user, db=db)
@@ -233,7 +239,6 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_messages_handles_around_and_default_paths(self):
         current_user = SimpleNamespace(id=5)
-        target = SimpleNamespace(id=9)
         serialized = [SimpleNamespace(id=8), SimpleNamespace(id=9), SimpleNamespace(id=10)]
         db = FakeDB(
             execute_results=[
@@ -241,7 +246,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
                 FakeExecuteResult(scalars=[SimpleNamespace(id=10)]),
                 FakeExecuteResult(scalars=[SimpleNamespace(id=7), SimpleNamespace(id=6)]),
             ],
-            get_map={9: target},
+            scalar_results=[9, 9],
         )
 
         with patch(
@@ -264,8 +269,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_messages_denies_customer_viewer_for_disallowed_direct_target(self):
         current_user = SimpleNamespace(id=91)
-        target = SimpleNamespace(id=1)
-        db = FakeDB(get_map={1: target})
+        db = FakeDB(scalar_results=[1])
 
         with patch(
             "api.routers.chat.get_active_customer_relation_for_customer",
