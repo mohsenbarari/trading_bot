@@ -7,6 +7,8 @@ from scripts.report_production_realistic_load import (
     SCENARIO_CONTRACT,
     THRESHOLD_CONTRACT,
     build_contract,
+    parse_duration_seconds,
+    sampler_command,
 )
 
 
@@ -51,6 +53,26 @@ class ProductionRealisticLoadTests(unittest.TestCase):
         self.assertIn("INCLUDE_MEDIA", source)
         self.assertIn("INCLUDE_MUTATIONS", source)
         self.assertIn("constant-arrival-rate", source)
+
+    def test_parse_duration_seconds_supports_k6_style_units(self):
+        self.assertEqual(parse_duration_seconds("30s"), 30)
+        self.assertEqual(parse_duration_seconds("2m"), 120)
+        self.assertEqual(parse_duration_seconds("1h"), 3600)
+        self.assertEqual(parse_duration_seconds("45"), 45)
+
+    def test_sampler_command_targets_stage_l4_sampler(self):
+        args = argparse.Namespace(
+            manifest="./deploy/production/online.env",
+            sampler_interval_seconds=5,
+        )
+        command = sampler_command(args, Path("tmp/sampler"), 90)
+        self.assertIn("./scripts/report_production_load_sampler.py", command)
+        self.assertIn("--duration-seconds", command)
+        self.assertIn("90", command)
+        self.assertIn("--sample-count", command)
+        self.assertIn("0", command)
+        self.assertIn("--roles", command)
+        self.assertIn("both", command)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrate Stage L3 realistic mixed k6 load-test harness."""
+"""Orchestrate Stage L realistic mixed k6 load-test harness."""
 
 from __future__ import annotations
 
@@ -128,7 +128,6 @@ THRESHOLD_CONTRACT = {
 }
 
 REMAINING_STAGES = [
-    "L4 - Observability Sampler During Load",
     "L5 - Smoke Run",
     "L6 - Warmup Ramp",
     "L7 - Official Target Run",
@@ -153,6 +152,22 @@ class CommandResult:
     stderr: str
 
 
+@dataclass
+class SamplerProcess:
+    process: subprocess.Popen[str]
+    stdout_path: Path
+    stderr_path: Path
+    artifact_dir: Path
+    command: list[str]
+
+
+DURATION_UNITS = {
+    "s": 1.0,
+    "m": 60.0,
+    "h": 3600.0,
+}
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -162,6 +177,19 @@ def bool_env(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_duration_seconds(value: str) -> float:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raise ValueError("duration is required")
+    unit = raw[-1]
+    if unit in DURATION_UNITS:
+        number = raw[:-1]
+        if not number:
+            raise ValueError(f"invalid duration: {value}")
+        return float(number) * DURATION_UNITS[unit]
+    return float(raw)
 
 
 def target_url(settings: dict[str, str], explicit: str | None) -> str:
@@ -330,12 +358,90 @@ def run_k6_command(args: argparse.Namespace, contract: dict[str, Any], paths: di
     )
 
 
+def sampler_command(args: argparse.Namespace, sampler_dir: Path, duration_seconds: float) -> list[str]:
+    return [
+        "python3",
+        "./scripts/report_production_load_sampler.py",
+        "--manifest",
+        args.manifest,
+        "--artifact-dir",
+        str(sampler_dir),
+        "--duration-seconds",
+        str(max(0.0, duration_seconds)),
+        "--interval-seconds",
+        str(max(1.0, args.sampler_interval_seconds)),
+        "--sample-count",
+        "0",
+        "--roles",
+        "both",
+        "--json",
+    ]
+
+
+def start_sampler(args: argparse.Namespace, *, run_dir: Path, logs_dir: Path) -> SamplerProcess:
+    k6_duration = parse_duration_seconds(args.duration)
+    duration_seconds = k6_duration + max(0.0, args.sampler_recovery_seconds)
+    sampler_dir = run_dir / "sampler"
+    stdout_path = logs_dir / "load_sampler.stdout.log"
+    stderr_path = logs_dir / "load_sampler.stderr.log"
+    command = sampler_command(args, sampler_dir, duration_seconds)
+    stdout_handle = stdout_path.open("w", encoding="utf-8")
+    stderr_handle = stderr_path.open("w", encoding="utf-8")
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+        )
+    except Exception:
+        stdout_handle.close()
+        stderr_handle.close()
+        raise
+    stdout_handle.close()
+    stderr_handle.close()
+    return SamplerProcess(
+        process=process,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        artifact_dir=sampler_dir,
+        command=command,
+    )
+
+
+def finish_sampler(sampler: SamplerProcess, *, timeout: float) -> dict[str, Any]:
+    status = "finished"
+    try:
+        exit_code = sampler.process.wait(timeout=max(1.0, timeout))
+    except subprocess.TimeoutExpired:
+        sampler.process.terminate()
+        try:
+            exit_code = sampler.process.wait(timeout=120)
+            status = "terminated"
+        except subprocess.TimeoutExpired:
+            sampler.process.kill()
+            exit_code = sampler.process.wait(timeout=10)
+            status = "killed"
+    results_path = sampler.artifact_dir / "results.json"
+    return {
+        "status": status,
+        "exit_code": exit_code,
+        "command": command_display(sampler.command),
+        "artifact_dir": display_path(sampler.artifact_dir),
+        "results_path": display_path(results_path) if results_path.exists() else None,
+        "stdout_path": display_path(sampler.stdout_path),
+        "stderr_path": display_path(sampler.stderr_path),
+    }
+
+
 def write_summary(path: Path, payload: dict[str, Any]) -> None:
     contract = payload.get("contract") or {}
     k6_result = payload.get("k6") or {}
     fixture = payload.get("fixture") or {}
+    sampler = payload.get("sampler") or {}
     lines = [
-        "# Stage L3 Production Realistic Load Harness",
+        "# Stage L Production Realistic Load Harness",
         "",
         f"- Status: `{payload.get('status')}`",
         f"- Dry run: `{payload.get('dry_run')}`",
@@ -356,6 +462,12 @@ def write_summary(path: Path, payload: dict[str, Any]) -> None:
         "",
         f"- Exit code: `{k6_result.get('exit_code', 'n/a')}`",
         f"- Summary: `{k6_result.get('summary_path', 'n/a')}`",
+        "",
+        "## Sampler",
+        "",
+        f"- Status: `{sampler.get('status', 'n/a')}`",
+        f"- Exit code: `{sampler.get('exit_code', 'n/a')}`",
+        f"- Results: `{sampler.get('results_path', 'n/a')}`",
         "",
         "## Scenario Weights",
         "",
@@ -378,9 +490,10 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     contract = build_contract(args, settings)
     runner = Runner(logs_dir=logs_dir)
+    sampler: SamplerProcess | None = None
     payload: dict[str, Any] = {
         "status": "running",
-        "stage": "L3",
+        "stage": "L3-L4",
         "dry_run": args.dry_run or args.list_scenarios,
         "prefix": prefix,
         "started_at": utc_iso(),
@@ -408,6 +521,15 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
             env=load_runner_env(args),
         )
         payload["fixture"]["prepare"] = redact_payload(parse_last_json(prepare.stdout))
+        if not args.skip_sampler:
+            sampler = start_sampler(args, run_dir=run_dir, logs_dir=logs_dir)
+            payload["sampler"] = {
+                "status": "running",
+                "command": command_display(sampler.command),
+                "artifact_dir": display_path(sampler.artifact_dir),
+                "stdout_path": display_path(sampler.stdout_path),
+                "stderr_path": display_path(sampler.stderr_path),
+            }
 
         paths = remote_paths(args, prefix)
         env = load_runner_env(args)
@@ -471,9 +593,17 @@ def run_report(args: argparse.Namespace) -> dict[str, Any]:
                     payload["error"] = f"fixture cleanup failed with exit code {cleanup.exit_code}"
             except Exception as cleanup_exc:
                 payload.setdefault("fixture", {})["cleanup_error"] = str(cleanup_exc)
+        if sampler is not None:
+            payload["sampler"] = finish_sampler(
+                sampler,
+                timeout=max(30.0, args.sampler_interval_seconds + args.sampler_timeout_padding_seconds),
+            )
+            if payload["sampler"].get("exit_code") not in (0, None) and payload.get("status") == "passed":
+                payload["status"] = "failed"
+                payload["error"] = f"load sampler failed with exit code {payload['sampler'].get('exit_code')}"
         payload["finished_at"] = utc_iso()
         payload["commands"] = runner.commands
-        write_json(run_dir / "metadata.json", {"contract": contract, "prefix": prefix, "stage": "L3"})
+        write_json(run_dir / "metadata.json", {"contract": contract, "prefix": prefix, "stage": "L3-L4"})
         write_json(run_dir / "results.json", redact_payload(payload))
         write_summary(run_dir / "summary.md", redact_payload(payload))
     return redact_payload(payload)
@@ -502,6 +632,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--token-minutes", type=int, default=240)
     parser.add_argument("--fixture-timeout", type=int, default=420)
     parser.add_argument("--k6-timeout", type=int, default=900)
+    parser.add_argument("--sampler-interval-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_INTERVAL_SECONDS", "10")))
+    parser.add_argument("--sampler-recovery-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_RECOVERY_SECONDS", "30")))
+    parser.add_argument("--sampler-timeout-padding-seconds", type=float, default=float(os.environ.get("LOAD_SAMPLER_TIMEOUT_PADDING_SECONDS", "60")))
+    parser.add_argument("--skip-sampler", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-scenarios", action="store_true")
     parser.add_argument("--keep-fixtures", action="store_true")

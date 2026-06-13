@@ -1,8 +1,8 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L3 complete. Stage L4 is next.
+Status: Stage L4 complete. Stage L5 is next.
 
-Last updated: 2026-06-12
+Last updated: 2026-06-13
 
 This roadmap is intentionally separate from the existing focused P0-P11
 optimization stages. P0-P11 proved individual production surfaces and release
@@ -19,7 +19,8 @@ same time.
 | `L1` | Complete on 2026-06-12 | Load-runner `root@45.129.39.182` was bootstrapped through jump host `root@87.107.3.22`, wrote artifacts under `tmp/production-benchmark/20260612T190146Z/load-runner-bootstrap/`, verified `k6 v0.49.0`, `curl`, `jq`, UTC baseline, and HTTP 200 from `https://coin.gold-trade.ir/api/config`. |
 | `L2` | Complete on 2026-06-12 | Default `make production-load-fixtures` prepare-and-cleanup passed against Iran/load-runner with artifact `tmp/production-benchmark/20260612T193743Z/load-fixtures/`: 161 synthetic users, 80 direct pairs, 12 groups, 3 channels, 60 offers, 20 trades, auth-pool upload, clean pre/post sync-health, and successful Iran/foreign/load-runner cleanup. |
 | `L3` | Complete on 2026-06-12 | Added the mixed k6 harness, production runner, and make target. Dry-run artifact `tmp/production-benchmark/20260612T195338Z/load-realistic/` passed without touching production and validated scenario weights, manifest-derived Iran URL, runtime flags, and threshold contract. |
-| `L4`-`L11` | Pending | observability sampler, smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
+| `L4` | Complete on 2026-06-13 | Added the low-overhead runtime sampler, `make production-load-sampler`, and automatic sampler wiring into non-dry-run `make production-load-realistic`. Dry-run artifacts `tmp/production-benchmark/20260613T052819Z/load-sampler/` and `tmp/production-benchmark/20260613T052804Z/load-realistic/` passed without production pressure. |
+| `L5`-`L11` | Pending | smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
 
@@ -113,6 +114,12 @@ tmp/production-benchmark/<timestamp>/load-realistic/
   sync-after-foreign.json
   sync-after-iran.json
   cleanup-report.json
+  sampler/
+    results.json
+    summary.md
+    samples/sample-0001.json
+    samples/sample-0002.json
+    ...
 ```
 
 Artifacts must be redacted. They must not include passwords, OTPs, tokens,
@@ -501,6 +508,41 @@ Acceptance:
 - Sampler overhead is low.
 - If k6 fails, sampler still writes final snapshots.
 - Sensitive values are redacted.
+
+Commands:
+
+```bash
+make production-load-sampler ARGS="--dry-run --json"
+```
+
+For a single live sample without k6 pressure:
+
+```bash
+make production-load-sampler ARGS="--sample-count 1 --roles both --json"
+```
+
+Implementation status:
+
+- `scripts/report_production_load_sampler.py` samples both production roles from
+  the deploy manifest and writes artifacts under
+  `tmp/production-benchmark/<timestamp>/load-sampler/` or an explicit
+  `--artifact-dir`.
+- The sampler collects only redaction-safe counters and state summaries:
+  aggregate host load/memory/disk/network, `docker stats`, PostgreSQL runtime
+  budget/query-state report, Redis memory/AOF/queue state, sync-health/backlog,
+  and Nginx status-code family counts from bounded log windows.
+- It does not persist raw access log lines, IP addresses, message bodies, media
+  URLs, tokens, OTPs, passwords, or user payloads.
+- Non-dry-run `make production-load-realistic` starts the sampler before k6 and
+  finalizes it after the cleanup/recovery window. Use
+  `ARGS="--skip-sampler"` only for controlled debugging.
+- `SIGTERM`/`SIGINT` handling writes one final sample before exit, so failed or
+  interrupted k6 runs still leave diagnostic evidence.
+- Validation passed with `py_compile`,
+  `python3 -m unittest tests.test_production_load_sampler tests.test_production_realistic_load tests.test_load_fixture_tools`,
+  `make production-load-sampler ARGS="--dry-run --json"`,
+  `make production-load-realistic ARGS="--dry-run --json"`, and
+  `git diff --check`.
 
 ## Stage L5 - Smoke Run
 
