@@ -522,6 +522,192 @@ def build_direct_unread_poll_stmt(current_user_id: int):
     )
 
 
+def build_direct_poll_summary_stmt(current_user_id: int):
+    """Build the lightweight direct poll summary query for unread and muted state."""
+    user1_alias = aliased(User)
+    user2_alias = aliased(User)
+    user1_relation_alias = aliased(AccountantRelation)
+    user2_relation_alias = aliased(AccountantRelation)
+    user1_owner_alias = aliased(User)
+    user2_owner_alias = aliased(User)
+    current_direct_member_alias = aliased(ChatMember)
+    other_direct_member_alias = aliased(ChatMember)
+    current_member_alias = aliased(ChatMember)
+    direct_chat_lookup = (
+        select(
+            Chat.id.label("chat_id"),
+            func.least(
+                current_direct_member_alias.user_id,
+                other_direct_member_alias.user_id,
+            ).label("user1_id"),
+            func.greatest(
+                current_direct_member_alias.user_id,
+                other_direct_member_alias.user_id,
+            ).label("user2_id"),
+            Chat.last_message_id.label("chat_last_message_id"),
+        )
+        .join(
+            current_direct_member_alias,
+            sa.and_(
+                current_direct_member_alias.chat_id == Chat.id,
+                current_direct_member_alias.user_id == current_user_id,
+                current_direct_member_alias.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
+        .join(
+            other_direct_member_alias,
+            sa.and_(
+                other_direct_member_alias.chat_id == Chat.id,
+                other_direct_member_alias.user_id != current_user_id,
+                other_direct_member_alias.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
+        .where(Chat.type == ChatType.DIRECT, Chat.is_deleted.is_(False))
+        .subquery()
+    )
+    resolved_last_message_id = func.coalesce(
+        direct_chat_lookup.c.chat_last_message_id,
+        Conversation.last_message_id,
+    )
+    other_user_id = case(
+        (Conversation.user1_id == current_user_id, Conversation.user2_id),
+        else_=Conversation.user1_id,
+    ).label("other_user_id")
+    user1_relation_display_name = func.nullif(func.btrim(user1_relation_alias.relation_display_name), "")
+    user2_relation_display_name = func.nullif(func.btrim(user2_relation_alias.relation_display_name), "")
+    user1_display_name = func.coalesce(
+        user1_relation_display_name,
+        user1_owner_alias.account_name,
+        user1_alias.account_name,
+    )
+    user2_display_name = func.coalesce(
+        user2_relation_display_name,
+        user2_owner_alias.account_name,
+        user2_alias.account_name,
+    )
+    other_user_name = case(
+        (Conversation.user1_id == current_user_id, user2_display_name),
+        else_=user1_display_name,
+    ).label("other_user_name")
+    other_user_is_deleted = case(
+        (Conversation.user1_id == current_user_id, user2_alias.is_deleted),
+        else_=user1_alias.is_deleted,
+    ).label("other_user_is_deleted")
+    legacy_unread_count = case(
+        (Conversation.user1_id == current_user_id, Conversation.unread_count_user1),
+        else_=Conversation.unread_count_user2,
+    )
+    generic_unread_count = (
+        select(func.count(Message.id))
+        .where(
+            Message.chat_id == direct_chat_lookup.c.chat_id,
+            Message.sender_id != current_user_id,
+            Message.is_deleted.is_(False),
+            Message.id > func.coalesce(current_member_alias.last_read_message_id, 0),
+        )
+        .correlate(direct_chat_lookup, current_member_alias)
+        .scalar_subquery()
+    )
+    computed_unread_count = case(
+        (
+            sa.and_(
+                direct_chat_lookup.c.chat_id.is_not(None),
+                current_member_alias.last_read_message_id.is_not(None),
+            ),
+            generic_unread_count,
+        ),
+        else_=legacy_unread_count,
+    )
+    manual_unread_count = case(
+        (
+            sa.and_(
+                current_member_alias.is_marked_unread.is_(True),
+                resolved_last_message_id.is_not(None),
+            ),
+            1,
+        ),
+        else_=0,
+    )
+    unread_count = func.greatest(
+        func.coalesce(computed_unread_count, 0),
+        manual_unread_count,
+    ).label("unread_count")
+    is_muted = func.coalesce(current_member_alias.is_muted, False).label("is_muted")
+    hidden_flag = case(
+        (current_member_alias.is_hidden.is_(True), 1),
+        else_=0,
+    )
+
+    return (
+        select(
+            Conversation.id.label("id"),
+            direct_chat_lookup.c.chat_id.label("chat_id"),
+            other_user_id,
+            other_user_name,
+            other_user_is_deleted,
+            unread_count,
+            is_muted,
+            sa.literal(0).label("unread_mention_count"),
+        )
+        .select_from(Conversation)
+        .join(user1_alias, Conversation.user1_id == user1_alias.id)
+        .join(user2_alias, Conversation.user2_id == user2_alias.id)
+        .outerjoin(
+            user1_relation_alias,
+            sa.and_(
+                user1_relation_alias.accountant_user_id == user1_alias.id,
+                user1_relation_alias.status == AccountantRelationStatus.ACTIVE,
+                user1_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user2_relation_alias,
+            sa.and_(
+                user2_relation_alias.accountant_user_id == user2_alias.id,
+                user2_relation_alias.status == AccountantRelationStatus.ACTIVE,
+                user2_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user1_owner_alias,
+            sa.and_(
+                user1_owner_alias.id == user1_relation_alias.owner_user_id,
+                user1_owner_alias.is_deleted.is_(False),
+            ),
+        )
+        .outerjoin(
+            user2_owner_alias,
+            sa.and_(
+                user2_owner_alias.id == user2_relation_alias.owner_user_id,
+                user2_owner_alias.is_deleted.is_(False),
+            ),
+        )
+        .outerjoin(
+            direct_chat_lookup,
+            sa.and_(
+                direct_chat_lookup.c.user1_id == Conversation.user1_id,
+                direct_chat_lookup.c.user2_id == Conversation.user2_id,
+            ),
+        )
+        .outerjoin(
+            current_member_alias,
+            sa.and_(
+                current_member_alias.chat_id == direct_chat_lookup.c.chat_id,
+                current_member_alias.user_id == current_user_id,
+                current_member_alias.membership_status == ChatMembershipStatus.ACTIVE,
+            ),
+        )
+        .where(
+            build_direct_conversation_scope_condition(current_user_id),
+            func.coalesce(hidden_flag, 0) == 0,
+            sa.or_(
+                func.coalesce(unread_count, 0) > 0,
+                is_muted.is_(True),
+            ),
+        )
+    )
+
+
 async def get_existing_direct_conversation(
     db: AsyncSession,
     user1_id: int,

@@ -1,8 +1,8 @@
 # Production Read Path Latency Roadmap
 
-Status: Stage RPL3 completed on 2026-06-13 with no production index/query
-mutation because the Iran EXPLAIN evidence did not show a clear single-query
-plan bottleneck.
+Status: Stage RPL4 completed on 2026-06-13 by reducing Messenger
+`/api/chat/poll` read amplification without changing conversation-list
+behavior.
 
 Last updated: 2026-06-13
 
@@ -59,7 +59,7 @@ latency under sustained concurrency.
 | `RPL1` | Complete | Low-risk micro-cache for market runtime state; cache only live reads and invalidate after market runtime mutations. |
 | `RPL2` | Complete | Add query-plan/report coverage for the L9 hot read surfaces not already covered by P2/P7: public user search, project users, relation lists, admin users, offers list/my, and chat conversations/poll. |
 | `RPL3` | Complete | Apply index/query fixes only where RPL2 shows a clear plan problem; closed with no index/query mutation because current Iran plans are fast and the remaining issue is read amplification/concurrency pressure. |
-| `RPL4` | Pending | Reduce polling/read amplification in Messenger and market screens where backend correctness permits it. |
+| `RPL4` | Complete | Reduce polling/read amplification in Messenger and market screens where backend correctness permits it. |
 | `RPL5` | Pending | Add narrowly-scoped Redis or in-process caches for read-only/current-state endpoints such as current market/admin message reads, with explicit TTL and invalidation. |
 | `RPL6` | Pending | Rerun targeted 500RPS benchmark, then rerun L9 `500 RPS / 30m` only if targeted results improve p95/p99 materially. |
 
@@ -208,8 +208,61 @@ RPL3 output:
   - bad row-estimate drift with high actual rows;
   - a Stage L targeted benchmark proving one endpoint family dominates latency.
 
+## Stage RPL4 - Messenger Poll Read-Amplification Reduction
+
+Decision:
+
+- Optimize `/api/chat/poll` first because RPL3 showed the main problem is
+  query shape/read amplification, not a missing index.
+- Keep `/api/chat/conversations` behavior unchanged.
+- Do not add a cache to unread state in this stage; correctness requires poll
+  to reflect read/unread/mute state directly from the database.
+
+Change:
+
+- Replaced the poll route's direct full conversation-list projection with
+  `build_direct_poll_summary_stmt()`.
+- Added `list_room_poll_summaries()` and `build_room_poll_summary_stmt()` for
+  group/channel poll reads.
+- The poll route now reads only rows that can affect the poll response:
+  - direct conversations with unread or muted state;
+  - rooms/channels with unread, unread mention, or muted state.
+- The poll route no longer reads last-message preview fields, avatar fields,
+  member counts, pin/order state, room send capability, or full conversation
+  list rows just to compute unread counters.
+- Updated `scripts/report_production_read_path_query_plans.py` so future
+  reports explain the new RPL4 poll summary queries instead of the old full
+  projection path.
+
+Correctness budget:
+
+- No TTL and no stale unread state.
+- The response schema stays unchanged:
+  - `total_unread`;
+  - `unread_chats_count`;
+  - `conversations_with_unread`;
+  - `muted_conversation_ids`;
+  - `total_unread_mentions`.
+- Customer direct-chat visibility filtering is still applied after the direct
+  summary query, matching the old route behavior.
+- Conversation-list ordering and full preview behavior are intentionally left
+  untouched.
+
+Validation:
+
+- `python3 -m unittest tests.test_chat_router_direct_reads tests.test_chat_router_remaining_paths tests.test_chat_room_service_room_read_models tests.test_chat_service_projection_and_send_helpers` passed.
+- `python3 -m py_compile api/routers/chat.py core/services/chat_service.py core/services/chat_room_service.py scripts/report_production_read_path_query_plans.py` passed.
+- `docker compose exec -T app python scripts/report_production_read_path_query_plans.py --json --statement-timeout-ms 10000` passed locally with no report errors.
+- Local post-change query-plan coverage reported:
+  - `chat_poll_direct_summary`: execution about `1.425ms`, planning about
+    `7.45ms`, no temp blocks;
+  - `chat_poll_rooms_summary`: execution about `1.504ms`, planning about
+    `1.427ms`, no temp blocks.
+- `git diff --check` passed.
+
 Next:
 
-- Stage RPL4 should target read amplification first, especially `chat/poll`
-  reading full direct/room conversation projections before Python unread
-  filtering.
+- Stage RPL5 should target tightly scoped current-state caches, especially
+  reads that are naturally cacheable and already have clear invalidation points.
+- Stage RPL6 should run a targeted 500RPS benchmark before deciding whether a
+  full L9 rerun is worth the cost.

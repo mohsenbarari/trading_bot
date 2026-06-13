@@ -677,24 +677,21 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.avatar_file_id, 'avatar-1')
 
         poll_db = FakeDB(execute_results=[FakeMappingsExecuteResult([
-            object(),
             {
                 'other_user_id': 9,
                 'other_user_name': 'Ali',
                 'unread_count': 2,
                 'is_muted': True,
                 'other_user_is_deleted': False,
+                'unread_mention_count': 0,
             },
         ])])
         with patch(
             'api.routers.chat.get_active_customer_relation_for_customer',
             new=AsyncMock(return_value=None),
-        ), patch('api.routers.chat.build_direct_conversation_list_stmt', return_value=object()), patch(
-            'api.routers.chat.list_group_conversations',
-            new=AsyncMock(return_value=[SimpleNamespace(other_user_id=-10, other_user_name='Desk', unread_count=1, is_muted=False, other_user_is_deleted=False)]),
-        ), patch(
-            'api.routers.chat.list_channel_conversations',
-            new=AsyncMock(return_value=[]),
+        ), patch('api.routers.chat.build_direct_poll_summary_stmt', return_value=object()), patch(
+            'api.routers.chat.list_room_poll_summaries',
+            new=AsyncMock(return_value=[SimpleNamespace(other_user_id=-10, other_user_name='Desk', unread_count=1, is_muted=False, other_user_is_deleted=False, unread_mention_count=0)]),
         ):
             poll_response = await poll_messages(current_user=current_user, db=poll_db)
 

@@ -335,11 +335,8 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.chat.build_allowed_customer_chat_targets",
             new=AsyncMock(return_value=[20, 44]),
-        ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt"), patch(
-            "api.routers.chat.list_group_conversations",
-            new=AsyncMock(return_value=[]),
-        ), patch(
-            "api.routers.chat.list_channel_conversations",
+        ), patch("api.routers.chat.build_direct_poll_summary_stmt", return_value="poll-stmt"), patch(
+            "api.routers.chat.list_room_poll_summaries",
             new=AsyncMock(return_value=[]),
         ):
             result = await poll_messages(current_user=current_user, db=db)
@@ -417,7 +414,6 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         current_user = SimpleNamespace(id=5)
         rows = [
             {"other_user_id": 9, "other_user_name": "A", "unread_count": 2, "other_user_is_deleted": False, "is_muted": True},
-            {"other_user_id": 10, "other_user_name": "B", "unread_count": 0, "other_user_is_deleted": True, "is_muted": False},
         ]
         db = FakeDB(execute_results=[FakeExecuteResult(mappings=rows)])
         group_row = SimpleNamespace(
@@ -426,6 +422,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             unread_count=1,
             other_user_is_deleted=False,
             is_muted=False,
+            unread_mention_count=0,
         )
         channel_row = SimpleNamespace(
             other_user_id=-30,
@@ -433,6 +430,7 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
             unread_count=4,
             other_user_is_deleted=False,
             is_muted=True,
+            unread_mention_count=2,
         )
 
         rows[0]["other_user_name"] = "دفتر A"
@@ -440,20 +438,17 @@ class ChatRouterDirectReadEndpointTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.chat.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
-        ), patch("api.routers.chat.build_direct_conversation_list_stmt", return_value="stmt") as stmt_mock, patch(
-            "api.routers.chat.list_group_conversations",
-            new=AsyncMock(return_value=[group_row]),
-        ) as groups_mock, patch(
-            "api.routers.chat.list_channel_conversations",
-            new=AsyncMock(return_value=[channel_row]),
-        ) as channels_mock:
+        ), patch("api.routers.chat.build_direct_poll_summary_stmt", return_value="poll-stmt") as poll_stmt_mock, patch(
+            "api.routers.chat.list_room_poll_summaries",
+            new=AsyncMock(return_value=[group_row, channel_row]),
+        ) as room_poll_mock:
             result = await poll_messages(current_user=current_user, db=db)
 
-        stmt_mock.assert_called_once_with(5)
-        groups_mock.assert_awaited_once_with(db, current_user_id=5)
-        channels_mock.assert_awaited_once_with(db, current_user_id=5)
+        poll_stmt_mock.assert_called_once_with(5)
+        room_poll_mock.assert_awaited_once_with(db, current_user_id=5)
         self.assertEqual(result.total_unread, 7)
         self.assertEqual(result.unread_chats_count, 3)
+        self.assertEqual(result.total_unread_mentions, 2)
         self.assertEqual(result.conversations_with_unread[0]["user_name"], "دفتر A")
         self.assertEqual(result.conversations_with_unread[1]["user_id"], -20)
         self.assertEqual(result.conversations_with_unread[2]["user_id"], -30)

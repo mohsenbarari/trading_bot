@@ -105,6 +105,7 @@ from core.services.chat_room_service import (
     list_channel_members,
     list_channel_messages,
     list_manageable_channels,
+    list_room_poll_summaries,
     mark_channel_messages_read,
     mark_channel_messages_read_with_broadcast,
     mark_group_messages_read_with_broadcast,
@@ -153,7 +154,7 @@ from core.services.chat_service import (
     build_direct_conversation_list_stmt,
     build_direct_message_history_statements,
     build_direct_message_search_stmt,
-    build_direct_unread_poll_stmt,
+    build_direct_poll_summary_stmt,
     commit_direct_read_state,
     get_existing_direct_chat,
     get_pinned_message_for_chat,
@@ -2027,11 +2028,9 @@ async def poll_messages(
 ):
     """پولینگ برای پیام‌های جدید"""
     allowed_direct_target_ids = await _get_customer_visible_direct_target_ids(db, current_user=current_user)
-    conv_stmt = build_direct_conversation_list_stmt(current_user.id)
-    result = await db.execute(conv_stmt)
-    direct_convs = result.mappings().all()
-    group_convs = await list_group_conversations(db, current_user_id=current_user.id)
-    channel_convs = await list_channel_conversations(db, current_user_id=current_user.id)
+    direct_poll_result = await db.execute(build_direct_poll_summary_stmt(current_user.id))
+    direct_poll_rows = direct_poll_result.mappings().all()
+    room_poll_summaries = await list_room_poll_summaries(db, current_user_id=current_user.id)
 
     def read_field(row, key, default=None):
         if hasattr(row, key):
@@ -2041,29 +2040,38 @@ async def poll_messages(
         return default
 
     if allowed_direct_target_ids is not None:
-        direct_convs = [
+        direct_poll_rows = [
             row
-            for row in direct_convs
+            for row in direct_poll_rows
             if int(read_field(row, "other_user_id", 0) or 0) in allowed_direct_target_ids
         ]
 
-    all_convs = [*direct_convs, *group_convs, *channel_convs]
-
     unread_convs = [
-        row for row in all_convs
-        if int(read_field(row, "unread_count", 0) or 0) > 0
+        *[
+            row
+            for row in direct_poll_rows
+            if int(read_field(row, "unread_count", 0) or 0) > 0
+        ],
+        *[
+            row
+            for row in room_poll_summaries
+            if int(read_field(row, "unread_count", 0) or 0) > 0
+        ],
     ]
     muted_conversation_ids = sorted(
         {
             int(read_field(row, "other_user_id", 0) or 0)
-            for row in all_convs
+            for row in [*direct_poll_rows, *room_poll_summaries]
             if bool(read_field(row, "is_muted", False))
         }
     )
 
     unread_chats_count = len(unread_convs)
     total_unread = sum(int(read_field(row, "unread_count", 0) or 0) for row in unread_convs)
-    total_unread_mentions = sum(int(read_field(row, "unread_mention_count", 0) or 0) for row in all_convs)
+    total_unread_mentions = sum(
+        int(read_field(row, "unread_mention_count", 0) or 0)
+        for row in room_poll_summaries
+    )
     conversations_with_unread = [
         {
             "user_id": int(read_field(row, "other_user_id", 0) or 0),
