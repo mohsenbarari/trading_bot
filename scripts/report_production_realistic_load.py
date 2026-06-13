@@ -265,6 +265,7 @@ def build_contract(args: argparse.Namespace, settings: dict[str, str] | None = N
         "include_mutations": args.include_mutations,
         "pre_allocated_vus": args.pre_allocated_vus,
         "max_vus": args.max_vus,
+        "load_runner_nofile": args.load_runner_nofile,
         "scenario_contract": SCENARIO_CONTRACT,
         "thresholds": THRESHOLD_CONTRACT,
         "k6_script": display_path(K6_SCRIPT),
@@ -350,9 +351,11 @@ def run_k6_command(args: argparse.Namespace, contract: dict[str, Any], paths: di
         "MAX_VUS": str(args.max_vus),
     }
     exports = " ".join(f"{key}={shlex.quote(value)}" for key, value in env_parts.items())
+    nofile = max(1024, int(args.load_runner_nofile or 1024))
     return (
         f"mkdir -p {quote_remote(paths['artifact_dir'])} {quote_remote(paths['script_dir'])} && "
         f"cd {quote_remote(paths['root'])} && "
+        f"ulimit -n {nofile} && "
         f"{exports} k6 run --summary-export {quote_remote(paths['summary'])} "
         f"{quote_remote(paths['script'])}"
     )
@@ -623,6 +626,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--include-mutations", action=argparse.BooleanOptionalAction, default=bool_env("INCLUDE_MUTATIONS", False))
     parser.add_argument("--pre-allocated-vus", type=int, default=int(os.environ.get("PRE_ALLOCATED_VUS", "0") or "0"))
     parser.add_argument("--max-vus", type=int, default=int(os.environ.get("MAX_VUS", "0") or "0"))
+    parser.add_argument("--load-runner-nofile", type=int, default=int(os.environ.get("LOAD_RUNNER_NOFILE", "65535")))
     parser.add_argument("--load-runner-host", default=os.environ.get("LOAD_RUNNER_HOST", ""))
     parser.add_argument("--load-runner-port", default=os.environ.get("LOAD_RUNNER_SSH_PORT", "22"))
     parser.add_argument("--load-runner-jump-host", default=os.environ.get("LOAD_RUNNER_JUMP_HOST", ""))

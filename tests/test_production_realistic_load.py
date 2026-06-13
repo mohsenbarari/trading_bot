@@ -9,6 +9,7 @@ from scripts.report_production_realistic_load import (
     THRESHOLD_CONTRACT,
     build_contract,
     parse_duration_seconds,
+    run_k6_command,
     sampler_command,
 )
 
@@ -27,12 +28,42 @@ class ProductionRealisticLoadTests(unittest.TestCase):
             include_mutations=True,
             pre_allocated_vus=250,
             max_vus=2000,
+            load_runner_nofile=65535,
         )
         contract = build_contract(args, {"IRAN_SERVER_URL": "https://iran.example"})
         self.assertEqual(contract["base_url"], "https://iran.example")
         self.assertEqual(contract["target_rps"], 500)
         self.assertTrue(contract["include_media"])
         self.assertTrue(contract["include_mutations"])
+        self.assertEqual(contract["load_runner_nofile"], 65535)
+
+    def test_k6_command_raises_load_runner_nofile_limit(self):
+        args = argparse.Namespace(
+            target_rps=500,
+            duration="2m",
+            load_profile="target",
+            include_media=False,
+            include_mutations=False,
+            pre_allocated_vus=250,
+            max_vus=2000,
+            load_runner_nofile=65535,
+        )
+        contract = {"base_url": "https://iran.example"}
+        command = run_k6_command(
+            args,
+            contract,
+            {
+                "artifact_dir": "/srv/load/artifacts/run",
+                "script_dir": "/srv/load/scripts",
+                "root": "/srv/load",
+                "auth_pool": "/srv/load/auth/pool.json",
+                "summary": "/srv/load/artifacts/run/k6-summary.json",
+                "script": "/srv/load/scripts/k6_realistic_mix.js",
+            },
+        )
+        self.assertIn("ulimit -n 65535 &&", command)
+        self.assertIn("PRE_ALLOCATED_VUS=250", command)
+        self.assertIn("MAX_VUS=2000", command)
 
     def test_restricted_endpoints_are_not_in_contract(self):
         joined = "\n".join(endpoint for item in SCENARIO_CONTRACT for endpoint in item["endpoints"])
