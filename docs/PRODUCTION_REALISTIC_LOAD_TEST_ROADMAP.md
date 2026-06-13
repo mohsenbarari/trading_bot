@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L4 complete. Stage L5 is next.
+Status: Stage L5 complete. Stage L6 is next.
 
 Last updated: 2026-06-13
 
@@ -20,7 +20,8 @@ same time.
 | `L2` | Complete on 2026-06-12 | Default `make production-load-fixtures` prepare-and-cleanup passed against Iran/load-runner with artifact `tmp/production-benchmark/20260612T193743Z/load-fixtures/`: 161 synthetic users, 80 direct pairs, 12 groups, 3 channels, 60 offers, 20 trades, auth-pool upload, clean pre/post sync-health, and successful Iran/foreign/load-runner cleanup. |
 | `L3` | Complete on 2026-06-12 | Added the mixed k6 harness, production runner, and make target. Dry-run artifact `tmp/production-benchmark/20260612T195338Z/load-realistic/` passed without touching production and validated scenario weights, manifest-derived Iran URL, runtime flags, and threshold contract. |
 | `L4` | Complete on 2026-06-13 | Added the low-overhead runtime sampler, `make production-load-sampler`, and automatic sampler wiring into non-dry-run `make production-load-realistic`. Dry-run artifacts `tmp/production-benchmark/20260613T052819Z/load-sampler/` and `tmp/production-benchmark/20260613T052804Z/load-realistic/` passed without production pressure. |
-| `L5`-`L11` | Pending | smoke, warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
+| `L5` | Complete on 2026-06-13 | Smoke run `TARGET_RPS=50 DURATION=2m INCLUDE_MEDIA=0 INCLUDE_MUTATIONS=0` passed with artifact `tmp/production-benchmark/20260613T065328Z/load-realistic/`: `6001` HTTP requests at `49.98 req/s`, request failure rate `0.27%`, checks pass rate `99.73%`, p95 `101.05ms`, p99 `436.59ms`, chat p95 `137.11ms`, market p95 `97.74ms`, profile p95 `49.18ms`, fixture prepare/cleanup passed, sampler passed with `0` Nginx 5xx and max PostgreSQL connections `36`, and final foreign/Iran sync-health remained clean (`unsynced=0`, `outbound=0`). |
+| `L6`-`L11` | Pending | warmup, target, spike, soak, analysis, and release-capacity decision remain pending. |
 
 ## Objective
 
@@ -560,6 +561,21 @@ Acceptance:
 - All personas execute at least once.
 - Cleanup succeeds.
 - Sync-health is clean after recovery.
+
+Result:
+
+- Complete: artifact `tmp/production-benchmark/20260613T065328Z/load-realistic/`.
+- `k6` exit code `0`, `6001` requests, `49.98 req/s`, failure rate `0.27%`.
+- Latency: overall p95 `101.05ms`, p99 `436.59ms`; market p95 `97.74ms`;
+  chat p95 `137.11ms`; profile p95 `49.18ms`.
+- Fixture prepare and cleanup both passed. Cleanup removed run-scoped DB rows
+  on both servers and deleted matching Redis queue residue by prefix/table/id.
+- Sampler passed: `0` collector errors, `0` Nginx 5xx in sampled windows,
+  max PostgreSQL connections `36`, max Redis memory about `3.4MB`, and max sync
+  backlog `816` during the run.
+- Postflight sync-health: foreign and Iran both `unsynced_change_log_count=0`
+  and `sync:outbound=0`. Existing `sync:retry` debt is not from the smoke run
+  and remains tracked separately.
 
 ## Stage L6 - Warmup Ramp
 
