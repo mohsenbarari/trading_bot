@@ -167,7 +167,7 @@ class Runner:
     def worker_args(self, role: str, *script_args: str) -> list[str]:
         env_prefix = ""
         if script_args and script_args[0] == "prepare":
-            env_prefix = "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1 "
+            env_prefix = "env TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1 "
         body = (
             "exec -T app "
             + env_prefix
