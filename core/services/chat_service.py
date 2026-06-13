@@ -7,7 +7,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Awaitable, Callable, TypeVar
+from typing import Awaitable, Callable, Collection, TypeVar
 
 import aiofiles
 import httpx
@@ -39,6 +39,14 @@ DirectEventPublisher = Callable[[int, str, dict[str, object]], Awaitable[object]
 
 
 logger = logging.getLogger(__name__)
+
+
+def build_direct_conversation_other_user_id_expr(current_user_id: int):
+    """Return the counterparty user-id expression for a legacy direct row."""
+    return case(
+        (Conversation.user1_id == current_user_id, Conversation.user2_id),
+        else_=Conversation.user1_id,
+    )
 
 
 async def _ensure_direct_chat_initiation_allowed(
@@ -238,10 +246,7 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
         direct_chat_lookup.c.chat_last_message_at,
         Conversation.last_message_at,
     ).label("last_message_at")
-    other_user_id = case(
-        (Conversation.user1_id == current_user_id, Conversation.user2_id),
-        else_=Conversation.user1_id,
-    ).label("other_user_id")
+    other_user_id = build_direct_conversation_other_user_id_expr(current_user_id).label("other_user_id")
     user1_relation_display_name = func.nullif(func.btrim(user1_relation_alias.relation_display_name), "")
     user2_relation_display_name = func.nullif(func.btrim(user2_relation_alias.relation_display_name), "")
     user1_display_name = func.coalesce(
@@ -500,9 +505,19 @@ def build_direct_conversation_scope_condition(current_user_id: int):
     )
 
 
-def build_direct_conversation_list_stmt(current_user_id: int):
+def build_direct_conversation_list_stmt(
+    current_user_id: int,
+    *,
+    allowed_target_ids: Collection[int] | None = None,
+):
     """Build the ordered direct-conversation list query for the current user."""
     stmt, _, conversation_order_at, hidden_flag = build_direct_conversation_projection_stmt(current_user_id)
+    if allowed_target_ids is not None:
+        target_ids = tuple(sorted({int(item) for item in allowed_target_ids}))
+        if not target_ids:
+            stmt = stmt.where(sa.false())
+        else:
+            stmt = stmt.where(build_direct_conversation_other_user_id_expr(current_user_id).in_(target_ids))
     return (
         stmt
         .where(build_direct_conversation_scope_condition(current_user_id))
