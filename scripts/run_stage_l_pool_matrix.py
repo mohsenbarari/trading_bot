@@ -42,6 +42,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--manifest", default=os.environ.get("MANIFEST", "./deploy/production/online.env"))
     parser.add_argument("--candidates", default="8:6,12:8,16:8")
     parser.add_argument("--api-workers", type=int, default=int(os.environ.get("IRAN_API_WORKERS", "8")))
+    parser.add_argument("--workers", default=None, help="Optional comma-separated API_WORKERS candidates. Defaults to --api-workers.")
     parser.add_argument("--target-rps", type=int, default=int(os.environ.get("TARGET_RPS", "500")))
     parser.add_argument("--duration", default=os.environ.get("DURATION", "2m"))
     parser.add_argument("--load-profile", default=os.environ.get("LOAD_PROFILE", "target"))
@@ -74,6 +75,24 @@ def parse_candidates(raw: str) -> list[PoolCandidate]:
     return candidates
 
 
+def parse_worker_candidates(raw: str | None, fallback: int) -> list[int]:
+    if not raw:
+        return [fallback]
+    candidates: list[int] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        value = int(item)
+        if value <= 0:
+            raise ValueError("worker candidates must be positive integers")
+        if value not in candidates:
+            candidates.append(value)
+    if not candidates:
+        raise ValueError("at least one worker candidate is required")
+    return candidates
+
+
 def remote_compose_prelude(project_dir: str) -> str:
     return f"""
 set -euo pipefail
@@ -89,7 +108,7 @@ fi
 """
 
 
-def apply_pool_script(project_dir: str, stamp: str, candidate: PoolCandidate) -> str:
+def apply_pool_script(project_dir: str, stamp: str, candidate: PoolCandidate, api_workers: int) -> str:
     return f"""
 {remote_compose_prelude(project_dir)}
 env_file=".env"
@@ -125,7 +144,11 @@ path = Path(sys.argv[1])
 path.write_text(
     update_env_content(
         path.read_text(encoding="utf-8"),
-        {{"DB_POOL_SIZE": "{candidate.pool_size}", "DB_MAX_OVERFLOW": "{candidate.max_overflow}"}},
+        {{
+            "API_WORKERS": "{api_workers}",
+            "DB_POOL_SIZE": "{candidate.pool_size}",
+            "DB_MAX_OVERFLOW": "{candidate.max_overflow}",
+        }},
     ),
     encoding="utf-8",
 )
@@ -391,6 +414,7 @@ def recommend(report: dict[str, Any]) -> str:
 def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     candidates = parse_candidates(args.candidates)
+    worker_candidates = parse_worker_candidates(args.workers, args.api_workers)
     stamp = args.timestamp or utc_stamp()
     matrix_dir = Path(args.artifact_root) / stamp / "load-pool-matrix"
     logs_dir = matrix_dir / "logs"
@@ -404,6 +428,7 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
         "iran_host": settings["IRAN_HOST"],
         "iran_project_dir": settings["IRAN_PROJECT_DIR"],
         "api_workers": args.api_workers,
+        "worker_candidates": worker_candidates,
         "target_rps": args.target_rps,
         "duration": args.duration,
         "artifact_dir": display_path(matrix_dir),
@@ -411,37 +436,46 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
     }
     restored = False
     try:
-        for candidate in candidates:
-            candidate_stamp = f"{stamp}-l7pool-{candidate.label}"
-            print(f"[stage-l7.1] applying DB_POOL_SIZE={candidate.pool_size} DB_MAX_OVERFLOW={candidate.max_overflow}", flush=True)
-            apply_result = run_remote_script(
-                settings,
-                apply_pool_script(settings["IRAN_PROJECT_DIR"], stamp, candidate),
-                timeout=240,
-            )
-            (logs_dir / f"{candidate.label}-apply.stdout.log").write_text(apply_result.stdout, encoding="utf-8")
-            (logs_dir / f"{candidate.label}-apply.stderr.log").write_text(apply_result.stderr, encoding="utf-8")
-            item: dict[str, Any] = {
-                "candidate": f"{candidate.pool_size}:{candidate.max_overflow}",
-                "candidate_stamp": candidate_stamp,
-                "theoretical_api_connections": args.api_workers * candidate.total_per_worker,
-                "apply": apply_result.__dict__,
-            }
-            if apply_result.returncode != 0:
-                item["status"] = "apply_failed"
+        for worker_count in worker_candidates:
+            for candidate in candidates:
+                candidate_label = f"w{worker_count}-{candidate.label}" if len(worker_candidates) > 1 else candidate.label
+                candidate_stamp = f"{stamp}-l7pool-{candidate_label}"
+                print(
+                    f"[stage-l7.1] applying API_WORKERS={worker_count} "
+                    f"DB_POOL_SIZE={candidate.pool_size} DB_MAX_OVERFLOW={candidate.max_overflow}",
+                    flush=True,
+                )
+                apply_result = run_remote_script(
+                    settings,
+                    apply_pool_script(settings["IRAN_PROJECT_DIR"], stamp, candidate, worker_count),
+                    timeout=240,
+                )
+                (logs_dir / f"{candidate_label}-apply.stdout.log").write_text(apply_result.stdout, encoding="utf-8")
+                (logs_dir / f"{candidate_label}-apply.stderr.log").write_text(apply_result.stderr, encoding="utf-8")
+                item: dict[str, Any] = {
+                    "candidate": f"workers={worker_count} pool={candidate.pool_size}:{candidate.max_overflow}",
+                    "candidate_stamp": candidate_stamp,
+                    "api_workers": worker_count,
+                    "pool_size": candidate.pool_size,
+                    "max_overflow": candidate.max_overflow,
+                    "theoretical_api_connections": worker_count * candidate.total_per_worker,
+                    "apply": apply_result.__dict__,
+                }
+                if apply_result.returncode != 0:
+                    item["status"] = "apply_failed"
+                    report["candidates"].append(item)
+                    write_json(matrix_dir / "results.json", report)
+                    continue
+
+                print(f"[stage-l7.1] running {candidate_label} at {args.target_rps} RPS for {args.duration}", flush=True)
+                command = realistic_load_args(args, candidate_stamp)
+                run_result = run_local_command(command, timeout=candidate_timeout, env={})
+                (logs_dir / f"{candidate_label}-realistic.stdout.log").write_text(run_result["stdout"], encoding="utf-8")
+                (logs_dir / f"{candidate_label}-realistic.stderr.log").write_text(run_result["stderr"], encoding="utf-8")
+                item["run"] = {key: value for key, value in run_result.items() if key not in {"stdout", "stderr"}}
+                item["summary"] = summarize_candidate(args.artifact_root, candidate_stamp)
                 report["candidates"].append(item)
                 write_json(matrix_dir / "results.json", report)
-                continue
-
-            print(f"[stage-l7.1] running {candidate.label} at {args.target_rps} RPS for {args.duration}", flush=True)
-            command = realistic_load_args(args, candidate_stamp)
-            run_result = run_local_command(command, timeout=candidate_timeout, env={})
-            (logs_dir / f"{candidate.label}-realistic.stdout.log").write_text(run_result["stdout"], encoding="utf-8")
-            (logs_dir / f"{candidate.label}-realistic.stderr.log").write_text(run_result["stderr"], encoding="utf-8")
-            item["run"] = {key: value for key, value in run_result.items() if key not in {"stdout", "stderr"}}
-            item["summary"] = summarize_candidate(args.artifact_root, candidate_stamp)
-            report["candidates"].append(item)
-            write_json(matrix_dir / "results.json", report)
     finally:
         print("[stage-l7.1] restoring original Iran DB pool env and app service", flush=True)
         restore = run_remote_script(settings, restore_pool_script(settings["IRAN_PROJECT_DIR"], stamp), timeout=240)
