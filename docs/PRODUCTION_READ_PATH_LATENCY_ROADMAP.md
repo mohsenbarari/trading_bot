@@ -1,7 +1,8 @@
 # Production Read Path Latency Roadmap
 
-Status: Stage RPL5 completed on 2026-06-13 by adding a narrow
-Redis-backed cache for the current admin market message read path.
+Status: Stage RPL6 completed on 2026-06-13. The targeted `500 RPS / 2m`
+benchmark ran successfully, but it did not show enough p95/p99 improvement to
+justify rerunning the expensive L9 `500 RPS / 30m` soak.
 
 Last updated: 2026-06-13
 
@@ -60,7 +61,7 @@ latency under sustained concurrency.
 | `RPL3` | Complete | Apply index/query fixes only where RPL2 shows a clear plan problem; closed with no index/query mutation because current Iran plans are fast and the remaining issue is read amplification/concurrency pressure. |
 | `RPL4` | Complete | Reduce polling/read amplification in Messenger and market screens where backend correctness permits it. |
 | `RPL5` | Complete | Add narrowly-scoped Redis or in-process caches for read-only/current-state endpoints such as current market/admin message reads, with explicit TTL and invalidation. |
-| `RPL6` | Pending | Rerun targeted 500RPS benchmark, then rerun L9 `500 RPS / 30m` only if targeted results improve p95/p99 materially. |
+| `RPL6` | Complete | Rerun targeted 500RPS benchmark, then rerun L9 `500 RPS / 30m` only if targeted results improve p95/p99 materially. |
 
 ## Stage RPL1 - Market Runtime Micro-Cache
 
@@ -312,7 +313,106 @@ Validation:
   - sync invalidation for `admin_market_messages`;
   - envelope behavior in `core.cache`.
 
-Next:
+## Stage RPL6 - Targeted 500RPS Benchmark
 
-- Stage RPL6 should run a targeted 500RPS benchmark before deciding whether a
-  full L9 rerun is worth the cost.
+Decision:
+
+- Run a short targeted `500 RPS / 2m` benchmark before paying the cost of a
+  full L9 `500 RPS / 30m` soak.
+- Use the same diagnostic shape that previously produced the accepted L7
+  capacity proof:
+  - `API_WORKERS=24`;
+  - `DB_POOL_SIZE=10`;
+  - `DB_MAX_OVERFLOW=4`;
+  - `LOAD_RUNNER_SHARDS=2`;
+  - no media and no mutating official loop traffic.
+- Restore Iran production to the default profile after the benchmark:
+  - `API_WORKERS=8`;
+  - `DB_POOL_SIZE=8`;
+  - `DB_MAX_OVERFLOW=6`.
+
+Artifacts:
+
+- Invalid first attempt:
+  `tmp/production-benchmark/20260613T160622Z/load-pool-matrix/`.
+  This attempt applied and restored the Iran profile correctly, but k6 did not
+  run because `LOAD_RUNNER_HOST` was not present in the tmux environment. It is
+  not used as performance evidence.
+- Valid RPL6 targeted run:
+  `tmp/production-benchmark/20260613T160851Z/load-pool-matrix/`.
+- Execution log:
+  `tmp/e2e-logs/rpl6-targeted-500rps-valid-20260613T1610Z.log`.
+
+Valid RPL6 result:
+
+| Metric | RPL6 targeted `500 RPS / 2m` |
+| --- | ---: |
+| Status | `passed` |
+| HTTP requests | `58677` |
+| Effective RPS | `486.86` |
+| Request failure rate | `0%` |
+| Check pass rate | `100%` |
+| p95 | `637.08ms` |
+| p99 | `1534.14ms` |
+| Dropped iterations | `1325` |
+| Dropped iteration ratio | `2.208%` |
+| Max PostgreSQL connections | `250` |
+| Nginx 5xx delta | `0` |
+| Max sync backlog | `846` |
+| Sampler status | `passed` |
+| Restored production profile | `true` |
+
+Endpoint p95 highlights:
+
+| Endpoint family | RPL6 p95 | RPL6 p99 |
+| --- | ---: | ---: |
+| `chat_conversations` | `736.51ms` | `1903.41ms` |
+| `notifications_unread` | `711.00ms` | `1441.09ms` |
+| `direct_messages` | `710.62ms` | `1922.96ms` |
+| `offers_list` | `704.54ms` | `1693.59ms` |
+| `customer_relations` | `699.44ms` | `1693.16ms` |
+| `offers_my` | `693.54ms` | `1755.50ms` |
+| `users_public_detail` | `678.09ms` | `1447.82ms` |
+| `users_public_search` | `665.38ms` | `1763.55ms` |
+| `chat_poll` | `664.66ms` | `1644.14ms` |
+
+Comparison with the previous accepted L7 `500 RPS / 10m` proof:
+
+| Metric | L7 final `500 RPS / 10m` | RPL6 targeted `500 RPS / 2m` | Direction |
+| --- | ---: | ---: | --- |
+| Effective RPS | `498.21` | `486.86` | Worse |
+| p95 | `559.76ms` | `637.08ms` | Worse |
+| p99 | `812.07ms` | `1534.14ms` | Worse |
+| Dropped ratio | `0.324%` | `2.208%` | Worse |
+| Request failure rate | `0%` | `0%` | Same |
+| Nginx 5xx delta | `0` | `0` | Same |
+| Max PostgreSQL connections | `248` | `250` | Same range |
+
+Decision on L9 rerun:
+
+- Do not rerun the full L9 `500 RPS / 30m` soak from this RPL6 result.
+- RPL1/RPL4/RPL5 are still correct low-risk optimizations, but the targeted
+  benchmark did not prove a material enough latency improvement to justify a
+  costly 30-minute rerun.
+- The remaining bottleneck is still broad read-path latency under high
+  concurrency, with current pressure showing in chat conversation reads,
+  direct/room message reads, offers reads, relation reads, and public-user
+  reads.
+
+Post-run health:
+
+- Foreign sync-health after the valid run:
+  `status=ok`, `unsynced_change_log_count=0`, `sync:outbound=0`.
+- Iran sync-health after the valid run:
+  `status=ok`, `unsynced_change_log_count=0`, `sync:outbound=0`.
+- Known ignored sync retry debt remains in Redis retry queues and is still
+  outside the RPL6 decision.
+- Iran app after restore:
+  `API_WORKERS=8`, `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6`, app `Up (healthy)`.
+
+RPL roadmap status:
+
+- This roadmap is complete through RPL6.
+- Further work should not rerun L9 until a new narrow optimization produces a
+  targeted benchmark that beats the accepted L7 shape on p95, p99, and dropped
+  iteration ratio.
