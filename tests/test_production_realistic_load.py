@@ -10,6 +10,7 @@ from scripts.report_production_realistic_load import (
     SCENARIO_CONTRACT,
     THRESHOLD_CONTRACT,
     build_contract,
+    effective_k6_timeout,
     merge_k6_summaries,
     parse_duration_seconds,
     run_k6_command,
@@ -220,6 +221,13 @@ class ProductionRealisticLoadTests(unittest.TestCase):
         self.assertEqual(parse_duration_seconds("2m"), 120)
         self.assertEqual(parse_duration_seconds("1h"), 3600)
         self.assertEqual(parse_duration_seconds("45"), 45)
+
+    def test_effective_k6_timeout_extends_for_long_soak_runs(self):
+        args = argparse.Namespace(duration="30m", k6_timeout=900, k6_timeout_padding_seconds=300)
+        self.assertEqual(effective_k6_timeout(args), 2100)
+
+        short_args = argparse.Namespace(duration="10m", k6_timeout=900, k6_timeout_padding_seconds=300)
+        self.assertEqual(effective_k6_timeout(short_args), 900)
 
     def test_sampler_command_targets_stage_l4_sampler(self):
         args = argparse.Namespace(
