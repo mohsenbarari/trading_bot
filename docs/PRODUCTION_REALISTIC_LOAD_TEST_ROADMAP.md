@@ -1,6 +1,6 @@
 # Production Realistic Load Test Roadmap
 
-Status: Stage L7 failed on the first official target attempt. Stage L7.1-L7.4 showed that `workers=16 pool=16:8` is close on latency/throughput but still fails because of Nginx 502 upstream resets; Stage L7.5 applies a narrow Nginx API keepalive/header fix before rerunning that candidate.
+Status: Stage L7 failed on the first official target attempt. Stage L7.1-L7.4 diagnosed DB pool exhaustion, broad API worker saturation, and Nginx upstream resets. Stage L7.5 fixed the normal API proxy keepalive/header path and removed the 502/reset blocker. Stage L7.6-L7.8 now show the best short-run shape at `workers=24 pool=10:4`, but Stage L7 remains open because the current 4-vCPU third load-runner tops out around `491`-`494 req/s` with non-zero dropped iterations even after raising k6 `nofile`.
 
 Last updated: 2026-06-13
 
@@ -27,7 +27,10 @@ same time.
 | `L7.2` | Complete on 2026-06-13 | Added endpoint-level k6 trends and pool-matrix summary breakdown. Diagnostic artifact `tmp/production-benchmark/20260613T090738Z/load-pool-matrix/` ran `API_WORKERS=8`, `DB_POOL_SIZE=16`, `DB_MAX_OVERFLOW=8` at `500 RPS / 2m`: `326.39 req/s`, `0%` request failures, `0` new Nginx 5xx delta, p95 `6631.78ms`, p99 `7006.81ms`, `19074` dropped iterations, max PostgreSQL connections `199`. The slowest endpoint families were all clustered around p95 `6.5s`-`6.9s`, so the remaining bottleneck is broad API worker saturation/session-hold-time rather than a single endpoint. During load the Iran app container reached about `810%` CPU while DB connections stayed within budget. |
 | `L7.3` | Complete on 2026-06-13 | Extended the reversible Stage L matrix to test API worker candidates together with pool candidates. Artifact `tmp/production-benchmark/20260613T092130Z/load-pool-matrix/` compared `API_WORKERS=8/12/16` with pool `16:8`: `8` workers stayed operationally clean but reached only `321.71 req/s` with p95 `6901.47ms`; `12` workers improved throughput to `452.29 req/s` and p95 `2980.97ms` but produced `6.897%` failures and `604` load-runner 502s; `16` workers reached `483.85 req/s` with p95 `1172.38ms` and p99 `1632.33ms`, but produced `7.342%` failures and `1037` load-runner 502s. Nginx error logs showed `recv() failed (104: Connection reset by peer) while reading response header from upstream` across high-volume endpoints, so higher workers cannot be accepted until the upstream resets are explained and removed. |
 | `L7.4` | Complete on 2026-06-13 | Hardened diagnostic capture so candidate app logs are saved before each app recreate and added a short post-apply settle window. Artifact `tmp/production-benchmark/20260613T094038Z/load-pool-matrix/` reran `workers=16 pool=16:8`: `488.97 req/s`, p95 `826.04ms`, p99 `1356.6ms`, dropped `1119`, max PostgreSQL connections `263`, but failure remained `7.255%` with Nginx 5xx delta `1792`. App logs did not show request exceptions or OOM/restart evidence; Nginx classified the failures as upstream resets. The live Nginx config was found to send `Connection "upgrade"` on every `/api/` request instead of only websocket traffic, so Stage L7.5 is a narrow Nginx proxy fix. |
-| `L7.5` | In progress | Update production Nginx templates/scripts so normal `/api/` traffic uses an upstream keepalive pool and clears the `Connection` header, while websocket upgrade remains isolated under `/api/realtime/ws`. Apply the Nginx-only change on Iran and rerun `workers=16 pool=16:8`. |
+| `L7.5` | Complete on 2026-06-13 | Updated production Nginx templates/scripts so normal `/api/` traffic uses an upstream keepalive pool and clears the `Connection` header, while websocket upgrade remains isolated under `/api/realtime/ws`. The live Iran Nginx config was patched and reloaded. Artifact `tmp/production-benchmark/20260613T095408Z/load-pool-matrix/` reran `workers=16 pool=16:8`: request failures dropped to `0%`, Nginx 5xx delta dropped to `0`, p95 improved to `983.84ms`, p99 `1608.92ms`, and max PostgreSQL connections `270`; however effective throughput remained `480.48 req/s` with `2107` dropped iterations. |
+| `L7.6` | Complete on 2026-06-13 | Ran a focused worker/pool mini-matrix after the Nginx fix. Artifact `tmp/production-benchmark/20260613T100049Z/load-pool-matrix/` compared `workers=20/24` with pools `10:4` and `12:4`. All candidates had `0%` failures and `0` Nginx 5xx delta. Best short-run shape was `workers=24 pool=10:4`: `494.33 req/s`, p95 `549.84ms`, p99 `821.91ms`, `609` dropped iterations, and max PostgreSQL connections `248`. |
+| `L7.7` | Complete on 2026-06-13 | Tested whether dropped iterations were caused by k6 VU pre-allocation by rerunning `workers=24 pool=10:4` with `PRE_ALLOCATED_VUS=600`. Artifact `tmp/production-benchmark/20260613T101858Z/load-pool-matrix/` passed k6 thresholds with `0%` failures and `0` Nginx 5xx delta, but throughput stayed `492.81 req/s` with `601` dropped iterations and worse p95 `757.37ms`. The current blocker is therefore not simple VU pre-allocation; load-runner capacity/no-file limits and final long-run behavior must be separated before accepting Stage L7. |
+| `L7.8` | Complete on 2026-06-13 | Added `LOAD_RUNNER_NOFILE`/`--load-runner-nofile` so the k6 SSH command raises `ulimit -n` before execution. Reran `workers=24 pool=10:4` with artifact `tmp/production-benchmark/20260613T102650Z/load-pool-matrix/`: `491.51 req/s`, `0%` failures, p95 `555.94ms`, p99 `860.77ms`, `760` dropped iterations, max PostgreSQL connections `246`, and `0` Nginx 5xx delta. This rules out the low SSH soft `nofile=1024` as the main dropped-iteration cause. |
 | `L8`-`L11` | Pending | spike, soak, analysis, and release-capacity decision remain pending until L7 passes cleanly. |
 
 ## Objective
@@ -58,6 +61,15 @@ The test must answer these questions:
 | Static assets | Nginx direct immutable delivery |
 | Sync | Bidirectional foreign/Iran sync-health must be clean before and after |
 | Existing benchmark root | `tmp/production-benchmark/<timestamp>/` |
+
+## Current Load-Runner Baseline
+
+The active third host is `root@45.129.39.182` reached through jump host
+`root@87.107.3.22`. It has `4` vCPUs, about `8 GiB` RAM, and `k6 v0.49.0`.
+Its SSH session soft `nofile` limit was observed at `1024` while the hard limit
+is `1048576`. The Stage L runner now raises `ulimit -n` to
+`LOAD_RUNNER_NOFILE` before invoking k6 so high-RPS tests do not inherit a
+low interactive session limit.
 
 ## Stage L7.1 DB Pool Diagnostic
 
