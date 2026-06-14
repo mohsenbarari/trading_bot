@@ -247,7 +247,7 @@ describe('notification store', () => {
     apiFetchMock.mockResolvedValueOnce(makeResponse([{ id: 4, message: 'history', category: 'user', is_read: false }]))
     apiFetchMock.mockResolvedValueOnce(makeResponse({ ok: true }))
     await store.openNotificationCenter()
-    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/notifications/')
+    expect(apiFetchMock).toHaveBeenNthCalledWith(1, '/api/notifications/?limit=50&offset=0')
     expect(apiFetchMock).toHaveBeenNthCalledWith(2, '/api/notifications/mark-all-read', { method: 'POST' })
     expect(store.appNotifications.every((notification) => notification.is_read)).toBe(true)
 
