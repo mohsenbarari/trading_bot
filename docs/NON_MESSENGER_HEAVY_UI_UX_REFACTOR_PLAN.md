@@ -1,7 +1,7 @@
 # Non-Messenger Heavy UI/UX Refactor Plan
 
 Last updated: 2026-06-14
-Status: Stage 0 baseline audit completed; implementation stages are pending.
+Status: Stage H1 foundation completed; route/page migration stages are pending.
 
 ## 1. هدف و اصل اجرایی
 
@@ -378,16 +378,29 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H1 - Design System And Workspace Primitives
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - اضافه کردن primitives مشترک غیرپیام‌رسان.
 - تعریف workspace responsive layout.
 - تعریف shared cards/buttons/toasts/forms برای customer/accountant/admin/account.
 - استخراج minimal CSS از صفحات سنگین به shared classes.
+- خروجی این stage:
+  - `frontend/src/components/workspace/WorkspaceShell.vue`
+  - `frontend/src/components/workspace/WorkspaceSection.vue`
+  - `frontend/src/components/workspace/WorkspaceActionTile.vue`
+  - `frontend/src/components/workspace/WorkspaceNotice.vue`
+  - `frontend/src/components/workspace/WorkspaceStatTile.vue`
+  - `frontend/src/components/workspace/WorkspaceDangerZone.vue`
+  - `frontend/src/components/workspace/index.ts`
+  - `frontend/src/components/workspace/WorkspacePrimitives.test.ts`
+  - workspace layout/tone/focus/desktop classes in `frontend/src/assets/main.css`
 
 پذیرش:
 - هیچ route رفتاری تغییر نکند.
 - build و focused unit tests پاس شوند.
 - صفحات فعلی با primitives جدید قابل mount باشند.
+- هیچ صفحه فعلی در H1 به primitiveهای جدید migrate نشد؛ این تصمیم عمدی است تا behavior change به Stage H2/H3 منتقل شود.
 
 ### Stage H2 - Navigation And Compatibility Adapters
 
