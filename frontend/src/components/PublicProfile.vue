@@ -17,6 +17,13 @@ import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
 import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
+import {
+  AppActionCard,
+  AppErrorState,
+  AppMetricCard,
+  AppSectionCard,
+  AppStatusBadge,
+} from './ui';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity';
 import { apiFetch } from '../utils/auth';
@@ -417,6 +424,11 @@ const sharedStatCards = computed<ProfileStatCard[]>(() => {
       key: 'member-since',
       label: 'عضویت',
       value: profileData.value.created_at_jalali,
+    },
+    {
+      key: 'trade-count',
+      label: 'تعداد معاملات',
+      value: Number(profileData.value.trades_count || 0).toLocaleString('fa-IR'),
     },
   ];
 });
@@ -1242,9 +1254,9 @@ function getTradeBadgeLabel(trade: MutualTradePreview) {
   const isPerspectiveResponder = Number(trade.responder_user_id) === Number(tradeHistoryPerspectiveUserId.value);
   
   if (isPerspectiveResponder) {
-    return type === 'BUY' ? '🟢 خرید' : '🔴 فروش';
+    return type === 'BUY' ? 'خرید' : 'فروش';
   } else {
-    return type === 'BUY' ? '🔴 فروش' : '🟢 خرید';
+    return type === 'BUY' ? 'فروش' : 'خرید';
   }
 }
 
@@ -1401,10 +1413,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
        <LoadingSkeleton :count="1" :height="50" /> <!-- Button -->
     </div>
 
-    <div v-else-if="error" class="error-state">
-      <p>{{ error }}</p>
-      <button class="retry-btn" @click="$emit('navigate', 'home')">بازگشت به خانه</button>
-    </div>
+    <AppErrorState v-else-if="error" title="دریافت پروفایل انجام نشد" :message="error" class="error-state">
+      <template #actions>
+        <button class="retry-btn" @click="$emit('navigate', 'home')">بازگشت به خانه</button>
+      </template>
+    </AppErrorState>
 
     <div v-else-if="profileData" class="profile-content" :class="{ 'profile-content--own': showOwnerSections }">
       <section class="profile-section shared-profile-section">
@@ -1427,6 +1440,16 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           </p>
         </div>
 
+        <section class="profile-stats-grid" aria-label="خلاصه وضعیت پروفایل">
+          <AppMetricCard
+            v-for="stat in sharedStatCards"
+            :key="stat.key"
+            :label="stat.label"
+            :value="stat.value"
+            tone="neutral"
+          />
+        </section>
+
         <div class="ds-accordion mt-4 card-with-help" :class="{ open: openSections.info }">
           <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
             <div class="ds-accordion-header-info">
@@ -1447,11 +1470,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           <div v-show="openSections.info" class="ds-accordion-body">
             <div class="info-section">
               <div class="info-row">
-                  <span class="label">📞 موبایل:</span>
+                  <span class="label">شماره تماس</span>
                   <span class="value">{{ profileData.mobile_number }}</span>
               </div>
               <div class="info-row address-row">
-                  <span class="label">📍 آدرس:</span>
+                  <span class="label">آدرس</span>
                   <div v-if="!addressEditing" class="address-display-frame" :class="{ editable: isOwnProfile }">
                     <span class="value address-value">{{ profileData.address }}</span>
                     <button
@@ -1589,7 +1612,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                     <h4>{{ relation.relation_display_name }}</h4>
                     <p class="public-accountant-handle">@{{ relation.accountant_account_name || 'unknown' }}</p>
                   </div>
-                  <span v-if="isHighlightedAccountant(relation)" class="public-accountant-highlight-badge">مسیر فعلی</span>
+                  <AppStatusBadge v-if="isHighlightedAccountant(relation)" tone="warning">مسیر فعلی</AppStatusBadge>
                 </div>
                 <p v-if="relation.duty_description" class="public-accountant-duty">{{ relation.duty_description }}</p>
               </article>
@@ -1639,7 +1662,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                       <p class="public-customer-handle">@{{ relation.customer_account_name || 'unknown' }}</p>
                     </template>
                   </div>
-                  <span class="public-customer-tier-badge">{{ getCustomerTierLabel(relation.customer_tier) }}</span>
+                  <AppStatusBadge tone="info">{{ getCustomerTierLabel(relation.customer_tier) }}</AppStatusBadge>
                 </div>
               </article>
             </div>
@@ -1648,61 +1671,69 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showVisitorSections && visitorActionCards.length > 0" class="profile-section visitor-profile-section">
-        <div class="profile-menu-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="public-profile-visitor-menu-help"
-            note-test="public-profile-visitor-menu-help-note"
-            label="راهنمای منوی پروفایل عمومی"
-            text="اقدام‌های عمومی این پروفایل در این بخش قرار گرفته‌اند تا مسیر پیام، بلاک و عملیات مشابه یکپارچه و قابل پیش‌بینی بماند."
-          />
-          <div class="profile-menu-heading">اقدام‌های عمومی</div>
-          <button
+        <AppSectionCard class="profile-menu-card" title="اقدام‌های عمومی" description="ارسال پیام و مدیریت دسترسی عمومی این کاربر از این بخش انجام می‌شود.">
+          <template #actions>
+            <HelpPopover
+              floating
+              button-test="public-profile-visitor-menu-help"
+              note-test="public-profile-visitor-menu-help-note"
+              label="راهنمای منوی پروفایل عمومی"
+              text="اقدام‌های عمومی این پروفایل در این بخش قرار گرفته‌اند تا مسیر پیام، بلاک و عملیات مشابه یکپارچه و قابل پیش‌بینی بماند."
+            />
+          </template>
+          <div class="profile-action-grid">
+            <AppActionCard
             v-for="action in visitorActionCards"
             :key="action.key"
             class="menu-button"
             :class="[getActionButtonClass(action), { 'menu-button--disabled': Boolean(action.disabled) }]"
+            :title="action.label"
+            :description="action.description || undefined"
             :disabled="Boolean(action.disabled)"
-            @click="handleActionClick(action)"
+            :tone="action.key === 'block_toggle' ? (publicBlockState ? 'success' : 'danger') : action.key === 'message' ? 'info' : 'warning'"
+            @select="handleActionClick(action)"
           >
-            <span class="menu-button-icon" aria-hidden="true">
-              <component :is="getActionIconComponent(action)" :size="18" />
-            </span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">{{ action.label }}</span>
-              <span v-if="action.description" class="menu-button-note">{{ action.description }}</span>
-            </span>
-          </button>
-        </div>
+            <template #icon>
+              <span class="menu-button-icon" aria-hidden="true">
+                <component :is="getActionIconComponent(action)" :size="18" />
+              </span>
+            </template>
+          </AppActionCard>
+          </div>
+        </AppSectionCard>
       </section>
 
       <section v-if="showAdminSections && adminActionCards.length > 0" class="profile-section owner-profile-section">
         <p v-if="adminUserError" class="admin-user-error">{{ adminUserError }}</p>
-        <div class="profile-menu-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="public-profile-admin-menu-help"
-            note-test="public-profile-admin-menu-help-note"
-            label="راهنمای منوی مدیریت پروفایل"
-            text="تنظیمات مدیریتی کاربر از بخش عمومی جدا شده‌اند تا عملیات روزمره با ابزارهای مدیریتی مخلوط نشود."
-          />
-          <div class="profile-menu-heading">مدیریت کاربر</div>
-          <button
+        <AppSectionCard class="profile-menu-card" title="مدیریت کاربر" description="ابزارهای مدیریتی این پروفایل از اقدام‌های عمومی جدا شده‌اند.">
+          <template #actions>
+            <HelpPopover
+              floating
+              button-test="public-profile-admin-menu-help"
+              note-test="public-profile-admin-menu-help-note"
+              label="راهنمای منوی مدیریت پروفایل"
+              text="تنظیمات مدیریتی کاربر از بخش عمومی جدا شده‌اند تا عملیات روزمره با ابزارهای مدیریتی مخلوط نشود."
+            />
+          </template>
+          <div class="profile-action-grid">
+            <AppActionCard
             v-for="action in adminActionCards"
             :key="action.key"
             class="menu-button"
             :class="getActionButtonClass(action)"
+            :title="adminUserLoading ? 'در حال بارگذاری...' : action.label"
+            tone="warning"
             :disabled="adminUserLoading"
-            @click="handleActionClick(action)"
+            @select="handleActionClick(action)"
           >
-            <span class="menu-button-icon" aria-hidden="true">
-              <component :is="getActionIconComponent(action)" :size="18" />
-            </span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">{{ adminUserLoading ? 'در حال بارگذاری...' : action.label }}</span>
-            </span>
-          </button>
-        </div>
+            <template #icon>
+              <span class="menu-button-icon" aria-hidden="true">
+                <component :is="getActionIconComponent(action)" :size="18" />
+              </span>
+            </template>
+          </AppActionCard>
+          </div>
+        </AppSectionCard>
       </section>
 
       <section class="profile-section">
@@ -1877,30 +1908,34 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
-        <div class="profile-menu-card card-with-help">
-          <HelpPopover
-            floating
-            button-test="public-profile-owner-menu-help"
-            note-test="public-profile-owner-menu-help-note"
-            label="راهنمای منوی مالک"
-            text="میانبرهای تنظیمات، مشتریان و حسابداران در همین منو جمع شده‌اند تا ظاهر پروفایل شما با پروفایل عمومی بقیه بخش‌ها هم‌راستا بماند."
-          />
-          <div class="profile-menu-heading">میانبرهای مدیریت پروفایل</div>
-          <button
+        <AppSectionCard class="profile-menu-card" title="میانبرهای مدیریت پروفایل" description="تنظیمات، مشتریان و حسابداران از همین بخش در دسترس هستند.">
+          <template #actions>
+            <HelpPopover
+              floating
+              button-test="public-profile-owner-menu-help"
+              note-test="public-profile-owner-menu-help-note"
+              label="راهنمای منوی مالک"
+              text="میانبرهای تنظیمات، مشتریان و حسابداران در همین منو جمع شده‌اند تا ظاهر پروفایل شما با پروفایل عمومی بقیه بخش‌ها هم‌راستا بماند."
+            />
+          </template>
+          <div class="profile-action-grid">
+            <AppActionCard
             v-for="action in ownerOnlyActions"
             :key="action.key"
             class="menu-button"
             :class="getActionButtonClass(action)"
-            @click="handleActionClick(action)"
+            :title="action.label"
+            tone="warning"
+            @select="handleActionClick(action)"
           >
-            <span class="menu-button-icon" aria-hidden="true">
-              <component :is="getActionIconComponent(action)" :size="18" />
-            </span>
-            <span class="menu-button-copy">
-              <span class="menu-button-label">{{ action.label }}</span>
-            </span>
-          </button>
-        </div>
+            <template #icon>
+              <span class="menu-button-icon" aria-hidden="true">
+                <component :is="getActionIconComponent(action)" :size="18" />
+              </span>
+            </template>
+          </AppActionCard>
+          </div>
+        </AppSectionCard>
       </section>
     </div>
 
@@ -1953,6 +1988,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .profile-content--own .ds-accordion-header {
   padding-top: 0.74rem;
   padding-bottom: 0.74rem;
+}
+
+.profile-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+  max-width: var(--ds-page-max-width);
 }
 
 .profile-header-row {
@@ -2412,6 +2455,12 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   grid-template-columns: 1fr;
 }
 
+.profile-action-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
 .stat-card {
   background: var(--ds-bg-card);
   padding: 12px;
@@ -2564,6 +2613,18 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .unblock-btn .menu-button-icon {
   background: rgba(34, 197, 94, 0.14);
   color: #166534;
+}
+
+.retry-btn {
+  min-height: 2.75rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 
@@ -2916,6 +2977,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 @media (max-width: 640px) {
+  .profile-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
   .history-filter-grid {
     grid-template-columns: 1fr;
   }

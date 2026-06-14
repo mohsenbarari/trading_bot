@@ -338,7 +338,7 @@ Gate نهایی Stage 12:
 | Stage 4 | Accountant Workspace: remove remaining legacy feel | Completed |
 | Stage 5 | Account, Settings, Session and Storage UX | Completed |
 | Stage 6 | Admin workspace and admin subviews | Completed |
-| Stage 7 | Profile and Public Profile final polish | Pending |
+| Stage 7 | Profile and Public Profile final polish | Completed |
 | Stage 8 | Notifications final polish | Pending |
 | Stage 9 | Dashboard, Operations and Market polish | Pending |
 | Stage 10 | Small surfaces and auth/public utility pages | Pending |
@@ -481,8 +481,22 @@ Gate نهایی Stage 12:
 
 ### Stage 7 - Profile/Public Profile
 
-- `PublicProfile.vue` را از نظر action areas، relation cards، trade history، project users و admin/owner actions هم‌زبان کن.
-- owner actions به workspace routeها بروند.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `ProfileView.vue` و `PublicProfileView.vue` روی shell مشترک `AppPage` و `AppPageHeader` منتقل شدند تا ورود به پروفایل شخصی و عمومی از نظر spacing، heading و safe-area با بقیه app هم‌زبان شود.
+- `PublicProfile.vue` در action areaهای visitor/admin/owner به primitiveهای shared (`AppSectionCard`, `AppActionCard`) منتقل شد و منوهای جداگانه پروفایل به presentation یکپارچه‌تری رسیدند، بدون تغییر route contractها یا eventهای `navigate`.
+- actionهای owner همچنان به routeهای workspace (`operations_customers`, `operations_accountants`) متصل ماندند و مسیر admin settings نیز بدون تغییر به flow فعلی مدیریت کاربر وصل ماند.
+- summary profile با `AppMetricCard` تقویت شد و relation cardهای حسابداران/مشتریان با badgeهای shared (`AppStatusBadge`) از نظر typography و visual hierarchy یکدست‌تر شدند.
+- wordingهای info/trade history استانداردتر شد: labelهای اطلاعات شخصی از حالت emoji/text-symbol خارج شدند و badgeهای خرید/فروش در تاریخچه معاملات به متن محصولی خالص تبدیل شدند.
+
+اعتبارسنجی Stage 7:
+
+- `npm run test:unit:run -- src/views/ProfileView.test.ts src/views/PublicProfileView.test.ts src/components/PublicProfile.test.ts` پاس شد: `54/54`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 8 - Notifications
 

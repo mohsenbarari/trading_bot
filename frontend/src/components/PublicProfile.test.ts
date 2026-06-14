@@ -1865,8 +1865,8 @@ describe('PublicProfile.vue', () => {
 
     const historyCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')
     expect(historyCalls).toHaveLength(1)
-    expect(wrapper.text()).toContain('🟢 خرید')
-    expect(wrapper.text()).toContain('🔴 فروش')
+    expect(wrapper.text()).toContain('خرید')
+    expect(wrapper.text()).toContain('فروش')
     expect(wrapper.text()).toContain('بیننده')
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۲')
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
@@ -1955,7 +1955,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/60')).toHaveLength(1)
-    expect(wrapper.text()).toContain('🟢 خرید')
+    expect(wrapper.text()).toContain('خرید')
     expect(wrapper.text()).toContain('مالک owner15')
     expect(wrapper.text()).toContain('سطح 2')
     expect(wrapper.text()).not.toContain('هیچ معامله مشترکی یافت نشد.')

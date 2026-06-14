@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
+import { AppPage, AppPageHeader } from '../components/ui'
 import { apiFetch } from '../utils/auth'
 
 const route = useRoute()
@@ -146,23 +147,32 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="public-profile-view">
-    <PublicProfile
-      :key="profileViewKey"
-      :user="profileUser"
-      :viewerUserId="viewerUserId"
-      :apiBaseUrl="apiBaseUrl"
-      :jwtToken="jwtToken"
-      :highlightAccountantUserId="highlightAccountantUserId"
-      :highlightAccountantRelationDisplayName="highlightAccountantRelationDisplayName"
-      @navigate="handleNavigate"
-    />
-  </div>
+  <AppPage>
+    <div class="public-profile-view">
+      <AppPageHeader
+        eyebrow="پروفایل عمومی"
+        title="مشاهده پروفایل"
+        description="اطلاعات عمومی، ارتباط‌های پروژه و سابقه فعالیت کاربر را از این صفحه دنبال کنید."
+      />
+      <PublicProfile
+        :key="profileViewKey"
+        :user="profileUser"
+        :viewerUserId="viewerUserId"
+        :apiBaseUrl="apiBaseUrl"
+        :jwtToken="jwtToken"
+        :highlightAccountantUserId="highlightAccountantUserId"
+        :highlightAccountantRelationDisplayName="highlightAccountantRelationDisplayName"
+        @navigate="handleNavigate"
+      />
+    </div>
+  </AppPage>
 </template>
 
 <style scoped>
 .public-profile-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-section-gap);
   min-height: 100%;
-  padding: 16px;
 }
 </style>

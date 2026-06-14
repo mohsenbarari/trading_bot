@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
-import { AppLoadingState } from '../components/ui'
+import { AppLoadingState, AppPage, AppPageHeader } from '../components/ui'
 import { apiFetch } from '../utils/auth'
 
 const router = useRouter()
@@ -57,32 +57,41 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="profile-view">
-    <PublicProfile
-      v-if="currentUser"
-      :key="currentUser.id"
-      :user="currentUser"
-      :viewerUserId="currentUser.id"
-      :apiBaseUrl="apiBaseUrl"
-      :jwtToken="jwtToken"
-      :initialOwnerWorkspace="initialOwnerWorkspace"
-      @navigate="handleNavigate"
-    />
-    <div v-else class="loading-container">
-      <AppLoadingState label="در حال دریافت پروفایل" />
+  <AppPage>
+    <div class="profile-view">
+      <AppPageHeader
+        eyebrow="حساب کاربری"
+        title="پروفایل من"
+        description="نمای کلی حساب، مسیرهای مدیریتی و اطلاعات عمومی خود را از این صفحه دنبال کنید."
+      />
+      <PublicProfile
+        v-if="currentUser"
+        :key="currentUser.id"
+        :user="currentUser"
+        :viewerUserId="currentUser.id"
+        :apiBaseUrl="apiBaseUrl"
+        :jwtToken="jwtToken"
+        :initialOwnerWorkspace="initialOwnerWorkspace"
+        @navigate="handleNavigate"
+      />
+      <div v-else class="loading-container">
+        <AppLoadingState label="در حال دریافت پروفایل" />
+      </div>
     </div>
-  </div>
+  </AppPage>
 </template>
 
 <style scoped>
 .profile-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-section-gap);
   min-height: 100%;
-  padding: 16px;
 }
 .loading-container {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100dvh;
+  min-height: 16rem;
 }
 </style>
