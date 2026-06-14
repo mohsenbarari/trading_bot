@@ -2,11 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { authGuard } from '../utils/auth'
 import LoginView from '../views/LoginView.vue'
 
-const withQuery = (query: Record<string, unknown>, extra: Record<string, unknown>) => ({
-  ...query,
-  ...extra,
-})
-
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -72,28 +67,19 @@ const router = createRouter({
     {
       path: '/account/security',
       name: 'account-security',
-      redirect: (to) => ({
-        name: 'settings',
-        query: withQuery(to.query, { section: 'sessions' }),
-      }),
+      component: () => import('../views/SettingsView.vue'),
       meta: { requiresAuth: true }
     },
     {
       path: '/account/storage',
       name: 'account-storage',
-      redirect: (to) => ({
-        name: 'settings',
-        query: withQuery(to.query, { section: 'storage' }),
-      }),
+      component: () => import('../views/SettingsView.vue'),
       meta: { requiresAuth: true }
     },
     {
       path: '/account/notifications',
       name: 'account-notifications',
-      redirect: (to) => ({
-        name: 'notifications',
-        query: to.query,
-      }),
+      component: () => import('../views/NotificationsView.vue'),
       meta: { requiresAuth: true }
     },
     {

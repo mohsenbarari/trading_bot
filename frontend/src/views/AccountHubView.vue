@@ -48,7 +48,7 @@ const profileActions = computed<AccountAction[]>(() => [
     title: 'تنظیمات کاربری',
     description: isAccountant.value ? 'تنظیمات مجاز حساب حسابدار' : 'تنظیمات حساب، نشست‌ها و خروج',
     icon: Settings,
-    action: () => router.push({ name: 'settings' }),
+    action: () => router.push({ name: 'account-storage' }),
   },
 ])
 
@@ -61,7 +61,7 @@ const securityActions = computed<AccountAction[]>(() => {
       title: 'نشست‌های فعال',
       description: 'بررسی و مدیریت دستگاه‌های فعال',
       icon: Smartphone,
-      action: () => router.push({ name: 'settings', query: { section: 'sessions' } }),
+      action: () => router.push({ name: 'account-security' }),
     })
   }
 
@@ -70,7 +70,7 @@ const securityActions = computed<AccountAction[]>(() => {
     title: 'حافظه و داده‌ها',
     description: 'پاک‌سازی فایل‌های دانلود شده پیام‌رسان',
     icon: Database,
-    action: () => router.push({ name: 'settings', query: { section: 'storage' } }),
+    action: () => router.push({ name: 'account-storage' }),
   })
 
   return actions
@@ -82,7 +82,7 @@ const notificationActions = computed<AccountAction[]>(() => [
     title: 'اعلان‌ها',
     description: 'اعلان‌های سیستمی، بازار و معاملات',
     icon: Bell,
-    action: () => router.push({ name: 'notifications' }),
+    action: () => router.push({ name: 'account-notifications' }),
   },
 ])
 

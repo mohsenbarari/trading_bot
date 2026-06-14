@@ -17,7 +17,11 @@ const currentUser = ref<{ id: number; account_name: string } | null>(null)
 
 function handleNavigate(view: string, payload?: any) {
   if (view === 'settings') {
-    router.push({ name: 'settings' })
+    router.push({ name: 'account-storage' })
+  } else if (view === 'operations_customers') {
+    router.push({ name: 'operations-customers' })
+  } else if (view === 'operations_accountants') {
+    router.push({ name: 'operations-accountants' })
   } else if (view === 'chat' && payload?.userId) {
     router.push({
       name: 'messenger',

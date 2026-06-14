@@ -142,7 +142,32 @@ describe('PublicProfileView.vue', () => {
     })
   })
 
-  it('routes admin settings navigation requests through the admin user-profile handoff query contract', async () => {
+  it('routes owner workspace navigation requests to the operations workspaces', async () => {
+    const PublicProfileView = (await import('./PublicProfileView.vue')).default
+    const wrapper = mount(PublicProfileView, {
+      global: {
+        stubs: {
+          PublicProfile: {
+            name: 'PublicProfile',
+            template: `
+              <div>
+                <button class="customers-nav" @click="$emit('navigate', 'operations_customers')">customers</button>
+                <button class="accountants-nav" @click="$emit('navigate', 'operations_accountants')">accountants</button>
+              </div>
+            `,
+          },
+        },
+      },
+    })
+
+    await wrapper.get('.customers-nav').trigger('click')
+    await wrapper.get('.accountants-nav').trigger('click')
+
+    expect(publicProfileViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'operations-customers' })
+    expect(publicProfileViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'operations-accountants' })
+  })
+
+  it('routes admin settings navigation requests through the admin user-profile route', async () => {
     const PublicProfileView = (await import('./PublicProfileView.vue')).default
     const wrapper = mount(PublicProfileView, {
       global: {
@@ -158,10 +183,9 @@ describe('PublicProfileView.vue', () => {
     await wrapper.get('.settings-nav').trigger('click')
 
     expect(publicProfileViewMocks.routerPushMock).toHaveBeenCalledWith({
-      name: 'admin',
+      name: 'admin-user-profile',
+      params: { id: '66' },
       query: {
-        section: 'user_profile',
-        user_id: '66',
         account_name: 'managed66',
       },
     })

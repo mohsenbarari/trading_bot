@@ -90,6 +90,8 @@ describe('ProfileView.vue', () => {
             template: `
               <div>
                 <button class="go-settings" @click="$emit('navigate', 'settings')">settings</button>
+                <button class="go-customers" @click="$emit('navigate', 'operations_customers')">customers</button>
+                <button class="go-accountants" @click="$emit('navigate', 'operations_accountants')">accountants</button>
                 <button class="go-home" @click="$emit('navigate', 'home')">home</button>
                 <button class="go-chat" @click="$emit('navigate', 'chat', { userId: 88, userName: 'peer-user' })">chat</button>
                 <button class="go-public-profile" @click="$emit('navigate', 'public_profile', { id: 99, account_name: 'project-user' })">profile</button>
@@ -102,21 +104,25 @@ describe('ProfileView.vue', () => {
     await flushPromises()
 
     await wrapper.get('.go-settings').trigger('click')
+    await wrapper.get('.go-customers').trigger('click')
+    await wrapper.get('.go-accountants').trigger('click')
     await wrapper.get('.go-chat').trigger('click')
     await wrapper.get('.go-public-profile').trigger('click')
     await wrapper.get('.go-home').trigger('click')
 
-    expect(routerPushMock).toHaveBeenNthCalledWith(1, { name: 'settings' })
-    expect(routerPushMock).toHaveBeenNthCalledWith(2, {
+    expect(routerPushMock).toHaveBeenNthCalledWith(1, { name: 'account-storage' })
+    expect(routerPushMock).toHaveBeenNthCalledWith(2, { name: 'operations-customers' })
+    expect(routerPushMock).toHaveBeenNthCalledWith(3, { name: 'operations-accountants' })
+    expect(routerPushMock).toHaveBeenNthCalledWith(4, {
       name: 'messenger',
       query: { user_id: '88', user_name: 'peer-user' },
     })
-    expect(routerPushMock).toHaveBeenNthCalledWith(3, {
+    expect(routerPushMock).toHaveBeenNthCalledWith(5, {
       name: 'public-profile',
       params: { id: '99' },
       query: { account_name: 'project-user' },
     })
-    expect(routerPushMock).toHaveBeenNthCalledWith(4, '/')
+    expect(routerPushMock).toHaveBeenNthCalledWith(6, '/')
   })
 
   it('keeps the loading fallback and logs when loading the current profile fails', async () => {

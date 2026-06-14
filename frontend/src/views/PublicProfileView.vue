@@ -80,6 +80,16 @@ function handleNavigate(
     return
   }
 
+  if (view === 'operations_customers') {
+    router.push({ name: 'operations-customers' })
+    return
+  }
+
+  if (view === 'operations_accountants') {
+    router.push({ name: 'operations-accountants' })
+    return
+  }
+
   const profileId = Number(payload?.id ?? payload?.user_id)
   if ((view === 'public_profile' || view === 'profile') && Number.isInteger(profileId) && profileId > 0) {
     router.push({
@@ -98,10 +108,9 @@ function handleNavigate(
 
   if (view === 'settings' && payload?.userId) {
     router.push({
-      name: 'admin',
+      name: 'admin-user-profile',
+      params: { id: String(payload.userId) },
       query: {
-        section: 'user_profile',
-        user_id: String(payload.userId),
         ...(payload.userName ? { account_name: payload.userName } : {}),
       },
     })

@@ -69,10 +69,10 @@ describe('router/index.ts', () => {
     expect(routeByName.get('operations-accountants-detail')?.component).toBeTypeOf('function')
     expect(routeByName.get('operations-accountants')?.redirect).toBeUndefined()
     expect(routeByName.get('operations-accountants-detail')?.redirect).toBeUndefined()
-    expect(routeByName.get('account-storage')?.redirect({ query: { source: 'hub' }, params: {} })).toEqual({
-      name: 'settings',
-      query: { source: 'hub', section: 'storage' },
-    })
+    expect(routeByName.get('account-security')?.component).toBeTypeOf('function')
+    expect(routeByName.get('account-storage')?.component).toBeTypeOf('function')
+    expect(routeByName.get('account-notifications')?.component).toBeTypeOf('function')
+    expect(routeByName.get('account-storage')?.redirect).toBeUndefined()
     expect(routeByName.get('admin-invitations')?.component).toBeTypeOf('function')
     expect(routeByName.get('admin-channels')?.component).toBeTypeOf('function')
     expect(routeByName.get('admin-users')?.component).toBeTypeOf('function')
