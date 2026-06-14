@@ -1,7 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ChevronLeft, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
-import { apiFetch } from '../utils/auth'
+import {
+  createOwnerAccountantRelation,
+  deleteOwnerAccountantRelation,
+  fetchOwnerAccountantRelations,
+  fetchOwnerAccountantSessions,
+  makeEmptyAccountantCreateForm,
+  makeEmptyAccountantEditForm,
+  normalizeDutyDescription,
+  terminateOwnerAccountantSession,
+  updateOwnerAccountantRelation,
+  type AccountantRelation,
+  type AccountantSessionSummary,
+} from '../composables/useOwnerAccountants'
+import type { RelationStatus } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
 
@@ -21,58 +34,14 @@ const emit = defineEmits<{
   (e: 'back-to-list'): void
 }>()
 
-type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
 type DetailSection = 'detailOverview' | 'detailSessions' | 'detailDanger'
 
-interface AccountantRelation {
-  id: number
-  owner_user_id: number
-  accountant_user_id: number | null
-  accountant_account_name: string | null
-  global_account_name: string
-  relation_display_name: string
-  duty_description: string | null
-  mobile_number: string
-  status: RelationStatus
-  invitation_token: string
-  registration_link: string | null
-  expires_at: string
-  activated_at: string | null
-  deleted_at: string | null
-  created_at: string
-}
-
-interface AccountantSessionSummary {
-  id: string
-  device_name: string
-  device_ip: string | null
-  platform: string
-  home_server: string
-  is_primary: boolean
-  is_active: boolean
-  created_at: string | null
-  last_active_at: string | null
-}
-
-interface AccountantSessionTerminateResponse {
-  detail: string
-  terminated_session_id: string
-  promoted_primary_session_id: string | null
-}
-
 function makeEmptyCreateForm() {
-  return {
-    account_name: '',
-    relation_display_name: '',
-    mobile_number: '',
-    duty_description: '',
-  }
+  return makeEmptyAccountantCreateForm()
 }
 
 function makeEmptyEditForm() {
-  return {
-    duty_description: '',
-  }
+  return makeEmptyAccountantEditForm()
 }
 
 const relations = ref<AccountantRelation[]>([])
@@ -109,21 +78,6 @@ const openSections = reactive({
 })
 let countdownTimer: number | null = null
 let viewportToastTimer: number | null = null
-
-function parseApiError(payload: unknown, fallback: string) {
-  if (typeof payload === 'object' && payload && 'detail' in payload) {
-    const detail = (payload as { detail?: unknown }).detail
-    if (typeof detail === 'string' && detail.trim()) {
-      return detail
-    }
-  }
-  return fallback
-}
-
-function normalizeDutyDescription(value: string) {
-  const cleaned = value.trim()
-  return cleaned || null
-}
 
 function resetCreateForm() {
   Object.assign(createForm, makeEmptyCreateForm())
@@ -333,12 +287,7 @@ async function loadRelations() {
   error.value = ''
 
   try {
-    const response = await apiFetch('/api/accountants/owner-relations')
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'دریافت لیست حسابداران ناموفق بود.'))
-    }
-    relations.value = Array.isArray(payload) ? payload : []
+    relations.value = await fetchOwnerAccountantRelations()
     if (openSessionsRelationId.value !== null) {
       const openRelation = relations.value.find((relation) => relation.id === openSessionsRelationId.value)
       if (!openRelation || openRelation.status !== 'active' || !openRelation.accountant_user_id) {
@@ -362,16 +311,10 @@ async function loadSessionsForRelation(relationId: number) {
   error.value = ''
 
   try {
-    const response = await apiFetch(`/api/accountants/owner-relations/${relationId}/sessions`, {
-      method: 'GET',
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'دریافت نشست‌های حسابدار ناموفق بود.'))
-    }
+    const payload = await fetchOwnerAccountantSessions(relationId)
     sessionsByRelationId.value = {
       ...sessionsByRelationId.value,
-      [relationId]: Array.isArray(payload) ? (payload as AccountantSessionSummary[]) : [],
+      [relationId]: payload,
     }
   } catch (err: any) {
     error.value = err?.message || 'دریافت نشست‌های حسابدار ناموفق بود.'
@@ -391,14 +334,7 @@ async function terminateAccountantSession(relation: AccountantRelation, session:
   notice.value = ''
 
   try {
-    const response = await apiFetch(`/api/accountants/owner-relations/${relation.id}/sessions/${session.id}`, {
-      method: 'DELETE',
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'پایان دادن نشست حسابدار ناموفق بود.'))
-    }
-    const result = payload as AccountantSessionTerminateResponse | null
+    const result = await terminateOwnerAccountantSession(relation.id, session.id)
     notice.value = result?.detail || 'نشست حسابدار با موفقیت پایان یافت.'
     await loadSessionsForRelation(relation.id)
   } catch (err: any) {
@@ -417,20 +353,13 @@ async function createRelation() {
   notice.value = ''
 
   try {
-    const response = await apiFetch('/api/accountants/owner-relations', {
-      method: 'POST',
-      body: JSON.stringify({
-        account_name: createForm.account_name,
-        relation_display_name: createForm.relation_display_name,
-        mobile_number: createForm.mobile_number,
-        duty_description: normalizeDutyDescription(createForm.duty_description),
-      }),
+    const created = await createOwnerAccountantRelation({
+      account_name: createForm.account_name,
+      relation_display_name: createForm.relation_display_name,
+      mobile_number: createForm.mobile_number,
+      duty_description: normalizeDutyDescription(createForm.duty_description),
     })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'ایجاد حسابدار ناموفق بود.'))
-    }
-    relations.value = [payload as AccountantRelation, ...relations.value.filter((item) => item.id !== (payload as AccountantRelation).id)]
+    relations.value = [created, ...relations.value.filter((item) => item.id !== created.id)]
     resetCreateForm()
     notice.value = 'دعوت حسابدار ثبت شد.'
     openSections.relations = true
@@ -450,17 +379,9 @@ async function saveDetailEdit() {
   detailSaveNotice.value = ''
 
   try {
-    const response = await apiFetch(`/api/accountants/owner-relations/${relation.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        duty_description: normalizeDutyDescription(editForm.duty_description),
-      }),
+    const updated = await updateOwnerAccountantRelation(relation.id, {
+      duty_description: normalizeDutyDescription(editForm.duty_description),
     })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'ویرایش حسابدار ناموفق بود.'))
-    }
-    const updated = payload as AccountantRelation
     relations.value = relations.value.map((item) => (item.id === updated.id ? updated : item))
     notice.value = 'اطلاعات حسابدار به‌روزرسانی شد.'
     detailSaveNotice.value = notice.value
@@ -487,13 +408,7 @@ async function unlinkRelation(relation: AccountantRelation) {
   error.value = ''
   notice.value = ''
   try {
-    const response = await apiFetch(`/api/accountants/owner-relations/${relation.id}`, {
-      method: 'DELETE',
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.'))
-    }
+    await deleteOwnerAccountantRelation(relation.id, isPending ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
     relations.value = relations.value.filter((item) => item.id !== relation.id)
     if (selectedRelationId.value === relation.id) {
       selectedRelationId.value = null

@@ -1,7 +1,28 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { BarChart3, ChevronLeft, ReceiptText, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
-import { apiFetch } from '../utils/auth'
+import {
+  buildCustomerPayload,
+  createOwnerCustomerRelation,
+  deleteOwnerCustomerRelation,
+  fetchOwnerCustomerRelations,
+  fetchOwnerCustomerSessions,
+  fetchOwnerCustomerTradeStats,
+  fetchOwnerCustomerTrades,
+  makeEmptyCustomerCreateForm,
+  makeEmptyCustomerDetailEditForm,
+  normalizeCommissionRate,
+  normalizeLatinDigits,
+  normalizeOptionalNumber,
+  terminateOwnerCustomerSession,
+  updateOwnerCustomerRelation,
+  type CustomerRelation,
+  type CustomerSessionSummary,
+  type CustomerTier,
+  type CustomerTradeStats,
+  type CustomerTradeSummary,
+  type RelationStatus,
+} from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
 
@@ -21,104 +42,14 @@ const emit = defineEmits<{
   (e: 'back-to-list'): void
 }>()
 
-type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
-type CustomerTier = 'tier1' | 'tier2'
 type DetailSection = 'detailOverview' | 'detailTrades' | 'detailStats' | 'detailSessions' | 'detailDanger'
 
-interface CustomerRelation {
-  id: number
-  owner_user_id: number
-  customer_user_id: number | null
-  customer_account_name: string | null
-  invitation_account_name: string | null
-  mobile_number: string | null
-  management_name: string
-  customer_tier: CustomerTier
-  commission_rate: number | null
-  min_trade_quantity: number | null
-  max_trade_quantity: number | null
-  max_daily_trades: number | null
-  max_daily_commodity_volume: number | null
-  status: RelationStatus
-  invitation_token: string
-  registration_link: string | null
-  expires_at: string | null
-  activated_at: string | null
-  deleted_at: string | null
-  created_at: string
-}
-
-interface CustomerSessionSummary {
-  id: string
-  device_name: string
-  device_ip: string | null
-  platform: string
-  home_server: string
-  is_primary: boolean
-  is_active: boolean
-  created_at: string | null
-  last_active_at: string | null
-}
-
-interface CustomerSessionTerminateResponse {
-  detail: string
-  terminated_session_id: string
-  promoted_primary_session_id: string | null
-}
-
-interface CustomerTradeSummary {
-  id: number
-  trade_number: number
-  trade_type: string
-  commodity_name: string
-  quantity: number
-  price: number
-  status: string
-  counterparty_name?: string | null
-  created_at: string
-}
-
-interface CustomerTradeStatsCommodity {
-  commodity_id: number
-  commodity_name: string
-  total_quantity: number
-}
-
-interface CustomerTradeStats {
-  relation_id: number
-  customer_user_id: number
-  period_days: number
-  from_date: string
-  to_date: string
-  trade_count: number
-  total_quantity: number
-  commission_profit_toman: number
-  commodities: CustomerTradeStatsCommodity[]
-  profit_calculation_note: string
-}
-
 function makeEmptyCreateForm() {
-  return {
-    management_name: '',
-    mobile_number: '',
-    customer_tier: 'tier1' as CustomerTier,
-    commission_rate: '0.50',
-    min_trade_quantity: '',
-    max_trade_quantity: '',
-    max_daily_trades: '',
-    max_daily_commodity_volume: '',
-  }
+  return makeEmptyCustomerCreateForm()
 }
 
 function makeEmptyDetailEditForm() {
-  return {
-    customer_tier: '',
-    commission_rate: '',
-    min_trade_quantity: '',
-    max_trade_quantity: '',
-    max_daily_trades: '',
-    max_daily_commodity_volume: '',
-  }
+  return makeEmptyCustomerDetailEditForm()
 }
 
 const relations = ref<CustomerRelation[]>([])
@@ -165,16 +96,6 @@ let countdownTimer: number | null = null
 let commissionHoldTimer: number | null = null
 let viewportToastTimer: number | null = null
 
-function parseApiError(payload: unknown, fallback: string) {
-  if (typeof payload === 'object' && payload && 'detail' in payload) {
-    const detail = (payload as { detail?: unknown }).detail
-    if (typeof detail === 'string' && detail.trim()) {
-      return detail
-    }
-  }
-  return fallback
-}
-
 function resetCreateForm() {
   Object.assign(createForm, makeEmptyCreateForm())
 }
@@ -218,14 +139,6 @@ function clearViewportToast() {
   viewportToastTimer = null
 }
 
-function normalizeLatinDigits(value: string) {
-  const persian = '۰۱۲۳۴۵۶۷۸۹'
-  const arabic = '٠١٢٣٤٥٦٧٨٩'
-  return String(value || '')
-    .replace(/[۰-۹]/g, (digit) => String(persian.indexOf(digit)))
-    .replace(/[٠-٩]/g, (digit) => String(arabic.indexOf(digit)))
-}
-
 const generatedCreateAccountName = computed(() => {
   const mobileDigits = normalizeLatinDigits(createForm.mobile_number).replace(/\D/g, '')
   return mobileDigits ? `customer_${mobileDigits}` : ''
@@ -266,32 +179,6 @@ function formatHomeServer(homeServer: string) {
   if (homeServer === 'iran') return 'ایران'
   if (homeServer === 'foreign') return 'خارج'
   return homeServer || 'نامشخص'
-}
-
-function normalizeOptionalNumber(value: string | number | null | undefined) {
-  if (value == null) return null
-  const cleaned = String(value).trim()
-  if (!cleaned) return null
-  const normalized = Number(cleaned)
-  return Number.isFinite(normalized) ? normalized : null
-}
-
-function buildCustomerPayload(form: {
-  customer_tier: CustomerTier
-  commission_rate: string | number
-  min_trade_quantity: string | number
-  max_trade_quantity: string | number
-  max_daily_trades: string | number
-  max_daily_commodity_volume: string | number
-}) {
-  return {
-    customer_tier: form.customer_tier,
-    commission_rate: form.customer_tier === 'tier2' ? normalizeOptionalNumber(form.commission_rate) : null,
-    min_trade_quantity: normalizeOptionalNumber(form.min_trade_quantity),
-    max_trade_quantity: normalizeOptionalNumber(form.max_trade_quantity),
-    max_daily_trades: normalizeOptionalNumber(form.max_daily_trades),
-    max_daily_commodity_volume: normalizeOptionalNumber(form.max_daily_commodity_volume),
-  }
 }
 
 function getRemainingMs(value: string | null) {
@@ -346,12 +233,6 @@ function formatMoneyToman(value: number | null | undefined) {
     return `${formatPlainNumber(amount / 1_000, 1)} هزار تومان`
   }
   return `${Math.round(amount).toLocaleString('fa-IR')} تومان`
-}
-
-function normalizeCommissionRate(value: string | number | null | undefined) {
-  const normalized = Number(normalizeLatinDigits(String(value ?? '')).replace(',', '.'))
-  if (!Number.isFinite(normalized)) return 0
-  return Math.min(100, Math.max(0, normalized))
 }
 
 function formatCommissionRate(value: string | number | null | undefined) {
@@ -485,16 +366,10 @@ async function loadSessionsForRelation(relationId: number) {
   error.value = ''
 
   try {
-    const response = await apiFetch(`/api/customers/owner-relations/${relationId}/sessions`, {
-      method: 'GET',
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'دریافت نشست‌های مشتری ناموفق بود.'))
-    }
+    const payload = await fetchOwnerCustomerSessions(relationId)
     sessionsByRelationId.value = {
       ...sessionsByRelationId.value,
-      [relationId]: Array.isArray(payload) ? (payload as CustomerSessionSummary[]) : [],
+      [relationId]: payload,
     }
   } catch (err: any) {
     error.value = err?.message || 'دریافت نشست‌های مشتری ناموفق بود.'
@@ -524,14 +399,7 @@ async function terminateCustomerSession(relation: CustomerRelation, session: Cus
   notice.value = ''
 
   try {
-    const response = await apiFetch(`/api/customers/owner-relations/${relation.id}/sessions/${session.id}`, {
-      method: 'DELETE',
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'پایان دادن نشست مشتری ناموفق بود.'))
-    }
-    const result = payload as CustomerSessionTerminateResponse | null
+    const result = await terminateOwnerCustomerSession(relation.id, session.id)
     notice.value = result?.detail || 'نشست مشتری با موفقیت پایان یافت.'
     await loadSessionsForRelation(relation.id)
   } catch (err: any) {
@@ -627,14 +495,7 @@ function applyInitialRouteState() {
 }
 
 async function fetchRelationsSnapshot(options: { retryNetwork?: boolean } = {}) {
-  const response = await apiFetch('/api/customers/owner-relations', {
-    retryNetwork: options.retryNetwork ?? true,
-  })
-  const payload = await response.json().catch(() => null)
-  if (!response.ok) {
-    throw new Error(parseApiError(payload, 'دریافت لیست مشتریان ناموفق بود.'))
-  }
-  return Array.isArray(payload) ? payload as CustomerRelation[] : []
+  return fetchOwnerCustomerRelations(options)
 }
 
 function relationMatchesDetailPayload(relation: CustomerRelation, payload: ReturnType<typeof buildDetailUpdatePayload>) {
@@ -670,20 +531,12 @@ async function createRelation() {
   notice.value = ''
 
   try {
-    const response = await apiFetch('/api/customers/owner-relations', {
-      method: 'POST',
-      body: JSON.stringify({
-        account_name: generatedCreateAccountName.value,
-        management_name: createForm.management_name,
-        mobile_number: createForm.mobile_number,
-        ...buildCustomerPayload(createForm),
-      }),
+    const created = await createOwnerCustomerRelation({
+      account_name: generatedCreateAccountName.value,
+      management_name: createForm.management_name,
+      mobile_number: createForm.mobile_number,
+      ...buildCustomerPayload(createForm),
     })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'ایجاد مشتری ناموفق بود.'))
-    }
-    const created = payload as CustomerRelation
     relations.value = [created, ...relations.value.filter((item) => item.id !== created.id)]
     resetCreateForm()
     notice.value = 'دعوت مشتری ثبت شد.'
@@ -716,17 +569,10 @@ async function saveDetailEdit() {
     : null
 
   try {
-    const response = await apiFetch(`/api/customers/owner-relations/${relation.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
+    const updated = await updateOwnerCustomerRelation(relation.id, payload, {
+      signal: abortController?.signal ?? null,
       retryNetwork: false,
-      ...(abortController ? { signal: abortController.signal } : {}),
     })
-    const responsePayload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(responsePayload, 'ویرایش مشتری ناموفق بود.'))
-    }
-    const updated = responsePayload as CustomerRelation
     relations.value = relations.value.map((item) => (item.id === updated.id ? updated : item))
     clearDetailEditState()
     isSavingEdit.value = false
@@ -776,13 +622,7 @@ async function unlinkRelation(relation: CustomerRelation) {
   error.value = ''
   notice.value = ''
   try {
-    const response = await apiFetch(`/api/customers/owner-relations/${relation.id}`, {
-      method: 'DELETE',
-    })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.'))
-    }
+    await deleteOwnerCustomerRelation(relation.id, isPending ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.')
     relations.value = relations.value.filter((item) => item.id !== relation.id)
     if (openSessionsRelationId.value === relation.id) {
       openSessionsRelationId.value = null
@@ -836,14 +676,10 @@ async function loadCustomerTrades(relationId: number, options?: { force?: boolea
   loadingTradesRelationId.value = relationId
   error.value = ''
   try {
-    const response = await apiFetch(`/api/trades/with/${relation.customer_user_id}?limit=20`)
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'دریافت معاملات مشتری ناموفق بود.'))
-    }
+    const payload = await fetchOwnerCustomerTrades(relation.customer_user_id, { limit: 20 })
     tradesByRelationId.value = {
       ...tradesByRelationId.value,
-      [relationId]: Array.isArray(payload) ? (payload as CustomerTradeSummary[]) : [],
+      [relationId]: payload,
     }
   } catch (err: any) {
     error.value = err?.message || 'دریافت معاملات مشتری ناموفق بود.'
@@ -861,14 +697,10 @@ async function loadCustomerStats(relationId: number, options?: { force?: boolean
   loadingStatsRelationId.value = relationId
   error.value = ''
   try {
-    const response = await apiFetch(`/api/customers/owner-relations/${relationId}/trade-stats?days=${statsPeriodDays.value}`)
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(parseApiError(payload, 'دریافت آمار مشتری ناموفق بود.'))
-    }
+    const payload = await fetchOwnerCustomerTradeStats(relationId, statsPeriodDays.value)
     statsByRelationId.value = {
       ...statsByRelationId.value,
-      [relationId]: payload as CustomerTradeStats,
+      [relationId]: payload,
     }
   } catch (err: any) {
     error.value = err?.message || 'دریافت آمار مشتری ناموفق بود.'
