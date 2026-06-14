@@ -88,8 +88,9 @@ describe('OwnerCustomerManagerModal.vue', () => {
     vi.useRealTimers()
   })
 
-  function mountModal() {
+  function mountModal(props: Record<string, unknown> = {}) {
     return mount(OwnerCustomerManagerModal, {
+      props,
       global: {
         stubs: {
           Teleport: true,
@@ -147,6 +148,42 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.text()).toContain('افزودن مشتری جدید')
     expect(wrapper.text()).toContain('مدیریت مشتریان')
     expect(wrapper.text()).not.toContain('مشتریان فعال و در انتظار')
+
+    wrapper.unmount()
+  })
+
+  it('renders as an inline workspace surface and emits route navigation events', async () => {
+    apiFetchMock.mockResolvedValue(makeResponse([activeRelation]))
+
+    const wrapper = mountModal({ presentation: 'workspace' })
+    await flushPromises()
+
+    expect(wrapper.find('.customer-manager-page').exists()).toBe(true)
+    expect(wrapper.find('.customer-manager-backdrop').exists()).toBe(false)
+    expect(wrapper.find('.customer-manager-header').exists()).toBe(false)
+    expect(wrapper.find('.customer-manager-shell--workspace').exists()).toBe(true)
+
+    await openCustomerDetail(wrapper)
+    expect(wrapper.emitted('open-relation')?.[0]).toEqual([11])
+
+    await backToCategories(wrapper)
+    expect(wrapper.emitted('back-to-list')).toHaveLength(1)
+
+    wrapper.unmount()
+  })
+
+  it('opens the requested relation when mounted from a detail route', async () => {
+    apiFetchMock.mockResolvedValue(makeResponse([activeRelation]))
+
+    const wrapper = mountModal({
+      presentation: 'workspace',
+      initialRelationId: '11',
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('مشتری ویژه')
+    expect(wrapper.text()).toContain('مشخصات و محدودیت‌ها')
+    expect(wrapper.find('.customer-detail-page').exists()).toBe(true)
 
     wrapper.unmount()
   })

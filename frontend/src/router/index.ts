@@ -42,22 +42,13 @@ const router = createRouter({
     {
       path: '/operations/customers',
       name: 'operations-customers',
-      redirect: (to) => ({
-        name: 'profile',
-        query: withQuery(to.query, { workspace: 'customers' }),
-      }),
+      component: () => import('../views/CustomerWorkspaceView.vue'),
       meta: { requiresAuth: true }
     },
     {
       path: '/operations/customers/:relationId',
       name: 'operations-customers-detail',
-      redirect: (to) => ({
-        name: 'profile',
-        query: withQuery(to.query, {
-          workspace: 'customers',
-          relation_id: to.params.relationId,
-        }),
-      }),
+      component: () => import('../views/CustomerWorkspaceView.vue'),
       meta: { requiresAuth: true }
     },
     {
