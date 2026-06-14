@@ -23,7 +23,7 @@ describe('BottomNav.vue', () => {
     routeState.name = 'home'
   })
 
-  it('shows the admin entry immediately from the cached role on first mount', async () => {
+  it('shows the operations entry immediately from the cached role on first mount', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({
       id: 1,
       role: 'مدیر ارشد',
@@ -44,7 +44,8 @@ describe('BottomNav.vue', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('مدیریت')
+    expect(wrapper.text()).toContain('عملیات')
+    expect(wrapper.text()).not.toContain('مدیریت')
     wrapper.unmount()
   })
 

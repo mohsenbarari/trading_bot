@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Home, Store, User, MessageCircle, Shield, Menu, X } from 'lucide-vue-next'
-import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
+import { BriefcaseBusiness, Home, MessageCircle, Menu, Store, UserRound, X } from 'lucide-vue-next'
+import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 import { useNotificationStore } from '../stores/notifications'
 import { isMarketRuntimeClosed, startMarketRuntimeUpdates, stopMarketRuntimeUpdates } from '../composables/useMarketRuntime'
 
@@ -137,25 +137,25 @@ onUnmounted(() => {
   stopMarketRuntimeUpdates()
 })
 
-const userRole = computed(() => currentUserSummary.value?.role || '')
-const isAdmin = computed(() => isAdminRole(userRole.value))
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
 const isMarketClosed = computed(() => isMarketRuntimeClosed.value)
 
 const baseItems = [
-  { name: 'dashboard', label: 'خانه', icon: Home, path: '/' },
-  { name: 'market', label: 'بازار', icon: Store, path: '/market' },
-  { name: 'messenger', label: 'پیام‌رسان', icon: MessageCircle, path: '/chat', disabled: false },
-  { name: 'profile', label: 'پروفایل', icon: User, path: '/profile' },
+  { name: 'home', label: 'خانه', icon: Home, path: '/', routeNames: ['home'] },
+  { name: 'market', label: 'بازار', icon: Store, path: '/market', routeNames: ['market'] },
+  { name: 'messenger', label: 'پیام‌رسان', icon: MessageCircle, path: '/chat', routeNames: ['messenger'], disabled: false },
+  { name: 'operations', label: 'عملیات', icon: BriefcaseBusiness, path: '/operations', routeNames: ['operations', 'admin'] },
+  { name: 'account', label: 'حساب', icon: UserRound, path: '/account', routeNames: ['account', 'profile', 'settings', 'notifications', 'public-profile'] },
 ]
 
 const navItems = computed(() => {
-  const items = baseItems.filter(item => item.name !== 'market' || !isAccountant.value)
-  if (isAdmin.value) {
-    items.push({ name: 'admin', label: 'مدیریت', icon: Shield, path: '/admin', disabled: false })
-  }
-  return items
+  return baseItems.filter(item => item.name !== 'market' || !isAccountant.value)
 })
+
+function isActiveNavItem(item: { routeNames?: string[]; name: string }) {
+  const currentRouteName = typeof route.name === 'string' ? route.name : ''
+  return item.routeNames?.includes(currentRouteName) || currentRouteName === item.name
+}
 
 function toggleNav() {
   if (isDragging.value) return;
@@ -177,10 +177,10 @@ function toggleNav() {
           v-else
           :to="item.path"
           class="nav-item"
-          :class="{ active: route.name === item.name, 'market-closed': item.name === 'market' && isMarketClosed }"
+          :class="{ active: isActiveNavItem(item), 'market-closed': item.name === 'market' && isMarketClosed }"
         >
-          <div class="nav-icon-wrap" :class="{ 'icon-active': route.name === item.name }">
-            <component :is="item.icon" :size="22" :stroke-width="route.name === item.name ? 2.5 : 1.8" />
+          <div class="nav-icon-wrap" :class="{ 'icon-active': isActiveNavItem(item) }">
+            <component :is="item.icon" :size="22" :stroke-width="isActiveNavItem(item) ? 2.5 : 1.8" />
             
             <!-- Unread Badge for Messenger -->
             <div v-if="item.name === 'messenger' && notificationStore.chatUnreadCount > 0" class="nav-unread-badge" :class="{ 'has-mention': notificationStore.unreadMentionCount > 0 }">
@@ -216,7 +216,7 @@ function toggleNav() {
             v-else
             :to="item.path"
             class="fab-item"
-            :class="{ active: route.name === item.name, 'market-closed': item.name === 'market' && isMarketClosed }"
+            :class="{ active: isActiveNavItem(item), 'market-closed': item.name === 'market' && isMarketClosed }"
             @click="isExpanded = false"
           >
             <div class="relative">

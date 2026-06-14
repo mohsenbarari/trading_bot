@@ -22,6 +22,14 @@ const apiBaseUrl = '' // Relative path for proxy
 const selectedUserForProfile = ref<any>(null)
 const isLoadingRouteUserProfile = ref(false)
 const canAccessSystemSettings = computed(() => isCachedSuperAdmin())
+const routeAdminSections = new Set([
+  'create_invitation',
+  'create_channel',
+  'manage_commodities',
+  'manage_users',
+  'admin_messages',
+  'settings',
+])
 
 function getRouteUserProfileId(): number | null {
   if (route.query.section !== 'user_profile') {
@@ -33,7 +41,20 @@ function getRouteUserProfileId(): number | null {
 }
 
 function shouldClearRouteUserProfile(): boolean {
-  return route.query.section === 'user_profile' || typeof route.query.user_id === 'string'
+  return typeof route.query.section === 'string' || typeof route.query.user_id === 'string'
+}
+
+function getRouteAdminSection(): string | null {
+  const section = route.query.section
+  if (typeof section !== 'string' || section === 'user_profile' || !routeAdminSections.has(section)) {
+    return null
+  }
+
+  if ((section === 'settings' || section === 'admin_messages') && !canAccessSystemSettings.value) {
+    return null
+  }
+
+  return section
 }
 
 async function loadRouteUserProfile(userId: number) {
@@ -66,19 +87,37 @@ onMounted(() => {
   const routeUserId = getRouteUserProfileId()
   if (routeUserId) {
     void loadRouteUserProfile(routeUserId)
+    return
+  }
+
+  const routeSection = getRouteAdminSection()
+  if (routeSection) {
+    selectedUserForProfile.value = null
+    currentSection.value = routeSection
   }
 })
 
 watch(
   () => [route.query.section, route.query.user_id],
   ([section, userId]) => {
-    if (section !== 'user_profile') {
+    if (section === 'user_profile') {
+      const normalized = Number(userId)
+      if (Number.isInteger(normalized) && normalized > 0) {
+        void loadRouteUserProfile(normalized)
+      }
       return
     }
 
-    const normalized = Number(userId)
-    if (Number.isInteger(normalized) && normalized > 0) {
-      void loadRouteUserProfile(normalized)
+    const routeSection = getRouteAdminSection()
+    if (routeSection) {
+      selectedUserForProfile.value = null
+      currentSection.value = routeSection
+      return
+    }
+
+    if (section === undefined && currentSection.value !== 'menu') {
+      currentSection.value = 'menu'
+      selectedUserForProfile.value = null
     }
   }
 )

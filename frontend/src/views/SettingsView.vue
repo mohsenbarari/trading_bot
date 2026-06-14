@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { 
   Smartphone, Trash2, Loader2, HardDrive, 
   ChevronDown, ChevronLeft
 } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
+const route = useRoute()
 const { getCacheSize, clearFileCache } = useChatFileHandler()
 const cacheSize = ref('0.00 MB')
 const cacheBusy = ref(false)
@@ -23,6 +24,16 @@ const isAccountant = computed(() => currentUserSummary.value?.is_accountant === 
 
 function toggleSection(section: 'sessions' | 'storage') {
   openSections.value[section] = !openSections.value[section]
+}
+
+function applyRouteSection() {
+  const section = route.query.section
+  if (section === 'storage') {
+    openSections.value.storage = true
+  }
+  if (section === 'sessions' && !isAccountant.value) {
+    openSections.value.sessions = true
+  }
 }
 
 // ----------------- STORAGE -----------------
@@ -110,9 +121,16 @@ onMounted(() => {
     if (!isAccountant.value) {
       void fetchSessions()
     }
+    applyRouteSection()
   })
   refreshCacheSize()
 })
+
+watch(
+  () => route.query.section,
+  () => applyRouteSection(),
+  { immediate: true }
+)
 </script>
 
 <template>
