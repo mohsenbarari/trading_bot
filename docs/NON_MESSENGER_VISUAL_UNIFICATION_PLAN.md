@@ -723,8 +723,16 @@ Tablet/Desktop:
 
 ### Stage 13 - Final Persian Report
 
+وضعیت: تکمیل شد در 2026-06-14.
+
 هدف:
 - گزارش نهایی فارسی با mapping، وضعیت compatibility، تست‌ها، build/e2e، risks و تصریح اینکه production deploy اجرا نشده مگر مالک پروژه درخواست کرده باشد.
+
+خروجی انجام‌شده:
+- `docs/NON_MESSENGER_VISUAL_UNIFICATION_HANDOFF.md` ایجاد شد.
+- handoff شامل scope، stage summary، فایل‌های اصلی، وضعیت compatibility، route map، validation نهایی، debtهای release، guardrailهای آینده و وضعیت production deploy است.
+- در handoff تصریح شد که Messenger internals خارج از scope بوده‌اند و production deploy در این roadmap اجرا نشده است.
+- این roadmap از Stage 0 تا Stage 13 بسته شد.
 
 ## 13. old-to-new mapping منوها و زیرمنوها
 
