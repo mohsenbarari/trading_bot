@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import AppButton from '../components/ui/AppButton.vue';
+import AppCard from '../components/ui/AppCard.vue';
+import AppErrorState from '../components/ui/AppErrorState.vue';
+import AppLoadingState from '../components/ui/AppLoadingState.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -112,17 +116,16 @@ async function submitRegistration() {
 
 <template>
   <div class="register-container">
-    <div class="card">
+    <AppCard class="register-card">
       <h2>تکمیل ثبت‌نام</h2>
       
-      <div v-if="loading && !inviteInfo" class="loading">
-        <div class="spinner"></div>
-      </div>
+      <AppLoadingState v-if="loading && !inviteInfo" label="در حال بررسی دعوت‌نامه" />
       
-      <div v-else-if="error" class="error-box">
-        <p>❌ {{ error }}</p>
-        <button v-if="step > 1" @click="error = ''; loading = false" class="btn secondary">تلاش مجدد</button>
-      </div>
+      <AppErrorState v-else-if="error" title="ثبت‌نام ادامه پیدا نکرد" :message="error">
+        <template v-if="step > 1" #actions>
+          <AppButton variant="secondary" block @click="error = ''; loading = false">تلاش مجدد</AppButton>
+        </template>
+      </AppErrorState>
       
       <div v-else-if="step === 1" class="step-content">
         <p class="info-row"><span>نام کاربری:</span> <strong>{{ inviteInfo.account_name }}</strong></p>
@@ -131,30 +134,24 @@ async function submitRegistration() {
         
         <p class="hint">برای احراز هویت، یک کد تایید به شماره موبایل شما ارسال می‌شود.</p>
         
-        <button @click="requestOtp" :disabled="loading" class="btn primary">
-          {{ loading ? 'در حال ارسال...' : 'ارسال کد تایید' }}
-        </button>
+        <AppButton block :loading="loading" @click="requestOtp">ارسال کد تایید</AppButton>
       </div>
       
       <div v-else-if="step === 2" class="step-content">
         <label>کد تایید ۵ رقمی را وارد کنید:</label>
         <input v-model="otpCode" type="tel" maxlength="5" class="otp-input" placeholder="- - - - -" />
         
-        <button @click="verifyOtp" :disabled="otpCode.length !== 5 || loading" class="btn primary">
-          {{ loading ? 'بررسی...' : 'تایید کد' }}
-        </button>
+        <AppButton block :disabled="otpCode.length !== 5" :loading="loading" @click="verifyOtp">تایید کد</AppButton>
       </div>
       
       <div v-else-if="step === 3" class="step-content">
         <label>آدرس دقیق پستی:</label>
         <textarea v-model="address" rows="4" class="address-input" placeholder="استان، شهر، خیابان، پلاک..."></textarea>
         
-        <button @click="submitRegistration" :disabled="address.length < 10 || loading" class="btn primary">
-          {{ loading ? 'ثبت نهایی...' : 'تکمیل ثبت‌نام' }}
-        </button>
+        <AppButton block :disabled="address.length < 10" :loading="loading" @click="submitRegistration">تکمیل ثبت‌نام</AppButton>
       </div>
       
-    </div>
+    </AppCard>
   </div>
 </template>
 
@@ -164,29 +161,81 @@ async function submitRegistration() {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: #f3f4f6;
+  background: var(--ds-bg-page);
   padding: 1rem;
 }
-.card {
-  background: white;
-  padding: 2rem;
-  border-radius: 1.5rem;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+.register-card {
   width: 100%;
   max-width: 400px;
 }
-h2 { text-align: center; margin-bottom: 1.5rem; color: #1f2937; }
-.info-row { display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px solid #f3f4f6; padding-bottom: 0.5rem; }
-.hint { font-size: 0.85rem; color: #6b7280; margin-bottom: 1.5rem; text-align: center; }
-.btn { width: 100%; padding: 1rem; border-radius: 1rem; font-weight: 700; border: none; cursor: pointer; margin-top: 1rem; }
-.btn.primary { background: linear-gradient(135deg, #f59e0b, #d97706); color: white; }
-.btn.secondary { background: #e5e7eb; color: #374151; }
-.btn:disabled { opacity: 0.7; cursor: not-allowed; }
-.otp-input { width: 100%; padding: 1rem; font-size: 1.5rem; text-align: center; letter-spacing: 0.5rem; border: 2px solid #e5e7eb; border-radius: 1rem; outline: none; }
-.otp-input:focus { border-color: #f59e0b; }
-.address-input { width: 100%; padding: 1rem; border: 2px solid #e5e7eb; border-radius: 1rem; outline: none; resize: vertical; }
-.address-input:focus { border-color: #f59e0b; }
-.error-box { background: #fef2f2; color: #dc2626; padding: 1rem; border-radius: 1rem; text-align: center; }
-.spinner { width: 30px; height: 30px; border: 3px solid #e5e7eb; border-top-color: #f59e0b; border-radius: 50%; animation: spin 1s infinite; margin: 0 auto; }
-@keyframes spin { to { transform: rotate(360deg); } }
+
+h2 {
+  margin: 0 0 1.5rem;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-xl);
+  font-weight: 850;
+  text-align: center;
+}
+
+.step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+  border-bottom: 1px solid var(--ds-border-light);
+  padding-bottom: 0.5rem;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+}
+
+.info-row strong {
+  color: var(--ds-text-primary);
+}
+
+.hint {
+  margin: 0 0 0.5rem;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-sm);
+  line-height: 1.8;
+  text-align: center;
+}
+
+label {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 800;
+}
+
+.otp-input,
+.address-input {
+  width: 100%;
+  padding: 0.9rem;
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+  outline: none;
+}
+
+.otp-input {
+  font-size: 1.35rem;
+  letter-spacing: 0.45rem;
+  text-align: center;
+}
+
+.address-input {
+  resize: vertical;
+}
+
+.otp-input:focus,
+.address-input:focus {
+  border-color: var(--ds-primary-500);
+  box-shadow: 0 0 0 3px var(--ds-primary-soft);
+}
 </style>

@@ -2,19 +2,20 @@
   <div class="share-receive-root">
     <!-- Loading / error states (rare; modal takes over on success) -->
     <div v-if="loading" class="state-overlay">
-      <div class="spinner"></div>
-      <p>در حال آماده‌سازی...</p>
+      <AppLoadingState label="در حال آماده‌سازی" />
     </div>
 
     <div v-else-if="errorMsg" class="state-overlay error">
-      <p>{{ errorMsg }}</p>
-      <button class="primary-btn" @click="goHome">بازگشت به خانه</button>
+      <AppErrorState title="اشتراک‌گذاری آماده نشد" :message="errorMsg">
+        <template #actions>
+          <AppButton @click="goHome">بازگشت به خانه</AppButton>
+        </template>
+      </AppErrorState>
     </div>
 
     <!-- Sending progress overlay -->
     <div v-else-if="sending" class="state-overlay">
-      <div class="spinner"></div>
-      <p>در حال ارسال... ({{ sentCount }}/{{ totalSendCount }})</p>
+      <AppLoadingState :label="`در حال ارسال (${sentCount}/${totalSendCount})`" />
       <ul v-if="sendErrors.length" class="errors-list">
         <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
       </ul>
@@ -29,7 +30,7 @@
       <ul v-if="sendErrors.length" class="errors-list">
         <li v-for="(e, i) in sendErrors" :key="i">{{ e }}</li>
       </ul>
-      <button class="primary-btn" @click="goHome">بازگشت</button>
+      <AppButton @click="goHome">بازگشت</AppButton>
     </div>
 
     <!-- Main UI: full-screen messenger-like target picker -->
@@ -50,6 +51,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetchJson } from '../utils/auth'
 import { readSharedPayload, deleteSharedPayload, type SharedPayload, type SharedFileEntry } from '../utils/shareTargetStore'
+import AppButton from '../components/ui/AppButton.vue'
+import AppErrorState from '../components/ui/AppErrorState.vue'
+import AppLoadingState from '../components/ui/AppLoadingState.vue'
 import ChatForwardModal from '../components/chat/ChatForwardModal.vue'
 import type { ChatForwardTarget, Conversation, Message } from '../types/chat'
 import {
@@ -287,23 +291,12 @@ function goHome() { router.replace('/') }
   direction: rtl;
   z-index: 10;
 }
-.state-overlay.error { color: #b91c1c; }
-.spinner {
-  width: 36px; height: 36px; border-radius: 50%;
-  border: 3px solid rgba(51,144,236,0.2);
-  border-top-color: #3390ec;
-  animation: spin 0.9s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+.state-overlay.error { color: var(--ds-danger-700); }
 .errors-list {
   list-style: disc;
   padding-inline-start: 20px;
   font-size: 13px;
-  color: #92400e;
+  color: var(--ds-warning-700);
   max-width: 320px;
-}
-.primary-btn {
-  background: #3390ec; color: #fff; border: none; border-radius: 12px;
-  padding: 12px 22px; font-size: 14px; font-weight: 600; cursor: pointer;
 }
 </style>

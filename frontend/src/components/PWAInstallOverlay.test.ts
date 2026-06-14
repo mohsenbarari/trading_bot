@@ -38,7 +38,6 @@ describe('PWAInstallOverlay.vue', () => {
     pwaOverlayMocks.isInstalled.value = false
     pwaOverlayMocks.installAppMock.mockReset()
     pwaOverlayMocks.installAppMock.mockResolvedValue(true)
-    vi.stubGlobal('alert', vi.fn())
     setUserAgent('Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Safari/537.36')
   })
 
@@ -52,7 +51,7 @@ describe('PWAInstallOverlay.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(true)
-    await wrapper.get('.btn-dismiss').trigger('click')
+    await wrapper.get('.pwa-action-dismiss').trigger('click')
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
     expect(localStorage.getItem(PROMPT_DISMISSED_KEY)).toMatch(/^\d+$/)
@@ -83,7 +82,7 @@ describe('PWAInstallOverlay.vue', () => {
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(true)
   })
 
-  it('shows the iOS guide flow and alerts instead of calling installApp', async () => {
+  it('shows the iOS guide inline instead of calling installApp', async () => {
     setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1')
 
     const wrapper = mount(PWAInstallOverlay)
@@ -91,12 +90,12 @@ describe('PWAInstallOverlay.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(true)
-    expect(wrapper.get('.btn-install').text()).toBe('راهنما')
+    expect(wrapper.get('.pwa-action-install').text()).toBe('راهنما')
 
-    await wrapper.get('.btn-install').trigger('click')
+    await wrapper.get('.pwa-action-install').trigger('click')
 
     expect(pwaOverlayMocks.installAppMock).not.toHaveBeenCalled()
-    expect(vi.mocked(alert)).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('در Safari دکمه Share را بزنید')
   })
 
   it('calls installApp on supported browsers and hides the overlay when installation succeeds', async () => {
@@ -107,7 +106,7 @@ describe('PWAInstallOverlay.vue', () => {
     await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
 
-    await wrapper.get('.btn-install').trigger('click')
+    await wrapper.get('.pwa-action-install').trigger('click')
     await flushPromises()
 
     expect(pwaOverlayMocks.installAppMock).toHaveBeenCalledTimes(1)

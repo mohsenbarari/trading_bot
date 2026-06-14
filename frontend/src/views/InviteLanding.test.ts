@@ -34,7 +34,7 @@ describe('InviteLanding.vue', () => {
     expect(wrapper.text()).toContain('شما به سامانه معاملاتی دعوت شده‌اید.')
     expect(wrapper.get('a.telegram-btn').attributes('href')).toBe('https://t.me/mbmtrading1_bot?start=token-123')
 
-    await wrapper.get('button.web-btn').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('ثبت‌نام از طریق وب'))!.trigger('click')
     expect(inviteLandingMocks.push).toHaveBeenCalledWith('/register?token=token-123')
   })
 

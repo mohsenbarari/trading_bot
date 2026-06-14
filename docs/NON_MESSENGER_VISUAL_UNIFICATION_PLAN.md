@@ -356,8 +356,7 @@ Tablet/Desktop:
 - `npm run test:unit:run -- AppPrimitives.test.ts OperationsView.test.ts` پاس شد: `2` فایل، `8/8` تست.
 - `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
 
-مراحل باقی‌مانده بعد از Stage 6:
-- Stage 7: یکپارچه‌سازی small surfaces و micro UI.
+مراحل باقی‌مانده بعد از Stage 7:
 - Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
 - Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
 - Stage 10: responsive و PWA quality.
@@ -549,6 +548,29 @@ Tablet/Desktop:
 
 پذیرش:
 - هیچ صفحه کوچک با emoji/error خام یا button محلی قدیمی باقی نماند.
+
+خروجی انجام‌شده:
+- `WebRegister.vue` از card/spinner/error/button محلی به primitiveهای مشترک `AppCard`، `AppLoadingState`، `AppErrorState` و `AppButton` منتقل شد؛ مسیر validate invitation، OTP و ثبت آدرس بدون تغییر باقی ماند.
+- `InviteLanding.vue` از error/spinner/button محلی و emoji/text-symbol actionها پاکسازی شد؛ تلگرام با icon استاندارد `Send` و ثبت‌نام وب با `AppButton` نمایش داده می‌شود.
+- `PWAInstallOverlay.vue` از `alert()` برای راهنمای iOS خارج شد و راهنما را inline داخل overlay نشان می‌دهد؛ actionها روی `AppButton` قرار گرفتند.
+- `ShareReceiveView.vue` loading/error/sending/result stateها را با `AppLoadingState`، `AppErrorState` و `AppButton` نمایش می‌دهد؛ منطق share target، upload و redirect دست‌نخورده ماند.
+- `JalaliDatePicker.vue` symbolهای متنی trigger/navigation را با iconهای `lucide-vue-next` جایگزین کرد تا shell تقویم با استاندارد icon پروژه هم‌راستا شود.
+- اسکن هدفمند روی small surfaces اصلاح‌شده برای emoji/error خام، `alert()`، spinner/button/error-box محلی تمیز شد.
+
+اعتبارسنجی Stage 7:
+- `npm run test:unit:run -- WebRegister.test.ts InviteLanding.test.ts PWAInstallOverlay.test.ts ShareReceiveView.test.ts JalaliDatePicker.test.ts` پاس شد: `5` فایل، `23/23` تست.
+- اسکن هدفمند `rg` روی small surfaces اصلاح‌شده برای emojiهای هدف، `alert()` و کلاس‌های قدیمی button/spinner/error خام خروجی نداشت.
+- `git diff --check` پاس شد.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
+- production deploy طبق قاعده این roadmap اجرا نشد.
+
+مراحل باقی‌مانده بعد از Stage 7:
+- Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
+- Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی.
 
 ### Stage 8 - Dashboard, Operations, Account, Settings, Notifications Polish
 

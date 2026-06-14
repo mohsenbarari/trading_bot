@@ -363,7 +363,7 @@ describe('ShareReceiveView.vue', () => {
       query: { user_id: '15' },
     })
 
-    await wrapper.get('.primary-btn').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('بازگشت'))!.trigger('click')
     expect(shareReceiveViewMocks.routerReplaceMock).toHaveBeenCalledWith('/')
   })
 })

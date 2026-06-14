@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import moment from 'moment-jalaali'
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 type CalendarValueType = 'gregorian' | 'jalali'
 type JalaliMoment = ReturnType<typeof moment>
@@ -255,14 +256,20 @@ watch(isOpen, async (opened) => {
       :data-testid="triggerTestId"
       @click="togglePicker"
     >
-      <span class="jalali-date-trigger__icon" aria-hidden="true">☉</span>
+      <span class="jalali-date-trigger__icon" aria-hidden="true">
+        <CalendarDays :size="16" />
+      </span>
       <span class="jalali-date-trigger__text">{{ displayValue || placeholder }}</span>
-      <span class="jalali-date-trigger__chevron" aria-hidden="true">⌄</span>
+      <span class="jalali-date-trigger__chevron" aria-hidden="true">
+        <ChevronDown :size="18" />
+      </span>
     </button>
 
     <div v-if="inline || isOpen" class="jalali-calendar-panel" :class="{ 'is-popover': !inline }" role="dialog" aria-label="تقویم جلالی">
       <div class="jalali-calendar-header">
-        <button type="button" class="jalali-calendar-nav" aria-label="ماه قبل" @click="goToPreviousMonth">‹</button>
+        <button type="button" class="jalali-calendar-nav" aria-label="ماه قبل" @click="goToPreviousMonth">
+          <ChevronRight :size="20" />
+        </button>
         <div class="jalali-calendar-title" :aria-label="visibleMonthTitle">
           <select class="jalali-calendar-select" aria-label="انتخاب ماه" :value="visibleMonth.jMonth()" @change="updateVisibleMonth">
             <option v-for="option in monthOptions" :key="option.value" :value="option.value">
@@ -275,7 +282,9 @@ watch(isOpen, async (opened) => {
             </option>
           </select>
         </div>
-        <button type="button" class="jalali-calendar-nav" aria-label="ماه بعد" @click="goToNextMonth">›</button>
+        <button type="button" class="jalali-calendar-nav" aria-label="ماه بعد" @click="goToNextMonth">
+          <ChevronLeft :size="20" />
+        </button>
       </div>
 
       <div class="jalali-calendar-weekdays" aria-hidden="true">

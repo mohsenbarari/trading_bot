@@ -49,17 +49,17 @@ describe('WebRegister.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('نام کاربری:')
-    await wrapper.get('button.btn.primary').trigger('click')
+    await wrapper.get('button').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('کد تایید ۵ رقمی را وارد کنید:')
     await wrapper.get('input.otp-input').setValue('12345')
-    await wrapper.get('button.btn.primary').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('تایید کد'))!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('آدرس دقیق پستی:')
     await wrapper.get('textarea.address-input').setValue('تهران، خیابان مثال، پلاک ۱۲۳')
-    await wrapper.get('button.btn.primary').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('تکمیل ثبت‌نام'))!.trigger('click')
     await flushPromises()
 
     expect(localStorage.getItem('auth_token')).toBe('access-1')
@@ -82,14 +82,14 @@ describe('WebRegister.vue', () => {
     const wrapper = mount(WebRegister)
     await flushPromises()
 
-    await wrapper.get('button.btn.primary').trigger('click')
+    await wrapper.get('button').trigger('click')
     await flushPromises()
     await wrapper.get('input.otp-input').setValue('54321')
-    await wrapper.get('button.btn.primary').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('تایید کد'))!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('کد نادرست است')
-    await wrapper.get('button.btn.secondary').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('تلاش مجدد'))!.trigger('click')
     expect(wrapper.text()).not.toContain('کد نادرست است')
 
     ;(wrapper.vm as any).step = 3
