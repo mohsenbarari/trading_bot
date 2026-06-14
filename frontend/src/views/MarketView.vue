@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { ArrowUp, ArrowDown, ArrowUpDown, X, Loader2, Send, ChevronLeft, ChevronDown } from 'lucide-vue-next'
+import { ChevronDown, Loader2, Send } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
 import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
+import { AppEmptyState, AppLoadingState, AppStatusBadge } from '../components/ui'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
@@ -167,6 +168,8 @@ const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRu
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
 const filteredOfferCountLabel = computed(() => `${filteredOffers.value.length.toLocaleString('fa-IR')} لفظ`)
+const totalOfferCountLabel = computed(() => `${(offers.value || []).length.toLocaleString('fa-IR')} کل`)
+const marketStatusTone = computed(() => (isMarketOpen.value ? 'success' : 'danger'))
 const marketShellDescription = computed(() => (
   isMarketOpen.value
     ? 'وضعیت لحظه‌ای بازار و لفظ‌های قابل معامله'
@@ -690,14 +693,16 @@ onUnmounted(() => {
             <p>بازار معاملات</p>
             <h1>لفظ‌های فعال</h1>
           </div>
-          <div class="market-shell-meta">
-            <span
+          <div class="market-shell-meta" aria-label="خلاصه وضعیت بازار">
+            <AppStatusBadge
               class="market-status-chip"
               :class="isMarketOpen ? 'market-status-chip--open' : 'market-status-chip--closed'"
+              :tone="marketStatusTone"
             >
               {{ isMarketOpen ? 'بازار باز' : 'بازار بسته' }}
-            </span>
-            <span class="market-count-chip">{{ filteredOfferCountLabel }}</span>
+            </AppStatusBadge>
+            <AppStatusBadge class="market-count-chip" tone="primary">{{ filteredOfferCountLabel }}</AppStatusBadge>
+            <AppStatusBadge class="market-total-chip" tone="neutral">{{ totalOfferCountLabel }}</AppStatusBadge>
           </div>
         </div>
         <p>{{ marketShellDescription }}</p>
@@ -797,15 +802,25 @@ onUnmounted(() => {
           </button>
           <transition name="recent-offers-dropdown">
             <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown">
-              <div v-if="recentOffersLoading" class="recent-offers-state">
-                در حال بارگذاری...
-              </div>
-              <div v-else-if="recentOffersError" class="recent-offers-state recent-offers-state--error">
-                {{ recentOffersError }}
-              </div>
-              <div v-else-if="!recentOffers.length" class="recent-offers-state">
-                در یک ساعت گذشته لفظی نداشتید.
-              </div>
+              <AppLoadingState
+                v-if="recentOffersLoading"
+                class="recent-offers-state"
+                label="در حال دریافت لفظ‌های اخیر"
+              />
+              <AppEmptyState
+                v-else-if="recentOffersError"
+                class="recent-offers-state recent-offers-state--error"
+                title="لفظ‌های اخیر دریافت نشد"
+                :message="recentOffersError"
+                tone="danger"
+              />
+              <AppEmptyState
+                v-else-if="!recentOffers.length"
+                class="recent-offers-state"
+                title="لفظ اخیری وجود ندارد"
+                message="در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است."
+                tone="neutral"
+              />
               <button
                 v-for="offer in recentOffers"
                 :key="offer.id"
@@ -939,34 +954,9 @@ onUnmounted(() => {
 }
 
 .market-status-chip,
-.market-count-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.65rem;
-  padding: 0.22rem 0.62rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 900;
+.market-count-chip,
+.market-total-chip {
   white-space: nowrap;
-}
-
-.market-status-chip--open {
-  color: #15803d;
-  background: rgba(22, 163, 74, 0.12);
-  border: 1px solid rgba(22, 163, 74, 0.2);
-}
-
-.market-status-chip--closed {
-  color: #b91c1c;
-  background: rgba(220, 38, 38, 0.1);
-  border: 1px solid rgba(220, 38, 38, 0.18);
-}
-
-.market-count-chip {
-  color: #92400e;
-  background: rgba(245, 158, 11, 0.11);
-  border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
 .header-controls {
@@ -1036,35 +1026,6 @@ onUnmounted(() => {
   outline-offset: 3px;
 }
 
-.sort-toggle-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0 1rem;
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--ds-text-secondary);
-  box-shadow: var(--ds-shadow-sm);
-  transition: all 0.2s;
-}
-
-.sort-toggle-btn.active {
-  background: var(--ds-primary-50);
-  border-color: var(--ds-primary-400);
-  color: var(--ds-primary-600);
-}
-
-.sort-toggle-btn .btn-label {
-  display: none;
-}
-@media (min-width: 400px) {
-  .sort-toggle-btn .btn-label { display: inline; }
-}
-
 @media (max-width: 420px) {
   .market-shell-main {
     flex-direction: column;
@@ -1082,69 +1043,6 @@ onUnmounted(() => {
   .tab-btn small {
     display: none;
   }
-}
-
-/* Sort Panel */
-.sort-panel {
-  margin-top: 0.5rem;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
-}
-
-.sort-panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.panel-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--ds-text-secondary);
-}
-
-.clear-sort-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-600);
-  border-radius: var(--ds-radius-sm);
-  font-size: 0.65rem;
-  font-weight: 700;
-}
-
-.panel-loading {
-  display: flex;
-  justify-content: center;
-  padding: 1rem;
-  color: var(--ds-primary-500);
-}
-
-.commodity-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.commodity-btn {
-  padding: 0.4rem 1rem;
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-full);
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--ds-text-secondary);
-  transition: all 0.2s;
-}
-
-.commodity-btn.active {
-  background: var(--ds-primary-50);
-  border-color: var(--ds-primary-400);
-  color: var(--ds-primary-700);
-  box-shadow: var(--ds-shadow-sm);
 }
 
 /* Main Content */
@@ -1304,14 +1202,11 @@ onUnmounted(() => {
 }
 
 .recent-offers-state {
-  padding: 0.8rem 0.7rem;
-  font-size: 0.76rem;
-  line-height: 1.7;
-  color: var(--ds-text-secondary);
+  margin: 0;
 }
 
 .recent-offers-state--error {
-  color: var(--ds-danger-600);
+  color: var(--ds-danger-700);
 }
 
 .recent-offer-item {
@@ -1461,272 +1356,6 @@ onUnmounted(() => {
 .recent-offers-dropdown-leave-to {
   opacity: 0;
   transform: translateY(0.35rem);
-}
-
-.action-buttons {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.create-btn {
-  flex: 1;
-  padding: 0.85rem;
-  border-radius: var(--ds-radius-lg);
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  transition: all 0.2s;
-  border: 1px solid transparent;
-}
-
-.create-btn.buy {
-  background: var(--ds-success-50);
-  color: var(--ds-success-700);
-  border-color: var(--ds-success-200);
-}
-
-.create-btn.sell {
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-700);
-  border-color: var(--ds-danger-200);
-}
-
-.create-btn:active {
-  transform: scale(0.97);
-}
-
-/* Wizard Modal */
-.wizard-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-}
-
-.wizard-modal {
-  width: 100%;
-  max-width: 400px;
-  background: var(--ds-bg-card);
-  border-radius: var(--ds-radius-xl);
-  overflow: hidden;
-  box-shadow: var(--ds-shadow-xl);
-  animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.wizard-header {
-  padding: 1rem 1.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--ds-bg-inset);
-  border-bottom: 1px solid var(--ds-border-light);
-}
-
-.wizard-title {
-  font-size: 1rem;
-  font-weight: 800;
-  color: var(--ds-text-primary);
-}
-
-.close-btn {
-  padding: 0.5rem;
-  color: var(--ds-text-muted);
-  border-radius: var(--ds-radius-md);
-  transition: all 0.2s;
-}
-
-.close-btn:hover {
-  background: var(--ds-bg-hover);
-  color: var(--ds-text-primary);
-}
-
-.wizard-body {
-  padding: 1.5rem;
-}
-
-.step-content {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.step-label {
-  text-align: center;
-  font-weight: 700;
-  color: var(--ds-text-secondary);
-  font-size: 0.9rem;
-}
-
-.commodity-selection {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
-.wizard-btn-outline {
-  padding: 1rem;
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  font-weight: 700;
-  color: var(--ds-text-primary);
-  transition: all 0.2s;
-}
-
-.wizard-btn-outline:hover {
-  border-color: var(--ds-primary-400);
-  background: var(--ds-primary-50);
-}
-
-.quick-quantities {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-}
-
-.wizard-btn-quick {
-  padding: 0.6rem;
-  background: var(--ds-bg-inset);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
-  font-weight: 600;
-  color: var(--ds-text-secondary);
-}
-
-.input-group {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.wizard-input {
-  flex: 1;
-  padding: 0.75rem;
-  background: var(--ds-bg-inset);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
-  text-align: center;
-  font-weight: 800;
-  font-size: 1.1rem;
-  outline: none;
-}
-
-.wizard-input.big {
-  font-size: 1.75rem;
-  padding: 1rem;
-}
-
-.wizard-confirm-btn {
-  padding: 0 1.5rem;
-  background: var(--ds-gradient-primary);
-  color: white;
-  border-radius: var(--ds-radius-lg);
-  font-weight: 800;
-  box-shadow: var(--ds-shadow-sm);
-}
-
-.lot-types {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.lot-type-btn {
-  padding: 1.25rem;
-  border: 2px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-xl);
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  transition: all 0.2s;
-}
-
-.lot-type-btn .type-title {
-  font-weight: 800;
-  font-size: 1rem;
-}
-
-.lot-type-btn .type-desc {
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.lot-type-btn.wholesale {
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-800);
-  border-color: var(--ds-primary-100);
-}
-
-.lot-type-btn.retail {
-  background: #fff7ed;
-  color: #9a3412;
-  border-color: #ffedd5;
-}
-
-.info-alert {
-  padding: 0.75rem;
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-800);
-  border: 1px solid var(--ds-primary-100);
-  border-radius: var(--ds-radius-md);
-  font-size: 0.75rem;
-  text-align: center;
-  font-weight: 600;
-}
-
-.wizard-primary-btn {
-  padding: 1rem;
-  background: var(--ds-gradient-primary);
-  color: white;
-  border-radius: var(--ds-radius-lg);
-  font-weight: 800;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
-}
-
-.price-input-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.price-preview {
-  text-align: center;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--ds-primary-600);
-}
-
-.wizard-submit-btn {
-  width: 100%;
-  padding: 1.25rem;
-  background: var(--ds-success-500);
-  color: white;
-  border-radius: var(--ds-radius-xl);
-  font-weight: 800;
-  font-size: 1.1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2);
-}
-
-.wizard-submit-btn:disabled {
-  background: var(--ds-bg-disabled);
-  box-shadow: none;
-}
-
-/* Animations */
-@keyframes modalIn {
-  from { opacity: 0; transform: scale(0.95) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .slide-enter-active, .slide-leave-active {

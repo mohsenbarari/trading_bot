@@ -605,12 +605,34 @@ Tablet/Desktop:
 
 ### Stage 9 - Market Visual Harmonization
 
+وضعیت: تکمیل شد در 2026-06-14.
+
 هدف:
 - market header، tabs، status cards، input/action bar، recent offers، notices و states هماهنگ شوند.
 - core trading logic دست‌نخورده بماند.
 
 پذیرش:
 - offer create/parse/confirm/cancel/trade flow tests پاس شود.
+
+خروجی انجام‌شده:
+- `MarketView.vue` header وضعیت بازار و شمارنده‌های offer را از badgeهای local به `AppStatusBadge` منتقل کرد.
+- شمارنده «کل لفظ‌ها» به header اضافه شد تا کاربر هم تعداد filtered و هم total را یکجا ببیند.
+- recent offers dropdown برای loading، error و empty state از `AppLoadingState` و `AppEmptyState` استفاده می‌کند.
+- importها و CSS مرده مربوط به sort panel، create wizard، action buttons، commodity grid و panel loading حذف شد.
+- متن‌محور بودن ثبت لفظ، parse/confirm/cancel/trade flow، realtime handling و backend contract تغییر نکرد.
+
+اعتبارسنجی:
+- `npm run test:unit:run -- MarketView.test.ts` پاس شد؛ `21/21`.
+- scan هدفمند برای کلاس‌ها/importهای stale پاس شد؛ فقط stringهای keyboard event مثل `ArrowLeft`/`ArrowDown` باقی‌اند.
+- scan هدفمند emoji/text-symbol روی Market/offer surfaces خروجی نداشت.
+- `git diff --check` پاس شد.
+- `npm run build` پاس شد؛ production deploy طبق قانون این roadmap اجرا نشد.
+
+مسیر باقی‌مانده:
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی و handoff.
 
 ### Stage 10 - Responsive And PWA Quality
 
