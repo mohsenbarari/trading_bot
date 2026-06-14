@@ -43,6 +43,7 @@ describe('AdminPanel.vue', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.admin-action-btn')).toHaveLength(5)
+    expect(wrapper.findAll('.admin-accordion')).toHaveLength(3)
     expect(wrapper.text()).toContain('مدیریت کالاها')
     expect(wrapper.text()).toContain('پیام‌های مدیریت')
     expect(wrapper.text()).toContain('تنظیمات سیستم')

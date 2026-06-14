@@ -276,12 +276,14 @@ const saveOverride = async () => {
       message.value = 'استثنای تقویمی با موفقیت ثبت شد'
     }
     messageType.value = 'success'
+    showViewportToast('success', message.value)
 
     resetOverrideForm()
     await Promise.all([loadOverrides(), loadMarketState()])
   } catch (error: any) {
     message.value = error.message || 'خطا در ذخیره استثنای تقویمی'
     messageType.value = 'danger'
+    showViewportToast('danger', message.value)
   } finally {
     overrideSaving.value = false
   }
@@ -301,10 +303,12 @@ const deleteOverride = async (overrideId: number) => {
     }
     message.value = 'استثنای تقویمی حذف شد'
     messageType.value = 'success'
+    showViewportToast('success', message.value)
     await Promise.all([loadOverrides(), loadMarketState()])
   } catch (error: any) {
     message.value = error.message || 'خطا در حذف استثنای تقویمی'
     messageType.value = 'danger'
+    showViewportToast('danger', message.value)
   } finally {
     overrideDeletingId.value = null
   }
