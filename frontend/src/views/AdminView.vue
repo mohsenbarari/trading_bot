@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, ChevronLeft } from 'lucide-vue-next'
+import { ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import { apiFetch } from '../utils/auth'
 import AdminPanel from '../components/AdminPanel.vue'
@@ -22,6 +22,41 @@ const apiBaseUrl = '' // Relative path for proxy
 const selectedUserForProfile = ref<any>(null)
 const isLoadingRouteUserProfile = ref(false)
 const canAccessSystemSettings = computed(() => isCachedSuperAdmin())
+const sectionMetaByKey: Record<string, { title: string; description: string }> = {
+  menu: {
+    title: 'پنل مدیریت',
+    description: 'ورود به ابزارهای مجاز مدیریتی',
+  },
+  create_invitation: {
+    title: 'ارسال دعوت‌نامه',
+    description: 'ساخت لینک دعوت و مدیریت دعوت‌نامه‌های در انتظار',
+  },
+  create_channel: {
+    title: 'ساخت کانال',
+    description: 'ایجاد و تنظیم کانال‌های پیام‌رسان',
+  },
+  manage_commodities: {
+    title: 'مدیریت کالاها',
+    description: 'تعریف کالا و نام‌های قابل استفاده در بازار',
+  },
+  manage_users: {
+    title: 'مدیریت کاربران',
+    description: 'جستجو، مشاهده و تنظیم کاربران پروژه',
+  },
+  admin_messages: {
+    title: 'پیام‌های مدیریت',
+    description: 'پیام بازار و اعلان‌های مدیریتی',
+  },
+  settings: {
+    title: 'تنظیمات سیستم',
+    description: 'تنظیمات حساس بازار، دعوت و امنیت',
+  },
+  user_profile: {
+    title: 'پروفایل کاربر',
+    description: 'مشاهده و ویرایش تنظیمات کاربر منتخب',
+  },
+}
+const currentSectionMeta = computed(() => sectionMetaByKey[currentSection.value] || sectionMetaByKey.menu)
 const routeAdminSections = new Set([
   'create_invitation',
   'create_channel',
@@ -200,17 +235,8 @@ onUnmounted(() => clearBackStack())
          <div class="header-row admin-header">
              <div class="header-spacer"></div>
              <div class="header-title">
-                 <h2>
-                     {{ currentSection === 'manage_users' ? 'مدیریت کاربران' :
-                        currentSection === 'manage_commodities' ? 'مدیریت کالاها' :
-                      currentSection === 'admin_messages' ? 'پیام‌های مدیریت' :
-                        currentSection === 'settings' ? 'تنظیمات سیستم' : 
-                        currentSection === 'user_profile' ? 'پروفایل کاربر' : 
-                      currentSection === 'create_channel' ? 'ساخت کانال' :
-                        currentSection === 'create_invitation' ? 'ارسال دعوت‌نامه' :
-                        'پنل مدیریت' 
-                     }}
-                 </h2>
+                 <h2>{{ currentSectionMeta.title }}</h2>
+                 <p>{{ currentSectionMeta.description }}</p>
              </div>
              <button @click="handleNavigate('admin_panel')" class="back-button">
                  <ChevronLeft :size="24" />
@@ -266,7 +292,8 @@ onUnmounted(() => clearBackStack())
                 />
 
                 <div v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile" class="admin-route-loading">
-                  در حال بارگذاری پروفایل کاربر...
+                  <strong>در حال بارگذاری پروفایل کاربر...</strong>
+                  <p>پس از دریافت اطلاعات، تنظیمات کاربر منتخب نمایش داده می‌شود.</p>
                 </div>
 
                  <TradingSettings 
@@ -301,6 +328,32 @@ onUnmounted(() => clearBackStack())
   margin: 0 auto;
 }
 
+.admin-header .header-title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.admin-header .header-title h2 {
+  margin: 0;
+  font-size: var(--ds-font-lg);
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.admin-header .header-title p {
+  max-width: 16rem;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .admin-content {
   flex: 1;
   padding: var(--ds-card-padding);
@@ -315,9 +368,27 @@ onUnmounted(() => clearBackStack())
 }
 
 .admin-route-loading {
-  padding: 1rem;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem;
+  border-radius: var(--ds-radius-md);
+  border: 1px dashed var(--ds-border-medium);
+  background: var(--ds-bg-inset);
   color: var(--ds-text-secondary);
+}
+
+.admin-route-loading strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 850;
+  line-height: 1.5;
+}
+
+.admin-route-loading p {
+  margin: 0;
+  font-size: var(--ds-font-xs);
+  line-height: 1.8;
 }
 
 .fade-enter-active,

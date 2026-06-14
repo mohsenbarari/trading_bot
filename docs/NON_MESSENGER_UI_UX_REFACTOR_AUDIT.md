@@ -224,6 +224,7 @@ Stage N5 - Public profile/customer/accountant visual consolidation:
 Stage N6 - Admin workspace consolidation:
 - Standardize admin section headers, empty states, and save feedback.
 - Keep existing section components and permission gates.
+- Status: completed. The admin landing workspace now uses project-standard intro and accordion groups for access/users, catalog, and super-admin system tools. Admin sub-section headers include concise descriptions, route-profile loading uses a standard empty-state card, and system-settings calendar save/delete paths now use the same viewport feedback toast as primary settings saves. Existing admin route guards and component-level permission gates were preserved.
 
 Stage N7 - Responsive and accessibility pass:
 - Check text fit, focus states, tap targets, RTL alignment, and keyboard navigation.

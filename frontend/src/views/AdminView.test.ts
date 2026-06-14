@@ -111,7 +111,9 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.findAll('.admin-action-btn.secondary')[1]!.trigger('click')
+    const usersButton = wrapper.findAll('.admin-action-btn').find((button) => button.text().includes('مدیریت کاربران'))
+    expect(usersButton).toBeTruthy()
+    await usersButton!.trigger('click')
     await flushPromises()
     await wrapper.get('.user-manager-open-profile').trigger('click')
     await flushPromises()
@@ -295,7 +297,9 @@ describe('AdminView.vue', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
 
-    await wrapper.findAll('.admin-action-btn.secondary')[1]!.trigger('click')
+    const usersButton = wrapper.findAll('.admin-action-btn').find((button) => button.text().includes('مدیریت کاربران'))
+    expect(usersButton).toBeTruthy()
+    await usersButton!.trigger('click')
     await flushPromises()
     await wrapper.get('.user-manager-open-profile').trigger('click')
     await flushPromises()
