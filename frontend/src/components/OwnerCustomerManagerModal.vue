@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { BarChart3, ChevronLeft, ReceiptText, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
 
+const props = withDefaults(defineProps<{
+  presentation?: 'modal' | 'workspace'
+  initialRelationId?: string | number | null
+  initialPanel?: string | null
+}>(), {
+  presentation: 'modal',
+  initialRelationId: null,
+  initialPanel: null,
+})
+
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'open-relation', relationId: number): void
+  (e: 'back-to-list'): void
 }>()
 
 type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
@@ -130,6 +142,12 @@ const currentTimeMs = ref(Date.now())
 const selectedRelationId = ref<number | null>(null)
 const statsPeriodDays = ref(7)
 const shellRef = ref<HTMLElement | null>(null)
+const isWorkspace = computed(() => props.presentation === 'workspace')
+const initialRelationIdNumber = computed(() => {
+  if (props.initialRelationId == null || props.initialRelationId === '') return null
+  const normalized = Number(props.initialRelationId)
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null
+})
 
 const createForm = reactive(makeEmptyCreateForm())
 const detailEditForm = reactive(makeEmptyDetailEditForm())
@@ -163,6 +181,16 @@ function resetCreateForm() {
 
 function toggleSection(section: keyof typeof openSections) {
   openSections[section] = !openSections[section]
+}
+
+function handleShellDismiss() {
+  if (!isWorkspace.value) {
+    emit('close')
+  }
+}
+
+function closeManager() {
+  emit('close')
 }
 
 function clearDetailEditState() {
@@ -562,6 +590,40 @@ function applyRelationsSnapshot(snapshot: CustomerRelation[]) {
       openSessionsRelationId.value = null
     }
   }
+  applyInitialRouteState()
+}
+
+function openDefaultDetailSections() {
+  openSections.detailOverview = true
+  openSections.detailTrades = false
+  openSections.detailStats = false
+  openSections.detailSessions = false
+  openSections.detailDanger = false
+}
+
+function applyInitialRouteState() {
+  if (!isWorkspace.value) return
+
+  const routeRelationId = initialRelationIdNumber.value
+  if (routeRelationId !== null) {
+    selectedRelationId.value = routeRelationId
+    openSections.relations = true
+    openDefaultDetailSections()
+    return
+  }
+
+  if (selectedRelationId.value !== null) {
+    selectedRelationId.value = null
+    clearDetailEditState()
+    detailSaveNotice.value = ''
+  }
+
+  if (props.initialPanel === 'create') {
+    openSections.create = true
+    openSections.relations = false
+  } else if (props.initialPanel === 'pending' || props.initialPanel === 'manage' || props.initialPanel === 'relations') {
+    openSections.relations = true
+  }
 }
 
 async function fetchRelationsSnapshot(options: { retryNetwork?: boolean } = {}) {
@@ -752,17 +814,19 @@ function openCustomerDetail(relation: CustomerRelation) {
   error.value = ''
   notice.value = ''
   detailSaveNotice.value = ''
-  openSections.detailOverview = true
-  openSections.detailTrades = false
-  openSections.detailStats = false
-  openSections.detailSessions = false
-  openSections.detailDanger = false
+  openDefaultDetailSections()
+  if (isWorkspace.value) {
+    emit('open-relation', relation.id)
+  }
 }
 
 function backToCustomerList() {
   selectedRelationId.value = null
   clearDetailEditState()
   detailSaveNotice.value = ''
+  if (isWorkspace.value) {
+    emit('back-to-list')
+  }
 }
 
 async function loadCustomerTrades(relationId: number, options?: { force?: boolean }) {
@@ -853,8 +917,14 @@ function formatTradeStatus(status: string) {
 
 onMounted(() => {
   startCountdownTimer()
+  applyInitialRouteState()
   void loadRelations()
 })
+
+watch(
+  () => [props.initialRelationId, props.initialPanel],
+  () => applyInitialRouteState(),
+)
 
 onBeforeUnmount(() => {
   stopCountdownTimer()
@@ -864,7 +934,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="isWorkspace">
     <div
       v-if="viewportToast"
       class="customer-viewport-toast"
@@ -874,10 +944,17 @@ onBeforeUnmount(() => {
     >
       {{ viewportToast.text }}
     </div>
-    <div class="customer-manager-backdrop" @click.self="emit('close')">
-      <div ref="shellRef" class="customer-manager-shell">
-        <div class="customer-manager-header">
-          <button type="button" class="customer-manager-back" aria-label="بازگشت" @click="emit('close')">
+    <div
+      :class="isWorkspace ? 'customer-manager-page' : 'customer-manager-backdrop'"
+      @click.self="handleShellDismiss"
+    >
+      <div
+        ref="shellRef"
+        class="customer-manager-shell"
+        :class="{ 'customer-manager-shell--workspace': isWorkspace }"
+      >
+        <div v-if="!isWorkspace" class="customer-manager-header">
+          <button type="button" class="customer-manager-back" aria-label="بازگشت" @click="closeManager">
             <ChevronLeft :size="24" />
           </button>
           <div class="customer-manager-title">
@@ -1380,6 +1457,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.customer-manager-page {
+  width: 100%;
+}
+
 .customer-manager-backdrop {
   position: fixed;
   inset: 0;
@@ -1404,6 +1485,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
+}
+
+.customer-manager-shell--workspace {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
 }
 
 .customer-manager-header {

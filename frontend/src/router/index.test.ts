@@ -47,7 +47,7 @@ describe('router/index.ts', () => {
     expect(createWebHistorySpy).toHaveBeenCalledTimes(1)
   })
 
-  it('registers heavy non-messenger compatibility routes without replacing current working surfaces', async () => {
+  it('registers heavy non-messenger workspace routes and remaining compatibility redirects', async () => {
     await import('./index')
 
     const options = createRouterSpy.mock.calls[0]?.[0] as any
@@ -61,10 +61,10 @@ describe('router/index.ts', () => {
     expect(routeByName.get('admin-channels')?.path).toBe('/admin/channels')
     expect(routeByName.get('admin-user-profile')?.path).toBe('/admin/users/:id')
 
-    expect(routeByName.get('operations-customers')?.redirect({ query: { panel: 'create' }, params: {} })).toEqual({
-      name: 'profile',
-      query: { panel: 'create', workspace: 'customers' },
-    })
+    expect(routeByName.get('operations-customers')?.component).toBeTypeOf('function')
+    expect(routeByName.get('operations-customers-detail')?.component).toBeTypeOf('function')
+    expect(routeByName.get('operations-customers')?.redirect).toBeUndefined()
+    expect(routeByName.get('operations-customers-detail')?.redirect).toBeUndefined()
     expect(routeByName.get('operations-accountants-detail')?.redirect({ query: {}, params: { relationId: '42' } })).toEqual({
       name: 'profile',
       query: { workspace: 'accountants', relation_id: '42' },

@@ -452,11 +452,19 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H4 - Customer Workspace
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - ساخت `/operations/customers`.
 - ساخت `/operations/customers/:relationId`.
 - انتقال add/pending/manage/detail/trades/stats/sessions/danger از modal به route.
 - modal قدیمی فقط compatibility wrapper یا حذف مرحله‌ای بعد از test کامل.
+- خروجی این stage:
+  - routeهای `operations-customers` و `operations-customers-detail` از redirect موقت H2 خارج و به `CustomerWorkspaceView.vue` وصل شدند.
+  - `OwnerCustomerManagerModal.vue` دوحالته شد: modal قدیمی برای profile compatibility حفظ شد و presentation جدید `workspace` بدون backdrop/header داخلی در route مستقل render می‌شود.
+  - انتخاب مشتری در workspace به `/operations/customers/:relationId` هدایت می‌شود و بازگشت detail به `/operations/customers` برمی‌گردد.
+  - add customer، pending invitation copy/cancel، edit limits/commission، stats، trades، sessions، unlink/cancel و viewport toast از همان منطق تست‌شده قبلی استفاده می‌کنند.
+  - production deploy برای H4 هم عمداً defer شد تا H2-H4 به‌صورت گروهی و بعد از validation گسترده‌تر منتشر شود.
 
 پذیرش:
 - add customer با tier1/tier2 و commission preview حفظ شود.
