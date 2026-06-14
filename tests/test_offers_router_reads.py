@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.deps import EffectiveOwnerActor
-from api.routers.offers import ParseOfferRequest, get_active_offers, get_my_offers, parse_offer_text
+from api.routers.offers import (
+    ParseOfferRequest,
+    build_offer_read_options,
+    get_active_offers,
+    get_my_offers,
+    parse_offer_text,
+)
 
 
 class FakeScalarRows:
@@ -101,6 +107,10 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
+    async def test_offer_read_options_only_load_owner_when_identity_is_required(self):
+        self.assertEqual(len(build_offer_read_options(include_owner_identity=False)), 1)
+        self.assertEqual(len(build_offer_read_options(include_owner_identity=True)), 2)
 
     async def test_get_active_offers_serializes_rows_for_viewer(self):
         offers = [SimpleNamespace(id=1, user_id=501), SimpleNamespace(id=2, user_id=502)]

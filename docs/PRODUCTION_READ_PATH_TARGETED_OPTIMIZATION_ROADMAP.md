@@ -1,9 +1,9 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0 and RPO1 completed; RPO2 started on 2026-06-13. This roadmap is for
+Status: RPO0, RPO1, and RPO2 completed; RPO3 started on 2026-06-14. This roadmap is for
 targeted read-path optimization, not for another broad benchmark loop.
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 ## Purpose
 
@@ -98,8 +98,8 @@ RPL6 endpoint p95 highlights:
 | --- | --- | --- |
 | `RPO0` | Complete | Add endpoint-family attribution/read-path reporting needed for this roadmap and freeze the benchmark contract. |
 | `RPO1` | Complete | Optimize `chat_conversations` read shape without changing Messenger behavior. |
-| `RPO2` | In Progress | Optimize `direct_messages` and room message read pagination/projection. |
-| `RPO3` | Pending | Optimize `offers_list` and `offers_my` read paths. |
+| `RPO2` | Complete | Optimize `direct_messages` and room message read pagination/projection. |
+| `RPO3` | In Progress | Optimize `offers_list` and `offers_my` read paths. |
 | `RPO4` | Pending | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
 | `RPO5` | Pending | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
 | `RPO6` | Pending | Run a combined short benchmark across accepted RPO changes and decide whether L9 rerun is justified. |
@@ -377,6 +377,33 @@ Validation for slice 1:
 - `python3 -m py_compile api/routers/chat.py core/services/chat_room_service.py core/services/chat_service.py tests/test_chat_router_direct_reads.py`
   passed.
 
+RPO2 benchmark and decision:
+
+- Benchmark artifact:
+  `tmp/production-benchmark/20260614T053036Z/load-pool-matrix`.
+- Shape: `500 RPS / 2m`, `workers=24`, `DB_POOL_SIZE=10`,
+  `DB_MAX_OVERFLOW=4`, `LOAD_RUNNER_SHARDS=2`, no media mutations, then
+  restored Iran to `API_WORKERS=8`, `DB_POOL_SIZE=8`, `DB_MAX_OVERFLOW=6`.
+- Run quality caveat: request failure rate stayed `0%` and sampler passed, but
+  effective throughput dropped to `420.02 RPS` with `9307` dropped iterations
+  (`15.511%`). Treat this as endpoint evidence, not as a clean capacity gate.
+- Message endpoint comparison versus RPL6:
+  - `direct_messages` p95/p99: `710.62ms` / `1922.96ms` ->
+    `691.08ms` / `1839.39ms`;
+  - `room_messages` p95/p99: `650.28ms` / `2086.34ms` ->
+    `942.80ms` / `1897.14ms`.
+- A rerun was attempted with the same shape but stopped after k6 exceeded the
+  expected duration without producing a clean local summary. Iran remained
+  restored and healthy at `API_WORKERS=8`, `DB_POOL_SIZE=8`,
+  `DB_MAX_OVERFLOW=6`.
+- Decision: keep slice 1 because it is low-risk and removes one unnecessary
+  direct-message user hydration. Do not expand RPO2 into message serializer,
+  media, reply, forwarding, or room-history projection changes before release;
+  those paths are behavior-sensitive and the benchmark did not justify the
+  extra risk.
+- RPO2 is closed as a limited improvement with message-read projection debt
+  deferred.
+
 ## Stage RPO3 - Offers Read Paths
 
 Goal:
@@ -415,6 +442,24 @@ Exit criteria:
 
 - `offers_list` and `offers_my` improve without increasing write-path risk or
   market correctness risk.
+
+Implementation slice 1:
+
+- Added `build_offer_read_options(include_owner_identity=...)` to make eager
+  relationship loading explicit per offer read route.
+- `GET /api/offers` no longer eager-loads `Offer.user`, because active market
+  list responses intentionally do not include owner identity.
+- `GET /api/offers/my` still eager-loads `Offer.user`, because that route keeps
+  owner identity in the response.
+- Per-offer expiry trace logs were downgraded from `info` to `debug` to avoid
+  high-volume read-path log noise without changing the response schema.
+
+Validation for slice 1:
+
+- `python3 -m unittest tests.test_chat_router_direct_reads tests.test_chat_room_service_room_read_models tests.test_chat_service_projection_and_send_helpers tests.test_offers_router_reads`
+  passed.
+- `python3 -m py_compile api/routers/chat.py core/services/chat_service.py core/services/chat_room_service.py api/routers/offers.py tests/test_offers_router_reads.py`
+  passed.
 
 ## Stage RPO4 - Relations and Public User Reads
 
