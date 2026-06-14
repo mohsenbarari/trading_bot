@@ -77,7 +77,12 @@ Evidence:
 Release note:
 
 - The first release remains acceptable with documented operational limits.
-- Validated mixed-load capacity is `500 RPS / 10m`.
+- Validated mixed-load capacity is `500 RPS / 10m` only for the accepted
+  scale-up benchmark profile: `API_WORKERS=24`, `DB_POOL_SIZE=10`,
+  `DB_MAX_OVERFLOW=4`, `LOAD_RUNNER_SHARDS=2`.
+- Steady-state production remains `API_WORKERS=8`, `DB_POOL_SIZE=8`,
+  `DB_MAX_OVERFLOW=6`; do not claim this profile has independently proven
+  `500 RPS / 10m` without a separate run using that exact runtime contract.
 - Sustained `500 RPS / 30m` is not yet accepted and must not be advertised as
   supported capacity.
 - Follow-up optimization must target broad read-path latency across market,

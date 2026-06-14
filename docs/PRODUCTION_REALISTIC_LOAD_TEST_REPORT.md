@@ -4,8 +4,27 @@ Last updated: 2026-06-13
 
 ## Current Decision
 
-The current Iran production profile is proven for the official short target:
-`500 RPS / 10m`.
+The official short target, `500 RPS / 10m`, is proven only for the accepted
+scale-up benchmark profile:
+
+```text
+API_WORKERS=24
+DB_POOL_SIZE=10
+DB_MAX_OVERFLOW=4
+LOAD_RUNNER_SHARDS=2
+```
+
+The steady-state Iran production profile remains:
+
+```text
+API_WORKERS=8
+DB_POOL_SIZE=8
+DB_MAX_OVERFLOW=6
+```
+
+Do not describe the steady-state `8/8/6` profile as independently validated
+for `500 RPS / 10m` unless a separate benchmark is run with that exact runtime
+contract.
 
 It is not proven for sustained `500 RPS / 30m` soak. The L9 soak completed
 with clean recovery and no lasting sync residue, but it failed latency,
@@ -38,7 +57,11 @@ Release condition:
 
 ```text
 The first release may proceed with operational limits:
-- validated mixed-load capacity: 500 RPS for 10 minutes;
+- validated mixed-load capacity: 500 RPS for 10 minutes only with the scale-up
+  benchmark profile API_WORKERS=24 / DB_POOL_SIZE=10 / DB_MAX_OVERFLOW=4;
+- steady-state production profile remains API_WORKERS=8 / DB_POOL_SIZE=8 /
+  DB_MAX_OVERFLOW=6 and has not independently proven the same 500 RPS / 10m
+  claim;
 - sustained 500 RPS for 30 minutes is not yet accepted;
 - alerting must watch p95/p99 latency, Nginx 5xx delta, DB connections, and sync backlog;
 - follow-up optimization must target broad read-path latency before another L9 run.

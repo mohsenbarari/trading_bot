@@ -22,6 +22,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     const activeToasts = ref<ToastNotification[]>([])
     const isLoadingHistory = ref(false)
     const MAX_IN_MEMORY_NOTIFICATIONS = 100
+    const NOTIFICATION_HISTORY_LIMIT = 50
     const TOAST_LIFETIME_MS = 5000
     let clientReceivedAtCursor = 0
 
@@ -307,7 +308,7 @@ export const useNotificationStore = defineStore('notifications', () => {
         isLoadingHistory.value = true
         const fetchStartedAt = Date.now()
         try {
-            const response = await apiFetch('/api/notifications/')
+            const response = await apiFetch(`/api/notifications/?limit=${NOTIFICATION_HISTORY_LIMIT}&offset=0`)
             if (response.ok) {
                 const data = await response.json()
                 const existingById = new Map(
