@@ -56,7 +56,8 @@ describe('OperationsView.vue', () => {
     expect(wrapper.findAll('.ds-workspace-section')).toHaveLength(4)
     expect(wrapper.text()).toContain('دسترسی کامل مدیریتی')
     expect(wrapper.text()).toContain('تنظیمات سیستم')
-    expect(wrapper.text()).toContain('مسیر جدید')
+    expect(wrapper.text()).not.toContain('مسیر جدید')
+    expect(wrapper.text()).toContain('مدیریت مشتریان و حسابداران از مسیرهای اختصاصی همین بخش.')
 
     await findAction(wrapper, 'مشتریان')!.trigger('click')
     await findAction(wrapper, 'تنظیمات سیستم')!.trigger('click')

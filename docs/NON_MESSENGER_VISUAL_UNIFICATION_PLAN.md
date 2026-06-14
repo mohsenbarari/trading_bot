@@ -356,8 +356,7 @@ Tablet/Desktop:
 - `npm run test:unit:run -- AppPrimitives.test.ts OperationsView.test.ts` پاس شد: `2` فایل، `8/8` تست.
 - `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
 
-مراحل باقی‌مانده بعد از Stage 7:
-- Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
+مراحل باقی‌مانده بعد از Stage 8:
 - Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
 - Stage 10: responsive و PWA quality.
 - Stage 11: accessibility و interaction quality.
@@ -581,6 +580,28 @@ Tablet/Desktop:
 
 پذیرش:
 - mobile/desktop spacing و action hierarchy یکسان باشد.
+
+خروجی انجام‌شده:
+- `OperationsView.vue` از badge و متن‌های transitional مثل «مسیر جدید» و «آماده مهاجرت» پاکسازی شد و متن روابط کاری به wording نهایی محصول تغییر کرد.
+- `AccountHubView.vue` actionهای پروفایل/امنیت/اعلان‌ها را از buttonهای محلی به `AppActionCard` منتقل کرد و restriction حسابدار را با `WorkspaceNotice` نشان می‌دهد.
+- `SettingsView.vue` loading/empty/session badge/storage/logout actions را با `AppLoadingState`، `AppEmptyState`، `AppStatusBadge` و `AppButton` هم‌راستا کرد؛ permission حسابدار و session behavior تغییر نکرد.
+- `NotificationsView.vue` loading و empty/filter empty را با primitiveهای مشترک نشان می‌دهد و action پاک‌سازی کلی روی `AppButton` قرار گرفت؛ parse/render اعلان‌های trade و route click رفتار قبلی را حفظ کرد.
+- `DashboardView.vue` loading اولیه را با `AppLoadingState` جایگزین کرد، emoji greeting را حذف کرد، و wording «سوییچ موقت حساب» را به «سوییچ حساب» تبدیل کرد تا صفحه حالت نهایی‌تری داشته باشد.
+- اسکن هدفمند روی پنج صفحه Stage 8 برای wording transitional و spinner/button محلی قدیمی خروجی نداشت.
+
+اعتبارسنجی Stage 8:
+- `npm run test:unit:run -- OperationsView.test.ts AccountHubView.test.ts SettingsView.test.ts NotificationsView.test.ts DashboardView.test.ts` پاس شد: `5` فایل، `38/38` تست.
+- اسکن هدفمند `rg` برای wording transitional و local loading/button debt روی صفحات Stage 8 خروجی نداشت.
+- `git diff --check` پاس شد.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
+- production deploy طبق قاعده این roadmap اجرا نشد.
+
+مراحل باقی‌مانده بعد از Stage 8:
+- Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی.
 
 ### Stage 9 - Market Visual Harmonization
 

@@ -396,7 +396,7 @@ describe('DashboardView.vue', () => {
     await flushPromises()
 
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/dev-switch/users')
-    expect(wrapper.text()).toContain('سوییچ موقت حساب')
+    expect(wrapper.text()).toContain('سوییچ حساب')
     expect(wrapper.text()).toContain('حسابدار تست')
 
     await wrapper.get('.switcher-user-row').trigger('click')
@@ -425,7 +425,7 @@ describe('DashboardView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.find('.switcher-entry-btn').exists()).toBe(true)
-    expect(wrapper.text()).toContain('سوییچ موقت حساب')
+    expect(wrapper.text()).toContain('سوییچ حساب')
   })
 
   it('hides the temporary account switcher when a non-admin session has an invalid token claim payload', async () => {

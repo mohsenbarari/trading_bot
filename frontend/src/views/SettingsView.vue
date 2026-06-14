@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
 import { 
-  Smartphone, Trash2, Loader2, HardDrive, 
+  Smartphone, Trash2, HardDrive, LogOut,
   ChevronDown, ChevronLeft
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
+import { AppButton, AppEmptyState, AppLoadingState, AppStatusBadge } from '../components/ui'
 
 const router = useRouter()
 const route = useRoute()
@@ -180,13 +181,14 @@ watch(
           role="region"
           aria-labelledby="settings-sessions-header"
         >
-          <div v-if="sessionsLoading" class="loading-inline">
-            <Loader2 class="spin-icon" :size="20" />
-          </div>
+          <AppLoadingState v-if="sessionsLoading" label="در حال دریافت نشست‌ها" />
           
-          <div v-else-if="sessions.length === 0" class="empty-inline">
-            هیچ نشست فعالی یافت نشد
-          </div>
+          <AppEmptyState
+            v-else-if="sessions.length === 0"
+            title="نشست فعالی یافت نشد"
+            message="در حال حاضر دستگاه دیگری برای مدیریت نمایش داده نمی‌شود."
+            tone="info"
+          />
           
           <div v-else class="sessions-list">
             <div v-for="session in sessions" :key="session.id" class="session-card">
@@ -197,8 +199,8 @@ watch(
                 <div class="session-details">
                   <div class="session-name-row">
                     <span class="session-name">{{ session.device_name }}</span>
-                    <span v-if="session.is_primary" class="session-tag tag-primary">اصلی</span>
-                    <span v-if="session.is_current" class="session-tag tag-current">این دستگاه</span>
+                    <AppStatusBadge v-if="session.is_primary" tone="primary">اصلی</AppStatusBadge>
+                    <AppStatusBadge v-if="session.is_current" tone="success">این دستگاه</AppStatusBadge>
                   </div>
                   <div class="session-meta">
                     {{ session.platform }} · {{ session.device_ip || '—' }}
@@ -215,13 +217,16 @@ watch(
               </button>
             </div>
             
-            <button
+            <AppButton
               v-if="sessions.length > 1 && sessions.some(s => s.is_current && s.is_primary)"
-              @click="logoutAll"
               class="logout-all-btn"
+              type="button"
+              variant="danger"
+              block
+              @click="logoutAll"
             >
               خروج از همه نشست‌ها
-            </button>
+            </AppButton>
           </div>
         </div>
       </div>
@@ -254,25 +259,32 @@ watch(
               <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود‌شده</span>
               <span class="storage-value" dir="ltr">{{ cacheSize }}</span>
             </div>
-            <button
+            <AppButton
               type="button"
               class="storage-clear-btn"
+              variant="danger"
+              block
               :disabled="cacheBusy"
+              :loading="cacheBusy"
               @click="clearCache"
             >
-              <Loader2 v-if="cacheBusy" :size="16" class="spin-icon" />
-              <Trash2 v-else :size="16" />
-              <span>حذف فایل‌های دانلود شده</span>
-            </button>
+              <template #icon>
+                <Trash2 :size="16" />
+              </template>
+              حذف فایل‌های دانلود شده
+            </AppButton>
             <p v-if="cacheFeedback" class="storage-feedback">{{ cacheFeedback }}</p>
           </div>
         </div>
       </div>
 
       <!-- Logout Button -->
-      <button v-if="!isAccountant" class="logout-btn" @click="logout">
+      <AppButton v-if="!isAccountant" variant="danger" block class="logout-btn" @click="logout">
+        <template #icon>
+          <LogOut :size="16" />
+        </template>
         خروج از حساب کاربری
-      </button>
+      </AppButton>
 
     </div>
   </div>
@@ -292,26 +304,7 @@ watch(
   flex-direction: column;
 }
 
-/* Icon color utility */
 .icon-primary { color: var(--ds-primary-600); }
-.spin-icon { animation: spin 0.8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* Inline loading/empty */
-.loading-inline {
-  text-align: center;
-  padding: 1rem 0;
-  display: flex;
-  justify-content: center;
-}
-.loading-inline .spin-icon { color: var(--ds-primary-500); }
-
-.empty-inline {
-  text-align: center;
-  font-size: var(--ds-font-base);
-  color: var(--ds-text-placeholder);
-  padding: 1rem 0;
-}
 
 /* Sessions */
 .sessions-list {
@@ -373,22 +366,6 @@ watch(
   white-space: nowrap;
 }
 
-.session-tag {
-  font-size: 0.625rem;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.tag-primary {
-  background: var(--ds-primary-100);
-  color: var(--ds-primary-700);
-}
-.tag-current {
-  background: var(--ds-success-100);
-  color: var(--ds-success-700);
-}
-
 .session-meta {
   font-size: var(--ds-font-xs);
   color: var(--ds-text-placeholder);
@@ -412,21 +389,8 @@ watch(
   background: var(--ds-danger-50);
 }
 
-.logout-all-btn {
-  width: 100%;
+.sessions-list :deep(.ui-button) {
   margin-top: 0.75rem;
-  padding: 0.625rem;
-  font-size: var(--ds-font-base);
-  color: var(--ds-danger-500);
-  font-weight: 700;
-  border: 1px solid var(--ds-danger-200);
-  border-radius: var(--ds-radius-md);
-  background: transparent;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.logout-all-btn:hover {
-  background: var(--ds-danger-50);
 }
 
 /* Storage Card */
@@ -454,25 +418,6 @@ watch(
   font-weight: 700;
   color: var(--ds-text-primary);
 }
-.storage-clear-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.6rem 0.875rem;
-  border-radius: var(--ds-radius-md);
-  border: 1px solid var(--ds-danger-200);
-  background: #fff5f5;
-  color: var(--ds-danger-600);
-  font-size: var(--ds-font-base);
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.2s, transform 0.15s;
-}
-.storage-clear-btn:hover:not(:disabled) { background: var(--ds-danger-100); }
-.storage-clear-btn:active:not(:disabled) { transform: scale(0.98); }
-.storage-clear-btn:disabled { opacity: 0.6; cursor: progress; }
 .storage-feedback {
   font-size: var(--ds-font-sm);
   color: var(--ds-success-600);
@@ -481,20 +426,6 @@ watch(
 }
 
 .logout-btn {
-  width: 100%;
-  padding: 0.875rem;
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-danger-200);
-  background: linear-gradient(135deg, var(--ds-danger-50), var(--ds-danger-100));
-  color: var(--ds-danger-600);
-  font-weight: 700;
-  font-size: var(--ds-font-md);
-  cursor: pointer;
-  transition: all 0.2s;
   margin-top: 1rem;
-}
-.logout-btn:active {
-  transform: scale(0.98);
-  background: var(--ds-danger-100);
 }
 </style>

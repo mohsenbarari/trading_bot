@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, ChevronDown, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
+import { AppActionCard } from '../components/ui'
+import { WorkspaceNotice } from '../components/workspace'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
@@ -144,20 +146,18 @@ onMounted(() => {
           aria-labelledby="account-profile-header"
         >
           <div class="action-grid">
-            <button
+            <AppActionCard
               v-for="action in profileActions"
               :key="action.key"
-              type="button"
               class="hub-action"
-              @click="action.action"
+              :title="action.title"
+              :description="action.description"
+              @select="action.action"
             >
-              <span class="action-icon"><component :is="action.icon" :size="20" /></span>
-              <span class="action-copy">
-                <strong>{{ action.title }}</strong>
-                <small>{{ action.description }}</small>
-              </span>
-              <ChevronLeft :size="18" class="action-chevron" />
-            </button>
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </AppActionCard>
           </div>
         </div>
       </section>
@@ -187,25 +187,26 @@ onMounted(() => {
           role="region"
           aria-labelledby="account-security-header"
         >
-          <div v-if="sessionsRestriction" class="account-empty-state">
-            <strong>{{ sessionsRestriction.title }}</strong>
-            <p>{{ sessionsRestriction.description }}</p>
-          </div>
+          <WorkspaceNotice
+            v-if="sessionsRestriction"
+            class="account-empty-state"
+            tone="warning"
+            :title="sessionsRestriction.title"
+            :message="sessionsRestriction.description"
+          />
           <div class="action-grid">
-            <button
+            <AppActionCard
               v-for="action in securityActions"
               :key="action.key"
-              type="button"
               class="hub-action"
-              @click="action.action"
+              :title="action.title"
+              :description="action.description"
+              @select="action.action"
             >
-              <span class="action-icon"><component :is="action.icon" :size="20" /></span>
-              <span class="action-copy">
-                <strong>{{ action.title }}</strong>
-                <small>{{ action.description }}</small>
-              </span>
-              <ChevronLeft :size="18" class="action-chevron" />
-            </button>
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </AppActionCard>
           </div>
         </div>
       </section>
@@ -236,20 +237,18 @@ onMounted(() => {
           aria-labelledby="account-notifications-header"
         >
           <div class="action-grid">
-            <button
+            <AppActionCard
               v-for="action in notificationActions"
               :key="action.key"
-              type="button"
               class="hub-action"
-              @click="action.action"
+              :title="action.title"
+              :description="action.description"
+              @select="action.action"
             >
-              <span class="action-icon"><component :is="action.icon" :size="20" /></span>
-              <span class="action-copy">
-                <strong>{{ action.title }}</strong>
-                <small>{{ action.description }}</small>
-              </span>
-              <ChevronLeft :size="18" class="action-chevron" />
-            </button>
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </AppActionCard>
           </div>
         </div>
       </section>
@@ -331,85 +330,9 @@ onMounted(() => {
 .hub-action {
   width: 100%;
   min-height: 72px;
-  display: grid;
-  grid-template-columns: 44px 1fr 24px;
-  align-items: center;
-  gap: 0.75rem;
-  direction: rtl;
-  text-align: right;
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
-  padding: 0.85rem;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.18s ease;
-}
-
-.hub-action:active {
-  transform: scale(0.985);
-  background: var(--ds-primary-50);
-}
-
-.action-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--ds-radius-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
-}
-
-.action-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.action-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-md);
-  font-weight: 850;
-  line-height: 1.35;
-}
-
-.action-copy small {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.6;
-}
-
-.action-chevron {
-  color: var(--ds-text-placeholder);
 }
 
 .account-empty-state {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.85rem;
   margin-bottom: 0.65rem;
-  border-radius: var(--ds-radius-md);
-  border: 1px dashed var(--ds-border-medium);
-  background: var(--ds-bg-inset);
-}
-
-.account-empty-state strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 850;
-  line-height: 1.5;
-}
-
-.account-empty-state p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.8;
 }
 </style>

@@ -2,10 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notifications'
-import { Bell, ChevronLeft, Trash2, Circle, CheckCircle2, Mail, MailOpen } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Trash2, Mail, MailOpen } from 'lucide-vue-next'
 import { getNotificationIconComponent } from '../utils/notificationUi'
 import { formatIranTime } from '../utils/iranTime'
 import type { NormalizedAppNotification } from '../types/notifications'
+import { AppButton, AppEmptyState, AppLoadingState } from '../components/ui'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -119,9 +120,19 @@ onMounted(async () => {
   <div class="ds-page">
     <header class="header-row">
       <div class="header-spacer">
-        <button class="clear-btn" :disabled="isClearingAll" @click="clearAll" v-if="notificationStore.appNotifications.length > 0">
-          <Trash2 :size="18" />
-        </button>
+        <AppButton
+          v-if="notificationStore.appNotifications.length > 0"
+          class="clear-btn"
+          variant="danger"
+          size="sm"
+          :loading="isClearingAll"
+          @click="clearAll"
+        >
+          <template #icon>
+            <Trash2 :size="16" />
+          </template>
+          پاک‌سازی
+        </AppButton>
       </div>
       <div class="header-title">
         <h2>مرکز اعلان‌ها</h2>
@@ -132,16 +143,18 @@ onMounted(async () => {
     </header>
 
     <main class="content">
-      <div v-if="notificationStore.isLoadingHistory" class="ds-loading-state">
-        <div class="ds-spinner"></div>
-      </div>
+      <AppLoadingState v-if="notificationStore.isLoadingHistory" class="ds-loading-state" label="در حال دریافت اعلان‌ها" />
 
-      <div v-else-if="notificationStore.appNotifications.length === 0" class="ds-empty-state">
-        <div class="ds-empty-icon">
+      <AppEmptyState
+        v-else-if="notificationStore.appNotifications.length === 0"
+        title="هیچ اعلانی یافت نشد"
+        message="اعلان‌های سیستم، بازار و معاملات بعد از دریافت در این بخش نمایش داده می‌شوند."
+        tone="info"
+      >
+        <template #icon>
           <Bell :size="48" />
-        </div>
-        <p>هیچ اعلانی یافت نشد</p>
-      </div>
+        </template>
+      </AppEmptyState>
 
       <template v-else>
         <div class="notification-toolbar" role="tablist" aria-label="فیلتر اعلان‌ها">
@@ -160,12 +173,17 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div v-if="filteredNotifications.length === 0" class="ds-empty-state notification-filter-empty">
-          <div class="ds-empty-icon">
+        <AppEmptyState
+          v-if="filteredNotifications.length === 0"
+          class="notification-filter-empty"
+          title="اعلانی در این فیلتر وجود ندارد"
+          message="فیلتر دیگری را انتخاب کنید یا بعداً دوباره بررسی کنید."
+          tone="neutral"
+        >
+          <template #icon>
             <Bell :size="40" />
-          </div>
-          <p>اعلانی در این فیلتر وجود ندارد</p>
-        </div>
+          </template>
+        </AppEmptyState>
 
       <div v-else class="notifications-list">
         <div 
@@ -220,28 +238,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.clear-btn {
-  background: var(--ds-danger-50);
-  border: 1px solid var(--ds-danger-100);
-  color: var(--ds-danger-500);
-  cursor: pointer;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.clear-btn:hover {
-  background: var(--ds-danger-100);
-}
-
-.clear-btn:active {
-  transform: scale(0.95);
-}
-
 .content {
   padding: var(--ds-card-padding);
 }

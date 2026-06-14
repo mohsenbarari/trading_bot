@@ -53,7 +53,6 @@ const ownerActions = computed<OperationAction[]>(() => {
       title: 'مشتریان',
       description: 'دعوت، مدیریت، محدودیت و گزارش مشتریان',
       icon: Users,
-      badge: 'مسیر جدید',
       tone: 'primary',
       action: () => router.push({ name: 'operations-customers' }),
     },
@@ -62,7 +61,6 @@ const ownerActions = computed<OperationAction[]>(() => {
       title: 'حسابداران',
       description: 'دعوت، مدیریت نشست و تنظیمات حسابداران',
       icon: BriefcaseBusiness,
-      badge: 'مسیر جدید',
       tone: 'primary',
       action: () => router.push({ name: 'operations-accountants' }),
     },
@@ -208,7 +206,7 @@ onMounted(() => {
 
       <WorkspaceSection
         title="روابط کاری"
-        description="مدیریت مشتریان و حسابداران از مسیرهای مستقل و آماده مهاجرت."
+        description="مدیریت مشتریان و حسابداران از مسیرهای اختصاصی همین بخش."
         tone="primary"
       >
           <div v-if="ownerActions.length" class="action-grid">

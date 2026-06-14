@@ -6,6 +6,7 @@ import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
+import AppLoadingState from '../components/ui/AppLoadingState.vue'
 
 interface DashboardTrade {
   id: number
@@ -388,9 +389,7 @@ onBeforeUnmount(() => {
   <div class="dashboard-page">
     
     <!-- Loading -->
-    <div v-if="loading" class="ds-loading-state">
-      <div class="ds-spinner"></div>
-    </div>
+    <AppLoadingState v-if="loading" class="ds-loading-state" label="در حال دریافت داشبورد" />
 
     <div v-else-if="user" class="dashboard-content">
 
@@ -413,7 +412,7 @@ onBeforeUnmount(() => {
             <span>{{ userInitial }}</span>
           </div>
           <div class="user-text">
-            <span class="greeting">{{ greeting }} 👋</span>
+            <span class="greeting">{{ greeting }}</span>
             <span class="user-name">{{ user.full_name || user.account_name }}</span>
           </div>
         </button>
@@ -521,7 +520,7 @@ onBeforeUnmount(() => {
         >
           <span class="switcher-entry-icon"><Users :size="20" /></span>
           <span class="switcher-entry-text">
-            <strong>سوییچ موقت حساب</strong>
+            <strong>سوییچ حساب</strong>
             <small>بدون OTP و خروج، بین اکانت‌های موجود جابه‌جا شوید</small>
           </span>
         </button>
@@ -587,10 +586,10 @@ onBeforeUnmount(() => {
   </div>
 
   <div v-if="isSwitchModalOpen" class="switcher-modal-backdrop" @click.self="closeAccountSwitchModal">
-    <div class="switcher-modal" role="dialog" aria-modal="true" aria-label="سوییچ موقت حساب">
+    <div class="switcher-modal" role="dialog" aria-modal="true" aria-label="سوییچ حساب">
       <div class="switcher-modal-header">
         <div>
-          <h3>سوییچ موقت حساب</h3>
+          <h3>سوییچ حساب</h3>
           <p>حساب فعلی: <strong>{{ currentSwitchUserLabel }}</strong></p>
         </div>
         <button type="button" class="switcher-close-btn" aria-label="بستن سوییچ حساب" @click="closeAccountSwitchModal">×</button>
