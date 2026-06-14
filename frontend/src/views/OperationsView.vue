@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Bell,
   BriefcaseBusiness,
-  ChevronDown,
-  ChevronLeft,
   Megaphone,
   Package,
   Settings,
@@ -14,11 +12,16 @@ import {
   Users,
   WalletCards,
 } from 'lucide-vue-next'
+import {
+  WorkspaceActionTile,
+  WorkspaceNotice,
+  WorkspaceSection,
+  WorkspaceShell,
+  WorkspaceStatTile,
+} from '../components/workspace'
 import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
-
-type OperationsSectionKey = 'relations' | 'management' | 'shortcuts'
 
 interface OperationAction {
   key: string
@@ -26,14 +29,10 @@ interface OperationAction {
   description: string
   icon: Component
   action: () => void
+  badge?: string
+  tone?: 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
   hidden?: boolean
 }
-
-const openSections = ref<Record<OperationsSectionKey, boolean>>({
-  relations: true,
-  management: true,
-  shortcuts: true,
-})
 
 const user = computed(() => currentUserSummary.value)
 const userRole = computed(() => user.value?.role || '')
@@ -41,10 +40,6 @@ const isAdmin = computed(() => isAdminRole(userRole.value))
 const isSuperAdmin = computed(() => userRole.value === 'مدیر ارشد')
 const isCustomer = computed(() => user.value?.is_customer === true)
 const canUseOwnerRelations = computed(() => !isCustomer.value)
-
-function toggleSection(section: OperationsSectionKey) {
-  openSections.value[section] = !openSections.value[section]
-}
 
 const ownerActions = computed<OperationAction[]>(() => {
   if (!canUseOwnerRelations.value) return []
@@ -54,14 +49,18 @@ const ownerActions = computed<OperationAction[]>(() => {
       title: 'مشتریان',
       description: 'دعوت، مدیریت، محدودیت و گزارش مشتریان',
       icon: Users,
-      action: () => router.push({ name: 'profile', query: { workspace: 'customers' } }),
+      badge: 'مسیر جدید',
+      tone: 'primary',
+      action: () => router.push({ name: 'operations-customers' }),
     },
     {
       key: 'accountants',
       title: 'حسابداران',
       description: 'دعوت، مدیریت نشست و تنظیمات حسابداران',
       icon: BriefcaseBusiness,
-      action: () => router.push({ name: 'profile', query: { workspace: 'accountants' } }),
+      badge: 'مسیر جدید',
+      tone: 'primary',
+      action: () => router.push({ name: 'operations-accountants' }),
     },
   ]
 })
@@ -75,14 +74,14 @@ const adminActions = computed<OperationAction[]>(() => {
       title: 'ارسال دعوت‌نامه',
       description: 'ساخت لینک دعوت برای کاربران مجاز',
       icon: UserPlus,
-      action: () => router.push({ name: 'admin', query: { section: 'create_invitation' } }),
+      action: () => router.push({ name: 'admin-invitations' }),
     },
     {
       key: 'manage_users',
       title: 'مدیریت کاربران',
       description: 'مشاهده، جستجو و تنظیم کاربران پروژه',
       icon: Users,
-      action: () => router.push({ name: 'admin', query: { section: 'manage_users' } }),
+      action: () => router.push({ name: 'admin-users' }),
     },
   ]
 
@@ -93,21 +92,21 @@ const adminActions = computed<OperationAction[]>(() => {
         title: 'مدیریت کالاها',
         description: 'تعریف کالا و aliasهای بازار',
         icon: Package,
-        action: () => router.push({ name: 'admin', query: { section: 'manage_commodities' } }),
+        action: () => router.push({ name: 'admin-commodities' }),
       },
       {
         key: 'admin_messages',
         title: 'پیام‌های مدیریت',
         description: 'مدیریت پیام‌های سراسری و مدیریتی',
         icon: Megaphone,
-        action: () => router.push({ name: 'admin', query: { section: 'admin_messages' } }),
+        action: () => router.push({ name: 'admin-messages' }),
       },
       {
         key: 'settings',
         title: 'تنظیمات سیستم',
         description: 'تنظیمات حساس بازار و سیستم',
         icon: Settings,
-        action: () => router.push({ name: 'admin', query: { section: 'settings' } }),
+        action: () => router.push({ name: 'admin-system' }),
       },
     )
   }
@@ -167,6 +166,18 @@ const managementNote = computed(() => {
   return 'دسترسی مدیر میانی؛ تنظیمات سیستم و پیام‌های مدیریت فقط برای مدیر ارشد است.'
 })
 
+const roleLabel = computed(() => {
+  if (!user.value) return 'در حال دریافت'
+  if (isSuperAdmin.value) return 'مدیر ارشد'
+  if (isAdmin.value) return 'مدیر میانی'
+  if (isCustomer.value) return 'مشتری'
+  return 'کاربر عادی'
+})
+
+const relationAccessLabel = computed(() => (ownerActions.value.length ? `${ownerActions.value.length} مسیر` : 'غیرفعال'))
+const adminAccessLabel = computed(() => (adminActions.value.length ? `${adminActions.value.length} ابزار` : 'ندارد'))
+const shortcutAccessLabel = computed(() => `${utilityActions.value.length} میانبر`)
+
 onMounted(() => {
   void primeCurrentUserSummary()
 })
@@ -174,228 +185,140 @@ onMounted(() => {
 
 <template>
   <div class="ds-page operations-page">
-    <header class="header-row">
-      <div class="header-spacer"></div>
-      <div class="header-title">
-        <h2>عملیات</h2>
-      </div>
-      <button class="back-button" type="button" @click="router.back()">
-        <ChevronLeft :size="24" />
-      </button>
-    </header>
-
-    <main class="operations-content">
-      <section class="operations-intro">
-        <h1>کارهای اجرایی</h1>
-        <p>دسترسی‌های عملیاتی حساب شما در یک مسیر واحد قرار گرفته‌اند.</p>
-      </section>
-
-      <section class="ds-accordion operations-accordion" :class="{ open: openSections.relations }">
-        <button
-          id="operations-relations-header"
-          class="ds-accordion-header operations-accordion-header"
-          type="button"
-          :aria-expanded="openSections.relations"
-          aria-controls="operations-relations-panel"
-          @click="toggleSection('relations')"
-        >
-          <div class="ds-accordion-header-info">
-            <Users :size="18" class="section-icon" />
-            <div class="section-title-copy">
-              <h2>روابط کاری</h2>
-              <span>مشتریان و حسابداران</span>
-            </div>
-          </div>
-          <component :is="openSections.relations ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
+    <WorkspaceShell
+      title="عملیات"
+      eyebrow="فضای کاری"
+      description="دسترسی‌های اجرایی، رابطه‌ای و مدیریتی حساب شما در یک مسیر واحد قرار گرفته‌اند."
+      layout="split"
+      show-back
+      @back="router.back()"
+    >
+      <template #actions>
+        <button type="button" class="ds-btn secondary operations-header-action" @click="router.push({ name: 'notifications' })">
+          <Bell :size="16" />
+          اعلان‌ها
         </button>
-        <div
-          id="operations-relations-panel"
-          v-show="openSections.relations"
-          class="ds-accordion-body operations-accordion-body"
-          role="region"
-          aria-labelledby="operations-relations-header"
-        >
+      </template>
+
+      <WorkspaceSection
+        title="روابط کاری"
+        description="مدیریت مشتریان و حسابداران از مسیرهای مستقل و آماده مهاجرت."
+        tone="primary"
+      >
           <div v-if="ownerActions.length" class="action-grid">
-            <button
+            <WorkspaceActionTile
               v-for="action in ownerActions"
               :key="action.key"
-              type="button"
-              class="hub-action"
-              @click="action.action"
+              class="operations-action-tile"
+              :title="action.title"
+              :description="action.description"
+              :badge="action.badge"
+              :tone="action.tone || 'neutral'"
+              @select="action.action"
             >
-              <span class="action-icon"><component :is="action.icon" :size="20" /></span>
-              <span class="action-copy">
-                <strong>{{ action.title }}</strong>
-                <small>{{ action.description }}</small>
-              </span>
-              <ChevronLeft :size="18" class="action-chevron" />
-            </button>
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </WorkspaceActionTile>
           </div>
-          <div v-else class="operations-empty-state">
-            <strong>{{ relationsEmptyState.title }}</strong>
-            <p>{{ relationsEmptyState.description }}</p>
-          </div>
-        </div>
-      </section>
+          <WorkspaceNotice
+            v-else
+            tone="warning"
+            :title="relationsEmptyState.title"
+            :message="relationsEmptyState.description"
+          />
+      </WorkspaceSection>
 
-      <section class="ds-accordion operations-accordion" :class="{ open: openSections.management }">
-        <button
-          id="operations-management-header"
-          class="ds-accordion-header operations-accordion-header"
-          type="button"
-          :aria-expanded="openSections.management"
-          aria-controls="operations-management-panel"
-          @click="toggleSection('management')"
-        >
-          <div class="ds-accordion-header-info">
-            <WalletCards :size="18" class="section-icon" />
-            <div class="section-title-copy">
-              <h2>مدیریت</h2>
-              <span>{{ managementNote || 'ابزارهای نقش مدیریتی' }}</span>
-            </div>
-          </div>
-          <component :is="openSections.management ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="operations-management-panel"
-          v-show="openSections.management"
-          class="ds-accordion-body operations-accordion-body"
-          role="region"
-          aria-labelledby="operations-management-header"
-        >
+      <WorkspaceSection
+        title="مدیریت"
+        :description="managementNote || 'ابزارهای مدیریتی فقط برای نقش‌های مجاز نمایش داده می‌شوند.'"
+        :tone="isAdmin ? 'success' : 'neutral'"
+      >
           <div v-if="adminActions.length" class="action-grid">
-            <button
+            <WorkspaceActionTile
               v-for="action in adminActions"
               :key="action.key"
-              type="button"
-              class="hub-action"
-              @click="action.action"
+              class="operations-action-tile"
+              :title="action.title"
+              :description="action.description"
+              tone="success"
+              @select="action.action"
             >
-              <span class="action-icon"><component :is="action.icon" :size="20" /></span>
-              <span class="action-copy">
-                <strong>{{ action.title }}</strong>
-                <small>{{ action.description }}</small>
-              </span>
-              <ChevronLeft :size="18" class="action-chevron" />
-            </button>
+              <template #icon>
+                <component :is="action.icon" :size="20" />
+              </template>
+            </WorkspaceActionTile>
           </div>
-          <div v-else class="operations-empty-state">
-            <strong>{{ managementEmptyState.title }}</strong>
-            <p>{{ managementEmptyState.description }}</p>
-          </div>
-        </div>
-      </section>
+          <WorkspaceNotice
+            v-else
+            tone="info"
+            :title="managementEmptyState.title"
+            :message="managementEmptyState.description"
+          />
+      </WorkspaceSection>
 
-      <section class="ds-accordion operations-accordion" :class="{ open: openSections.shortcuts }">
-        <button
-          id="operations-shortcuts-header"
-          class="ds-accordion-header operations-accordion-header"
-          type="button"
-          :aria-expanded="openSections.shortcuts"
-          aria-controls="operations-shortcuts-panel"
-          @click="toggleSection('shortcuts')"
-        >
-          <div class="ds-accordion-header-info">
-            <Bell :size="18" class="section-icon" />
-            <div class="section-title-copy">
-              <h2>میانبرها</h2>
-              <span>دسترسی سریع</span>
-            </div>
-          </div>
-          <component :is="openSections.shortcuts ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="operations-shortcuts-panel"
-          v-show="openSections.shortcuts"
-          class="ds-accordion-body operations-accordion-body"
-          role="region"
-          aria-labelledby="operations-shortcuts-header"
-        >
-          <div class="action-grid">
-            <button
-              v-for="action in utilityActions"
-              :key="action.key"
-              type="button"
-              class="hub-action"
-              @click="action.action"
-            >
-              <span class="action-icon"><component :is="action.icon" :size="20" /></span>
-              <span class="action-copy">
-                <strong>{{ action.title }}</strong>
-                <small>{{ action.description }}</small>
-              </span>
-              <ChevronLeft :size="18" class="action-chevron" />
-            </button>
-          </div>
+      <WorkspaceSection
+        title="میانبرها"
+        description="مسیرهای سریع برای کارهای کم‌تکرار یا عمومی."
+      >
+        <div class="action-grid">
+          <WorkspaceActionTile
+            v-for="action in utilityActions"
+            :key="action.key"
+            class="operations-action-tile"
+            :title="action.title"
+            :description="action.description"
+            @select="action.action"
+          >
+            <template #icon>
+              <component :is="action.icon" :size="20" />
+            </template>
+          </WorkspaceActionTile>
         </div>
-      </section>
-    </main>
+      </WorkspaceSection>
+
+      <template #aside>
+        <WorkspaceSection
+          title="وضعیت دسترسی"
+          description="خلاصه مسیرهایی که برای نقش فعلی شما فعال است."
+        >
+          <div class="operations-stat-grid">
+            <WorkspaceStatTile label="نقش" :value="roleLabel" />
+            <WorkspaceStatTile label="روابط کاری" :value="relationAccessLabel" tone="primary" />
+            <WorkspaceStatTile label="مدیریت" :value="adminAccessLabel" :tone="isAdmin ? 'success' : 'neutral'" />
+            <WorkspaceStatTile label="میانبرها" :value="shortcutAccessLabel" />
+          </div>
+
+          <WorkspaceNotice
+            class="operations-aside-note"
+            tone="info"
+            title="مسیر مهاجرت"
+            message="در این مرحله مسیرهای جدید آماده شده‌اند و هر کارت به مقصد سازگار فعلی هدایت می‌شود."
+          />
+
+          <button
+            v-if="isAdmin"
+            type="button"
+            class="ds-btn secondary operations-admin-full"
+            @click="router.push({ name: 'admin' })"
+          >
+            <WalletCards :size="16" />
+            منوی کامل مدیریت
+          </button>
+        </WorkspaceSection>
+      </template>
+    </WorkspaceShell>
   </div>
 </template>
 
 <style scoped>
 .operations-page {
+  min-height: 100dvh;
   padding-bottom: 5rem;
 }
 
-.operations-content {
-  width: 100%;
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-  padding: var(--ds-card-padding);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-section-gap);
-}
-
-.operations-intro {
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  box-shadow: var(--ds-shadow-md);
-  padding: 1rem;
-}
-
-.operations-intro h1 {
-  margin: 0 0 0.35rem;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-xl);
-  font-weight: 850;
-}
-
-.operations-intro p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
-}
-
-.operations-accordion {
-  margin-bottom: 0;
-}
-
-.operations-accordion-header {
-  width: 100%;
-  border: 0;
-  font-family: inherit;
-  text-align: right;
-}
-
-.section-icon {
-  color: var(--ds-primary-700);
-}
-
-.section-title-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.section-title-copy span {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.5;
+.operations-header-action {
+  min-width: 116px;
 }
 
 .action-grid {
@@ -404,87 +327,34 @@ onMounted(() => {
   gap: 0.65rem;
 }
 
-.hub-action {
-  width: 100%;
-  min-height: 72px;
-  display: grid;
-  grid-template-columns: 44px 1fr 24px;
-  align-items: center;
-  gap: 0.75rem;
-  direction: rtl;
-  text-align: right;
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
-  padding: 0.85rem;
-  cursor: pointer;
+.operations-action-tile {
   font-family: inherit;
-  transition: all 0.18s ease;
 }
 
-.hub-action:active {
-  transform: scale(0.985);
-  background: var(--ds-primary-50);
+.operations-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
 }
 
-.action-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--ds-radius-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
+.operations-aside-note {
+  margin-top: 0.75rem;
 }
 
-.action-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+.operations-admin-full {
+  width: 100%;
+  margin-top: 0.75rem;
 }
 
-.action-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-md);
-  font-weight: 850;
-  line-height: 1.35;
+@media (min-width: 720px) {
+  .action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-.action-copy small {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.6;
-}
-
-.action-chevron {
-  color: var(--ds-text-placeholder);
-}
-
-.operations-empty-state {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.85rem;
-  border-radius: var(--ds-radius-md);
-  border: 1px dashed var(--ds-border-medium);
-  background: var(--ds-bg-inset);
-}
-
-.operations-empty-state strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 850;
-  line-height: 1.5;
-}
-
-.operations-empty-state p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.8;
+@media (max-width: 520px) {
+  .operations-stat-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
