@@ -53,6 +53,10 @@ const isPublishingBroadcast = ref(false)
 const isClearingMarketPin = ref(false)
 const isLoading = ref(false)
 const marketComposerInputRef = ref<HTMLTextAreaElement | null>(null)
+const panelOptions = [
+  { key: 'market' as const, label: 'ارسال پیام در بازار' },
+  { key: 'chat' as const, label: 'ارسال پیام در چت' },
+]
 
 const marketArchive = computed(() => marketHistory.value.filter((message) => message.id !== activeMarketMessage.value?.id))
 const marketRecentHistory = computed(() => marketArchive.value.slice(0, 5))
@@ -69,6 +73,35 @@ function formatDate(value: string | undefined) {
 
 function targetLabel(key: string) {
   return targetOptions.find((option) => option.key === key)?.label || key
+}
+
+function selectPanel(panel: 'market' | 'chat') {
+  activePanel.value = panel
+}
+
+function isPanelTabbable(panel: 'market' | 'chat') {
+  return activePanel.value === null ? panel === 'market' : activePanel.value === panel
+}
+
+function handlePanelKeydown(event: KeyboardEvent, panel: 'market' | 'chat') {
+  const currentIndex = panelOptions.findIndex((option) => option.key === panel)
+  if (currentIndex === -1) return
+
+  let nextIndex = currentIndex
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    nextIndex = currentIndex <= 0 ? panelOptions.length - 1 : currentIndex - 1
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    nextIndex = currentIndex >= panelOptions.length - 1 ? 0 : currentIndex + 1
+  } else if (event.key === 'Home') {
+    nextIndex = 0
+  } else if (event.key === 'End') {
+    nextIndex = panelOptions.length - 1
+  } else {
+    return
+  }
+
+  event.preventDefault()
+  selectPanel(panelOptions[nextIndex]!.key)
 }
 
 async function loadDashboard() {
@@ -206,9 +239,14 @@ onMounted(loadDashboard)
         type="button"
         class="message-mode-button message-mode-button--market"
         data-test="message-mode-market"
+        id="admin-message-tab-market"
         :class="{ 'message-mode-button--active': activePanel === 'market' }"
+        role="tab"
         :aria-selected="activePanel === 'market'"
-        @click="activePanel = 'market'"
+        aria-controls="admin-message-panel-market"
+        :tabindex="isPanelTabbable('market') ? 0 : -1"
+        @click="selectPanel('market')"
+        @keydown="handlePanelKeydown($event, 'market')"
       >
         <Pin :size="16" />
         <span>ارسال پیام در بازار</span>
@@ -217,9 +255,14 @@ onMounted(loadDashboard)
         type="button"
         class="message-mode-button message-mode-button--chat"
         data-test="message-mode-chat"
+        id="admin-message-tab-chat"
         :class="{ 'message-mode-button--active': activePanel === 'chat' }"
+        role="tab"
         :aria-selected="activePanel === 'chat'"
-        @click="activePanel = 'chat'"
+        aria-controls="admin-message-panel-chat"
+        :tabindex="isPanelTabbable('chat') ? 0 : -1"
+        @click="selectPanel('chat')"
+        @keydown="handlePanelKeydown($event, 'chat')"
       >
         <Megaphone :size="16" />
         <span>ارسال پیام در چت</span>
@@ -227,7 +270,14 @@ onMounted(loadDashboard)
     </div>
 
     <div class="message-workspace" :aria-busy="isLoading">
-      <section v-if="activePanel === 'market'" class="message-panel message-panel--market" data-test="market-panel">
+      <section
+        v-if="activePanel === 'market'"
+        id="admin-message-panel-market"
+        class="message-panel message-panel--market"
+        data-test="market-panel"
+        role="tabpanel"
+        aria-labelledby="admin-message-tab-market"
+      >
         <article v-if="activeMarketMessage" class="market-pin-card" data-test="active-market-message">
           <div class="market-pin-card-header">
             <div class="market-pin-card-title-wrap">
@@ -358,7 +408,14 @@ onMounted(loadDashboard)
         </section>
       </section>
 
-      <section v-else-if="activePanel === 'chat'" class="message-panel message-panel--chat" data-test="broadcast-panel">
+      <section
+        v-else-if="activePanel === 'chat'"
+        id="admin-message-panel-chat"
+        class="message-panel message-panel--chat"
+        data-test="broadcast-panel"
+        role="tabpanel"
+        aria-labelledby="admin-message-tab-chat"
+      >
         <article class="status-card status-card--broadcast card-with-help">
           <HelpPopover
             floating
@@ -496,6 +553,17 @@ onMounted(loadDashboard)
 .message-mode-button:hover {
   transform: translateY(-1px);
   box-shadow: 0 18px 34px rgba(15, 23, 42, 0.11);
+}
+
+.message-mode-button:focus-visible,
+.history-toggle-button:focus-visible,
+.icon-edit-button:focus-visible,
+.ghost-link:focus-visible,
+.primary-action:focus-visible,
+.secondary-action:focus-visible,
+.target-option:focus-within {
+  outline: 3px solid rgba(245, 158, 11, 0.34);
+  outline-offset: 3px;
 }
 
 .message-mode-button--active {

@@ -150,6 +150,9 @@ describe('AdminMessagesView.vue', () => {
 
     expect(wrapper.find('[data-test="message-mode-market"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="message-mode-chat"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="message-mode-market"]').attributes('role')).toBe('tab')
+    expect(wrapper.get('[data-test="message-mode-market"]').attributes('tabindex')).toBe('0')
+    expect(wrapper.get('[data-test="message-mode-chat"]').attributes('tabindex')).toBe('-1')
     expect(wrapper.text()).toContain('ارسال پیام در بازار')
     expect(wrapper.find('[data-test="market-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="broadcast-panel"]').exists()).toBe(false)
@@ -158,6 +161,8 @@ describe('AdminMessagesView.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('پیام فعال بازار')
+    expect(wrapper.get('[data-test="market-panel"]').attributes('role')).toBe('tabpanel')
+    expect(wrapper.get('[data-test="market-panel"]').attributes('aria-labelledby')).toBe('admin-message-tab-market')
     expect(wrapper.text()).toContain('مشاهده همه پیام')
     expect(wrapper.find('[data-test="market-history-list"]').exists()).toBe(false)
     expect(wrapper.find('.history-header--market .history-badge').exists()).toBe(false)
@@ -186,6 +191,30 @@ describe('AdminMessagesView.vue', () => {
     const marketTextarea = wrapper.get('[data-test="market-composer-input"]')
     expect((marketTextarea.element as HTMLTextAreaElement).value).toBe('پیام قبلی بازار')
     expect(adminMessagesMocks.scrollIntoViewMock).toHaveBeenCalled()
+  })
+
+  it('supports keyboard navigation between management message tabs', async () => {
+    const AdminMessagesView = (await import('./AdminMessagesView.vue')).default
+    const wrapper = mount(AdminMessagesView)
+    await flushPromises()
+
+    const marketTab = wrapper.get('[data-test="message-mode-market"]')
+    const chatTab = wrapper.get('[data-test="message-mode-chat"]')
+
+    await marketTab.trigger('keydown', { key: 'ArrowLeft' })
+    await flushPromises()
+
+    expect(chatTab.attributes('aria-selected')).toBe('true')
+    expect(chatTab.attributes('tabindex')).toBe('0')
+    expect(wrapper.get('[data-test="broadcast-panel"]').attributes('role')).toBe('tabpanel')
+    expect(wrapper.get('[data-test="broadcast-panel"]').attributes('aria-labelledby')).toBe('admin-message-tab-chat')
+
+    await chatTab.trigger('keydown', { key: 'Home' })
+    await flushPromises()
+
+    expect(marketTab.attributes('aria-selected')).toBe('true')
+    expect(marketTab.attributes('tabindex')).toBe('0')
+    expect(wrapper.find('[data-test="market-panel"]').exists()).toBe(true)
   })
 
   it('publishes market and chat management messages through their own tabs', async () => {

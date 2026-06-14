@@ -111,9 +111,60 @@ describe('NotificationsView.vue', () => {
     await wrapper.findAll('.notification-filter-chip')[1]!.trigger('click')
     expect(wrapper.text()).toContain('خوانده نشده')
     expect(wrapper.text()).not.toContain('خوانده شده')
+    expect(wrapper.findAll('.notification-filter-chip')[1]!.attributes('tabindex')).toBe('0')
+    expect(wrapper.findAll('.notification-filter-chip')[1]!.attributes('aria-selected')).toBe('true')
 
     await wrapper.findAll('.notification-filter-chip')[2]!.trigger('click')
     expect(wrapper.text()).not.toContain('خوانده نشده')
+    expect(wrapper.text()).toContain('خوانده شده')
+  })
+
+  it('supports keyboard navigation across notification filter tabs', async () => {
+    const store = useNotificationStore()
+    store.appNotifications = [
+      {
+        id: 31,
+        title: 'خوانده نشده',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'info',
+        category: 'system',
+        is_read: false,
+      },
+      {
+        id: 32,
+        title: 'خوانده شده',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'info',
+        category: 'system',
+        is_read: true,
+      },
+    ]
+
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    const chips = () => wrapper.findAll('.notification-filter-chip')
+    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
+
+    await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
+    expect(chips()[1]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('خوانده نشده')
+    expect(wrapper.text()).not.toContain('خوانده شده')
+
+    await chips()[1]!.trigger('keydown', { key: 'End' })
+    expect(chips()[2]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).not.toContain('خوانده نشده')
+    expect(wrapper.text()).toContain('خوانده شده')
+
+    await chips()[2]!.trigger('keydown', { key: 'Home' })
+    expect(chips()[0]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('خوانده نشده')
     expect(wrapper.text()).toContain('خوانده شده')
   })
 
@@ -139,6 +190,12 @@ describe('NotificationsView.vue', () => {
     await flushPromises()
 
     await wrapper.get('.notif-item').trigger('click')
+    expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
+    expect(wrapper.get('.notif-item').attributes('role')).toBe('button')
+    expect(wrapper.get('.notif-item').attributes('tabindex')).toBe('0')
+
+    routerPushMock.mockClear()
+    await wrapper.get('.notif-item').trigger('keydown', { key: 'Enter' })
     expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
   })
 
@@ -173,6 +230,7 @@ describe('NotificationsView.vue', () => {
 
     await wrapper.get('.toggle-read-btn').trigger('click')
     expect(toggleReadSpy).toHaveBeenCalledWith(14, true)
+    expect(wrapper.get('.toggle-read-btn').attributes('aria-label')).toContain('خوانده‌شده')
     expect(routerPushMock).not.toHaveBeenCalled()
 
     await wrapper.get('.notif-item').trigger('click')

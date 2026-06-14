@@ -110,6 +110,36 @@ const openNotificationRoute = (notification: NormalizedAppNotification) => {
   router.push(routePath)
 }
 
+function selectFilter(filter: typeof activeFilter.value) {
+  activeFilter.value = filter
+}
+
+function handleFilterKeydown(event: KeyboardEvent, filter: typeof activeFilter.value) {
+  const options = filterOptions.value
+  const currentIndex = options.findIndex((option) => option.key === filter)
+  if (currentIndex === -1) return
+
+  let nextIndex = currentIndex
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    nextIndex = currentIndex <= 0 ? options.length - 1 : currentIndex - 1
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    nextIndex = currentIndex >= options.length - 1 ? 0 : currentIndex + 1
+  } else if (event.key === 'Home') {
+    nextIndex = 0
+  } else if (event.key === 'End') {
+    nextIndex = options.length - 1
+  } else {
+    return
+  }
+
+  event.preventDefault()
+  selectFilter(options[nextIndex]!.key)
+}
+
+function canOpenNotificationRoute(notification: NormalizedAppNotification): boolean {
+  return typeof notification.route === 'string' && notification.route.trim().length > 0
+}
+
 onMounted(async () => {
   await notificationStore.openNotificationCenter()
 })
@@ -166,7 +196,10 @@ onMounted(async () => {
             :class="{ active: activeFilter === option.key }"
             role="tab"
             :aria-selected="activeFilter === option.key"
-            @click="activeFilter = option.key"
+            :tabindex="activeFilter === option.key ? 0 : -1"
+            :aria-controls="`notifications-${option.key}-panel`"
+            @click="selectFilter(option.key)"
+            @keydown="handleFilterKeydown($event, option.key)"
           >
             <span>{{ option.label }}</span>
             <strong>{{ option.count.toLocaleString('fa-IR') }}</strong>
@@ -185,19 +218,40 @@ onMounted(async () => {
           </template>
         </AppEmptyState>
 
-      <div v-else class="notifications-list">
+      <div
+        v-else
+        :id="`notifications-${activeFilter}-panel`"
+        class="notifications-list"
+        role="tabpanel"
+        :aria-label="`اعلان‌های ${filterOptions.find((option) => option.key === activeFilter)?.label || ''}`"
+      >
         <div 
           v-for="notif in filteredNotifications"
           :key="notif.id"
           class="notif-item"
           :class="[`type-${notif.level || 'info'}`, { 'is-unread': !notif.is_read }]"
+          :role="canOpenNotificationRoute(notif) ? 'button' : undefined"
+          :tabindex="canOpenNotificationRoute(notif) ? 0 : undefined"
+          :aria-label="canOpenNotificationRoute(notif) ? `باز کردن اعلان ${notif.title || 'اعلان جدید'}` : undefined"
           @click="openNotificationRoute(notif)"
+          @keydown.enter.prevent="openNotificationRoute(notif)"
+          @keydown.space.prevent="openNotificationRoute(notif)"
         >
           <div class="notif-actions">
-            <button class="action-btn delete-btn" @click.stop="notificationStore.deleteNotification(notif.id)" title="حذف">
+            <button
+              type="button"
+              class="action-btn delete-btn"
+              :aria-label="`حذف اعلان ${notif.title || 'اعلان جدید'}`"
+              @click.stop="notificationStore.deleteNotification(notif.id)"
+            >
               <Trash2 :size="16" />
             </button>
-            <button class="action-btn toggle-read-btn" @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)" :title="notif.is_read ? 'خوانده نشده' : 'خوانده شده'">
+            <button
+              type="button"
+              class="action-btn toggle-read-btn"
+              :aria-label="notif.is_read ? `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌نشده` : `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌شده`"
+              @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)"
+            >
               <component :is="notif.is_read ? Mail : MailOpen" :size="16" />
             </button>
           </div>
@@ -287,6 +341,13 @@ onMounted(async () => {
   color: var(--ds-primary-700);
 }
 
+.notification-filter-chip:focus-visible,
+.notif-item:focus-visible,
+.action-btn:focus-visible {
+  outline: 3px solid rgba(245, 158, 11, 0.34);
+  outline-offset: 3px;
+}
+
 .notification-filter-empty {
   max-width: var(--ds-page-max-width);
   margin: 0 auto;
@@ -313,6 +374,10 @@ onMounted(async () => {
   box-shadow: var(--ds-shadow-xs);
 }
 
+.notif-item[role='button'] {
+  cursor: pointer;
+}
+
 .notif-item.is-unread {
   background: #fdfaf3;
   border-color: var(--ds-primary-100);
@@ -334,7 +399,8 @@ onMounted(async () => {
   transition: opacity 0.2s;
 }
 
-.notif-item:hover .notif-actions {
+.notif-item:hover .notif-actions,
+.notif-item:focus-within .notif-actions {
   opacity: 1;
 }
 

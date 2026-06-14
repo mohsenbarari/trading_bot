@@ -664,11 +664,32 @@ Tablet/Desktop:
 
 ### Stage 11 - Accessibility And Interaction Quality
 
+وضعیت: تکمیل شد در 2026-06-14.
+
 هدف:
 - focus-visible، real buttons، keyboard tabs، aria contractها، contrast، reduced motion.
 
 پذیرش:
 - مهم‌ترین tab/segmented/list/action controls با keyboard قابل استفاده باشند.
+
+خروجی انجام‌شده:
+- `NotificationsView.vue` filter tabs به roving tabindex، `aria-controls`، Arrow/Home/End navigation و panel role مجهز شد.
+- notification rows دارای route با `role="button"`، `tabindex="0"`، activation با Enter/Space و label قابل فهم شدند.
+- دکمه‌های حذف و read/unread اعلان‌ها `type="button"` و `aria-label` دقیق دریافت کردند.
+- focus-visible برای notification tabs، notification rows و action buttons اضافه شد و action buttons هنگام `focus-within` نیز دیده می‌شوند.
+- `AdminMessagesView.vue` mode switcher به tablist کامل با `role="tab"`, `aria-selected`, `aria-controls`, roving tabindex و Arrow/Home/End navigation تبدیل شد.
+- admin market/chat panels با `role="tabpanel"` و `aria-labelledby` به tabهای مرتبط متصل شدند.
+- focus-visible برای admin mode tabs، history toggle/edit، primary/secondary actions، ghost links و target options تکمیل شد.
+
+اعتبارسنجی:
+- `npm run test:unit:run -- NotificationsView.test.ts AdminMessagesView.test.ts` پاس شد؛ `13/13`.
+- `npm run build` پاس شد.
+- `npx playwright test e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد؛ `6/6`.
+- `git diff --check` پاس شد؛ production deploy طبق قانون این roadmap اجرا نشد.
+
+مسیر باقی‌مانده:
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی و handoff.
 
 ### Stage 12 - Testing And Visual Verification
 
