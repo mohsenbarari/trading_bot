@@ -1,6 +1,7 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0, RPO1, and RPO2 completed; RPO3 started on 2026-06-14. This roadmap is for
+Status: RPO0, RPO1, and RPO2 completed; RPO3 has a second validation slice
+ready for deployment, and RPO4 started on 2026-06-14. This roadmap is for
 targeted read-path optimization, not for another broad benchmark loop.
 
 Last updated: 2026-06-14
@@ -100,7 +101,7 @@ RPL6 endpoint p95 highlights:
 | `RPO1` | Complete | Optimize `chat_conversations` read shape without changing Messenger behavior. |
 | `RPO2` | Complete | Optimize `direct_messages` and room message read pagination/projection. |
 | `RPO3` | In Progress | Optimize `offers_list` and `offers_my` read paths. |
-| `RPO4` | Pending | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
+| `RPO4` | In Progress | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
 | `RPO5` | Pending | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
 | `RPO6` | Pending | Run a combined short benchmark across accepted RPO changes and decide whether L9 rerun is justified. |
 
@@ -461,6 +462,28 @@ Validation for slice 1:
 - `python3 -m py_compile api/routers/chat.py core/services/chat_service.py core/services/chat_room_service.py api/routers/offers.py tests/test_offers_router_reads.py`
   passed.
 
+Implementation slice 2:
+
+- Empty `GET /api/offers` and `GET /api/offers/my` result sets now return
+  before loading trading settings or customer read context.
+- `load_offer_customer_read_context()` still reuses the viewer relation from
+  the already-loaded owner relation map when possible, but its fallback viewer
+  lookup now reads `CustomerRelation` directly instead of using the heavier
+  helper that joined `User`.
+- Offer status filter mapping is centralized in `OFFER_STATUS_FILTERS` to keep
+  the `offers_my` branch consistent and avoid duplicate mapping construction.
+
+Validation for slice 2:
+
+- `python3 -m unittest tests.test_offers_router_reads tests.test_customer_relation_service`
+  passed.
+- `python3 -m py_compile api/routers/offers.py core/services/customer_relation_service.py tests/test_offers_router_reads.py tests/test_customer_relation_service.py`
+  passed.
+
+Pending validation:
+
+- Deploy this slice to Iran and run the short offers-focused RPO3 benchmark.
+
 ## Stage RPO4 - Relations and Public User Reads
 
 Goal:
@@ -502,6 +525,32 @@ Validation:
 Exit criteria:
 
 - Relation/profile p95/p99 improves and visibility tests stay stable.
+
+Implementation slice 1:
+
+- Public search now defers `get_active_accountant_relation_for_accountant()`
+  for the viewer until the returned rows actually include a customer profile
+  that needs accountant-based access validation.
+- Project-user directory reads skip the viewer accountant lookup for the
+  current user's own profile, because self access is already definitive.
+- Public profile detail reads defer the viewer accountant lookup until the
+  target is confirmed to be a customer profile and the viewer is not already
+  the customer, the owner, or a super admin.
+- Direct test calls to the project-user route now normalize FastAPI `Query`
+  defaults for `limit`/`offset`, matching runtime behavior without changing the
+  HTTP contract.
+
+Validation for slice 1:
+
+- `python3 -m unittest tests.test_users_public_router_read tests.test_users_public_router_search tests.test_users_public_project_users`
+  passed.
+- `python3 -m py_compile api/routers/users_public.py tests/test_users_public_router_read.py tests/test_users_public_router_search.py tests/test_users_public_project_users.py`
+  passed.
+
+Pending validation:
+
+- Deploy after the RPO3 benchmark and include relation/profile endpoint metrics
+  in the next short RPO run.
 
 ## Stage RPO5 - Notification and Counter Reads
 

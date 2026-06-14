@@ -181,6 +181,14 @@ def _can_view_customer_profile(
     )
 
 
+def _customer_profile_access_is_immediate(current_user: User, relation: CustomerRelation) -> bool:
+    return (
+        current_user.id == relation.customer_user_id
+        or current_user.id == relation.owner_user_id
+        or _is_super_admin(current_user)
+    )
+
+
 def _build_customer_public_visibility_filter(current_user: User):
     current_customer_owner_rel = aliased(CustomerRelation)
     current_customer_exists_rel = aliased(CustomerRelation)
@@ -384,8 +392,6 @@ async def _resolve_public_search_rows(
     if not user_ids:
         return []
 
-    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
-
     relation_stmt = (
         select(AccountantRelation)
         .options(joinedload(AccountantRelation.owner_user))
@@ -417,6 +423,12 @@ async def _resolve_public_search_rows(
         for relation in customer_relations
         if relation.customer_user_id is not None
     }
+    viewer_accountant_relation: AccountantRelation | None = None
+    if any(
+        not _customer_profile_access_is_immediate(current_user, relation)
+        for relation in customer_relations
+    ):
+        viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
 
     serialized_rows: list[schemas.PublicUserSearchResult] = []
     seen_user_ids: set[int] = set()
@@ -589,15 +601,20 @@ async def list_project_users_directory(
     if current_customer_relation is not None:
         raise HTTPException(status_code=403, detail="Customers cannot view the project users directory")
 
-    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
     if not _can_view_project_users_directory(
         current_user,
         user_id,
-        viewer_accountant_relation=viewer_accountant_relation,
+        viewer_accountant_relation=(
+            await get_active_accountant_relation_for_accountant(db, current_user.id)
+            if current_user.id != user_id
+            else None
+        ),
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    stmt = _build_project_user_directory_stmt(q=q, limit=limit, offset=offset)
+    normalized_limit = limit if isinstance(limit, int) else 25
+    normalized_offset = offset if isinstance(offset, int) else 0
+    stmt = _build_project_user_directory_stmt(q=q, limit=normalized_limit, offset=normalized_offset)
     rows = (await db.execute(stmt)).scalars().all()
     return [_serialize_project_user_directory_entry(user) for user in rows]
 
@@ -608,22 +625,45 @@ async def read_public_user(
     current_user: User = Depends(get_current_user),
 ):
     """دریافت اطلاعات عمومی یک کاربر (قابل دسترسی برای همه کاربران لاگین شده)"""
-    viewer_accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
-    current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
-    allowed_target_ids = (
-        set(await build_allowed_customer_chat_targets(db, current_user.id))
-        if current_customer_relation is not None
-        else None
-    )
-    relation = await get_active_accountant_relation_for_accountant(db, user_id)
-    if relation and relation.owner_user and not relation.owner_user.is_deleted:
+    current_customer_relation_loaded = False
+    current_customer_relation: CustomerRelation | None = None
+    allowed_target_ids_loaded = False
+    allowed_target_ids: set[int] | None = None
+
+    async def get_current_customer_relation() -> CustomerRelation | None:
+        nonlocal current_customer_relation_loaded, current_customer_relation
+        if not current_customer_relation_loaded:
+            current_customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+            current_customer_relation_loaded = True
+        return current_customer_relation
+
+    async def get_customer_allowed_target_ids() -> set[int] | None:
+        nonlocal allowed_target_ids_loaded, allowed_target_ids
+        current_relation = await get_current_customer_relation()
+        if current_relation is None:
+            return None
+        if not allowed_target_ids_loaded:
+            allowed_target_ids = set(await build_allowed_customer_chat_targets(db, current_user.id))
+            allowed_target_ids_loaded = True
+        return allowed_target_ids
+
+    async def ensure_customer_viewer_can_access_target(target_user_id: int) -> None:
+        if target_user_id == current_user.id:
+            return
+        current_relation = await get_current_customer_relation()
+        if current_relation is None:
+            return
         await _ensure_customer_viewer_can_access_public_user(
             db,
             current_user,
-            user_id,
-            current_customer_relation=current_customer_relation,
-            allowed_target_ids=allowed_target_ids,
+            target_user_id,
+            current_customer_relation=current_relation,
+            allowed_target_ids=await get_customer_allowed_target_ids(),
         )
+
+    relation = await get_active_accountant_relation_for_accountant(db, user_id)
+    if relation and relation.owner_user and not relation.owner_user.is_deleted:
+        await ensure_customer_viewer_can_access_target(user_id)
         accountant_relations = await _load_public_accountant_relation_summaries(db, relation.owner_user.id)
         customer_relations = []
         if _can_view_owner_customer_list(current_user, relation.owner_user.id):
@@ -643,6 +683,11 @@ async def read_public_user(
         customer_user = customer_relation.customer_user
         if customer_user is None or customer_user.is_deleted:
             raise HTTPException(status_code=404, detail="User not found")
+        viewer_accountant_relation = (
+            await get_active_accountant_relation_for_accountant(db, current_user.id)
+            if not _customer_profile_access_is_immediate(current_user, customer_relation)
+            else None
+        )
         if not _can_view_customer_profile(
             current_user,
             customer_relation,
@@ -662,13 +707,7 @@ async def read_public_user(
     user = await db.get(User, user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-    await _ensure_customer_viewer_can_access_public_user(
-        db,
-        current_user,
-        user_id,
-        current_customer_relation=current_customer_relation,
-        allowed_target_ids=allowed_target_ids,
-    )
+    await ensure_customer_viewer_can_access_target(user_id)
     accountant_relations = await _load_public_accountant_relation_summaries(db, user.id)
     customer_relations = []
     if _can_view_owner_customer_list(current_user, user.id):

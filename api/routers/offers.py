@@ -43,6 +43,12 @@ logger = logging.getLogger(__name__)
 
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
+OFFER_STATUS_FILTERS = {
+    "active": OfferStatus.ACTIVE,
+    "completed": OfferStatus.COMPLETED,
+    "cancelled": OfferStatus.CANCELLED,
+    "expired": OfferStatus.EXPIRED,
+}
 
 
 def _resolve_offer_owner_context(
@@ -216,6 +222,9 @@ async def _serialize_offer_responses(
     viewer_user_id: Optional[int] = None,
     include_owner_identity: bool = False,
 ) -> List[OfferResponse]:
+    if not offers:
+        return []
+
     offer_owner_relation_map, viewer_customer_relation = await load_offer_customer_read_context(
         db,
         offer_owner_user_ids={offer.user_id for offer in offers if getattr(offer, "user_id", None) is not None},
@@ -591,6 +600,8 @@ async def get_active_offers(
     
     result = await db.execute(query)
     offers = result.scalars().all()
+    if not offers:
+        return []
     
     # دریافت تنظیمات برای محاسبه دقیق انقضا
     from core.trading_settings import get_trading_settings_async
@@ -635,21 +646,11 @@ async def get_my_offers(
         query = query.where(Offer.created_at >= cutoff_time)
         
         if status_filter:
-             status_enum = {
-                "active": OfferStatus.ACTIVE,
-                "completed": OfferStatus.COMPLETED,
-                "cancelled": OfferStatus.CANCELLED,
-                "expired": OfferStatus.EXPIRED
-            }.get(status_filter)
-             if status_enum:
+            status_enum = OFFER_STATUS_FILTERS.get(status_filter)
+            if status_enum:
                 query = query.where(Offer.status == status_enum)
     elif status_filter:
-        status_enum = {
-            "active": OfferStatus.ACTIVE,
-            "completed": OfferStatus.COMPLETED,
-            "cancelled": OfferStatus.CANCELLED,
-            "expired": OfferStatus.EXPIRED
-        }.get(status_filter)
+        status_enum = OFFER_STATUS_FILTERS.get(status_filter)
         if status_enum:
             query = query.where(Offer.status == status_enum)
     
@@ -658,6 +659,8 @@ async def get_my_offers(
     
     result = await db.execute(query)
     offers = result.scalars().all()
+    if not offers:
+        return []
     
     # دریافت تنظیمات برای محاسبه انقضا
     from core.trading_settings import get_trading_settings_async

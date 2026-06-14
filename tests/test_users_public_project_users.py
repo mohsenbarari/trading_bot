@@ -50,15 +50,17 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
             ])
         ])
 
+        accountant_lookup = AsyncMock(side_effect=AssertionError("self profile should not load accountant relation"))
         with patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ), patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
-            new=AsyncMock(return_value=None),
+            new=accountant_lookup,
         ):
             result = await list_project_users_directory(7, q="0912", limit=25, db=db, current_user=current_user)
 
+        accountant_lookup.assert_not_awaited()
         self.assertEqual([row.id for row in result], [7, 9])
         self.assertEqual(result[0].account_name, "owner7")
         self.assertEqual(result[0].mobile_number, "09120000007")

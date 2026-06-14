@@ -148,6 +148,28 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(first_call.kwargs["offer_owner_relation"], owner_relation)
         self.assertIs(first_call.kwargs["viewer_customer_relation"], viewer_relation)
 
+    async def test_get_active_offers_returns_empty_without_extra_read_context(self):
+        db = FakeDB([FakeExecuteResult([])])
+        context = self.make_context(owner_id=77)
+
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(side_effect=AssertionError("settings should not be loaded for empty offers")),
+        ), patch(
+            "api.routers.offers.load_offer_customer_read_context",
+            new=AsyncMock(side_effect=AssertionError("read context should not be loaded for empty offers")),
+        ):
+            result = await get_active_offers(
+                offer_type=None,
+                commodity_id=None,
+                skip=0,
+                limit=50,
+                db=db,
+                context=context,
+            )
+
+        self.assertEqual(result, [])
+
     async def test_get_active_offers_rejects_accountant_context(self):
         with self.assertRaises(HTTPException) as exc_info:
             await get_active_offers(
@@ -196,6 +218,28 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(call.kwargs["include_owner_identity"])
         self.assertIs(call.kwargs["offer_owner_relation"], owner_relation)
         self.assertIs(call.kwargs["viewer_customer_relation"], viewer_relation)
+
+    async def test_get_my_offers_returns_empty_without_extra_read_context(self):
+        db = FakeDB([FakeExecuteResult([])])
+        context = self.make_context(owner_id=88)
+
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(side_effect=AssertionError("settings should not be loaded for empty offers")),
+        ), patch(
+            "api.routers.offers.load_offer_customer_read_context",
+            new=AsyncMock(side_effect=AssertionError("read context should not be loaded for empty offers")),
+        ):
+            result = await get_my_offers(
+                status_filter=None,
+                since_hours=None,
+                skip=0,
+                limit=50,
+                db=db,
+                context=context,
+            )
+
+        self.assertEqual(result, [])
 
     async def test_get_my_offers_rejects_accountant_context(self):
         with self.assertRaises(HTTPException) as exc_info:

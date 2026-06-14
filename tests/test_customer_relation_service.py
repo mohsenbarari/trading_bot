@@ -70,11 +70,13 @@ class FakeExecuteResult:
 class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
+        self.executed_statements = []
         self.commit = AsyncMock()
         self.refresh = AsyncMock()
         self.added = []
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        self.executed_statements.append(stmt)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -764,6 +766,9 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(owner_relation_map, {12: owner_relation})
         self.assertIs(resolved_viewer_relation, viewer_relation)
+        fallback_sql = str(db.executed_statements[1].compile(compile_kwargs={"literal_binds": True})).lower()
+        self.assertIn("customer_relations", fallback_sql)
+        self.assertNotIn(" join users", fallback_sql)
 
     async def test_load_offer_customer_read_context_skips_invalid_owner_ids(self):
         owner_relation = SimpleNamespace(customer_user_id=9, owner_user_id=7, status=CustomerRelationStatus.ACTIVE)
