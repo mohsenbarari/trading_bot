@@ -209,6 +209,7 @@ Stage N2 - Dashboard simplification:
 Stage N3 - Operations hub refinement:
 - Convert admin/customer/accountant actions into consistent accordion groups.
 - Add role-aware empty states and disabled explanations.
+- Status: completed. `/operations` now uses project-standard accordion groups for relations, management, and shortcuts, with customer/non-admin empty states and middle-manager scope notes.
 
 Stage N4 - Account hub refinement:
 - Standardize settings, sessions, storage, notifications and profile links.
