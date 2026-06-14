@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
 import { apiFetch } from '../utils/auth'
 
 const router = useRouter()
+const route = useRoute()
 const jwtToken = computed(() => localStorage.getItem('auth_token'))
 const apiBaseUrl = computed(() => import.meta.env.VITE_API_BASE_URL || '')
+const initialOwnerWorkspace = computed<'customers' | 'accountants' | null>(() => {
+  const workspace = route.query.workspace
+  return workspace === 'customers' || workspace === 'accountants' ? workspace : null
+})
 
 const currentUser = ref<{ id: number; account_name: string } | null>(null)
 
@@ -55,6 +60,7 @@ onMounted(async () => {
       :viewerUserId="currentUser.id"
       :apiBaseUrl="apiBaseUrl"
       :jwtToken="jwtToken"
+      :initialOwnerWorkspace="initialOwnerWorkspace"
       @navigate="handleNavigate"
     />
     <div v-else class="loading-container">

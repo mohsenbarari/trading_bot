@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { ChevronLeft, User as UserIcon, Activity, Pencil } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
@@ -22,6 +22,7 @@ const props = defineProps<{
   jwtToken: string | null;
   highlightAccountantUserId?: number | null;
   highlightAccountantRelationDisplayName?: string | null;
+  initialOwnerWorkspace?: 'customers' | 'accountants' | null;
   hideBackButton?: boolean;
 }>();
 
@@ -500,6 +501,7 @@ async function loadProfile() {
     if (!isOwnProfile.value && showCustomerListSection.value) {
       openSections.value.customers = true;
     }
+    applyInitialOwnerWorkspace();
   } catch (e: any) {
     error.value = e.message || 'خطا در برقراری ارتباط';
   } finally {
@@ -508,6 +510,28 @@ async function loadProfile() {
 }
 
 onMounted(loadProfile);
+
+function applyInitialOwnerWorkspace() {
+  if (!showOwnerSections.value || customerProfileContext.value !== null || viewerIsCustomer.value) {
+    return;
+  }
+
+  if (props.initialOwnerWorkspace === 'customers') {
+    showCustomerManager.value = true;
+  } else if (props.initialOwnerWorkspace === 'accountants') {
+    showAccountantManager.value = true;
+  }
+}
+
+watch(
+  () => props.initialOwnerWorkspace,
+  () => applyInitialOwnerWorkspace()
+);
+
+watch(
+  () => profileData.value?.id,
+  () => applyInitialOwnerWorkspace()
+);
 
 function parseApiError(payload: unknown, fallback: string) {
   if (typeof payload === 'object' && payload && 'detail' in payload) {

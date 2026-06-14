@@ -29,6 +29,18 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresMarketAccess: true }
     },
     {
+      path: '/operations',
+      name: 'operations',
+      component: () => import('../views/OperationsView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/account',
+      name: 'account',
+      component: () => import('../views/AccountHubView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/chat',
       name: 'messenger',
       component: () => import('../views/MessengerView.vue'),
