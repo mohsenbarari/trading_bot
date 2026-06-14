@@ -519,11 +519,22 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H7 - Account, Settings, Notifications, Profile Polish
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - Account security/storage route یا workspace sections.
 - Settings قدیمی به adapter تبدیل شود.
 - Notifications با filter، state و action hierarchy بهتر.
 - PublicProfile از owner-management modal dependency آزاد شود.
+- خروجی این stage:
+  - routeهای `/account/security`, `/account/storage`, و `/account/notifications` از redirect موقت خارج و مستقیم به `SettingsView.vue` / `NotificationsView.vue` وصل شدند.
+  - `AccountHubView` برای امنیت، حافظه/داده، و اعلان‌ها به routeهای جدید H2 هدایت می‌کند.
+  - `SettingsView.vue` هم route nameهای جدید و هم query legacy مثل `?section=storage` / `?section=sessions` را پشتیبانی می‌کند و عنوان صفحه را براساس workspace فعال نمایش می‌دهد.
+  - `NotificationsView.vue` فیلترهای همه/خوانده‌نشده/خوانده‌شده و empty state مربوط به فیلتر گرفت، در حالی که read/delete/clear/open route حفظ شد.
+  - `PublicProfile.vue` از dependency مستقیم به modalهای owner customer/accountant آزاد شد و owner actionها را به workspaceهای H4/H5 emit می‌کند.
+  - `ProfileView.vue` و `PublicProfileView.vue` این actionها را به routeهای `/operations/customers` و `/operations/accountants` هدایت می‌کنند.
+  - handoff تنظیمات admin از profile عمومی به route جدید `/admin/users/:id` منتقل شد.
+  - production deploy برای H7 هم عمداً defer شد تا validation/deploy گروهی بعد از stageهای بعدی انجام شود.
 
 پذیرش:
 - accountant restrictions حفظ شود.

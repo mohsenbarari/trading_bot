@@ -74,6 +74,49 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.text()).toContain('اعلان')
   })
 
+  it('filters notification visibility by read state without changing store actions', async () => {
+    const store = useNotificationStore()
+    store.appNotifications = [
+      {
+        id: 21,
+        title: 'خوانده نشده',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'info',
+        category: 'system',
+        is_read: false,
+      },
+      {
+        id: 22,
+        title: 'خوانده شده',
+        body: 'بدنه',
+        content: 'بدنه',
+        message: 'بدنه',
+        level: 'info',
+        category: 'system',
+        is_read: true,
+      },
+    ]
+
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    expect(wrapper.findAll('.notification-filter-chip')).toHaveLength(3)
+    expect(wrapper.text()).toContain('خوانده نشده')
+    expect(wrapper.text()).toContain('خوانده شده')
+
+    await wrapper.findAll('.notification-filter-chip')[1]!.trigger('click')
+    expect(wrapper.text()).toContain('خوانده نشده')
+    expect(wrapper.text()).not.toContain('خوانده شده')
+
+    await wrapper.findAll('.notification-filter-chip')[2]!.trigger('click')
+    expect(wrapper.text()).not.toContain('خوانده نشده')
+    expect(wrapper.text()).toContain('خوانده شده')
+  })
+
   it('opens a notification route when the item carries one', async () => {
     const store = useNotificationStore()
     store.appNotifications = [

@@ -21,13 +21,24 @@ const openSections = ref({
   storage: false
 })
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const routeSection = computed<'sessions' | 'storage' | null>(() => {
+  if (route.name === 'account-storage') return 'storage'
+  if (route.name === 'account-security') return 'sessions'
+  const section = route.query.section
+  return section === 'sessions' || section === 'storage' ? section : null
+})
+const pageTitle = computed(() => {
+  if (routeSection.value === 'sessions') return 'امنیت حساب'
+  if (routeSection.value === 'storage') return 'حافظه و داده‌ها'
+  return 'تنظیمات'
+})
 
 function toggleSection(section: 'sessions' | 'storage') {
   openSections.value[section] = !openSections.value[section]
 }
 
 function applyRouteSection() {
-  const section = route.query.section
+  const section = routeSection.value
   if (section === 'storage') {
     openSections.value.storage = true
   }
@@ -127,7 +138,7 @@ onMounted(() => {
 })
 
 watch(
-  () => route.query.section,
+  () => [route.name, route.query.section],
   () => applyRouteSection(),
   { immediate: true }
 )
@@ -139,7 +150,7 @@ watch(
     <div class="header-row">
       <div class="header-spacer"></div>
       <div class="header-title">
-         <h2>⚙️ تنظیمات</h2>
+         <h2>{{ pageTitle }}</h2>
       </div>
       <button class="back-button" @click="router.back()"><ChevronLeft :size="24" /></button>
     </div>

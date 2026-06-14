@@ -66,14 +66,12 @@ describe('AccountHubView.vue', () => {
 
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'profile' })
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, {
-      name: 'settings',
-      query: { section: 'sessions' },
+      name: 'account-security',
     })
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, {
-      name: 'settings',
-      query: { section: 'storage' },
+      name: 'account-storage',
     })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'notifications' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'account-notifications' })
   })
 
   it('keeps accountant session restrictions visible without exposing the sessions action', async () => {

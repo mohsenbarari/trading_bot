@@ -4,6 +4,7 @@ import { currentUserSummary } from '../utils/currentUser'
 
 const settingsViewMocks = vi.hoisted(() => ({
   route: {
+    name: 'settings' as string,
     query: {} as Record<string, string>,
   },
   backMock: vi.fn(),
@@ -68,6 +69,7 @@ describe('SettingsView.vue', () => {
     vi.useFakeTimers()
     localStorage.clear()
     currentUserSummary.value = null
+    settingsViewMocks.route.name = 'settings'
     settingsViewMocks.route.query = {}
     settingsViewMocks.backMock.mockReset()
     settingsViewMocks.apiFetchMock.mockReset()
@@ -149,6 +151,22 @@ describe('SettingsView.vue', () => {
     expect(wrapper.find('.storage-feedback').exists()).toBe(false)
 
     wrapper.unmount()
+  })
+
+  it('opens account route sections from route names without legacy query handoff', async () => {
+    settingsViewMocks.route.name = 'account-storage'
+    const storageWrapper = await mountSettingsView()
+    await flushPromises()
+
+    expect(storageWrapper.text()).toContain('حافظه و داده‌ها')
+    expect(storageWrapper.find('#settings-storage-header').attributes('aria-expanded')).toBe('true')
+
+    settingsViewMocks.route.name = 'account-security'
+    const securityWrapper = await mountSettingsView()
+    await flushPromises()
+
+    expect(securityWrapper.text()).toContain('امنیت حساب')
+    expect(securityWrapper.find('#settings-sessions-header').attributes('aria-expanded')).toBe('true')
   })
 
   it('does not render the blocked-users management section or call block APIs', async () => {

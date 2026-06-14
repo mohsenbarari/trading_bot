@@ -1717,7 +1717,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
   })
 
-  it('exposes owner actions for settings navigation and owner customer/accountant manager modals', async () => {
+  it('exposes owner actions for settings and owner workspace navigation', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValueOnce(makeResponse({
       id: 44,
@@ -1744,12 +1744,6 @@ describe('PublicProfile.vue', () => {
       global: {
         stubs: {
           LoadingSkeleton: true,
-          OwnerCustomerManagerModal: {
-            template: '<button class="owner-customer-modal-stub" @click="$emit(\'close\')">customer modal</button>',
-          },
-          OwnerAccountantManagerModal: {
-            template: '<button class="owner-accountant-modal-stub" @click="$emit(\'close\')">accountant modal</button>',
-          },
         },
       },
     })
@@ -1767,16 +1761,12 @@ describe('PublicProfile.vue', () => {
     const customerButton = wrapper.findAll('button').find((button) => button.text().includes('مشتریان'))
     expect(customerButton).toBeTruthy()
     await customerButton!.trigger('click')
-    expect(wrapper.find('.owner-customer-modal-stub').exists()).toBe(true)
-    await wrapper.get('.owner-customer-modal-stub').trigger('click')
-    expect(wrapper.find('.owner-customer-modal-stub').exists()).toBe(false)
+    expect(wrapper.emitted('navigate')?.[1]).toEqual(['operations_customers'])
     expect(vi.mocked(alert)).not.toHaveBeenCalled()
 
     await accountantButton!.trigger('click')
 
-    expect(wrapper.find('.owner-accountant-modal-stub').exists()).toBe(true)
-    await wrapper.get('.owner-accountant-modal-stub').trigger('click')
-    expect(wrapper.find('.owner-accountant-modal-stub').exists()).toBe(false)
+    expect(wrapper.emitted('navigate')?.[2]).toEqual(['operations_accountants'])
   })
 
   it('loads mutual trade history for direct profiles and reuses loaded results on reopen', async () => {

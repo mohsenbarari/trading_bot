@@ -3,8 +3,6 @@ import { computed, ref, onMounted, watch } from 'vue';
 import { ChevronLeft, User as UserIcon, Activity, Pencil } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
-import OwnerAccountantManagerModal from './OwnerAccountantManagerModal.vue';
-import OwnerCustomerManagerModal from './OwnerCustomerManagerModal.vue';
 import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import { isAdminRoleValue, readCachedCurrentUserRole, SUPER_ADMIN_ROLE } from '../utils/adminAccess';
@@ -173,12 +171,11 @@ const addressError = ref('');
 const publicBlockBusy = ref(false);
 const publicBlockState = ref<boolean | null>(null);
 const publicBlockStatus = ref<PublicBlockStatus | null>(null);
-const showAccountantManager = ref(false);
-const showCustomerManager = ref(false);
 const showAdminUserManager = ref(false);
 const adminUserData = ref<any>(null);
 const adminUserLoading = ref(false);
 const adminUserError = ref('');
+const appliedInitialOwnerWorkspace = ref<'customers' | 'accountants' | null>(null);
 const projectUsers = ref<ProjectUserDirectoryEntry[]>([]);
 const projectUsersLoading = ref(false);
 const projectUsersLoadingMore = ref(false);
@@ -515,11 +512,16 @@ function applyInitialOwnerWorkspace() {
   if (!showOwnerSections.value || customerProfileContext.value !== null || viewerIsCustomer.value) {
     return;
   }
+  if (!props.initialOwnerWorkspace || appliedInitialOwnerWorkspace.value === props.initialOwnerWorkspace) {
+    return;
+  }
 
   if (props.initialOwnerWorkspace === 'customers') {
-    showCustomerManager.value = true;
+    appliedInitialOwnerWorkspace.value = 'customers';
+    emit('navigate', 'operations_customers');
   } else if (props.initialOwnerWorkspace === 'accountants') {
-    showAccountantManager.value = true;
+    appliedInitialOwnerWorkspace.value = 'accountants';
+    emit('navigate', 'operations_accountants');
   }
 }
 
@@ -1028,11 +1030,6 @@ async function closeAdminUserManager() {
   await loadProfile();
 }
 
-async function closeCustomerManager() {
-  showCustomerManager.value = false;
-  await loadProfile();
-}
-
 async function getCurrentPublicBlockState() {
   if (!profileData.value || !props.jwtToken) {
     throw new Error('نشست کاربری معتبر نیست.');
@@ -1192,9 +1189,9 @@ function handleActionClick(action: ProfileActionCard) {
   } else if (action.key === 'admin_settings') {
     void openAdminUserManager();
   } else if (action.key === 'add_customer') {
-    showCustomerManager.value = true;
+    emit('navigate', 'operations_customers');
   } else if (action.key === 'add_accountant') {
-    showAccountantManager.value = true;
+    emit('navigate', 'operations_accountants');
   }
 }
 
@@ -1888,16 +1885,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
         </div>
       </section>
     </div>
-
-    <OwnerAccountantManagerModal
-      v-if="showAccountantManager"
-      @close="showAccountantManager = false"
-    />
-
-    <OwnerCustomerManagerModal
-      v-if="showCustomerManager"
-      @close="closeCustomerManager"
-    />
 
     <Teleport to="body">
       <div v-if="showAdminUserManager" class="admin-user-modal-overlay" @click.self="closeAdminUserManager">
