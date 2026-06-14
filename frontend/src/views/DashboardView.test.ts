@@ -152,14 +152,20 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
     expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
     expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
+    expect(wrapper.get('.dashboard-shortcuts').text()).toContain('عملیات')
+    expect(wrapper.get('.dashboard-shortcuts').text()).toContain('حساب')
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
     await wrapper.get('.hero-btn').trigger('click')
+    await wrapper.findAll('.dashboard-shortcut-card')[0]!.trigger('click')
+    await wrapper.findAll('.dashboard-shortcut-card')[1]!.trigger('click')
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/notifications')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(3, '/market')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(4, '/operations')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(5, '/account')
   })
 
   it('shows the inactive warning and blocks market navigation for inactive accounts', async () => {

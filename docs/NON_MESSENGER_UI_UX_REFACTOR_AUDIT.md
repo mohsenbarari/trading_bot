@@ -199,10 +199,12 @@ Stage N1 - Audit and additive navigation:
 - Add `/operations` and `/account`.
 - Update bottom nav to the 5-tab product model.
 - Add query-driven openings for existing sections.
+- Status: completed in commit `0ac5a1e`.
 
 Stage N2 - Dashboard simplification:
 - Reduce dashboard to status, today's work, and primary market/profile signals.
 - Move operational density to `/operations`.
+- Status: completed. Dashboard now keeps market entry and today's trades as primary content, while routing relation/admin/account work through `/operations` and `/account` shortcut cards.
 
 Stage N3 - Operations hub refinement:
 - Convert admin/customer/accountant actions into consistent accordion groups.
