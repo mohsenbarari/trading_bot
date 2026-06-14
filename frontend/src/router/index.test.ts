@@ -73,10 +73,14 @@ describe('router/index.ts', () => {
       name: 'settings',
       query: { source: 'hub', section: 'storage' },
     })
-    expect(routeByName.get('admin-user-profile')?.redirect({ query: { mode: 'audit' }, params: { id: '7' } })).toEqual({
-      name: 'admin',
-      query: { mode: 'audit', section: 'user_profile', user_id: '7' },
-    })
+    expect(routeByName.get('admin-invitations')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-channels')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-users')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-user-profile')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-commodities')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-messages')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-system')?.component).toBeTypeOf('function')
+    expect(routeByName.get('admin-user-profile')?.redirect).toBeUndefined()
     expect(routeByName.get('admin-system')?.meta).toEqual({ requiresAuth: true, requiresAdmin: true })
   })
 

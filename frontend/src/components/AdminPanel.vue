@@ -100,6 +100,14 @@ const actions = computed<AdminAction[]>(() => {
         section: 'catalog',
       },
       {
+        key: 'create_channel',
+        label: 'ساخت کانال',
+        description: 'ایجاد کانال و تنظیم مالک/اعضای اولیه',
+        variant: 'secondary',
+        icon: PlusCircle,
+        section: 'system',
+      },
+      {
         key: 'admin_messages',
         label: 'پیام‌های مدیریت',
         description: 'پیام بازار و اعلان همگانی',

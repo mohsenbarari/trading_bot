@@ -497,11 +497,19 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H6 - Admin Workspace
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - route-level admin sections.
 - visible action برای create channel.
 - تبدیل `AdminView` state machine به route-driven workspace.
 - حفظ `section` queryهای قدیمی.
+- خروجی این stage:
+  - routeهای `/admin/invitations`, `/admin/channels`, `/admin/users`, `/admin/users/:id`, `/admin/commodities`, `/admin/messages`, و `/admin/system` از redirect موقت خارج و مستقیم به `AdminView.vue` وصل شدند.
+  - `AdminView.vue` اکنون route name/params را منبع اصلی section می‌داند و queryهای legacy مانند `?section=create_invitation` و `?section=user_profile&user_id=...` همچنان کار می‌کنند.
+  - navigation داخلی admin برای sectionهای route-level از `router.push()` به routeهای جدید استفاده می‌کند و profile کاربر منتخب به `/admin/users/:id` منتقل شد.
+  - action «ساخت کانال» به منوی مدیر ارشد اضافه شد؛ مدیر میانی فقط دعوت‌نامه و مدیریت کاربران را می‌بیند و routeهای super-admin-only برای او به menu برمی‌گردند.
+  - production deploy برای H6 هم عمداً defer شد تا H2-H6 بعد از validation گروهی منتشر شود.
 
 پذیرش:
 - middle manager فقط invitations/users ببیند.

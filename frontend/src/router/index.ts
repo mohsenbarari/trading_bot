@@ -129,67 +129,43 @@ const router = createRouter({
     {
       path: '/admin/invitations',
       name: 'admin-invitations',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, { section: 'create_invitation' }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/admin/channels',
       name: 'admin-channels',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, { section: 'create_channel' }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/admin/users',
       name: 'admin-users',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, { section: 'manage_users' }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/admin/users/:id',
       name: 'admin-user-profile',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, {
-          section: 'user_profile',
-          user_id: to.params.id,
-        }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/admin/commodities',
       name: 'admin-commodities',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, { section: 'manage_commodities' }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/admin/messages',
       name: 'admin-messages',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, { section: 'admin_messages' }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/admin/system',
       name: 'admin-system',
-      redirect: (to) => ({
-        name: 'admin',
-        query: withQuery(to.query, { section: 'settings' }),
-      }),
+      component: () => import('../views/AdminView.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {

@@ -5,6 +5,8 @@ import AdminView from './AdminView.vue'
 
 const adminViewMocks = vi.hoisted(() => ({
   route: {
+    name: 'admin' as string,
+    params: {} as Record<string, string>,
     query: {} as Record<string, string>,
   },
   routerPushMock: vi.fn(),
@@ -35,6 +37,8 @@ vi.mock('../composables/useBackButton', () => ({
 
 describe('AdminView.vue', () => {
   beforeEach(() => {
+    adminViewMocks.route.name = 'admin'
+    adminViewMocks.route.params = reactive({}) as Record<string, string>
     adminViewMocks.route.query = reactive({}) as Record<string, string>
     adminViewMocks.routerPushMock.mockReset()
     adminViewMocks.routerReplaceMock.mockReset()
@@ -97,6 +101,7 @@ describe('AdminView.vue', () => {
     await flushPromises()
 
     expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(1)
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'admin-invitations' })
     expect(wrapper.text()).toContain('ارسال دعوت‌نامه')
     expect(wrapper.get('.create-invitation-stub').text()).toBe('admin-jwt-token')
 
@@ -115,11 +120,18 @@ describe('AdminView.vue', () => {
     expect(usersButton).toBeTruthy()
     await usersButton!.trigger('click')
     await flushPromises()
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({ name: 'admin-users' })
+
     await wrapper.get('.user-manager-open-profile').trigger('click')
     await flushPromises()
 
     expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(2)
     expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
+    expect(adminViewMocks.routerPushMock).toHaveBeenCalledWith({
+      name: 'admin-user-profile',
+      params: { id: '77' },
+      query: { account_name: 'user-77' },
+    })
     expect(wrapper.text()).toContain('پروفایل کاربر')
     expect(wrapper.get('.user-profile-stub').text()).toBe('user-77')
   })
@@ -156,6 +168,31 @@ describe('AdminView.vue', () => {
     expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91')
     expect(wrapper.text()).toContain('پروفایل کاربر')
     expect(wrapper.get('.user-profile-stub').text()).toBe('route-user')
+  })
+
+  it('opens admin sections directly from route names and params', async () => {
+    adminViewMocks.route.name = 'admin-system'
+    const systemWrapper = mountView()
+    await flushPromises()
+
+    expect(systemWrapper.text()).toContain('تنظیمات سیستم')
+    expect(systemWrapper.find('.trading-settings-stub').exists()).toBe(true)
+
+    adminViewMocks.route.name = 'admin-user-profile'
+    adminViewMocks.route.params = {
+      id: '91',
+    }
+    adminViewMocks.apiFetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 91, account_name: 'route-param-user' }),
+    })
+
+    const profileWrapper = mountView()
+    await flushPromises()
+
+    expect(adminViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/91')
+    expect(profileWrapper.text()).toContain('پروفایل کاربر')
+    expect(profileWrapper.get('.user-profile-stub').text()).toBe('route-param-user')
   })
 
   it('renders the route-profile loading state when the profile section is awaiting route data', async () => {
@@ -265,6 +302,17 @@ describe('AdminView.vue', () => {
 
     expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
     expect(wrapper.find('.trading-settings-stub').exists()).toBe(false)
+  })
+
+  it('blocks super-admin only route names for middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    adminViewMocks.route.name = 'admin-channels'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
   })
 
   it('reacts to route query changes after mount and executes stored back callbacks', async () => {

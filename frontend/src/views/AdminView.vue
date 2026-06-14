@@ -12,7 +12,7 @@ import AdminMessagesView from '../components/AdminMessagesView.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
-import { isCachedSuperAdmin } from '../utils/adminAccess'
+import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 
 const router = useRouter()
 const route = useRoute()
@@ -65,8 +65,53 @@ const routeAdminSections = new Set([
   'admin_messages',
   'settings',
 ])
+const adminRouteSectionByName: Record<string, string> = {
+  'admin-invitations': 'create_invitation',
+  'admin-channels': 'create_channel',
+  'admin-commodities': 'manage_commodities',
+  'admin-users': 'manage_users',
+  'admin-messages': 'admin_messages',
+  'admin-system': 'settings',
+}
+const adminRouteNameBySection: Record<string, string> = {
+  create_invitation: 'admin-invitations',
+  create_channel: 'admin-channels',
+  manage_commodities: 'admin-commodities',
+  manage_users: 'admin-users',
+  admin_messages: 'admin-messages',
+  settings: 'admin-system',
+}
+
+function getRouteName() {
+  return typeof route.name === 'string' ? route.name : ''
+}
+
+function getSingleParam(value: unknown) {
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
+}
+
+function canAccessAdminSection(section: string) {
+  if (!routeAdminSections.has(section)) return false
+  if (isCachedSuperAdmin()) return true
+  if (isCachedMiddleManager()) {
+    return section === 'create_invitation' || section === 'manage_users'
+  }
+  return section === 'create_invitation' || section === 'manage_users' || section === 'manage_commodities'
+}
+
+function getAdminRouteForSection(section: string) {
+  const routeName = adminRouteNameBySection[section]
+  return routeName ? { name: routeName } : { name: 'admin' }
+}
 
 function getRouteUserProfileId(): number | null {
+  const routeName = getRouteName()
+  if (routeName === 'admin-user-profile') {
+    const normalized = Number(getSingleParam(route.params?.id))
+    return Number.isInteger(normalized) && normalized > 0 ? normalized : null
+  }
+
   if (route.query.section !== 'user_profile') {
     return null
   }
@@ -76,20 +121,43 @@ function getRouteUserProfileId(): number | null {
 }
 
 function shouldClearRouteUserProfile(): boolean {
-  return typeof route.query.section === 'string' || typeof route.query.user_id === 'string'
+  return getRouteName().startsWith('admin-') ||
+    typeof route.query.section === 'string' ||
+    typeof route.query.user_id === 'string'
 }
 
 function getRouteAdminSection(): string | null {
-  const section = route.query.section
-  if (typeof section !== 'string' || section === 'user_profile' || !routeAdminSections.has(section)) {
-    return null
+  const routeSection = adminRouteSectionByName[getRouteName()]
+  if (routeSection) {
+    return canAccessAdminSection(routeSection) ? routeSection : null
   }
 
-  if ((section === 'settings' || section === 'admin_messages') && !canAccessSystemSettings.value) {
+  const section = route.query.section
+  if (typeof section !== 'string' || section === 'user_profile' || !canAccessAdminSection(section)) {
     return null
   }
 
   return section
+}
+
+function syncRouteToSection() {
+  const routeUserId = getRouteUserProfileId()
+  if (routeUserId) {
+    void loadRouteUserProfile(routeUserId)
+    return
+  }
+
+  const routeSection = getRouteAdminSection()
+  if (routeSection) {
+    selectedUserForProfile.value = null
+    currentSection.value = routeSection
+    return
+  }
+
+  if (currentSection.value !== 'menu') {
+    currentSection.value = 'menu'
+    selectedUserForProfile.value = null
+  }
 }
 
 async function loadRouteUserProfile(userId: number) {
@@ -119,42 +187,12 @@ async function loadRouteUserProfile(userId: number) {
 onMounted(() => {
   jwtToken.value = localStorage.getItem('auth_token')
   // Router guard handles redirect to login if token is missing/expired
-  const routeUserId = getRouteUserProfileId()
-  if (routeUserId) {
-    void loadRouteUserProfile(routeUserId)
-    return
-  }
-
-  const routeSection = getRouteAdminSection()
-  if (routeSection) {
-    selectedUserForProfile.value = null
-    currentSection.value = routeSection
-  }
+  syncRouteToSection()
 })
 
 watch(
-  () => [route.query.section, route.query.user_id],
-  ([section, userId]) => {
-    if (section === 'user_profile') {
-      const normalized = Number(userId)
-      if (Number.isInteger(normalized) && normalized > 0) {
-        void loadRouteUserProfile(normalized)
-      }
-      return
-    }
-
-    const routeSection = getRouteAdminSection()
-    if (routeSection) {
-      selectedUserForProfile.value = null
-      currentSection.value = routeSection
-      return
-    }
-
-    if (section === undefined && currentSection.value !== 'menu') {
-      currentSection.value = 'menu'
-      selectedUserForProfile.value = null
-    }
-  }
+  () => [route.name, route.params?.id, route.query.section, route.query.user_id],
+  () => syncRouteToSection()
 )
 
 function goToMenu() {
@@ -167,20 +205,27 @@ function goToMenu() {
 }
 
 function handleNavigate(section: string, data?: any) {
-  console.log('Navigate to:', section, data)
-
-  if ((section === 'settings' || section === 'admin_messages') && !canAccessSystemSettings.value) {
+  if (routeAdminSections.has(section) && !canAccessAdminSection(section)) {
     goToMenu()
     return
   }
   
   if (section === 'user_profile' && data) {
+     const normalizedId = Number(data.id ?? data.user_id)
+     if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+       return
+     }
      if (currentSection.value !== 'menu') {
        // تغییر ساب‌پیج — جایگزینی state قبلی
        popBackState()
      }
      selectedUserForProfile.value = data
      currentSection.value = 'user_profile'
+     void router.push({
+       name: 'admin-user-profile',
+       params: { id: String(normalizedId) },
+       query: data.account_name ? { account_name: data.account_name } : {},
+     })
      pushBackState(() => {
        currentSection.value = 'menu'
        selectedUserForProfile.value = null
@@ -196,6 +241,7 @@ function handleNavigate(section: string, data?: any) {
       popBackState()
     }
     currentSection.value = section
+    void router.push(getAdminRouteForSection(section))
     pushBackState(() => {
       currentSection.value = 'menu'
       selectedUserForProfile.value = null
