@@ -258,7 +258,7 @@ onMounted(() => {
 
 <style scoped>
 .account-hub-page {
-  padding-bottom: 5rem;
+  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
 .account-hub-content {

@@ -2,21 +2,32 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import {
   AppActionCard,
+  AppBottomSheet,
   AppButton,
   AppDangerZone,
   AppEmptyState,
   AppErrorState,
+  AppFilterChips,
   AppFormField,
   AppInput,
   AppListItem,
   AppLoadingState,
+  AppMasterDetail,
   AppMetricCard,
+  AppNumberStepper,
+  AppPage,
+  AppPageHeader,
+  AppResponsiveDialog,
+  AppSearchField,
   AppSectionCard,
   AppSelect,
   AppStatusBadge,
   AppTabs,
   AppTextarea,
   AppConfirmDialog,
+  AppToast,
+  AppToolbar,
+  AppWorkspace,
 } from './index'
 
 describe('ui primitives', () => {
@@ -180,5 +191,102 @@ describe('ui primitives', () => {
     await dialog.findAll('button')[1]!.trigger('click')
     expect(dialog.emitted('cancel')).toHaveLength(1)
     expect(dialog.emitted('confirm')).toHaveLength(1)
+  })
+
+  it('renders page, workspace, master-detail, toolbar, and page header primitives', () => {
+    const page = mount(AppPage, {
+      props: { narrow: true },
+      slots: { default: '<section>محتوای صفحه</section>' },
+    })
+    expect(page.classes()).toContain('ui-page--narrow')
+    expect(page.text()).toContain('محتوای صفحه')
+
+    const workspace = mount(AppWorkspace, {
+      slots: { default: '<section>فضای کاری</section>' },
+    })
+    expect(workspace.classes()).toContain('ui-workspace')
+
+    const header = mount(AppPageHeader, {
+      props: {
+        eyebrow: 'عملیات',
+        title: 'مشتریان',
+        description: 'مدیریت روابط مشتریان',
+      },
+      slots: { actions: '<button>افزودن</button>' },
+    })
+    expect(header.text()).toContain('مدیریت روابط مشتریان')
+    expect(header.find('.ui-page-header__actions').exists()).toBe(true)
+
+    const masterDetail = mount(AppMasterDetail, {
+      slots: {
+        master: '<p>لیست</p>',
+        detail: '<p>جزئیات</p>',
+      },
+    })
+    expect(masterDetail.text()).toContain('جزئیات')
+
+    const toolbar = mount(AppToolbar, {
+      slots: {
+        leading: '<span>فیلتر</span>',
+        default: '<input aria-label="جستجو" />',
+        actions: '<button>اعمال</button>',
+      },
+    })
+    expect(toolbar.find('.ui-toolbar__actions').exists()).toBe(true)
+  })
+
+  it('supports search fields, filter chips, and number steppers', async () => {
+    const search = mount(AppSearchField, {
+      props: { modelValue: '', placeholder: 'جستجوی مشتری' },
+    })
+    await search.get('input').setValue('علی')
+    expect(search.emitted('update:modelValue')?.[0]).toEqual(['علی'])
+
+    const chips = mount(AppFilterChips, {
+      props: {
+        modelValue: 'all',
+        label: 'فیلتر مشتریان',
+        options: [
+          { key: 'all', label: 'همه' },
+          { key: 'active', label: 'فعال' },
+        ],
+      },
+    })
+    await chips.findAll('[role="tab"]')[1]!.trigger('click')
+    expect(chips.emitted('update:modelValue')?.[0]).toEqual(['active'])
+
+    const stepper = mount(AppNumberStepper, {
+      props: { modelValue: 0.5, min: 0, max: 2, step: 0.1, label: 'درصد کمیسیون' },
+    })
+    await stepper.findAll('button')[1]!.trigger('click')
+    expect(stepper.emitted('update:modelValue')?.[0]).toEqual([0.6])
+    await stepper.get('input').setValue('1.23')
+    expect(stepper.emitted('update:modelValue')?.[1]).toEqual([1.23])
+  })
+
+  it('renders toast, bottom sheet, and responsive dialog primitives', async () => {
+    const toast = mount(AppToast, {
+      props: { title: 'ذخیره شد', message: 'تغییرات با موفقیت ذخیره شد.', tone: 'success' },
+    })
+    expect(toast.attributes('role')).toBe('status')
+    expect(toast.classes()).toContain('ui-toast--success')
+
+    const sheet = mount(AppBottomSheet, {
+      props: { open: true, title: 'فیلترها' },
+      slots: { default: '<p>گزینه‌ها</p>', actions: '<button>اعمال</button>' },
+      attachTo: document.body,
+    })
+    expect(document.body.querySelector('.ui-bottom-sheet')).toBeTruthy()
+    await sheet.findComponent(AppButton).trigger('click')
+    expect(sheet.emitted('close')).toHaveLength(1)
+    sheet.unmount()
+
+    const dialog = mount(AppResponsiveDialog, {
+      props: { open: true, title: 'جزئیات' },
+      slots: { default: '<p>متن</p>' },
+      attachTo: document.body,
+    })
+    expect(document.body.querySelector('.ui-responsive-dialog')).toBeTruthy()
+    dialog.unmount()
   })
 })

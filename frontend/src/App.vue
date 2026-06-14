@@ -44,7 +44,7 @@ watch(isFirstRouteReady, (ready) => {
     </div>
 
     <!-- Page Content Container -->
-    <div class="flex-1 relative overflow-y-auto overflow-x-hidden min-h-0 bg-transparent">
+    <div class="app-route-scroll flex-1 relative overflow-y-auto overflow-x-hidden min-h-0 bg-transparent">
       <!-- Full-screen spinner shown while the first route's JS chunk loads from
            the network (only visible on first incognito/cold load). Without this,
            the RouterView renders nothing during the async component download → blank white page. -->

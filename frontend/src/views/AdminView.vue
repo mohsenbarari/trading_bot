@@ -405,7 +405,8 @@ onUnmounted(() => clearBackStack())
   flex: 1;
   padding: var(--ds-card-padding);
   overflow-y: auto;
-  padding-bottom: 6rem;
+  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
+  scroll-padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
 .admin-inner {

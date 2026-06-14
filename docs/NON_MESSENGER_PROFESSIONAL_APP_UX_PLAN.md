@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 0 تکمیل شد؛ Stage 1 مرحله بعدی است.
+وضعیت: Stage 1 و Stage 2 تکمیل شدند؛ Stage 3 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -186,7 +186,9 @@ gaps نسبت به درخواست جدید:
 | `/admin?section=user_profile&user_id=...` | `/admin/users/:id` | profile management route-native. |
 | `/admin?section=manage_commodities` | `/admin/commodities` | commodity cards/forms/danger shared. |
 | `/admin?section=admin_messages` | `/admin/messages` | broadcast/history native. |
-| `/admin?section=system_settings` و trading/system | `/admin/system` | settings tabs/cards native. |
+| `/admin?section=settings` | `/admin/system` | deep link واقعی فعلی؛ باید به section داخلی `settings` وصل بماند. |
+| `/admin?section=system_settings` | `/admin/system` | اگر در نسخه‌های قدیمی‌تر استفاده شده باشد باید به عنوان alias compatibility پوشش داده شود. |
+| trading/system settings | `/admin/system` | settings tabs/cards native. |
 | Market filters | `/market` internal state | tabs/filter chips shared؛ trading logic دست‌نخورده. |
 | Market input/action bar | `/market` | fixed bar safe-area-aware با matching content padding. |
 | Recent offers | `/market` recent menu | list/empty/loading shared، keyboard-friendly. |
@@ -208,6 +210,25 @@ gaps نسبت به درخواست جدید:
 10. auth/public/small surfaces را با shell/form/state مشترک ببندیم.
 11. accessibility و interaction را روی همه interactive controlهای مهم enforce کنیم.
 12. visual/viewport/e2e gate را اجرا کنیم و گزارش فارسی نهایی بدهیم.
+
+## 10.1. عبارات ممنوع در UI نهایی
+
+این عبارت‌ها زبان داخلی توسعه هستند و نباید در UI نهایی کاربر دیده شوند:
+
+- `Stage`
+- `migration`
+- `compatibility`
+- `fallback`
+- `legacy`
+- `adapter`
+- `مدیریت کامل`
+- `مسیر مهاجرت`
+- `تا پایان Stage`
+- `سازگاری موقت`
+- `نسخه قدیمی`
+- `مهاجرت`
+
+استثنا: این عبارت‌ها فقط در مستندات فنی، تست‌ها، نام متغیر داخلی یا commentهای غیر user-facing مجاز هستند. هر متن visible باید با زبان محصول جایگزین شود؛ مثل «تنظیمات مشتری»، «اقدامات حساس»، «دعوت‌های در انتظار»، «مدیریت نشست‌ها».
 
 ## 11. معیار پذیرش سطح‌به‌سطح
 
@@ -246,6 +267,11 @@ gaps نسبت به درخواست جدید:
 - bottom sheets/dialogها actionهای خود را بالای safe-area نگه دارند.
 - market action bar آخرین offer/control را نپوشاند.
 - customer/accountant danger/session actions زیر nav پنهان نشوند.
+- در هر route کلیدی، آخرین `button`, `a`, `input`, `textarea`, `select`, `[role=button]`, `[tabindex]` visible که داخل bottom chrome نیست پیدا شود.
+- صفحه و scroll containerهای داخلی تا انتها scroll شوند.
+- bounding box آخرین کنترل با bounding boxهای bottom nav و fixed/sticky bottom bar مقایسه شود.
+- اگر overlap وجود داشت یا فاصله آخرین کنترل با بالای bottom chrome کمتر از `12px` بود، تست باید fail شود.
+- این obstruction check روی عرض‌های موبایل `360`, `375`, `390`, `414`, `430` اجباری است.
 
 ## 13. چک‌لیست desktop viewport
 
@@ -298,9 +324,9 @@ Gate نهایی Stage 12:
 | Stage | عنوان | وضعیت |
 | --- | --- | --- |
 | Stage 0 | Audit قبل از coding و ایجاد همین سند | Completed |
-| Stage 1 | Design system completion and enforcement | Next |
-| Stage 2 | Global layout, safe-area and fixed UI hardening | Pending |
-| Stage 3 | Customer Workspace: remove remaining legacy feel | Pending |
+| Stage 1 | Design system completion and enforcement | Completed |
+| Stage 2 | Global layout, safe-area and fixed UI hardening | Completed |
+| Stage 3 | Customer Workspace: remove remaining legacy feel | Next |
 | Stage 4 | Accountant Workspace: remove remaining legacy feel | Pending |
 | Stage 5 | Account, Settings, Session and Storage UX | Pending |
 | Stage 6 | Admin workspace and admin subviews | Pending |
@@ -316,16 +342,49 @@ Gate نهایی Stage 12:
 
 ### Stage 1 - Design system completion and enforcement
 
-- primitiveهای غایب را فقط در صورت مصرف واقعی بساز.
-- `AppPage`, `AppPageHeader`, `AppMasterDetail`, `AppToolbar`, `AppSearchField`, `AppFilterChips`, `AppNumberStepper`, `AppToast`, `AppBottomSheet`, `AppResponsiveDialog` را بر اساس نیاز stageهای بعدی تکمیل کن.
-- duplicated button/card/input/list/badge/tab CSS را با shared components جایگزین کن.
-- focus-visible، touch target، semantic tone و empty/loading/error را از primitiveها تأمین کن.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- primitiveهای غایب با API کوچک و قابل مصرف اضافه شدند: `AppPage`, `AppPageHeader`, `AppWorkspace`, `AppMasterDetail`, `AppToolbar`, `AppSearchField`, `AppFilterChips`, `AppNumberStepper`, `AppToast`, `AppBottomSheet`, `AppResponsiveDialog`.
+- export مرکزی `frontend/src/components/ui/index.ts` به‌روز شد.
+- CSS shared برای page/workspace/header/master-detail/toolbar/search/filter/number-stepper/toast/bottom-sheet/responsive-dialog به `frontend/src/assets/main.css` اضافه شد.
+- `sr-only`، focus-within/focus-visible، touch target و safe-area padding برای primitiveهای جدید تعریف شد.
+- `AppPrimitives.test.ts` برای primitiveهای جدید گسترش یافت.
+
+پذیرش:
+
+- primitiveها آماده مصرف در Stage 3 به بعد هستند.
+- duplicated visual system هنوز در featureها کامل حذف نشده؛ حذف واقعی در Stageهای سطحی بعدی انجام می‌شود.
+
+اعتبارسنجی Stage 1:
+
+- `npm run test:unit:run -- AppPrimitives.test.ts AppAuthenticatedShell.test.ts AccountHubView.test.ts AdminView.test.ts` پاس شد: `4` فایل، `29/29` تست.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
 
 ### Stage 2 - Global layout, safe-area and fixed UI hardening
 
-- bottom nav و تمام fixed bars را با tokenهای مرکزی همگام کن.
-- obstruction e2e را برای last control/list item اضافه یا تقویت کن.
-- market/customer/accountant/settings/admin/auth pages را از نظر bottom padding و overflow بررسی کن.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- viewport matrix موبایل از `360/390/430` به `360/375/390/414/430` گسترش یافت.
+- `frontend/e2e/non-messenger-viewport.spec.ts` با obstruction check سخت‌تر به‌روز شد.
+- تست جدید در هر route کلیدی صفحه و scroll containerها را تا bottom می‌برد، آخرین کنترل focusable/interactive visible را پیدا می‌کند، کنترل‌های داخل bottom chrome را exclude می‌کند و فاصله کنترل نهایی با bottom nav/fixed bar را اندازه می‌گیرد.
+- اگر آخرین کنترل با bottom nav/fixed bar overlap داشته باشد یا فاصله کمتر از `12px` باشد، تست fail می‌شود.
+- fixed bottom chrome شامل `.bottom-nav-bar`, `.market-action-bar` و fixed/sticky elementهای چسبیده به پایین viewport است.
+
+پذیرش:
+
+- gate دقیق برای مشکل hidden-under-bottom-nav قبل از refactorهای بزرگ customer/accountant فعال شد.
+- اصلاح visual/layout عمیق هر route در Stageهای بعدی انجام می‌شود، اما معیار fail شدن از همین Stage وجود دارد.
+
+اعتبارسنجی Stage 2:
+
+- اجرای اول e2e سخت‌تر چند obstruction واقعی را در Dashboard، Operations، Admin و Account آشکار کرد.
+- route scroll container عمومی، shared workspace padding، `AdminView.vue` و `AccountHubView.vue` به padding/scroll-padding token-based با clearance محافظه‌کارانه مجهز شدند.
+- `npx playwright test e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پس از اصلاحات پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 3 - Customer Workspace
 

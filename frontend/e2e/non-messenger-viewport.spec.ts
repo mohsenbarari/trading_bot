@@ -8,7 +8,9 @@ type ViewportCase = {
 
 const VIEWPORTS: ViewportCase[] = [
   { width: 360, height: 740, label: 'mobile-360' },
+  { width: 375, height: 812, label: 'mobile-375' },
   { width: 390, height: 844, label: 'mobile-390' },
+  { width: 414, height: 896, label: 'mobile-414' },
   { width: 430, height: 932, label: 'mobile-430' },
   { width: 768, height: 1024, label: 'tablet-768' },
   { width: 1024, height: 768, label: 'tablet-landscape-1024' },
@@ -209,6 +211,119 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
   }
 }
 
+async function expectLastControlClearOfBottomChrome(page: Page, label: string) {
+  const metrics = await page.evaluate(() => {
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled]):not([type="hidden"])',
+      'textarea:not([disabled])',
+      'select:not([disabled])',
+      '[role="button"]',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',')
+
+    const isVisible = (element: HTMLElement) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity || '1') > 0
+        && rect.width > 0
+        && rect.height > 0
+    }
+
+    const scrollables = Array.from(document.querySelectorAll<HTMLElement>('body, #app, main, section, div'))
+      .filter((element) => {
+        const style = window.getComputedStyle(element)
+        const overflowY = `${style.overflowY} ${style.overflow}`
+        return /(auto|scroll)/.test(overflowY) && element.scrollHeight > element.clientHeight + 2
+      })
+
+    for (const element of scrollables) {
+      element.scrollTop = element.scrollHeight
+    }
+    window.scrollTo(0, document.documentElement.scrollHeight)
+
+    const fixedBottomElements = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .filter((element) => {
+        if (!isVisible(element)) return false
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        const isBottomFixed = (style.position === 'fixed' || style.position === 'sticky')
+          && rect.bottom >= window.innerHeight - 2
+          && rect.top < window.innerHeight
+          && rect.height > 8
+        const isKnownBottomChrome = element.matches('.bottom-nav-bar, .market-action-bar')
+        return isBottomFixed || isKnownBottomChrome
+      })
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          className: element.className.toString(),
+          top: rect.top,
+          bottom: rect.bottom,
+          left: rect.left,
+          right: rect.right,
+          height: rect.height,
+        }
+      })
+      .sort((a, b) => a.top - b.top)
+
+    const bottomChromeTop = fixedBottomElements.length
+      ? Math.min(...fixedBottomElements.map(element => element.top))
+      : window.innerHeight
+
+    const focusables = Array.from(document.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter((element) => {
+        if (!isVisible(element)) return false
+        const isInsideBottomChrome = fixedBottomElements.some((chrome) => {
+          const rect = element.getBoundingClientRect()
+          const overlapsX = rect.right > chrome.left && rect.left < chrome.right
+          const overlapsY = rect.bottom > chrome.top && rect.top < chrome.bottom
+          return overlapsX && overlapsY
+        })
+        return !isInsideBottomChrome
+      })
+
+    const lastControl = focusables.at(-1) ?? null
+    if (!lastControl) {
+      return {
+        viewportHeight: window.innerHeight,
+        bottomChromeTop,
+        fixedBottomElements,
+        lastControl: null,
+        gap: null,
+      }
+    }
+
+    const rect = lastControl.getBoundingClientRect()
+
+    return {
+      viewportHeight: window.innerHeight,
+      bottomChromeTop,
+      fixedBottomElements,
+      lastControl: {
+        tagName: lastControl.tagName,
+        text: (lastControl.textContent || lastControl.getAttribute('aria-label') || '').trim().slice(0, 80),
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        height: rect.height,
+      },
+      gap: bottomChromeTop - rect.bottom,
+    }
+  })
+
+  if (!metrics.lastControl) return
+
+  expect(
+    metrics.gap,
+    `${label}: last control "${metrics.lastControl.text}" must stay at least 12px above bottom nav/fixed bar`,
+  ).toBeGreaterThanOrEqual(12)
+}
+
 test.describe('Non-messenger responsive viewport matrix', () => {
   test.beforeEach(async ({ page }) => {
     await primeAuthenticatedLayout(page)
@@ -223,6 +338,9 @@ test.describe('Non-messenger responsive viewport matrix', () => {
         await page.goto(route.path, { waitUntil: 'domcontentloaded' })
         await expect(page.getByText(route.expectedText).first()).toBeVisible({ timeout: 10_000 })
         await expectNoHorizontalOverflow(page, `${viewport.label}:${route.label}`)
+        if (viewport.width <= 430) {
+          await expectLastControlClearOfBottomChrome(page, `${viewport.label}:${route.label}`)
+        }
       }
     })
   }
