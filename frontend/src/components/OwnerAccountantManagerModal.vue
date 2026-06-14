@@ -776,7 +776,7 @@ onBeforeUnmount(() => {
                 </section>
 
                 <div v-if="manageableRelations.length" class="accountant-list">
-                  <article v-for="relation in manageableRelations" :key="relation.id" class="accountant-card">
+                  <article v-for="relation in manageableRelations" :key="relation.id" class="accountant-card profile-relation-card profile-relation-card--accountant">
                     <div class="accountant-card-head accountant-card-head--manage">
                       <div class="accountant-card-main">
                         <div class="accountant-card-title-row">
@@ -1583,6 +1583,14 @@ onBeforeUnmount(() => {
   padding: 0.7rem;
   gap: 0.6rem;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profile-relation-card.accountant-card {
+  border-radius: var(--ds-radius-md);
+  border-color: var(--ds-border-accent);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
+  padding: 0.85rem;
 }
 
 .accountant-card-head {

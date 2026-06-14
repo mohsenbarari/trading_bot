@@ -2354,6 +2354,7 @@ describe('PublicProfile.vue', () => {
 
     expect(wrapper.text()).toContain('نمایش پروفایل مالک اصلی')
     expect(wrapper.text()).toContain('حسابداران این مالک')
+    expect(wrapper.find('.public-accountant-card.profile-relation-card.highlighted').exists()).toBe(true)
     expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('acct44')
     expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('مسیر فعلی')
 
@@ -2462,6 +2463,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('مشتریان این مالک')
+    expect(wrapper.find('.public-customer-card.profile-relation-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('مشتری ویژه')
     expect(wrapper.text()).toContain('customer91')
     expect(wrapper.text()).toContain('سطح 1')

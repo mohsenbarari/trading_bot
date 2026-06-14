@@ -1572,7 +1572,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               <article
                 v-for="relation in accountantRelations"
                 :key="`${relation.accountant_user_id || 'relation'}-${relation.relation_display_name}`"
-                class="public-accountant-card"
+                class="public-accountant-card profile-relation-card profile-relation-card--accountant"
                 :class="{ highlighted: isHighlightedAccountant(relation) }"
               >
                 <div class="public-accountant-card-head">
@@ -1612,7 +1612,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               <article
                 v-for="relation in customerRelations"
                 :key="`${relation.customer_user_id || 'customer'}-${relation.management_name}`"
-                class="public-customer-card"
+                class="public-customer-card profile-relation-card profile-relation-card--customer"
               >
                 <div class="public-customer-card-head">
                   <div>
@@ -2693,25 +2693,24 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .public-customer-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ds-section-gap);
 }
 
+.profile-relation-card,
 .public-accountant-card,
 .public-customer-card {
   position: relative;
   overflow: hidden;
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(14, 165, 233, 0.18);
-  background:
-    radial-gradient(circle at top left, rgba(20, 184, 166, 0.12), transparent 42%),
-    linear-gradient(135deg, rgba(240, 249, 255, 0.98), rgba(236, 253, 245, 0.96));
-  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+  padding: 0.85rem;
+  border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-border-accent);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
 }
 
 .public-accountant-card.highlighted {
-  border-color: rgba(20, 184, 166, 0.44);
-  box-shadow: 0 0 0 1px rgba(20, 184, 166, 0.14), 0 16px 34px rgba(15, 118, 110, 0.16);
+  border-color: rgba(245, 158, 11, 0.34);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12), var(--ds-shadow-md);
 }
 
 .public-accountant-card-head,
@@ -2727,8 +2726,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .public-accountant-card-head h4,
 .public-customer-card-head h4 {
   margin: 0;
-  font-size: 1rem;
-  color: #0f766e;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-md);
+  font-weight: 850;
+  line-height: 1.5;
 }
 
 .public-customer-profile-link {
@@ -2740,16 +2741,17 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 .public-customer-link-title {
-  font-size: 1rem;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-md);
   font-weight: 800;
-  color: #0f766e;
+  line-height: 1.5;
 }
 
 .public-accountant-handle,
 .public-customer-handle {
   margin: 6px 0 0;
-  font-size: 0.9rem;
-  color: #0284c7;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
   direction: ltr;
   text-align: right;
 }
@@ -2758,8 +2760,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex-shrink: 0;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(20, 184, 166, 0.14);
-  color: #0f766e;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-primary-700);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -2768,8 +2770,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex-shrink: 0;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(14, 165, 233, 0.14);
-  color: #0369a1;
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-700);
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -2778,7 +2780,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   position: relative;
   z-index: 1;
   margin: 12px 0 0;
-  color: #115e59;
+  color: var(--ds-text-secondary);
   line-height: 1.7;
 }
 

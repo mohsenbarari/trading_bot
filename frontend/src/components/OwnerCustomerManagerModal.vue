@@ -1325,7 +1325,7 @@ onBeforeUnmount(() => {
                 <article
                   v-for="relation in manageableRelations"
                   :key="relation.id"
-                  class="customer-card"
+                  class="customer-card profile-relation-card profile-relation-card--customer"
                 >
                   <div class="customer-card-head customer-card-head--manage">
                     <div class="customer-card-main">
@@ -2044,6 +2044,14 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.6rem;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
+}
+
+.profile-relation-card.customer-card {
+  border-radius: var(--ds-radius-md);
+  border-color: var(--ds-border-accent);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
+  padding: 0.85rem;
 }
 
 .customer-card-head {
