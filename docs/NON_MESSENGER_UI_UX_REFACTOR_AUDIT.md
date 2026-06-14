@@ -219,6 +219,7 @@ Stage N4 - Account hub refinement:
 Stage N5 - Public profile/customer/accountant visual consolidation:
 - Align customer and accountant management details with the same accordion spacing, typography, and action hierarchy.
 - Preserve all current actions.
+- Status: completed. Public profile customer/accountant relation cards and owner customer/accountant management cards now share the token-based relation-card treatment for spacing, radius, border, shadow, and typography. Existing profile navigation and management actions were preserved.
 
 Stage N6 - Admin workspace consolidation:
 - Standardize admin section headers, empty states, and save feedback.
