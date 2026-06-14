@@ -214,6 +214,7 @@ Stage N3 - Operations hub refinement:
 Stage N4 - Account hub refinement:
 - Standardize settings, sessions, storage, notifications and profile links.
 - Keep accountant restrictions visible and consistent.
+- Status: completed. `/account` now uses project-standard accordion groups for profile/settings, security/data, and notifications. Accountant sessions remain unavailable, but the restriction is shown as an explicit empty state while storage and allowed settings remain accessible.
 
 Stage N5 - Public profile/customer/accountant visual consolidation:
 - Align customer and accountant management details with the same accordion spacing, typography, and action hierarchy.
