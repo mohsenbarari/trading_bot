@@ -297,13 +297,14 @@ function toggleNav() {
   left: 0;
   right: 0;
   z-index: 50;
-  padding: 0 0.75rem 0.75rem;
+  padding: 0 0.75rem calc(0.75rem + var(--ds-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
   pointer-events: none;
 }
 
 .bottom-nav-bar {
   max-width: var(--ds-page-max-width);
   margin: 0 auto;
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-around;
@@ -318,6 +319,8 @@ function toggleNav() {
 }
 
 .nav-item {
+  min-width: var(--ds-touch-target, 48px);
+  min-height: var(--ds-touch-target, 48px);
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -636,11 +636,31 @@ Tablet/Desktop:
 
 ### Stage 10 - Responsive And PWA Quality
 
+وضعیت: تکمیل شد در 2026-06-14.
+
 هدف:
 - viewport matrix اجرا و overflow/safe-area/fixed-bar/touch-target مشکلات رفع شود.
 
 پذیرش:
 - 360/390/430/768/1024/1440 smoke screenshots یا viewport checks پاس شود.
+
+خروجی انجام‌شده:
+- `main.css` به `box-sizing: border-box` سراسری، `body width: 100%` به‌جای `100vw`، header grid انعطاف‌پذیر، safe-area top و ellipsis امن برای header title مجهز شد.
+- shared page/workspace containers برای bottom navigation و safe-area پایین padding رزرو می‌کنند تا محتوای route-native زیر nav ثابت پنهان نشود.
+- `BottomNav.vue` safe-area پایین، ارتفاع پایدار و touch target حداقل 48px برای nav itemها دریافت کرد.
+- `MarketView.vue` در shell بازار width/max-width امن، overflow کنترل‌شده، safe-area header/action bar، scroll container با `min-height: 0` و touch targetهای 48px برای recent/replay و send actions دریافت کرد.
+- `frontend/e2e/non-messenger-viewport.spec.ts` اضافه شد تا routeهای اصلی non-messenger در viewportهای 360، 390، 430، 768، 1024 و 1440 از نظر overflow افقی و fixed-element bounds بررسی شوند.
+
+اعتبارسنجی:
+- `npx playwright test e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد؛ `6/6`.
+- مسیرهای بررسی‌شده در هر viewport: dashboard، operations، account، account/security، account/notifications، market و admin.
+- `npm run test:unit:run -- MarketView.test.ts BottomNav.test.ts` پاس شد؛ `30/30`.
+- `npm run build` پاس شد؛ production deploy طبق قانون این roadmap اجرا نشد.
+
+مسیر باقی‌مانده:
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی و handoff.
 
 ### Stage 11 - Accessibility And Interaction Quality
 

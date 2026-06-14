@@ -877,7 +877,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100dvh;
+  width: 100%;
+  max-width: 100%;
   background: var(--ds-bg-page);
+  overflow: hidden;
 }
 
 /* Header & Filters */
@@ -887,7 +890,7 @@ onUnmounted(() => {
   z-index: 20;
   display: grid;
   gap: 0.65rem;
-  padding: 0.85rem 1rem 0.65rem;
+  padding: calc(0.85rem + var(--ds-safe-area-top, 0px)) 1rem 0.65rem;
   background: var(--ds-bg-card);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -1048,8 +1051,10 @@ onUnmounted(() => {
 /* Main Content */
 .market-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 0.9rem 0 7rem;
+  padding: 0.9rem 0 calc(7rem + var(--ds-safe-area-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
 }
 
 .market-runtime-notice {
@@ -1131,7 +1136,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   z-index: 30;
-  padding: 0.75rem 1rem 2rem;
+  padding: 0.75rem 1rem calc(1rem + var(--ds-safe-area-bottom, 0px));
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -1157,6 +1162,8 @@ onUnmounted(() => {
   bottom: 0.58rem;
   width: 2.1rem;
   height: 2.1rem;
+  min-width: var(--ds-touch-target, 48px);
+  min-height: var(--ds-touch-target, 48px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1189,7 +1196,7 @@ onUnmounted(() => {
   position: absolute;
   left: 0;
   bottom: calc(100% + 0.65rem);
-  width: min(19rem, calc(100vw - 2rem));
+  width: min(19rem, calc(100dvw - 2rem));
   padding: 0.45rem;
   display: grid;
   gap: 0.3rem;
@@ -1326,6 +1333,8 @@ onUnmounted(() => {
   position: absolute;
   right: 0.5rem;
   bottom: 0.5rem;
+  min-width: var(--ds-touch-target, 48px);
+  min-height: var(--ds-touch-target, 48px);
   padding: 0.5rem;
   background: var(--ds-gradient-primary);
   color: white;
