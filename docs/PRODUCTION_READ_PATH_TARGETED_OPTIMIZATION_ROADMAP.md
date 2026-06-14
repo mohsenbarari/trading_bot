@@ -1,8 +1,8 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0, RPO1, and RPO2 completed; RPO3 has a second validation slice
-ready for deployment, and RPO4 started on 2026-06-14. This roadmap is for
-targeted read-path optimization, not for another broad benchmark loop.
+Status: RPO0, RPO1, RPO2, and RPO3 completed; RPO4 started on 2026-06-14.
+This roadmap is for targeted read-path optimization, not for another broad
+benchmark loop.
 
 Last updated: 2026-06-14
 
@@ -100,7 +100,7 @@ RPL6 endpoint p95 highlights:
 | `RPO0` | Complete | Add endpoint-family attribution/read-path reporting needed for this roadmap and freeze the benchmark contract. |
 | `RPO1` | Complete | Optimize `chat_conversations` read shape without changing Messenger behavior. |
 | `RPO2` | Complete | Optimize `direct_messages` and room message read pagination/projection. |
-| `RPO3` | In Progress | Optimize `offers_list` and `offers_my` read paths. |
+| `RPO3` | Complete | Optimize `offers_list` and `offers_my` read paths. |
 | `RPO4` | In Progress | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
 | `RPO5` | Pending | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
 | `RPO6` | Pending | Run a combined short benchmark across accepted RPO changes and decide whether L9 rerun is justified. |
@@ -480,9 +480,48 @@ Validation for slice 2:
 - `python3 -m py_compile api/routers/offers.py core/services/customer_relation_service.py tests/test_offers_router_reads.py tests/test_customer_relation_service.py`
   passed.
 
-Pending validation:
+Slice 2 deployment:
 
-- Deploy this slice to Iran and run the short offers-focused RPO3 benchmark.
+- Commit `e769c90` was deployed to foreign and Iran with
+  `make production-release`.
+- Release log: `tmp/e2e-logs/rpo3-rpo4-release.log`.
+- Foreign and Iran health checks passed.
+- Iran deployment used the incremental path:
+  - frontend build skipped;
+  - wheel cache rebuild skipped;
+  - Docker image build/save/upload/load skipped where checksums matched;
+  - only changed payload files were synced.
+
+RPO3 benchmark:
+
+- Artifact: `tmp/production-benchmark/20260614T060230Z/load-pool-matrix`.
+- Shape: `500 RPS / 2m`, `workers=24`, `DB_POOL_SIZE=10`,
+  `DB_MAX_OVERFLOW=4`, `LOAD_RUNNER_SHARDS=2`, no media, no mutations.
+- Overall:
+  - effective RPS: `493.39`;
+  - p95/p99: `589.67ms` / `1129.99ms`;
+  - dropped-iteration ratio: `1.025%`;
+  - request failure rate: `0%`;
+  - Nginx 5xx delta from first sampler sample: `0`;
+  - max PostgreSQL connections: `252`;
+  - sampler status: passed.
+- Iran was restored to `API_WORKERS=8`, `DB_POOL_SIZE=8`,
+  `DB_MAX_OVERFLOW=6`.
+- Endpoint comparison versus RPL6:
+  - `offers_list` p95/p99: `704.54ms` / `1693.59ms` ->
+    `614.90ms` / `1494.70ms`;
+  - `offers_my` p95/p99: `693.54ms` / `1755.50ms` ->
+    `617.81ms` / `1471.62ms`.
+
+RPO3 final decision:
+
+- RPO3 is closed with the accepted low-risk read-path reductions.
+- The short run improved offers endpoints versus RPL6 and stayed clean on
+  request failures and Nginx 5xx, but it did not beat the accepted L7 offers
+  endpoints or the best RPO1 short-run variance.
+- Do not expand offers reads into broader active-offer caching or market-state
+  behavior before release; the correctness risk is not justified by this
+  evidence.
 
 ## Stage RPO4 - Relations and Public User Reads
 
@@ -549,8 +588,13 @@ Validation for slice 1:
 
 Pending validation:
 
-- Deploy after the RPO3 benchmark and include relation/profile endpoint metrics
-  in the next short RPO run.
+- The RPO3 benchmark also exercised RPO4 slice 1:
+  - `customer_relations` p95/p99 improved versus RPL6 from
+    `699.44ms` / `1693.16ms` to `599.66ms` / `1364.95ms`;
+  - `users_public_search` p95/p99 improved versus RPL6 from
+    `665.38ms` / `1763.55ms` to `607.07ms` / `1138.29ms`.
+- RPO4 remains open until relation/profile query-plan evidence and any next
+  low-risk slice are reviewed.
 
 ## Stage RPO5 - Notification and Counter Reads
 
