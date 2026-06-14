@@ -431,15 +431,24 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H3 - Operations Workspace Index
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - تبدیل `/operations` از hub ساده به workspace index.
 - نمایش role-aware entry cards برای customers/accountants/admin/notifications.
 - empty states دقیق برای customer/accountant/admin roles.
+- خروجی این stage:
+  - `frontend/src/views/OperationsView.vue` از `WorkspaceShell`, `WorkspaceSection`, `WorkspaceActionTile`, `WorkspaceNotice`, و `WorkspaceStatTile` استفاده می‌کند.
+  - کارت‌های مشتری/حسابدار به routeهای adapter جدید H2 (`operations-customers`, `operations-accountants`) هدایت می‌شوند.
+  - کارت‌های مدیریتی به routeهای adapter جدید H2 (`admin-invitations`, `admin-users`, `admin-commodities`, `admin-messages`, `admin-system`) هدایت می‌شوند.
+  - خلاصه وضعیت دسترسی نقش فعلی در aside اضافه شد.
+  - ساختار accordion قدیمی فقط در این صفحه حذف شد؛ مسیرها و قابلیت‌های فعلی حفظ شدند.
 
 پذیرش:
 - تمام actions فعلی Operations مقصد دارند.
 - هیچ action برای نقش غیرمجاز فعال نمی‌شود.
 - mobile و desktop layout پایدار است.
+- production deploy برای H3 عمداً defer شد تا زنجیره H2-H3-H4 به شکل کنترل‌شده‌تر منتشر شود.
 
 ### Stage H4 - Customer Workspace
 
