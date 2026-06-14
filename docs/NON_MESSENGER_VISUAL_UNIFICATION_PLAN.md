@@ -693,6 +693,8 @@ Tablet/Desktop:
 
 ### Stage 12 - Testing And Visual Verification
 
+وضعیت: تکمیل شد در 2026-06-14.
+
 هدف:
 - اجرای checks موجود بدون اختراع script جدید.
 
@@ -703,6 +705,21 @@ Tablet/Desktop:
 - `npm run build`
 - e2e smoke برای customer/accountant/admin/settings/notifications/dashboard/market و messenger shell فقط mount
 - viewport checks در اندازه‌های مشخص
+
+خروجی انجام‌شده:
+- `frontend/e2e/non-messenger-viewport.spec.ts` گسترش یافت تا علاوه بر dashboard، operations، account، security، notifications، market و admin، مسیرهای `/operations/customers` و `/operations/accountants` را هم در viewport matrix بررسی کند.
+- mockهای حداقلی `/api/customers/owner-relations` و `/api/accountants/owner-relations` به viewport smoke اضافه شد تا تست فقط mount/layout را بسنجد و به دیتای backend وابسته نشود.
+- Messenger در e2e layout matrix وارد نشد؛ فقط unit smoke موجود `MessengerView.test.ts` برای mount/route shell طبق guardrail این roadmap استفاده شد.
+
+اعتبارسنجی نهایی Stage 12:
+- Focused unit gate پاس شد: `npm run test:unit:run -- AppPrimitives.test.ts WorkspacePrimitives.test.ts OperationsView.test.ts CustomerWorkspaceView.test.ts AccountantWorkspaceView.test.ts ProfileView.test.ts PublicProfileView.test.ts PublicProfile.test.ts AdminView.test.ts AdminPanel.test.ts TradingSettings.test.ts AccountHubView.test.ts SettingsView.test.ts NotificationsView.test.ts DashboardView.test.ts MarketView.test.ts BottomNav.test.ts AdminMessagesView.test.ts router/index.test.ts MessengerView.test.ts AppAuthenticatedShell.test.ts` با `21/21` فایل و `183/183` تست.
+- `npm run build` پاس شد.
+- `npx playwright test e2e/non-messenger-viewport.spec.ts e2e/auth.spec.ts --project=chromium --reporter=line` پاس شد؛ `9/9`.
+- `git diff --check` پاس شد.
+- production deploy طبق قانون این roadmap اجرا نشد.
+
+مسیر باقی‌مانده:
+- Stage 13: گزارش نهایی فارسی و handoff.
 
 ### Stage 13 - Final Persian Report
 

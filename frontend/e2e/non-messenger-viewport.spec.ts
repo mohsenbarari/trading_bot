@@ -18,6 +18,8 @@ const VIEWPORTS: ViewportCase[] = [
 const ROUTES = [
   { path: '/', label: 'dashboard', expectedText: 'ورود به بازار' },
   { path: '/operations', label: 'operations', expectedText: 'عملیات' },
+  { path: '/operations/customers', label: 'customers', expectedText: 'مشتریان' },
+  { path: '/operations/accountants', label: 'accountants', expectedText: 'حسابداران' },
   { path: '/account', label: 'account', expectedText: 'حساب' },
   { path: '/account/security', label: 'security', expectedText: 'امنیت حساب' },
   { path: '/account/notifications', label: 'notifications', expectedText: 'مرکز اعلان‌ها' },
@@ -152,6 +154,12 @@ async function installApiMocks(page: Page) {
       return json(null)
     }
     if (path === '/api/invitations/pending') {
+      return json([])
+    }
+    if (path === '/api/customers/owner-relations') {
+      return json([])
+    }
+    if (path === '/api/accountants/owner-relations') {
       return json([])
     }
 
