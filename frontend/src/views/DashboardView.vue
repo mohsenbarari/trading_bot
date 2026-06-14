@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, Store, LogOut, AlertTriangle, Ban, Users } from 'lucide-vue-next'
+import { Bell, BriefcaseBusiness, ChevronLeft, Store, LogOut, AlertTriangle, Ban, UserRound, Users } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
@@ -318,6 +318,14 @@ function openMarket() {
   router.push('/market')
 }
 
+function openOperations() {
+  router.push('/operations')
+}
+
+function openAccountHub() {
+  router.push('/account')
+}
+
 onMounted(fetchUser)
 
 onBeforeUnmount(() => {
@@ -413,6 +421,30 @@ onBeforeUnmount(() => {
           </div>
           <div class="hero-arrow">←</div>
         </button>
+
+        <section class="dashboard-shortcuts" aria-label="میانبرهای اصلی">
+          <button type="button" class="dashboard-shortcut-card" @click="openOperations">
+            <span class="shortcut-icon">
+              <BriefcaseBusiness :size="20" />
+            </span>
+            <span class="shortcut-copy">
+              <strong>عملیات</strong>
+              <small>مشتریان، حسابداران و مدیریت</small>
+            </span>
+            <ChevronLeft :size="18" class="shortcut-chevron" />
+          </button>
+
+          <button type="button" class="dashboard-shortcut-card" @click="openAccountHub">
+            <span class="shortcut-icon">
+              <UserRound :size="20" />
+            </span>
+            <span class="shortcut-copy">
+              <strong>حساب</strong>
+              <small>پروفایل، تنظیمات و اعلان‌ها</small>
+            </span>
+            <ChevronLeft :size="18" class="shortcut-chevron" />
+          </button>
+        </section>
 
         <button
           v-if="canUseTestAccountSwitcher"
@@ -707,6 +739,71 @@ onBeforeUnmount(() => {
   gap: 1.25rem;
 }
 
+.dashboard-shortcuts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.dashboard-shortcut-card {
+  min-width: 0;
+  min-height: 86px;
+  display: grid;
+  grid-template-columns: 38px 1fr 18px;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-border-accent);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-sm);
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.dashboard-shortcut-card:active {
+  transform: scale(0.985);
+  background: var(--ds-primary-50);
+}
+
+.shortcut-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--ds-radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-700);
+}
+
+.shortcut-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.shortcut-copy strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-md);
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.shortcut-copy small {
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
+  line-height: 1.55;
+}
+
+.shortcut-chevron {
+  color: var(--ds-text-placeholder);
+}
+
 .switcher-entry-btn {
   display: flex;
   align-items: center;
@@ -757,6 +854,12 @@ onBeforeUnmount(() => {
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-sm);
   line-height: 1.5;
+}
+
+@media (max-width: 380px) {
+  .dashboard-shortcuts {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ═══ Today Trades ═══ */
