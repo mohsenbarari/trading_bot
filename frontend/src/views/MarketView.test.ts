@@ -290,6 +290,27 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.clearBackStackMock).toHaveBeenCalled()
   })
 
+  it('supports keyboard navigation across market filter tabs', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-market-filter="all"]').attributes('aria-selected')).toBe('true')
+
+    await wrapper.find('[data-market-filter="all"]').trigger('keydown', { key: 'ArrowLeft' })
+    await nextTick()
+    expect(wrapper.find('[data-market-filter="buy"]').attributes('aria-selected')).toBe('true')
+
+    await wrapper.find('[data-market-filter="buy"]').trigger('keydown', { key: 'End' })
+    await nextTick()
+    expect(wrapper.find('[data-market-filter="my"]').attributes('aria-selected')).toBe('true')
+
+    await wrapper.find('[data-market-filter="my"]').trigger('keydown', { key: 'Home' })
+    await nextTick()
+    expect(wrapper.find('[data-market-filter="all"]').attributes('aria-selected')).toBe('true')
+
+    wrapper.unmount()
+  })
+
   it('parses and submits a text offer from the action bar', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()

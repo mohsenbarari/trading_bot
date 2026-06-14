@@ -397,13 +397,18 @@ onBeforeUnmount(() => {
       <!-- ═══ Top Bar ═══ -->
       <header class="top-bar">
         <!-- Notifications on the far Right (in RTL) -->
-        <button class="ds-icon-btn notif-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
+        <button type="button" class="ds-icon-btn notif-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
           <Bell :size="22" />
           <div v-if="notificationStore.appNotifications.length > 0" class="notif-dot"></div>
         </button>
 
         <!-- User Info in the Center -->
-        <div class="user-info-center" @click="router.push('/profile')">
+        <button
+          type="button"
+          class="user-info-center"
+          @click="router.push('/profile')"
+          :aria-label="`مشاهده پروفایل ${user.full_name || user.account_name}`"
+        >
           <div class="avatar">
             <span>{{ userInitial }}</span>
           </div>
@@ -411,10 +416,10 @@ onBeforeUnmount(() => {
             <span class="greeting">{{ greeting }} 👋</span>
             <span class="user-name">{{ user.full_name || user.account_name }}</span>
           </div>
-        </div>
+        </button>
 
         <!-- Logout on the far Left (in RTL) -->
-        <button v-if="!isAccountant" class="ds-icon-btn logout-btn" @click="logout" aria-label="خروج">
+        <button v-if="!isAccountant" type="button" class="ds-icon-btn logout-btn" @click="logout" aria-label="خروج">
           <LogOut :size="20" />
         </button>
       </header>
@@ -460,6 +465,7 @@ onBeforeUnmount(() => {
         <!-- Market Entry — Hero Button -->
         <button
           v-if="!isAccountant"
+          type="button"
           class="hero-btn"
           :class="{ 'hero-btn--open': isMarketOpen, 'hero-btn--closed': isMarketClosed }"
           :disabled="isInactiveAccount"
@@ -587,7 +593,7 @@ onBeforeUnmount(() => {
           <h3>سوییچ موقت حساب</h3>
           <p>حساب فعلی: <strong>{{ currentSwitchUserLabel }}</strong></p>
         </div>
-        <button type="button" class="switcher-close-btn" @click="closeAccountSwitchModal">×</button>
+        <button type="button" class="switcher-close-btn" aria-label="بستن سوییچ حساب" @click="closeAccountSwitchModal">×</button>
       </div>
 
       <div class="switcher-search-box">
@@ -670,8 +676,28 @@ onBeforeUnmount(() => {
   flex-direction: row;
   align-items: center;
   gap: 0.875rem;
+  min-width: 0;
+  padding: 0.25rem;
+  border: 0;
+  border-radius: var(--ds-radius-lg);
+  background: transparent;
+  font: inherit;
   cursor: pointer;
+  text-align: right;
   -webkit-tap-highlight-color: transparent;
+}
+
+.user-info-center:focus-visible,
+.notif-btn:focus-visible,
+.logout-btn:focus-visible,
+.hero-btn:focus-visible,
+.dashboard-shortcut-card:focus-visible,
+.switcher-entry-btn:focus-visible,
+.today-trades-refresh:focus-visible,
+.switcher-close-btn:focus-visible,
+.switcher-user-row:focus-visible {
+  outline: 3px solid rgba(245, 158, 11, 0.34);
+  outline-offset: 3px;
 }
 
 .avatar {

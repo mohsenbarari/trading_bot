@@ -566,12 +566,22 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H9 - Responsive, Accessibility, Regression
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - desktop/tablet/mobile QA.
 - keyboard navigation و focus-visible.
 - ARIA برای accordions/tabs/menus.
 - no overlap/no clipped text/no tiny tap targets.
 - focused unit/e2e regression.
+- خروجی این stage:
+  - کنترل profile در `DashboardView.vue` از `div` کلیک‌پذیر به `button` واقعی با `aria-label` تبدیل شد تا keyboard/focus behavior استاندارد شود.
+  - دکمه‌های top bar، hero، و modal switcher در dashboard `type`/`aria-label` کامل‌تر و focus-visible محلی گرفتند.
+  - tabهای فیلتر بازار در `MarketView.vue` علاوه بر `role="tab"`، navigation با `ArrowLeft` / `ArrowRight` / `ArrowUp` / `ArrowDown` / `Home` / `End` گرفتند.
+  - کنترل‌های جدید بازار و recent-offers focus-visible محلی گرفتند و tap targetهای فیلتر بازار حفظ شدند.
+  - focused regression شامل Dashboard, Market, Account, Settings, Notifications, Operations, Customer/Accountant/Admin workspaces, PublicProfileView, route index, BottomNav و یک smoke برای Messenger shell اجرا شد.
+  - e2e smoke کوتاه `auth.spec.ts` روی Chromium اجرا شد تا protected-route redirect، dev-login dashboard، و deep-linkهای profile/settings با session موجود پوشش داده شود.
+  - production deploy برای H9 هم defer شد؛ deploy نهایی در H10 انجام می‌شود.
 
 پذیرش:
 - تمام routeهای non-messenger در mobile و desktop inspect شوند.

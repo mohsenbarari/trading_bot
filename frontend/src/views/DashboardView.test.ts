@@ -146,6 +146,8 @@ describe('DashboardView.vue', () => {
     expect(wrapper.text()).toContain('صبح بخیر')
     expect(wrapper.text()).toContain('رضا محمدی')
     expect(wrapper.get('.avatar').text()).toContain('ر')
+    expect(wrapper.get('.user-info-center').element.tagName).toBe('BUTTON')
+    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe('مشاهده پروفایل رضا محمدی')
     expect(wrapper.find('.notif-dot').exists()).toBe(true)
     expect(wrapper.get('.today-trades-card').text()).toContain('طرف مقابل معامله')
     expect(wrapper.get('.today-trades-card').text()).toContain('حسین رضایی')

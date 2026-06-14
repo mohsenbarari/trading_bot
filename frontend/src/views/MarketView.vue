@@ -179,6 +179,35 @@ const shouldCollapseAdminMarketMessage = computed(() => (
   && !adminMarketMessageExpanded.value
 ))
 
+function activateMarketFilter(tab: MarketFilterType, focusTab = false) {
+  filterType.value = tab
+  if (!focusTab) return
+  void nextTick(() => {
+    document.querySelector<HTMLButtonElement>(`[data-market-filter="${tab}"]`)?.focus()
+  })
+}
+
+function handleMarketFilterKeydown(event: KeyboardEvent, tab: MarketFilterType) {
+  const options = visibleTabs.value
+  const currentIndex = options.indexOf(tab)
+  if (currentIndex === -1) return
+
+  let nextTab: MarketFilterType | null = null
+  if (event.key === 'Home') {
+    nextTab = options[0] ?? null
+  } else if (event.key === 'End') {
+    nextTab = options[options.length - 1] ?? null
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+    nextTab = options[(currentIndex + 1) % options.length] ?? null
+  } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+    nextTab = options[(currentIndex - 1 + options.length) % options.length] ?? null
+  }
+
+  if (!nextTab) return
+  event.preventDefault()
+  activateMarketFilter(nextTab, true)
+}
+
 // Computed
 const randomPlaceholder = computed(() => {
   if (!commodities.value || commodities.value.length === 0) {
@@ -679,12 +708,14 @@ onUnmounted(() => {
           <button 
             v-for="option in visibleFilterOptions"
             :key="option.key"
-            @click="filterType = option.key"
+            @click="activateMarketFilter(option.key)"
+            @keydown="handleMarketFilterKeydown($event, option.key)"
             class="tab-btn"
             :class="{ active: filterType === option.key }"
             role="tab"
             :aria-selected="filterType === option.key"
             type="button"
+            :data-market-filter="option.key"
           >
             <span>{{ option.label }}</span>
             <small>{{ option.description }}</small>
@@ -993,6 +1024,16 @@ onUnmounted(() => {
 
 .tab-btn.active small {
   color: var(--ds-primary-700);
+}
+
+.tab-btn:focus-visible,
+.recent-offers-toggle:focus-visible,
+.text-offer-input:focus-visible,
+.send-btn:focus-visible,
+.recent-offer-item:focus-visible,
+.admin-market-message-expand:focus-visible {
+  outline: 3px solid rgba(245, 158, 11, 0.34);
+  outline-offset: 3px;
 }
 
 .sort-toggle-btn {
