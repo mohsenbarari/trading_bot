@@ -1,7 +1,7 @@
 # نقشه بازطراحی واقعی UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 2 تکمیل شد؛ اجرای Stage 3 به بعد هنوز شروع نشده است.
+وضعیت: Stage 3 تکمیل شد؛ اجرای Stage 4 به بعد هنوز شروع نشده است.
 قاعده مهم: production deploy در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. هدف محصول
@@ -356,8 +356,7 @@ Tablet/Desktop:
 - `npm run test:unit:run -- AppPrimitives.test.ts OperationsView.test.ts` پاس شد: `2` فایل، `8/8` تست.
 - `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
 
-مراحل باقی‌مانده بعد از Stage 2:
-- Stage 3: بازطراحی واقعی Customer Workspace.
+مراحل باقی‌مانده بعد از Stage 3:
 - Stage 4: بازطراحی واقعی Accountant Workspace.
 - Stage 5: پاکسازی Profile و Public Profile.
 - Stage 6: بازطراحی Admin Workspace.
@@ -416,6 +415,32 @@ Tablet/Desktop:
 پذیرش:
 - تمام add/edit/pending/copy/cancel/trades/stats/session/unlink flows حفظ شوند.
 - nested accordion primary navigation حذف شود.
+
+خروجی انجام‌شده:
+- `CustomerWorkspaceView.vue` از placeholder Stage 2 به workspace واقعی‌تر تبدیل شد: summary پنج‌تایی، جستجو، فیلتر segmented، گروه‌بندی دعوت‌های در انتظار و مشتریان قابل مدیریت، و highlight مشتری انتخاب‌شده.
+- مسیر detail `/operations/customers/:relationId` اکنون یک پرونده tabدار دارد: مشخصات، محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس.
+- tabهای معاملات، آمار و نشست‌ها به APIهای route-native وصل شدند و فقط هنگام نیاز load می‌شوند تا ورود اولیه به workspace سنگین نشود.
+- ویرایش سطح/محدودیت‌ها، مدیریت نشست‌ها و اقدامات حساس همچنان از compatibility/full-management panel باز می‌شوند تا confirmationها، permissionها و رفتارهای قبلی add/edit/pending/copy/cancel/trades/stats/session/unlink حفظ شوند.
+- navigation قبلی و deep-link queryها حفظ شدند؛ تغییر tab نیز از route query استفاده می‌کند.
+- تست `CustomerWorkspaceView.test.ts` با رفتار جدید آپدیت شد و سناریوی load شدن آمار route-native اضافه شد.
+
+اعتبارسنجی Stage 3:
+- `npm run test:unit:run -- CustomerWorkspaceView.test.ts` پاس شد: `1` فایل، `5/5` تست.
+- `npm run test:unit:run -- CustomerWorkspaceView.test.ts OwnerCustomerManagerModal.test.ts useOwnerRelations.test.ts` پاس شد: `3` فایل، `26/26` تست.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
+- production deploy طبق قاعده این roadmap اجرا نشد.
+
+مراحل باقی‌مانده بعد از Stage 3:
+- Stage 4: بازطراحی واقعی Accountant Workspace.
+- Stage 5: پاکسازی Profile و Public Profile.
+- Stage 6: بازطراحی Admin Workspace.
+- Stage 7: یکپارچه‌سازی small surfaces و micro UI.
+- Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
+- Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی.
 
 ### Stage 4 - Accountant Workspace Redesign
 

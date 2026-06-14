@@ -6,6 +6,9 @@ import CustomerWorkspaceView from './CustomerWorkspaceView.vue'
 const customerWorkspaceMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   fetchOwnerCustomerRelationsMock: vi.fn(),
+  fetchOwnerCustomerSessionsMock: vi.fn(),
+  fetchOwnerCustomerTradeStatsMock: vi.fn(),
+  fetchOwnerCustomerTradesMock: vi.fn(),
   routeState: {
     params: {} as Record<string, unknown>,
     query: {} as Record<string, unknown>,
@@ -24,6 +27,9 @@ vi.mock('../composables/useOwnerCustomers', async (importOriginal) => {
   return {
     ...actual,
     fetchOwnerCustomerRelations: customerWorkspaceMocks.fetchOwnerCustomerRelationsMock,
+    fetchOwnerCustomerSessions: customerWorkspaceMocks.fetchOwnerCustomerSessionsMock,
+    fetchOwnerCustomerTradeStats: customerWorkspaceMocks.fetchOwnerCustomerTradeStatsMock,
+    fetchOwnerCustomerTrades: customerWorkspaceMocks.fetchOwnerCustomerTradesMock,
   }
 })
 
@@ -49,6 +55,9 @@ describe('CustomerWorkspaceView.vue', () => {
   beforeEach(() => {
     customerWorkspaceMocks.routerPushMock.mockReset()
     customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockReset()
+    customerWorkspaceMocks.fetchOwnerCustomerSessionsMock.mockReset()
+    customerWorkspaceMocks.fetchOwnerCustomerTradeStatsMock.mockReset()
+    customerWorkspaceMocks.fetchOwnerCustomerTradesMock.mockReset()
     customerWorkspaceMocks.fetchOwnerCustomerRelationsMock.mockResolvedValue([
       {
         id: 11,
@@ -95,6 +104,44 @@ describe('CustomerWorkspaceView.vue', () => {
         created_at: '2026-01-02T10:00:00Z',
       },
     ])
+    customerWorkspaceMocks.fetchOwnerCustomerSessionsMock.mockResolvedValue([
+      {
+        id: 'session-1',
+        device_name: 'Chrome',
+        device_ip: null,
+        platform: 'web',
+        home_server: 'iran',
+        is_primary: true,
+        is_active: true,
+        created_at: '2026-01-01T10:00:00Z',
+        last_active_at: '2026-01-02T10:00:00Z',
+      },
+    ])
+    customerWorkspaceMocks.fetchOwnerCustomerTradeStatsMock.mockResolvedValue({
+      relation_id: 11,
+      customer_user_id: 22,
+      period_days: 7,
+      from_date: '2026-01-01T00:00:00Z',
+      to_date: '2026-01-08T00:00:00Z',
+      trade_count: 3,
+      total_quantity: 23,
+      commission_profit_toman: 18_400_000,
+      commodities: [{ commodity_id: 1, commodity_name: 'ربع', total_quantity: 23 }],
+      profit_calculation_note: 'بر اساس نرخ تاریخی هر معامله',
+    })
+    customerWorkspaceMocks.fetchOwnerCustomerTradesMock.mockResolvedValue([
+      {
+        id: 1,
+        trade_number: 1001,
+        trade_type: 'خرید',
+        commodity_name: 'ربع',
+        quantity: 23,
+        price: 50800,
+        status: 'completed',
+        counterparty_name: 'محسن',
+        created_at: '2026-01-02T10:00:00Z',
+      },
+    ])
     customerWorkspaceMocks.routeState.params = {}
     customerWorkspaceMocks.routeState.query = {}
   })
@@ -113,7 +160,7 @@ describe('CustomerWorkspaceView.vue', () => {
 
   it('opens the compatibility manager for create actions and forwards route state', async () => {
     customerWorkspaceMocks.routeState.params = { relationId: '11' }
-    customerWorkspaceMocks.routeState.query = { section: 'stats' }
+    customerWorkspaceMocks.routeState.query = { section: 'stats', tab: 'limits' }
 
     const wrapper = mount(CustomerWorkspaceView)
     await flushPromises()
@@ -126,13 +173,13 @@ describe('CustomerWorkspaceView.vue', () => {
 
   it('routes relation selection, manager events, detail back, and operations actions explicitly', async () => {
     customerWorkspaceMocks.routeState.params = { relationId: '11' }
-    customerWorkspaceMocks.routeState.query = { section: 'stats' }
+    customerWorkspaceMocks.routeState.query = { section: 'stats', tab: 'limits' }
 
     const wrapper = mount(CustomerWorkspaceView)
     await flushPromises()
 
     await wrapper.get('.workspace-relation-list .ui-list-item').trigger('click')
-    await wrapper.get('.workspace-detail-card .ui-button').trigger('click')
+    await wrapper.get('.customer-detail-list .ui-button').trigger('click')
 
     await wrapper.get('.stub-open-relation').trigger('click')
     await wrapper.get('.stub-back-list').trigger('click')
@@ -142,16 +189,16 @@ describe('CustomerWorkspaceView.vue', () => {
     expect(customerWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(1, {
       name: 'operations-customers-detail',
       params: { relationId: '12' },
-      query: { section: 'stats' },
+      query: { section: 'stats', tab: 'limits' },
     })
     expect(customerWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(2, {
       name: 'operations-customers-detail',
       params: { relationId: '42' },
-      query: { section: 'stats' },
+      query: { section: 'stats', tab: 'limits' },
     })
     expect(customerWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(3, {
       name: 'operations-customers',
-      query: { section: 'stats' },
+      query: { section: 'stats', tab: 'limits' },
     })
     expect(customerWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(4, {
       name: 'operations',
@@ -168,5 +215,19 @@ describe('CustomerWorkspaceView.vue', () => {
     expect(customerWorkspaceMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'operations',
     })
+  })
+
+  it('loads route-native customer stats for the detail stats tab', async () => {
+    customerWorkspaceMocks.routeState.params = { relationId: '11' }
+    customerWorkspaceMocks.routeState.query = { tab: 'stats' }
+
+    const wrapper = mount(CustomerWorkspaceView)
+    await flushPromises()
+    await flushPromises()
+
+    expect(customerWorkspaceMocks.fetchOwnerCustomerTradeStatsMock).toHaveBeenCalledWith(11, 7)
+    expect(wrapper.text()).toContain('تعداد معاملات')
+    expect(wrapper.text()).toContain('۱۸٫۴ میلیون تومان')
+    expect(wrapper.text()).toContain('ربع')
   })
 })
