@@ -121,4 +121,10 @@ Not blockers for the first release:
 
 ## Production Deploy
 
-H10 production deploy should be recorded in `docs/NON_MESSENGER_HEAVY_UI_UX_REFACTOR_PLAN.md` and `.github/copilot-instructions.md` after the final `make production-release` run completes.
+H10 production deploy completed on `2026-06-14 13:29 UTC` with `make production-release`.
+
+- Foreign deploy completed and core services were healthy.
+- Iran online deploy completed. Cached wheelhouse/image signatures were valid, so the heavy wheel rebuild, image build/save, image bundle upload, and `docker load` paths were skipped.
+- Iran Nginx config validation passed and the existing SSL certificate was deployed by certbot.
+- Iran shared-data inspection returned `classification=existing` with `signal_total=260`; `skip` was selected so no reset or seed modified existing shared data.
+- Final post-deploy health checks passed.

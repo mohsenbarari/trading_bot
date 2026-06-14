@@ -590,7 +590,7 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H10 - Final Handoff And Production Readiness
 
-وضعیت: in progress on 2026-06-14; handoff and validation completed, production deploy pending.
+وضعیت: completed on 2026-06-14; handoff, validation, and production deploy completed.
 
 تغییرات:
 - گزارش نهایی old/new مسیرها.
@@ -601,7 +601,12 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
   - سند `docs/NON_MESSENGER_HEAVY_UI_UX_REFACTOR_HANDOFF.md` ساخته شد و routeهای جدید، compatibilityهای باقی‌مانده، فایل‌های درگیر، تست‌ها، debtها و مسیر حذف compatibility بعد release را ثبت کرد.
   - focused unit regression برای سطوح non-messenger و messenger shell smoke پاس شد: `13` فایل تست، `107/107` تست.
   - production frontend build پاس شد؛ warningهای chunk-size موجود همچنان debt جدا از H refactor هستند.
-  - production deploy بعد از commit/push این سند و با worktree تمیز اجرا می‌شود.
+  - production deploy با `make production-release` پس از commit/push سند و با worktree تمیز اجرا شد.
+  - foreign deploy کامل شد و core services سالم بالا آمدند.
+  - Iran deploy در حالت online کامل شد؛ wheelhouse، image build/save، image upload و `docker load` به دلیل signature/checksum معتبر skip شدند.
+  - Iran Nginx config تست شد، SSL موجود معتبر بود و certbot deploy certificate را انجام داد.
+  - Iran shared-data classification برابر `existing` با `signal_total=260` بود و action امن `skip` انتخاب شد تا دیتای موجود reset/seed نشود.
+  - post-deploy health checks در `2026-06-14 13:29 UTC` پاس شد.
 
 پذیرش:
 - مسیر حذف compatibility wrappers بعد release روشن باشد.
