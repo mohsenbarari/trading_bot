@@ -41,7 +41,7 @@ describe('AccountHubView.vue', () => {
     accountHubMocks.currentUserSummary.value = null
   })
 
-  it('renders account accordions and routes normal users to profile, sessions, storage and notifications', async () => {
+  it('renders account sections and routes normal users to profile, sessions, storage and notifications', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 1,
       role: 'عادی',
@@ -53,9 +53,8 @@ describe('AccountHubView.vue', () => {
     const wrapper = await mountView()
 
     expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.findAll('.account-accordion')).toHaveLength(3)
-    expect(wrapper.find('#account-profile-header').attributes('aria-expanded')).toBe('true')
-    expect(wrapper.find('#account-profile-panel').attributes('role')).toBe('region')
+    expect(wrapper.findAll('.account-section-card')).toHaveLength(4)
+    expect(wrapper.text()).toContain('مرکز حساب کاربری')
     expect(wrapper.text()).toContain('محمد')
     expect(wrapper.text()).toContain('نشست‌های فعال')
 
@@ -63,15 +62,13 @@ describe('AccountHubView.vue', () => {
     await findAction(wrapper, 'نشست‌های فعال')!.trigger('click')
     await findAction(wrapper, 'حافظه و داده‌ها')!.trigger('click')
     await findAction(wrapper, 'اعلان‌ها')!.trigger('click')
+    await wrapper.get('.account-back-button').trigger('click')
 
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'profile' })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, {
-      name: 'account-security',
-    })
-    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, {
-      name: 'account-storage',
-    })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'account-security' })
+    expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(3, { name: 'account-storage' })
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(4, { name: 'account-notifications' })
+    expect(accountHubMocks.routerBackMock).toHaveBeenCalledTimes(1)
   })
 
   it('keeps accountant session restrictions visible without exposing the sessions action', async () => {
@@ -84,14 +81,13 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(wrapper.find('#account-security-header').attributes('aria-controls')).toBe('account-security-panel')
     expect(wrapper.text()).toContain('مدیریت نشست برای حسابدار فعال نیست')
     expect(findAction(wrapper, 'نشست‌های فعال')).toBeUndefined()
     expect(findAction(wrapper, 'حافظه و داده‌ها')?.exists()).toBe(true)
-    expect(wrapper.text()).toContain('تنظیمات مجاز حساب حسابدار')
+    expect(wrapper.text()).toContain('دسترسی‌های مجاز حسابدار و حافظه دستگاه')
   })
 
-  it('collapses account sections with the project accordion contract', async () => {
+  it('renders metrics and guidance instead of the old accordion layout', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 3,
       role: 'عادی',
@@ -101,11 +97,8 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
-    const header = wrapper.findAll('.account-accordion-header')[0]!
-    expect(header.attributes('aria-expanded')).toBe('true')
-    await header.trigger('click')
-
-    expect(wrapper.findAll('.account-accordion')[0]!.classes()).not.toContain('open')
-    expect(header.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.findAll('.ui-metric-card')).toHaveLength(3)
+    expect(wrapper.findAll('.account-guidance-item')).toHaveLength(2)
+    expect(wrapper.findAll('.account-accordion')).toHaveLength(0)
   })
 })

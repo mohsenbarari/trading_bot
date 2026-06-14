@@ -1,26 +1,39 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
-import { 
-  Smartphone, Trash2, HardDrive, LogOut,
-  ChevronDown, ChevronLeft
+import { computed, onMounted, watch, ref } from 'vue'
+import {
+  Smartphone,
+  Trash2,
+  HardDrive,
+  LogOut,
+  ChevronLeft,
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
-import { AppButton, AppEmptyState, AppLoadingState, AppStatusBadge } from '../components/ui'
+import {
+  AppButton,
+  AppCard,
+  AppEmptyState,
+  AppLoadingState,
+  AppPage,
+  AppPageHeader,
+  AppSectionCard,
+  AppStatusBadge,
+} from '../components/ui'
+import { WorkspaceNotice } from '../components/workspace'
 
 const router = useRouter()
 const route = useRoute()
 const { getCacheSize, clearFileCache } = useChatFileHandler()
+
 const cacheSize = ref('0.00 MB')
 const cacheBusy = ref(false)
 const cacheFeedback = ref<string | null>(null)
+const sessions = ref<any[]>([])
+const sessionsLoading = ref(false)
+const sessionsError = ref<string | null>(null)
 
-const openSections = ref({
-  sessions: false,
-  storage: false
-})
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
 const routeSection = computed<'sessions' | 'storage' | null>(() => {
   if (route.name === 'account-storage') return 'storage'
@@ -28,27 +41,19 @@ const routeSection = computed<'sessions' | 'storage' | null>(() => {
   const section = route.query.section
   return section === 'sessions' || section === 'storage' ? section : null
 })
+
 const pageTitle = computed(() => {
   if (routeSection.value === 'sessions') return 'امنیت حساب'
   if (routeSection.value === 'storage') return 'حافظه و داده‌ها'
-  return 'تنظیمات'
+  return 'تنظیمات حساب'
 })
 
-function toggleSection(section: 'sessions' | 'storage') {
-  openSections.value[section] = !openSections.value[section]
-}
+const settingsDescription = computed(() => {
+  if (routeSection.value === 'sessions') return 'نشست‌های فعال و دسترسی‌های ورود از این بخش مدیریت می‌شوند.'
+  if (routeSection.value === 'storage') return 'فایل‌های محلی و داده‌های دانلود شده از این بخش مدیریت می‌شوند.'
+  return 'امنیت حساب، حافظه دستگاه و خروج از حساب را از یک مرکز تنظیمات روشن مدیریت کنید.'
+})
 
-function applyRouteSection() {
-  const section = routeSection.value
-  if (section === 'storage') {
-    openSections.value.storage = true
-  }
-  if (section === 'sessions' && !isAccountant.value) {
-    openSections.value.sessions = true
-  }
-}
-
-// ----------------- STORAGE -----------------
 async function refreshCacheSize() {
   try {
     cacheSize.value = await getCacheSize()
@@ -74,23 +79,26 @@ async function clearCache() {
   }
 }
 
-// ----------------- SESSIONS -----------------
-const sessions = ref<any[]>([])
-const sessionsLoading = ref(false)
-
 async function fetchSessions() {
   if (isAccountant.value) {
     sessions.value = []
+    sessionsError.value = null
     return
   }
   sessionsLoading.value = true
+  sessionsError.value = null
   try {
     const res = await apiFetch('/api/sessions/active')
     if (res.ok) {
       sessions.value = await res.json()
+      return
     }
+    sessions.value = []
+    sessionsError.value = 'دریافت نشست‌های فعال ناموفق بود.'
   } catch (e) {
     console.error(e)
+    sessions.value = []
+    sessionsError.value = 'دریافت نشست‌های فعال ناموفق بود.'
   } finally {
     sessionsLoading.value = false
   }
@@ -100,7 +108,7 @@ async function terminateSession(sessionId: string) {
   try {
     const res = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
     if (res.ok) {
-      sessions.value = sessions.value.filter(s => s.id !== sessionId)
+      sessions.value = sessions.value.filter((session) => session.id !== sessionId)
     }
   } catch (e) {
     console.error(e)
@@ -110,14 +118,14 @@ async function terminateSession(sessionId: string) {
 async function logoutAll() {
   try {
     await apiFetch('/api/sessions/logout-all', { method: 'POST' })
-    fetchSessions()
+    await fetchSessions()
   } catch (e) {
     console.error(e)
   }
 }
 
 async function logout() {
-  const currentSession = sessions.value.find(s => s.is_current)
+  const currentSession = sessions.value.find((session) => session.is_current)
   if (currentSession) {
     try {
       await apiFetch(`/api/sessions/${currentSession.id}`, { method: 'DELETE' })
@@ -133,72 +141,76 @@ onMounted(() => {
     if (!isAccountant.value) {
       void fetchSessions()
     }
-    applyRouteSection()
   })
-  refreshCacheSize()
+  void refreshCacheSize()
 })
 
 watch(
   () => [route.name, route.query.section],
-  () => applyRouteSection(),
-  { immediate: true }
+  () => {
+    if (!isAccountant.value && routeSection.value === 'sessions' && sessions.length === 0 && !sessionsLoading.value) {
+      void fetchSessions()
+    }
+  },
+  { immediate: true },
 )
 </script>
 
 <template>
   <div class="ds-page settings-page">
-    
-    <div class="header-row">
-      <div class="header-spacer"></div>
-      <div class="header-title">
-         <h2>{{ pageTitle }}</h2>
-      </div>
-      <button class="back-button" @click="router.back()"><ChevronLeft :size="24" /></button>
-    </div>
+    <AppPage narrow>
+      <AppPageHeader eyebrow="حساب" :title="pageTitle" :description="settingsDescription">
+        <template #actions>
+          <AppButton class="settings-back-button" variant="ghost" size="sm" @click="router.back()">
+            <template #icon>
+              <ChevronLeft :size="18" />
+            </template>
+            بازگشت
+          </AppButton>
+        </template>
+      </AppPageHeader>
 
-    <div class="settings-content">
+      <WorkspaceNotice
+        v-if="isAccountant"
+        class="settings-role-notice"
+        tone="warning"
+        title="نشست و خروج برای حسابدار محدود است"
+        message="نشست‌های حسابدار و خروج از حساب توسط سرگروه مدیریت می‌شود. در این صفحه فقط حافظه و داده‌های دستگاه در دسترس است."
+      />
 
-      <!-- Active Sessions Accordion -->
-      <div v-if="!isAccountant" class="ds-accordion" :class="{ open: openSections.sessions }">
-        <button
-          id="settings-sessions-header"
-          class="ds-accordion-header"
-          type="button"
-          :aria-expanded="openSections.sessions"
-          aria-controls="settings-sessions-panel"
-          @click="toggleSection('sessions')"
-        >
-          <div class="ds-accordion-header-info">
-            <Smartphone :size="18" class="icon-primary" />
-            <h2>نشست‌های فعال</h2>
-          </div>
-          <component :is="openSections.sessions ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="settings-sessions-panel"
-          v-show="openSections.sessions"
-          class="ds-accordion-body"
-          role="region"
-          aria-labelledby="settings-sessions-header"
-        >
-          <AppLoadingState v-if="sessionsLoading" label="در حال دریافت نشست‌ها" />
-          
-          <AppEmptyState
-            v-else-if="sessions.length === 0"
-            title="نشست فعالی یافت نشد"
-            message="در حال حاضر دستگاه دیگری برای مدیریت نمایش داده نمی‌شود."
-            tone="info"
-          />
-          
-          <div v-else class="sessions-list">
-            <div v-for="session in sessions" :key="session.id" class="session-card">
-              <div class="session-info">
+      <AppSectionCard
+        v-if="!isAccountant"
+        class="settings-section-card"
+        title="نشست‌های فعال"
+        description="دستگاه‌های فعال، نشست جاری و پایان دادن به نشست‌های دیگر را از این بخش مدیریت کنید."
+        :tone="routeSection === 'sessions' ? 'primary' : 'neutral'"
+      >
+        <AppLoadingState v-if="sessionsLoading" label="در حال دریافت نشست‌ها" />
+
+        <WorkspaceNotice
+          v-else-if="sessionsError"
+          tone="danger"
+          title="خطا در دریافت نشست‌ها"
+          :message="sessionsError"
+        />
+
+        <AppEmptyState
+          v-else-if="sessions.length === 0"
+          title="نشست فعالی یافت نشد"
+          message="در حال حاضر دستگاه دیگری برای مدیریت نمایش داده نمی‌شود."
+          tone="info"
+        />
+
+        <div v-else class="sessions-list">
+          <AppCard v-for="session in sessions" :key="session.id" class="session-card">
+            <div class="session-card__main">
+              <div class="session-card__identity">
                 <div class="session-icon" :class="{ 'session-icon-primary': session.is_primary }">
                   <Smartphone :size="18" />
                 </div>
                 <div class="session-details">
                   <div class="session-name-row">
-                    <span class="session-name">{{ session.device_name }}</span>
+                    <strong class="session-name">{{ session.device_name }}</strong>
                     <AppStatusBadge v-if="session.is_primary" tone="primary">اصلی</AppStatusBadge>
                     <AppStatusBadge v-if="session.is_current" tone="success">این دستگاه</AppStatusBadge>
                   </div>
@@ -207,16 +219,23 @@ watch(
                   </div>
                 </div>
               </div>
-              <button
+
+              <AppButton
                 v-if="!session.is_current && !session.is_primary && sessions.some(s => s.is_current && s.is_primary)"
-                @click="terminateSession(session.id)"
                 class="session-delete-btn"
-                title="پایان نشست"
+                variant="ghost"
+                size="sm"
+                @click="terminateSession(session.id)"
               >
-                <Trash2 :size="16" />
-              </button>
+                <template #icon>
+                  <Trash2 :size="16" />
+                </template>
+                پایان نشست
+              </AppButton>
             </div>
-            
+          </AppCard>
+
+          <div class="settings-inline-actions">
             <AppButton
               v-if="sessions.length > 1 && sessions.some(s => s.is_current && s.is_primary)"
               class="logout-all-btn"
@@ -229,111 +248,104 @@ watch(
             </AppButton>
           </div>
         </div>
-      </div>
+      </AppSectionCard>
 
-      <!-- Storage Management Accordion -->
-      <div class="ds-accordion" :class="{ open: openSections.storage }">
-        <button
-          id="settings-storage-header"
-          class="ds-accordion-header"
-          type="button"
-          :aria-expanded="openSections.storage"
-          aria-controls="settings-storage-panel"
-          @click="toggleSection('storage')"
-        >
-          <div class="ds-accordion-header-info">
-            <HardDrive :size="18" class="icon-primary" />
-            <h2>مدیریت حافظه و داده‌ها</h2>
-          </div>
-          <component :is="openSections.storage ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="settings-storage-panel"
-          v-show="openSections.storage"
-          class="ds-accordion-body"
-          role="region"
-          aria-labelledby="settings-storage-header"
-        >
-          <div class="storage-card">
-            <div class="storage-info">
-              <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود‌شده</span>
-              <span class="storage-value" dir="ltr">{{ cacheSize }}</span>
+      <AppSectionCard
+        class="settings-section-card"
+        title="حافظه و داده‌ها"
+        description="فایل‌های دانلود شده و داده‌های محلی دستگاه را بدون خروج از حساب مدیریت کنید."
+        :tone="routeSection === 'storage' ? 'primary' : 'neutral'"
+      >
+        <AppCard class="storage-card">
+          <div class="storage-info">
+            <div>
+              <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود شده</span>
+              <p class="storage-copy">فایل‌های پیام‌رسان و داده‌های محلی قابل حذف از این بخش هستند.</p>
             </div>
-            <AppButton
-              type="button"
-              class="storage-clear-btn"
-              variant="danger"
-              block
-              :disabled="cacheBusy"
-              :loading="cacheBusy"
-              @click="clearCache"
-            >
-              <template #icon>
-                <Trash2 :size="16" />
-              </template>
-              حذف فایل‌های دانلود شده
-            </AppButton>
-            <p v-if="cacheFeedback" class="storage-feedback">{{ cacheFeedback }}</p>
+            <strong class="storage-value" dir="ltr">{{ cacheSize }}</strong>
           </div>
+
+          <AppButton
+            type="button"
+            class="storage-clear-btn"
+            variant="danger"
+            block
+            :disabled="cacheBusy"
+            :loading="cacheBusy"
+            @click="clearCache"
+          >
+            <template #icon>
+              <Trash2 :size="16" />
+            </template>
+            حذف فایل‌های دانلود شده
+          </AppButton>
+
+          <p v-if="cacheFeedback" class="storage-feedback">{{ cacheFeedback }}</p>
+        </AppCard>
+      </AppSectionCard>
+
+      <AppSectionCard
+        v-if="!isAccountant"
+        class="settings-section-card"
+        title="خروج از حساب"
+        description="نشست فعلی را ببندید و از حساب کاربری خارج شوید."
+        tone="danger"
+      >
+        <WorkspaceNotice
+          tone="warning"
+          title="خروج روی همین دستگاه اعمال می‌شود"
+          message="برای بستن همه دستگاه‌ها از بخش نشست‌های فعال استفاده کنید."
+        />
+        <div class="settings-inline-actions">
+          <AppButton variant="danger" block class="logout-btn" @click="logout">
+            <template #icon>
+              <LogOut :size="16" />
+            </template>
+            خروج از حساب کاربری
+          </AppButton>
         </div>
-      </div>
-
-      <!-- Logout Button -->
-      <AppButton v-if="!isAccountant" variant="danger" block class="logout-btn" @click="logout">
-        <template #icon>
-          <LogOut :size="16" />
-        </template>
-        خروج از حساب کاربری
-      </AppButton>
-
-    </div>
+      </AppSectionCard>
+    </AppPage>
   </div>
 </template>
 
 <style scoped>
 .settings-page {
-  padding: var(--ds-page-padding);
+  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
-.settings-content {
-  padding: 1.25rem 0;
-  width: 100%;
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
+.settings-back-button {
+  white-space: nowrap;
 }
 
-.icon-primary { color: var(--ds-primary-600); }
-
-/* Sessions */
-.sessions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.settings-role-notice,
+.settings-section-card + .settings-section-card {
+  margin-top: 0.75rem;
 }
 
-.session-card {
+.sessions-list,
+.settings-inline-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.session-card__main,
+.session-card__identity,
+.storage-info {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem;
-  background: var(--ds-bg-inset);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
+  gap: 0.75rem;
 }
 
-.session-info {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex: 1;
+.session-card__identity,
+.storage-info {
   min-width: 0;
 }
 
 .session-icon {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--ds-radius-sm);
   display: flex;
   align-items: center;
@@ -342,6 +354,7 @@ watch(
   background: var(--ds-bg-hover);
   color: var(--ds-text-muted);
 }
+
 .session-icon-primary {
   background: var(--ds-primary-100);
   color: var(--ds-primary-600);
@@ -349,83 +362,59 @@ watch(
 
 .session-details {
   min-width: 0;
-  flex: 1;
 }
 
 .session-name-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
+
 .session-name {
-  font-size: var(--ds-font-base);
-  font-weight: 600;
   color: var(--ds-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--ds-font-sm);
+  font-weight: 900;
 }
 
-.session-meta {
-  font-size: var(--ds-font-xs);
-  color: var(--ds-text-placeholder);
-  margin-top: 2px;
-  direction: ltr;
-  text-align: right;
+.session-meta,
+.storage-copy,
+.storage-label,
+.storage-feedback {
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-sm);
+  line-height: 1.8;
 }
 
-.session-delete-btn {
-  padding: 0.5rem;
-  color: var(--ds-danger-500);
-  background: transparent;
-  border: none;
-  border-radius: var(--ds-radius-sm);
-  cursor: pointer;
-  transition: all 0.2s;
+.storage-copy,
+.storage-feedback {
+  margin: 0.25rem 0 0;
+}
+
+.storage-label {
+  display: block;
+}
+
+.storage-value {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-lg);
+  font-weight: 900;
   flex-shrink: 0;
 }
-.session-delete-btn:hover {
-  color: var(--ds-danger-600);
-  background: var(--ds-danger-50);
-}
 
-.sessions-list :deep(.ui-button) {
-  margin-top: 0.75rem;
-}
+@media (max-width: 640px) {
+  .session-card__main,
+  .storage-info {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-/* Storage Card */
-.storage-card {
-  background: var(--ds-bg-inset);
-  border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-md);
-  padding: 0.875rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-.storage-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.storage-label {
-  font-size: 0.8rem;
-  color: var(--ds-text-secondary);
-}
-.storage-value {
-  font-size: var(--ds-font-base);
-  font-weight: 700;
-  color: var(--ds-text-primary);
-}
-.storage-feedback {
-  font-size: var(--ds-font-sm);
-  color: var(--ds-success-600);
-  margin: 0;
-  text-align: center;
-}
+  .session-card__identity {
+    align-items: flex-start;
+  }
 
-.logout-btn {
-  margin-top: 1rem;
+  .storage-value {
+    text-align: right;
+  }
 }
 </style>

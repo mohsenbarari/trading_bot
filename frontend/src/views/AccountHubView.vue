@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, ChevronDown, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
-import { AppActionCard } from '../components/ui'
+import { Bell, ChevronLeft, Database, Settings, ShieldCheck, Smartphone, UserRound } from 'lucide-vue-next'
+import {
+  AppActionCard,
+  AppButton,
+  AppMetricCard,
+  AppPage,
+  AppPageHeader,
+  AppSectionCard,
+} from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
-type AccountSectionKey = 'profile' | 'security' | 'notifications'
 
 interface AccountAction {
   key: string
@@ -18,24 +24,20 @@ interface AccountAction {
   action: () => void
 }
 
-const openSections = ref<Record<AccountSectionKey, boolean>>({
-  profile: true,
-  security: true,
-  notifications: true,
-})
-
 const user = computed(() => currentUserSummary.value)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
-
-function toggleSection(section: AccountSectionKey) {
-  openSections.value[section] = !openSections.value[section]
-}
 
 const userDisplayName = computed(() => {
   const fullName = user.value?.full_name?.trim()
   const accountName = user.value?.account_name?.trim()
   return fullName || accountName || 'حساب کاربری'
 })
+
+const accountMetrics = computed(() => [
+  { label: 'پروفایل', value: '۱', tone: 'primary' as const },
+  { label: 'تنظیمات امنیت', value: isAccountant.value ? 'محدود' : 'فعال', tone: isAccountant.value ? 'warning' as const : 'success' as const },
+  { label: 'اعلان‌ها', value: 'آماده', tone: 'neutral' as const },
+])
 
 const profileActions = computed<AccountAction[]>(() => [
   {
@@ -48,7 +50,7 @@ const profileActions = computed<AccountAction[]>(() => [
   {
     key: 'settings',
     title: 'تنظیمات کاربری',
-    description: isAccountant.value ? 'تنظیمات مجاز حساب حسابدار' : 'تنظیمات حساب، نشست‌ها و خروج',
+    description: isAccountant.value ? 'دسترسی‌های مجاز حسابدار و حافظه دستگاه' : 'امنیت حساب، حافظه دستگاه و خروج',
     icon: Settings,
     action: () => router.push({ name: 'account-storage' }),
   },
@@ -70,7 +72,7 @@ const securityActions = computed<AccountAction[]>(() => {
   actions.push({
     key: 'storage',
     title: 'حافظه و داده‌ها',
-    description: 'پاک‌سازی فایل‌های دانلود شده پیام‌رسان',
+    description: 'پاک‌سازی فایل‌های دانلود شده و داده‌های محلی',
     icon: Database,
     action: () => router.push({ name: 'account-storage' }),
   })
@@ -90,7 +92,6 @@ const notificationActions = computed<AccountAction[]>(() => [
 
 const sessionsRestriction = computed(() => {
   if (!isAccountant.value) return null
-
   return {
     title: 'مدیریت نشست برای حسابدار فعال نیست',
     description: 'نشست‌های حسابدار توسط سرگروه مدیریت و در صورت نیاز منقضی می‌شود. این محدودیت با تنظیمات امنیتی پروژه هماهنگ است.',
@@ -104,155 +105,120 @@ onMounted(() => {
 
 <template>
   <div class="ds-page account-hub-page">
-    <header class="header-row">
-      <div class="header-spacer"></div>
-      <div class="header-title">
-        <h2>حساب</h2>
-      </div>
-      <button class="back-button" type="button" @click="router.back()">
-        <ChevronLeft :size="24" />
-      </button>
-    </header>
+    <AppPage>
+      <AppPageHeader
+        eyebrow="حساب"
+        title="مرکز حساب کاربری"
+        :description="`${userDisplayName}؛ پروفایل، امنیت، اعلان‌ها و داده‌های دستگاه از اینجا مدیریت می‌شوند.`"
+      >
+        <template #actions>
+          <AppButton class="account-back-button" variant="ghost" size="sm" @click="router.back()">
+            <template #icon>
+              <ChevronLeft :size="18" />
+            </template>
+            بازگشت
+          </AppButton>
+        </template>
+      </AppPageHeader>
 
-    <main class="account-hub-content">
-      <section class="account-intro">
-        <h1>{{ userDisplayName }}</h1>
-        <p>پروفایل، تنظیمات مجاز، اعلان‌ها و داده‌های دستگاه در یک مسیر واحد قرار دارند.</p>
+      <section class="account-metrics-grid">
+        <AppMetricCard
+          v-for="metric in accountMetrics"
+          :key="metric.label"
+          :label="metric.label"
+          :value="metric.value"
+          :tone="metric.tone"
+        />
       </section>
 
-      <section class="ds-accordion account-accordion" :class="{ open: openSections.profile }">
-        <button
-          id="account-profile-header"
-          class="ds-accordion-header account-accordion-header"
-          type="button"
-          :aria-expanded="openSections.profile"
-          aria-controls="account-profile-panel"
-          @click="toggleSection('profile')"
-        >
-          <div class="ds-accordion-header-info">
-            <UserRound :size="18" class="section-icon" />
-            <div class="section-title-copy">
-              <h2>پروفایل و تنظیمات</h2>
-              <span>اطلاعات حساب و مسیرهای شخصی</span>
-            </div>
+      <AppSectionCard
+        class="account-section-card"
+        title="پروفایل و تنظیمات"
+        description="اطلاعات حساب و مسیرهای شخصی را از یک نقطه مدیریت کنید."
+        tone="primary"
+      >
+        <div class="account-action-grid">
+          <AppActionCard
+            v-for="action in profileActions"
+            :key="action.key"
+            class="hub-action"
+            :title="action.title"
+            :description="action.description"
+            @select="action.action"
+          >
+            <template #icon>
+              <component :is="action.icon" :size="20" />
+            </template>
+          </AppActionCard>
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard
+        class="account-section-card"
+        title="امنیت و داده‌ها"
+        description="نشست‌ها، حافظه دستگاه و داده‌های محلی را در یک سطح منظم ببینید."
+      >
+        <WorkspaceNotice
+          v-if="sessionsRestriction"
+          class="account-empty-state"
+          tone="warning"
+          :title="sessionsRestriction.title"
+          :message="sessionsRestriction.description"
+        />
+        <div class="account-action-grid">
+          <AppActionCard
+            v-for="action in securityActions"
+            :key="action.key"
+            class="hub-action"
+            :title="action.title"
+            :description="action.description"
+            @select="action.action"
+          >
+            <template #icon>
+              <component :is="action.icon" :size="20" />
+            </template>
+          </AppActionCard>
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard
+        class="account-section-card"
+        title="اعلان‌ها"
+        description="اعلان‌های بازار، معامله و سیستم را از مسیر اختصاصی خود ببینید."
+      >
+        <div class="account-action-grid">
+          <AppActionCard
+            v-for="action in notificationActions"
+            :key="action.key"
+            class="hub-action"
+            :title="action.title"
+            :description="action.description"
+            @select="action.action"
+          >
+            <template #icon>
+              <component :is="action.icon" :size="20" />
+            </template>
+          </AppActionCard>
+        </div>
+      </AppSectionCard>
+
+      <AppSectionCard
+        class="account-section-card"
+        title="راهنمای دسترسی"
+        description="این خلاصه کمک می‌کند قبل از ورود به تنظیمات بدانید کدام مسیرها برای نقش فعلی شما فعال هستند."
+      >
+        <div class="account-guidance-list">
+          <div class="account-guidance-item">
+            <ShieldCheck :size="18" />
+            <p>پروفایل و اعلان‌ها برای همه نقش‌ها در دسترس هستند.</p>
           </div>
-          <component :is="openSections.profile ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="account-profile-panel"
-          v-show="openSections.profile"
-          class="ds-accordion-body account-accordion-body"
-          role="region"
-          aria-labelledby="account-profile-header"
-        >
-          <div class="action-grid">
-            <AppActionCard
-              v-for="action in profileActions"
-              :key="action.key"
-              class="hub-action"
-              :title="action.title"
-              :description="action.description"
-              @select="action.action"
-            >
-              <template #icon>
-                <component :is="action.icon" :size="20" />
-              </template>
-            </AppActionCard>
+          <div class="account-guidance-item">
+            <Smartphone :size="18" />
+            <p>{{ isAccountant ? 'نشست‌های حسابدار توسط سرگروه مدیریت می‌شوند.' : 'نشست‌های فعال و خروج از حساب از بخش امنیت حساب در دسترس است.' }}</p>
           </div>
         </div>
-      </section>
-
-      <section class="ds-accordion account-accordion" :class="{ open: openSections.security }">
-        <button
-          id="account-security-header"
-          class="ds-accordion-header account-accordion-header"
-          type="button"
-          :aria-expanded="openSections.security"
-          aria-controls="account-security-panel"
-          @click="toggleSection('security')"
-        >
-          <div class="ds-accordion-header-info">
-            <Smartphone :size="18" class="section-icon" />
-            <div class="section-title-copy">
-              <h2>امنیت و داده‌ها</h2>
-              <span>نشست‌ها، حافظه و فایل‌های محلی</span>
-            </div>
-          </div>
-          <component :is="openSections.security ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="account-security-panel"
-          v-show="openSections.security"
-          class="ds-accordion-body account-accordion-body"
-          role="region"
-          aria-labelledby="account-security-header"
-        >
-          <WorkspaceNotice
-            v-if="sessionsRestriction"
-            class="account-empty-state"
-            tone="warning"
-            :title="sessionsRestriction.title"
-            :message="sessionsRestriction.description"
-          />
-          <div class="action-grid">
-            <AppActionCard
-              v-for="action in securityActions"
-              :key="action.key"
-              class="hub-action"
-              :title="action.title"
-              :description="action.description"
-              @select="action.action"
-            >
-              <template #icon>
-                <component :is="action.icon" :size="20" />
-              </template>
-            </AppActionCard>
-          </div>
-        </div>
-      </section>
-
-      <section class="ds-accordion account-accordion" :class="{ open: openSections.notifications }">
-        <button
-          id="account-notifications-header"
-          class="ds-accordion-header account-accordion-header"
-          type="button"
-          :aria-expanded="openSections.notifications"
-          aria-controls="account-notifications-panel"
-          @click="toggleSection('notifications')"
-        >
-          <div class="ds-accordion-header-info">
-            <Bell :size="18" class="section-icon" />
-            <div class="section-title-copy">
-              <h2>اعلان‌ها</h2>
-              <span>پیام‌های سیستم، بازار و معاملات</span>
-            </div>
-          </div>
-          <component :is="openSections.notifications ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </button>
-        <div
-          id="account-notifications-panel"
-          v-show="openSections.notifications"
-          class="ds-accordion-body account-accordion-body"
-          role="region"
-          aria-labelledby="account-notifications-header"
-        >
-          <div class="action-grid">
-            <AppActionCard
-              v-for="action in notificationActions"
-              :key="action.key"
-              class="hub-action"
-              :title="action.title"
-              :description="action.description"
-              @select="action.action"
-            >
-              <template #icon>
-                <component :is="action.icon" :size="20" />
-              </template>
-            </AppActionCard>
-          </div>
-        </div>
-      </section>
-    </main>
+      </AppSectionCard>
+    </AppPage>
   </div>
 </template>
 
@@ -261,78 +227,50 @@ onMounted(() => {
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
-.account-hub-content {
-  width: 100%;
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-  padding: var(--ds-card-padding);
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-section-gap);
+.account-back-button {
+  white-space: nowrap;
 }
 
-.account-intro {
-  background: var(--ds-bg-card);
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  box-shadow: var(--ds-shadow-md);
-  padding: 1rem;
+.account-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
-.account-intro h1 {
-  margin: 0 0 0.35rem;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-xl);
-  font-weight: 850;
+.account-section-card + .account-section-card {
+  margin-top: 0.75rem;
 }
 
-.account-intro p {
-  margin: 0;
+.account-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.account-guidance-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-guidance-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
   color: var(--ds-text-secondary);
+}
+
+.account-guidance-item p {
+  margin: 0;
   font-size: var(--ds-font-sm);
   line-height: 1.8;
 }
 
-.account-accordion {
-  margin-bottom: 0;
-}
-
-.account-accordion-header {
-  width: 100%;
-  border: 0;
-  font-family: inherit;
-  text-align: right;
-}
-
-.section-icon {
-  color: var(--ds-primary-700);
-}
-
-.section-title-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.section-title-copy span {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.5;
-}
-
-.action-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.65rem;
-}
-
-.hub-action {
-  width: 100%;
-  min-height: 72px;
-}
-
-.account-empty-state {
-  margin-bottom: 0.65rem;
+@media (max-width: 700px) {
+  .account-metrics-grid,
+  .account-action-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

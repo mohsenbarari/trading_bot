@@ -104,12 +104,6 @@ describe('SettingsView.vue', () => {
     expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/active')
     expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
 
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    expect(accordions[0]!.attributes('aria-expanded')).toBe('false')
-    await accordions[0]!.trigger('click')
-    await flushPromises()
-    expect(accordions[0]!.attributes('aria-expanded')).toBe('true')
-
     expect(wrapper.text()).toContain('Chrome')
     expect(wrapper.text()).toContain('Android')
 
@@ -122,7 +116,7 @@ describe('SettingsView.vue', () => {
     expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-secondary', { method: 'DELETE' })
     expect(wrapper.text()).not.toContain('Android')
 
-    await wrapper.find('.back-button').trigger('click')
+    await wrapper.find('.settings-back-button').trigger('click')
     expect(settingsViewMocks.backMock).toHaveBeenCalled()
 
     wrapper.unmount()
@@ -131,12 +125,6 @@ describe('SettingsView.vue', () => {
   it('clears cached files from the storage accordion and shows feedback', async () => {
     const wrapper = await mountSettingsView()
     await flushPromises()
-
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    expect(accordions[1]!.attributes('aria-expanded')).toBe('false')
-    await accordions[1]!.trigger('click')
-    await flushPromises()
-    expect(accordions[1]!.attributes('aria-expanded')).toBe('true')
 
     expect(wrapper.find('.storage-value').text()).toBe('12.50 MB')
     await wrapper.find('.storage-clear-btn').trigger('click')
@@ -159,14 +147,16 @@ describe('SettingsView.vue', () => {
     await flushPromises()
 
     expect(storageWrapper.text()).toContain('حافظه و داده‌ها')
-    expect(storageWrapper.find('#settings-storage-header').attributes('aria-expanded')).toBe('true')
+    expect(storageWrapper.find('.settings-page').exists()).toBe(true)
+    expect(storageWrapper.findAll('.settings-section-card').length).toBeGreaterThanOrEqual(2)
 
     settingsViewMocks.route.name = 'account-security'
     const securityWrapper = await mountSettingsView()
     await flushPromises()
 
     expect(securityWrapper.text()).toContain('امنیت حساب')
-    expect(securityWrapper.find('#settings-sessions-header').attributes('aria-expanded')).toBe('true')
+    expect(securityWrapper.find('.settings-page').exists()).toBe(true)
+    expect(securityWrapper.findAll('.settings-section-card').length).toBeGreaterThanOrEqual(3)
   })
 
   it('does not render the blocked-users management section or call block APIs', async () => {
@@ -193,6 +183,7 @@ describe('SettingsView.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('نشست‌های فعال')
+    expect(wrapper.text()).toContain('نشست و خروج برای حسابدار محدود است')
     expect(wrapper.find('.logout-btn').exists()).toBe(false)
     expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => path === '/api/sessions/active')).toBe(false)
     expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
@@ -222,10 +213,6 @@ describe('SettingsView.vue', () => {
     }))
 
     const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    await accordions[1]!.trigger('click')
     await flushPromises()
 
     expect(wrapper.find('.storage-value').text()).toBe('0.00 MB')
@@ -300,10 +287,6 @@ describe('SettingsView.vue', () => {
     })
 
     const wrapper = await mountSettingsView()
-    await flushPromises()
-
-    const accordions = wrapper.findAll('.ds-accordion-header')
-    await accordions[0]!.trigger('click')
     await flushPromises()
 
     await wrapper.find('.logout-all-btn').trigger('click')

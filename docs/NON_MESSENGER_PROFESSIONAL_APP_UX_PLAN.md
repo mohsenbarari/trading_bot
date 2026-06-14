@@ -336,8 +336,8 @@ Gate نهایی Stage 12:
 | Stage 2 | Global layout, safe-area and fixed UI hardening | Completed |
 | Stage 3 | Customer Workspace: remove remaining legacy feel | Completed |
 | Stage 4 | Accountant Workspace: remove remaining legacy feel | Completed |
-| Stage 5 | Account, Settings, Session and Storage UX | Next |
-| Stage 6 | Admin workspace and admin subviews | Pending |
+| Stage 5 | Account, Settings, Session and Storage UX | Completed |
+| Stage 6 | Admin workspace and admin subviews | Next |
 | Stage 7 | Profile and Public Profile final polish | Pending |
 | Stage 8 | Notifications final polish | Pending |
 | Stage 9 | Dashboard, Operations and Market polish | Pending |
@@ -441,9 +441,24 @@ Gate نهایی Stage 12:
 
 ### Stage 5 - Account/Settings
 
-- Account Hub را به settings center حرفه‌ای تبدیل کن.
-- sessions/storage/logout را polish و safe-area-proof کن.
-- `/settings?section=...` همچنان کار کند.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `AccountHubView.vue` از صفحه accordion-heavy به یک account center روشن‌تر با `AppPage`, `AppPageHeader`, `AppSectionCard`, `AppActionCard` و `AppMetricCard` تبدیل شد.
+- مسیرهای profile / security / storage / notifications در همان routeهای فعلی باقی ماندند، ولی presentation حساب کاربری از منوی تاشو به section cardهای دائماً قابل‌اسکن منتقل شد.
+- restriction حسابدار برای نشست و خروج به‌صورت واضح در account center و settings center حفظ شد.
+- `SettingsView.vue` از accordion-only layout به settings center حرفه‌ای‌تر با section cardهای مجزا برای sessions، storage و logout تبدیل شد.
+- sessions/storage/logout routeها و deep linkهای قدیمی (`/settings?section=...`, `account-security`, `account-storage`) حفظ شدند.
+- session list، storage card و logout actionها با shell جدید و spacing ایمن‌تر نسبت به bottom nav بازچینش شدند.
+- account/settings surfaces بدون تغییر API contract یا منطق backend-authoritative به primitiveهای shared منتقل شدند.
+
+اعتبارسنجی Stage 5:
+
+- `npm run test:unit:run -- AccountHubView.test.ts SettingsView.test.ts` پاس شد: `13/13`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 6 - Admin
 
