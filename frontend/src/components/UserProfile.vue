@@ -1,7 +1,22 @@
 <script setup lang="ts">
 import { ref, computed, watchEffect, onUnmounted, watch, toRef } from 'vue';
 import moment from 'moment-jalaali';
-import { ArrowRight, ChevronLeft } from 'lucide-vue-next';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Ban,
+  Bell,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  Clock,
+  Pencil,
+  RotateCcw,
+  Settings,
+  Trash2,
+  Undo2,
+  Users,
+} from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 import { isCachedMiddleManager } from '../utils/adminAccess';
@@ -269,10 +284,10 @@ const isRestricted = computed(() => {
 });
 
 const restrictionText = computed(() => {
-  if (!isRestricted.value) return '✅ آزاد';
+  if (!isRestricted.value) return 'آزاد';
   const restrictionTime = moment.utc(props.user.trading_restricted_until);
-  if (restrictionTime.year() > 2100) return '⛔ مسدود دائم';
-  return `⛔ تا ${props.user.trading_restricted_until_jalali}`;
+  if (restrictionTime.year() > 2100) return 'مسدود دائم';
+  return `تا ${props.user.trading_restricted_until_jalali}`;
 });
 
 const isAccountInactive = computed(() => (props.user?.account_status ?? accountStatus.value) === 'inactive');
@@ -292,10 +307,10 @@ const globalLockGraceExpiresAtText = computed(() => formatAccountStatusDate(prop
 const globalWebLockedAtText = computed(() => formatAccountStatusDate(props.user?.global_web_locked_at));
 
 const accountStatusText = computed(() => {
-  if (!isAccountInactive.value) return '✅ فعال';
-  if (globalWebLockedAtText.value) return '⛔ غیرفعال (قفل کامل)';
-  if (globalLockGraceExpiresAtText.value) return '⛔ غیرفعال (در مهلت فعال‌سازی)';
-  return '⛔ غیرفعال';
+  if (!isAccountInactive.value) return 'فعال';
+  if (globalWebLockedAtText.value) return 'غیرفعال (قفل کامل)';
+  if (globalLockGraceExpiresAtText.value) return 'غیرفعال (در مهلت فعال‌سازی)';
+  return 'غیرفعال';
 });
 
 const accountStatusDetailText = computed(() => {
@@ -737,14 +752,14 @@ async function deleteUser() {
       
       <!-- تایمر شمارش معکوس مسدودیت -->
       <div v-if="isRestricted && countdownRestriction" class="countdown-box restriction-countdown">
-          <span class="countdown-icon">⏱️</span>
+          <span class="countdown-icon" aria-hidden="true"><Clock :size="15" /></span>
           <span class="countdown-label">زمان باقی‌مانده مسدودیت:</span>
           <span class="countdown-value">{{ countdownRestriction }}</span>
       </div>
       
       <!-- نمایش محدودیت‌ها -->
       <div v-if="user.max_daily_trades || user.max_active_commodities || user.max_daily_requests" class="limitations-box">
-          <h4>⚠️ محدودیت‌های فعال:</h4>
+          <h4><AlertTriangle :size="17" aria-hidden="true" /> محدودیت‌های فعال:</h4>
           <div v-if="user.max_daily_trades" class="limit-item">
               <span>مجموع معاملات:</span> <span class="usage-ratio">{{ user.trades_count ?? 0 }} / {{ user.max_daily_trades }}</span>
           </div>
@@ -759,14 +774,14 @@ async function deleteUser() {
           </div>
           <!-- تایمر شمارش معکوس محدودیت -->
           <div v-if="countdownLimitation" class="countdown-inline">
-              <span class="countdown-icon">⏱️</span>
+              <span class="countdown-icon" aria-hidden="true"><Clock :size="15" /></span>
               <span class="countdown-label">باقی‌مانده:</span>
               <span class="countdown-value">{{ countdownLimitation }}</span>
           </div>
       </div>
 
           <div v-if="showCustomerContext" class="limitations-box customer-context-box">
-            <h4>👥 اطلاعات مشتری</h4>
+            <h4><Users :size="17" aria-hidden="true" /> اطلاعات مشتری</h4>
             <div class="limit-item">
               <span>نام مدیریتی:</span>
               <span>{{ user.customer_management_name || '---' }}</span>
@@ -886,15 +901,15 @@ async function deleteUser() {
               text="عملیات این بخش فقط روی همین کاربر اعمال می‌شود. حذف کاربر، نشست‌ها و دسترسی‌های فعال او را هم مدیریت می‌کند."
             />
             <button @click="showSettings = true" class="menu-button settings-btn">
-              <span class="menu-button-icon">⚙</span>
+              <span class="menu-button-icon" aria-hidden="true"><Settings :size="18" /></span>
               <span class="menu-button-label">تنظیمات کاربر</span>
             </button>
             <button @click="deleteUser" class="menu-button delete-btn">
-              <span class="menu-button-icon">✕</span>
+              <span class="menu-button-icon" aria-hidden="true"><Trash2 :size="18" /></span>
               <span class="menu-button-label">حذف کاربر</span>
             </button>
             <button @click="$emit('navigate', 'manage_users')" class="menu-button back-btn">
-              <span class="menu-button-icon">‹</span>
+              <span class="menu-button-icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
               <span class="menu-button-label">بازگشت به لیست</span>
             </button>
         </div>
@@ -908,34 +923,34 @@ async function deleteUser() {
             text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
           />
           <button @click="toggleAccountStatus" class="menu-button">
-            <span class="menu-button-icon">↻</span>
+            <span class="menu-button-icon" aria-hidden="true"><RotateCcw :size="18" /></span>
             <span class="menu-button-label">تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})</span>
             </button>
             <button v-if="canEditRole" @click="isEditingRole = true" class="menu-button">
-              <span class="menu-button-icon">✎</span>
+              <span class="menu-button-icon" aria-hidden="true"><Pencil :size="18" /></span>
               <span class="menu-button-label">ویرایش نقش</span>
             </button>
             
             <button v-if="!hasLimitations" @click="openLimitationsModal" class="menu-button">
-              <span class="menu-button-icon">!</span>
+              <span class="menu-button-icon" aria-hidden="true"><AlertTriangle :size="18" /></span>
               <span class="menu-button-label">اعمال محدودیت</span>
             </button>
             <button v-else @click="removeLimitations" class="menu-button unlimit-btn">
-                <span class="menu-button-icon">✓</span>
+                <span class="menu-button-icon" aria-hidden="true"><Check :size="18" /></span>
                 <span class="menu-button-label">رفع محدودیت</span>
             </button>
             
             <button v-if="!isRestricted" @click="showBlockModal = true" class="menu-button block-btn">
-                <span class="menu-button-icon">⊘</span>
+                <span class="menu-button-icon" aria-hidden="true"><Ban :size="18" /></span>
                 <span class="menu-button-label">مسدود کردن</span>
             </button>
             <button v-else @click="unblockUser" class="menu-button unblock-btn">
-                <span class="menu-button-icon">⌁</span>
+                <span class="menu-button-icon" aria-hidden="true"><Undo2 :size="18" /></span>
                 <span class="menu-button-label">رفع مسدودیت</span>
             </button>
 
             <button @click="showSettings = false" class="menu-button back-btn">
-              <span class="menu-button-icon">‹</span>
+              <span class="menu-button-icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
               <span class="menu-button-label">بازگشت</span>
             </button>
         </div>
@@ -983,7 +998,7 @@ async function deleteUser() {
     <Teleport to="body">
         <div v-if="showLimitationsModal" class="modal-overlay">
             <div class="modal-content">
-                <h3>⚠️ اعمال محدودیت</h3>
+                <h3><AlertTriangle :size="18" aria-hidden="true" /> اعمال محدودیت</h3>
                 
                 <div class="form-group">
                     <label>مجموع تعداد معاملات:</label>
@@ -1035,7 +1050,7 @@ async function deleteUser() {
           text="از این بخش به پیام‌های سیستمی و تنظیمات مجاز همین حساب دسترسی داری. گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شود."
         />
         <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
-          <span class="menu-button-icon">🔔</span>
+          <span class="menu-button-icon" aria-hidden="true"><Bell :size="18" /></span>
           <span class="menu-button-label">صندوق پیام‌ها</span>
         </button>
         <!-- دکمه تنظیمات فقط برای نقش‌های غیر عادی -->
@@ -1044,7 +1059,7 @@ async function deleteUser() {
           class="menu-button settings-btn" 
           @click="emit('navigate', 'user_settings')"
         >
-          <span class="menu-button-icon">⚙</span>
+          <span class="menu-button-icon" aria-hidden="true"><Settings :size="18" /></span>
           <span class="menu-button-label">تنظیمات</span>
         </button>
       </div>
@@ -1055,7 +1070,11 @@ async function deleteUser() {
     <Teleport to="body">
         <div v-if="showBlockDateModal" class="modal-overlay" style="z-index: 2010;">
             <div class="modal-content date-modal-content">
-                <h3>{{ pickerStep === 1 ? '📅 انتخاب تاریخ' : '⏰ انتخاب ساعت' }}</h3>
+                <h3>
+                  <CalendarDays v-if="pickerStep === 1" :size="18" aria-hidden="true" />
+                  <Clock v-else :size="18" aria-hidden="true" />
+                  {{ pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت' }}
+                </h3>
                 
                 <div class="date-picker-wrapper">
                     <!-- Step 1: Date -->
@@ -1093,7 +1112,11 @@ async function deleteUser() {
     <Teleport to="body">
         <div v-if="showLimitDateModal" class="modal-overlay" style="z-index: 2010;">
             <div class="modal-content date-modal-content">
-                <h3>{{ pickerStep === 1 ? '📅 انتخاب تاریخ' : '⏰ انتخاب ساعت' }}</h3>
+                <h3>
+                  <CalendarDays v-if="pickerStep === 1" :size="18" aria-hidden="true" />
+                  <Clock v-else :size="18" aria-hidden="true" />
+                  {{ pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت' }}
+                </h3>
                 
                 <div class="date-picker-wrapper">
                     <!-- Step 1: Date -->

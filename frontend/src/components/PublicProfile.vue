@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue';
-import { ChevronLeft, User as UserIcon, Activity, Pencil } from 'lucide-vue-next';
+import {
+  BriefcaseBusiness,
+  ChevronLeft,
+  MessageCircle,
+  Settings,
+  ShieldBan,
+  ShieldCheck,
+  Users,
+  User as UserIcon,
+  Activity,
+  Pencil,
+  Wrench,
+} from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
 import UserProfile from './UserProfile.vue';
@@ -112,14 +124,12 @@ interface CommodityFilterOption {
 
 interface ProfileStatCard {
   key: string;
-  icon: string;
   label: string;
   value: string;
 }
 
 interface ProfileActionCard {
   key: 'message' | 'block_toggle' | 'settings' | 'admin_settings' | 'add_customer' | 'add_accountant';
-  icon: string;
   label: string;
   description?: string | null;
   disabled?: boolean;
@@ -399,16 +409,12 @@ const publicBlockActionLabel = computed(() => {
   }
   return 'بلاک / رفع بلاک';
 });
-const publicBlockActionIcon = computed(() => {
-  return publicBlockState.value ? '🔓' : '⛔';
-});
 const sharedStatCards = computed<ProfileStatCard[]>(() => {
   if (!profileData.value) return [];
 
   return [
     {
       key: 'member-since',
-      icon: '📅',
       label: 'عضویت',
       value: profileData.value.created_at_jalali,
     },
@@ -420,7 +426,6 @@ const visitorActionCards = computed<ProfileActionCard[]>(() => {
   const actions: ProfileActionCard[] = [
     {
       key: 'message',
-      icon: '💬',
       label: 'ارسال پیام',
     },
   ];
@@ -428,7 +433,6 @@ const visitorActionCards = computed<ProfileActionCard[]>(() => {
   if (showPublicBlockAction.value) {
     actions.push({
       key: 'block_toggle',
-      icon: publicBlockActionIcon.value,
       label: publicBlockActionLabel.value,
       description: publicBlockActionDescription.value,
       disabled: publicBlockBusy.value || publicBlockActionDisabled.value,
@@ -442,7 +446,6 @@ const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
   const actions: ProfileActionCard[] = [
     {
       key: 'settings',
-      icon: '⚙️',
       label: 'تنظیمات کاربری',
     },
   ];
@@ -450,11 +453,9 @@ const ownerOnlyActions = computed<ProfileActionCard[]>(() => {
   if (customerProfileContext.value === null && !viewerIsCustomer.value) {
     actions.push({
       key: 'add_customer',
-      icon: '👥',
       label: 'مشتریان',
     }, {
       key: 'add_accountant',
-      icon: '💼',
       label: 'حسابداران',
     });
   }
@@ -466,11 +467,22 @@ const adminActionCards = computed<ProfileActionCard[]>(() => {
   return [
     {
       key: 'admin_settings',
-      icon: '🛠️',
       label: 'تنظیمات کاربر',
     },
   ];
 });
+
+function getActionIconComponent(action: ProfileActionCard) {
+  if (action.key === 'message') return MessageCircle;
+  if (action.key === 'settings') return Settings;
+  if (action.key === 'add_customer') return Users;
+  if (action.key === 'add_accountant') return BriefcaseBusiness;
+  if (action.key === 'admin_settings') return Wrench;
+  if (action.key === 'block_toggle') {
+    return publicBlockState.value ? ShieldCheck : ShieldBan;
+  }
+  return Settings;
+}
 
 async function loadProfile() {
   if (!props.user?.id || !props.jwtToken) {
@@ -1368,12 +1380,12 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
         </div>
       </div>
       <div class="header-title">
-         <h2 v-if="profileData">👤 {{ profileData.account_name }}</h2>
+         <h2 v-if="profileData">{{ profileData.account_name }}</h2>
          <h2 v-else-if="isLoading" class="skeleton-text-header">
            <!-- Skeleton for Title -->
            <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
          </h2>
-         <h2 v-else>👤 پروفایل</h2>
+         <h2 v-else>پروفایل</h2>
       </div>
       <button class="back-button" @click="$emit('navigate', 'home')"><ChevronLeft :size="24" /></button>
     </div>
@@ -1390,7 +1402,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
     </div>
 
     <div v-else-if="error" class="error-state">
-      <p>❌ {{ error }}</p>
+      <p>{{ error }}</p>
       <button class="retry-btn" @click="$emit('navigate', 'home')">بازگشت به خانه</button>
     </div>
 
@@ -1653,7 +1665,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             :disabled="Boolean(action.disabled)"
             @click="handleActionClick(action)"
           >
-            <span class="menu-button-icon">{{ action.icon }}</span>
+            <span class="menu-button-icon" aria-hidden="true">
+              <component :is="getActionIconComponent(action)" :size="18" />
+            </span>
             <span class="menu-button-copy">
               <span class="menu-button-label">{{ action.label }}</span>
               <span v-if="action.description" class="menu-button-note">{{ action.description }}</span>
@@ -1681,7 +1695,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             :disabled="adminUserLoading"
             @click="handleActionClick(action)"
           >
-            <span class="menu-button-icon">{{ action.icon }}</span>
+            <span class="menu-button-icon" aria-hidden="true">
+              <component :is="getActionIconComponent(action)" :size="18" />
+            </span>
             <span class="menu-button-copy">
               <span class="menu-button-label">{{ adminUserLoading ? 'در حال بارگذاری...' : action.label }}</span>
             </span>
@@ -1877,7 +1893,9 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             :class="getActionButtonClass(action)"
             @click="handleActionClick(action)"
           >
-            <span class="menu-button-icon">{{ action.icon }}</span>
+            <span class="menu-button-icon" aria-hidden="true">
+              <component :is="getActionIconComponent(action)" :size="18" />
+            </span>
             <span class="menu-button-copy">
               <span class="menu-button-label">{{ action.label }}</span>
             </span>

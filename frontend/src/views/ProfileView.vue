@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
+import { AppLoadingState } from '../components/ui'
 import { apiFetch } from '../utils/auth'
 
 const router = useRouter()
@@ -68,7 +69,7 @@ onMounted(async () => {
       @navigate="handleNavigate"
     />
     <div v-else class="loading-container">
-      <div class="loading-spinner"></div>
+      <AppLoadingState label="در حال دریافت پروفایل" />
     </div>
   </div>
 </template>
@@ -83,16 +84,5 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   height: 100dvh;
-}
-.loading-spinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid #f59e0b;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 </style>

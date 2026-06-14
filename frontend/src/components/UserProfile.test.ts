@@ -22,9 +22,21 @@ vi.mock('../composables/useUserProfileTiming', () => ({
 }))
 
 vi.mock('lucide-vue-next', () => ({
+  AlertTriangle: { template: '<span />' },
   ArrowRight: { template: '<span />' },
+  Ban: { template: '<span />' },
+  Bell: { template: '<span />' },
+  CalendarDays: { template: '<span />' },
+  Check: { template: '<span />' },
   ChevronLeft: { template: '<span />' },
+  Clock: { template: '<span />' },
   Info: { template: '<span />' },
+  Pencil: { template: '<span />' },
+  RotateCcw: { template: '<span />' },
+  Settings: { template: '<span />' },
+  Trash2: { template: '<span />' },
+  Undo2: { template: '<span />' },
+  Users: { template: '<span />' },
 }))
 
 function makeResponse(payload: unknown, ok = true) {
@@ -889,7 +901,7 @@ describe('UserProfile.vue', () => {
     expect(vm.accountStatus).toBe('inactive')
     expect(vm.getCustomerTierLabel('tier1')).toBe('سطح 1')
     expect(vm.getCustomerTierLabel('unknown-tier')).toBe('---')
-    expect(wrapper.text()).toContain('⛔ غیرفعال')
+    expect(wrapper.text()).toContain('غیرفعال')
     expect(wrapper.text()).toContain('این حساب از بازار خارج شده و تا فعال‌سازی مجدد، دسترسی معاملاتی ندارد.')
 
     vm.showBlockModal = true

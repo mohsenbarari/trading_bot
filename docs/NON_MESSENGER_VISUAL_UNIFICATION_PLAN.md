@@ -1,7 +1,7 @@
 # نقشه بازطراحی واقعی UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 4 تکمیل شد؛ اجرای Stage 5 به بعد هنوز شروع نشده است.
+وضعیت: Stage 5 تکمیل شد؛ اجرای Stage 6 به بعد هنوز شروع نشده است.
 قاعده مهم: production deploy در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. هدف محصول
@@ -356,8 +356,7 @@ Tablet/Desktop:
 - `npm run test:unit:run -- AppPrimitives.test.ts OperationsView.test.ts` پاس شد: `2` فایل، `8/8` تست.
 - `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
 
-مراحل باقی‌مانده بعد از Stage 4:
-- Stage 5: پاکسازی Profile و Public Profile.
+مراحل باقی‌مانده بعد از Stage 5:
 - Stage 6: بازطراحی Admin Workspace.
 - Stage 7: یکپارچه‌سازی small surfaces و micro UI.
 - Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
@@ -486,6 +485,29 @@ Tablet/Desktop:
 پذیرش:
 - owner/admin/visitor modes actionهای قبلی را حفظ کنند.
 - Profile و PublicProfile زبان بصری واحد داشته باشند.
+
+خروجی انجام‌شده:
+- emojiهای قابل مشاهده از header، error state، action gridهای visitor/admin/owner در `PublicProfile.vue` حذف و با icon componentهای `lucide-vue-next` جایگزین شدند.
+- `ProfileActionCard` دیگر icon متنی نگه نمی‌دارد؛ iconها از روی `action.key` resolve می‌شوند تا رفتار actionها تغییر نکند.
+- iconهای متنی/emoji در منوها، وضعیت‌ها، customer context، limitation/block modalها و user action panel داخل `UserProfile.vue` با icon component یا متن خالص جایگزین شدند.
+- متن‌های وضعیت حساب و محدودیت از emoji جدا شدند تا با زبان بصری جدید هم‌راستا باشند.
+- fallback loading در `ProfileView.vue` از primitive مشترک `AppLoadingState` استفاده می‌کند و کلاس wrapper قبلی برای سازگاری تست/layout حفظ شد.
+- جستجوی هدفمند روی محدوده Profile/PublicProfile نشان داد emojiهای هدف‌گذاری‌شده باقی نمانده‌اند.
+
+اعتبارسنجی Stage 5:
+- `npm run test:unit:run -- PublicProfile.test.ts UserProfile.test.ts ProfileView.test.ts PublicProfileView.test.ts` پاس شد: `4` فایل، `70/70` تست.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
+- production deploy طبق قاعده این roadmap اجرا نشد.
+
+مراحل باقی‌مانده بعد از Stage 5:
+- Stage 6: بازطراحی Admin Workspace.
+- Stage 7: یکپارچه‌سازی small surfaces و micro UI.
+- Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
+- Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی.
 
 ### Stage 6 - Admin Workspace Redesign
 
