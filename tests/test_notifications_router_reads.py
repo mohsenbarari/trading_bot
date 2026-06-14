@@ -26,8 +26,10 @@ class FakeExecuteResult:
 class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
+        self.statements = []
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        self.statements.append(stmt)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -84,17 +86,32 @@ class NotificationsRouterReadTests(unittest.IsolatedAsyncioTestCase):
         unread_rows = [make_notification(1), make_notification(2)]
         all_rows = [make_notification(3, is_read=True)]
 
-        unread = await get_unread_notifications(
-            current_user=current_user,
-            db=FakeDB([FakeExecuteResult(values=unread_rows)]),
-        )
-        all_notifications = await get_all_notifications(
-            current_user=current_user,
-            db=FakeDB([FakeExecuteResult(values=all_rows)]),
-        )
+        unread_db = FakeDB([FakeExecuteResult(values=unread_rows)])
+        all_db = FakeDB([FakeExecuteResult(values=all_rows)])
+        unread = await get_unread_notifications(current_user=current_user, db=unread_db)
+        all_notifications = await get_all_notifications(current_user=current_user, db=all_db)
 
         self.assertEqual(unread, unread_rows)
         self.assertEqual(all_notifications, all_rows)
+        self.assertNotIn("LIMIT", str(unread_db.statements[0]).upper())
+        self.assertNotIn("LIMIT", str(all_db.statements[0]).upper())
+
+    async def test_notification_list_reads_apply_optional_pagination(self):
+        current_user = SimpleNamespace(id=5)
+
+        unread_db = FakeDB([FakeExecuteResult(values=[])])
+        all_db = FakeDB([FakeExecuteResult(values=[])])
+
+        await get_unread_notifications(limit=30, offset=10, current_user=current_user, db=unread_db)
+        await get_all_notifications(limit=25, offset=5, current_user=current_user, db=all_db)
+
+        unread_sql = str(unread_db.statements[0].compile(compile_kwargs={"literal_binds": True})).upper()
+        all_sql = str(all_db.statements[0].compile(compile_kwargs={"literal_binds": True})).upper()
+
+        self.assertIn("LIMIT 30", unread_sql)
+        self.assertIn("OFFSET 10", unread_sql)
+        self.assertIn("LIMIT 25", all_sql)
+        self.assertIn("OFFSET 5", all_sql)
 
 
 if __name__ == "__main__":
