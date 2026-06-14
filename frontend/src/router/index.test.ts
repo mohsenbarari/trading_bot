@@ -4,12 +4,13 @@ const beforeEachSpy = vi.fn()
 const onErrorSpy = vi.fn()
 const createWebHistorySpy = vi.fn(() => ({ history: true }))
 const authGuardMock = vi.fn()
+const createRouterSpy = vi.fn(() => ({
+  beforeEach: beforeEachSpy,
+  onError: onErrorSpy,
+}))
 
 vi.mock('vue-router', () => ({
-  createRouter: vi.fn(() => ({
-    beforeEach: beforeEachSpy,
-    onError: onErrorSpy,
-  })),
+  createRouter: createRouterSpy,
   createWebHistory: createWebHistorySpy,
 }))
 
@@ -31,6 +32,7 @@ describe('router/index.ts', () => {
   beforeEach(() => {
     beforeEachSpy.mockReset()
     onErrorSpy.mockReset()
+    createRouterSpy.mockClear()
     createWebHistorySpy.mockClear()
     authGuardMock.mockClear()
     mockLocation()
@@ -43,6 +45,39 @@ describe('router/index.ts', () => {
     expect(beforeEachSpy).toHaveBeenCalledTimes(1)
     expect(beforeEachSpy).toHaveBeenCalledWith(authGuardMock)
     expect(createWebHistorySpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('registers heavy non-messenger compatibility routes without replacing current working surfaces', async () => {
+    await import('./index')
+
+    const options = createRouterSpy.mock.calls[0]?.[0] as any
+    const routes = options.routes as Array<any>
+    const routeByName = new Map(routes.map((route) => [route.name, route]))
+
+    expect(routeByName.get('operations-customers')?.path).toBe('/operations/customers')
+    expect(routeByName.get('operations-customers-detail')?.path).toBe('/operations/customers/:relationId')
+    expect(routeByName.get('operations-accountants')?.path).toBe('/operations/accountants')
+    expect(routeByName.get('account-security')?.path).toBe('/account/security')
+    expect(routeByName.get('admin-channels')?.path).toBe('/admin/channels')
+    expect(routeByName.get('admin-user-profile')?.path).toBe('/admin/users/:id')
+
+    expect(routeByName.get('operations-customers')?.redirect({ query: { panel: 'create' }, params: {} })).toEqual({
+      name: 'profile',
+      query: { panel: 'create', workspace: 'customers' },
+    })
+    expect(routeByName.get('operations-accountants-detail')?.redirect({ query: {}, params: { relationId: '42' } })).toEqual({
+      name: 'profile',
+      query: { workspace: 'accountants', relation_id: '42' },
+    })
+    expect(routeByName.get('account-storage')?.redirect({ query: { source: 'hub' }, params: {} })).toEqual({
+      name: 'settings',
+      query: { source: 'hub', section: 'storage' },
+    })
+    expect(routeByName.get('admin-user-profile')?.redirect({ query: { mode: 'audit' }, params: { id: '7' } })).toEqual({
+      name: 'admin',
+      query: { mode: 'audit', section: 'user_profile', user_id: '7' },
+    })
+    expect(routeByName.get('admin-system')?.meta).toEqual({ requiresAuth: true, requiresAdmin: true })
   })
 
   it('forces a hard reload for dynamic chunk load failures only', async () => {

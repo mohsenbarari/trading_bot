@@ -2,6 +2,11 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { authGuard } from '../utils/auth'
 import LoginView from '../views/LoginView.vue'
 
+const withQuery = (query: Record<string, unknown>, extra: Record<string, unknown>) => ({
+  ...query,
+  ...extra,
+})
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -35,9 +40,78 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/operations/customers',
+      name: 'operations-customers',
+      redirect: (to) => ({
+        name: 'profile',
+        query: withQuery(to.query, { workspace: 'customers' }),
+      }),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/operations/customers/:relationId',
+      name: 'operations-customers-detail',
+      redirect: (to) => ({
+        name: 'profile',
+        query: withQuery(to.query, {
+          workspace: 'customers',
+          relation_id: to.params.relationId,
+        }),
+      }),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/operations/accountants',
+      name: 'operations-accountants',
+      redirect: (to) => ({
+        name: 'profile',
+        query: withQuery(to.query, { workspace: 'accountants' }),
+      }),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/operations/accountants/:relationId',
+      name: 'operations-accountants-detail',
+      redirect: (to) => ({
+        name: 'profile',
+        query: withQuery(to.query, {
+          workspace: 'accountants',
+          relation_id: to.params.relationId,
+        }),
+      }),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/account',
       name: 'account',
       component: () => import('../views/AccountHubView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/account/security',
+      name: 'account-security',
+      redirect: (to) => ({
+        name: 'settings',
+        query: withQuery(to.query, { section: 'sessions' }),
+      }),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/account/storage',
+      name: 'account-storage',
+      redirect: (to) => ({
+        name: 'settings',
+        query: withQuery(to.query, { section: 'storage' }),
+      }),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/account/notifications',
+      name: 'account-notifications',
+      redirect: (to) => ({
+        name: 'notifications',
+        query: to.query,
+      }),
       meta: { requiresAuth: true }
     },
     {
@@ -68,6 +142,72 @@ const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: () => import('../views/AdminView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/invitations',
+      name: 'admin-invitations',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, { section: 'create_invitation' }),
+      }),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/channels',
+      name: 'admin-channels',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, { section: 'create_channel' }),
+      }),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, { section: 'manage_users' }),
+      }),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/users/:id',
+      name: 'admin-user-profile',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, {
+          section: 'user_profile',
+          user_id: to.params.id,
+        }),
+      }),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/commodities',
+      name: 'admin-commodities',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, { section: 'manage_commodities' }),
+      }),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/messages',
+      name: 'admin-messages',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, { section: 'admin_messages' }),
+      }),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/system',
+      name: 'admin-system',
+      redirect: (to) => ({
+        name: 'admin',
+        query: withQuery(to.query, { section: 'settings' }),
+      }),
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
