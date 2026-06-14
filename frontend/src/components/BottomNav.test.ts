@@ -124,6 +124,41 @@ describe('BottomNav.vue', () => {
     wrapper.unmount()
   })
 
+  it('keeps operations and account tabs active for the new workspace route names', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({
+      id: 14,
+      role: 'عادی',
+      account_name: 'route-user',
+    }))
+    apiFetchMock.mockRejectedValue(new Error('temporary network issue'))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a class="nav-link-stub"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    routeState.name = 'operations-customers-detail'
+    await nextTick()
+    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('عملیات'))).toBe(true)
+
+    routeState.name = 'admin-system'
+    await nextTick()
+    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('عملیات'))).toBe(true)
+
+    routeState.name = 'account-storage'
+    await nextTick()
+    expect(wrapper.findAll('.nav-item.active').some((item) => item.text().includes('حساب'))).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('shows a red closed marker on the market navigation item when the market is closed', async () => {
     localStorage.setItem('auth_token', 'jwt-token')
     apiFetchMock.mockImplementation(async (path: string) => {

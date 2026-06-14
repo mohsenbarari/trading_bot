@@ -404,16 +404,30 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H2 - Navigation And Compatibility Adapters
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - توسعه router برای routeهای جدید.
 - حفظ deep linkهای قدیمی با redirect/adapter.
 - اصلاح active state در BottomNav.
 - افزودن breadcrumbs/back behavior برای nested workspaces.
+- خروجی این stage:
+  - routeهای آینده customer/accountant/account/admin به router اضافه شدند.
+  - تا قبل از ساخت workspaceهای واقعی، routeهای جدید به سطح‌های فعلی کارکرددار redirect می‌شوند:
+    - `/operations/customers` -> `/profile?workspace=customers`
+    - `/operations/accountants` -> `/profile?workspace=accountants`
+    - `/account/security` -> `/settings?section=sessions`
+    - `/account/storage` -> `/settings?section=storage`
+    - `/admin/*` routeهای جدید -> `/admin?section=...`
+  - `BottomNav.vue` برای route names جدید active-state آماده شد.
+  - routeهای قدیمی حذف یا redirect نشدند؛ تغییر جهت adapter به old-to-new بعد از ساخت H4/H5/H6 انجام می‌شود.
 
 پذیرش:
-- `/profile?workspace=customers/accountants` کاربر را به مقصد جدید می‌رساند.
+- `/profile?workspace=customers/accountants` همچنان مسیر فعلی کارکرددار را باز می‌کند؛ flip نهایی به مقصد جدید بعد از H4/H5 انجام می‌شود.
+- routeهای جدید customer/accountant/account/admin قابل resolve هستند و به مسیر فعلی کارکرددار هدایت می‌شوند.
 - `/admin?section=...` همچنان کار می‌کند.
 - `/chat` و badgeهای آن دست‌نخورده‌اند.
+- در H2 هیچ production deploy انجام نشد؛ این stage با تست و build محلی validate شد تا UI نیمه‌مهاجرت‌شده روی کاربران production منتشر نشود.
 
 ### Stage H3 - Operations Workspace Index
 
