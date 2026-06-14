@@ -1,6 +1,6 @@
 # trading_bot/api/routers/notifications.py
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List
@@ -35,6 +35,12 @@ class NotificationRead(BaseModel):
         from_attributes = True 
 
 
+def _normalize_notification_pagination(limit: int | None, offset: int) -> tuple[int | None, int]:
+    normalized_limit = limit if isinstance(limit, int) else None
+    normalized_offset = offset if isinstance(offset, int) else 0
+    return normalized_limit, normalized_offset
+
+
 async def sync_unread_count(db: AsyncSession, redis: Redis, user_id: int) -> int:
     count_stmt = select(func.count(Notification.id)).where(
         Notification.user_id == user_id,
@@ -59,14 +65,21 @@ async def get_unread_count(
 
 @router.get("/unread", response_model=List[NotificationRead])
 async def get_unread_notifications(
+    limit: int | None = Query(None, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """فقط پیام‌های خوانده نشده را برمی‌گرداند."""
+    normalized_limit, normalized_offset = _normalize_notification_pagination(limit, offset)
     stmt = select(Notification).where(
         Notification.user_id == current_user.id,
         Notification.is_read == False
     ).order_by(Notification.created_at.desc())
+    if normalized_offset:
+        stmt = stmt.offset(normalized_offset)
+    if normalized_limit is not None:
+        stmt = stmt.limit(normalized_limit)
     
     result = await db.execute(stmt)
     notifications = result.scalars().all()
@@ -74,13 +87,20 @@ async def get_unread_notifications(
 
 @router.get("/", response_model=List[NotificationRead])
 async def get_all_notifications(
+    limit: int | None = Query(None, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """تمام پیام‌های کاربر (تاریخچه) را برمی‌گرداند."""
+    normalized_limit, normalized_offset = _normalize_notification_pagination(limit, offset)
     stmt = select(Notification).where(
         Notification.user_id == current_user.id
     ).order_by(Notification.created_at.desc())
+    if normalized_offset:
+        stmt = stmt.offset(normalized_offset)
+    if normalized_limit is not None:
+        stmt = stmt.limit(normalized_limit)
     
     result = await db.execute(stmt)
     notifications = result.scalars().all()

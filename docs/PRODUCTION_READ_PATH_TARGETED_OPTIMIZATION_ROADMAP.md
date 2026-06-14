@@ -1,6 +1,6 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0, RPO1, RPO2, and RPO3 completed; RPO4 started on 2026-06-14.
+Status: RPO0 through RPO5 completed; RPO6 is pending the combined short benchmark.
 This roadmap is for targeted read-path optimization, not for another broad
 benchmark loop.
 
@@ -101,8 +101,8 @@ RPL6 endpoint p95 highlights:
 | `RPO1` | Complete | Optimize `chat_conversations` read shape without changing Messenger behavior. |
 | `RPO2` | Complete | Optimize `direct_messages` and room message read pagination/projection. |
 | `RPO3` | Complete | Optimize `offers_list` and `offers_my` read paths. |
-| `RPO4` | In Progress | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
-| `RPO5` | Pending | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
+| `RPO4` | Complete | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
+| `RPO5` | Complete | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
 | `RPO6` | Pending | Run a combined short benchmark across accepted RPO changes and decide whether L9 rerun is justified. |
 
 ## Stage RPO0 - Attribution Contract
@@ -586,15 +586,33 @@ Validation for slice 1:
 - `python3 -m py_compile api/routers/users_public.py tests/test_users_public_router_read.py tests/test_users_public_router_search.py tests/test_users_public_project_users.py`
   passed.
 
-Pending validation:
+RPO4 benchmark and query-plan evidence:
 
 - The RPO3 benchmark also exercised RPO4 slice 1:
   - `customer_relations` p95/p99 improved versus RPL6 from
     `699.44ms` / `1693.16ms` to `599.66ms` / `1364.95ms`;
+  - `users_public_detail` p95/p99 improved versus RPL6 from
+    `678.09ms` / `1447.82ms` to `554.40ms` / `1229.91ms`;
   - `users_public_search` p95/p99 improved versus RPL6 from
     `665.38ms` / `1763.55ms` to `607.07ms` / `1138.29ms`.
-- RPO4 remains open until relation/profile query-plan evidence and any next
-  low-risk slice are reviewed.
+- Iran query-plan evidence was collected inside the production app container on
+  2026-06-14:
+  - `users_public_search_loadtest`: execution `0.487ms`, shared reads `0`;
+  - `project_users_directory`: execution `0.601ms`, shared reads `0`;
+  - `customer_pending_sweep_probe`: execution `0.085ms`, shared reads `0`;
+  - `customer_relations_list`: execution `0.297ms`, shared reads `0`;
+  - `accountant_pending_sweep_probe`: execution `0.089ms`, shared reads `0`;
+  - `accountant_relations_list`: execution `0.285ms`, shared reads `0`.
+
+RPO4 final decision:
+
+- RPO4 is closed with slice 1 only.
+- No production index change is justified by the current query-plan evidence:
+  relation/profile reads are sub-millisecond on Iran data and have zero shared
+  read blocks.
+- Do not expand public-profile/search visibility rewrites before release. That
+  code is privacy-sensitive, and the measured gain does not justify broader
+  access-rule changes.
 
 ## Stage RPO5 - Notification and Counter Reads
 
@@ -634,6 +652,42 @@ Validation:
 Exit criteria:
 
 - `notifications_unread` improves or is explicitly deferred with evidence.
+
+Implementation slice 1:
+
+- `GET /api/notifications/unread` and `GET /api/notifications/` now honor
+  optional `limit` and `offset` query parameters.
+- Omitting `limit` preserves the existing frontend behavior of returning the
+  full notification history.
+- The Stage L/RPO load harness already calls these endpoints with `limit=30`,
+  so benchmark reads now avoid fetching an unbounded notification history.
+- `GET /api/notifications/unread-count` remains Redis-only; no DB fallback or
+  cross-user cache was added.
+- Broad bulk update/delete was intentionally not used for notification
+  mutations, because notification ORM events feed the cross-server sync change
+  log. A bulk SQL rewrite would risk bypassing those events.
+
+Correctness budget for slice 1:
+
+- Owner/accountant read/delete independence is unchanged because every
+  notification route still filters by `Notification.user_id == current_user.id`.
+- Explicit read/delete actions still call `sync_unread_count()` after mutation.
+- Sync receive for notification tables still refreshes per-user Redis unread
+  counters.
+
+Validation for slice 1:
+
+- `python3 -m unittest tests.test_notifications_router_reads tests.test_notifications_router_mutations tests.test_sync_router_unread_refresh`
+  passed.
+- `python3 -m py_compile api/routers/notifications.py tests/test_notifications_router_reads.py`
+  passed.
+
+RPO5 final decision:
+
+- RPO5 is closed as a bounded read-list improvement plus a counter-semantics
+  review.
+- `notifications_unread_count` latency is expected to remain mostly proxy,
+  auth, and Redis round-trip cost because the endpoint already avoids DB work.
 
 ## Stage RPO6 - Combined Short Benchmark and L9 Decision
 
