@@ -4,9 +4,13 @@ import ProfileView from './ProfileView.vue'
 
 const {
   apiFetchMock,
+  profileRouteMock,
   routerPushMock,
 } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
+  profileRouteMock: {
+    query: {},
+  },
   routerPushMock: vi.fn(),
 }))
 
@@ -15,6 +19,7 @@ vi.mock('../utils/auth', () => ({
 }))
 
 vi.mock('vue-router', () => ({
+  useRoute: () => profileRouteMock,
   useRouter: () => ({
     push: routerPushMock,
   }),
@@ -30,6 +35,7 @@ function makeResponse(payload: unknown, ok = true) {
 describe('ProfileView.vue', () => {
   beforeEach(() => {
     apiFetchMock.mockReset()
+    profileRouteMock.query = {}
     routerPushMock.mockReset()
     localStorage.clear()
   })
