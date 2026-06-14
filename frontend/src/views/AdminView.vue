@@ -12,6 +12,7 @@ import AdminMessagesView from '../components/AdminMessagesView.vue'
 import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
+import AppLoadingState from '../components/ui/AppLoadingState.vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 
 const router = useRouter()
@@ -337,10 +338,10 @@ onUnmounted(() => clearBackStack())
                     @navigate="handleNavigate"
                 />
 
-                <div v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile" class="admin-route-loading">
-                  <strong>در حال بارگذاری پروفایل کاربر...</strong>
-                  <p>پس از دریافت اطلاعات، تنظیمات کاربر منتخب نمایش داده می‌شود.</p>
-                </div>
+                <AppLoadingState
+                  v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile"
+                  label="در حال بارگذاری پروفایل کاربر"
+                />
 
                  <TradingSettings 
                    v-else-if="currentSection === 'settings' && canAccessSystemSettings" 
@@ -411,30 +412,6 @@ onUnmounted(() => clearBackStack())
   max-width: var(--ds-page-max-width);
   margin: 0 auto;
   width: 100%;
-}
-
-.admin-route-loading {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.85rem;
-  border-radius: var(--ds-radius-md);
-  border: 1px dashed var(--ds-border-medium);
-  background: var(--ds-bg-inset);
-  color: var(--ds-text-secondary);
-}
-
-.admin-route-loading strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 850;
-  line-height: 1.5;
-}
-
-.admin-route-loading p {
-  margin: 0;
-  font-size: var(--ds-font-xs);
-  line-height: 1.8;
 }
 
 .fade-enter-active,

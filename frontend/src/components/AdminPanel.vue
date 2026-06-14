@@ -12,6 +12,9 @@ import {
 import { computed, ref } from 'vue'
 import type { Component } from 'vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
+import AppActionCard from './ui/AppActionCard.vue'
+import AppMetricCard from './ui/AppMetricCard.vue'
+import AppStatusBadge from './ui/AppStatusBadge.vue'
 import HelpPopover from './HelpPopover.vue'
 
 defineEmits(['navigate'])
@@ -164,6 +167,27 @@ const actionGroups = computed(() => {
     .filter((group) => group.actions.length > 0)
 })
 
+const adminMetrics = computed(() => [
+  {
+    label: 'سطح دسترسی',
+    value: accessNote.value,
+    hint: isCachedSuperAdmin() ? 'همه ابزارها فعال است' : 'ابزارها براساس نقش محدود شده‌اند',
+    tone: isCachedSuperAdmin() ? 'success' : 'info',
+  },
+  {
+    label: 'دسته‌های فعال',
+    value: actionGroups.value.length,
+    hint: 'پنل‌های قابل استفاده',
+    tone: 'primary',
+  },
+  {
+    label: 'ابزارهای مجاز',
+    value: actions.value.length,
+    hint: 'عملیات در دسترس',
+    tone: 'neutral',
+  },
+] as const)
+
 const accessNote = computed(() => {
   if (isCachedSuperAdmin()) return 'دسترسی کامل مدیریتی'
   if (isCachedMiddleManager()) return 'دسترسی مدیر میانی'
@@ -190,6 +214,17 @@ function toggleSection(section: AdminSectionKey) {
       <p>لطفاً بخش مورد نظر خود را انتخاب کنید:</p>
     </section>
 
+    <section class="admin-metrics" aria-label="وضعیت پنل مدیریت">
+      <AppMetricCard
+        v-for="metric in adminMetrics"
+        :key="metric.label"
+        :label="metric.label"
+        :value="metric.value"
+        :hint="metric.hint"
+        :tone="metric.tone"
+      />
+    </section>
+
     <section
       v-for="group in actionGroups"
       :key="group.key"
@@ -207,7 +242,10 @@ function toggleSection(section: AdminSectionKey) {
         <div class="ds-accordion-header-info">
           <component :is="group.icon" :size="18" class="section-icon" />
           <div class="section-title-copy">
-            <h2>{{ group.title }}</h2>
+            <div class="section-title-row">
+              <h2>{{ group.title }}</h2>
+              <AppStatusBadge tone="primary">{{ group.actions.length }} ابزار</AppStatusBadge>
+            </div>
             <span>{{ group.description }}</span>
           </div>
         </div>
@@ -221,23 +259,20 @@ function toggleSection(section: AdminSectionKey) {
         :aria-labelledby="`admin-${group.key}-header`"
       >
         <div class="action-grid">
-          <button
+          <AppActionCard
             v-for="action in group.actions"
             :key="action.key"
             class="admin-action-btn hub-action"
             :class="action.variant"
-            type="button"
-            @click="$emit('navigate', action.key)"
+            :title="action.label"
+            :description="action.description"
+            :tone="action.variant === 'primary' ? 'primary' : 'neutral'"
+            @select="$emit('navigate', action.key)"
           >
-            <span class="admin-action-icon action-icon">
+            <template #icon>
               <component :is="action.icon" :size="20" />
-            </span>
-            <span class="action-copy">
-              <strong>{{ action.label }}</strong>
-              <small>{{ action.description }}</small>
-            </span>
-            <ChevronLeft :size="18" class="action-chevron" />
-          </button>
+            </template>
+          </AppActionCard>
         </div>
       </div>
     </section>
@@ -295,6 +330,12 @@ function toggleSection(section: AdminSectionKey) {
   line-height: 1.8;
 }
 
+.admin-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
 .admin-accordion {
   margin-bottom: 0;
 }
@@ -314,6 +355,13 @@ function toggleSection(section: AdminSectionKey) {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+  min-width: 0;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   min-width: 0;
 }
 
@@ -340,93 +388,6 @@ function toggleSection(section: AdminSectionKey) {
 .admin-action-btn {
   width: 100%;
   min-height: 72px;
-  display: grid;
-  grid-template-columns: 44px 1fr 24px;
-  align-items: center;
-  gap: 0.75rem;
-  direction: rtl;
-  text-align: right;
-  padding: 0.85rem;
-  border: 1px solid var(--ds-border-accent);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.18s ease;
-}
-
-.admin-action-btn:hover {
-  border-color: var(--ds-primary-500);
-  color: var(--ds-primary-700);
-  background: var(--ds-primary-50);
-}
-
-.admin-action-btn:active {
-  transform: scale(0.985);
-  background: var(--ds-primary-50);
-}
-
-.admin-action-btn.primary {
-  background: var(--ds-gradient-primary);
-  color: white;
-  border-color: transparent;
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
-}
-
-.admin-action-btn.primary:hover {
-  background: linear-gradient(135deg, var(--ds-primary-600), var(--ds-primary-700));
-  color: white;
-}
-
-.admin-action-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--ds-radius-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
-  flex: 0 0 auto;
-}
-
-.admin-action-btn.primary .admin-action-icon {
-  background: rgba(255, 255, 255, 0.22);
-  color: white;
-}
-
-.action-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.action-copy strong {
-  color: inherit;
-  font-size: var(--ds-font-md);
-  font-weight: 850;
-  line-height: 1.35;
-}
-
-.action-copy small {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.6;
-}
-
-.admin-action-btn.primary .action-copy small {
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.action-chevron {
-  color: var(--ds-text-placeholder);
-}
-
-.admin-action-btn.primary .action-chevron {
-  color: rgba(255, 255, 255, 0.78);
 }
 
 .admin-empty-state {
@@ -454,5 +415,17 @@ function toggleSection(section: AdminSectionKey) {
   margin: 0;
   font-size: var(--ds-font-xs);
   line-height: 1.8;
+}
+
+@media (max-width: 640px) {
+  .admin-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .section-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
 }
 </style>

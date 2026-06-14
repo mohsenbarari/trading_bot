@@ -195,6 +195,18 @@ describe('AdminView.vue', () => {
     expect(profileWrapper.get('.user-profile-stub').text()).toBe('route-param-user')
   })
 
+  it('keeps legacy section query deep links working for allowed admin tools', async () => {
+    adminViewMocks.route.query = {
+      section: 'create_channel',
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('ساخت کانال')
+    expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(true)
+  })
+
   it('renders the route-profile loading state when the profile section is awaiting route data', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -307,6 +319,19 @@ describe('AdminView.vue', () => {
   it('blocks super-admin only route names for middle managers', async () => {
     localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
     adminViewMocks.route.name = 'admin-channels'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
+  })
+
+  it('blocks legacy section query deep links that are not allowed for middle managers', async () => {
+    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر میانی' }))
+    adminViewMocks.route.query = {
+      section: 'create_channel',
+    }
 
     const wrapper = mountView()
     await flushPromises()

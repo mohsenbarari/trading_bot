@@ -356,8 +356,7 @@ Tablet/Desktop:
 - `npm run test:unit:run -- AppPrimitives.test.ts OperationsView.test.ts` پاس شد: `2` فایل، `8/8` تست.
 - `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
 
-مراحل باقی‌مانده بعد از Stage 5:
-- Stage 6: بازطراحی Admin Workspace.
+مراحل باقی‌مانده بعد از Stage 6:
 - Stage 7: یکپارچه‌سازی small surfaces و micro UI.
 - Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
 - Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
@@ -519,6 +518,29 @@ Tablet/Desktop:
 پذیرش:
 - old query deep links هنوز کار کنند.
 - middle manager فقط allowed tools را ببیند.
+
+خروجی انجام‌شده:
+- `AdminPanel.vue` روی primitiveهای مشترک `AppActionCard`، `AppMetricCard` و `AppStatusBadge` قرار گرفت تا admin index به جای button/card محلی، زبان بصری مشترک پروژه را داشته باشد.
+- کارت‌های وضعیت نقش، تعداد دسته‌های فعال و تعداد ابزارهای مجاز به landing پنل اضافه شد، بدون تغییر در navigation keyها یا permission gateها.
+- گروه‌های دسترسی/کاربران، بازار/کالاها و پیام‌ها/تنظیمات همچنان accordion با ARIA contract قبلی هستند، اما actionها از کارت مشترک استفاده می‌کنند.
+- action «ساخت کانال» برای مدیر ارشد در مجموعه ابزارهای مجاز حفظ شد و برای مدیر میانی همچنان مخفی/غیرقابل دسترس ماند.
+- loading مسیر مستقیم پروفایل کاربر در `AdminView.vue` با primitive مشترک `AppLoadingState` جایگزین شد.
+- تست‌های `AdminView.test.ts` برای legacy `section` query deep-link مجاز و بلاک شدن همان deep-link برای مدیر میانی تقویت شدند.
+
+اعتبارسنجی Stage 6:
+- `npm run test:unit:run -- AdminView.test.ts AdminPanel.test.ts` پاس شد: `2` فایل، `18/18` تست.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
+- `git diff --check` پاس شد.
+- production deploy طبق قاعده این roadmap اجرا نشد.
+
+مراحل باقی‌مانده بعد از Stage 6:
+- Stage 7: یکپارچه‌سازی small surfaces و micro UI.
+- Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
+- Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی.
 
 ### Stage 7 - Small Surfaces And Micro UI
 
