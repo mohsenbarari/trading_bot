@@ -168,15 +168,19 @@ test.describe('Admin smoke regressions', () => {
     await openAdmin(page)
 
     await page.getByRole('button', { name: /تنظیمات سیستم/ }).click()
-    const invitationAccordionHeader = page.locator('.ds-accordion-header').filter({ hasText: 'دعوت‌نامه' }).first()
+    const invitationAccordionHeader = page.getByRole('button', { name: /^دعوت‌نامه$/ })
     await expect(invitationAccordionHeader).toBeVisible()
+    await expect(invitationAccordionHeader).toHaveAttribute('aria-expanded', 'false')
     await invitationAccordionHeader.click()
+    await expect(invitationAccordionHeader).toHaveAttribute('aria-expanded', 'true')
 
-    const invitationExpiryInput = page.locator('input[placeholder="2"]').first()
+    const invitationPanel = page.locator('#trading-settings-invitation-panel')
+    await expect(invitationPanel).toBeVisible()
+    const invitationExpiryInput = invitationPanel.locator('input[type="number"]').first()
     await invitationExpiryInput.fill(String(currentSettings.invitation_expiry_days))
     await page.getByRole('button', { name: /ذخیره تنظیمات/ }).click()
 
-    await expect(page.getByText('تنظیمات با موفقیت ذخیره شد')).toBeVisible()
+    await expect(page.getByRole('status')).toContainText('تنظیمات با موفقیت ذخیره شد')
   })
 
   test('admin can create an optional channel and invite a seeded active member', async ({ page, request, browserName }) => {

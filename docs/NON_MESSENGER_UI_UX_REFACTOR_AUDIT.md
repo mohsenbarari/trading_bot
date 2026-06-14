@@ -234,3 +234,4 @@ Stage N8 - Regression and production rollout:
 - Run focused unit/build checks.
 - Run high-risk e2e flows only where UI contracts changed.
 - Commit, push, deploy, and record the change.
+- Status: completed. The non-messenger regression pass covered dashboard, account, operations, profile/public-profile, settings, admin, trading-settings, owner customer/accountant managers, relation cards, and bottom navigation with `135/135` focused unit tests passing. The high-risk admin/trading-settings e2e smoke was updated to assert the Stage N7 ARIA accordion contract and viewport toast feedback, then passed in Chromium. Production frontend build passed with only the existing chunk-size warning. The rollout was recorded after the Stage N7 production deploy and this final regression hardening commit.
