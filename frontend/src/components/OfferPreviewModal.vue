@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { AppStatusBadge } from './ui'
 
 type ParsedOfferPreview = {
   trade_type: 'buy' | 'sell'
@@ -34,7 +35,6 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const tradeEmoji = computed(() => (props.offer.trade_type === 'buy' ? '🟢' : '🔴'))
 const tradeLabel = computed(() => (props.offer.trade_type === 'buy' ? 'خرید' : 'فروش'))
 const formattedPrice = computed(() => props.offer.price.toLocaleString())
 const referencePrice = computed(() => props.warning?.reference_price?.toLocaleString() ?? '')
@@ -63,18 +63,17 @@ const confirmButtonText = computed(() => {
 
       <div class="offer-preview-body">
         <div class="offer-preview-bubble">
+          <div class="offer-preview-badges">
+            <AppStatusBadge :tone="offer.trade_type === 'buy' ? 'success' : 'danger'">
+              {{ tradeLabel }}
+            </AppStatusBadge>
+            <AppStatusBadge tone="neutral">{{ lotSummary }}</AppStatusBadge>
+          </div>
           <div class="offer-preview-line">
-            {{ tradeEmoji }}{{ tradeLabel }} {{ offer.commodity_name }} {{ offer.quantity }} عدد {{ formattedPrice }}
+            {{ offer.commodity_name }} {{ offer.quantity }} عدد {{ formattedPrice }}
           </div>
           <div v-if="offer.notes" class="offer-preview-notes">
             توضیحات: {{ offer.notes }}
-          </div>
-        </div>
-
-        <div class="offer-preview-meta">
-          <div class="offer-preview-meta-row">
-            <span>نوع عرضه</span>
-            <strong>{{ lotSummary }}</strong>
           </div>
         </div>
 
@@ -172,6 +171,13 @@ const confirmButtonText = computed(() => {
   border: 1px solid rgba(245, 158, 11, 0.16);
 }
 
+.offer-preview-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.7rem;
+}
+
 .offer-preview-line {
   font-size: 1rem;
   font-weight: 800;
@@ -184,28 +190,6 @@ const confirmButtonText = computed(() => {
   font-size: 0.92rem;
   line-height: 1.75;
   color: var(--ds-text-secondary, #475569);
-}
-
-.offer-preview-meta {
-  margin-top: 0.9rem;
-  padding: 0.95rem 1rem;
-  border-radius: 0.95rem;
-  background: var(--ds-bg-page, #f8fafc);
-  border: 1px solid var(--ds-border-light, rgba(148, 163, 184, 0.2));
-}
-
-.offer-preview-meta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  font-size: 0.92rem;
-  color: var(--ds-text-secondary, #475569);
-}
-
-.offer-preview-meta-row strong {
-  color: var(--ds-text-primary, #0f172a);
-  font-weight: 800;
 }
 
 .offer-preview-error {

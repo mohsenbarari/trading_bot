@@ -209,6 +209,11 @@ onMounted(() => {
         description="مدیریت مشتریان و حسابداران از مسیرهای اختصاصی همین بخش."
         tone="primary"
       >
+        <template #actions>
+          <AppStatusBadge :tone="ownerActions.length ? 'primary' : 'neutral'">
+            {{ ownerActions.length ? `${ownerActions.length} مسیر فعال` : 'غیرفعال' }}
+          </AppStatusBadge>
+        </template>
           <div v-if="ownerActions.length" class="action-grid">
             <AppActionCard
               v-for="action in ownerActions"
@@ -238,6 +243,11 @@ onMounted(() => {
         :description="managementNote || 'ابزارهای مدیریتی فقط برای نقش‌های مجاز نمایش داده می‌شوند.'"
         :tone="isAdmin ? 'success' : 'neutral'"
       >
+        <template #actions>
+          <AppStatusBadge :tone="isAdmin ? 'success' : 'neutral'">
+            {{ adminActions.length ? `${adminActions.length} ابزار فعال` : 'بدون ابزار' }}
+          </AppStatusBadge>
+        </template>
           <div v-if="adminActions.length" class="action-grid">
             <AppActionCard
               v-for="action in adminActions"
@@ -265,6 +275,9 @@ onMounted(() => {
         title="میانبرها"
         description="مسیرهای سریع برای کارهای کم‌تکرار یا عمومی."
       >
+        <template #actions>
+          <AppStatusBadge tone="neutral">{{ shortcutAccessLabel }}</AppStatusBadge>
+        </template>
         <div class="action-grid">
           <AppActionCard
             v-for="action in utilityActions"

@@ -7,6 +7,8 @@ import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
+import AppMetricCard from '../components/ui/AppMetricCard.vue'
+import AppSectionCard from '../components/ui/AppSectionCard.vue'
 
 interface DashboardTrade {
   id: number
@@ -446,16 +448,15 @@ onBeforeUnmount(() => {
       </div>
 
       <section class="dashboard-overview" aria-label="خلاصه وضعیت روزانه">
-        <article
+        <AppMetricCard
           v-for="card in dashboardSummaryCards"
           :key="card.key"
           class="dashboard-stat-card"
-          :class="`dashboard-stat-card--${card.tone}`"
-        >
-          <span class="dashboard-stat-label">{{ card.label }}</span>
-          <strong>{{ card.value }}</strong>
-          <small>{{ card.description }}</small>
-        </article>
+          :label="card.label"
+          :value="card.value"
+          :hint="card.description"
+          :tone="card.tone"
+        />
       </section>
 
       <!-- ═══ Main Content ═══ -->
@@ -525,12 +526,13 @@ onBeforeUnmount(() => {
           </span>
         </button>
 
-        <section class="today-trades-card" aria-label="تاریخچه معاملات امروز">
-          <div class="today-trades-header">
-            <div>
-              <h2>معاملات امروز</h2>
-              <p>تاریخچه روز جاری بر اساس زمان ایران</p>
-            </div>
+        <AppSectionCard
+          class="today-trades-card"
+          title="معاملات امروز"
+          description="تاریخچه روز جاری بر اساس زمان ایران"
+          aria-label="تاریخچه معاملات امروز"
+        >
+          <template #actions>
             <button
               type="button"
               class="today-trades-refresh"
@@ -539,7 +541,7 @@ onBeforeUnmount(() => {
             >
               بروزرسانی
             </button>
-          </div>
+          </template>
 
           <div v-if="todayTradesLoading" class="today-trades-state">در حال دریافت معاملات...</div>
           <div v-else-if="todayTradesError" class="today-trades-state today-trades-state--error">
@@ -570,7 +572,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-        </section>
+        </AppSectionCard>
 
       </main>
 
@@ -834,22 +836,19 @@ onBeforeUnmount(() => {
 
 .dashboard-stat-card {
   min-width: 0;
-  display: grid;
-  gap: 0.28rem;
-  padding: 0.9rem 1rem;
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-sm);
 }
 
-.dashboard-stat-label {
+.dashboard-overview :deep(.ui-metric-card) {
+  min-height: 100%;
+}
+
+.dashboard-overview :deep(.ui-metric-card__label) {
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
   font-weight: 800;
 }
 
-.dashboard-stat-card strong {
+.dashboard-overview :deep(.ui-metric-card__value) {
   min-width: 0;
   color: var(--ds-text-primary);
   font-size: 0.98rem;
@@ -858,15 +857,10 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.dashboard-stat-card small {
+.dashboard-overview :deep(.ui-metric-card__hint) {
   color: var(--ds-text-muted);
   font-size: var(--ds-font-xs);
   line-height: 1.65;
-}
-
-.dashboard-stat-card--success {
-  border-color: rgba(22, 163, 74, 0.2);
-  background: linear-gradient(135deg, rgba(240, 253, 244, 0.92), var(--ds-bg-card));
 }
 
 .dashboard-stat-card--warning {
@@ -1024,27 +1018,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.today-trades-header {
+.today-trades-card :deep(.ui-section-card__body) {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 1.1rem 0.85rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-}
-
-.today-trades-header h2 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 800;
-  color: var(--ds-text-primary);
-}
-
-.today-trades-header p {
-  margin: 0.25rem 0 0;
-  font-size: 0.78rem;
-  color: var(--ds-text-secondary);
-  line-height: 1.5;
+  flex-direction: column;
+  gap: 0;
 }
 
 .today-trades-refresh {

@@ -519,8 +519,22 @@ Gate نهایی Stage 12:
 
 ### Stage 9 - Dashboard/Operations/Market
 
-- Dashboard و Operations را polish نهایی کن.
-- Market shell/filter/action bar/recent/preview را هماهنگ کن؛ trading logic دست‌نخورده بماند.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `frontend/src/views/DashboardView.vue` در summary و daily-trades از primitiveهای shared استفاده می‌کند: summary cards روی `AppMetricCard` نشستند و کارت «معاملات امروز» به `AppSectionCard` منتقل شد، بدون تغییر API calls، top-bar flow، routing یا منطق تشخیص نقش/وضعیت بازار.
+- `frontend/src/views/OperationsView.vue` polish نهایی سطح route گرفت: برای هر section badge جمع‌بندی مسیر/ابزار فعال اضافه شد تا کاربر قبل از ورود به زیرمنوها بداند چه سطحی از دسترسی در همان بخش برای او باز است.
+- `frontend/src/views/MarketView.vue` در بخش non-trading presentation هماهنگ‌تر شد: action bar حالا summary و helper text روشن‌تری برای ثبت لفظ دارد، dropdown «لفظ‌های اخیر» header و hierarchy خواناتری گرفت، و badgeهای buy/sell از الگوی shared استفاده می‌کنند.
+- `frontend/src/components/OfferPreviewModal.vue` از preview محلی emoji-heavy قبلی فاصله گرفت و با badgeهای shared (`AppStatusBadge`) وضعیت buy/sell و نوع عرضه را شفاف‌تر نشان می‌دهد؛ منطق parse/confirm/edit/cancel و warning flow دست‌نخورده ماند.
+- در این stage هیچ trading logic، websocket contract، offer parse flow، tier policy، یا backend/store contract بازار تغییر نکرد.
+
+اعتبارسنجی Stage 9:
+
+- `npm run test:unit:run -- src/views/DashboardView.test.ts src/views/OperationsView.test.ts src/views/MarketView.test.ts` پاس شد: `38/38`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 10 - Small surfaces
 

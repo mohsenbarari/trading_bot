@@ -175,6 +175,11 @@ const marketShellDescription = computed(() => (
     ? 'وضعیت لحظه‌ای بازار و لفظ‌های قابل معامله'
     : 'بازار بسته است و ثبت لفظ جدید تا باز شدن بازار غیرفعال می‌ماند'
 ))
+const marketComposerDescription = computed(() => (
+  isMarketOpen.value
+    ? 'لفظ جدید را مستقیم و متنی ثبت کنید یا یکی از لفظ‌های اخیر را بازنشر کنید.'
+    : 'ثبت لفظ جدید موقتاً غیرفعال است و بعد از باز شدن بازار دوباره فعال می‌شود.'
+))
 const shouldCollapseAdminMarketMessage = computed(() => (
   !!adminMarketMessage.value
   && isMarketOpen.value
@@ -785,6 +790,14 @@ onUnmounted(() => {
     <!-- Bottom Action Bar -->
     <div v-if="!isTier2Customer" class="market-action-bar">
       <div class="action-bar-inner">
+        <div class="action-bar-summary">
+          <div class="action-bar-copy">
+            <strong>ثبت لفظ</strong>
+            <p>{{ marketComposerDescription }}</p>
+          </div>
+          <AppStatusBadge tone="neutral">لفظ‌های اخیر</AppStatusBadge>
+        </div>
+
         <!-- Text Input Row -->
         <div ref="recentOffersRef" class="input-wrapper">
           <button
@@ -802,6 +815,10 @@ onUnmounted(() => {
           </button>
           <transition name="recent-offers-dropdown">
             <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown">
+              <div class="recent-offers-header">
+                <strong>لفظ‌های اخیر</strong>
+                <span>بازنشر سریع از یک ساعت گذشته</span>
+              </div>
               <AppLoadingState
                 v-if="recentOffersLoading"
                 class="recent-offers-state"
@@ -829,9 +846,12 @@ onUnmounted(() => {
                 @click="openRecentOfferPreview(offer)"
               >
                 <div class="recent-offer-item-main">
-                  <span class="recent-offer-item-badge" :class="offer.offer_type === 'buy' ? 'recent-offer-item-badge--buy' : 'recent-offer-item-badge--sell'">
-                    {{ offer.offer_type === 'buy' ? 'خ' : 'ف' }}
-                  </span>
+                  <AppStatusBadge
+                    class="recent-offer-item-badge"
+                    :tone="offer.offer_type === 'buy' ? 'success' : 'danger'"
+                  >
+                    {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
+                  </AppStatusBadge>
                   <span class="recent-offer-item-copy">
                     <span class="recent-offer-item-summary">
                       {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
@@ -1152,6 +1172,33 @@ onUnmounted(() => {
   gap: 0.75rem;
 }
 
+.action-bar-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.action-bar-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.action-bar-copy strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 900;
+  line-height: 1.5;
+}
+
+.action-bar-copy p {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.65;
+}
+
 .input-wrapper {
   position: relative;
 }
@@ -1208,6 +1255,25 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(16px);
 }
 
+.recent-offers-header {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.55rem 0.3rem;
+}
+
+.recent-offers-header strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 900;
+  line-height: 1.5;
+}
+
+.recent-offers-header span {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.6;
+}
+
 .recent-offers-state {
   margin: 0;
 }
@@ -1249,24 +1315,7 @@ onUnmounted(() => {
 
 .recent-offer-item-badge {
   flex: 0 0 auto;
-  width: 1.45rem;
-  height: 1.45rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 900;
-}
-
-.recent-offer-item-badge--buy {
-  background: var(--ds-success-50);
-  color: var(--ds-success-700);
-}
-
-.recent-offer-item-badge--sell {
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-700);
+  align-self: flex-start;
 }
 
 .recent-offer-item-summary {
@@ -1381,4 +1430,10 @@ onUnmounted(() => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .ltr { direction: ltr; }
+
+@media (max-width: 420px) {
+  .action-bar-summary {
+    flex-direction: column;
+  }
+}
 </style>
