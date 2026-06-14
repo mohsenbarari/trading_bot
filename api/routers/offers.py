@@ -69,6 +69,14 @@ def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> No
         )
 
 
+def build_offer_read_options(*, include_owner_identity: bool):
+    """Return the relationships required by the offer response serializer."""
+    options = [selectinload(Offer.commodity)]
+    if include_owner_identity:
+        options.append(selectinload(Offer.user))
+    return tuple(options)
+
+
 router = APIRouter(
     tags=["Offers"],
 )
@@ -159,16 +167,15 @@ def offer_to_response(
     
     # محاسبه زمان انقضا
     expires_at_ts = None
-    logger.info(f"TRACE EXPIRY: offer.id={offer.id} offer.status={offer.status} offer.status.type={type(offer.status)}")
+    logger.debug("offer_expiry_trace id=%s status=%s", offer.id, offer.status)
     if offer.status == OfferStatus.ACTIVE:
         try:
             ts = start_settings or get_trading_settings()
-            logger.info(f"TRACE SETTINGS: offer_expiry_minutes={ts.offer_expiry_minutes}")
             # تبدیل created_at به timestamp
             created_ts = offer.created_at.timestamp()
             expiry_seconds = ts.offer_expiry_minutes * 60
             expires_at_ts = int(created_ts + expiry_seconds)
-            logger.info(f"TRACE EXPIRY RESULT: ID={offer.id} ExpiresTS={expires_at_ts}")
+            logger.debug("offer_expiry_result id=%s expires_at_ts=%s", offer.id, expires_at_ts)
         except Exception as e:
             logger.error(f"Error calculating expiry for offer {offer.id}: {e}")
 
@@ -571,8 +578,7 @@ async def get_active_offers(
     owner_user = context.owner_user
 
     query = select(Offer).options(
-        selectinload(Offer.user),
-        selectinload(Offer.commodity)
+        *build_offer_read_options(include_owner_identity=False)
     ).where(Offer.status == OfferStatus.ACTIVE)
     
     if offer_type:
@@ -617,8 +623,7 @@ async def get_my_offers(
     owner_user = context.owner_user
 
     query = select(Offer).options(
-        selectinload(Offer.user),
-        selectinload(Offer.commodity)
+        *build_offer_read_options(include_owner_identity=True)
     ).where(Offer.user_id == owner_user.id)
     
     # فیلتر کردن لفظ‌هایی که دوباره منتشر شده‌اند
