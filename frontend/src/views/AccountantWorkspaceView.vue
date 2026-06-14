@@ -1,13 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { BriefcaseBusiness, Clock, Search, ShieldAlert, SlidersHorizontal, UserPlus } from 'lucide-vue-next'
+import { BriefcaseBusiness, Clock, Copy, ShieldAlert, UserPlus, Users } from 'lucide-vue-next'
 import OwnerAccountantManagerModal from '../components/OwnerAccountantManagerModal.vue'
 import { WorkspaceNotice, WorkspaceSection, WorkspaceShell } from '../components/workspace'
-import { AppActionCard, AppButton, AppCard, AppFormField, AppInput, AppListItem, AppMetricCard, AppStatusBadge, AppTabs } from '../components/ui'
 import {
-  fetchOwnerAccountantSessions,
+  AppActionCard,
+  AppBottomSheet,
+  AppButton,
+  AppCard,
+  AppConfirmDialog,
+  AppDangerZone,
+  AppEmptyState,
+  AppFilterChips,
+  AppFormField,
+  AppInput,
+  AppListItem,
+  AppMasterDetail,
+  AppMetricCard,
+  AppResponsiveDialog,
+  AppSearchField,
+  AppStatusBadge,
+  AppTabs,
+  AppTextarea,
+} from '../components/ui'
+import {
+  createOwnerAccountantRelation,
+  deleteOwnerAccountantRelation,
   fetchOwnerAccountantRelations,
+  fetchOwnerAccountantSessions,
+  normalizeDutyDescription,
+  terminateOwnerAccountantSession,
+  updateOwnerAccountantRelation,
   useOwnerAccountants,
   type AccountantRelation,
   type AccountantSessionSummary,
@@ -17,9 +41,24 @@ const route = useRoute()
 const router = useRouter()
 const accountantState = useOwnerAccountants()
 const isLoading = ref(true)
+const isMobile = ref(false)
 const error = ref('')
 const isCompatibilityManagerOpen = ref(false)
 const compatibilityPanel = ref<string | null>(null)
+const isCreatePanelOpen = ref(false)
+const isCreateSubmitting = ref(false)
+const createError = ref('')
+const createNotice = ref('')
+const isSavingDuty = ref(false)
+const dutyError = ref('')
+const dutyNotice = ref('')
+const copiedRelationId = ref<number | null>(null)
+const isConfirmDialogOpen = ref(false)
+const confirmTitle = ref('')
+const confirmMessage = ref('')
+const confirmAction = ref<'terminate-session' | 'cancel-invitation' | 'unlink-relation' | null>(null)
+const confirmRelation = ref<AccountantRelation | null>(null)
+const confirmSession = ref<AccountantSessionSummary | null>(null)
 const searchQuery = ref('')
 const relationFilter = ref('all')
 const detailSessions = ref<AccountantSessionSummary[]>([])
@@ -84,9 +123,10 @@ const detailTab = computed({
 const filteredRelations = computed(() => {
   const query = searchQuery.value.trim().toLocaleLowerCase('fa-IR')
   return accountantState.orderedRelations.value.filter((relation) => {
-    if (relationFilter.value === 'active' && relation.status !== 'active') return false
-    if (relationFilter.value === 'pending' && relation.status !== 'pending') return false
-    if (relationFilter.value === 'inactive' && (relation.status === 'active' || relation.status === 'pending')) return false
+    const filter = relationFilter.value
+    if (filter === 'active' && relation.status !== 'active') return false
+    if (filter === 'pending' && relation.status !== 'pending') return false
+    if (filter === 'inactive' && (relation.status === 'active' || relation.status === 'pending')) return false
     if (!query) return true
     const haystack = [
       relation.relation_display_name,
@@ -102,6 +142,8 @@ const filteredRelations = computed(() => {
 
 const visiblePendingRelations = computed(() => filteredRelations.value.filter((relation) => relation.status === 'pending'))
 const visibleManageableRelations = computed(() => filteredRelations.value.filter((relation) => relation.status !== 'pending'))
+
+const generatedGlobalAccountName = computed(() => accountantState.createForm.account_name.trim())
 
 async function loadRelations() {
   isLoading.value = true
@@ -157,6 +199,39 @@ function closeCompatibilityManager() {
   void loadRelations()
 }
 
+function updateIsMobile() {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
+
+function openCreatePanel() {
+  isCreatePanelOpen.value = true
+  createError.value = ''
+  createNotice.value = ''
+}
+
+function closeCreatePanel() {
+  isCreatePanelOpen.value = false
+}
+
+function resetCreateForm() {
+  Object.assign(accountantState.createForm, {
+    account_name: '',
+    relation_display_name: '',
+    mobile_number: '',
+    duty_description: '',
+  })
+}
+
+function seedEditForm(relation: AccountantRelation | null, options: { resetFeedback?: boolean } = {}) {
+  const { resetFeedback = true } = options
+  accountantState.editForm.duty_description = relation?.duty_description || ''
+  if (resetFeedback) {
+    dutyError.value = ''
+    dutyNotice.value = ''
+  }
+}
+
 async function loadDetailSessions(force = false) {
   const relation = activeRelation.value
   if (!relation || relation.status !== 'active' || !relation.accountant_user_id) {
@@ -181,12 +256,138 @@ function refreshCurrentDetailTab() {
   }
 }
 
+async function createRelation() {
+  if (isCreateSubmitting.value) return
+  isCreateSubmitting.value = true
+  createError.value = ''
+  createNotice.value = ''
+  try {
+    const created = await createOwnerAccountantRelation({
+      account_name: accountantState.createForm.account_name,
+      relation_display_name: accountantState.createForm.relation_display_name,
+      mobile_number: accountantState.createForm.mobile_number,
+      duty_description: normalizeDutyDescription(accountantState.createForm.duty_description),
+    })
+    accountantState.relations.value = [created, ...accountantState.relations.value.filter((item) => item.id !== created.id)]
+    createNotice.value = 'دعوت حسابدار با موفقیت ثبت شد.'
+    resetCreateForm()
+    closeCreatePanel()
+  } catch (err: any) {
+    createError.value = err?.message || 'ایجاد حسابدار ناموفق بود.'
+  } finally {
+    isCreateSubmitting.value = false
+  }
+}
+
+async function saveDuty() {
+  const relation = activeRelation.value
+  if (!relation || isSavingDuty.value) return
+  const normalizedDuty = normalizeDutyDescription(accountantState.editForm.duty_description)
+  const currentDuty = normalizeDutyDescription(relation.duty_description || '')
+  if (normalizedDuty === currentDuty) {
+    dutyNotice.value = 'تغییری برای ذخیره انتخاب نشده است.'
+    return
+  }
+  isSavingDuty.value = true
+  dutyError.value = ''
+  dutyNotice.value = ''
+  try {
+    const updated = await updateOwnerAccountantRelation(relation.id, {
+      duty_description: normalizedDuty,
+    })
+    accountantState.relations.value = accountantState.relations.value.map((item) => (item.id === updated.id ? updated : item))
+    seedEditForm(updated, { resetFeedback: false })
+    dutyNotice.value = 'شرح وظیفه حسابدار ذخیره شد.'
+  } catch (err: any) {
+    dutyError.value = err?.message || 'ذخیره شرح وظیفه ناموفق بود.'
+  } finally {
+    isSavingDuty.value = false
+  }
+}
+
+async function copyRegistrationLink(relation: AccountantRelation) {
+  if (!relation.registration_link) return
+  try {
+    await navigator.clipboard.writeText(relation.registration_link)
+    copiedRelationId.value = relation.id
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        if (copiedRelationId.value === relation.id) copiedRelationId.value = null
+      }, 1800)
+    }
+  } catch {
+    dutyError.value = 'کپی لینک ثبت‌نام ممکن نشد.'
+  }
+}
+
+function openConfirmDialog(
+  kind: 'terminate-session' | 'cancel-invitation' | 'unlink-relation',
+  relation: AccountantRelation,
+  session: AccountantSessionSummary | null = null,
+) {
+  confirmAction.value = kind
+  confirmRelation.value = relation
+  confirmSession.value = session
+  confirmTitle.value = kind === 'terminate-session'
+    ? 'پایان نشست'
+    : kind === 'cancel-invitation'
+      ? 'لغو دعوت حسابدار'
+      : 'قطع ارتباط حسابدار'
+  confirmMessage.value = kind === 'terminate-session'
+    ? `نشست «${session?.device_name || 'دستگاه حسابدار'}» پایان یابد؟`
+    : kind === 'cancel-invitation'
+      ? `دعوت «${relation.relation_display_name}» لغو شود؟`
+      : `ارتباط «${relation.relation_display_name}» قطع شود؟ این عملیات دسترسی حسابدار را غیرفعال می‌کند.`
+  isConfirmDialogOpen.value = true
+}
+
+function closeConfirmDialog() {
+  isConfirmDialogOpen.value = false
+  confirmAction.value = null
+  confirmRelation.value = null
+  confirmSession.value = null
+}
+
+async function handleConfirmAction() {
+  const relation = confirmRelation.value
+  if (!relation || !confirmAction.value) return
+  const action = confirmAction.value
+  const session = confirmSession.value
+  closeConfirmDialog()
+
+  if (action === 'terminate-session' && session) {
+    detailSessionsError.value = ''
+    try {
+      await terminateOwnerAccountantSession(relation.id, session.id)
+      await loadDetailSessions(true)
+    } catch (err: any) {
+      detailSessionsError.value = err?.message || 'پایان دادن نشست حسابدار ناموفق بود.'
+    }
+    return
+  }
+
+  try {
+    await deleteOwnerAccountantRelation(
+      relation.id,
+      action === 'cancel-invitation' ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.',
+    )
+    accountantState.relations.value = accountantState.relations.value.filter((item) => item.id !== relation.id)
+    if (activeRelation.value?.id === relation.id) {
+      backToList()
+    }
+  } catch (err: any) {
+    detailSessionsError.value = err?.message
+      || (action === 'cancel-invitation' ? 'لغو دعوت حسابدار ناموفق بود.' : 'قطع ارتباط حسابدار ناموفق بود.')
+  }
+}
+
 function getRelationTitle(relation: AccountantRelation) {
   return relation.relation_display_name || relation.accountant_account_name || relation.global_account_name || 'حسابدار'
 }
 
 function getRelationDescription(relation: AccountantRelation) {
-  return `${relation.mobile_number || 'بدون شماره'}${relation.duty_description ? ` - ${relation.duty_description}` : ''}`
+  const mobile = relation.mobile_number || 'بدون شماره'
+  return relation.duty_description ? `${mobile} - ${relation.duty_description}` : mobile
 }
 
 function getStatusTone(status: string) {
@@ -222,7 +423,15 @@ function getDutyText(relation: AccountantRelation) {
 }
 
 watch(initialPanel, (panel) => {
-  if (panel === 'create' || panel === 'pending' || panel === 'manage' || panel === 'relations') {
+  if (panel === 'create') {
+    openCreatePanel()
+    return
+  }
+  if (panel === 'pending') {
+    relationFilter.value = 'pending'
+    return
+  }
+  if (panel === 'legacy') {
     openCompatibilityManager(panel)
   }
 }, { immediate: true })
@@ -233,8 +442,24 @@ watch([activeRelation, detailTab], () => {
   refreshCurrentDetailTab()
 }, { flush: 'post' })
 
+watch(activeRelation, (relation, previousRelation) => {
+  seedEditForm(relation, {
+    resetFeedback: relation?.id !== previousRelation?.id,
+  })
+}, { immediate: true })
+
 onMounted(() => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+  }
   void loadRelations()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+  }
 })
 </script>
 
@@ -243,7 +468,7 @@ onMounted(() => {
     <WorkspaceShell
       title="حسابداران"
       eyebrow="عملیات"
-      description="نمای route-native برای مرور حسابداران و ورود به مدیریت کامل."
+      description="افزودن، مرور و تنظیم روابط حسابداران در یک فضای کاری یکپارچه."
       layout="split"
       show-back
       back-label="بازگشت"
@@ -253,7 +478,7 @@ onMounted(() => {
         <AppButton variant="secondary" class="accountant-workspace-action" @click="goToOperations">
           عملیات
         </AppButton>
-        <AppButton variant="primary" class="accountant-workspace-create" @click="openCompatibilityManager('create')">
+        <AppButton variant="primary" class="accountant-workspace-create" @click="openCreatePanel">
           <template #icon>
             <UserPlus :size="16" />
           </template>
@@ -289,7 +514,7 @@ onMounted(() => {
         <WorkspaceSection
           v-if="relationIdNumber"
           title="پرونده حسابدار"
-          description="مشخصات، شرح وظیفه، نشست‌ها و اقدامات حساس در یک نمای tabدار."
+          description="مشخصات، شرح وظیفه، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
         >
           <WorkspaceNotice
             v-if="!activeRelation && !isLoading"
@@ -326,6 +551,10 @@ onMounted(() => {
                 <strong>{{ activeRelation.accountant_account_name || activeRelation.global_account_name || 'در انتظار ثبت‌نام' }}</strong>
               </AppCard>
               <AppCard>
+                <span class="accountant-field-label">نام کاربری جهانی</span>
+                <strong>@{{ activeRelation.global_account_name || 'ثبت نشده' }}</strong>
+              </AppCard>
+              <AppCard>
                 <span class="accountant-field-label">فعال‌سازی</span>
                 <strong>{{ formatDate(activeRelation.activated_at) }}</strong>
               </AppCard>
@@ -333,20 +562,38 @@ onMounted(() => {
                 <span class="accountant-field-label">ایجاد رابطه</span>
                 <strong>{{ formatDate(activeRelation.created_at) }}</strong>
               </AppCard>
-              <AppCard>
-                <span class="accountant-field-label">انقضا دعوت</span>
-                <strong>{{ formatDate(activeRelation.expires_at) }}</strong>
-              </AppCard>
             </div>
 
             <div v-else-if="detailTab === 'duty'" class="accountant-detail-list">
-              <AppCard>
+              <AppCard class="accountant-edit-form-card">
                 <span class="accountant-field-label">شرح وظیفه فعلی</span>
                 <strong>{{ getDutyText(activeRelation) }}</strong>
               </AppCard>
-              <AppButton variant="secondary" @click="openCompatibilityManager('manage')">
-                ویرایش شرح وظیفه
-              </AppButton>
+
+              <AppCard class="accountant-edit-form-card">
+                <AppFormField label="ویرایش شرح وظیفه" hint="این توضیح برای تفکیک نقش حسابدار در فضای کاری شما استفاده می‌شود.">
+                  <template #default="{ id }">
+                    <AppTextarea
+                      :id="id"
+                      v-model="accountantState.editForm.duty_description"
+                      rows="4"
+                      :placeholder="activeRelation.duty_description || 'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'"
+                    />
+                  </template>
+                </AppFormField>
+
+                <WorkspaceNotice v-if="dutyError" tone="danger" title="ذخیره شرح وظیفه ناموفق بود" :message="dutyError" />
+                <WorkspaceNotice v-else-if="dutyNotice" tone="success" title="شرح وظیفه ذخیره شد" :message="dutyNotice" />
+
+                <div class="accountant-inline-actions">
+                  <AppButton variant="secondary" @click="accountantState.editForm.duty_description = activeRelation.duty_description || ''">
+                    بازنشانی
+                  </AppButton>
+                  <AppButton variant="primary" :loading="isSavingDuty" @click="saveDuty">
+                    ذخیره تغییرات
+                  </AppButton>
+                </div>
+              </AppCard>
             </div>
 
             <div v-else-if="detailTab === 'sessions'" class="accountant-detail-list">
@@ -366,50 +613,74 @@ onMounted(() => {
                   :key="session.id"
                   :title="session.device_name || session.platform || 'دستگاه بدون نام'"
                   :description="`${session.home_server || 'سرور نامشخص'} · آخرین فعالیت ${formatDate(session.last_active_at)}`"
-                  :meta="session.is_primary ? 'اصلی' : 'فرعی'"
                 >
                   <template #leading>
                     <Clock :size="18" />
                   </template>
+                  <template #trailing>
+                    <div class="accountant-session-actions">
+                      <AppStatusBadge :tone="session.is_primary ? 'primary' : 'neutral'">
+                        {{ session.is_primary ? 'اصلی' : 'فرعی' }}
+                      </AppStatusBadge>
+                      <AppButton size="sm" variant="secondary" @click.stop="openConfirmDialog('terminate-session', activeRelation, session)">
+                        پایان نشست
+                      </AppButton>
+                    </div>
+                  </template>
                 </AppListItem>
               </template>
-              <AppButton variant="secondary" @click="openCompatibilityManager('manage')">
-                مدیریت نشست‌ها
-              </AppButton>
             </div>
 
             <div v-else class="accountant-detail-list">
-              <AppCard tone="danger">
+              <AppDangerZone
+                title="اقدامات حساس حسابدار"
+                :description="activeRelation.status === 'pending'
+                  ? 'دعوت ثبت‌شده را لغو کنید یا قبل از فعال‌سازی آن را متوقف نگه دارید.'
+                  : 'در این بخش می‌توانید دسترسی حسابدار را به‌طور کامل قطع کنید.'"
+              >
                 <div class="accountant-danger-card">
                   <ShieldAlert :size="22" />
                   <div>
-                    <strong>اقدامات حساس حسابدار</strong>
-                    <p>قطع رابطه یا لغو دعوت باید از مسیر مدیریت کامل انجام شود تا confirmation و permissionهای قبلی حفظ شوند.</p>
+                    <strong>{{ activeRelation.status === 'pending' ? 'لغو دعوت حسابدار' : 'قطع ارتباط حسابدار' }}</strong>
+                    <p>
+                      {{ activeRelation.status === 'pending'
+                        ? 'لغو دعوت، لینک ثبت‌نام را بی‌اعتبار می‌کند.'
+                        : 'قطع ارتباط، دسترسی حسابدار به حساب فعلی را غیرفعال می‌کند.' }}
+                    </p>
                   </div>
                 </div>
-              </AppCard>
-              <AppButton variant="danger" @click="openCompatibilityManager('manage')">
-                ورود به اقدامات حساس
-              </AppButton>
+                <div class="accountant-inline-actions">
+                  <AppButton
+                    variant="danger"
+                    @click="openConfirmDialog(activeRelation.status === 'pending' ? 'cancel-invitation' : 'unlink-relation', activeRelation)"
+                  >
+                    {{ activeRelation.status === 'pending' ? 'لغو دعوت حسابدار' : 'قطع ارتباط حسابدار' }}
+                  </AppButton>
+                </div>
+              </AppDangerZone>
             </div>
           </div>
         </WorkspaceSection>
 
         <WorkspaceSection
           title="لیست حسابداران"
-          description="جستجو، فیلتر و انتخاب حسابدار بدون accordionهای تو در تو."
+          description="جستجو، فیلتر و انتخاب حسابدار با ساختار روشن و بدون accordionهای تو در تو."
         >
           <div class="accountant-list-controls">
-            <AppFormField label="جستجوی حسابدار" hint="نام، شماره موبایل، حساب یا شرح وظیفه را جستجو کنید.">
-              <template #default="{ id }">
-                <div class="accountant-search-field">
-                  <Search :size="16" />
-                  <AppInput :id="id" v-model="searchQuery" placeholder="مثلاً نرگس یا ثبت معاملات" />
-                </div>
-              </template>
-            </AppFormField>
-            <AppTabs v-model="relationFilter" label="فیلتر حسابداران" :options="relationFilterOptions" />
+            <AppSearchField
+              v-model="searchQuery"
+              label="جستجوی حسابدار"
+              placeholder="نام، شماره موبایل، حساب یا شرح وظیفه را جستجو کنید."
+            />
+            <AppFilterChips v-model="relationFilter" label="فیلتر حسابداران" :options="relationFilterOptions" />
           </div>
+
+          <WorkspaceNotice
+            v-if="createNotice"
+            tone="success"
+            title="دعوت حسابدار ثبت شد"
+            :message="createNotice"
+          />
 
           <WorkspaceNotice
             v-if="error"
@@ -435,88 +706,194 @@ onMounted(() => {
             title="نتیجه‌ای پیدا نشد"
             message="فیلتر یا عبارت جستجو را تغییر دهید."
           />
-          <div v-else class="accountant-master-detail-grid">
-            <div class="workspace-relation-list">
-              <div v-if="visiblePendingRelations.length" class="accountant-list-group">
-                <h3>دعوت‌های در انتظار</h3>
-                <AppListItem
-                  v-for="relation in visiblePendingRelations"
-                  :key="relation.id"
-                  :title="getRelationTitle(relation)"
-                  :description="getRelationDescription(relation)"
-                  interactive
-                  @select="openRelation(relation.id)"
-                >
-                  <template #leading>
-                    <Clock :size="18" />
-                  </template>
-                  <template #trailing>
-                    <AppStatusBadge tone="warning">
-                      دعوت
-                    </AppStatusBadge>
-                  </template>
-                </AppListItem>
-              </div>
-
-              <div v-if="visibleManageableRelations.length" class="accountant-list-group">
-                <h3>حسابداران قابل مدیریت</h3>
-                <AppListItem
-                  v-for="relation in visibleManageableRelations"
-                  :key="relation.id"
-                  :title="getRelationTitle(relation)"
-                  :description="getRelationDescription(relation)"
-                  interactive
-                  @select="openRelation(relation.id)"
-                >
-                  <template #leading>
-                    <BriefcaseBusiness :size="18" />
-                  </template>
-                  <template #trailing>
-                    <div class="accountant-list-badges">
-                      <AppStatusBadge :tone="activeRelation?.id === relation.id ? 'primary' : getStatusTone(relation.status)">
-                        {{ activeRelation?.id === relation.id ? 'انتخاب‌شده' : getStatusLabel(relation.status) }}
-                      </AppStatusBadge>
+          <AppMasterDetail v-else class="accountant-master-detail-grid">
+            <template #master>
+              <div class="workspace-relation-list">
+                <div v-if="visiblePendingRelations.length" class="accountant-list-group">
+                  <h3>دعوت‌های در انتظار</h3>
+                  <AppCard
+                    v-for="relation in visiblePendingRelations"
+                    :key="relation.id"
+                    tone="warning"
+                    class="accountant-pending-card"
+                  >
+                    <div class="accountant-pending-card__header">
+                      <div>
+                        <strong>{{ getRelationTitle(relation) }}</strong>
+                        <p>{{ getRelationDescription(relation) }}</p>
+                      </div>
+                      <AppStatusBadge tone="warning">دعوت</AppStatusBadge>
                     </div>
-                  </template>
-                </AppListItem>
-              </div>
-            </div>
-          </div>
-        </WorkspaceSection>
+                    <div class="accountant-inline-actions">
+                      <AppButton
+                        v-if="relation.registration_link"
+                        size="sm"
+                        variant="secondary"
+                        @click="copyRegistrationLink(relation)"
+                      >
+                        <template #icon>
+                          <Copy :size="16" />
+                        </template>
+                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                      </AppButton>
+                      <AppButton size="sm" variant="danger" @click="openConfirmDialog('cancel-invitation', relation)">
+                        لغو دعوت
+                      </AppButton>
+                    </div>
+                  </AppCard>
+                </div>
 
+                <div v-if="visibleManageableRelations.length" class="accountant-list-group">
+                  <h3>حسابداران قابل مدیریت</h3>
+                  <AppListItem
+                    v-for="relation in visibleManageableRelations"
+                    :key="relation.id"
+                    :title="getRelationTitle(relation)"
+                    :description="getRelationDescription(relation)"
+                    interactive
+                    @select="openRelation(relation.id)"
+                  >
+                    <template #leading>
+                      <BriefcaseBusiness :size="18" />
+                    </template>
+                    <template #trailing>
+                      <div class="accountant-list-badges">
+                        <AppStatusBadge :tone="activeRelation?.id === relation.id ? 'primary' : getStatusTone(relation.status)">
+                          {{ activeRelation?.id === relation.id ? 'انتخاب‌شده' : getStatusLabel(relation.status) }}
+                        </AppStatusBadge>
+                      </div>
+                    </template>
+                  </AppListItem>
+                </div>
+              </div>
+            </template>
+
+            <template #detail>
+              <AppEmptyState
+                v-if="!activeRelation"
+                title="حسابداری انتخاب نشده است"
+                message="برای دیدن پرونده و تنظیمات، یکی از حسابداران فعال را از لیست انتخاب کنید."
+              />
+              <AppCard v-else tone="primary" class="accountant-selection-card">
+                <span class="accountant-field-label">حسابدار انتخاب‌شده</span>
+                <strong>{{ getRelationTitle(activeRelation) }}</strong>
+                <p>{{ getRelationDescription(activeRelation) }}</p>
+                <div class="accountant-inline-actions">
+                  <AppButton size="sm" variant="secondary" @click="openRelation(activeRelation.id)">
+                    مشاهده پرونده
+                  </AppButton>
+                  <AppButton
+                    v-if="activeRelation.registration_link"
+                    size="sm"
+                    variant="secondary"
+                    @click="copyRegistrationLink(activeRelation)"
+                  >
+                    {{ copiedRelationId === activeRelation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
+                  </AppButton>
+                </div>
+              </AppCard>
+            </template>
+          </AppMasterDetail>
+        </WorkspaceSection>
       </template>
 
       <template #aside>
         <WorkspaceSection
           v-if="!isCompatibilityManagerOpen"
-          title="دسترسی‌های باقی‌مانده"
-          description="تا پایان Stage 4 هیچ action فعلی حذف نمی‌شود."
+          title="میانبرهای حسابدار"
+          description="دعوت‌های در انتظار و پرونده حسابداران از همین فضای کاری قابل مدیریت است."
         >
           <div class="workspace-side-actions">
             <AppActionCard
               title="دعوت‌های در انتظار"
               :description="`${accountantState.pendingInvitationRelations.value.length.toLocaleString('fa-IR')} دعوت در وضعیت انتظار`"
               tone="warning"
-              @select="openCompatibilityManager('pending')"
+              @select="relationFilter = 'pending'"
             >
               <template #icon>
                 <Clock :size="18" />
               </template>
             </AppActionCard>
             <AppActionCard
-              title="مدیریت کامل"
-              description="ویرایش شرح وظیفه، نشست‌ها و اقدامات حساس"
+              title="افزودن حسابدار"
+              description="دعوت حسابدار جدید با نام کاربری، شماره و شرح وظیفه"
               tone="primary"
-              @select="openCompatibilityManager('manage')"
+              @select="openCreatePanel"
             >
               <template #icon>
-                <SlidersHorizontal :size="18" />
+                <UserPlus :size="18" />
               </template>
             </AppActionCard>
           </div>
         </WorkspaceSection>
       </template>
     </WorkspaceShell>
+
+    <component
+      :is="isMobile ? AppBottomSheet : AppResponsiveDialog"
+      :open="isCreatePanelOpen"
+      title="افزودن حسابدار"
+      description="اطلاعات اولیه حسابدار و شرح وظیفه را ثبت کنید."
+      @close="closeCreatePanel"
+    >
+      <div class="accountant-create-panel">
+        <AppFormField label="نام کاربری جهانی" hint="این نام برای ساخت دعوت و ورود حسابدار استفاده می‌شود.">
+          <template #default="{ id }">
+            <AppInput :id="id" v-model="accountantState.createForm.account_name" placeholder="مثلاً accountant_01" />
+          </template>
+        </AppFormField>
+
+        <AppFormField label="نام نمایشی رابطه" hint="نامی که در فضای کاری خودتان می‌بینید.">
+          <template #default="{ id }">
+            <AppInput :id="id" v-model="accountantState.createForm.relation_display_name" placeholder="مثلاً حسابدار فروش" />
+          </template>
+        </AppFormField>
+
+        <AppFormField label="شماره موبایل" hint="برای ثبت دعوت و ساخت لینک مخصوص حسابدار استفاده می‌شود.">
+          <template #default="{ id }">
+            <AppInput :id="id" v-model="accountantState.createForm.mobile_number" placeholder="0912xxxxxxx" />
+          </template>
+        </AppFormField>
+
+        <AppFormField label="شرح وظیفه" hint="اختیاری، برای تفکیک نقش حسابدار در گروه کاری.">
+          <template #default="{ id }">
+            <AppTextarea
+              :id="id"
+              v-model="accountantState.createForm.duty_description"
+              rows="4"
+              placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"
+            />
+          </template>
+        </AppFormField>
+
+        <AppCard v-if="generatedGlobalAccountName" class="accountant-generated-account">
+          <span class="accountant-field-label">نام کاربری دعوتی</span>
+          <strong>@{{ generatedGlobalAccountName }}</strong>
+        </AppCard>
+
+        <WorkspaceNotice v-if="createError" tone="danger" title="ثبت دعوت ناموفق بود" :message="createError" />
+        <WorkspaceNotice v-else-if="createNotice" tone="success" title="دعوت ثبت شد" :message="createNotice" />
+      </div>
+
+      <template #actions>
+        <AppButton variant="secondary" @click="closeCreatePanel">
+          انصراف
+        </AppButton>
+        <AppButton variant="primary" :loading="isCreateSubmitting" @click="createRelation">
+          ثبت دعوت حسابدار
+        </AppButton>
+      </template>
+    </component>
+
+    <AppConfirmDialog
+      :open="isConfirmDialogOpen"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirm-label="confirmAction === 'terminate-session' ? 'پایان نشست' : confirmAction === 'cancel-invitation' ? 'لغو دعوت' : 'قطع ارتباط'"
+      :tone="confirmAction === 'terminate-session' ? 'warning' : 'danger'"
+      @cancel="closeConfirmDialog"
+      @confirm="handleConfirmAction"
+    />
   </div>
 </template>
 
@@ -538,34 +915,11 @@ onMounted(() => {
   gap: 0.65rem;
 }
 
-.workspace-detail-card {
-  display: grid;
-  gap: 0.75rem;
-}
-
 .accountant-list-controls,
 .accountant-detail-shell,
 .accountant-detail-list {
   display: grid;
   gap: 0.85rem;
-}
-
-.accountant-search-field {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.55rem;
-  border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface);
-  color: var(--ds-text-muted);
-  padding-inline: 0.75rem 0;
-}
-
-.accountant-search-field :deep(.ui-input) {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
 }
 
 .accountant-master-detail-grid {
@@ -681,25 +1035,34 @@ onMounted(() => {
   line-height: 1.8;
 }
 
-.workspace-detail-card h2,
-.workspace-detail-card p {
-  margin: 0;
+.workspace-compatibility-panel {
+  min-width: 0;
 }
 
-.workspace-detail-card h2 {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-lg);
-  font-weight: 900;
+.accountant-edit-form-card,
+.accountant-create-panel,
+.accountant-generated-account,
+.accountant-selection-card {
+  display: grid;
+  gap: 0.85rem;
 }
 
-.workspace-detail-card p {
+.accountant-inline-actions,
+.accountant-session-actions,
+.accountant-pending-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.accountant-selection-card p,
+.accountant-pending-card__header p {
+  margin: 0.2rem 0 0;
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
   line-height: 1.8;
-}
-
-.workspace-compatibility-panel {
-  min-width: 0;
 }
 
 @media (max-width: 520px) {
@@ -715,6 +1078,13 @@ onMounted(() => {
   .accountant-detail-badges,
   .accountant-list-badges {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .accountant-workspace-view :deep(.ds-workspace-main),
+  .accountant-workspace-view :deep(.ds-workspace-aside) {
+    padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 2.25rem);
   }
 }
 </style>

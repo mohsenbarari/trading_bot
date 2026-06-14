@@ -335,8 +335,8 @@ Gate نهایی Stage 12:
 | Stage 1 | Design system completion and enforcement | Completed |
 | Stage 2 | Global layout, safe-area and fixed UI hardening | Completed |
 | Stage 3 | Customer Workspace: remove remaining legacy feel | Completed |
-| Stage 4 | Accountant Workspace: remove remaining legacy feel | Next |
-| Stage 5 | Account, Settings, Session and Storage UX | Pending |
+| Stage 4 | Accountant Workspace: remove remaining legacy feel | Completed |
+| Stage 5 | Account, Settings, Session and Storage UX | Next |
 | Stage 6 | Admin workspace and admin subviews | Pending |
 | Stage 7 | Profile and Public Profile final polish | Pending |
 | Stage 8 | Notifications final polish | Pending |
@@ -419,8 +419,25 @@ Gate نهایی Stage 12:
 
 ### Stage 4 - Accountant Workspace
 
-- create accountant، pending invitations، duty edit، sessions، danger، copy link و unlink را route-native کن.
-- `OwnerAccountantManagerModal.vue` فقط compatibility fallback بماند.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `AccountantWorkspaceView.vue` از wrapper حداقلی به یک workspace route-native واقعی تبدیل شد: summary metrics، جستجو، filter chips، master-detail، گروه دعوت‌های در انتظار، گروه حسابداران قابل مدیریت، selected-state و detail tabs.
+- create accountant با `AppBottomSheet` در mobile و `AppResponsiveDialog` در desktop route-native شد و دیگر create primary path به manager قدیمی وابسته نیست.
+- duty edit با `AppTextarea` و action ذخیره مستقیم route-native شد.
+- sessions و danger flows در همان route نگه داشته شدند و manager قدیمی فقط fallback سازگاری باقی ماند.
+- copy link، cancel invitation و unlink relation به actionهای route-level منتقل شدند.
+- `AppSearchField`, `AppFilterChips`, `AppMasterDetail`, `AppBottomSheet`, `AppResponsiveDialog`, `AppDangerZone`, `AppConfirmDialog` و `AppActionCard` در این feature مصرف واقعی گرفتند.
+- متن‌های user-facing مربوط به stage/migration از UI این صفحه حذف شدند.
+- mobile safe-area پایین این route برای stacked workspace تقویت شد تا obstruction gate Stage 2 در عرض `414px` دوباره پاس شود.
+
+اعتبارسنجی Stage 4:
+
+- `npm run test:unit:run -- AccountantWorkspaceView.test.ts` پاس شد: `6/6`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 5 - Account/Settings
 

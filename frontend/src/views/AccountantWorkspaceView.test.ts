@@ -7,6 +7,10 @@ const accountantWorkspaceMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   fetchOwnerAccountantRelationsMock: vi.fn(),
   fetchOwnerAccountantSessionsMock: vi.fn(),
+  createOwnerAccountantRelationMock: vi.fn(),
+  updateOwnerAccountantRelationMock: vi.fn(),
+  deleteOwnerAccountantRelationMock: vi.fn(),
+  terminateOwnerAccountantSessionMock: vi.fn(),
   routeState: {
     params: {} as Record<string, unknown>,
     query: {} as Record<string, unknown>,
@@ -26,6 +30,10 @@ vi.mock('../composables/useOwnerAccountants', async (importOriginal) => {
     ...actual,
     fetchOwnerAccountantRelations: accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock,
     fetchOwnerAccountantSessions: accountantWorkspaceMocks.fetchOwnerAccountantSessionsMock,
+    createOwnerAccountantRelation: accountantWorkspaceMocks.createOwnerAccountantRelationMock,
+    updateOwnerAccountantRelation: accountantWorkspaceMocks.updateOwnerAccountantRelationMock,
+    deleteOwnerAccountantRelation: accountantWorkspaceMocks.deleteOwnerAccountantRelationMock,
+    terminateOwnerAccountantSession: accountantWorkspaceMocks.terminateOwnerAccountantSessionMock,
   }
 })
 
@@ -52,6 +60,10 @@ describe('AccountantWorkspaceView.vue', () => {
     accountantWorkspaceMocks.routerPushMock.mockReset()
     accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockReset()
     accountantWorkspaceMocks.fetchOwnerAccountantSessionsMock.mockReset()
+    accountantWorkspaceMocks.createOwnerAccountantRelationMock.mockReset()
+    accountantWorkspaceMocks.updateOwnerAccountantRelationMock.mockReset()
+    accountantWorkspaceMocks.deleteOwnerAccountantRelationMock.mockReset()
+    accountantWorkspaceMocks.terminateOwnerAccountantSessionMock.mockReset()
     accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockResolvedValue([
       {
         id: 11,
@@ -75,13 +87,13 @@ describe('AccountantWorkspaceView.vue', () => {
         owner_user_id: 1,
         accountant_user_id: null,
         accountant_account_name: null,
-        global_account_name: null,
+        global_account_name: 'accountant12',
         relation_display_name: 'دعوت حسابدار',
         duty_description: null,
         mobile_number: '09122222222',
         status: 'pending',
         invitation_token: 'token',
-        registration_link: null,
+        registration_link: 'https://example.test/invite/accountant12',
         expires_at: null,
         activated_at: null,
         deleted_at: null,
@@ -101,6 +113,40 @@ describe('AccountantWorkspaceView.vue', () => {
         last_active_at: '2026-01-02T10:00:00Z',
       },
     ])
+    accountantWorkspaceMocks.createOwnerAccountantRelationMock.mockResolvedValue({
+      id: 15,
+      owner_user_id: 1,
+      accountant_user_id: null,
+      accountant_account_name: null,
+      global_account_name: 'accountant15',
+      relation_display_name: 'حسابدار جدید',
+      duty_description: 'پیگیری پیشنهادها',
+      mobile_number: '09123334444',
+      status: 'pending',
+      invitation_token: 'new-token',
+      registration_link: 'https://example.test/invite/accountant15',
+      expires_at: null,
+      activated_at: null,
+      deleted_at: null,
+      created_at: '2026-01-03T10:00:00Z',
+    })
+    accountantWorkspaceMocks.updateOwnerAccountantRelationMock.mockImplementation(async (relationId: number, payload: Record<string, unknown>) => ({
+      id: relationId,
+      owner_user_id: 1,
+      accountant_user_id: 22,
+      accountant_account_name: 'accountant11',
+      global_account_name: 'accountant11',
+      relation_display_name: 'حسابدار تست',
+      duty_description: (payload.duty_description as string | null | undefined) ?? null,
+      mobile_number: '09121111111',
+      status: 'active',
+      invitation_token: null,
+      registration_link: null,
+      expires_at: null,
+      activated_at: '2026-01-02T10:00:00Z',
+      deleted_at: null,
+      created_at: '2026-01-01T10:00:00Z',
+    }))
     accountantWorkspaceMocks.routeState.params = {}
     accountantWorkspaceMocks.routeState.query = {}
   })
@@ -117,20 +163,21 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(wrapper.find('.accountant-manager-stub').exists()).toBe(false)
   })
 
-  it('opens the compatibility manager for create actions and forwards route state', async () => {
+  it('opens the route-native create dialog instead of the compatibility manager', async () => {
     accountantWorkspaceMocks.routeState.params = { relationId: '11' }
     accountantWorkspaceMocks.routeState.query = { section: 'sessions' }
 
-    const wrapper = mount(AccountantWorkspaceView)
+    const wrapper = mount(AccountantWorkspaceView, { attachTo: document.body })
     await flushPromises()
     await wrapper.get('.accountant-workspace-create').trigger('click')
 
-    expect(wrapper.get('.stub-presentation').text()).toBe('workspace')
-    expect(wrapper.get('.stub-relation').text()).toBe('11')
-    expect(wrapper.get('.stub-panel').text()).toBe('create')
+    expect(document.body.textContent).toContain('افزودن حسابدار')
+    expect(document.body.textContent).toContain('ثبت دعوت حسابدار')
+    expect(wrapper.find('.accountant-manager-stub').exists()).toBe(false)
+    wrapper.unmount()
   })
 
-  it('routes relation selection, manager events, detail back, and operations actions explicitly', async () => {
+  it('routes relation selection, detail navigation, list back, and operations actions explicitly', async () => {
     accountantWorkspaceMocks.routeState.params = { relationId: '11' }
     accountantWorkspaceMocks.routeState.query = { section: 'sessions', tab: 'duty' }
 
@@ -138,21 +185,18 @@ describe('AccountantWorkspaceView.vue', () => {
     await flushPromises()
 
     await wrapper.get('.workspace-relation-list .ui-list-item').trigger('click')
-    await wrapper.get('.accountant-detail-list .ui-button').trigger('click')
-
-    await wrapper.get('.stub-open-relation').trigger('click')
-    await wrapper.get('.stub-back-list').trigger('click')
+    await wrapper.get('.accountant-selection-card .ui-button').trigger('click')
     await wrapper.get('.ds-workspace-back').trigger('click')
     await wrapper.get('.accountant-workspace-action').trigger('click')
 
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(1, {
       name: 'operations-accountants-detail',
-      params: { relationId: '12' },
+      params: { relationId: '11' },
       query: { section: 'sessions', tab: 'duty' },
     })
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(2, {
       name: 'operations-accountants-detail',
-      params: { relationId: '42' },
+      params: { relationId: '11' },
       query: { section: 'sessions', tab: 'duty' },
     })
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(3, {
@@ -188,5 +232,22 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(wrapper.text()).toContain('نشست‌های فعال حسابدار')
     expect(wrapper.text()).toContain('Chrome')
     expect(wrapper.text()).toContain('اصلی')
+  })
+
+  it('saves duty through the route-native detail form', async () => {
+    accountantWorkspaceMocks.routeState.params = { relationId: '11' }
+    accountantWorkspaceMocks.routeState.query = { tab: 'duty' }
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('هماهنگی معاملات روزانه')
+    await wrapper.get('.accountant-edit-form-card .ui-button--primary').trigger('click')
+    await flushPromises()
+
+    expect(accountantWorkspaceMocks.updateOwnerAccountantRelationMock).toHaveBeenCalledWith(11, {
+      duty_description: 'هماهنگی معاملات روزانه',
+    })
+    expect(wrapper.text()).toContain('شرح وظیفه ذخیره شد')
   })
 })
