@@ -1,24 +1,37 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Bell, ChevronLeft, Mail, MailOpen, Trash2 } from 'lucide-vue-next'
+import {
+  AppButton,
+  AppConfirmDialog,
+  AppEmptyState,
+  AppFilterChips,
+  AppLoadingState,
+  AppPage,
+  AppPageHeader,
+  AppSectionCard,
+  AppStatusBadge,
+} from '../components/ui'
 import { useNotificationStore } from '../stores/notifications'
-import { Bell, ChevronLeft, Trash2, Mail, MailOpen } from 'lucide-vue-next'
-import { getNotificationIconComponent } from '../utils/notificationUi'
-import { formatIranTime } from '../utils/iranTime'
 import type { NormalizedAppNotification } from '../types/notifications'
-import { AppButton, AppEmptyState, AppLoadingState } from '../components/ui'
+import { formatIranTime } from '../utils/iranTime'
+import { getNotificationIconComponent } from '../utils/notificationUi'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
 const isClearingAll = ref(false)
 const activeFilter = ref<'all' | 'unread' | 'read'>('all')
+const confirmClearAllOpen = ref(false)
+const pendingDeleteNotification = ref<NormalizedAppNotification | null>(null)
 
 const unreadCount = computed(() => notificationStore.appNotifications.filter((notification) => !notification.is_read).length)
 const readCount = computed(() => notificationStore.appNotifications.length - unreadCount.value)
+const totalCount = computed(() => notificationStore.appNotifications.length)
 const filterOptions = computed(() => [
-  { key: 'all' as const, label: 'همه', count: notificationStore.appNotifications.length },
-  { key: 'unread' as const, label: 'خوانده‌نشده', count: unreadCount.value },
-  { key: 'read' as const, label: 'خوانده‌شده', count: readCount.value },
+  { key: 'all' as const, label: `همه ${totalCount.value.toLocaleString('fa-IR')}` },
+  { key: 'unread' as const, label: `خوانده‌نشده ${unreadCount.value.toLocaleString('fa-IR')}` },
+  { key: 'read' as const, label: `خوانده‌شده ${readCount.value.toLocaleString('fa-IR')}` },
 ])
 const filteredNotifications = computed(() => {
   if (activeFilter.value === 'unread') {
@@ -29,12 +42,17 @@ const filteredNotifications = computed(() => {
   }
   return notificationStore.appNotifications
 })
+const activeFilterLabel = computed(() => {
+  if (activeFilter.value === 'unread') return 'خوانده‌نشده'
+  if (activeFilter.value === 'read') return 'خوانده‌شده'
+  return 'همه اعلان‌ها'
+})
 
 const goBack = () => {
   router.push('/')
 }
 
-const formatTime = (ts: any) => {
+const formatTime = (ts: unknown) => {
   return formatIranTime(ts)
 }
 
@@ -99,6 +117,7 @@ const clearAll = async () => {
   isClearingAll.value = true
   try {
     await notificationStore.clearAllNotifications()
+    confirmClearAllOpen.value = false
   } finally {
     isClearingAll.value = false
   }
@@ -110,34 +129,23 @@ const openNotificationRoute = (notification: NormalizedAppNotification) => {
   router.push(routePath)
 }
 
-function selectFilter(filter: typeof activeFilter.value) {
-  activeFilter.value = filter
-}
-
-function handleFilterKeydown(event: KeyboardEvent, filter: typeof activeFilter.value) {
-  const options = filterOptions.value
-  const currentIndex = options.findIndex((option) => option.key === filter)
-  if (currentIndex === -1) return
-
-  let nextIndex = currentIndex
-  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-    nextIndex = currentIndex <= 0 ? options.length - 1 : currentIndex - 1
-  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
-    nextIndex = currentIndex >= options.length - 1 ? 0 : currentIndex + 1
-  } else if (event.key === 'Home') {
-    nextIndex = 0
-  } else if (event.key === 'End') {
-    nextIndex = options.length - 1
-  } else {
-    return
-  }
-
-  event.preventDefault()
-  selectFilter(options[nextIndex]!.key)
-}
-
 function canOpenNotificationRoute(notification: NormalizedAppNotification): boolean {
   return typeof notification.route === 'string' && notification.route.trim().length > 0
+}
+
+function requestDelete(notification: NormalizedAppNotification) {
+  pendingDeleteNotification.value = notification
+}
+
+function closeDeleteConfirm() {
+  pendingDeleteNotification.value = null
+}
+
+async function confirmDeleteNotification() {
+  const notification = pendingDeleteNotification.value
+  if (!notification) return
+  await notificationStore.deleteNotification(notification.id)
+  pendingDeleteNotification.value = null
 }
 
 onMounted(async () => {
@@ -145,226 +153,241 @@ onMounted(async () => {
 })
 </script>
 
-
 <template>
-  <div class="ds-page">
-    <header class="header-row">
-      <div class="header-spacer">
-        <AppButton
-          v-if="notificationStore.appNotifications.length > 0"
-          class="clear-btn"
-          variant="danger"
-          size="sm"
-          :loading="isClearingAll"
-          @click="clearAll"
-        >
-          <template #icon>
-            <Trash2 :size="16" />
-          </template>
-          پاک‌سازی
-        </AppButton>
-      </div>
-      <div class="header-title">
-        <h2>مرکز اعلان‌ها</h2>
-      </div>
-      <button class="back-button" @click="goBack">
-        <ChevronLeft :size="24" />
-      </button>
-    </header>
-
-    <main class="content">
-      <AppLoadingState v-if="notificationStore.isLoadingHistory" class="ds-loading-state" label="در حال دریافت اعلان‌ها" />
-
-      <AppEmptyState
-        v-else-if="notificationStore.appNotifications.length === 0"
-        title="هیچ اعلانی یافت نشد"
-        message="اعلان‌های سیستم، بازار و معاملات بعد از دریافت در این بخش نمایش داده می‌شوند."
-        tone="info"
+  <AppPage narrow>
+    <div class="notifications-view">
+      <AppPageHeader
+        eyebrow="حساب کاربری"
+        title="مرکز اعلان‌ها"
+        description="اعلان‌های سیستم، بازار و معاملات را در یک inbox یکپارچه دنبال و مدیریت کنید."
       >
-        <template #icon>
-          <Bell :size="48" />
-        </template>
-      </AppEmptyState>
-
-      <template v-else>
-        <div class="notification-toolbar" role="tablist" aria-label="فیلتر اعلان‌ها">
-          <button
-            v-for="option in filterOptions"
-            :key="option.key"
-            type="button"
-            class="notification-filter-chip"
-            :class="{ active: activeFilter === option.key }"
-            role="tab"
-            :aria-selected="activeFilter === option.key"
-            :tabindex="activeFilter === option.key ? 0 : -1"
-            :aria-controls="`notifications-${option.key}-panel`"
-            @click="selectFilter(option.key)"
-            @keydown="handleFilterKeydown($event, option.key)"
-          >
-            <span>{{ option.label }}</span>
-            <strong>{{ option.count.toLocaleString('fa-IR') }}</strong>
+        <template #actions>
+          <button type="button" class="back-button" aria-label="بازگشت" @click="goBack">
+            <ChevronLeft :size="24" />
           </button>
-        </div>
+        </template>
+      </AppPageHeader>
+
+      <main class="content">
+        <AppLoadingState v-if="notificationStore.isLoadingHistory" class="ds-loading-state" label="در حال دریافت اعلان‌ها" />
 
         <AppEmptyState
-          v-if="filteredNotifications.length === 0"
-          class="notification-filter-empty"
-          title="اعلانی در این فیلتر وجود ندارد"
-          message="فیلتر دیگری را انتخاب کنید یا بعداً دوباره بررسی کنید."
-          tone="neutral"
+          v-else-if="notificationStore.appNotifications.length === 0"
+          title="هیچ اعلانی یافت نشد"
+          message="اعلان‌های سیستم، بازار و معاملات بعد از دریافت در این بخش نمایش داده می‌شوند."
+          tone="info"
         >
           <template #icon>
-            <Bell :size="40" />
+            <Bell :size="48" />
           </template>
         </AppEmptyState>
 
-      <div
-        v-else
-        :id="`notifications-${activeFilter}-panel`"
-        class="notifications-list"
-        role="tabpanel"
-        :aria-label="`اعلان‌های ${filterOptions.find((option) => option.key === activeFilter)?.label || ''}`"
-      >
-        <div 
-          v-for="notif in filteredNotifications"
-          :key="notif.id"
-          class="notif-item"
-          :class="[`type-${notif.level || 'info'}`, { 'is-unread': !notif.is_read }]"
-          :role="canOpenNotificationRoute(notif) ? 'button' : undefined"
-          :tabindex="canOpenNotificationRoute(notif) ? 0 : undefined"
-          :aria-label="canOpenNotificationRoute(notif) ? `باز کردن اعلان ${notif.title || 'اعلان جدید'}` : undefined"
-          @click="openNotificationRoute(notif)"
-          @keydown.enter.prevent="openNotificationRoute(notif)"
-          @keydown.space.prevent="openNotificationRoute(notif)"
+        <AppSectionCard
+          v-else
+          title="صندوق ورودی"
+          :description="`فیلتر فعال: ${activeFilterLabel}`"
+          class="notifications-section"
         >
-          <div class="notif-actions">
-            <button
-              type="button"
-              class="action-btn delete-btn"
-              :aria-label="`حذف اعلان ${notif.title || 'اعلان جدید'}`"
-              @click.stop="notificationStore.deleteNotification(notif.id)"
-            >
-              <Trash2 :size="16" />
-            </button>
-            <button
-              type="button"
-              class="action-btn toggle-read-btn"
-              :aria-label="notif.is_read ? `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌نشده` : `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌شده`"
-              @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)"
-            >
-              <component :is="notif.is_read ? Mail : MailOpen" :size="16" />
-            </button>
-          </div>
-          
-          <div class="notif-icon">
-            <component :is="getNotificationIconComponent(notif)" :size="20" />
-            <div v-if="!notif.is_read" class="unread-dot"></div>
-          </div>
-          <div class="notif-body">
-            <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>
-            <div v-if="shouldUseStructuredLines(notif)" class="notif-lines" :class="{ 'is-trade-lines': notif.category === 'trade' }">
-              <div
-                v-for="(line, lineIndex) in getNotificationLines(notif)"
-                :key="`${notif.id}-line-${lineIndex}`"
-                class="notif-line"
-                :class="[
-                  line.isField ? 'notif-line-field' : 'notif-line-plain',
-                  { 'notif-line-wide': line.isWide },
-                ]"
+          <template #actions>
+            <div class="notifications-summary">
+              <AppStatusBadge tone="warning">خوانده‌نشده {{ unreadCount.toLocaleString('fa-IR') }}</AppStatusBadge>
+              <AppStatusBadge tone="neutral">کل {{ totalCount.toLocaleString('fa-IR') }}</AppStatusBadge>
+              <AppButton
+                class="clear-btn"
+                variant="danger"
+                size="sm"
+                :loading="isClearingAll"
+                @click="confirmClearAllOpen = true"
               >
-                <span v-if="line.icon" class="notif-line-icon" aria-hidden="true">{{ line.icon }}</span>
-                <template v-if="line.isField">
-                  <span class="notif-line-label">{{ line.label }}</span>
-                  <span class="notif-line-separator">:</span>
-                  <bdi class="notif-line-value">{{ line.value }}</bdi>
+                <template #icon>
+                  <Trash2 :size="16" />
                 </template>
-                <bdi v-else class="notif-line-text">{{ line.text }}</bdi>
+                پاک‌سازی همه
+              </AppButton>
+            </div>
+          </template>
+
+          <AppFilterChips
+            v-model="activeFilter"
+            class="notification-toolbar"
+            label="فیلتر اعلان‌ها"
+            :options="filterOptions"
+          />
+
+          <AppEmptyState
+            v-if="filteredNotifications.length === 0"
+            class="notification-filter-empty"
+            title="اعلانی در این فیلتر وجود ندارد"
+            message="فیلتر دیگری را انتخاب کنید یا بعداً دوباره بررسی کنید."
+            tone="neutral"
+          >
+            <template #icon>
+              <Bell :size="40" />
+            </template>
+          </AppEmptyState>
+
+          <div
+            v-else
+            :id="`notifications-${activeFilter}-panel`"
+            class="notifications-list"
+            role="tabpanel"
+            :aria-label="`اعلان‌های ${filterOptions.find((option) => option.key === activeFilter)?.label || ''}`"
+          >
+            <div
+              v-for="notif in filteredNotifications"
+              :key="notif.id"
+              class="notif-item"
+              :class="[`type-${notif.level || 'info'}`, { 'is-unread': !notif.is_read }]"
+              :role="canOpenNotificationRoute(notif) ? 'button' : undefined"
+              :tabindex="canOpenNotificationRoute(notif) ? 0 : undefined"
+              :aria-label="canOpenNotificationRoute(notif) ? `باز کردن اعلان ${notif.title || 'اعلان جدید'}` : undefined"
+              @click="openNotificationRoute(notif)"
+              @keydown.enter.prevent="openNotificationRoute(notif)"
+              @keydown.space.prevent="openNotificationRoute(notif)"
+            >
+              <div class="notif-main">
+                <div class="notif-icon">
+                  <component :is="getNotificationIconComponent(notif)" :size="20" />
+                  <div v-if="!notif.is_read" class="unread-dot"></div>
+                </div>
+
+                <div class="notif-body">
+                  <div class="notif-meta-row">
+                    <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>
+                    <div class="notif-badges">
+                      <AppStatusBadge :tone="notif.is_read ? 'neutral' : 'warning'">
+                        {{ notif.is_read ? 'خوانده‌شده' : 'جدید' }}
+                      </AppStatusBadge>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="shouldUseStructuredLines(notif)"
+                    class="notif-lines"
+                    :class="{ 'is-trade-lines': notif.category === 'trade' }"
+                  >
+                    <div
+                      v-for="(line, lineIndex) in getNotificationLines(notif)"
+                      :key="`${notif.id}-line-${lineIndex}`"
+                      class="notif-line"
+                      :class="[
+                        line.isField ? 'notif-line-field' : 'notif-line-plain',
+                        { 'notif-line-wide': line.isWide },
+                      ]"
+                    >
+                      <span v-if="line.icon" class="notif-line-icon" aria-hidden="true">{{ line.icon }}</span>
+                      <template v-if="line.isField">
+                        <span class="notif-line-label">{{ line.label }}</span>
+                        <span class="notif-line-separator">:</span>
+                        <bdi class="notif-line-value">{{ line.value }}</bdi>
+                      </template>
+                      <bdi v-else class="notif-line-text">{{ line.text }}</bdi>
+                    </div>
+                  </div>
+
+                  <p v-else class="notif-text">{{ notif.content || notif.body }}</p>
+                  <span class="notif-time">{{ formatTime(notif.created_at || notif.client_received_at) }}</span>
+                </div>
+              </div>
+
+              <div class="notif-actions">
+                <button
+                  type="button"
+                  class="action-btn toggle-read-btn"
+                  :aria-label="notif.is_read ? `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌نشده` : `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌شده`"
+                  @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)"
+                >
+                  <component :is="notif.is_read ? Mail : MailOpen" :size="16" />
+                </button>
+                <button
+                  type="button"
+                  class="action-btn delete-btn"
+                  :aria-label="`حذف اعلان ${notif.title || 'اعلان جدید'}`"
+                  @click.stop="requestDelete(notif)"
+                >
+                  <Trash2 :size="16" />
+                </button>
               </div>
             </div>
-            <p v-else class="notif-text">{{ notif.content || notif.body }}</p>
-            <span class="notif-time">{{ formatTime(notif.created_at || notif.client_received_at) }}</span>
           </div>
-        </div>
-      </div>
-      </template>
-    </main>
-  </div>
+        </AppSectionCard>
+      </main>
+    </div>
+  </AppPage>
+
+  <AppConfirmDialog
+    :open="confirmClearAllOpen"
+    title="پاک‌سازی همه اعلان‌ها"
+    message="همه اعلان‌های فعلی از این مرکز حذف می‌شوند. این عمل فقط روی inbox فعلی شما اثر می‌گذارد."
+    confirm-label="پاک‌سازی"
+    cancel-label="انصراف"
+    tone="danger"
+    @cancel="confirmClearAllOpen = false"
+    @confirm="clearAll"
+  />
+
+  <AppConfirmDialog
+    :open="Boolean(pendingDeleteNotification)"
+    title="حذف اعلان"
+    :message="`اعلان «${pendingDeleteNotification?.title || 'اعلان جدید'}» از inbox شما حذف می‌شود.`"
+    confirm-label="حذف اعلان"
+    cancel-label="انصراف"
+    tone="danger"
+    @cancel="closeDeleteConfirm"
+    @confirm="confirmDeleteNotification"
+  />
 </template>
 
 <style scoped>
+.notifications-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-section-gap);
+  min-height: 100%;
+}
+
 .content {
-  padding: var(--ds-card-padding);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-section-gap);
+}
+
+.notifications-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .notification-toolbar {
+  margin-bottom: 1rem;
+}
+
+.notifications-section :deep(.ui-section-card__body) {
   display: flex;
-  gap: 0.5rem;
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto 0.75rem;
-  padding: 0 var(--ds-card-padding);
-  overflow-x: auto;
+  flex-direction: column;
+  gap: 1rem;
 }
 
-.notification-filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-height: 2.25rem;
-  border: 1px solid var(--ds-border-light);
-  border-radius: 999px;
-  background: var(--ds-bg-card);
-  color: var(--ds-text-secondary);
-  font: inherit;
-  font-size: var(--ds-font-sm);
-  font-weight: 800;
-  padding: 0 0.75rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.notification-filter-chip strong {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.45rem;
-  height: 1.45rem;
-  border-radius: 999px;
-  background: var(--ds-bg-inset);
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-xs);
-  font-weight: 900;
-}
-
-.notification-filter-chip.active {
-  border-color: var(--ds-primary-500);
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
-}
-
-.notification-filter-chip:focus-visible,
 .notif-item:focus-visible,
 .action-btn:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
 }
 
-.notification-filter-empty {
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-}
-
 .notifications-list {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: var(--ds-card-padding);
-  padding-bottom: 12rem; /* Ensure space for bottom nav and extra buffer */
+  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
 .notif-item {
   position: relative;
   display: flex;
-  gap: 1rem;
+  flex-direction: column;
+  gap: 0.9rem;
   padding: 1.25rem;
   background: var(--ds-bg-card);
   border-radius: var(--ds-radius-xl);
@@ -379,7 +402,7 @@ onMounted(async () => {
 }
 
 .notif-item.is-unread {
-  background: #fdfaf3;
+  background: color-mix(in srgb, var(--ds-primary-50) 40%, var(--ds-bg-card) 60%);
   border-color: var(--ds-primary-100);
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.05);
 }
@@ -389,24 +412,21 @@ onMounted(async () => {
 .notif-item.type-warning { border-right-color: var(--ds-primary-500); }
 .notif-item.type-error { border-right-color: var(--ds-danger-500); }
 
-.notif-actions {
-  position: absolute;
-  top: 0.75rem;
-  left: 0.75rem;
+.notif-main {
   display: flex;
-  gap: 0.5rem;
-  opacity: 0;
-  transition: opacity 0.2s;
+  gap: 1rem;
+  min-width: 0;
 }
 
-.notif-item:hover .notif-actions,
-.notif-item:focus-within .notif-actions {
-  opacity: 1;
+.notif-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .action-btn {
-  width: 32px;
-  height: 32px;
+  min-width: var(--ds-touch-target);
+  min-height: var(--ds-touch-target);
   border-radius: 10px;
   border: none;
   display: flex;
@@ -421,13 +441,21 @@ onMounted(async () => {
   background: var(--ds-danger-50);
   color: var(--ds-danger-500);
 }
-.delete-btn:hover { background: var(--ds-danger-100); transform: scale(1.1); }
+
+.delete-btn:hover {
+  background: var(--ds-danger-100);
+  transform: scale(1.04);
+}
 
 .toggle-read-btn {
   background: var(--ds-bg-page);
   color: var(--ds-text-muted);
 }
-.toggle-read-btn:hover { background: var(--ds-bg-hover); color: var(--ds-text-primary); }
+
+.toggle-read-btn:hover {
+  background: var(--ds-bg-hover);
+  color: var(--ds-text-primary);
+}
 
 .notif-icon {
   position: relative;
@@ -463,21 +491,33 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  padding-left: 1.5rem; /* Space for actions */
   min-width: 0;
 }
 
+.notif-meta-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.notif-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .notif-title {
+  margin: 0;
   font-size: var(--ds-font-lg);
   font-weight: 700;
   color: var(--ds-text-primary);
-  margin: 0;
 }
 
 .notif-text {
+  margin: 0;
   font-size: var(--ds-font-base);
   color: var(--ds-text-secondary);
-  margin: 0;
   line-height: 1.5;
   white-space: pre-line;
   unicode-bidi: plaintext;
@@ -568,25 +608,33 @@ onMounted(async () => {
 }
 
 .notif-time {
-  font-size: var(--ds-font-sm);
-  color: var(--ds-text-placeholder);
-  margin-top: 0.15rem;
-  font-weight: 500;
   align-self: flex-start;
+  margin-top: 0.15rem;
+  font-size: var(--ds-font-sm);
+  font-weight: 500;
+  color: var(--ds-text-placeholder);
 }
 
 @media (max-width: 640px) {
+  .notifications-summary {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .notifications-summary :deep(.ui-button) {
+    width: 100%;
+  }
+
   .notif-item {
     padding: 0.95rem;
   }
 
-  .notif-body {
-    padding-left: 0;
-    padding-top: 2.35rem;
+  .notif-main {
+    gap: 0.75rem;
   }
 
-  .notif-actions {
-    opacity: 1;
+  .notif-meta-row {
+    flex-direction: column;
   }
 
   .notif-lines.is-trade-lines {

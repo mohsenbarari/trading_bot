@@ -500,8 +500,22 @@ Gate نهایی Stage 12:
 
 ### Stage 8 - Notifications
 
-- tabs/filter/list/read/delete/clear all را inbox-native کن.
-- final list item زیر nav پنهان نشود.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `frontend/src/views/NotificationsView.vue` از header/list محلی قبلی به shell مشترک `AppPage` + `AppPageHeader` + `AppSectionCard` منتقل شد تا مرکز اعلان‌ها از نظر spacing، hierarchy و wording با بقیه app هم‌زبان شود.
+- فیلترها روی primitive مشترک `AppFilterChips` نشستند و summary inbox با badgeهای shared (`AppStatusBadge`) به‌صورت خوانده‌نشده/کل نمایش داده شد؛ در عین حال store contract و route-open behavior اعلان‌ها بدون تغییر ماند.
+- actionهای destructive ایمن‌تر شدند: پاک‌سازی همه و حذف تکی اعلان حالا از `AppConfirmDialog` عبور می‌کنند، اما همان actionهای store (`clearAllNotifications`, `deleteNotification`) را صدا می‌زنند و logic backend دست‌نخورده مانده است.
+- hierarchy هر اعلان inbox-nativeتر شد: وضعیت `جدید`/`خوانده‌شده` داخل badge مشترک نمایش داده می‌شود، action bar به پایین هر card منتقل شد، و آیتم‌های structured trade/system بدون از دست دادن parsing قبلی حفظ شدند.
+- debt محلی bottom-safe برطرف شد: `padding-bottom: 12rem` حذف و با spacing مبتنی بر token (`--ds-bottom-nav-height` + `--ds-safe-area-bottom`) جایگزین شد تا آخرین item در viewport mobile زیر bottom nav پنهان نشود.
+
+اعتبارسنجی Stage 8:
+
+- `npm run test:unit:run -- src/views/NotificationsView.test.ts` پاس شد: `9/9`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 9 - Dashboard/Operations/Market
 

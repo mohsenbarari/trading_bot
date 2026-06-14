@@ -41,7 +41,7 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.text()).toContain('هیچ اعلانی یافت نشد')
   })
 
-  it('routes back home and delegates clear/delete actions to the store', async () => {
+  it('routes back home and delegates clear/delete actions to the store after confirmation', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
@@ -67,9 +67,13 @@ describe('NotificationsView.vue', () => {
     expect(routerPushMock).toHaveBeenCalledWith('/')
 
     await wrapper.get('.clear-btn').trigger('click')
+    expect(wrapper.text()).toContain('پاک‌سازی همه اعلان‌ها')
+    await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
     expect(clearAllSpy).toHaveBeenCalledTimes(1)
 
     await wrapper.get('.delete-btn').trigger('click')
+    expect(wrapper.text()).toContain('حذف اعلان')
+    await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
     expect(deleteSpy).toHaveBeenCalledWith(11)
     expect(wrapper.text()).toContain('اعلان')
   })
@@ -104,17 +108,17 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    expect(wrapper.findAll('.notification-filter-chip')).toHaveLength(3)
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
     expect(wrapper.text()).toContain('خوانده نشده')
     expect(wrapper.text()).toContain('خوانده شده')
 
-    await wrapper.findAll('.notification-filter-chip')[1]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
     expect(wrapper.text()).toContain('خوانده نشده')
     expect(wrapper.text()).not.toContain('خوانده شده')
-    expect(wrapper.findAll('.notification-filter-chip')[1]!.attributes('tabindex')).toBe('0')
-    expect(wrapper.findAll('.notification-filter-chip')[1]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('tabindex')).toBe('0')
+    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
 
-    await wrapper.findAll('.notification-filter-chip')[2]!.trigger('click')
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
     expect(wrapper.text()).not.toContain('خوانده نشده')
     expect(wrapper.text()).toContain('خوانده شده')
   })
@@ -149,7 +153,7 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    const chips = () => wrapper.findAll('.notification-filter-chip')
+    const chips = () => wrapper.findAll('[role="tab"]')
     expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
 
     await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
@@ -227,6 +231,7 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.notif-title').text()).toBe('اعلان جدید')
     expect(wrapper.find('.unread-dot').exists()).toBe(true)
     expect(wrapper.find('.notif-time').exists()).toBe(true)
+    expect(wrapper.text()).toContain('جدید')
 
     await wrapper.get('.toggle-read-btn').trigger('click')
     expect(toggleReadSpy).toHaveBeenCalledWith(14, true)
