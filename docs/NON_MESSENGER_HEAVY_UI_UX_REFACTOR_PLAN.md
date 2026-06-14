@@ -476,11 +476,19 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H5 - Accountant Workspace
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - ساخت `/operations/accountants`.
 - ساخت `/operations/accountants/:relationId`.
 - انتقال add/pending/manage/detail/sessions/danger از modal به route.
 - account/session restrictions روشن و backend-compatible.
+- خروجی این stage:
+  - routeهای `operations-accountants` و `operations-accountants-detail` از redirect موقت H2 خارج و به `AccountantWorkspaceView.vue` وصل شدند.
+  - `OwnerAccountantManagerModal.vue` دوحالته شد: modal قدیمی برای profile compatibility حفظ شد و presentation جدید `workspace` بدون backdrop/header داخلی در route مستقل render می‌شود.
+  - انتخاب حسابدار در workspace به `/operations/accountants/:relationId` هدایت می‌شود و بازگشت detail به `/operations/accountants` برمی‌گردد.
+  - add accountant، pending invitation copy/cancel، duty edit، session termination و unlink/cancel از همان endpointها و permission flow فعلی استفاده می‌کنند.
+  - production deploy برای H5 هم عمداً defer شد تا H2-H5 بعد از validation گروهی منتشر شود.
 
 پذیرش:
 - add accountant، pending copy/cancel، duty edit، session termination و unlink حفظ شود.

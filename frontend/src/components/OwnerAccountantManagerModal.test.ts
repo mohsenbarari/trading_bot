@@ -35,9 +35,10 @@ function makeRelation(overrides: Record<string, unknown> = {}) {
   }
 }
 
-async function mountModal() {
+async function mountModal(props: Record<string, unknown> = {}) {
   const OwnerAccountantManagerModal = (await import('./OwnerAccountantManagerModal.vue')).default
   const wrapper = mount(OwnerAccountantManagerModal, {
+    props,
     global: {
       stubs: {
         teleport: true,
@@ -125,6 +126,54 @@ describe('OwnerAccountantManagerModal.vue', () => {
     })
     expect(wrapper.text()).toContain('دعوت حسابدار ثبت شد.')
     expect(wrapper.text()).toContain('حسابدار دوم')
+  })
+
+  it('renders as an inline workspace surface and emits route navigation events', async () => {
+    apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation({
+      id: 8,
+      status: 'active',
+      accountant_user_id: 18,
+      accountant_account_name: 'acc-active',
+      relation_display_name: 'حسابدار فعال',
+      registration_link: null,
+      activated_at: '2026-01-02T08:00:00',
+    })]))
+
+    const wrapper = await mountModal({ presentation: 'workspace' })
+
+    expect(wrapper.find('.accountant-manager-page').exists()).toBe(true)
+    expect(wrapper.find('.accountant-manager-backdrop').exists()).toBe(false)
+    expect(wrapper.find('.accountant-manager-header').exists()).toBe(false)
+    expect(wrapper.find('.accountant-manager-shell--workspace').exists()).toBe(true)
+
+    await openRelationsPanel(wrapper)
+    await openFirstAccountantDetail(wrapper)
+    expect(wrapper.emitted('open-relation')?.[0]).toEqual([8])
+
+    await wrapper.get('.accountant-detail-topbar .ghost-btn').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('back-to-list')).toHaveLength(1)
+  })
+
+  it('opens the requested accountant relation when mounted from a detail route', async () => {
+    apiFetchMock.mockResolvedValueOnce(makeResponse([makeRelation({
+      id: 8,
+      status: 'active',
+      accountant_user_id: 18,
+      accountant_account_name: 'acc-active',
+      relation_display_name: 'حسابدار فعال',
+      registration_link: null,
+      activated_at: '2026-01-02T08:00:00',
+    })]))
+
+    const wrapper = await mountModal({
+      presentation: 'workspace',
+      initialRelationId: '8',
+    })
+
+    expect(wrapper.find('.accountant-detail-page').exists()).toBe(true)
+    expect(wrapper.text()).toContain('حسابدار فعال')
+    expect(wrapper.text()).toContain('مشخصات و شرح وظیفه')
   })
 
   it('edits an active accountant in the detail page and cancels a pending invitation', async () => {

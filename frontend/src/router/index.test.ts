@@ -65,10 +65,10 @@ describe('router/index.ts', () => {
     expect(routeByName.get('operations-customers-detail')?.component).toBeTypeOf('function')
     expect(routeByName.get('operations-customers')?.redirect).toBeUndefined()
     expect(routeByName.get('operations-customers-detail')?.redirect).toBeUndefined()
-    expect(routeByName.get('operations-accountants-detail')?.redirect({ query: {}, params: { relationId: '42' } })).toEqual({
-      name: 'profile',
-      query: { workspace: 'accountants', relation_id: '42' },
-    })
+    expect(routeByName.get('operations-accountants')?.component).toBeTypeOf('function')
+    expect(routeByName.get('operations-accountants-detail')?.component).toBeTypeOf('function')
+    expect(routeByName.get('operations-accountants')?.redirect).toBeUndefined()
+    expect(routeByName.get('operations-accountants-detail')?.redirect).toBeUndefined()
     expect(routeByName.get('account-storage')?.redirect({ query: { source: 'hub' }, params: {} })).toEqual({
       name: 'settings',
       query: { source: 'hub', section: 'storage' },

@@ -54,22 +54,13 @@ const router = createRouter({
     {
       path: '/operations/accountants',
       name: 'operations-accountants',
-      redirect: (to) => ({
-        name: 'profile',
-        query: withQuery(to.query, { workspace: 'accountants' }),
-      }),
+      component: () => import('../views/AccountantWorkspaceView.vue'),
       meta: { requiresAuth: true }
     },
     {
       path: '/operations/accountants/:relationId',
       name: 'operations-accountants-detail',
-      redirect: (to) => ({
-        name: 'profile',
-        query: withQuery(to.query, {
-          workspace: 'accountants',
-          relation_id: to.params.relationId,
-        }),
-      }),
+      component: () => import('../views/AccountantWorkspaceView.vue'),
       meta: { requiresAuth: true }
     },
     {
