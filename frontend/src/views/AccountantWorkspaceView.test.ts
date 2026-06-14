@@ -6,6 +6,7 @@ import AccountantWorkspaceView from './AccountantWorkspaceView.vue'
 const accountantWorkspaceMocks = vi.hoisted(() => ({
   routerPushMock: vi.fn(),
   fetchOwnerAccountantRelationsMock: vi.fn(),
+  fetchOwnerAccountantSessionsMock: vi.fn(),
   routeState: {
     params: {} as Record<string, unknown>,
     query: {} as Record<string, unknown>,
@@ -24,6 +25,7 @@ vi.mock('../composables/useOwnerAccountants', async (importOriginal) => {
   return {
     ...actual,
     fetchOwnerAccountantRelations: accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock,
+    fetchOwnerAccountantSessions: accountantWorkspaceMocks.fetchOwnerAccountantSessionsMock,
   }
 })
 
@@ -49,6 +51,7 @@ describe('AccountantWorkspaceView.vue', () => {
   beforeEach(() => {
     accountantWorkspaceMocks.routerPushMock.mockReset()
     accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockReset()
+    accountantWorkspaceMocks.fetchOwnerAccountantSessionsMock.mockReset()
     accountantWorkspaceMocks.fetchOwnerAccountantRelationsMock.mockResolvedValue([
       {
         id: 11,
@@ -85,6 +88,19 @@ describe('AccountantWorkspaceView.vue', () => {
         created_at: '2026-01-02T10:00:00Z',
       },
     ])
+    accountantWorkspaceMocks.fetchOwnerAccountantSessionsMock.mockResolvedValue([
+      {
+        id: 'session-1',
+        device_name: 'Chrome',
+        device_ip: null,
+        platform: 'web',
+        home_server: 'iran',
+        is_primary: true,
+        is_active: true,
+        created_at: '2026-01-01T10:00:00Z',
+        last_active_at: '2026-01-02T10:00:00Z',
+      },
+    ])
     accountantWorkspaceMocks.routeState.params = {}
     accountantWorkspaceMocks.routeState.query = {}
   })
@@ -116,13 +132,13 @@ describe('AccountantWorkspaceView.vue', () => {
 
   it('routes relation selection, manager events, detail back, and operations actions explicitly', async () => {
     accountantWorkspaceMocks.routeState.params = { relationId: '11' }
-    accountantWorkspaceMocks.routeState.query = { section: 'sessions' }
+    accountantWorkspaceMocks.routeState.query = { section: 'sessions', tab: 'duty' }
 
     const wrapper = mount(AccountantWorkspaceView)
     await flushPromises()
 
     await wrapper.get('.workspace-relation-list .ui-list-item').trigger('click')
-    await wrapper.get('.workspace-detail-card .ui-button').trigger('click')
+    await wrapper.get('.accountant-detail-list .ui-button').trigger('click')
 
     await wrapper.get('.stub-open-relation').trigger('click')
     await wrapper.get('.stub-back-list').trigger('click')
@@ -132,16 +148,16 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(1, {
       name: 'operations-accountants-detail',
       params: { relationId: '12' },
-      query: { section: 'sessions' },
+      query: { section: 'sessions', tab: 'duty' },
     })
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(2, {
       name: 'operations-accountants-detail',
       params: { relationId: '42' },
-      query: { section: 'sessions' },
+      query: { section: 'sessions', tab: 'duty' },
     })
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(3, {
       name: 'operations-accountants',
-      query: { section: 'sessions' },
+      query: { section: 'sessions', tab: 'duty' },
     })
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenNthCalledWith(4, {
       name: 'operations',
@@ -158,5 +174,19 @@ describe('AccountantWorkspaceView.vue', () => {
     expect(accountantWorkspaceMocks.routerPushMock).toHaveBeenCalledWith({
       name: 'operations',
     })
+  })
+
+  it('loads route-native accountant sessions for the detail sessions tab', async () => {
+    accountantWorkspaceMocks.routeState.params = { relationId: '11' }
+    accountantWorkspaceMocks.routeState.query = { tab: 'sessions' }
+
+    const wrapper = mount(AccountantWorkspaceView)
+    await flushPromises()
+    await flushPromises()
+
+    expect(accountantWorkspaceMocks.fetchOwnerAccountantSessionsMock).toHaveBeenCalledWith(11)
+    expect(wrapper.text()).toContain('نشست‌های فعال حسابدار')
+    expect(wrapper.text()).toContain('Chrome')
+    expect(wrapper.text()).toContain('اصلی')
   })
 })
