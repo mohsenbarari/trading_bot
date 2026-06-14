@@ -1,15 +1,43 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { BarChart3, Clock, ReceiptText, Search, ShieldAlert, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
+import { BarChart3, Clock, Copy, ReceiptText, ShieldAlert, UserPlus, Users } from 'lucide-vue-next'
 import OwnerCustomerManagerModal from '../components/OwnerCustomerManagerModal.vue'
 import { WorkspaceNotice, WorkspaceSection, WorkspaceShell } from '../components/workspace'
-import { AppActionCard, AppButton, AppCard, AppFormField, AppInput, AppListItem, AppMetricCard, AppStatusBadge, AppTabs } from '../components/ui'
 import {
+  AppActionCard,
+  AppBottomSheet,
+  AppButton,
+  AppCard,
+  AppConfirmDialog,
+  AppDangerZone,
+  AppEmptyState,
+  AppFilterChips,
+  AppFormField,
+  AppInput,
+  AppListItem,
+  AppMasterDetail,
+  AppMetricCard,
+  AppNumberStepper,
+  AppResponsiveDialog,
+  AppSearchField,
+  AppSelect,
+  AppStatusBadge,
+  AppTabs,
+} from '../components/ui'
+import {
+  buildCustomerDetailUpdatePayload,
+  buildCustomerPayload,
+  createOwnerCustomerRelation,
+  deleteOwnerCustomerRelation,
   fetchOwnerCustomerRelations,
   fetchOwnerCustomerSessions,
   fetchOwnerCustomerTradeStats,
   fetchOwnerCustomerTrades,
+  normalizeCommissionRate,
+  normalizeLatinDigits,
+  terminateOwnerCustomerSession,
+  updateOwnerCustomerRelation,
   useOwnerCustomers,
   type CustomerRelation,
   type CustomerSessionSummary,
@@ -21,9 +49,24 @@ const route = useRoute()
 const router = useRouter()
 const customerState = useOwnerCustomers()
 const isLoading = ref(true)
+const isMobile = ref(false)
 const error = ref('')
 const isCompatibilityManagerOpen = ref(false)
 const compatibilityPanel = ref<string | null>(null)
+const isCreatePanelOpen = ref(false)
+const isCreateSubmitting = ref(false)
+const createError = ref('')
+const createNotice = ref('')
+const isSavingLimits = ref(false)
+const limitsError = ref('')
+const limitsNotice = ref('')
+const copiedRelationId = ref<number | null>(null)
+const isConfirmDialogOpen = ref(false)
+const confirmTitle = ref('')
+const confirmMessage = ref('')
+const confirmAction = ref<'terminate-session' | 'cancel-invitation' | 'unlink-relation' | null>(null)
+const confirmRelation = ref<CustomerRelation | null>(null)
+const confirmSession = ref<CustomerSessionSummary | null>(null)
 const searchQuery = ref('')
 const relationFilter = ref('all')
 const detailTrades = ref<CustomerTradeSummary[]>([])
@@ -131,6 +174,38 @@ const activeRelationLimits = computed(() => {
   ]
 })
 
+const createCommissionRate = computed({
+  get: () => normalizeCommissionRate(customerState.createForm.commission_rate),
+  set: (value: number) => {
+    customerState.createForm.commission_rate = normalizeCommissionRate(value).toFixed(2)
+  },
+})
+
+const detailCommissionRate = computed({
+  get: () => {
+    const seeded = customerState.detailEditForm.commission_rate || activeRelation.value?.commission_rate || 0.5
+    return normalizeCommissionRate(seeded)
+  },
+  set: (value: number) => {
+    customerState.detailEditForm.commission_rate = normalizeCommissionRate(value).toFixed(2)
+  },
+})
+
+const createCommissionPreview = computed(() => {
+  const amount = 100_000_000 * createCommissionRate.value / 100
+  return formatToman(amount)
+})
+
+const detailCommissionPreview = computed(() => {
+  const amount = 100_000_000 * detailCommissionRate.value / 100
+  return formatToman(amount)
+})
+
+const generatedCreateAccountName = computed(() => {
+  const mobileDigits = normalizeLatinDigits(customerState.createForm.mobile_number).replace(/\D/g, '')
+  return mobileDigits ? `customer_${mobileDigits}` : ''
+})
+
 async function loadRelations() {
   isLoading.value = true
   error.value = ''
@@ -183,6 +258,74 @@ function closeCompatibilityManager() {
   isCompatibilityManagerOpen.value = false
   compatibilityPanel.value = null
   void loadRelations()
+}
+
+function updateIsMobile() {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
+
+function openCreatePanel() {
+  isCreatePanelOpen.value = true
+  createError.value = ''
+  createNotice.value = ''
+}
+
+function closeCreatePanel() {
+  isCreatePanelOpen.value = false
+}
+
+function handleCreateTierChange() {
+  if (customerState.createForm.customer_tier === 'tier2') {
+    customerState.createForm.commission_rate = customerState.createForm.commission_rate || '0.50'
+  } else {
+    customerState.createForm.commission_rate = '0.50'
+  }
+}
+
+function resetCreateForm() {
+  Object.assign(customerState.createForm, {
+    management_name: '',
+    mobile_number: '',
+    customer_tier: 'tier1',
+    commission_rate: '0.50',
+    min_trade_quantity: '',
+    max_trade_quantity: '',
+    max_daily_trades: '',
+    max_daily_commodity_volume: '',
+  })
+}
+
+function seedDetailEditForm(relation: CustomerRelation | null, options: { resetFeedback?: boolean } = {}) {
+  const { resetFeedback = true } = options
+  if (!relation) {
+    Object.assign(customerState.detailEditForm, {
+      customer_tier: '',
+      commission_rate: '',
+      min_trade_quantity: '',
+      max_trade_quantity: '',
+      max_daily_trades: '',
+      max_daily_commodity_volume: '',
+    })
+    if (resetFeedback) {
+      limitsError.value = ''
+      limitsNotice.value = ''
+    }
+    return
+  }
+
+  Object.assign(customerState.detailEditForm, {
+    customer_tier: relation.customer_tier,
+    commission_rate: relation.commission_rate == null ? '0.50' : String(relation.commission_rate),
+    min_trade_quantity: relation.min_trade_quantity == null ? '' : String(relation.min_trade_quantity),
+    max_trade_quantity: relation.max_trade_quantity == null ? '' : String(relation.max_trade_quantity),
+    max_daily_trades: relation.max_daily_trades == null ? '' : String(relation.max_daily_trades),
+    max_daily_commodity_volume: relation.max_daily_commodity_volume == null ? '' : String(relation.max_daily_commodity_volume),
+  })
+  if (resetFeedback) {
+    limitsError.value = ''
+    limitsNotice.value = ''
+  }
 }
 
 async function loadDetailTrades(force = false) {
@@ -249,6 +392,128 @@ function setStatsPeriod(days: number) {
   statsPeriodDays.value = days
 }
 
+async function createRelation() {
+  if (isCreateSubmitting.value) return
+  isCreateSubmitting.value = true
+  createError.value = ''
+  createNotice.value = ''
+  try {
+    const created = await createOwnerCustomerRelation({
+      account_name: generatedCreateAccountName.value,
+      management_name: customerState.createForm.management_name,
+      mobile_number: customerState.createForm.mobile_number,
+      ...buildCustomerPayload(customerState.createForm),
+    })
+    customerState.relations.value = [created, ...customerState.relations.value.filter((item) => item.id !== created.id)]
+    createNotice.value = 'دعوت مشتری با موفقیت ثبت شد.'
+    resetCreateForm()
+    closeCreatePanel()
+  } catch (err: any) {
+    createError.value = err?.message || 'ایجاد مشتری ناموفق بود.'
+  } finally {
+    isCreateSubmitting.value = false
+  }
+}
+
+async function saveDetailLimits() {
+  const relation = activeRelation.value
+  if (!relation || isSavingLimits.value) return
+  const payload = buildCustomerDetailUpdatePayload(relation, customerState.detailEditForm)
+  if (!Object.keys(payload).length) {
+    limitsNotice.value = 'تغییری برای ذخیره انتخاب نشده است.'
+    return
+  }
+  isSavingLimits.value = true
+  limitsError.value = ''
+  limitsNotice.value = ''
+  try {
+    const updated = await updateOwnerCustomerRelation(relation.id, payload)
+    customerState.relations.value = customerState.relations.value.map((item) => (item.id === updated.id ? updated : item))
+    seedDetailEditForm(updated)
+    limitsNotice.value = 'تنظیمات مشتری ذخیره شد.'
+  } catch (err: any) {
+    limitsError.value = err?.message || 'ذخیره تنظیمات مشتری ناموفق بود.'
+  } finally {
+    isSavingLimits.value = false
+  }
+}
+
+async function copyRegistrationLink(relation: CustomerRelation) {
+  if (!relation.registration_link) return
+  try {
+    await navigator.clipboard.writeText(relation.registration_link)
+    copiedRelationId.value = relation.id
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        if (copiedRelationId.value === relation.id) copiedRelationId.value = null
+      }, 1800)
+    }
+  } catch {
+    limitsError.value = 'کپی لینک ثبت‌نام ممکن نشد.'
+  }
+}
+
+function openConfirmDialog(
+  kind: 'terminate-session' | 'cancel-invitation' | 'unlink-relation',
+  relation: CustomerRelation,
+  session: CustomerSessionSummary | null = null,
+) {
+  confirmAction.value = kind
+  confirmRelation.value = relation
+  confirmSession.value = session
+  confirmTitle.value = kind === 'terminate-session'
+    ? 'پایان نشست'
+    : kind === 'cancel-invitation'
+      ? 'لغو دعوت مشتری'
+      : 'قطع ارتباط مشتری'
+  confirmMessage.value = kind === 'terminate-session'
+    ? `نشست «${session?.device_name || 'دستگاه مشتری'}» پایان یابد؟`
+    : kind === 'cancel-invitation'
+      ? `دعوت «${relation.management_name}» لغو شود؟`
+      : `ارتباط «${relation.management_name}» قطع شود؟ این عملیات دسترسی مشتری را غیرفعال می‌کند.`
+  isConfirmDialogOpen.value = true
+}
+
+function closeConfirmDialog() {
+  isConfirmDialogOpen.value = false
+  confirmAction.value = null
+  confirmRelation.value = null
+  confirmSession.value = null
+}
+
+async function handleConfirmAction() {
+  const relation = confirmRelation.value
+  if (!relation || !confirmAction.value) return
+  const action = confirmAction.value
+  const session = confirmSession.value
+  closeConfirmDialog()
+
+  if (action === 'terminate-session' && session) {
+    detailSessionsError.value = ''
+    try {
+      await terminateOwnerCustomerSession(relation.id, session.id)
+      await loadDetailSessions(true)
+    } catch (err: any) {
+      detailSessionsError.value = err?.message || 'پایان دادن نشست مشتری ناموفق بود.'
+    }
+    return
+  }
+
+  try {
+    await deleteOwnerCustomerRelation(
+      relation.id,
+      action === 'cancel-invitation' ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.',
+    )
+    customerState.relations.value = customerState.relations.value.filter((item) => item.id !== relation.id)
+    if (activeRelation.value?.id === relation.id) {
+      backToList()
+    }
+  } catch (err: any) {
+    detailSessionsError.value = err?.message
+      || (action === 'cancel-invitation' ? 'لغو دعوت مشتری ناموفق بود.' : 'قطع ارتباط مشتری ناموفق بود.')
+  }
+}
+
 function getRelationTitle(relation: CustomerRelation) {
   return relation.management_name || relation.customer_account_name || relation.invitation_account_name || 'مشتری'
 }
@@ -313,7 +578,11 @@ function formatDate(value: string | null | undefined) {
 }
 
 watch(initialPanel, (panel) => {
-  if (panel === 'create' || panel === 'pending' || panel === 'manage' || panel === 'relations') {
+  if (panel === 'create') {
+    openCreatePanel()
+    return
+  }
+  if (panel === 'manage') {
     openCompatibilityManager(panel)
   }
 }, { immediate: true })
@@ -328,6 +597,12 @@ watch([activeRelation, detailTab], () => {
   refreshCurrentDetailTab()
 }, { flush: 'post' })
 
+watch(activeRelation, (relation, previousRelation) => {
+  seedDetailEditForm(relation, {
+    resetFeedback: relation?.id !== previousRelation?.id,
+  })
+}, { immediate: true })
+
 watch(statsPeriodDays, () => {
   if (detailTab.value === 'stats') {
     void loadDetailStats(true)
@@ -335,7 +610,17 @@ watch(statsPeriodDays, () => {
 })
 
 onMounted(() => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+  }
   void loadRelations()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+  }
 })
 </script>
 
@@ -344,7 +629,7 @@ onMounted(() => {
     <WorkspaceShell
       title="مشتریان"
       eyebrow="عملیات"
-      description="نمای route-native برای مرور مشتریان، وضعیت دعوت‌ها و ورود به مدیریت کامل."
+      description="افزودن، مرور و تنظیم روابط مشتریان در یک فضای کاری یکپارچه."
       layout="split"
       show-back
       back-label="بازگشت"
@@ -354,7 +639,7 @@ onMounted(() => {
         <AppButton variant="secondary" class="customer-workspace-action" @click="goToOperations">
           عملیات
         </AppButton>
-        <AppButton variant="primary" class="customer-workspace-create" @click="openCompatibilityManager('create')">
+        <AppButton variant="primary" class="customer-workspace-create" @click="openCreatePanel">
           <template #icon>
             <UserPlus :size="16" />
           </template>
@@ -391,7 +676,7 @@ onMounted(() => {
         <WorkspaceSection
           v-if="relationIdNumber"
           title="پرونده مشتری"
-          description="مشخصات، محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس در یک نمای tabدار."
+          description="مشخصات، محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
         >
           <WorkspaceNotice
             v-if="!activeRelation && !isLoading"
@@ -445,16 +730,81 @@ onMounted(() => {
             </div>
 
             <div v-else-if="detailTab === 'limits'" class="customer-detail-list">
-              <AppListItem
-                v-for="item in activeRelationLimits"
-                :key="item.label"
-                :title="item.label"
-                :description="item.description"
-                :meta="item.value"
-              />
-              <AppButton variant="secondary" @click="openCompatibilityManager('manage')">
-                ویرایش سطح و محدودیت‌ها
-              </AppButton>
+              <div class="customer-detail-grid">
+                <AppListItem
+                  v-for="item in activeRelationLimits"
+                  :key="item.label"
+                  :title="item.label"
+                  :description="item.description"
+                  :meta="item.value"
+                />
+              </div>
+
+              <AppCard class="customer-edit-form-card">
+                <div class="customer-edit-form-grid">
+                  <AppFormField label="سطح مشتری" hint="سطح مشتری، رفتار کمیسیون را تعیین می‌کند.">
+                    <template #default="{ id }">
+                      <AppSelect
+                        :id="id"
+                        v-model="customerState.detailEditForm.customer_tier"
+                        :options="[
+                          { value: 'tier1', label: 'سطح ۱' },
+                          { value: 'tier2', label: 'سطح ۲' },
+                        ]"
+                      />
+                    </template>
+                  </AppFormField>
+
+                  <AppFormField
+                    v-if="customerState.detailEditForm.customer_tier === 'tier2'"
+                    label="نرخ کمیسیون"
+                    :hint="`به ازای هر ۱۰۰ میلیون: ${detailCommissionPreview}`"
+                  >
+                    <template #default>
+                      <AppNumberStepper
+                        v-model="detailCommissionRate"
+                        label="درصد کمیسیون مشتری"
+                        :min="0"
+                        :max="100"
+                        :step="0.01"
+                      />
+                    </template>
+                  </AppFormField>
+
+                  <AppFormField label="حداقل مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+                    <template #default="{ id }">
+                      <AppInput :id="id" v-model="customerState.detailEditForm.min_trade_quantity" placeholder="مثلاً ۱۰" />
+                    </template>
+                  </AppFormField>
+
+                  <AppFormField label="حداکثر مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+                    <template #default="{ id }">
+                      <AppInput :id="id" v-model="customerState.detailEditForm.max_trade_quantity" placeholder="مثلاً ۵۰۰" />
+                    </template>
+                  </AppFormField>
+
+                  <AppFormField label="حداکثر تعداد روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+                    <template #default="{ id }">
+                      <AppInput :id="id" v-model="customerState.detailEditForm.max_daily_trades" placeholder="مثلاً ۴" />
+                    </template>
+                  </AppFormField>
+
+                  <AppFormField label="حداکثر حجم روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+                    <template #default="{ id }">
+                      <AppInput :id="id" v-model="customerState.detailEditForm.max_daily_commodity_volume" placeholder="مثلاً ۱۰۰۰" />
+                    </template>
+                  </AppFormField>
+                </div>
+
+                <WorkspaceNotice v-if="limitsError" tone="danger" title="ذخیره تنظیمات ناموفق بود" :message="limitsError" />
+                <WorkspaceNotice v-else-if="limitsNotice" tone="success" title="تغییرات ذخیره شد" :message="limitsNotice" />
+
+                <div class="customer-inline-actions">
+                  <AppButton variant="primary" :loading="isSavingLimits" @click="saveDetailLimits">
+                    ذخیره تغییرات
+                  </AppButton>
+                </div>
+              </AppCard>
             </div>
 
             <div v-else-if="detailTab === 'trades'" class="customer-detail-list">
@@ -530,50 +880,74 @@ onMounted(() => {
                   :key="session.id"
                   :title="session.device_name || session.platform || 'دستگاه بدون نام'"
                   :description="`${session.home_server || 'سرور نامشخص'} · آخرین فعالیت ${formatDate(session.last_active_at)}`"
-                  :meta="session.is_primary ? 'اصلی' : 'فرعی'"
                 >
                   <template #leading>
                     <Clock :size="18" />
                   </template>
+                  <template #trailing>
+                    <div class="customer-session-actions">
+                      <AppStatusBadge :tone="session.is_primary ? 'primary' : 'neutral'">
+                        {{ session.is_primary ? 'اصلی' : 'فرعی' }}
+                      </AppStatusBadge>
+                      <AppButton size="sm" variant="secondary" @click.stop="openConfirmDialog('terminate-session', activeRelation, session)">
+                        پایان نشست
+                      </AppButton>
+                    </div>
+                  </template>
                 </AppListItem>
               </template>
-              <AppButton variant="secondary" @click="openCompatibilityManager('manage')">
-                مدیریت نشست‌ها
-              </AppButton>
             </div>
 
             <div v-else class="customer-detail-list">
-              <AppCard tone="danger">
+              <AppDangerZone
+                title="اقدامات حساس مشتری"
+                :description="activeRelation.status === 'pending'
+                  ? 'دعوت ثبت‌شده را لغو کنید یا ابتدا مشتری را فعال نگه دارید.'
+                  : 'در این بخش می‌توانید دسترسی مشتری را به‌طور کامل قطع کنید.'"
+              >
                 <div class="customer-danger-card">
                   <ShieldAlert :size="22" />
                   <div>
-                    <strong>اقدامات حساس مشتری</strong>
-                    <p>لغو دعوت یا قطع رابطه باید از مسیر مدیریت کامل انجام شود تا confirmation و permissionهای قبلی حفظ شوند.</p>
+                    <strong>{{ activeRelation.status === 'pending' ? 'لغو دعوت مشتری' : 'قطع ارتباط مشتری' }}</strong>
+                    <p>
+                      {{ activeRelation.status === 'pending'
+                        ? 'لغو دعوت، لینک ثبت‌نام را بی‌اعتبار می‌کند.'
+                        : 'قطع ارتباط، دسترسی مشتری به حساب فعلی را غیرفعال می‌کند.' }}
+                    </p>
                   </div>
                 </div>
-              </AppCard>
-              <AppButton variant="danger" @click="openCompatibilityManager('manage')">
-                ورود به اقدامات حساس
-              </AppButton>
+                <div class="customer-inline-actions">
+                  <AppButton
+                    variant="danger"
+                    @click="openConfirmDialog(activeRelation.status === 'pending' ? 'cancel-invitation' : 'unlink-relation', activeRelation)"
+                  >
+                    {{ activeRelation.status === 'pending' ? 'لغو دعوت مشتری' : 'قطع ارتباط مشتری' }}
+                  </AppButton>
+                </div>
+              </AppDangerZone>
             </div>
           </div>
         </WorkspaceSection>
 
         <WorkspaceSection
           title="لیست مشتریان"
-          description="جستجو، فیلتر و انتخاب مشتری بدون accordionهای تو در تو."
+          description="جستجو، فیلتر و انتخاب مشتری با ساختار روشن و بدون accordion تو در تو."
         >
           <div class="customer-list-controls">
-            <AppFormField label="جستجوی مشتری" hint="نام، شماره موبایل، نام حساب یا وضعیت را جستجو کنید.">
-              <template #default="{ id }">
-                <div class="customer-search-field">
-                  <Search :size="16" />
-                  <AppInput :id="id" v-model="searchQuery" placeholder="مثلاً حسن یا 0912" />
-                </div>
-              </template>
-            </AppFormField>
-            <AppTabs v-model="relationFilter" label="فیلتر مشتریان" :options="relationFilterOptions" />
+            <AppSearchField
+              v-model="searchQuery"
+              label="جستجوی مشتری"
+              placeholder="نام، شماره موبایل یا نام حساب را جستجو کنید."
+            />
+            <AppFilterChips v-model="relationFilter" label="فیلتر مشتریان" :options="relationFilterOptions" />
           </div>
+
+          <WorkspaceNotice
+            v-if="createNotice"
+            tone="success"
+            title="دعوت مشتری ثبت شد"
+            :message="createNotice"
+          />
 
           <WorkspaceNotice
             v-if="error"
@@ -599,56 +973,97 @@ onMounted(() => {
             title="نتیجه‌ای پیدا نشد"
             message="فیلتر یا عبارت جستجو را تغییر دهید."
           />
-          <div v-else class="customer-master-detail-grid">
-            <div class="workspace-relation-list">
-              <div v-if="visiblePendingRelations.length" class="customer-list-group">
-                <h3>دعوت‌های در انتظار</h3>
-                <AppListItem
-                  v-for="relation in visiblePendingRelations"
-                  :key="relation.id"
-                  :title="getRelationTitle(relation)"
-                  :description="getRelationDescription(relation)"
-                  interactive
-                  @select="openRelation(relation.id)"
-                >
-                  <template #leading>
-                    <Clock :size="18" />
-                  </template>
-                  <template #trailing>
-                    <AppStatusBadge tone="warning">
-                      دعوت
-                    </AppStatusBadge>
-                  </template>
-                </AppListItem>
-              </div>
-
-              <div v-if="visibleManageableRelations.length" class="customer-list-group">
-                <h3>مشتریان قابل مدیریت</h3>
-                <AppListItem
-                  v-for="relation in visibleManageableRelations"
-                  :key="relation.id"
-                  :title="getRelationTitle(relation)"
-                  :description="getRelationDescription(relation)"
-                  interactive
-                  @select="openRelation(relation.id)"
-                >
-                  <template #leading>
-                    <Users :size="18" />
-                  </template>
-                  <template #trailing>
-                    <div class="customer-list-badges">
-                      <AppStatusBadge :tone="activeRelation?.id === relation.id ? 'primary' : getStatusTone(relation.status)">
-                        {{ activeRelation?.id === relation.id ? 'انتخاب‌شده' : getStatusLabel(relation.status) }}
-                      </AppStatusBadge>
-                      <AppStatusBadge v-if="relation.customer_tier === 'tier2'" tone="primary">
-                        سطح ۲
-                      </AppStatusBadge>
+          <AppMasterDetail class="customer-master-detail-grid">
+            <template #master>
+              <div class="workspace-relation-list">
+                <div v-if="visiblePendingRelations.length" class="customer-list-group">
+                  <h3>دعوت‌های در انتظار</h3>
+                  <AppCard
+                    v-for="relation in visiblePendingRelations"
+                    :key="relation.id"
+                    tone="warning"
+                    class="customer-pending-card"
+                  >
+                    <div class="customer-pending-card__header">
+                      <div>
+                        <strong>{{ getRelationTitle(relation) }}</strong>
+                        <p>{{ getRelationDescription(relation) }}</p>
+                      </div>
+                      <AppStatusBadge tone="warning">دعوت</AppStatusBadge>
                     </div>
-                  </template>
-                </AppListItem>
+                    <div class="customer-inline-actions">
+                      <AppButton
+                        v-if="relation.registration_link"
+                        size="sm"
+                        variant="secondary"
+                        @click="copyRegistrationLink(relation)"
+                      >
+                        <template #icon>
+                          <Copy :size="16" />
+                        </template>
+                        {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
+                      </AppButton>
+                      <AppButton size="sm" variant="danger" @click="openConfirmDialog('cancel-invitation', relation)">
+                        لغو دعوت
+                      </AppButton>
+                    </div>
+                  </AppCard>
+                </div>
+
+                <div v-if="visibleManageableRelations.length" class="customer-list-group">
+                  <h3>مشتریان قابل مدیریت</h3>
+                  <AppListItem
+                    v-for="relation in visibleManageableRelations"
+                    :key="relation.id"
+                    :title="getRelationTitle(relation)"
+                    :description="getRelationDescription(relation)"
+                    interactive
+                    @select="openRelation(relation.id)"
+                  >
+                    <template #leading>
+                      <Users :size="18" />
+                    </template>
+                    <template #trailing>
+                      <div class="customer-list-badges">
+                        <AppStatusBadge :tone="activeRelation?.id === relation.id ? 'primary' : getStatusTone(relation.status)">
+                          {{ activeRelation?.id === relation.id ? 'انتخاب‌شده' : getStatusLabel(relation.status) }}
+                        </AppStatusBadge>
+                        <AppStatusBadge v-if="relation.customer_tier === 'tier2'" tone="primary">
+                          سطح ۲
+                        </AppStatusBadge>
+                      </div>
+                    </template>
+                  </AppListItem>
+                </div>
               </div>
-            </div>
-          </div>
+            </template>
+
+            <template #detail>
+              <AppEmptyState
+                v-if="!activeRelation"
+                title="مشتری انتخاب نشده است"
+                message="برای دیدن پرونده و تنظیمات، یکی از مشتریان فعال را از لیست انتخاب کنید."
+              />
+              <AppCard v-else tone="primary" class="customer-selection-card">
+                <span class="customer-field-label">مشتری انتخاب‌شده</span>
+                <strong>{{ getRelationTitle(activeRelation) }}</strong>
+                <p>{{ getRelationDescription(activeRelation) }}</p>
+                <div class="customer-inline-actions">
+                  <AppButton size="sm" variant="secondary" @click="openRelation(activeRelation.id)">
+                    مشاهده پرونده
+                  </AppButton>
+                  <AppButton
+                    v-if="activeRelation.registration_link"
+                    size="sm"
+                    variant="secondary"
+                    @click="copyRegistrationLink(activeRelation)"
+                  >
+                    {{ copiedRelationId === activeRelation.id ? 'کپی شد' : 'کپی لینک ثبت‌نام' }}
+                  </AppButton>
+                </div>
+              </AppCard>
+            </template>
+          </AppMasterDetail>
         </WorkspaceSection>
 
       </template>
@@ -656,34 +1071,136 @@ onMounted(() => {
       <template #aside>
         <WorkspaceSection
           v-if="!isCompatibilityManagerOpen"
-          title="دسترسی‌های باقی‌مانده"
-          description="تا پایان Stage 3 هیچ action فعلی حذف نمی‌شود."
+          title="میانبرهای مشتری"
+          description="دعوت‌های در انتظار و پرونده مشتریان از همین فضای کاری قابل مدیریت است."
         >
           <div class="workspace-side-actions">
             <AppActionCard
               title="دعوت‌های در انتظار"
               :description="`${customerState.pendingInvitationRelations.value.length.toLocaleString('fa-IR')} دعوت در وضعیت انتظار`"
               tone="warning"
-              @select="openCompatibilityManager('pending')"
+              @select="relationFilter = 'pending'"
             >
               <template #icon>
                 <Clock :size="18" />
               </template>
             </AppActionCard>
             <AppActionCard
-              title="مدیریت کامل"
-              description="ویرایش محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس"
+              title="افزودن مشتری"
+              description="دعوت مشتری جدید با سطح، کمیسیون و محدودیت‌های اولیه"
               tone="primary"
-              @select="openCompatibilityManager('manage')"
+              @select="openCreatePanel"
             >
               <template #icon>
-                <SlidersHorizontal :size="18" />
+                <UserPlus :size="18" />
               </template>
             </AppActionCard>
           </div>
         </WorkspaceSection>
       </template>
     </WorkspaceShell>
+
+    <component
+      :is="isMobile ? AppBottomSheet : AppResponsiveDialog"
+      :open="isCreatePanelOpen"
+      title="افزودن مشتری"
+      description="اطلاعات اولیه مشتری و محدودیت‌های پایه را ثبت کنید."
+      @close="closeCreatePanel"
+    >
+      <div class="customer-create-panel">
+        <AppFormField label="نام مدیریتی" hint="نامی که در فضای کاری خودتان می‌بینید.">
+          <template #default="{ id }">
+            <AppInput :id="id" v-model="customerState.createForm.management_name" placeholder="مثلاً حسن رضایی" />
+          </template>
+        </AppFormField>
+
+        <AppFormField label="شماره موبایل" hint="برای ساخت حساب دعوتی و ثبت لینک استفاده می‌شود.">
+          <template #default="{ id }">
+            <AppInput :id="id" v-model="customerState.createForm.mobile_number" placeholder="0912xxxxxxx" />
+          </template>
+        </AppFormField>
+
+        <AppFormField label="سطح مشتری">
+          <template #default="{ id }">
+            <AppSelect
+              :id="id"
+              v-model="customerState.createForm.customer_tier"
+              :options="[
+                { value: 'tier1', label: 'سطح ۱' },
+                { value: 'tier2', label: 'سطح ۲' },
+              ]"
+              @update:model-value="handleCreateTierChange"
+            />
+          </template>
+        </AppFormField>
+
+        <AppFormField
+          v-if="customerState.createForm.customer_tier === 'tier2'"
+          label="نرخ کمیسیون"
+          :hint="`به ازای هر ۱۰۰ میلیون: ${createCommissionPreview}`"
+        >
+          <template #default>
+            <AppNumberStepper
+              v-model="createCommissionRate"
+              label="درصد کمیسیون مشتری"
+              :min="0"
+              :max="100"
+              :step="0.01"
+            />
+          </template>
+        </AppFormField>
+
+        <div class="customer-edit-form-grid">
+          <AppFormField label="حداقل مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+            <template #default="{ id }">
+              <AppInput :id="id" v-model="customerState.createForm.min_trade_quantity" placeholder="اختیاری" />
+            </template>
+          </AppFormField>
+          <AppFormField label="حداکثر مقدار معامله" hint="خالی بماند یعنی بدون محدودیت.">
+            <template #default="{ id }">
+              <AppInput :id="id" v-model="customerState.createForm.max_trade_quantity" placeholder="اختیاری" />
+            </template>
+          </AppFormField>
+          <AppFormField label="حداکثر تعداد روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+            <template #default="{ id }">
+              <AppInput :id="id" v-model="customerState.createForm.max_daily_trades" placeholder="اختیاری" />
+            </template>
+          </AppFormField>
+          <AppFormField label="حداکثر حجم روزانه" hint="خالی بماند یعنی بدون محدودیت.">
+            <template #default="{ id }">
+              <AppInput :id="id" v-model="customerState.createForm.max_daily_commodity_volume" placeholder="اختیاری" />
+            </template>
+          </AppFormField>
+        </div>
+
+        <AppCard v-if="generatedCreateAccountName" class="customer-generated-account">
+          <span class="customer-field-label">نام حساب دعوتی</span>
+          <strong>@{{ generatedCreateAccountName }}</strong>
+        </AppCard>
+
+        <WorkspaceNotice v-if="createError" tone="danger" title="ثبت دعوت ناموفق بود" :message="createError" />
+        <WorkspaceNotice v-else-if="createNotice" tone="success" title="دعوت ثبت شد" :message="createNotice" />
+      </div>
+
+      <template #actions>
+        <AppButton variant="secondary" @click="closeCreatePanel">
+          انصراف
+        </AppButton>
+        <AppButton variant="primary" :loading="isCreateSubmitting" @click="createRelation">
+          ثبت دعوت مشتری
+        </AppButton>
+      </template>
+    </component>
+
+    <AppConfirmDialog
+      :open="isConfirmDialogOpen"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :confirm-label="confirmAction === 'terminate-session' ? 'پایان نشست' : confirmAction === 'cancel-invitation' ? 'لغو دعوت' : 'قطع ارتباط'"
+      :tone="confirmAction === 'terminate-session' ? 'warning' : 'danger'"
+      @cancel="closeConfirmDialog"
+      @confirm="handleConfirmAction"
+    />
   </div>
 </template>
 
@@ -710,24 +1227,6 @@ onMounted(() => {
 .customer-detail-list {
   display: grid;
   gap: 0.85rem;
-}
-
-.customer-search-field {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.55rem;
-  border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-md);
-  background: var(--ds-surface);
-  color: var(--ds-text-muted);
-  padding-inline: 0.75rem 0;
-}
-
-.customer-search-field :deep(.ui-input) {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
 }
 
 .customer-master-detail-grid {
@@ -890,30 +1389,40 @@ onMounted(() => {
   line-height: 1.8;
 }
 
-.workspace-detail-card {
+.workspace-compatibility-panel {
+  min-width: 0;
+}
+
+.customer-edit-form-card,
+.customer-create-panel,
+.customer-generated-account,
+.customer-selection-card {
   display: grid;
+  gap: 0.85rem;
+}
+
+.customer-edit-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
-.workspace-detail-card h2,
-.workspace-detail-card p {
-  margin: 0;
+.customer-inline-actions,
+.customer-session-actions,
+.customer-pending-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
 }
 
-.workspace-detail-card h2 {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-lg);
-  font-weight: 900;
-}
-
-.workspace-detail-card p {
+.customer-selection-card p,
+.customer-pending-card__header p {
+  margin: 0.2rem 0 0;
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
   line-height: 1.8;
-}
-
-.workspace-compatibility-panel {
-  min-width: 0;
 }
 
 @media (max-width: 520px) {
@@ -923,6 +1432,7 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .customer-edit-form-grid,
   .customer-detail-header {
     grid-template-columns: 1fr;
   }
@@ -930,6 +1440,13 @@ onMounted(() => {
   .customer-detail-badges,
   .customer-list-badges {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 767px) {
+  .customer-workspace-view :deep(.ds-workspace-main),
+  .customer-workspace-view :deep(.ds-workspace-aside) {
+    padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1.5rem);
   }
 }
 </style>

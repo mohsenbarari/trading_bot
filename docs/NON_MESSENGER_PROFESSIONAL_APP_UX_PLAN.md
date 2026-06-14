@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 1 و Stage 2 تکمیل شدند؛ Stage 3 مرحله بعدی است.
+وضعیت: Stage 1 تا Stage 3 تکمیل شدند؛ Stage 4 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -110,6 +110,7 @@
 ممیزی با `rg` نشان داد هنوز debtهای زیر وجود دارد:
 
 - hard-coded color/shadow/radius در `TradingView.vue`, `CreateChannelView.vue`, `AdminMessagesView.vue`, `TradeLotSuggestionAlert.vue`, `OffersList.vue`, `AppToasts.vue`, `MainMenu.vue`, `HomePage.vue`.
+- در primitiveهای جدید هم هنوز shadow/color hard-code محدود باقی مانده است؛ مثل info tone و shadowهای overlay/dialog/sheet که باید در stageهای بعدی به token تبدیل شوند.
 - emoji/text-symbol در `TradingView.vue`, `CommodityManager.vue`, `CreateInvitationView.vue`, `OffersList.vue`, `MainMenu.vue`.
 - fixed/sticky UI و padding محلی در `TradingView.vue`, `MarketView.vue`, `BottomNav.vue`, `NotificationsView.vue`, `AdminMessagesView.vue`, `OwnerCustomerManagerModal.vue`, `OwnerAccountantManagerModal.vue`, `PublicProfile.vue`.
 - legacy utility classes در `frontend/src/assets/main.css` مثل `.btn-primary` و `.input-premium` که باید یا به primitiveها migrate شوند یا فقط backward compatibility محدود بمانند.
@@ -155,6 +156,11 @@ gaps نسبت به درخواست جدید:
 - `AppResponsiveDialog`
 
 این primitiveها فقط وقتی ساخته شوند که در همان Stage واقعاً مصرف می‌شوند. هدف ساخت کتابخانه بی‌مصرف نیست؛ هدف حذف visual duplication است.
+
+قید تکمیلی:
+
+- بسته شدن Stage 1 فقط با ساخت primitive کافی نیست؛ primitiveهای کلیدی مثل `AppMasterDetail`, `AppFilterChips`, `AppNumberStepper`, `AppBottomSheet`, `AppResponsiveDialog` باید در stageهای feature-level مصرف واقعی پیدا کنند.
+- `AppPage`, `AppWorkspace`, `AppMasterDetail` در stageهای بعدی باید behavior بیشتری بگیرند؛ از جمله variantهای safe-area/full-height/scrollable و modeهای desktop/mobile.
 
 ## 9. mapping قدیم به جدید برای منوها، زیرمنوها و actionها
 
@@ -272,6 +278,8 @@ gaps نسبت به درخواست جدید:
 - bounding box آخرین کنترل با bounding boxهای bottom nav و fixed/sticky bottom bar مقایسه شود.
 - اگر overlap وجود داشت یا فاصله آخرین کنترل با بالای bottom chrome کمتر از `12px` بود، تست باید fail شود.
 - این obstruction check روی عرض‌های موبایل `360`, `375`, `390`, `414`, `430` اجباری است.
+- در Stage 12 این coverage باید به `customer detail`, `accountant detail`, `admin` subroutes, legacy settings deep links و auth/public pages هم گسترش یابد.
+- اگر fixed/sticky bottom chrome با wrapperهای nested یا transform ساخته شده باشد، detection تست باید برای آن هم تقویت شود.
 
 ## 13. چک‌لیست desktop viewport
 
@@ -326,8 +334,8 @@ Gate نهایی Stage 12:
 | Stage 0 | Audit قبل از coding و ایجاد همین سند | Completed |
 | Stage 1 | Design system completion and enforcement | Completed |
 | Stage 2 | Global layout, safe-area and fixed UI hardening | Completed |
-| Stage 3 | Customer Workspace: remove remaining legacy feel | Next |
-| Stage 4 | Accountant Workspace: remove remaining legacy feel | Pending |
+| Stage 3 | Customer Workspace: remove remaining legacy feel | Completed |
+| Stage 4 | Accountant Workspace: remove remaining legacy feel | Next |
 | Stage 5 | Account, Settings, Session and Storage UX | Pending |
 | Stage 6 | Admin workspace and admin subviews | Pending |
 | Stage 7 | Profile and Public Profile final polish | Pending |
@@ -388,9 +396,26 @@ Gate نهایی Stage 12:
 
 ### Stage 3 - Customer Workspace
 
-- create customer، pending invitations، limits edit، sessions، danger، copy link را route-native کن.
-- «مدیریت کامل» و هر متن migration/stage را از UI حذف کن.
-- `OwnerCustomerManagerModal.vue` فقط compatibility fallback بماند.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `CustomerWorkspaceView.vue` از wrapper حداقلی به یک workspace route-native واقعی تبدیل شد: summary metrics، جستجو، filter chips، master-detail، گروه دعوت‌های در انتظار، گروه مشتریان قابل مدیریت، selected-state و detail tabs.
+- create customer با `AppBottomSheet` در mobile و `AppResponsiveDialog` در desktop route-native شد و دیگر create primary path به manager قدیمی وابسته نیست.
+- limits edit با `AppSelect`, `AppNumberStepper`, `AppInput` و action ذخیره مستقیم route-native شد.
+- trades/stats/sessions/danger flows در همان route نگه داشته شدند و manager قدیمی فقط fallback سازگاری باقی ماند.
+- `AppSearchField`, `AppFilterChips`, `AppNumberStepper`, `AppMasterDetail`, `AppBottomSheet`, `AppResponsiveDialog` و `AppActionCard` مصرف واقعی گرفتند.
+- متن‌های user-facing مربوط به migration/stage از UI این صفحه حذف شدند.
+- success feedback ذخیره محدودیت‌ها روی همان صفحه پایدار شد و توسط watcher همان relation پاک نمی‌شود.
+- mobile safe-area پایین این route برای stacked workspace حالت خالی/short-list تقویت شد تا obstruction gate Stage 2 در عرض `414px` دوباره پاس شود.
+
+اعتبارسنجی Stage 3:
+
+- `npm run test:unit:run -- CustomerWorkspaceView.test.ts AppPrimitives.test.ts` پاس شد: `14/14`.
+- `npm run test:unit:run -- CustomerWorkspaceView.test.ts` بعد از اصلاح notice و route expectations پاس شد: `6/6`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 4 - Accountant Workspace
 
@@ -430,6 +455,14 @@ Gate نهایی Stage 12:
 ### Stage 11 - Accessibility
 
 - real button، keyboard navigation، aria contracts، focus-visible، reduced-motion و semantic headings را enforce کن.
+- `AppBottomSheet` و `AppResponsiveDialog` در این stage باید Escape close، focus management، focus restore، scroll lock و keyboard-safe behavior بگیرند.
+- primitive overlayها نباید فقط render shell باشند؛ باید accessibility-grade شوند.
+
+### Stage 11.1 - Typography Consistency Audit
+
+- تمام badge/tag/caption/helper/eyebrow/meta textها از نظر اندازه، weight و کاربرد audit شوند.
+- نوشته‌های role/tag/status نباید بزرگ‌تر از اهمیت بصری خود باشند.
+- heading/body/meta/badge scale باید به semantic typography tokens متکی شود، نه مقادیر feature-level پراکنده.
 
 ### Stage 12 - Visual QA
 
