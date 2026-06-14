@@ -191,7 +191,14 @@ onMounted(() => {
       </section>
 
       <section class="ds-accordion operations-accordion" :class="{ open: openSections.relations }">
-        <button class="ds-accordion-header operations-accordion-header" type="button" @click="toggleSection('relations')">
+        <button
+          id="operations-relations-header"
+          class="ds-accordion-header operations-accordion-header"
+          type="button"
+          :aria-expanded="openSections.relations"
+          aria-controls="operations-relations-panel"
+          @click="toggleSection('relations')"
+        >
           <div class="ds-accordion-header-info">
             <Users :size="18" class="section-icon" />
             <div class="section-title-copy">
@@ -201,7 +208,13 @@ onMounted(() => {
           </div>
           <component :is="openSections.relations ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </button>
-        <div v-show="openSections.relations" class="ds-accordion-body operations-accordion-body">
+        <div
+          id="operations-relations-panel"
+          v-show="openSections.relations"
+          class="ds-accordion-body operations-accordion-body"
+          role="region"
+          aria-labelledby="operations-relations-header"
+        >
           <div v-if="ownerActions.length" class="action-grid">
             <button
               v-for="action in ownerActions"
@@ -226,7 +239,14 @@ onMounted(() => {
       </section>
 
       <section class="ds-accordion operations-accordion" :class="{ open: openSections.management }">
-        <button class="ds-accordion-header operations-accordion-header" type="button" @click="toggleSection('management')">
+        <button
+          id="operations-management-header"
+          class="ds-accordion-header operations-accordion-header"
+          type="button"
+          :aria-expanded="openSections.management"
+          aria-controls="operations-management-panel"
+          @click="toggleSection('management')"
+        >
           <div class="ds-accordion-header-info">
             <WalletCards :size="18" class="section-icon" />
             <div class="section-title-copy">
@@ -236,7 +256,13 @@ onMounted(() => {
           </div>
           <component :is="openSections.management ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </button>
-        <div v-show="openSections.management" class="ds-accordion-body operations-accordion-body">
+        <div
+          id="operations-management-panel"
+          v-show="openSections.management"
+          class="ds-accordion-body operations-accordion-body"
+          role="region"
+          aria-labelledby="operations-management-header"
+        >
           <div v-if="adminActions.length" class="action-grid">
             <button
               v-for="action in adminActions"
@@ -261,7 +287,14 @@ onMounted(() => {
       </section>
 
       <section class="ds-accordion operations-accordion" :class="{ open: openSections.shortcuts }">
-        <button class="ds-accordion-header operations-accordion-header" type="button" @click="toggleSection('shortcuts')">
+        <button
+          id="operations-shortcuts-header"
+          class="ds-accordion-header operations-accordion-header"
+          type="button"
+          :aria-expanded="openSections.shortcuts"
+          aria-controls="operations-shortcuts-panel"
+          @click="toggleSection('shortcuts')"
+        >
           <div class="ds-accordion-header-info">
             <Bell :size="18" class="section-icon" />
             <div class="section-title-copy">
@@ -271,7 +304,13 @@ onMounted(() => {
           </div>
           <component :is="openSections.shortcuts ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </button>
-        <div v-show="openSections.shortcuts" class="ds-accordion-body operations-accordion-body">
+        <div
+          id="operations-shortcuts-panel"
+          v-show="openSections.shortcuts"
+          class="ds-accordion-body operations-accordion-body"
+          role="region"
+          aria-labelledby="operations-shortcuts-header"
+        >
           <div class="action-grid">
             <button
               v-for="action in utilityActions"

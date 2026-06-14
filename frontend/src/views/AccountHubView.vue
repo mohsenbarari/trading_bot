@@ -119,7 +119,14 @@ onMounted(() => {
       </section>
 
       <section class="ds-accordion account-accordion" :class="{ open: openSections.profile }">
-        <button class="ds-accordion-header account-accordion-header" type="button" @click="toggleSection('profile')">
+        <button
+          id="account-profile-header"
+          class="ds-accordion-header account-accordion-header"
+          type="button"
+          :aria-expanded="openSections.profile"
+          aria-controls="account-profile-panel"
+          @click="toggleSection('profile')"
+        >
           <div class="ds-accordion-header-info">
             <UserRound :size="18" class="section-icon" />
             <div class="section-title-copy">
@@ -129,7 +136,13 @@ onMounted(() => {
           </div>
           <component :is="openSections.profile ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </button>
-        <div v-show="openSections.profile" class="ds-accordion-body account-accordion-body">
+        <div
+          id="account-profile-panel"
+          v-show="openSections.profile"
+          class="ds-accordion-body account-accordion-body"
+          role="region"
+          aria-labelledby="account-profile-header"
+        >
           <div class="action-grid">
             <button
               v-for="action in profileActions"
@@ -150,7 +163,14 @@ onMounted(() => {
       </section>
 
       <section class="ds-accordion account-accordion" :class="{ open: openSections.security }">
-        <button class="ds-accordion-header account-accordion-header" type="button" @click="toggleSection('security')">
+        <button
+          id="account-security-header"
+          class="ds-accordion-header account-accordion-header"
+          type="button"
+          :aria-expanded="openSections.security"
+          aria-controls="account-security-panel"
+          @click="toggleSection('security')"
+        >
           <div class="ds-accordion-header-info">
             <Smartphone :size="18" class="section-icon" />
             <div class="section-title-copy">
@@ -160,7 +180,13 @@ onMounted(() => {
           </div>
           <component :is="openSections.security ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </button>
-        <div v-show="openSections.security" class="ds-accordion-body account-accordion-body">
+        <div
+          id="account-security-panel"
+          v-show="openSections.security"
+          class="ds-accordion-body account-accordion-body"
+          role="region"
+          aria-labelledby="account-security-header"
+        >
           <div v-if="sessionsRestriction" class="account-empty-state">
             <strong>{{ sessionsRestriction.title }}</strong>
             <p>{{ sessionsRestriction.description }}</p>
@@ -185,7 +211,14 @@ onMounted(() => {
       </section>
 
       <section class="ds-accordion account-accordion" :class="{ open: openSections.notifications }">
-        <button class="ds-accordion-header account-accordion-header" type="button" @click="toggleSection('notifications')">
+        <button
+          id="account-notifications-header"
+          class="ds-accordion-header account-accordion-header"
+          type="button"
+          :aria-expanded="openSections.notifications"
+          aria-controls="account-notifications-panel"
+          @click="toggleSection('notifications')"
+        >
           <div class="ds-accordion-header-info">
             <Bell :size="18" class="section-icon" />
             <div class="section-title-copy">
@@ -195,7 +228,13 @@ onMounted(() => {
           </div>
           <component :is="openSections.notifications ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
         </button>
-        <div v-show="openSections.notifications" class="ds-accordion-body account-accordion-body">
+        <div
+          id="account-notifications-panel"
+          v-show="openSections.notifications"
+          class="ds-accordion-body account-accordion-body"
+          role="region"
+          aria-labelledby="account-notifications-header"
+        >
           <div class="action-grid">
             <button
               v-for="action in notificationActions"

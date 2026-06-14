@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { currentUserSummary } from '../utils/currentUser'
 
 const settingsViewMocks = vi.hoisted(() => ({
+  route: {
+    query: {} as Record<string, string>,
+  },
   backMock: vi.fn(),
   apiFetchMock: vi.fn(),
   forceLogoutMock: vi.fn(),
@@ -11,6 +14,7 @@ const settingsViewMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('vue-router', () => ({
+  useRoute: () => settingsViewMocks.route,
   useRouter: () => ({
     back: settingsViewMocks.backMock,
   }),
@@ -64,6 +68,7 @@ describe('SettingsView.vue', () => {
     vi.useFakeTimers()
     localStorage.clear()
     currentUserSummary.value = null
+    settingsViewMocks.route.query = {}
     settingsViewMocks.backMock.mockReset()
     settingsViewMocks.apiFetchMock.mockReset()
     settingsViewMocks.forceLogoutMock.mockReset()
@@ -98,8 +103,10 @@ describe('SettingsView.vue', () => {
     expect(settingsViewMocks.getCacheSizeMock).toHaveBeenCalled()
 
     const accordions = wrapper.findAll('.ds-accordion-header')
+    expect(accordions[0]!.attributes('aria-expanded')).toBe('false')
     await accordions[0]!.trigger('click')
     await flushPromises()
+    expect(accordions[0]!.attributes('aria-expanded')).toBe('true')
 
     expect(wrapper.text()).toContain('Chrome')
     expect(wrapper.text()).toContain('Android')
@@ -124,8 +131,10 @@ describe('SettingsView.vue', () => {
     await flushPromises()
 
     const accordions = wrapper.findAll('.ds-accordion-header')
+    expect(accordions[1]!.attributes('aria-expanded')).toBe('false')
     await accordions[1]!.trigger('click')
     await flushPromises()
+    expect(accordions[1]!.attributes('aria-expanded')).toBe('true')
 
     expect(wrapper.find('.storage-value').text()).toBe('12.50 MB')
     await wrapper.find('.storage-clear-btn').trigger('click')

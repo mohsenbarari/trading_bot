@@ -188,7 +188,14 @@ function toggleSection(section: AdminSectionKey) {
       class="ds-accordion admin-accordion"
       :class="{ open: openSections[group.key] }"
     >
-      <button class="ds-accordion-header admin-accordion-header" type="button" @click="toggleSection(group.key)">
+      <button
+        :id="`admin-${group.key}-header`"
+        class="ds-accordion-header admin-accordion-header"
+        type="button"
+        :aria-expanded="openSections[group.key]"
+        :aria-controls="`admin-${group.key}-panel`"
+        @click="toggleSection(group.key)"
+      >
         <div class="ds-accordion-header-info">
           <component :is="group.icon" :size="18" class="section-icon" />
           <div class="section-title-copy">
@@ -198,7 +205,13 @@ function toggleSection(section: AdminSectionKey) {
         </div>
         <component :is="openSections[group.key] ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
       </button>
-      <div v-show="openSections[group.key]" class="ds-accordion-body admin-accordion-body">
+      <div
+        :id="`admin-${group.key}-panel`"
+        v-show="openSections[group.key]"
+        class="ds-accordion-body admin-accordion-body"
+        role="region"
+        :aria-labelledby="`admin-${group.key}-header`"
+      >
         <div class="action-grid">
           <button
             v-for="action in group.actions"

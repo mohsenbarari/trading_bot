@@ -54,6 +54,8 @@ describe('AccountHubView.vue', () => {
 
     expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('.account-accordion')).toHaveLength(3)
+    expect(wrapper.find('#account-profile-header').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('#account-profile-panel').attributes('role')).toBe('region')
     expect(wrapper.text()).toContain('محمد')
     expect(wrapper.text()).toContain('نشست‌های فعال')
 
@@ -84,6 +86,7 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
+    expect(wrapper.find('#account-security-header').attributes('aria-controls')).toBe('account-security-panel')
     expect(wrapper.text()).toContain('مدیریت نشست برای حسابدار فعال نیست')
     expect(findAction(wrapper, 'نشست‌های فعال')).toBeUndefined()
     expect(findAction(wrapper, 'حافظه و داده‌ها')?.exists()).toBe(true)
@@ -100,8 +103,11 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
-    await wrapper.findAll('.account-accordion-header')[0]!.trigger('click')
+    const header = wrapper.findAll('.account-accordion-header')[0]!
+    expect(header.attributes('aria-expanded')).toBe('true')
+    await header.trigger('click')
 
     expect(wrapper.findAll('.account-accordion')[0]!.classes()).not.toContain('open')
+    expect(header.attributes('aria-expanded')).toBe('false')
   })
 })
