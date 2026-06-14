@@ -14,6 +14,8 @@ import type { Component } from 'vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 import AppActionCard from './ui/AppActionCard.vue'
 import AppMetricCard from './ui/AppMetricCard.vue'
+import AppPageHeader from './ui/AppPageHeader.vue'
+import AppSectionCard from './ui/AppSectionCard.vue'
 import AppStatusBadge from './ui/AppStatusBadge.vue'
 import HelpPopover from './HelpPopover.vue'
 
@@ -202,16 +204,22 @@ function toggleSection(section: AdminSectionKey) {
 <template>
   <div class="admin-panel-container">
     <section class="admin-intro">
-      <HelpPopover
-        floating
-        button-test="admin-panel-help"
-        note-test="admin-panel-help-note"
-        label="راهنمای پنل مدیریت"
-        text="از این منو برای ورود به بخش‌های مدیریتی مجاز حساب خود استفاده کن. گزینه‌های حساس مثل تنظیمات سیستم فقط برای مدیر ارشد نمایش داده می‌شوند."
-      />
+      <AppPageHeader
+        eyebrow="پنل مدیریت"
+        title="پنل مدیریت"
+        description="بخش مورد نظر خود را انتخاب کنید و فقط ابزارهای مجاز نقش فعلی را استفاده کنید."
+      >
+        <template #actions>
+          <HelpPopover
+            floating
+            button-test="admin-panel-help"
+            note-test="admin-panel-help-note"
+            label="راهنمای پنل مدیریت"
+            text="از این منو برای ورود به بخش‌های مدیریتی مجاز حساب خود استفاده کن. گزینه‌های حساس مثل تنظیمات سیستم فقط برای مدیر ارشد نمایش داده می‌شوند."
+          />
+        </template>
+      </AppPageHeader>
       <span class="admin-intro-kicker">{{ accessNote }}</span>
-      <h1>پنل مدیریت</h1>
-      <p>لطفاً بخش مورد نظر خود را انتخاب کنید:</p>
     </section>
 
     <section class="admin-metrics" aria-label="وضعیت پنل مدیریت">
@@ -225,36 +233,32 @@ function toggleSection(section: AdminSectionKey) {
       />
     </section>
 
-    <section
+    <AppSectionCard
       v-for="group in actionGroups"
       :key="group.key"
+      :title="group.title"
+      :description="group.description"
       class="ds-accordion admin-accordion"
       :class="{ open: openSections[group.key] }"
     >
-      <button
-        :id="`admin-${group.key}-header`"
-        class="ds-accordion-header admin-accordion-header"
-        type="button"
-        :aria-expanded="openSections[group.key]"
-        :aria-controls="`admin-${group.key}-panel`"
-        @click="toggleSection(group.key)"
-      >
-        <div class="ds-accordion-header-info">
+      <template #actions>
+        <button
+          :id="`admin-${group.key}-header`"
+          class="admin-accordion-toggle"
+          type="button"
+          :aria-expanded="openSections[group.key]"
+          :aria-controls="`admin-${group.key}-panel`"
+          @click="toggleSection(group.key)"
+        >
           <component :is="group.icon" :size="18" class="section-icon" />
-          <div class="section-title-copy">
-            <div class="section-title-row">
-              <h2>{{ group.title }}</h2>
-              <AppStatusBadge tone="primary">{{ group.actions.length }} ابزار</AppStatusBadge>
-            </div>
-            <span>{{ group.description }}</span>
-          </div>
-        </div>
-        <component :is="openSections[group.key] ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-      </button>
+          <AppStatusBadge tone="primary">{{ group.actions.length }} ابزار</AppStatusBadge>
+          <component :is="openSections[group.key] ? ChevronDown : ChevronLeft" :size="18" class="ds-accordion-icon" />
+        </button>
+      </template>
       <div
         :id="`admin-${group.key}-panel`"
         v-show="openSections[group.key]"
-        class="ds-accordion-body admin-accordion-body"
+        class="admin-accordion-body"
         role="region"
         :aria-labelledby="`admin-${group.key}-header`"
       >
@@ -275,7 +279,7 @@ function toggleSection(section: AdminSectionKey) {
           </AppActionCard>
         </div>
       </div>
-    </section>
+    </AppSectionCard>
 
     <section v-if="actionGroups.length === 0" class="admin-empty-state">
       <WalletCards :size="20" />
@@ -296,38 +300,25 @@ function toggleSection(section: AdminSectionKey) {
 
 .admin-intro {
   position: relative;
-  background: var(--ds-bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1rem;
   border: 1px solid var(--ds-border-accent);
   border-radius: var(--ds-radius-lg);
-  box-shadow: var(--ds-shadow-md);
-  padding: 1rem;
-  padding-left: 3.75rem;
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
 }
 
 .admin-intro-kicker {
   display: inline-flex;
   width: fit-content;
-  margin-bottom: 0.45rem;
   padding: 0.25rem 0.65rem;
   border-radius: 999px;
   background: var(--ds-primary-50);
   color: var(--ds-primary-700);
   font-size: var(--ds-font-xs);
   font-weight: 800;
-}
-
-.admin-intro h1 {
-  margin: 0 0 0.35rem;
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-xl);
-  font-weight: 850;
-}
-
-.admin-intro p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
 }
 
 .admin-metrics {
@@ -340,43 +331,20 @@ function toggleSection(section: AdminSectionKey) {
   margin-bottom: 0;
 }
 
-.admin-accordion-header {
-  width: 100%;
-  border: 0;
-  font-family: inherit;
-  text-align: right;
-}
-
 .section-icon {
   color: var(--ds-primary-700);
 }
 
-.section-title-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
-.section-title-row {
+.admin-accordion-toggle {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  min-width: 0;
-}
-
-.section-title-copy h2 {
-  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
   color: var(--ds-text-primary);
-  font-size: var(--ds-font-md);
-  font-weight: 850;
-  line-height: 1.45;
-}
-
-.section-title-copy span {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.5;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 .action-grid {
@@ -420,12 +388,6 @@ function toggleSection(section: AdminSectionKey) {
 @media (max-width: 640px) {
   .admin-metrics {
     grid-template-columns: 1fr;
-  }
-
-  .section-title-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.25rem;
   }
 }
 </style>

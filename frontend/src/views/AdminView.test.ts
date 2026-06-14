@@ -96,7 +96,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('پنل مدیریت')
+    expect(wrapper.text()).toContain('مرکز مدیریت')
     await wrapper.get('.admin-action-btn.primary').trigger('click')
     await flushPromises()
 
@@ -109,7 +109,7 @@ describe('AdminView.vue', () => {
     await flushPromises()
 
     expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
   })
 
   it('routes from the users section into the admin user profile view', async () => {
@@ -233,7 +233,7 @@ describe('AdminView.vue', () => {
     const notFoundWrapper = mountView()
     await flushPromises()
 
-    expect(notFoundWrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(notFoundWrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
     expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
 
     adminViewMocks.route.query = {
@@ -245,7 +245,7 @@ describe('AdminView.vue', () => {
     const rejectedWrapper = mountView()
     await flushPromises()
 
-    expect(rejectedWrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(rejectedWrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
     expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
   })
 
@@ -259,7 +259,7 @@ describe('AdminView.vue', () => {
     await flushPromises()
 
     expect(adminViewMocks.apiFetchMock).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
 
     const vm = wrapper.vm as any
     vm.handleOpenPublicProfile()
@@ -289,7 +289,7 @@ describe('AdminView.vue', () => {
     vm.handleNavigate('admin_panel')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
     expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(2)
     expect(adminViewMocks.routerReplaceMock).toHaveBeenCalledWith({ name: 'admin' })
   })
@@ -312,7 +312,7 @@ describe('AdminView.vue', () => {
     vm.handleNavigate('settings')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
     expect(wrapper.find('.trading-settings-stub').exists()).toBe(false)
   })
 
@@ -323,7 +323,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
     expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
   })
 
@@ -336,7 +336,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
     expect(wrapper.findComponent({ name: 'CreateChannelView' }).exists()).toBe(false)
   })
 
@@ -368,7 +368,7 @@ describe('AdminView.vue', () => {
     expect(typeof settingsBack).toBe('function')
     settingsBack()
     await flushPromises()
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
 
     const usersButton = wrapper.findAll('.admin-action-btn').find((button) => button.text().includes('مدیریت کاربران'))
     expect(usersButton).toBeTruthy()
@@ -380,6 +380,18 @@ describe('AdminView.vue', () => {
     expect(typeof profileBack).toBe('function')
     profileBack()
     await flushPromises()
-    expect(wrapper.text()).toContain('لطفاً بخش مورد نظر خود را انتخاب کنید:')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
+  })
+
+  it('keeps legacy system_settings query deep links mapped to the system route', async () => {
+    adminViewMocks.route.query = {
+      section: 'system_settings',
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('تنظیمات سیستم')
+    expect(wrapper.find('.trading-settings-stub').exists()).toBe(true)
   })
 })

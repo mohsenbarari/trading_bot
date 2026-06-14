@@ -24,11 +24,6 @@ async function mountCommodityManager() {
       apiBaseUrl: '',
       jwtToken: 'jwt-token',
     },
-    global: {
-      stubs: {
-        LoadingSkeleton: { template: '<div class="loading-skeleton-stub"></div>' },
-      },
-    },
   })
 }
 
@@ -152,7 +147,7 @@ describe('CommodityManager.vue', () => {
     await wrapper.find('.back-icon-btn').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('افزودن کالای جدید')
+    expect(wrapper.text()).toContain('افزودن کالا')
 
     wrapper.unmount()
   })
@@ -164,7 +159,7 @@ describe('CommodityManager.vue', () => {
     await wrapper.find('.action-btn.primary-soft').trigger('click')
     await flushPromises()
 
-    const inputs = wrapper.findAll('.ds-input')
+    const inputs = wrapper.findAll('input')
     await inputs[0]!.setValue('طلای آب‌شده')
     await inputs[1]!.setValue('آبشده - طلای خام')
     await wrapper.find('form').trigger('submit.prevent')
@@ -189,7 +184,7 @@ describe('CommodityManager.vue', () => {
     await wrapper.findAll('.list-item-btn')[0]!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('کالای پیش فرض امام فقط از مسیر نام های مستعار قابل مدیریت است')
+    expect(wrapper.text()).toContain('کالای پیش‌فرض امام فقط از مسیر نام‌های مستعار قابل مدیریت است')
     expect(wrapper.find('.action-btn.secondary-soft').exists()).toBe(false)
     expect(wrapper.find('.action-btn.danger-soft').exists()).toBe(false)
     expect(wrapper.find('.action-btn.primary-soft').exists()).toBe(true)
@@ -208,7 +203,7 @@ describe('CommodityManager.vue', () => {
     await actionButtons[1]!.trigger('click')
     await flushPromises()
 
-    await wrapper.find('.ds-input').setValue('سکه بهار آزادی')
+    await wrapper.find('input').setValue('سکه بهار آزادی')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -217,7 +212,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.findAll('.action-btn')[0]!.trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-input').setValue('بهار - طرح قدیم')
+    await wrapper.find('input').setValue('بهار - طرح قدیم')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -226,7 +221,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.icon-btn.edit').trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-input').setValue('بهار آزادی')
+    await wrapper.find('input').setValue('بهار آزادی')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -234,7 +229,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.icon-btn.delete').trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-btn.danger').trigger('click')
+    await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
 
     const aliasTexts = wrapper.findAll('.alias-text').map((node) => node.text())
@@ -252,7 +247,7 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
     await wrapper.find('.action-btn.danger-soft').trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-btn.danger').trigger('click')
+    await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('بهار')
@@ -281,7 +276,7 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
 
     expect(manageWrapper.text()).toContain('خطا در دریافت اطلاعات کالا')
-    expect(manageWrapper.text()).toContain('افزودن کالای جدید')
+    expect(manageWrapper.text()).toContain('افزودن کالا')
 
     manageWrapper.unmount()
   })
@@ -302,13 +297,13 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.action-btn.primary-soft').trigger('click')
     await flushPromises()
-    await wrapper.findAll('.ds-input')[0]!.setValue('سکه امامی')
+    await wrapper.findAll('input')[0]!.setValue('سکه امامی')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    const createErrorAlert = wrapper.find('.flash-box.error[role="alert"]')
+    const createErrorAlert = wrapper.find('.flash-box--error[role="alert"]')
     expect(createErrorAlert.exists()).toBe(true)
-    expect(createErrorAlert.text()).toContain('خطا در ثبت اطلاعات')
+    expect(createErrorAlert.text()).toContain('ثبت اطلاعات انجام نشد')
     expect(createErrorAlert.text()).toContain('duplicate')
     expect(wrapper.text()).toContain('افزودن کالا')
 
@@ -320,17 +315,17 @@ describe('CommodityManager.vue', () => {
       return responseOf({ detail: 'unexpected' }, false, 500)
     })
 
-    await wrapper.find('.ds-btn.secondary').trigger('click')
+    await wrapper.find('.ui-button--secondary').trigger('click')
     await flushPromises()
     await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
     await wrapper.findAll('.action-btn')[1]!.trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-input').setValue('x')
+    await wrapper.find('input').setValue('x')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    const editErrorAlert = wrapper.find('.flash-box.error[role="alert"]')
+    const editErrorAlert = wrapper.find('.flash-box--error[role="alert"]')
     expect(editErrorAlert.exists()).toBe(true)
     expect(editErrorAlert.text()).toContain('too short')
     expect(wrapper.text()).toContain('ویرایش نام کالا')
@@ -346,7 +341,7 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
     await wrapper.findAll('.action-btn')[0]!.trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-input').setValue('   ')
+    await wrapper.find('input').setValue('   ')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -363,7 +358,7 @@ describe('CommodityManager.vue', () => {
       return responseOf(commoditiesState)
     })
 
-    await wrapper.find('.ds-input').setValue('درست - خراب')
+    await wrapper.find('input').setValue('درست - خراب')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -375,10 +370,10 @@ describe('CommodityManager.vue', () => {
       method: 'POST',
       body: JSON.stringify({ alias: 'خراب' }),
     }))
-    const aliasErrorAlert = wrapper.find('.flash-box.error[role="alert"]')
+    const aliasErrorAlert = wrapper.find('.flash-box--error[role="alert"]')
     expect(aliasErrorAlert.exists()).toBe(true)
     expect(aliasErrorAlert.text()).toContain('خراب: تکراری')
-    expect(wrapper.text()).toContain('افزودن نام مستعار جدید')
+    expect(wrapper.text()).toContain('افزودن نام مستعار')
 
     wrapper.unmount()
   })
@@ -400,7 +395,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.action-btn.danger-soft').trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-btn.danger').trigger('click')
+    await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
 
     expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/2', { method: 'DELETE' })
@@ -408,7 +403,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.icon-btn.delete').trigger('click')
     await flushPromises()
-    await wrapper.find('.ds-btn.danger').trigger('click')
+    await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
 
     expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/aliases/21', { method: 'DELETE' })

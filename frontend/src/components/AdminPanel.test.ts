@@ -30,6 +30,7 @@ describe('AdminPanel.vue', () => {
     expect(wrapper.text()).toContain('ارسال لینک دعوت')
     expect(wrapper.text()).toContain('مدیریت کاربران')
     expect(wrapper.text()).not.toContain('مدیریت کالاها')
+    expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
 
     await buttons[1]!.trigger('click')
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['manage_users'])

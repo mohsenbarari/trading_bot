@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 1 تا Stage 3 تکمیل شدند؛ Stage 4 مرحله بعدی است.
+وضعیت: Stage 1 تا Stage 6 تکمیل شدند؛ Stage 7 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -337,7 +337,7 @@ Gate نهایی Stage 12:
 | Stage 3 | Customer Workspace: remove remaining legacy feel | Completed |
 | Stage 4 | Accountant Workspace: remove remaining legacy feel | Completed |
 | Stage 5 | Account, Settings, Session and Storage UX | Completed |
-| Stage 6 | Admin workspace and admin subviews | Next |
+| Stage 6 | Admin workspace and admin subviews | Completed |
 | Stage 7 | Profile and Public Profile final polish | Pending |
 | Stage 8 | Notifications final polish | Pending |
 | Stage 9 | Dashboard, Operations and Market polish | Pending |
@@ -462,8 +462,22 @@ Gate نهایی Stage 12:
 
 ### Stage 6 - Admin
 
-- subviewهای admin را روی shared page/header/card/form/list/danger patterns بیاور.
-- `/admin?section=...` و `/admin/*` همزمان سالم بمانند.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `AdminView.vue` از shell محلی top-bar/content به یک shell حرفه‌ای‌تر با `AppPage` و `AppPageHeader` برای landing و subview header/card استاندارد منتقل شد.
+- `AdminPanel.vue` روی primitiveهای shared بازچینش شد و landing ادمین حالا از `AppPageHeader`, `AppSectionCard`, `AppActionCard`, `AppMetricCard` و `AppStatusBadge` استفاده می‌کند، بدون تغییر permission gateها یا navigation keyها.
+- compatibility مسیرهای legacy ادمین حفظ شد و alias قدیمی `?section=system_settings` هم به `settings` نرمال شد تا `/admin?section=...` و `/admin/*` هم‌زمان سالم بمانند.
+- `CommodityManager.vue` از الگوی local/emoji-heavy قدیمی خارج شد و روی `AppSectionCard`, `AppListItem`, `AppButton`, `AppFormField`, `AppInput`, `AppEmptyState`, `AppLoadingState` و `AppDangerZone` بازسازی شد.
+- مدیریت کالا حالا route-nativeتر و خواناتر است: فهرست کالا، مدیریت نام‌های مستعار، فرم‌های create/edit و delete flows همگی در زبان و spacing یکپارچه‌تر با بقیه app نمایش داده می‌شوند.
+
+اعتبارسنجی Stage 6:
+
+- `npm run test:unit:run -- src/views/AdminView.test.ts src/components/AdminPanel.test.ts src/components/CommodityManager.test.ts` پاس شد: `28/28`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 7 - Profile/Public Profile
 

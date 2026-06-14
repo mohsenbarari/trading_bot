@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -13,6 +13,8 @@ import CreateInvitationView from '../components/CreateInvitationView.vue'
 import CreateChannelView from '../components/CreateChannelView.vue'
 import UserProfile from '../components/UserProfile.vue'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
+import AppPage from '../components/ui/AppPage.vue'
+import AppPageHeader from '../components/ui/AppPageHeader.vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 
 const router = useRouter()
@@ -92,6 +94,13 @@ function getSingleParam(value: unknown) {
   return value ?? null
 }
 
+function normalizeLegacyAdminSection(section: unknown) {
+  if (section === 'system_settings') {
+    return 'settings'
+  }
+  return section
+}
+
 function canAccessAdminSection(section: string) {
   if (!routeAdminSections.has(section)) return false
   if (isCachedSuperAdmin()) return true
@@ -133,7 +142,7 @@ function getRouteAdminSection(): string | null {
     return canAccessAdminSection(routeSection) ? routeSection : null
   }
 
-  const section = route.query.section
+  const section = normalizeLegacyAdminSection(route.query.section)
   if (typeof section !== 'string' || section === 'user_profile' || !canAccessAdminSection(section)) {
     return null
   }
@@ -276,143 +285,160 @@ onUnmounted(() => clearBackStack())
 </script>
 
 <template>
-  <div class="admin-view ds-page">
-     <!-- Top Bar (only when inside a sub-section) -->
-     <div v-if="currentSection !== 'menu'" class="admin-top-bar">
-         <div class="header-row admin-header">
-             <div class="header-spacer"></div>
-             <div class="header-title">
-                 <h2>{{ currentSectionMeta.title }}</h2>
-                 <p>{{ currentSectionMeta.description }}</p>
-             </div>
-             <button @click="handleNavigate('admin_panel')" class="back-button">
-                 <ChevronLeft :size="24" />
-             </button>
-         </div>
-     </div>
+  <AppPage>
+    <div class="admin-view">
+      <template v-if="currentSection === 'menu'">
+        <AppPageHeader
+          eyebrow="مدیریت پروژه"
+          title="مرکز مدیریت"
+          description="ابزارهای مدیریتی مجاز حساب خود را از این بخش دنبال کنید."
+        />
+        <AdminPanel @navigate="handleNavigate" />
+      </template>
 
-     <!-- Content Area -->
-     <div class="admin-content">
-         <div class="admin-inner">
-            
+      <template v-else>
+        <section class="admin-subview-shell">
+          <header class="admin-subview-header">
+            <button @click="handleNavigate('admin_panel')" class="back-button" type="button">
+              <ChevronLeft :size="20" />
+            </button>
+            <div class="admin-subview-copy">
+              <h1>{{ currentSectionMeta.title }}</h1>
+              <p>{{ currentSectionMeta.description }}</p>
+            </div>
+          </header>
+
+          <div class="admin-subview-card">
             <transition name="fade" mode="out-in">
-                <AdminPanel v-if="currentSection === 'menu'" @navigate="handleNavigate" />
-                
-                <CreateInvitationView 
-                   v-else-if="currentSection === 'create_invitation'" 
-                   :apiBaseUrl="apiBaseUrl" 
-                   :jwtToken="jwtToken" 
-                />
+              <CreateInvitationView
+                v-if="currentSection === 'create_invitation'"
+                :apiBaseUrl="apiBaseUrl"
+                :jwtToken="jwtToken"
+              />
 
-                 <CreateChannelView
-                   v-else-if="currentSection === 'create_channel'"
-                   :apiBaseUrl="apiBaseUrl"
-                   :jwtToken="jwtToken"
-                   @open-public-profile="handleOpenPublicProfile"
-                 />
+              <CreateChannelView
+                v-else-if="currentSection === 'create_channel'"
+                :apiBaseUrl="apiBaseUrl"
+                :jwtToken="jwtToken"
+                @open-public-profile="handleOpenPublicProfile"
+              />
 
-                <CommodityManager 
-                   v-else-if="currentSection === 'manage_commodities'" 
-                   :apiBaseUrl="apiBaseUrl" 
-                   :jwtToken="jwtToken" 
-                   @navigate="handleNavigate"
-                />
+              <CommodityManager
+                v-else-if="currentSection === 'manage_commodities'"
+                :apiBaseUrl="apiBaseUrl"
+                :jwtToken="jwtToken"
+                @navigate="handleNavigate"
+              />
 
-                <UserManager 
-                   v-else-if="currentSection === 'manage_users'" 
-                   :apiBaseUrl="apiBaseUrl" 
-                   :jwtToken="jwtToken" 
-                   @navigate="handleNavigate"
-                />
+              <UserManager
+                v-else-if="currentSection === 'manage_users'"
+                :apiBaseUrl="apiBaseUrl"
+                :jwtToken="jwtToken"
+                @navigate="handleNavigate"
+              />
 
-                 <AdminMessagesView
-                   v-else-if="currentSection === 'admin_messages' && canAccessSystemSettings"
-                 />
+              <AdminMessagesView
+                v-else-if="currentSection === 'admin_messages' && canAccessSystemSettings"
+              />
 
-                <UserProfile
-                    v-else-if="currentSection === 'user_profile' && selectedUserForProfile"
-                    :user="selectedUserForProfile"
-                    :isAdminView="true"
-                    :apiBaseUrl="apiBaseUrl"
-                    :jwtToken="jwtToken"
-                    @navigate="handleNavigate"
-                />
+              <UserProfile
+                v-else-if="currentSection === 'user_profile' && selectedUserForProfile"
+                :user="selectedUserForProfile"
+                :isAdminView="true"
+                :apiBaseUrl="apiBaseUrl"
+                :jwtToken="jwtToken"
+                @navigate="handleNavigate"
+              />
 
-                <AppLoadingState
-                  v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile"
-                  label="در حال بارگذاری پروفایل کاربر"
-                />
+              <AppLoadingState
+                v-else-if="currentSection === 'user_profile' && isLoadingRouteUserProfile"
+                label="در حال بارگذاری پروفایل کاربر"
+              />
 
-                 <TradingSettings 
-                   v-else-if="currentSection === 'settings' && canAccessSystemSettings" 
-                   :apiBaseUrl="apiBaseUrl" 
-                   :jwtToken="jwtToken" 
-                />
+              <TradingSettings
+                v-else-if="currentSection === 'settings' && canAccessSystemSettings"
+                :apiBaseUrl="apiBaseUrl"
+                :jwtToken="jwtToken"
+              />
             </transition>
-
-         </div>
-     </div>
-  </div>
+          </div>
+        </section>
+      </template>
+    </div>
+  </AppPage>
 </template>
 
 <style scoped>
 .admin-view {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  gap: var(--ds-section-gap);
 }
 
-.admin-top-bar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--ds-bg-card);
-  border-bottom: 1px solid var(--ds-border-light);
-}
-
-.admin-header {
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-}
-
-.admin-header .header-title {
+.admin-subview-shell {
   display: flex;
-  min-width: 0;
   flex-direction: column;
-  align-items: center;
-  gap: 0.1rem;
+  gap: 0.9rem;
 }
 
-.admin-header .header-title h2 {
-  margin: 0;
+.admin-subview-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.9rem;
+  align-items: start;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.admin-subview-copy {
+  min-width: 0;
+}
+
+.admin-subview-copy h1 {
+  margin: 0 0 0.3rem;
+  color: var(--ds-text-primary);
   font-size: var(--ds-font-lg);
   font-weight: 850;
-  line-height: 1.35;
+  line-height: 1.45;
 }
 
-.admin-header .header-title p {
-  max-width: 16rem;
+.admin-subview-copy p {
   margin: 0;
-  overflow: hidden;
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+  line-height: 1.8;
 }
 
-.admin-content {
-  flex: 1;
-  padding: var(--ds-card-padding);
-  overflow-y: auto;
-  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
-  scroll-padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
+.admin-subview-card {
+  padding: 1rem;
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
+  min-width: 0;
 }
 
-.admin-inner {
-  max-width: var(--ds-page-max-width);
-  margin: 0 auto;
-  width: 100%;
+.back-button {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ds-border-light);
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-primary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.back-button:hover {
+  border-color: var(--ds-primary-300);
+  background: var(--ds-primary-50);
+  color: var(--ds-primary-700);
 }
 
 .fade-enter-active,
@@ -423,5 +449,11 @@ onUnmounted(() => clearBackStack())
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+@media (max-width: 767px) {
+  .admin-subview-card {
+    padding: 0.85rem;
+  }
 }
 </style>
