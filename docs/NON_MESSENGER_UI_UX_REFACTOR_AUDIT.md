@@ -228,6 +228,7 @@ Stage N6 - Admin workspace consolidation:
 
 Stage N7 - Responsive and accessibility pass:
 - Check text fit, focus states, tap targets, RTL alignment, and keyboard navigation.
+- Status: completed. Account, operations, admin, settings, and trading-settings accordions now expose explicit `aria-expanded` / `aria-controls` / `region` relationships, settings/trading settings accordion headers are real keyboard-focusable buttons, shared accordion headers and primary action buttons have stronger focus-visible/tap-target behavior, and focused unit coverage verifies the expanded/collapsed accessibility state. Messenger internals were not touched.
 
 Stage N8 - Regression and production rollout:
 - Run focused unit/build checks.

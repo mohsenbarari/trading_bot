@@ -147,15 +147,28 @@ watch(
     <div class="settings-content">
 
       <!-- Active Sessions Accordion -->
-      <div v-if="!isAccountant" class="ds-accordion">
-        <div class="ds-accordion-header" @click="toggleSection('sessions')">
+      <div v-if="!isAccountant" class="ds-accordion" :class="{ open: openSections.sessions }">
+        <button
+          id="settings-sessions-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.sessions"
+          aria-controls="settings-sessions-panel"
+          @click="toggleSection('sessions')"
+        >
           <div class="ds-accordion-header-info">
             <Smartphone :size="18" class="icon-primary" />
             <h2>نشست‌های فعال</h2>
           </div>
           <component :is="openSections.sessions ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </div>
-        <div v-show="openSections.sessions" class="ds-accordion-body">
+        </button>
+        <div
+          id="settings-sessions-panel"
+          v-show="openSections.sessions"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="settings-sessions-header"
+        >
           <div v-if="sessionsLoading" class="loading-inline">
             <Loader2 class="spin-icon" :size="20" />
           </div>
@@ -203,15 +216,28 @@ watch(
       </div>
 
       <!-- Storage Management Accordion -->
-      <div class="ds-accordion">
-        <div class="ds-accordion-header" @click="toggleSection('storage')">
+      <div class="ds-accordion" :class="{ open: openSections.storage }">
+        <button
+          id="settings-storage-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.storage"
+          aria-controls="settings-storage-panel"
+          @click="toggleSection('storage')"
+        >
           <div class="ds-accordion-header-info">
             <HardDrive :size="18" class="icon-primary" />
             <h2>مدیریت حافظه و داده‌ها</h2>
           </div>
           <component :is="openSections.storage ? ChevronDown : ChevronLeft" :size="20" class="ds-accordion-icon" />
-        </div>
-        <div v-show="openSections.storage" class="ds-accordion-body">
+        </button>
+        <div
+          id="settings-storage-panel"
+          v-show="openSections.storage"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="settings-storage-header"
+        >
           <div class="storage-card">
             <div class="storage-info">
               <span class="storage-label">فضای اشغال‌شده توسط فایل‌های دانلود‌شده</span>

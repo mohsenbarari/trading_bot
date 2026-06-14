@@ -411,14 +411,27 @@ onBeforeUnmount(() => {
 
       <!-- دعوت‌نامه -->
       <div class="ds-accordion" :class="{ open: openSections.invitation }">
-        <div class="ds-accordion-header" @click="toggleSection('invitation')">
+        <button
+          id="trading-settings-invitation-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.invitation"
+          aria-controls="trading-settings-invitation-panel"
+          @click="toggleSection('invitation')"
+        >
           <div class="ds-accordion-header-info">
             <Mail class="section-icon" :size="18" />
             <h2 class="section-title">دعوت‌نامه</h2>
           </div>
           <ChevronLeft class="ds-accordion-icon" :size="18" />
-        </div>
-        <div v-show="openSections.invitation" class="ds-accordion-body">
+        </button>
+        <div
+          id="trading-settings-invitation-panel"
+          v-show="openSections.invitation"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="trading-settings-invitation-header"
+        >
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
             <input 
@@ -435,14 +448,27 @@ onBeforeUnmount(() => {
 
       <!-- لفظ -->
       <div class="ds-accordion" :class="{ open: openSections.offer }">
-        <div class="ds-accordion-header" @click="toggleSection('offer')">
+        <button
+          id="trading-settings-offer-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.offer"
+          aria-controls="trading-settings-offer-panel"
+          @click="toggleSection('offer')"
+        >
           <div class="ds-accordion-header-info">
             <ClipboardList class="section-icon" :size="18" />
             <h2 class="section-title">لفظ معاملاتی</h2>
           </div>
           <ChevronLeft class="ds-accordion-icon" :size="18" />
-        </div>
-        <div v-show="openSections.offer" class="ds-accordion-body">
+        </button>
+        <div
+          id="trading-settings-offer-panel"
+          v-show="openSections.offer"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="trading-settings-offer-header"
+        >
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
             <input 
@@ -495,14 +521,27 @@ onBeforeUnmount(() => {
 
       <!-- محدودیت منقضی کردن -->
       <div class="ds-accordion" :class="{ open: openSections.expire }">
-        <div class="ds-accordion-header" @click="toggleSection('expire')">
+        <button
+          id="trading-settings-expire-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.expire"
+          aria-controls="trading-settings-expire-panel"
+          @click="toggleSection('expire')"
+        >
           <div class="ds-accordion-header-info">
             <Clock class="section-icon" :size="18" />
             <h2 class="section-title">محدودیت منقضی کردن</h2>
           </div>
           <ChevronLeft class="ds-accordion-icon" :size="18" />
-        </div>
-        <div v-show="openSections.expire" class="ds-accordion-body">
+        </button>
+        <div
+          id="trading-settings-expire-panel"
+          v-show="openSections.expire"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="trading-settings-expire-header"
+        >
           <div class="ds-form-group">
             <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
             <input 
@@ -531,14 +570,27 @@ onBeforeUnmount(() => {
 
       <!-- امنیت -->
       <div class="ds-accordion" :class="{ open: openSections.security }">
-        <div class="ds-accordion-header" @click="toggleSection('security')">
+        <button
+          id="trading-settings-security-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.security"
+          aria-controls="trading-settings-security-panel"
+          @click="toggleSection('security')"
+        >
           <div class="ds-accordion-header-info">
             <ShieldCheck class="section-icon" :size="18" />
             <h2 class="section-title">امنیت و نشست‌ها</h2>
           </div>
           <ChevronLeft class="ds-accordion-icon" :size="18" />
-        </div>
-        <div v-show="openSections.security" class="ds-accordion-body">
+        </button>
+        <div
+          id="trading-settings-security-panel"
+          v-show="openSections.security"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="trading-settings-security-header"
+        >
           <div class="info-note">
             <AlertCircle :size="16" />
             <span>این مقادیر آستانه پایه برای جلوگیری از سوءاستفاده (Anti-Abuse) هستند. برای کاربرانی با بیش از یک نشست فعال، سیستم به صورت خودکار آستانه را افزایش می‌دهد.</span>
@@ -581,14 +633,27 @@ onBeforeUnmount(() => {
 
       <!-- برنامه بازار -->
       <div class="ds-accordion" :class="{ open: openSections.marketSchedule }">
-        <div class="ds-accordion-header" @click="toggleSection('marketSchedule')">
+        <button
+          id="trading-settings-market-schedule-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.marketSchedule"
+          aria-controls="trading-settings-market-schedule-panel"
+          @click="toggleSection('marketSchedule')"
+        >
           <div class="ds-accordion-header-info">
             <Clock class="section-icon" :size="18" />
             <h2 class="section-title">برنامه بازار</h2>
           </div>
           <ChevronLeft class="ds-accordion-icon" :size="18" />
-        </div>
-        <div v-show="openSections.marketSchedule" class="ds-accordion-body">
+        </button>
+        <div
+          id="trading-settings-market-schedule-panel"
+          v-show="openSections.marketSchedule"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="trading-settings-market-schedule-header"
+        >
           <div class="market-preview-card" data-testid="market-state-card">
             <div class="market-preview-row">
               <span class="preview-label">وضعیت فعلی</span>
@@ -654,14 +719,27 @@ onBeforeUnmount(() => {
 
       <!-- استثناهای تقویمی -->
       <div class="ds-accordion" :class="{ open: openSections.marketCalendar }">
-        <div class="ds-accordion-header" @click="toggleSection('marketCalendar')">
+        <button
+          id="trading-settings-market-calendar-header"
+          class="ds-accordion-header"
+          type="button"
+          :aria-expanded="openSections.marketCalendar"
+          aria-controls="trading-settings-market-calendar-panel"
+          @click="toggleSection('marketCalendar')"
+        >
           <div class="ds-accordion-header-info">
             <ClipboardList class="section-icon" :size="18" />
             <h2 class="section-title">استثناهای تقویمی بازار</h2>
           </div>
           <ChevronLeft class="ds-accordion-icon" :size="18" />
-        </div>
-        <div v-show="openSections.marketCalendar" class="ds-accordion-body">
+        </button>
+        <div
+          id="trading-settings-market-calendar-panel"
+          v-show="openSections.marketCalendar"
+          class="ds-accordion-body"
+          role="region"
+          aria-labelledby="trading-settings-market-calendar-header"
+        >
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">تاریخ</label>

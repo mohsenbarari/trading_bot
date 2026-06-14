@@ -53,6 +53,8 @@ describe('OperationsView.vue', () => {
 
     expect(operationsViewMocks.primeCurrentUserSummaryMock).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('.operations-accordion')).toHaveLength(3)
+    expect(wrapper.find('#operations-management-header').attributes('aria-controls')).toBe('operations-management-panel')
+    expect(wrapper.find('#operations-management-panel').attributes('role')).toBe('region')
     expect(wrapper.text()).toContain('دسترسی کامل مدیریتی')
     expect(wrapper.text()).toContain('تنظیمات سیستم')
 
@@ -82,8 +84,11 @@ describe('OperationsView.vue', () => {
     expect(wrapper.text()).not.toContain('ارسال دعوت‌نامه')
     expect(findAction(wrapper, 'مشتریان')?.exists()).toBe(true)
 
-    await wrapper.findAll('.operations-accordion-header')[1]!.trigger('click')
+    const managementHeader = wrapper.findAll('.operations-accordion-header')[1]!
+    expect(managementHeader.attributes('aria-expanded')).toBe('true')
+    await managementHeader.trigger('click')
     expect(wrapper.findAll('.operations-accordion')[1]!.classes()).not.toContain('open')
+    expect(managementHeader.attributes('aria-expanded')).toBe('false')
   })
 
   it('explains why relation management is hidden for customer accounts', async () => {
