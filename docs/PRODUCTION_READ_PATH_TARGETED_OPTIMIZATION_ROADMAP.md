@@ -1,6 +1,7 @@
 # Production Read Path Targeted Optimization Roadmap
 
-Status: RPO0 through RPO5 completed; RPO6 is pending the combined short benchmark.
+Status: RPO0 through RPO6 completed. Full L9 rerun is not justified by the RPO6
+gate result.
 This roadmap is for targeted read-path optimization, not for another broad
 benchmark loop.
 
@@ -103,7 +104,7 @@ RPL6 endpoint p95 highlights:
 | `RPO3` | Complete | Optimize `offers_list` and `offers_my` read paths. |
 | `RPO4` | Complete | Optimize relation and public-user reads: `customer_relations`, `users_public_detail`, `users_public_search`, and related directory reads. |
 | `RPO5` | Complete | Review `notifications_unread` and remaining poll/read counters for narrow, correctness-safe improvements. |
-| `RPO6` | Pending | Run a combined short benchmark across accepted RPO changes and decide whether L9 rerun is justified. |
+| `RPO6` | Complete | Run a combined short benchmark across accepted RPO changes and decide whether L9 rerun is justified. |
 
 ## Stage RPO0 - Attribution Contract
 
@@ -722,6 +723,70 @@ Exit criteria:
 - If gates pass: schedule one full L9 `500 RPS / 30m` rerun.
 - If gates do not pass: document remaining debt and do not spend another long
   benchmark cycle.
+
+RPO6 combined benchmark:
+
+- Artifact:
+  `tmp/production-benchmark/20260614T062923Z/load-pool-matrix`.
+- Shape:
+  - `500 RPS / 2m`;
+  - `workers=24`;
+  - `DB_POOL_SIZE=10`;
+  - `DB_MAX_OVERFLOW=4`;
+  - `LOAD_RUNNER_SHARDS=2`;
+  - no media;
+  - no mutations.
+- Overall result:
+  - status: `passed`;
+  - effective RPS: `493.10`;
+  - p95/p99: `597.89ms` / `1148.22ms`;
+  - dropped iterations: `650`;
+  - dropped-iteration ratio: `1.083%`;
+  - request failure rate: `0%`;
+  - check rate: `100%`;
+  - max PostgreSQL connections: `251`;
+  - Nginx 5xx delta from first sampler sample: `0`;
+  - sampler status: `passed`;
+  - production restore: `API_WORKERS=8`, `DB_POOL_SIZE=8`,
+    `DB_MAX_OVERFLOW=6`.
+
+Endpoint notes from RPO6:
+
+- `notifications_unread` p95/p99: `546.95ms` / `1112.15ms`.
+- `notifications_unread_count` p95/p99: `529.38ms` / `896.87ms`.
+- `notifications_list` p95/p99: `513.98ms` / `950.94ms`.
+- `users_public_detail` p95/p99: `552.47ms` / `1058.59ms`.
+- `users_public_search` p95/p99: `618.71ms` / `1054.65ms`.
+- `customer_relations` p95/p99: `548.10ms` / `1290.17ms`.
+- `accountant_relations` p95/p99: `629.75ms` / `1305.51ms`.
+
+Comparison:
+
+| Run | RPS | P95 | P99 | Dropped ratio | Failures | Nginx 5xx delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Accepted L7 | `498.21` | `559.76ms` | `812.07ms` | `0.324%` | `0%` | `0` |
+| RPL6 | `486.86` | `637.08ms` | `1534.14ms` | `2.208%` | `0%` | `0` |
+| RPO3 | `493.39` | `589.67ms` | `1129.99ms` | `1.025%` | `0%` | `0` |
+| RPO6 | `493.10` | `597.89ms` | `1148.22ms` | `1.083%` | `0%` | `0` |
+
+RPO6 final decision:
+
+- RPO6 improves materially versus RPL6, but does not beat the accepted L7
+  shape.
+- p99 is still far above L7 (`1148.22ms` versus `812.07ms`), and dropped
+  iterations remain above L7 (`1.083%` versus `0.324%`).
+- Do not run a full L9 `500 RPS / 30m` cycle from this state. The cost of that
+  run is not justified until another targeted read-path change moves the short
+  diagnostic result at least near the L7 p99 and dropped-iteration shape.
+- Current release capacity decision remains the Stage L11 outcome:
+  `release_ready_with_limits`.
+
+Post-run health:
+
+- `make sync-health`: clean on foreign with `unsynced_change_log_count=0`.
+- `make sync-health-iran`: clean on Iran with `unsynced_change_log_count=0`.
+- Iran app profile after restore: `API_WORKERS=8`, `DB_POOL_SIZE=8`,
+  `DB_MAX_OVERFLOW=6`.
 
 ## Current Recommendation
 
