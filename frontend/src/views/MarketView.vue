@@ -145,10 +145,33 @@ const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2'
 const visibleTabs = computed<MarketFilterType[]>(() => (
   isTier2Customer.value ? ['all', 'buy', 'sell'] : ['all', 'buy', 'sell', 'my']
 ))
+const marketFilterLabels: Record<MarketFilterType, string> = {
+  all: 'همه',
+  buy: 'خریدار',
+  sell: 'فروشنده',
+  my: 'لفظ‌های شما',
+}
+const marketFilterDescriptions: Record<MarketFilterType, string> = {
+  all: 'کل بازار',
+  buy: 'درخواست خرید',
+  sell: 'درخواست فروش',
+  my: 'فعال‌های شما',
+}
+const visibleFilterOptions = computed(() => visibleTabs.value.map((tab) => ({
+  key: tab,
+  label: marketFilterLabels[tab],
+  description: marketFilterDescriptions[tab],
+})))
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
+const filteredOfferCountLabel = computed(() => `${filteredOffers.value.length.toLocaleString('fa-IR')} لفظ`)
+const marketShellDescription = computed(() => (
+  isMarketOpen.value
+    ? 'وضعیت لحظه‌ای بازار و لفظ‌های قابل معامله'
+    : 'بازار بسته است و ثبت لفظ جدید تا باز شدن بازار غیرفعال می‌ماند'
+))
 const shouldCollapseAdminMarketMessage = computed(() => (
   !!adminMarketMessage.value
   && isMarketOpen.value
@@ -631,18 +654,40 @@ onUnmounted(() => {
 <template>
   <div class="market-page ds-page">
 
-    <!-- Header: Filters -->
     <div class="market-header">
+      <section class="market-shell-card" aria-label="وضعیت بازار">
+        <div class="market-shell-main">
+          <div class="market-shell-title">
+            <p>بازار معاملات</p>
+            <h1>لفظ‌های فعال</h1>
+          </div>
+          <div class="market-shell-meta">
+            <span
+              class="market-status-chip"
+              :class="isMarketOpen ? 'market-status-chip--open' : 'market-status-chip--closed'"
+            >
+              {{ isMarketOpen ? 'بازار باز' : 'بازار بسته' }}
+            </span>
+            <span class="market-count-chip">{{ filteredOfferCountLabel }}</span>
+          </div>
+        </div>
+        <p>{{ marketShellDescription }}</p>
+      </section>
+
       <div class="header-controls">
-        <div class="tabs-container">
+        <div class="tabs-container" role="tablist" aria-label="فیلتر لفظ‌های بازار">
           <button 
-            v-for="tab in visibleTabs" 
-            :key="tab"
-            @click="filterType = tab"
+            v-for="option in visibleFilterOptions"
+            :key="option.key"
+            @click="filterType = option.key"
             class="tab-btn"
-            :class="{ active: filterType === tab }"
+            :class="{ active: filterType === option.key }"
+            role="tab"
+            :aria-selected="filterType === option.key"
+            type="button"
           >
-            {{ tab === 'all' ? 'همه' : (tab === 'buy' ? 'خریدار' : (tab === 'sell' ? 'فروشنده' : 'لفظ های شما')) }}
+            <span>{{ option.label }}</span>
+            <small>{{ option.description }}</small>
           </button>
         </div>
       </div>
@@ -712,13 +757,15 @@ onUnmounted(() => {
             :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
             :disabled="isSubmitting"
             aria-label="نمایش لفظ‌های اخیر"
+            :aria-expanded="recentOffersOpen"
+            aria-controls="recent-offers-dropdown"
             @click="toggleRecentOffersMenu"
           >
             <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
             <ChevronDown v-else :size="17" />
           </button>
           <transition name="recent-offers-dropdown">
-            <div v-if="recentOffersOpen" class="recent-offers-dropdown">
+            <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown">
               <div v-if="recentOffersLoading" class="recent-offers-state">
                 در حال بارگذاری...
               </div>
@@ -758,6 +805,7 @@ onUnmounted(() => {
             class="text-offer-input"
             rows="1"
             :disabled="!isMarketOpen || isSubmitting"
+            aria-label="متن لفظ بازار"
             @input="syncOfferInputHeight"
             @keydown.enter.prevent="parseAndSubmitTextOffer"
           ></textarea>
@@ -765,6 +813,8 @@ onUnmounted(() => {
             @click="parseAndSubmitTextOffer"
             :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
             class="send-btn"
+            type="button"
+            aria-label="ارسال لفظ برای پیش‌نمایش"
           >
             <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
             <Send v-else :size="20" />
@@ -789,17 +839,111 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 20;
-  padding: 1rem 1rem 0.5rem;
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem 0.65rem;
   background: var(--ds-bg-card);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--ds-border-light);
 }
 
+.market-shell-card {
+  max-width: var(--ds-page-max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: var(--ds-radius-lg);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.76), rgba(255, 255, 255, 0.94));
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.market-shell-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.market-shell-title {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.market-shell-title p,
+.market-shell-card p {
+  margin: 0;
+}
+
+.market-shell-title p {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  font-weight: 800;
+}
+
+.market-shell-title h1 {
+  margin: 0;
+  color: var(--ds-text-primary);
+  font-size: 1.06rem;
+  font-weight: 950;
+  line-height: 1.4;
+}
+
+.market-shell-card > p {
+  margin-top: 0.4rem;
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
+  line-height: 1.65;
+}
+
+.market-shell-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.market-status-chip,
+.market-count-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.65rem;
+  padding: 0.22rem 0.62rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.market-status-chip--open {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.12);
+  border: 1px solid rgba(22, 163, 74, 0.2);
+}
+
+.market-status-chip--closed {
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+}
+
+.market-count-chip {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.11);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
 .header-controls {
   display: flex;
   gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  max-width: var(--ds-page-max-width);
+  width: 100%;
+  margin: 0 auto;
 }
 
 .tabs-container {
@@ -812,8 +956,13 @@ onUnmounted(() => {
 }
 
 .tab-btn {
+  min-width: 0;
+  min-height: 3rem;
   flex: 1;
-  padding: 0.5rem;
+  display: grid;
+  place-items: center;
+  gap: 0.12rem;
+  padding: 0.42rem 0.32rem;
   font-size: 0.85rem;
   font-weight: 700;
   border-radius: var(--ds-radius-md);
@@ -821,10 +970,29 @@ onUnmounted(() => {
   transition: all 0.2s;
 }
 
+.tab-btn span,
+.tab-btn small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-btn small {
+  color: var(--ds-text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .tab-btn.active {
   background: var(--ds-bg-card);
   color: var(--ds-text-primary);
   box-shadow: var(--ds-shadow-sm);
+}
+
+.tab-btn.active small {
+  color: var(--ds-primary-700);
 }
 
 .sort-toggle-btn {
@@ -854,6 +1022,25 @@ onUnmounted(() => {
 }
 @media (min-width: 400px) {
   .sort-toggle-btn .btn-label { display: inline; }
+}
+
+@media (max-width: 420px) {
+  .market-shell-main {
+    flex-direction: column;
+  }
+
+  .market-shell-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .tab-btn {
+    min-height: 2.72rem;
+  }
+
+  .tab-btn small {
+    display: none;
+  }
 }
 
 /* Sort Panel */
@@ -923,7 +1110,7 @@ onUnmounted(() => {
 .market-content {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem 0 7rem;
+  padding: 0.9rem 0 7rem;
 }
 
 .market-runtime-notice {

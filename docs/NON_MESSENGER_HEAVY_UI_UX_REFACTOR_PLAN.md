@@ -544,10 +544,20 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H8 - Dashboard And Market Shell Harmonization
 
+وضعیت: completed on 2026-06-14.
+
 تغییرات:
 - Dashboard task-focused و سبک‌تر.
 - Market shell visual harmonization، empty/error/loading polish.
 - core trading mutation/realtime بدون rewrite.
+- خروجی این stage:
+  - `DashboardView.vue` یک خلاصه سه‌گانه و قابل اسکن برای وضعیت حساب، وضعیت بازار، و کار امروز گرفت تا کاربر در نگاه اول وضعیت عملیاتی خود را ببیند.
+  - هشدارهای account inactive / trading restricted و جدول معاملات امروز بدون تغییر رفتاری حفظ شدند.
+  - `MarketView.vue` یک shell هدر استانداردتر برای وضعیت بازار، تعداد لفظ‌های فیلترشده، و توضیح وضعیت باز/بسته گرفت.
+  - tabهای بازار از نظر `role="tablist"` / `role="tab"` / `aria-selected` استانداردتر شدند و توضیحات کوتاه فیلترها اضافه شد.
+  - action bar بازار برای recent offers و ارسال لفظ `aria-expanded` / `aria-controls` / `aria-label` گرفت.
+  - مسیرهای create/parse/confirm/cancel/trade و WebSocket runtime events بدون rewrite حفظ شدند.
+  - production deploy برای H8 هم عمداً defer شد تا بعد از H9/H10 validation گروهی انجام شود.
 
 پذیرش:
 - offer create/parse/cancel/trade realtime behavior تغییر نکند.

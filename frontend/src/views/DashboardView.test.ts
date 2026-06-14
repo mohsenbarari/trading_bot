@@ -154,6 +154,12 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
     expect(wrapper.get('.dashboard-shortcuts').text()).toContain('عملیات')
     expect(wrapper.get('.dashboard-shortcuts').text()).toContain('حساب')
+    expect(wrapper.get('.dashboard-overview').text()).toContain('وضعیت حساب')
+    expect(wrapper.get('.dashboard-overview').text()).toContain('حساب فعال')
+    expect(wrapper.get('.dashboard-overview').text()).toContain('وضعیت بازار')
+    expect(wrapper.get('.dashboard-overview').text()).toContain('کار امروز')
+    expect(wrapper.get('.dashboard-overview').text()).toContain('۱ معامله')
+    expect(wrapper.get('.dashboard-overview').text()).toContain('۱ اعلان')
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')

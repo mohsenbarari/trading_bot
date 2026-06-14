@@ -76,6 +76,54 @@ const restrictedUntil = computed(() => {
   return formatIranDateTime(user.value.trading_restricted_until)
 })
 
+const accountStateLabel = computed(() => {
+  if (isInactiveAccount.value) return isGloballyLockedAccount.value ? 'حساب قفل شده' : 'حساب غیرفعال'
+  if (isRestricted.value) return 'معاملات محدود'
+  return 'حساب فعال'
+})
+
+const accountStateDescription = computed(() => {
+  if (isInactiveAccount.value) return 'دسترسی بازار تا فعال‌سازی مجدد بسته است'
+  if (isRestricted.value) return 'محدودیت معاملاتی زمان‌دار فعال است'
+  return isAccountant.value ? 'دسترسی حسابدار طبق مجوز سرگروه' : 'آماده انجام عملیات روزانه'
+})
+
+const accountStateTone = computed(() => {
+  if (isInactiveAccount.value) return 'danger'
+  if (isRestricted.value) return 'warning'
+  return 'success'
+})
+
+const todayTradesCountLabel = computed(() => `${formatDashboardNumber(todayTrades.value.length)} معامله`)
+const notificationCountLabel = computed(() => {
+  const count = notificationStore.appNotifications.length
+  return count > 0 ? `${formatDashboardNumber(count)} اعلان` : 'بدون اعلان'
+})
+
+const dashboardSummaryCards = computed(() => [
+  {
+    key: 'account',
+    label: 'وضعیت حساب',
+    value: accountStateLabel.value,
+    description: accountStateDescription.value,
+    tone: accountStateTone.value,
+  },
+  {
+    key: 'market',
+    label: 'وضعیت بازار',
+    value: isAccountant.value ? 'مشاهده محدود' : marketEntryStatusLabel.value,
+    description: isAccountant.value ? 'حسابدار مجاز به ورود مستقیم بازار نیست' : marketEntrySubtitle.value,
+    tone: isMarketOpen.value && !isAccountant.value ? 'success' : 'neutral',
+  },
+  {
+    key: 'today',
+    label: 'کار امروز',
+    value: todayTradesLoading.value ? 'در حال دریافت' : todayTradesCountLabel.value,
+    description: todayTradesError.value || notificationCountLabel.value,
+    tone: todayTradesError.value ? 'danger' : 'primary',
+  },
+])
+
 const greeting = computed(() => {
   const hour = getIranHour()
   if (hour < 12) return 'صبح بخیر'
@@ -392,6 +440,19 @@ onBeforeUnmount(() => {
           <p>دسترسی معاملاتی شما تا <strong>{{ restrictedUntil }}</strong> محدود شده است.</p>
         </div>
       </div>
+
+      <section class="dashboard-overview" aria-label="خلاصه وضعیت روزانه">
+        <article
+          v-for="card in dashboardSummaryCards"
+          :key="card.key"
+          class="dashboard-stat-card"
+          :class="`dashboard-stat-card--${card.tone}`"
+        >
+          <span class="dashboard-stat-label">{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <small>{{ card.description }}</small>
+        </article>
+      </section>
 
       <!-- ═══ Main Content ═══ -->
       <main class="main-section">
@@ -739,6 +800,65 @@ onBeforeUnmount(() => {
   gap: 1.25rem;
 }
 
+.dashboard-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.dashboard-stat-card {
+  min-width: 0;
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.dashboard-stat-label {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  font-weight: 800;
+}
+
+.dashboard-stat-card strong {
+  min-width: 0;
+  color: var(--ds-text-primary);
+  font-size: 0.98rem;
+  font-weight: 900;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-stat-card small {
+  color: var(--ds-text-muted);
+  font-size: var(--ds-font-xs);
+  line-height: 1.65;
+}
+
+.dashboard-stat-card--success {
+  border-color: rgba(22, 163, 74, 0.2);
+  background: linear-gradient(135deg, rgba(240, 253, 244, 0.92), var(--ds-bg-card));
+}
+
+.dashboard-stat-card--warning {
+  border-color: rgba(217, 119, 6, 0.24);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.95), var(--ds-bg-card));
+}
+
+.dashboard-stat-card--danger {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95), var(--ds-bg-card));
+}
+
+.dashboard-stat-card--primary {
+  border-color: rgba(245, 158, 11, 0.2);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.92), var(--ds-bg-card));
+}
+
 .dashboard-shortcuts {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -857,7 +977,14 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 380px) {
+  .dashboard-overview,
   .dashboard-shortcuts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 381px) and (max-width: 680px) {
+  .dashboard-overview {
     grid-template-columns: 1fr;
   }
 }
