@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ChevronLeft, ShieldCheck, SlidersHorizontal, UserPlus, Users } from 'lucide-vue-next'
 import { apiFetch } from '../utils/auth'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
 import HelpPopover from './HelpPopover.vue'
 
+const props = withDefaults(defineProps<{
+  presentation?: 'modal' | 'workspace'
+  initialRelationId?: string | number | null
+  initialPanel?: string | null
+}>(), {
+  presentation: 'modal',
+  initialRelationId: null,
+  initialPanel: null,
+})
+
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'open-relation', relationId: number): void
+  (e: 'back-to-list'): void
 }>()
 
 type RelationStatus = 'pending' | 'active' | 'expired' | 'revoked' | 'deleted' | string
@@ -78,6 +90,12 @@ const loadingSessionsRelationId = ref<number | null>(null)
 const terminatingSessionId = ref<string | null>(null)
 const currentTimeMs = ref(Date.now())
 const selectedRelationId = ref<number | null>(null)
+const isWorkspace = computed(() => props.presentation === 'workspace')
+const initialRelationIdNumber = computed(() => {
+  if (props.initialRelationId == null || props.initialRelationId === '') return null
+  const normalized = Number(props.initialRelationId)
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null
+})
 
 const createForm = reactive(makeEmptyCreateForm())
 const editForm = reactive(makeEmptyEditForm())
@@ -113,6 +131,16 @@ function resetCreateForm() {
 
 function toggleSection(section: keyof typeof openSections) {
   openSections[section] = !openSections[section]
+}
+
+function handleShellDismiss() {
+  if (!isWorkspace.value) {
+    emit('close')
+  }
+}
+
+function closeManager() {
+  emit('close')
 }
 
 function clearEditState() {
@@ -265,6 +293,41 @@ const pendingInvitationRelations = computed(() => orderedRelations.value.filter(
 
 const manageableRelations = computed(() => orderedRelations.value.filter((relation) => relation.status !== 'pending'))
 
+function openDefaultDetailSections() {
+  openSections.detailOverview = true
+  openSections.detailSessions = false
+  openSections.detailDanger = false
+}
+
+function applyInitialRouteState() {
+  if (!isWorkspace.value) return
+
+  const routeRelationId = initialRelationIdNumber.value
+  if (routeRelationId !== null) {
+    selectedRelationId.value = routeRelationId
+    const relation = relations.value.find((item) => item.id === routeRelationId)
+    if (relation) {
+      editForm.duty_description = relation.duty_description || ''
+    }
+    openSections.relations = true
+    openDefaultDetailSections()
+    return
+  }
+
+  if (selectedRelationId.value !== null) {
+    selectedRelationId.value = null
+    clearEditState()
+    detailSaveNotice.value = ''
+  }
+
+  if (props.initialPanel === 'create') {
+    openSections.create = true
+    openSections.relations = false
+  } else if (props.initialPanel === 'pending' || props.initialPanel === 'manage' || props.initialPanel === 'relations') {
+    openSections.relations = true
+  }
+}
+
 async function loadRelations() {
   isLoading.value = true
   error.value = ''
@@ -286,6 +349,7 @@ async function loadRelations() {
       selectedRelationId.value = null
       clearEditState()
     }
+    applyInitialRouteState()
   } catch (err: any) {
     error.value = err?.message || 'دریافت لیست حسابداران ناموفق بود.'
   } finally {
@@ -465,15 +529,19 @@ function openAccountantDetail(relation: AccountantRelation) {
   error.value = ''
   notice.value = ''
   detailSaveNotice.value = ''
-  openSections.detailOverview = true
-  openSections.detailSessions = false
-  openSections.detailDanger = false
+  openDefaultDetailSections()
+  if (isWorkspace.value) {
+    emit('open-relation', relation.id)
+  }
 }
 
 function backToAccountantList() {
   selectedRelationId.value = null
   clearEditState()
   detailSaveNotice.value = ''
+  if (isWorkspace.value) {
+    emit('back-to-list')
+  }
 }
 
 async function toggleDetailSection(section: DetailSection) {
@@ -488,8 +556,14 @@ async function toggleDetailSection(section: DetailSection) {
 
 onMounted(() => {
   startCountdownTimer()
+  applyInitialRouteState()
   void loadRelations()
 })
+
+watch(
+  () => [props.initialRelationId, props.initialPanel],
+  () => applyInitialRouteState(),
+)
 
 onBeforeUnmount(() => {
   stopCountdownTimer()
@@ -498,7 +572,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport to="body" :disabled="isWorkspace">
     <div
       v-if="viewportToast"
       class="accountant-viewport-toast"
@@ -508,10 +582,16 @@ onBeforeUnmount(() => {
     >
       {{ viewportToast.text }}
     </div>
-    <div class="accountant-manager-backdrop" @click.self="emit('close')">
-      <div class="accountant-manager-shell">
-        <div class="accountant-manager-header">
-          <button type="button" class="accountant-manager-back" aria-label="بازگشت" @click="emit('close')">
+    <div
+      :class="isWorkspace ? 'accountant-manager-page' : 'accountant-manager-backdrop'"
+      @click.self="handleShellDismiss"
+    >
+      <div
+        class="accountant-manager-shell"
+        :class="{ 'accountant-manager-shell--workspace': isWorkspace }"
+      >
+        <div v-if="!isWorkspace" class="accountant-manager-header">
+          <button type="button" class="accountant-manager-back" aria-label="بازگشت" @click="closeManager">
             <ChevronLeft :size="24" />
           </button>
           <div class="accountant-manager-title">
@@ -824,6 +904,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.accountant-manager-page {
+  width: 100%;
+}
+
 .accountant-manager-backdrop {
   position: fixed;
   inset: 0;
@@ -848,6 +932,17 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.accountant-manager-shell--workspace {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
 }
 
 .accountant-manager-header {
