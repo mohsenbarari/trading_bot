@@ -590,11 +590,18 @@ Workspaceهای جدید باید route داشته باشند، نه modal prima
 
 ### Stage H10 - Final Handoff And Production Readiness
 
+وضعیت: in progress on 2026-06-14; handoff and validation completed, production deploy pending.
+
 تغییرات:
 - گزارش نهایی old/new مسیرها.
 - لیست فایل‌های قدیمی compatibility که هنوز باقی‌اند.
 - benchmark/test summary.
 - debtها و post-release tasks.
+- خروجی pre-deploy:
+  - سند `docs/NON_MESSENGER_HEAVY_UI_UX_REFACTOR_HANDOFF.md` ساخته شد و routeهای جدید، compatibilityهای باقی‌مانده، فایل‌های درگیر، تست‌ها، debtها و مسیر حذف compatibility بعد release را ثبت کرد.
+  - focused unit regression برای سطوح non-messenger و messenger shell smoke پاس شد: `13` فایل تست، `107/107` تست.
+  - production frontend build پاس شد؛ warningهای chunk-size موجود همچنان debt جدا از H refactor هستند.
+  - production deploy بعد از commit/push این سند و با worktree تمیز اجرا می‌شود.
 
 پذیرش:
 - مسیر حذف compatibility wrappers بعد release روشن باشد.
