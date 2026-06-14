@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(defineProps<{
+import { computed } from 'vue'
+
+const props = withDefaults(defineProps<{
   open: boolean
   title: string
   message?: string
@@ -11,6 +13,8 @@ withDefaults(defineProps<{
   cancelLabel: 'انصراف',
   tone: 'warning',
 })
+
+const toneLabel = computed(() => (props.tone === 'danger' ? 'اقدام حساس' : 'نیازمند تایید'))
 
 defineEmits<{
   confirm: []
@@ -28,6 +32,7 @@ defineEmits<{
       aria-labelledby="ui-confirm-dialog-title"
     >
       <header class="ui-confirm-dialog__header">
+        <p class="ui-confirm-dialog__eyebrow">{{ toneLabel }}</p>
         <h2 id="ui-confirm-dialog-title">{{ title }}</h2>
         <p v-if="message">{{ message }}</p>
       </header>

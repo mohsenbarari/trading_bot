@@ -11,7 +11,9 @@ withDefaults(defineProps<{
 
 <template>
   <div class="ui-toast" :class="`ui-toast--${tone}`" role="status" aria-live="polite">
-    <strong v-if="title">{{ title }}</strong>
-    <span>{{ message }}</span>
+    <div class="ui-toast__copy">
+      <strong v-if="title">{{ title }}</strong>
+      <span>{{ message }}</span>
+    </div>
   </div>
 </template>

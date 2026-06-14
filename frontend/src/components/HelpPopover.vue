@@ -111,4 +111,17 @@ onUnmounted(clearTimer)
   white-space: normal;
   z-index: 20;
 }
+
+.help-popover-note::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 12px;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  border-left: 1px solid rgba(15, 118, 110, 0.12);
+  border-top: 1px solid rgba(15, 118, 110, 0.12);
+  transform: rotate(45deg);
+}
 </style>

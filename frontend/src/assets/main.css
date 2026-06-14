@@ -1887,9 +1887,13 @@
     color: var(--ds-text-primary);
     padding: 0.85rem 1rem;
     display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
+    align-items: flex-start;
     line-height: 1.75;
+  }
+
+  .ui-toast__copy {
+    display: grid;
+    gap: 0.2rem;
   }
 
   .ui-toast strong {
@@ -2030,6 +2034,14 @@
   .ui-confirm-dialog__header {
     padding: 1rem;
     border-bottom: 1px solid var(--ds-border-light);
+  }
+
+  .ui-confirm-dialog__eyebrow {
+    margin: 0 0 0.2rem;
+    color: var(--ds-text-placeholder);
+    font-size: var(--ds-font-xs);
+    font-weight: 800;
+    line-height: 1.6;
   }
 
   .ui-confirm-dialog__header h2 {

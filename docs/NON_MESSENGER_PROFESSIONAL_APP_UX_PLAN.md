@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 1 تا Stage 6 تکمیل شدند؛ Stage 7 مرحله بعدی است.
+وضعیت: Stage 1 تا Stage 10 تکمیل شدند؛ Stage 11 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -339,9 +339,9 @@ Gate نهایی Stage 12:
 | Stage 5 | Account, Settings, Session and Storage UX | Completed |
 | Stage 6 | Admin workspace and admin subviews | Completed |
 | Stage 7 | Profile and Public Profile final polish | Completed |
-| Stage 8 | Notifications final polish | Pending |
-| Stage 9 | Dashboard, Operations and Market polish | Pending |
-| Stage 10 | Small surfaces and auth/public utility pages | Pending |
+| Stage 8 | Notifications final polish | Completed |
+| Stage 9 | Dashboard, Operations and Market polish | Completed |
+| Stage 10 | Small surfaces and auth/public utility pages | Completed |
 | Stage 11 | Micro-interaction and accessibility | Pending |
 | Stage 12 | Visual QA and testing | Pending |
 | Stage 13 | Final Persian report | Pending |
@@ -538,7 +538,23 @@ Gate نهایی Stage 12:
 
 ### Stage 10 - Small surfaces
 
-- Login، Setup password، Invite landing، Web register، Share receive، PWA overlay، Jalali date picker، Help popovers، Toasts و Confirm dialogs را unified کن.
+وضعیت: Completed on 2026-06-14.
+
+خروجی انجام‌شده:
+
+- `frontend/src/views/SetupPassword.vue` از صفحه محلی و ساده قبلی به shell مشترک حرفه‌ای منتقل شد و حالا با `AppPage`, `AppPageHeader`, `AppCard`, `AppFormField`, `AppInput`, `AppButton` و `AppStatusBadge` کار می‌کند. منطق اعتبارسنجی رمز، submit API و redirect بدون تغییر حفظ شد.
+- `frontend/src/views/InviteLanding.vue` با `AppPage`, `AppPageHeader`, `AppCard`, `AppLoadingState`, `AppErrorState`, `AppStatusBadge` و `AppButton` یکپارچه شد تا loading/error/success pathهای دعوت‌نامه با بقیه اپ هم‌زبان باشند، بدون تغییر در lookup/config fetch یا مسیر ثبت‌نام وب/تلگرام.
+- `frontend/src/views/WebRegister.vue` روی همان primitiveهای shared بازسازی شد تا سه مرحله اعتبارسنجی دعوت‌نامه، OTP و تکمیل ثبت‌نام از یک shell واحد استفاده کنند. endpointها، localStorage contract و route replace دست‌نخورده ماند.
+- `frontend/src/components/PWAInstallOverlay.vue` در shell و wording با بقیه اپ هماهنگ‌تر شد و راهنمای iOS همچنان inline باقی ماند؛ behavior نصب/عدم نصب و dismiss TTL تغییر نکرد.
+- `frontend/src/components/HelpPopover.vue`, `frontend/src/components/ui/AppToast.vue` و `frontend/src/components/ui/AppConfirmDialog.vue` polish بصری محدود گرفتند تا popover/toast/confirm در همین stage به language مشترک نزدیک‌تر شوند، بدون تغییر در contract رویدادها.
+- `LoginView.vue`, `ShareReceiveView.vue` و `JalaliDatePicker.vue` در این stage مجدد audit شدند. برای این سه surface بازنویسی پرریسک لازم نبود، اما با تست هدفمند تأیید شد که behavior فعلی‌شان با shell حرفه‌ای فعلی ناسازگار نیست.
+
+اعتبارسنجی Stage 10:
+
+- `npm run test:unit:run -- src/views/SetupPassword.test.ts src/views/InviteLanding.test.ts src/views/WebRegister.test.ts src/components/PWAInstallOverlay.test.ts src/components/AppToasts.test.ts src/components/JalaliDatePicker.test.ts src/views/LoginView.test.ts src/views/ShareReceiveView.test.ts` پاس شد.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 11 - Accessibility
 

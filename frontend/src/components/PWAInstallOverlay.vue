@@ -93,10 +93,11 @@ const handleInstall = async () => {
           <img src="/pwa-192x192.png" alt="App Icon" />
         </div>
         <div class="pwa-info">
-          <h3>نصب اپلیکیشن</h3>
-          <p v-if="isIOS && !showIosGuide">برای نصب در آیفون، راهنمای نصب را باز کنید.</p>
+          <span class="pwa-eyebrow">نسخه اپلیکیشن</span>
+          <h3>نصب روی صفحه اصلی</h3>
+          <p v-if="isIOS && !showIosGuide">برای نصب در آیفون، راهنمای کوتاه نصب را باز کنید.</p>
           <p v-else-if="isIOS" class="ios-guide">در Safari دکمه Share را بزنید و سپس Add to Home Screen را انتخاب کنید.</p>
-          <p v-else>برای دسترسی سریع‌تر و تجربه بهتر، نسخه اپلیکیشن را نصب کنید.</p>
+          <p v-else>برای ورود سریع‌تر و تجربه پایدارتر، نسخه اپلیکیشن را نصب کنید.</p>
         </div>
         <div class="pwa-actions">
           <AppButton class="pwa-action-dismiss" variant="ghost" size="sm" @click="dismiss">بعداً</AppButton>
@@ -151,9 +152,17 @@ const handleInstall = async () => {
   min-width: 0;
 }
 
+.pwa-eyebrow {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--ds-text-placeholder);
+  font-size: var(--ds-font-xs);
+  font-weight: 800;
+}
+
 .pwa-info h3 {
   font-size: var(--ds-font-sm);
-  font-weight: 700;
+  font-weight: 900;
   margin: 0 0 2px 0;
   color: var(--ds-text-primary);
 }
