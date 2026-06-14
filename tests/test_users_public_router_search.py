@@ -64,15 +64,19 @@ class UsersPublicRouterSearchTests(unittest.IsolatedAsyncioTestCase):
         rows = [make_user(id=7), make_user(id=6)]
         db = FakeDB([FakeExecuteResult(rows), FakeExecuteResult([]), FakeExecuteResult([])])
 
+        viewer_accountant_lookup = AsyncMock(
+            side_effect=AssertionError("plain search rows should not load viewer accountant relation")
+        )
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
-            new=AsyncMock(return_value=None),
+            new=viewer_accountant_lookup,
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             result = await search_public_users(q=None, limit=25, db=db, current_user=current_user)
 
+        viewer_accountant_lookup.assert_not_awaited()
         self.assertEqual([item.id for item in result], [7, 6])
         self.assertNotIn("role", result[0].model_dump())
         self.assertNotIn("address", result[0].model_dump())

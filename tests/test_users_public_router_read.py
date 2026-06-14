@@ -224,7 +224,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
-            new=AsyncMock(side_effect=[None, relation]),
+            new=AsyncMock(return_value=relation),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
@@ -280,7 +280,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
-            new=AsyncMock(side_effect=[None, relation]),
+            new=AsyncMock(return_value=relation),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
@@ -395,7 +395,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
-            new=AsyncMock(side_effect=[viewer_accountant_relation, None]),
+            new=AsyncMock(side_effect=[None, viewer_accountant_relation]),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
             new=AsyncMock(side_effect=lambda _db, user_id: relation if user_id == 91 else None),
@@ -505,10 +505,10 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "api.routers.users_public.get_active_accountant_relation_for_accountant",
-            new=AsyncMock(side_effect=[None, relation]),
+            new=AsyncMock(return_value=relation),
         ), patch(
             "api.routers.users_public.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=SimpleNamespace(owner_user_id=21)),
+            new=AsyncMock(side_effect=lambda _db, user_id: SimpleNamespace(owner_user_id=21) if user_id == 91 else None),
         ), patch(
             "api.routers.users_public.build_allowed_customer_chat_targets",
             new=AsyncMock(return_value=[21, 44, 1]),

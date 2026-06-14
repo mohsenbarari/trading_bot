@@ -708,7 +708,16 @@ async def load_offer_customer_read_context(
     if viewer_user_id is not None:
         viewer_relation = owner_relation_map.get(viewer_user_id)
         if viewer_relation is None:
-            viewer_relation = await get_active_customer_relation_for_customer(db, viewer_user_id)
+            viewer_relation_stmt = (
+                select(CustomerRelation)
+                .where(
+                    CustomerRelation.customer_user_id == viewer_user_id,
+                    CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+                    CustomerRelation.deleted_at.is_(None),
+                )
+                .order_by(CustomerRelation.id.asc())
+            )
+            viewer_relation = (await db.execute(viewer_relation_stmt)).scalar_one_or_none()
 
     return owner_relation_map, viewer_relation
 
