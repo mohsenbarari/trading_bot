@@ -13,12 +13,16 @@ import {
   WalletCards,
 } from 'lucide-vue-next'
 import {
-  WorkspaceActionTile,
   WorkspaceNotice,
   WorkspaceSection,
   WorkspaceShell,
-  WorkspaceStatTile,
 } from '../components/workspace'
+import {
+  AppActionCard,
+  AppButton,
+  AppMetricCard,
+  AppStatusBadge,
+} from '../components/ui'
 import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
 
 const router = useRouter()
@@ -194,10 +198,12 @@ onMounted(() => {
       @back="router.back()"
     >
       <template #actions>
-        <button type="button" class="ds-btn secondary operations-header-action" @click="router.push({ name: 'notifications' })">
-          <Bell :size="16" />
+        <AppButton variant="secondary" class="operations-header-action" @click="router.push({ name: 'notifications' })">
+          <template #icon>
+            <Bell :size="16" />
+          </template>
           اعلان‌ها
-        </button>
+        </AppButton>
       </template>
 
       <WorkspaceSection
@@ -206,7 +212,7 @@ onMounted(() => {
         tone="primary"
       >
           <div v-if="ownerActions.length" class="action-grid">
-            <WorkspaceActionTile
+            <AppActionCard
               v-for="action in ownerActions"
               :key="action.key"
               class="operations-action-tile"
@@ -219,7 +225,7 @@ onMounted(() => {
               <template #icon>
                 <component :is="action.icon" :size="20" />
               </template>
-            </WorkspaceActionTile>
+            </AppActionCard>
           </div>
           <WorkspaceNotice
             v-else
@@ -235,7 +241,7 @@ onMounted(() => {
         :tone="isAdmin ? 'success' : 'neutral'"
       >
           <div v-if="adminActions.length" class="action-grid">
-            <WorkspaceActionTile
+            <AppActionCard
               v-for="action in adminActions"
               :key="action.key"
               class="operations-action-tile"
@@ -247,7 +253,7 @@ onMounted(() => {
               <template #icon>
                 <component :is="action.icon" :size="20" />
               </template>
-            </WorkspaceActionTile>
+            </AppActionCard>
           </div>
           <WorkspaceNotice
             v-else
@@ -262,7 +268,7 @@ onMounted(() => {
         description="مسیرهای سریع برای کارهای کم‌تکرار یا عمومی."
       >
         <div class="action-grid">
-          <WorkspaceActionTile
+          <AppActionCard
             v-for="action in utilityActions"
             :key="action.key"
             class="operations-action-tile"
@@ -273,7 +279,7 @@ onMounted(() => {
             <template #icon>
               <component :is="action.icon" :size="20" />
             </template>
-          </WorkspaceActionTile>
+          </AppActionCard>
         </div>
       </WorkspaceSection>
 
@@ -283,28 +289,33 @@ onMounted(() => {
           description="خلاصه مسیرهایی که برای نقش فعلی شما فعال است."
         >
           <div class="operations-stat-grid">
-            <WorkspaceStatTile label="نقش" :value="roleLabel" />
-            <WorkspaceStatTile label="روابط کاری" :value="relationAccessLabel" tone="primary" />
-            <WorkspaceStatTile label="مدیریت" :value="adminAccessLabel" :tone="isAdmin ? 'success' : 'neutral'" />
-            <WorkspaceStatTile label="میانبرها" :value="shortcutAccessLabel" />
+            <AppMetricCard label="نقش" :value="roleLabel" />
+            <AppMetricCard label="روابط کاری" :value="relationAccessLabel" tone="primary" />
+            <AppMetricCard label="مدیریت" :value="adminAccessLabel" :tone="isAdmin ? 'success' : 'neutral'" />
+            <AppMetricCard label="میانبرها" :value="shortcutAccessLabel" />
           </div>
 
-          <WorkspaceNotice
-            class="operations-aside-note"
-            tone="info"
-            title="مسیر مهاجرت"
-            message="در این مرحله مسیرهای جدید آماده شده‌اند و هر کارت به مقصد سازگار فعلی هدایت می‌شود."
-          />
+          <div class="operations-access-badges" aria-label="خلاصه وضعیت دسترسی">
+            <AppStatusBadge :tone="ownerActions.length ? 'primary' : 'neutral'">
+              روابط کاری: {{ relationAccessLabel }}
+            </AppStatusBadge>
+            <AppStatusBadge :tone="isAdmin ? 'success' : 'neutral'">
+              مدیریت: {{ adminAccessLabel }}
+            </AppStatusBadge>
+          </div>
 
-          <button
+          <AppButton
             v-if="isAdmin"
-            type="button"
-            class="ds-btn secondary operations-admin-full"
+            variant="secondary"
+            block
+            class="operations-admin-full"
             @click="router.push({ name: 'admin' })"
           >
-            <WalletCards :size="16" />
+            <template #icon>
+              <WalletCards :size="16" />
+            </template>
             منوی کامل مدیریت
-          </button>
+          </AppButton>
         </WorkspaceSection>
       </template>
     </WorkspaceShell>
@@ -341,8 +352,14 @@ onMounted(() => {
   margin-top: 0.75rem;
 }
 
+.operations-access-badges {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .operations-admin-full {
-  width: 100%;
   margin-top: 0.75rem;
 }
 

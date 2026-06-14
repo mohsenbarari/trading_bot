@@ -1,7 +1,7 @@
 # نقشه بازطراحی واقعی UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 0 تکمیل شد؛ اجرای کدنویسی Stage 1 به بعد هنوز شروع نشده است.
+وضعیت: Stage 1 تکمیل شد؛ اجرای Stage 2 به بعد هنوز شروع نشده است.
 قاعده مهم: production deploy در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. هدف محصول
@@ -331,14 +331,44 @@ Tablet/Desktop:
 
 ### Stage 1 - Design System Completion
 
+وضعیت: completed on 2026-06-14.
+
 هدف:
 - ساخت `frontend/src/components/ui/` با primitiveهای واقعاً مصرف‌شده.
 - تکمیل tokens برای safe-area، z-index، page widths، focus و reduced-motion.
 - اضافه کردن story/test سبک برای shared primitives در صورت وجود الگوی تست محلی.
 
+خروجی انجام‌شده:
+- مسیر `frontend/src/components/ui/` ساخته شد.
+- primitiveهای پایه اضافه شدند: `AppButton`, `AppIconButton`, `AppCard`, `AppSectionCard`, `AppActionCard`, `AppMetricCard`, `AppStatusBadge`, `AppTabs`, `AppFormField`, `AppInput`, `AppSelect`, `AppTextarea`, `AppEmptyState`, `AppErrorState`, `AppLoadingState`, `AppDangerZone`, `AppListItem`, `AppConfirmDialog`.
+- export مرکزی `frontend/src/components/ui/index.ts` اضافه شد.
+- tokenهای safe-area، z-index، touch target، bottom nav height و transition duration به `frontend/src/assets/main.css` اضافه شدند.
+- کلاس‌های shared `ui-*` برای button/card/action/metric/badge/tabs/form/empty/error/loading/danger/list/dialog اضافه شدند و همه از tokenهای موجود `--ds-*` استفاده می‌کنند.
+- `frontend/src/views/OperationsView.vue` به‌عنوان اولین surface واقعی از `AppButton`, `AppActionCard`, `AppMetricCard`, `AppStatusBadge` استفاده می‌کند.
+- متن transitional «مسیر مهاجرت» از aside عملیات حذف شد و با badgeهای وضعیت دسترسی جایگزین شد.
+- تست `frontend/src/components/ui/AppPrimitives.test.ts` اضافه شد.
+
 پذیرش:
 - حداقل button/card/input/tabs/badge/list/empty/error/danger/dialog primitives آماده و در یک surface مصرف شوند.
 - `git diff --check` و تست shared primitives پاس شود.
+
+اعتبارسنجی Stage 1:
+- `npm run test:unit:run -- AppPrimitives.test.ts OperationsView.test.ts` پاس شد: `2` فایل، `8/8` تست.
+- `npm run build` پاس شد؛ warningهای chunk-size موجود همچنان debt جداگانه هستند.
+
+مراحل باقی‌مانده بعد از Stage 1:
+- Stage 2: حذف راهبرد workspace-wrapper و استخراج state/API از modalهای بزرگ customer/accountant.
+- Stage 3: بازطراحی واقعی Customer Workspace.
+- Stage 4: بازطراحی واقعی Accountant Workspace.
+- Stage 5: پاکسازی Profile و Public Profile.
+- Stage 6: بازطراحی Admin Workspace.
+- Stage 7: یکپارچه‌سازی small surfaces و micro UI.
+- Stage 8: polish نهایی Dashboard/Operations/Account/Settings/Notifications.
+- Stage 9: هماهنگی visual بازار بدون ریسک trading logic.
+- Stage 10: responsive و PWA quality.
+- Stage 11: accessibility و interaction quality.
+- Stage 12: testing و visual verification.
+- Stage 13: گزارش نهایی فارسی.
 
 ### Stage 2 - Remove Workspace Wrapper Strategy
 
