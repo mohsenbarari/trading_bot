@@ -526,34 +526,34 @@ onBeforeUnmount(() => {
 
             <div v-if="detailTab === 'profile'" class="accountant-detail-grid">
               <AppCard>
-                <span class="accountant-field-label">نام نمایشی</span>
+                <span class="accountant-meta-label">نام نمایشی</span>
                 <strong>{{ activeRelation.relation_display_name || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-field-label">شماره موبایل</span>
+                <span class="accountant-meta-label">شماره موبایل</span>
                 <strong>{{ activeRelation.mobile_number || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-field-label">حساب کاربری</span>
+                <span class="accountant-meta-label">حساب کاربری</span>
                 <strong>{{ activeRelation.accountant_account_name || activeRelation.global_account_name || 'در انتظار ثبت‌نام' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-field-label">نام کاربری جهانی</span>
+                <span class="accountant-meta-label">نام کاربری جهانی</span>
                 <strong>@{{ activeRelation.global_account_name || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-field-label">فعال‌سازی</span>
+                <span class="accountant-meta-label">فعال‌سازی</span>
                 <strong>{{ formatDate(activeRelation.activated_at) }}</strong>
               </AppCard>
               <AppCard>
-                <span class="accountant-field-label">ایجاد رابطه</span>
+                <span class="accountant-meta-label">ایجاد رابطه</span>
                 <strong>{{ formatDate(activeRelation.created_at) }}</strong>
               </AppCard>
             </div>
 
             <div v-else-if="detailTab === 'duty'" class="accountant-detail-list">
               <AppCard class="accountant-edit-form-card">
-                <span class="accountant-field-label">شرح وظیفه فعلی</span>
+                <span class="accountant-meta-label">شرح وظیفه فعلی</span>
                 <strong>{{ getDutyText(activeRelation) }}</strong>
               </AppCard>
 
@@ -772,7 +772,7 @@ onBeforeUnmount(() => {
                 message="برای دیدن پرونده و تنظیمات، یکی از حسابداران فعال را از لیست انتخاب کنید."
               />
               <AppCard v-else tone="primary" class="accountant-selection-card">
-                <span class="accountant-field-label">حسابدار انتخاب‌شده</span>
+                <span class="accountant-meta-label">حسابدار انتخاب‌شده</span>
                 <strong>{{ getRelationTitle(activeRelation) }}</strong>
                 <p>{{ getRelationDescription(activeRelation) }}</p>
                 <div class="accountant-inline-actions">
@@ -864,7 +864,7 @@ onBeforeUnmount(() => {
         </AppFormField>
 
         <AppCard v-if="generatedGlobalAccountName" class="accountant-generated-account">
-          <span class="accountant-field-label">نام کاربری دعوتی</span>
+          <span class="accountant-meta-label">نام کاربری دعوتی</span>
           <strong>@{{ generatedGlobalAccountName }}</strong>
         </AppCard>
 
@@ -979,7 +979,7 @@ onBeforeUnmount(() => {
   gap: 0.65rem;
 }
 
-.accountant-field-label {
+.accountant-meta-label {
   display: block;
   margin-bottom: 0.35rem;
   color: var(--ds-text-muted);

@@ -125,7 +125,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
   async function openDetailAccordion(wrapper: any, label: string) {
     const accordion = wrapper.findAll('.detail-accordion').find((node: any) => node.text().includes(label))
     expect(accordion).toBeTruthy()
-    await accordion!.get('.ds-accordion-header').trigger('click')
+    await accordion!.get('.customer-accordion-header').trigger('click')
     await flushPromises()
   }
 
@@ -144,7 +144,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.text()).toContain('مشتریان')
     expect(wrapper.text()).not.toContain('مشتریان مالک')
     expect(wrapper.text()).not.toContain('مدیریت ارتباطات')
-    expect(wrapper.findAll('.customer-panel > .ds-accordion.open')).toHaveLength(0)
+    expect(wrapper.findAll('.customer-panel > .customer-accordion-panel.open')).toHaveLength(0)
     expect(wrapper.text()).toContain('افزودن مشتری جدید')
     expect(wrapper.text()).toContain('مدیریت مشتریان')
     expect(wrapper.text()).not.toContain('مشتریان فعال و در انتظار')
@@ -160,7 +160,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.find('.customer-manager-page').exists()).toBe(true)
     expect(wrapper.find('.customer-manager-backdrop').exists()).toBe(false)
-    expect(wrapper.find('.customer-manager-header').exists()).toBe(false)
+    expect(wrapper.find('.customer-owner-header').exists()).toBe(false)
     expect(wrapper.find('.customer-manager-shell--workspace').exists()).toBe(true)
 
     await openCustomerDetail(wrapper)
@@ -720,7 +720,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
 
     expect(wrapper.find('.create-commission-rate').exists()).toBe(false)
 
-    await wrapper.findAll('.panel-actions .secondary-btn')[0]!.trigger('click')
+    await wrapper.findAll('.panel-actions .customer-secondary-control')[0]!.trigger('click')
 
     expect((wrapper.get('.create-management-name').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-mobile-number').element as HTMLInputElement).value).toBe('')

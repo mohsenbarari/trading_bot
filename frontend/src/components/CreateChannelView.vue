@@ -951,28 +951,28 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="channel-manager-root">
+  <section class="channel-admin-shell">
     <input ref="avatarInput" type="file" accept="image/*" class="hidden-avatar-input" @change="handleAvatarSelected" />
-    <header class="manager-header">
-      <button type="button" class="header-icon-btn" :disabled="!canGoBack" @click="handleManagerBack()">
+    <header class="channel-admin-header">
+      <button type="button" class="channel-admin-header-btn" :disabled="!canGoBack" @click="handleManagerBack()">
         <ChevronRight :size="22" />
       </button>
       <div class="header-copy">
         <h2>{{ pageTitle }}</h2>
         <span>{{ pageSubtitle }}</span>
       </div>
-      <button v-if="showCloseButton" type="button" class="header-icon-btn" @click="requestClose()">
+      <button v-if="showCloseButton" type="button" class="channel-admin-header-btn" @click="requestClose()">
         <X :size="20" />
       </button>
       <div v-else class="header-spacer"></div>
     </header>
 
     <main class="manager-body">
-      <div v-if="errorMessage" class="flash-box error">{{ errorMessage }}</div>
-      <div v-if="successMessage" class="flash-box success">{{ successMessage }}</div>
+      <div v-if="errorMessage" class="channel-status-banner error">{{ errorMessage }}</div>
+      <div v-if="successMessage" class="channel-status-banner success">{{ successMessage }}</div>
 
       <template v-if="page === 'home'">
-        <section class="hero-card create-card card-with-help">
+        <section class="channel-surface-card create-card card-with-help">
           <HelpPopover
             floating
             button-test="channel-home-help"
@@ -982,7 +982,7 @@ onBeforeUnmount(() => {
           />
           <div class="hero-avatar">{{ getAvatarInitial('کانال') }}</div>
           <div class="hero-title">ساخت کانال جدید</div>
-          <button type="button" class="primary-btn" @click="openCreatePage">
+          <button type="button" class="channel-main-button" @click="openCreatePage">
             <UsersRound :size="18" />
             <span>کانال جدید</span>
           </button>
@@ -995,12 +995,12 @@ onBeforeUnmount(() => {
             <span>در حال دریافت کانال‌ها...</span>
           </div>
           <div v-else-if="existingChannels.length === 0" class="state-box muted">هنوز کانالی برای مدیریت ساخته نشده است.</div>
-          <div v-else class="telegram-list">
+          <div v-else class="channel-list">
             <button
               v-for="channel in existingChannels"
               :key="channel.id"
               type="button"
-              class="telegram-row nav"
+              class="channel-list-row nav"
               @click="openChannel(channel)"
             >
               <div class="row-avatar">
@@ -1021,7 +1021,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'create'">
-        <section class="hero-card preview card-with-help">
+        <section class="channel-surface-card preview card-with-help">
           <HelpPopover
             floating
             button-test="channel-create-preview-help"
@@ -1038,23 +1038,23 @@ onBeforeUnmount(() => {
           <div class="hero-meta">{{ description.trim() ? 'آماده برای ساخت' : 'بدون توضیحات' }}</div>
           <p v-if="description.trim()" class="hero-description">{{ description.trim() }}</p>
           <div class="avatar-tool-row">
-            <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+            <button type="button" class="channel-alt-button compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
               {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
             </button>
-            <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+            <button v-if="avatarFileId" type="button" class="channel-soft-button danger" :disabled="avatarBusy" @click="clearAvatar">
               حذف عکس
             </button>
           </div>
         </section>
 
-        <section class="editor-card">
-          <label class="field-label" for="channel-title">نام کانال</label>
-          <input id="channel-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="مثلاً اطلاعیه‌های ویژه" />
+        <section class="channel-form-panel">
+          <label class="channel-form-label" for="channel-title">نام کانال</label>
+          <input id="channel-title" v-model="title" class="channel-form-input" type="text" maxlength="255" placeholder="مثلاً اطلاعیه‌های ویژه" />
 
-          <label class="field-label" for="channel-description">توضیحات کانال</label>
+          <label class="channel-form-label" for="channel-description">توضیحات کانال</label>
           <textarea id="channel-description" v-model="description" class="editor-textarea" rows="5" maxlength="2000" placeholder="چند خط کوتاه درباره موضوع کانال"></textarea>
 
-          <button type="button" class="primary-btn" :disabled="!canSaveDetails || isSaving" @click="createChannel">
+          <button type="button" class="channel-main-button" :disabled="!canSaveDetails || isSaving" @click="createChannel">
             <Loader2 v-if="isSaving" :size="18" class="spin" />
             <Check v-else :size="18" />
             <span>ساخت کانال</span>
@@ -1063,7 +1063,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'overview' && activeChannel">
-        <section class="hero-card">
+        <section class="channel-surface-card">
           <button
             type="button"
             class="hero-avatar"
@@ -1080,21 +1080,21 @@ onBeforeUnmount(() => {
           <div class="hero-meta">{{ getChannelKindLabel(activeChannel) }} • {{ activeChannel.member_count.toLocaleString('fa-IR') }} عضو</div>
           <p v-if="activeChannel.description" class="hero-description">{{ activeChannel.description }}</p>
           <div v-if="canEditOverviewAvatar" class="avatar-tool-row compact centered-overview-tools">
-            <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+            <button type="button" class="channel-alt-button compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
               {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
             </button>
-            <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+            <button v-if="avatarFileId" type="button" class="channel-soft-button danger" :disabled="avatarBusy" @click="clearAvatar">
               حذف عکس
             </button>
           </div>
           <div v-if="canOpenCurrentChannelInMessenger" class="hero-actions">
-            <button type="button" class="secondary-btn compact" @click="openCurrentChannelInMessenger">باز کردن در پیام‌رسان</button>
+            <button type="button" class="channel-alt-button compact" @click="openCurrentChannelInMessenger">باز کردن در پیام‌رسان</button>
           </div>
         </section>
 
-        <div v-if="typeof currentUserId === 'number' && !currentUserMembership" class="flash-box warning">شما عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در فهرست گفتگوهای شما دیده نمی‌شود.</div>
-        <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="flash-box info">شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.</div>
-        <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && currentUserCanPostInCurrentChannel" class="flash-box info">شما ادمین این کانال هستید و می‌توانید مستقیماً از پیام‌رسان در آن پست بگذارید.</div>
+        <div v-if="typeof currentUserId === 'number' && !currentUserMembership" class="channel-status-banner warning">شما عضو فعال این کانال نیستید. تا قبل از اضافه شدن، این کانال در فهرست گفتگوهای شما دیده نمی‌شود.</div>
+        <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && !currentUserCanPostInCurrentChannel" class="channel-status-banner info">شما عضو این کانال هستید اما فقط ادمین‌های کانال امکان ارسال پست دارند.</div>
+        <div v-else-if="typeof currentUserId === 'number' && currentUserMembership && currentUserCanPostInCurrentChannel" class="channel-status-banner info">شما ادمین این کانال هستید و می‌توانید مستقیماً از پیام‌رسان در آن پست بگذارید.</div>
         <div class="manager-role-strip">
           <span>نقش شما</span>
           <strong>{{ currentChannelRoleLabel }}</strong>
@@ -1102,8 +1102,8 @@ onBeforeUnmount(() => {
 
         <section class="section-shell manager-action-group">
           <div class="section-heading">اعضا و دسترسی‌ها</div>
-          <div class="telegram-list nav-list">
-            <button type="button" class="telegram-row nav" @click="setPage('members')">
+          <div class="channel-list nav-list">
+            <button type="button" class="channel-list-row nav" @click="setPage('members')">
               <div class="row-icon soft"><UsersRound :size="18" /></div>
               <div class="row-copy">
                 <div class="row-title">اعضای کانال</div>
@@ -1113,7 +1113,7 @@ onBeforeUnmount(() => {
               <ChevronLeft :size="18" class="row-chevron" />
             </button>
 
-            <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('admins')">
+            <button v-if="!isMembershipManagementLocked" type="button" class="channel-list-row nav" @click="setPage('admins')">
               <div class="row-icon amber"><Shield :size="18" /></div>
               <div class="row-copy">
                 <div class="row-title">مدیریت ادمین‌ها</div>
@@ -1123,7 +1123,7 @@ onBeforeUnmount(() => {
               <ChevronLeft :size="18" class="row-chevron" />
             </button>
 
-            <button v-if="!isMembershipManagementLocked" type="button" class="telegram-row nav" @click="setPage('add-members')">
+            <button v-if="!isMembershipManagementLocked" type="button" class="channel-list-row nav" @click="setPage('add-members')">
               <div class="row-icon blue"><UserPlus :size="18" /></div>
               <div class="row-copy">
                 <div class="row-title">افزودن عضو</div>
@@ -1136,8 +1136,8 @@ onBeforeUnmount(() => {
 
         <section class="section-shell manager-action-group">
           <div class="section-heading">تنظیمات</div>
-          <div class="telegram-list nav-list">
-            <button type="button" class="telegram-row nav" @click="setPage('edit')">
+          <div class="channel-list nav-list">
+            <button type="button" class="channel-list-row nav" @click="setPage('edit')">
               <div class="row-icon muted"><PencilLine :size="18" /></div>
               <div class="row-copy">
                 <div class="row-title">تنظیمات کانال</div>
@@ -1150,8 +1150,8 @@ onBeforeUnmount(() => {
 
         <section v-if="currentUserMembership && !isMembershipManagementLocked" class="section-shell manager-action-group danger-zone">
           <div class="section-heading">خروج و حذف</div>
-          <div class="telegram-list nav-list">
-            <button type="button" class="telegram-row nav danger" :disabled="isSaving" @click="unfollowCurrentChannel">
+          <div class="channel-list nav-list">
+            <button type="button" class="channel-list-row nav danger" :disabled="isSaving" @click="unfollowCurrentChannel">
               <div class="row-icon danger"><LogOut :size="18" /></div>
               <div class="row-copy">
                 <div class="row-title">{{ currentChannelExitLabel }}</div>
@@ -1171,7 +1171,7 @@ onBeforeUnmount(() => {
           <Loader2 :size="18" class="spin" />
           <span>در حال دریافت اعضای کانال...</span>
         </div>
-        <div v-else class="telegram-list">
+        <div v-else class="channel-list">
           <ChatUserListRow
             v-for="member in filteredMembers"
             :key="member.user_id"
@@ -1211,7 +1211,7 @@ onBeforeUnmount(() => {
 
         <section class="section-shell">
           <div class="section-heading">ادمین‌های فعلی</div>
-          <div class="telegram-list compact">
+          <div class="channel-list compact">
             <ChatUserListRow
               v-for="member in filteredAdmins"
               :key="member.user_id"
@@ -1247,7 +1247,7 @@ onBeforeUnmount(() => {
         <section class="section-shell">
           <div class="section-heading">اعضای قابل ارتقا</div>
           <div v-if="promotableMembers.length === 0" class="state-box muted">عضوی برای ارتقا باقی نمانده است.</div>
-          <div v-else class="telegram-list compact">
+          <div v-else class="channel-list compact">
             <ChatUserListRow
               v-for="member in promotableMembers"
               :key="member.user_id"
@@ -1302,7 +1302,7 @@ onBeforeUnmount(() => {
           <span>در حال دریافت کاربران فعال...</span>
         </div>
         <div v-else-if="!selectAllActiveUsers && candidates.length === 0" class="state-box muted">کاربری برای دعوت باقی نمانده است.</div>
-        <div v-else-if="!selectAllActiveUsers" class="telegram-list">
+        <div v-else-if="!selectAllActiveUsers" class="channel-list">
           <ChatUserListRow
             v-for="candidate in candidates"
             :key="candidate.user_id"
@@ -1327,7 +1327,7 @@ onBeforeUnmount(() => {
       </template>
 
       <template v-else-if="page === 'edit' && activeChannel">
-        <section class="editor-card">
+        <section class="channel-form-panel">
           <div class="avatar-editor-block">
             <div class="hero-avatar small-editor">
               <img v-if="channelAvatarUrl" :src="channelAvatarUrl" :alt="activeChannel.title" class="hero-avatar-image" />
@@ -1335,10 +1335,10 @@ onBeforeUnmount(() => {
               <div v-if="avatarBusy" class="avatar-busy-overlay"><Loader2 :size="20" class="spin" /></div>
             </div>
             <div class="avatar-tool-row compact">
-              <button type="button" class="secondary-btn compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
+              <button type="button" class="channel-alt-button compact" :disabled="avatarBusy" @click="triggerAvatarPicker">
                 {{ avatarFileId ? 'تغییر عکس کانال' : 'افزودن عکس کانال' }}
               </button>
-              <button v-if="avatarFileId" type="button" class="ghost-action danger" :disabled="avatarBusy" @click="clearAvatar">
+              <button v-if="avatarFileId" type="button" class="channel-soft-button danger" :disabled="avatarBusy" @click="clearAvatar">
                 حذف عکس
               </button>
             </div>
@@ -1349,13 +1349,13 @@ onBeforeUnmount(() => {
             <span>از این بخش می‌توانید نام و توضیحات کانال را ویرایش کنید.</span>
           </div>
 
-          <label class="field-label" for="edit-channel-title">نام کانال</label>
-          <input id="edit-channel-title" v-model="title" class="editor-input" type="text" maxlength="255" placeholder="نام کانال" />
+          <label class="channel-form-label" for="edit-channel-title">نام کانال</label>
+          <input id="edit-channel-title" v-model="title" class="channel-form-input" type="text" maxlength="255" placeholder="نام کانال" />
 
-          <label class="field-label" for="edit-channel-description">توضیحات کانال</label>
+          <label class="channel-form-label" for="edit-channel-description">توضیحات کانال</label>
           <textarea id="edit-channel-description" v-model="description" class="editor-textarea" rows="5" maxlength="2000" placeholder="توضیحات کانال برای اعضا"></textarea>
 
-          <button type="button" class="primary-btn" :disabled="!canSaveDetails || isSaving" @click="updateChannelDetails">
+          <button type="button" class="channel-main-button" :disabled="!canSaveDetails || isSaving" @click="updateChannelDetails">
             <Loader2 v-if="isSaving" :size="18" class="spin" />
             <Check v-else :size="18" />
             <span>ذخیره تغییرات</span>
@@ -1367,7 +1367,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.channel-manager-root {
+.channel-admin-shell {
   width: 100%;
   min-height: 0;
   max-height: min(88vh, 880px);
@@ -1379,7 +1379,7 @@ onBeforeUnmount(() => {
   border-radius: var(--messenger-radius-sheet, 28px);
 }
 
-.manager-header {
+.channel-admin-header {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1389,7 +1389,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid rgba(148, 163, 184, 0.14);
 }
 
-.header-icon-btn {
+.channel-admin-header-btn {
   width: var(--messenger-touch-target, 44px);
   height: var(--messenger-touch-target, 44px);
   border: 0;
@@ -1442,7 +1442,7 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
-.flash-box,
+.channel-status-banner,
 .state-box,
 .selection-banner,
 .manager-role-strip,
@@ -1455,25 +1455,25 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.flash-box.error {
+.channel-status-banner.error {
   background: rgba(254, 242, 242, 0.95);
   color: #b91c1c;
   border: 1px solid rgba(248, 113, 113, 0.18);
 }
 
-.flash-box.success {
+.channel-status-banner.success {
   background: rgba(236, 253, 245, 0.94);
   color: #047857;
   border: 1px solid rgba(52, 211, 153, 0.18);
 }
 
-.flash-box.warning {
+.channel-status-banner.warning {
   background: rgba(255, 247, 237, 0.96);
   color: #9a3412;
   border: 1px solid rgba(245, 158, 11, 0.18);
 }
 
-.flash-box.info,
+.channel-status-banner.info,
 .info-strip {
   background: rgba(239, 246, 255, 0.96);
   color: #1d4ed8;
@@ -1503,7 +1503,7 @@ onBeforeUnmount(() => {
 }
 
 .search-input,
-.editor-input,
+.channel-form-input,
 .editor-textarea {
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -1518,7 +1518,7 @@ onBeforeUnmount(() => {
 }
 
 .search-input,
-.editor-input {
+.channel-form-input {
   min-height: 56px;
   padding: 0 18px;
 }
@@ -1531,7 +1531,7 @@ onBeforeUnmount(() => {
 }
 
 .search-input:focus,
-.editor-input:focus,
+.channel-form-input:focus,
 .editor-textarea:focus {
   border-color: #3390ec;
   box-shadow: 0 0 0 4px rgba(51, 144, 236, 0.12);
@@ -1577,9 +1577,9 @@ onBeforeUnmount(() => {
 }
 
 .primary-chip,
-.primary-btn,
-.secondary-btn,
-.ghost-action {
+.channel-main-button,
+.channel-alt-button,
+.channel-soft-button {
   border: 0;
   border-radius: var(--messenger-radius-panel, 18px);
   font: inherit;
@@ -1598,39 +1598,39 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
-.primary-btn,
-.secondary-btn {
+.channel-main-button,
+.channel-alt-button {
   min-height: 52px;
   padding: 0 18px;
 }
 
-.primary-btn {
+.channel-main-button {
   background: #3390ec;
   color: #fff;
   box-shadow: 0 12px 28px rgba(51, 144, 236, 0.24);
 }
 
-.secondary-btn {
+.channel-alt-button {
   background: rgba(226, 232, 240, 0.86);
   color: #0f172a;
 }
 
-.secondary-btn.compact {
+.channel-alt-button.compact {
   min-height: 42px;
   padding: 0 14px;
 }
 
 .primary-chip:disabled,
-.primary-btn:disabled,
-.secondary-btn:disabled,
-.ghost-action:disabled,
-.header-icon-btn:disabled {
+.channel-main-button:disabled,
+.channel-alt-button:disabled,
+.channel-soft-button:disabled,
+.channel-admin-header-btn:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
-.hero-card,
-.editor-card,
+.channel-surface-card,
+.channel-form-panel,
 .section-shell {
   border-radius: var(--messenger-radius-sheet, 28px);
   background: rgba(255, 255, 255, 0.88);
@@ -1638,7 +1638,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
 }
 
-.hero-card {
+.channel-surface-card {
   position: relative;
   padding: 26px 20px 22px;
   display: flex;
@@ -1648,12 +1648,12 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-.hero-card.card-with-help {
+.channel-surface-card.card-with-help {
   padding-left: 4rem;
 }
 
-.hero-card.preview,
-.hero-card.create-card {
+.channel-surface-card.preview,
+.channel-surface-card.create-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(236, 245, 255, 0.94));
 }
 
@@ -1784,17 +1784,17 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
-.telegram-list {
+.channel-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.telegram-list.compact {
+.channel-list.compact {
   gap: 8px;
 }
 
-.telegram-row {
+.channel-list-row {
   width: 100%;
   border: 0;
   border-radius: var(--messenger-radius-panel, 18px);
@@ -1808,12 +1808,12 @@ onBeforeUnmount(() => {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
 }
 
-.telegram-row.selectable,
-.telegram-row.nav {
+.channel-list-row.selectable,
+.channel-list-row.nav {
   cursor: pointer;
 }
 
-.telegram-row.selectable.selected {
+.channel-list-row.selectable.selected {
   border-color: rgba(51, 144, 236, 0.28);
   background: rgba(240, 248, 255, 0.96);
 }
@@ -1911,7 +1911,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.editor-card,
+.channel-form-panel,
 .section-shell {
   padding: 18px 16px;
   display: flex;
@@ -1928,7 +1928,7 @@ onBeforeUnmount(() => {
   border-color: rgba(239, 68, 68, 0.14);
 }
 
-.field-label,
+.channel-form-label,
 .section-heading {
   font-size: var(--ds-font-helper);
   font-weight: 800;
@@ -1969,21 +1969,21 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
-.ghost-action {
+.channel-soft-button {
   min-height: 36px;
   padding: 0 12px;
   background: rgba(241, 245, 249, 0.96);
   color: #334155;
 }
 
-.ghost-action.primary {
+.channel-soft-button.primary {
   background: rgba(51, 144, 236, 0.12);
   color: #0369a1;
 }
 
-.ghost-action.danger,
-.telegram-row.nav.danger .row-title,
-.telegram-row.nav.danger .row-subtitle {
+.channel-soft-button.danger,
+.channel-list-row.nav.danger .row-title,
+.channel-list-row.nav.danger .row-subtitle {
   color: #b91c1c;
 }
 
@@ -2017,7 +2017,7 @@ onBeforeUnmount(() => {
     justify-content: flex-start;
   }
 
-  .telegram-row.member-row {
+  .channel-list-row.member-row {
     flex-wrap: wrap;
   }
 }

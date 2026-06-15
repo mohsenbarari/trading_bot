@@ -648,7 +648,7 @@ onUnmounted(() => {
   <div class="market-page ds-page">
 
     <div class="market-header">
-      <section class="market-shell-card" aria-label="وضعیت بازار">
+      <section class="market-summary-shell" aria-label="وضعیت بازار">
         <div class="market-shell-main">
           <div class="market-shell-title">
             <h1>بازار</h1>
@@ -841,7 +841,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--ds-border-light);
 }
 
-.market-shell-card {
+.market-summary-shell {
   max-width: var(--ds-page-max-width);
   width: 100%;
   margin: 0 auto;

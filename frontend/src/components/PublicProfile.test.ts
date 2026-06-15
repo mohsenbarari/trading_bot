@@ -176,7 +176,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -256,7 +256,7 @@ describe('PublicProfile.vue', () => {
     fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(new Response('server exploded', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -332,7 +332,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -518,7 +518,7 @@ describe('PublicProfile.vue', () => {
     const messageButton = wrapper.findAll('button').find((button) => button.text().includes('ارسال پیام'))
     expect(messageButton).toBeTruthy()
 
-    const infoHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
+    const infoHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
     expect(infoHeader).toBeTruthy()
     await infoHeader!.trigger('click')
     await infoHeader!.trigger('click')
@@ -826,7 +826,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('لیست همکاران'))
+    const directoryHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('لیست همکاران'))
     expect(directoryHeader).toBeTruthy()
     await directoryHeader!.trigger('click')
     await flushPromises()
@@ -929,7 +929,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('لیست همکاران'))
+    const directoryHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('لیست همکاران'))
     expect(directoryHeader).toBeTruthy()
     await directoryHeader!.trigger('click')
     await flushPromises()
@@ -985,7 +985,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('لیست همکاران'))
+    const directoryHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('لیست همکاران'))
     expect(directoryHeader).toBeTruthy()
     await directoryHeader!.trigger('click')
     await flushPromises()
@@ -1631,7 +1631,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const infoHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
+    const infoHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
     expect(infoHeader).toBeTruthy()
     await infoHeader!.trigger('click')
 
@@ -1704,7 +1704,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('لیست حسابداران')
     expect(wrapper.text()).not.toContain('لیست مشتریان')
     expect(wrapper.find('[data-test="public-profile-customers-help"]').exists()).toBe(false)
-    const accountantAccordion = wrapper.findAll('.ds-accordion').find((node) => node.text().includes('لیست حسابداران'))
+    const accountantAccordion = wrapper.findAll('.profile-accordion').find((node) => node.text().includes('لیست حسابداران'))
     expect(accountantAccordion?.classes()).not.toContain('open')
 
     await wrapper.get('[data-test="public-profile-info-help"]').trigger('click')
@@ -1858,7 +1858,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -1949,7 +1949,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات این کاربر'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات این کاربر'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -1996,7 +1996,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -2078,7 +2078,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -2157,7 +2157,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -2241,7 +2241,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
+    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
     expect(historyHeader).toBeTruthy()
     await historyHeader!.trigger('click')
     await flushPromises()
@@ -2289,7 +2289,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('دریافت پروفایل ناموفق بود')
-    await wrapper.get('.back-button').trigger('click')
+    await wrapper.get('.profile-nav-back').trigger('click')
     expect(wrapper.emitted('navigate')?.[0]).toEqual(['home'])
   })
 
@@ -2348,9 +2348,9 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('acct44')
     expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('مسیر فعلی')
 
-    const accountantHeader = wrapper.findAll('.ds-accordion-header').find((node) => node.text().includes('حسابداران این مالک'))
+    const accountantHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('حسابداران این مالک'))
     expect(accountantHeader).toBeTruthy()
-    const accountantAccordion = wrapper.findAll('.ds-accordion').find((node) => node.text().includes('حسابداران این مالک'))
+    const accountantAccordion = wrapper.findAll('.profile-accordion').find((node) => node.text().includes('حسابداران این مالک'))
     expect(accountantAccordion).toBeTruthy()
     await accountantHeader!.trigger('click')
     expect(accountantAccordion!.classes()).not.toContain('open')

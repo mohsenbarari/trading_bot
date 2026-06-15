@@ -366,12 +366,12 @@ onMounted(fetchCommodities)
 
 <template>
   <div class="commodity-manager ds-page-content">
-    <div v-if="successMessage" class="flash-box flash-box--success" role="status" aria-live="polite">
+    <div v-if="successMessage" class="commodity-feedback commodity-feedback--success" role="status" aria-live="polite">
       <strong>ذخیره شد</strong>
       <span>{{ successMessage }}</span>
     </div>
 
-    <div v-if="errorMessage" class="flash-box flash-box--error" role="alert" aria-live="assertive">
+    <div v-if="errorMessage" class="commodity-feedback commodity-feedback--error" role="alert" aria-live="assertive">
       <strong>ثبت اطلاعات انجام نشد</strong>
       <pre class="error-pre">{{ errorMessage }}</pre>
     </div>
@@ -382,7 +382,7 @@ onMounted(fetchCommodities)
       description="کالاهای قابل معامله و نام‌های مستعار هر مورد را از این بخش مدیریت کنید."
     >
       <template #actions>
-        <AppButton class="action-btn primary-soft" variant="primary" @click="onAddCommodityStart">
+        <AppButton class="commodity-action primary-soft" variant="primary" @click="onAddCommodityStart">
           <template #icon>
             <Plus :size="16" />
           </template>
@@ -435,7 +435,7 @@ onMounted(fetchCommodities)
         <template #actions>
           <div class="aliases-header-actions">
             <AppStatusBadge tone="info">{{ aliasCountLabel(selectedCommodityAliasCount) }}</AppStatusBadge>
-            <button @click="fetchCommodities" class="back-icon-btn" type="button" aria-label="بازگشت به فهرست کالاها">
+            <button @click="fetchCommodities" class="commodity-back-control" type="button" aria-label="بازگشت به فهرست کالاها">
               <ArrowRight :size="16" />
             </button>
           </div>
@@ -452,7 +452,7 @@ onMounted(fetchCommodities)
             <Tag :size="18" />
           </template>
           <template #actions>
-            <AppButton class="action-btn primary-soft" variant="primary" @click="onAddAliasStart">
+            <AppButton class="commodity-action primary-soft" variant="primary" @click="onAddAliasStart">
               افزودن نام مستعار
             </AppButton>
           </template>
@@ -470,10 +470,10 @@ onMounted(fetchCommodities)
               </template>
               <template #trailing>
                 <div class="alias-actions">
-                  <button @click="onEditAliasStart(alias)" class="icon-btn edit" type="button" aria-label="ویرایش نام مستعار">
+                  <button @click="onEditAliasStart(alias)" class="commodity-icon-control edit" type="button" aria-label="ویرایش نام مستعار">
                     <PencilLine :size="15" />
                   </button>
-                  <button @click="onDeleteAliasStart(alias)" class="icon-btn delete" type="button" aria-label="حذف نام مستعار">
+                  <button @click="onDeleteAliasStart(alias)" class="commodity-icon-control delete" type="button" aria-label="حذف نام مستعار">
                     <Trash2 :size="15" />
                   </button>
                 </div>
@@ -489,7 +489,7 @@ onMounted(fetchCommodities)
         description="ثبت نام مستعار جدید، تغییر نام اصلی یا حذف کامل کالا از این بخش انجام می‌شود."
       >
         <div class="card-footer stacked">
-          <AppButton class="action-btn primary-soft" variant="primary" block @click="onAddAliasStart">
+          <AppButton class="commodity-action primary-soft" variant="primary" block @click="onAddAliasStart">
             <template #icon>
               <Plus :size="16" />
             </template>
@@ -500,7 +500,7 @@ onMounted(fetchCommodities)
           </p>
           <AppButton
             v-if="!selectedCommodityIsLockedImam"
-            class="action-btn secondary-soft"
+            class="commodity-action secondary-soft"
             variant="secondary"
             block
             @click="onEditCommodityNameStart"
@@ -512,7 +512,7 @@ onMounted(fetchCommodities)
           </AppButton>
           <AppButton
             v-if="!selectedCommodityIsLockedImam"
-            class="action-btn danger-soft"
+            class="commodity-action danger-soft"
             variant="danger"
             block
             @click="onDeleteCommodityStart"
@@ -678,7 +678,7 @@ onMounted(fetchCommodities)
   gap: var(--ds-section-gap);
 }
 
-.flash-box {
+.commodity-feedback {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -688,14 +688,14 @@ onMounted(fetchCommodities)
   box-shadow: var(--ds-shadow-sm);
 }
 
-.flash-box strong {
+.commodity-feedback strong {
   font-size: var(--ds-font-sm);
   font-weight: 850;
   line-height: 1.5;
 }
 
-.flash-box span,
-.flash-box pre {
+.commodity-feedback span,
+.commodity-feedback pre {
   margin: 0;
   font-size: var(--ds-font-xs);
   line-height: 1.8;
@@ -703,13 +703,13 @@ onMounted(fetchCommodities)
   font-family: inherit;
 }
 
-.flash-box--success {
+.commodity-feedback--success {
   background: var(--ds-success-50);
   border-color: var(--ds-success-100);
   color: var(--ds-success-700);
 }
 
-.flash-box--error {
+.commodity-feedback--error {
   background: var(--ds-danger-50);
   border-color: var(--ds-danger-100);
   color: var(--ds-danger-700);
@@ -742,8 +742,8 @@ onMounted(fetchCommodities)
   gap: 0.55rem;
 }
 
-.back-icon-btn,
-.icon-btn {
+.commodity-back-control,
+.commodity-icon-control {
   width: 2.25rem;
   height: 2.25rem;
   display: inline-flex;
@@ -757,14 +757,14 @@ onMounted(fetchCommodities)
   transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-.back-icon-btn:hover,
-.icon-btn:hover {
+.commodity-back-control:hover,
+.commodity-icon-control:hover {
   border-color: var(--ds-primary-300);
   background: var(--ds-primary-50);
   color: var(--ds-primary-700);
 }
 
-.icon-btn.delete:hover {
+.commodity-icon-control.delete:hover {
   border-color: var(--ds-danger-300);
   background: var(--ds-danger-50);
   color: var(--ds-danger-700);

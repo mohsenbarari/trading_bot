@@ -690,27 +690,27 @@ onBeforeUnmount(() => {
 
             <div v-if="detailTab === 'profile'" class="customer-detail-grid">
               <AppCard>
-                <span class="customer-field-label">نام مدیریتی</span>
+                <span class="customer-meta-label">نام مدیریتی</span>
                 <strong>{{ activeRelation.management_name || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="customer-field-label">شماره موبایل</span>
+                <span class="customer-meta-label">شماره موبایل</span>
                 <strong>{{ activeRelation.mobile_number || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="customer-field-label">حساب کاربری</span>
+                <span class="customer-meta-label">حساب کاربری</span>
                 <strong>{{ activeRelation.customer_account_name || activeRelation.invitation_account_name || 'در انتظار ثبت‌نام' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="customer-field-label">نرخ کمیسیون</span>
+                <span class="customer-meta-label">نرخ کمیسیون</span>
                 <strong>{{ activeRelation.customer_tier === 'tier2' ? formatPercent(activeRelation.commission_rate) : 'ندارد' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="customer-field-label">فعال‌سازی</span>
+                <span class="customer-meta-label">فعال‌سازی</span>
                 <strong>{{ formatDate(activeRelation.activated_at) }}</strong>
               </AppCard>
               <AppCard>
-                <span class="customer-field-label">ایجاد رابطه</span>
+                <span class="customer-meta-label">ایجاد رابطه</span>
                 <strong>{{ formatDate(activeRelation.created_at) }}</strong>
               </AppCard>
             </div>
@@ -837,7 +837,7 @@ onBeforeUnmount(() => {
                 <AppMetricCard label="حجم کل" :value="detailStats.total_quantity" tone="primary" />
                 <AppMetricCard label="سود کمیسیون" :value="formatToman(detailStats.commission_profit_toman)" tone="success" />
                 <AppCard class="customer-stats-commodities">
-                  <span class="customer-field-label">تفکیک کالا</span>
+                  <span class="customer-meta-label">تفکیک کالا</span>
                   <ul>
                     <li v-for="commodity in detailStats.commodities" :key="commodity.commodity_id">
                       <span>{{ commodity.commodity_name }}</span>
@@ -1042,7 +1042,7 @@ onBeforeUnmount(() => {
                 message="برای دیدن پرونده و تنظیمات، یکی از مشتریان فعال را از لیست انتخاب کنید."
               />
               <AppCard v-else tone="primary" class="customer-selection-card">
-                <span class="customer-field-label">مشتری انتخاب‌شده</span>
+                <span class="customer-meta-label">مشتری انتخاب‌شده</span>
                 <strong>{{ getRelationTitle(activeRelation) }}</strong>
                 <p>{{ getRelationDescription(activeRelation) }}</p>
                 <div class="customer-inline-actions">
@@ -1171,7 +1171,7 @@ onBeforeUnmount(() => {
         </div>
 
         <AppCard v-if="generatedCreateAccountName" class="customer-generated-account">
-          <span class="customer-field-label">نام حساب دعوتی</span>
+          <span class="customer-meta-label">نام حساب دعوتی</span>
           <strong>@{{ generatedCreateAccountName }}</strong>
         </AppCard>
 
@@ -1287,7 +1287,7 @@ onBeforeUnmount(() => {
   gap: 0.65rem;
 }
 
-.customer-field-label {
+.customer-meta-label {
   display: block;
   margin-bottom: 0.35rem;
   color: var(--ds-text-muted);

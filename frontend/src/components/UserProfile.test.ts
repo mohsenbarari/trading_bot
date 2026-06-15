@@ -29,6 +29,7 @@ vi.mock('lucide-vue-next', () => ({
   CalendarDays: { template: '<span />' },
   Check: { template: '<span />' },
   ChevronLeft: { template: '<span />' },
+  ChevronRight: { template: '<span />' },
   Clock: { template: '<span />' },
   Info: { template: '<span />' },
   Pencil: { template: '<span />' },
@@ -444,7 +445,7 @@ describe('UserProfile.vue', () => {
     })
 
     await wrapper.get('.notification-btn').trigger('click')
-    await wrapper.get('.menu-button.settings-btn').trigger('click')
+    await wrapper.get('.profile-control.settings-btn').trigger('click')
 
     expect(wrapper.emitted('navigate')).toEqual([
       ['notifications'],
@@ -1011,7 +1012,7 @@ describe('UserProfile.vue', () => {
       },
     })
 
-    await wrapper.get('.back-button').trigger('click')
+    await wrapper.get('.profile-nav-back').trigger('click')
     await wrapper.get('.main-actions .back-btn').trigger('click')
     await wrapper.get('.settings-btn').trigger('click')
     await findButtonByText(wrapper, 'تغییر وضعیت حساب').trigger('click')
@@ -1044,6 +1045,6 @@ describe('UserProfile.vue', () => {
     })
 
     expect(nonAdminWrapper.find('.notification-btn').exists()).toBe(true)
-    expect(nonAdminWrapper.find('.menu-button.settings-btn').exists()).toBe(false)
+    expect(nonAdminWrapper.find('.profile-control.settings-btn').exists()).toBe(false)
   })
 })

@@ -61,7 +61,7 @@ describe('AccountHubView.vue', () => {
     await findAction(wrapper, 'نشست‌های فعال')!.trigger('click')
     await findAction(wrapper, 'حافظه و داده‌ها')!.trigger('click')
     await findAction(wrapper, 'اعلان‌ها')!.trigger('click')
-    await wrapper.get('.account-back-button').trigger('click')
+    await wrapper.get('.account-return-control').trigger('click')
 
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(1, { name: 'profile' })
     expect(accountHubMocks.routerPushMock).toHaveBeenNthCalledWith(2, { name: 'account-security' })

@@ -228,7 +228,7 @@ describe('LoginView.vue', () => {
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
-    await wrapper.get('button.btn-primary').trigger('click')
+    await wrapper.get('button.ui-button').trigger('click')
     expect(wrapper.text()).toContain('شماره موبایل معتبر نیست')
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
@@ -682,17 +682,17 @@ describe('LoginView.vue', () => {
     expect(wrapper.text()).toContain('خطا در ارسال کد')
 
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
-    await wrapper.get('button.btn-primary').trigger('click')
+    await wrapper.get('button.ui-button').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
 
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12')
-    await wrapper.get('button.btn-primary').trigger('click')
+    await wrapper.get('button.ui-button').trigger('click')
     expect(wrapper.text()).toContain('کد احراز هویت نامعتبر است')
 
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ detail: '' }, false, 401) as any)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('1234')
-    await wrapper.get('button.btn-primary').trigger('click')
+    await wrapper.get('button.ui-button').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('کد نادرست است')
 

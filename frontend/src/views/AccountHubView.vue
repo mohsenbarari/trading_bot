@@ -98,7 +98,7 @@ onMounted(() => {
         title="مرکز حساب کاربری"
       >
         <template #actions>
-          <AppIconButton type="button" class="account-back-button" label="بازگشت" size="sm" @click="router.back()">
+          <AppIconButton type="button" class="account-return-control" label="بازگشت" size="sm" @click="router.back()">
             <ChevronLeft :size="18" />
           </AppIconButton>
         </template>
@@ -200,7 +200,7 @@ onMounted(() => {
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
-.account-back-button {
+.account-return-control {
   white-space: nowrap;
 }
 

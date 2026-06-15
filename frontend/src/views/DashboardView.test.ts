@@ -146,8 +146,8 @@ describe('DashboardView.vue', () => {
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
     await wrapper.get('.hero-btn').trigger('click')
-    await wrapper.findAll('.dashboard-shortcut-card')[0]!.trigger('click')
-    await wrapper.findAll('.dashboard-shortcut-card')[1]!.trigger('click')
+    await wrapper.findAll('.dashboard-action-card')[0]!.trigger('click')
+    await wrapper.findAll('.dashboard-action-card')[1]!.trigger('click')
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/notifications')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')

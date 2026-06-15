@@ -144,7 +144,7 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.text()).toContain('امامی')
     expect(wrapper.text()).toContain('سکه جدید')
 
-    await wrapper.find('.back-icon-btn').trigger('click')
+    await wrapper.find('.commodity-back-control').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('افزودن کالا')
@@ -156,7 +156,7 @@ describe('CommodityManager.vue', () => {
     const wrapper = await mountCommodityManager()
     await flushPromises()
 
-    await wrapper.find('.action-btn.primary-soft').trigger('click')
+    await wrapper.find('.commodity-action.primary-soft').trigger('click')
     await flushPromises()
 
     const inputs = wrapper.findAll('input')
@@ -185,9 +185,9 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('کالای پیش‌فرض امام فقط از مسیر نام‌های مستعار قابل مدیریت است')
-    expect(wrapper.find('.action-btn.secondary-soft').exists()).toBe(false)
-    expect(wrapper.find('.action-btn.danger-soft').exists()).toBe(false)
-    expect(wrapper.find('.action-btn.primary-soft').exists()).toBe(true)
+    expect(wrapper.find('.commodity-action.secondary-soft').exists()).toBe(false)
+    expect(wrapper.find('.commodity-action.danger-soft').exists()).toBe(false)
+    expect(wrapper.find('.commodity-action.primary-soft').exists()).toBe(true)
 
     wrapper.unmount()
   })
@@ -199,7 +199,7 @@ describe('CommodityManager.vue', () => {
     await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
 
-    const actionButtons = wrapper.findAll('.action-btn')
+    const actionButtons = wrapper.findAll('.commodity-action')
     await actionButtons[1]!.trigger('click')
     await flushPromises()
 
@@ -210,7 +210,7 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.text()).toContain('سکه بهار آزادی')
     expect(wrapper.text()).not.toContain('>بهار<')
 
-    await wrapper.findAll('.action-btn')[0]!.trigger('click')
+    await wrapper.findAll('.commodity-action')[0]!.trigger('click')
     await flushPromises()
     await wrapper.find('input').setValue('بهار - طرح قدیم')
     await wrapper.find('form').trigger('submit.prevent')
@@ -219,7 +219,7 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.text()).toContain('بهار')
     expect(wrapper.text()).toContain('طرح قدیم')
 
-    await wrapper.find('.icon-btn.edit').trigger('click')
+    await wrapper.find('.commodity-icon-control.edit').trigger('click')
     await flushPromises()
     await wrapper.find('input').setValue('بهار آزادی')
     await wrapper.find('form').trigger('submit.prevent')
@@ -227,7 +227,7 @@ describe('CommodityManager.vue', () => {
 
     expect(wrapper.text()).toContain('بهار آزادی')
 
-    await wrapper.find('.icon-btn.delete').trigger('click')
+    await wrapper.find('.commodity-icon-control.delete').trigger('click')
     await flushPromises()
     await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
@@ -245,7 +245,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
-    await wrapper.find('.action-btn.danger-soft').trigger('click')
+    await wrapper.find('.commodity-action.danger-soft').trigger('click')
     await flushPromises()
     await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
@@ -295,13 +295,13 @@ describe('CommodityManager.vue', () => {
       return responseOf({ detail: 'unexpected' }, false, 500)
     })
 
-    await wrapper.find('.action-btn.primary-soft').trigger('click')
+    await wrapper.find('.commodity-action.primary-soft').trigger('click')
     await flushPromises()
     await wrapper.findAll('input')[0]!.setValue('سکه امامی')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    const createErrorAlert = wrapper.find('.flash-box--error[role="alert"]')
+    const createErrorAlert = wrapper.find('.commodity-feedback--error[role="alert"]')
     expect(createErrorAlert.exists()).toBe(true)
     expect(createErrorAlert.text()).toContain('ثبت اطلاعات انجام نشد')
     expect(createErrorAlert.text()).toContain('duplicate')
@@ -319,13 +319,13 @@ describe('CommodityManager.vue', () => {
     await flushPromises()
     await wrapper.findAll('.list-item-btn')[1]!.trigger('click')
     await flushPromises()
-    await wrapper.findAll('.action-btn')[1]!.trigger('click')
+    await wrapper.findAll('.commodity-action')[1]!.trigger('click')
     await flushPromises()
     await wrapper.find('input').setValue('x')
     await wrapper.find('form').trigger('submit.prevent')
     await flushPromises()
 
-    const editErrorAlert = wrapper.find('.flash-box--error[role="alert"]')
+    const editErrorAlert = wrapper.find('.commodity-feedback--error[role="alert"]')
     expect(editErrorAlert.exists()).toBe(true)
     expect(editErrorAlert.text()).toContain('too short')
     expect(wrapper.text()).toContain('ویرایش نام کالا')
@@ -339,7 +339,7 @@ describe('CommodityManager.vue', () => {
 
     await wrapper.find('.list-item-btn').trigger('click')
     await flushPromises()
-    await wrapper.findAll('.action-btn')[0]!.trigger('click')
+    await wrapper.findAll('.commodity-action')[0]!.trigger('click')
     await flushPromises()
     await wrapper.find('input').setValue('   ')
     await wrapper.find('form').trigger('submit.prevent')
@@ -370,7 +370,7 @@ describe('CommodityManager.vue', () => {
       method: 'POST',
       body: JSON.stringify({ alias: 'خراب' }),
     }))
-    const aliasErrorAlert = wrapper.find('.flash-box--error[role="alert"]')
+    const aliasErrorAlert = wrapper.find('.commodity-feedback--error[role="alert"]')
     expect(aliasErrorAlert.exists()).toBe(true)
     expect(aliasErrorAlert.text()).toContain('خراب: تکراری')
     expect(wrapper.text()).toContain('افزودن نام مستعار')
@@ -393,7 +393,7 @@ describe('CommodityManager.vue', () => {
       return responseOf(commoditiesState)
     })
 
-    await wrapper.find('.action-btn.danger-soft').trigger('click')
+    await wrapper.find('.commodity-action.danger-soft').trigger('click')
     await flushPromises()
     await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()
@@ -401,7 +401,7 @@ describe('CommodityManager.vue', () => {
     expect(commodityManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/2', { method: 'DELETE' })
     expect(wrapper.text()).toContain('بهار')
 
-    await wrapper.find('.icon-btn.delete').trigger('click')
+    await wrapper.find('.commodity-icon-control.delete').trigger('click')
     await flushPromises()
     await wrapper.find('.ui-button--danger').trigger('click')
     await flushPromises()

@@ -213,7 +213,7 @@ function toggleSection(section: AdminSectionKey) {
       :key="group.key"
       :title="group.title"
       :description="group.description"
-      class="ds-accordion admin-accordion"
+      class="admin-section-card admin-accordion"
       :class="{ open: openSections[group.key] }"
     >
       <template #actions>
@@ -227,7 +227,7 @@ function toggleSection(section: AdminSectionKey) {
         >
           <component :is="group.icon" :size="18" class="section-icon" />
           <AppStatusBadge tone="primary">{{ group.actions.length }} ابزار</AppStatusBadge>
-          <component :is="openSections[group.key] ? ChevronDown : ChevronLeft" :size="18" class="ds-accordion-icon" />
+          <component :is="openSections[group.key] ? ChevronDown : ChevronLeft" :size="18" class="admin-section-card-icon" />
         </button>
       </template>
       <div
@@ -241,7 +241,7 @@ function toggleSection(section: AdminSectionKey) {
           <AppActionCard
             v-for="action in group.actions"
             :key="action.key"
-            class="admin-action-btn hub-action"
+            class="admin-panel-action hub-action"
             :class="action.variant"
             :title="action.label"
             :description="action.description"
@@ -328,7 +328,7 @@ function toggleSection(section: AdminSectionKey) {
   gap: 0.65rem;
 }
 
-.admin-action-btn {
+.admin-panel-action {
   width: 100%;
   min-height: 72px;
 }

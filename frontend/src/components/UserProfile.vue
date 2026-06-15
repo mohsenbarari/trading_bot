@@ -168,15 +168,15 @@ function handleFinalSubmit() {
     // Log current state for debugging
     console.log('tempDatePart before submit:', tempDatePart.value);
     console.log('tempTimePart before submit:', tempTimePart.value);
-    
+
     if (!tempDatePart.value) {
         alert('لطفاً تاریخ را انتخاب کنید.');
         return;
     }
-    
+
     // Try to get time from picker ref if tempTimePart is empty
     let timePart = tempTimePart.value;
-    
+
     if (!timePart || timePart === '') {
         // Try to read from picker component directly
         const pickerRef = showBlockDateModal.value ? blockTimePickerRef.value : limitTimePickerRef.value;
@@ -190,16 +190,16 @@ function handleFinalSubmit() {
             }
         }
     }
-    
+
     // Final fallback to current time
     if (!timePart || timePart === '') {
         timePart = moment().format('HH:mm');
         console.log('Using fallback current time:', timePart);
     }
-    
+
     const finalVal = `${tempDatePart.value} ${timePart}`;
     console.log('Final Submit (Jalali):', finalVal);
-    
+
     if (showBlockDateModal.value) {
         customDate.value = finalVal;
         showBlockDateModal.value = false;
@@ -220,7 +220,7 @@ function updateDatePart(val: any) {
 function updateTimePart(val: any) {
     console.log('updateTimePart received:', val, 'type:', typeof val);
     if (!val) return;
-    
+
     // Handle different formats the picker might return
     if (typeof val === 'string') {
         // If it's already HH:mm format
@@ -348,7 +348,7 @@ async function saveRole() {
 async function toggleAccountStatus() {
   if (!props.jwtToken) return;
   if (!confirm(`آیا از ${isAccountInactive.value ? 'فعال' : 'غیرفعال'} کردن حساب اطمینان دارید؟`)) return;
-  
+
   isLoading.value = true;
   try {
     const newValue = isAccountInactive.value ? 'active' : 'inactive';
@@ -390,7 +390,7 @@ async function blockUser(minutes: number) {
         date.setMinutes(date.getMinutes() + minutes);
         restrictedUntil = date.toISOString();
     }
-    
+
     await sendBlockRequest(restrictedUntil);
   } catch (e) {
     alert('خطا در انجام عملیات');
@@ -413,14 +413,14 @@ async function blockUserCustom() {
 
         // Parse Jalali date string strictly as Iran Time
         const isoDate = parseJalaliToIranISO(normalizedDate);
-        
+
         if (!isoDate) {
              console.error('Date Invalid:', normalizedDate);
              alert('تاریخ نامعتبر است.');
              isLoading.value = false;
              return;
         }
-        
+
         console.log('Sending ISO (Iran Time -> UTC):', isoDate);
         await sendBlockRequest(isoDate);
 
@@ -438,13 +438,13 @@ async function sendBlockRequest(restrictedUntil: string) {
           method: 'PUT',
           body: JSON.stringify({ trading_restricted_until: restrictedUntil })
         });
-        
+
         if (!response.ok) throw new Error('خطا در مسدودسازی');
         const updatedUser = await response.json();
-        console.log('Block User Response:', updatedUser); 
+        console.log('Block User Response:', updatedUser);
         Object.assign(props.user, updatedUser);
         console.log('Props User Restricted Until:', props.user.trading_restricted_until);
-        
+
         showBlockModal.value = false;
         showCustomDateInput.value = false;
         alert('کاربر مسدود شد.');
@@ -476,11 +476,11 @@ async function saveLimitations() {
              date.setMinutes(date.getMinutes() + limitDurationMinutes.value);
              expireAt = date.toISOString();
         }
-        // If 0 (Unlimited), expireAt remains null (permanent limitation until removed?) 
-        // Or maybe we want to set it to far future? 
+        // If 0 (Unlimited), expireAt remains null (permanent limitation until removed?)
+        // Or maybe we want to set it to far future?
         // Let's assume null means "Permanent" for limitations too, or we can use the same logic as block.
         // For now, let's treat 0 as "Permanent" (null in DB implies no expiry, so it's always active if values are set).
-        
+
         const body = {
             max_daily_trades: limitMaxTrades.value,
             max_active_commodities: limitMaxCommodities.value,
@@ -510,7 +510,7 @@ function openLimitationsModal() {
     limitMaxCommodities.value = props.user.max_active_commodities;
     limitMaxRequests.value = props.user.max_daily_requests;
     // We don't easily know the duration from expire_at, so reset duration to default
-    limitDurationMinutes.value = 0; 
+    limitDurationMinutes.value = 0;
     customLimitDate.value = ''; // Reset custom date
     showLimitationsModal.value = true;
 }
@@ -526,7 +526,7 @@ async function unblockUser() {
       method: 'PUT',
       body: JSON.stringify({ trading_restricted_until: null })
     });
-    
+
     if (!response.ok) throw new Error('خطا در رفع مسدودیت');
     const updatedUser = await response.json();
     Object.assign(props.user, updatedUser);
@@ -541,8 +541,8 @@ async function unblockUser() {
 
 // Check if user has active limitations
 const hasLimitations = computed(() => {
-    return props.user.max_daily_trades != null || 
-           props.user.max_active_commodities != null || 
+    return props.user.max_daily_trades != null ||
+           props.user.max_active_commodities != null ||
            props.user.max_daily_requests != null;
 });
 
@@ -553,14 +553,14 @@ async function removeLimitations() {
   try {
     const response = await apiFetch(`/api/users/${props.user.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         max_daily_trades: null,
         max_active_commodities: null,
         max_daily_requests: null,
         limitations_expire_at: null
       })
     });
-    
+
     if (!response.ok) throw new Error('خطا در رفع محدودیت‌ها');
     const updatedUser = await response.json();
     Object.assign(props.user, updatedUser);
@@ -721,7 +721,7 @@ async function deleteUser() {
         <div class="header-title">
             <h2>{{ isAdminView ? 'مدیریت کاربر' : 'پروفایل کاربری' }}</h2>
         </div>
-        <button v-if="isAdminView" class="back-button" @click="$emit('navigate', 'manage_users')"><ChevronLeft :size="24" /></button>
+        <button v-if="isAdminView" class="profile-nav-back" @click="$emit('navigate', 'manage_users')"><ChevronLeft :size="24" /></button>
     </div>
 
     <div class="profile-details">
@@ -749,14 +749,14 @@ async function deleteUser() {
           <span class="label">وضعیت معاملات</span>
           <span class="value" :class="{ 'text-red': isRestricted }">{{ restrictionText }}</span>
       </div>
-      
+
       <!-- تایمر شمارش معکوس مسدودیت -->
       <div v-if="isRestricted && countdownRestriction" class="countdown-box restriction-countdown">
           <span class="countdown-icon" aria-hidden="true"><Clock :size="15" /></span>
           <span class="countdown-label">زمان باقی‌مانده مسدودیت:</span>
           <span class="countdown-value">{{ countdownRestriction }}</span>
       </div>
-      
+
       <!-- نمایش محدودیت‌ها -->
       <div v-if="user.max_daily_trades || user.max_active_commodities || user.max_daily_requests" class="limitations-box">
           <h4><AlertTriangle :size="17" aria-hidden="true" /> محدودیت‌های فعال:</h4>
@@ -839,7 +839,7 @@ async function deleteUser() {
           <div class="inline-edit">
             <button
               type="button"
-              class="inline-action-btn toggle-block-capability-btn"
+              class="inline-control toggle-block-capability-btn"
               :class="{ 'is-disabled': !canBlockUsers }"
               @click="toggleBlockCapability"
             >
@@ -866,7 +866,7 @@ async function deleteUser() {
           <div class="inline-edit">
             <button
               type="button"
-              class="inline-action-btn danger-inline-btn terminate-sessions-btn"
+              class="inline-control danger-inline-btn terminate-sessions-btn"
               :disabled="isTerminatingSessions"
               @click="terminateAllSessions"
             >
@@ -889,7 +889,7 @@ async function deleteUser() {
             <button @click="isEditingRole = false" class="cancel-btn">انصراف</button>
         </div>
       </div>
-      
+
       <!-- منوی مدیریت (فقط ادمین) -->
       <template v-if="isAdminView">
         <div v-if="!showSettings" class="main-actions profile-menu-card card-with-help">
@@ -900,17 +900,17 @@ async function deleteUser() {
               label="راهنمای منوی مدیریت کاربر"
               text="عملیات این بخش فقط روی همین کاربر اعمال می‌شود. حذف کاربر، نشست‌ها و دسترسی‌های فعال او را هم مدیریت می‌کند."
             />
-            <button @click="showSettings = true" class="menu-button settings-btn">
-              <span class="menu-button-icon" aria-hidden="true"><Settings :size="18" /></span>
-              <span class="menu-button-label">تنظیمات کاربر</span>
+            <button @click="showSettings = true" class="profile-control settings-btn">
+              <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
+              <span class="profile-control__label">تنظیمات کاربر</span>
             </button>
-            <button @click="deleteUser" class="menu-button delete-btn">
-              <span class="menu-button-icon" aria-hidden="true"><Trash2 :size="18" /></span>
-              <span class="menu-button-label">حذف کاربر</span>
+            <button @click="deleteUser" class="profile-control delete-btn">
+              <span class="profile-control__icon" aria-hidden="true"><Trash2 :size="18" /></span>
+              <span class="profile-control__label">حذف کاربر</span>
             </button>
-            <button @click="$emit('navigate', 'manage_users')" class="menu-button back-btn">
-              <span class="menu-button-icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
-              <span class="menu-button-label">بازگشت به لیست</span>
+            <button @click="$emit('navigate', 'manage_users')" class="profile-control back-btn">
+              <span class="profile-control__icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
+              <span class="profile-control__label">بازگشت به لیست</span>
             </button>
         </div>
 
@@ -922,36 +922,36 @@ async function deleteUser() {
             label="راهنمای زیرمنوی تنظیمات کاربر"
             text="این زیرمنو برای تغییر وضعیت حساب، نقش، محدودیت و مسدودیت کاربر است. گزینه‌های حذف یا بازگشت در منوی قبلی قرار دارند."
           />
-          <button @click="toggleAccountStatus" class="menu-button">
-            <span class="menu-button-icon" aria-hidden="true"><RotateCcw :size="18" /></span>
-            <span class="menu-button-label">تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})</span>
+          <button @click="toggleAccountStatus" class="profile-control">
+            <span class="profile-control__icon" aria-hidden="true"><RotateCcw :size="18" /></span>
+            <span class="profile-control__label">تغییر وضعیت حساب ({{ isAccountInactive ? 'غیرفعال' : 'فعال' }})</span>
             </button>
-            <button v-if="canEditRole" @click="isEditingRole = true" class="menu-button">
-              <span class="menu-button-icon" aria-hidden="true"><Pencil :size="18" /></span>
-              <span class="menu-button-label">ویرایش نقش</span>
-            </button>
-            
-            <button v-if="!hasLimitations" @click="openLimitationsModal" class="menu-button">
-              <span class="menu-button-icon" aria-hidden="true"><AlertTriangle :size="18" /></span>
-              <span class="menu-button-label">اعمال محدودیت</span>
-            </button>
-            <button v-else @click="removeLimitations" class="menu-button unlimit-btn">
-                <span class="menu-button-icon" aria-hidden="true"><Check :size="18" /></span>
-                <span class="menu-button-label">رفع محدودیت</span>
-            </button>
-            
-            <button v-if="!isRestricted" @click="showBlockModal = true" class="menu-button block-btn">
-                <span class="menu-button-icon" aria-hidden="true"><Ban :size="18" /></span>
-                <span class="menu-button-label">مسدود کردن</span>
-            </button>
-            <button v-else @click="unblockUser" class="menu-button unblock-btn">
-                <span class="menu-button-icon" aria-hidden="true"><Undo2 :size="18" /></span>
-                <span class="menu-button-label">رفع مسدودیت</span>
+            <button v-if="canEditRole" @click="isEditingRole = true" class="profile-control">
+              <span class="profile-control__icon" aria-hidden="true"><Pencil :size="18" /></span>
+              <span class="profile-control__label">ویرایش نقش</span>
             </button>
 
-            <button @click="showSettings = false" class="menu-button back-btn">
-              <span class="menu-button-icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
-              <span class="menu-button-label">بازگشت</span>
+            <button v-if="!hasLimitations" @click="openLimitationsModal" class="profile-control">
+              <span class="profile-control__icon" aria-hidden="true"><AlertTriangle :size="18" /></span>
+              <span class="profile-control__label">اعمال محدودیت</span>
+            </button>
+            <button v-else @click="removeLimitations" class="profile-control unlimit-btn">
+                <span class="profile-control__icon" aria-hidden="true"><Check :size="18" /></span>
+                <span class="profile-control__label">رفع محدودیت</span>
+            </button>
+
+            <button v-if="!isRestricted" @click="showBlockModal = true" class="profile-control block-btn">
+                <span class="profile-control__icon" aria-hidden="true"><Ban :size="18" /></span>
+                <span class="profile-control__label">مسدود کردن</span>
+            </button>
+            <button v-else @click="unblockUser" class="profile-control unblock-btn">
+                <span class="profile-control__icon" aria-hidden="true"><Undo2 :size="18" /></span>
+                <span class="profile-control__label">رفع مسدودیت</span>
+            </button>
+
+            <button @click="showSettings = false" class="profile-control back-btn">
+              <span class="profile-control__icon" aria-hidden="true"><ChevronLeft :size="18" /></span>
+              <span class="profile-control__label">بازگشت</span>
             </button>
         </div>
       </template>
@@ -962,25 +962,25 @@ async function deleteUser() {
         <div v-if="showBlockModal" class="modal-overlay">
             <div class="modal-content">
                 <h3>⏳ مدت زمان مسدودیت</h3>
-                
+
                 <div v-if="!showCustomDateInput">
                     <div class="duration-list">
-                        <button v-for="duration in blockDurations" :key="duration.minutes" 
+                        <button v-for="duration in blockDurations" :key="duration.minutes"
                                 @click="blockUser(duration.minutes)" class="duration-btn">
                             {{ duration.label }}
                         </button>
                     </div>
                 </div>
-                
+
                 <div v-else class="custom-date-section">
                     <label>تاریخ و زمان پایان مسدودیت:</label>
-                    <div 
+                    <div
                         class="custom-date-trigger"
                         @click="initDatePicker(customDate); showBlockDateModal = true"
                     >
                         {{ customDate || 'انتخاب تاریخ...' }}
                     </div>
-                    
+
 
 
                     <div class="action-buttons">
@@ -999,7 +999,7 @@ async function deleteUser() {
         <div v-if="showLimitationsModal" class="modal-overlay">
             <div class="modal-content">
                 <h3><AlertTriangle :size="18" aria-hidden="true" /> اعمال محدودیت</h3>
-                
+
                 <div class="form-group">
                     <label>مجموع تعداد معاملات:</label>
                     <input type="number" v-model.number="limitMaxTrades" class="form-input" min="0" placeholder="نامحدود (خالی)" />
@@ -1021,17 +1021,17 @@ async function deleteUser() {
                         </option>
                     </select>
                 </div>
-                
+
                 <div v-if="limitDurationMinutes === -1" class="custom-date-section">
                     <label>تاریخ پایان:</label>
-                    <div 
+                    <div
                         class="custom-date-trigger"
                         @click="initDatePicker(customLimitDate); showLimitDateModal = true"
                     >
                         {{ customLimitDate || 'انتخاب تاریخ...' }}
                     </div>
                 </div>
-                
+
                 <div class="action-buttons">
                     <button @click="saveLimitations" :disabled="isLoading" class="save-btn">ذخیره</button>
                     <button @click="showLimitationsModal = false" class="cancel-btn">انصراف</button>
@@ -1049,18 +1049,18 @@ async function deleteUser() {
           label="راهنمای پنل کاربری"
           text="از این بخش به پیام‌های سیستمی و تنظیمات مجاز همین حساب دسترسی داری. گزینه‌های مدیریتی فقط برای ادمین‌ها نمایش داده می‌شود."
         />
-        <button class="menu-button notification-btn" @click="emit('navigate', 'notifications')">
-          <span class="menu-button-icon" aria-hidden="true"><Bell :size="18" /></span>
-          <span class="menu-button-label">صندوق پیام‌ها</span>
+        <button class="profile-control notification-btn" @click="emit('navigate', 'notifications')">
+          <span class="profile-control__icon" aria-hidden="true"><Bell :size="18" /></span>
+          <span class="profile-control__label">صندوق پیام‌ها</span>
         </button>
         <!-- دکمه تنظیمات فقط برای نقش‌های غیر عادی -->
-        <button 
-          v-if="user.role !== 'عادی'" 
-          class="menu-button settings-btn" 
+        <button
+          v-if="user.role !== 'عادی'"
+          class="profile-control settings-btn"
           @click="emit('navigate', 'user_settings')"
         >
-          <span class="menu-button-icon" aria-hidden="true"><Settings :size="18" /></span>
-          <span class="menu-button-label">تنظیمات</span>
+          <span class="profile-control__icon" aria-hidden="true"><Settings :size="18" /></span>
+          <span class="profile-control__label">تنظیمات</span>
         </button>
       </div>
     </template>
@@ -1075,7 +1075,7 @@ async function deleteUser() {
                   <Clock v-else :size="18" aria-hidden="true" />
                   {{ pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت' }}
                 </h3>
-                
+
                 <div class="date-picker-wrapper">
                     <!-- Step 1: Date -->
                     <JalaliDatePicker
@@ -1090,9 +1090,9 @@ async function deleteUser() {
                     <!-- Step 2: Time - Using native HTML5 input for reliability -->
                     <div v-if="pickerStep === 2" class="native-time-picker">
                         <label>ساعت مورد نظر:</label>
-                        <input 
-                            type="time" 
-                            v-model="tempTimePart" 
+                        <input
+                            type="time"
+                            v-model="tempTimePart"
                             class="time-input"
                         />
                     </div>
@@ -1100,7 +1100,7 @@ async function deleteUser() {
                 <!-- Footer moved outside wrapper to ensure visibility -->
                 <div class="integrated-footer">
                         <button @click="showBlockDateModal = false" class="integrated-cancel-btn">انصراف</button>
-                        
+
                         <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
                         <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
                 </div>
@@ -1117,7 +1117,7 @@ async function deleteUser() {
                   <Clock v-else :size="18" aria-hidden="true" />
                   {{ pickerStep === 1 ? 'انتخاب تاریخ' : 'انتخاب ساعت' }}
                 </h3>
-                
+
                 <div class="date-picker-wrapper">
                     <!-- Step 1: Date -->
                     <JalaliDatePicker
@@ -1132,9 +1132,9 @@ async function deleteUser() {
                     <!-- Step 2: Time - Using native HTML5 input for reliability -->
                     <div v-if="pickerStep === 2" class="native-time-picker">
                         <label>ساعت مورد نظر:</label>
-                        <input 
-                            type="time" 
-                            v-model="tempTimePart" 
+                        <input
+                            type="time"
+                            v-model="tempTimePart"
                             class="time-input"
                         />
                     </div>
@@ -1142,7 +1142,7 @@ async function deleteUser() {
                 <!-- Footer moved outside wrapper to ensure visibility -->
                 <div class="integrated-footer">
                         <button @click="showLimitDateModal = false" class="integrated-cancel-btn">انصراف</button>
-                        
+
                         <button v-if="pickerStep === 1" @click="handleNextStep" class="integrated-save-btn">ادامه</button>
                         <button v-if="pickerStep === 2" @click="handleFinalSubmit" class="integrated-save-btn">تایید نهایی</button>
                 </div>
@@ -1261,7 +1261,7 @@ async function deleteUser() {
 }
 
 /* Hide any button explicitly named 'submit' or having check icon class in header */
-.vpd-header .vpd-icon-btn.vpd-check, 
+.vpd-header .vpd-icon-btn.vpd-check,
 .vpd-header .vpd-icon-btn.vpd-tick {
     display: none !important;
 }
@@ -1325,7 +1325,7 @@ async function deleteUser() {
 }
 
 /* Just in case, explicit hide for check/tick class if present */
-.vpd-header .vpd-icon-btn.vpd-check, 
+.vpd-header .vpd-icon-btn.vpd-check,
 .vpd-header .vpd-icon-btn.vpd-tick {
     display: none !important;
 }
@@ -1512,7 +1512,7 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   margin-top: 1rem;
 }
 
-.menu-button {
+.profile-control {
   width: 100%;
   min-height: 3.15rem;
   padding: 0.72rem 0.8rem;
@@ -1531,14 +1531,14 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   text-align: right;
   -webkit-tap-highlight-color: transparent;
 }
-.menu-button:hover {
+.profile-control:hover {
   border-color: rgba(245, 158, 11, 0.3);
   background: #fffbeb;
 }
-.menu-button:active {
+.profile-control:active {
   transform: scale(0.98);
 }
-.menu-button-icon {
+.profile-control__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1552,7 +1552,7 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   flex: 0 0 auto;
 }
 
-.menu-button-label {
+.profile-control__label {
   flex: 1;
   min-width: 0;
 }
@@ -1564,8 +1564,8 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   color: #991b1b !important;
   border-color: #fecaca !important;
 }
-.block-btn .menu-button-icon,
-.delete-btn .menu-button-icon {
+.block-btn .profile-control__icon,
+.delete-btn .profile-control__icon {
   background: rgba(239, 68, 68, 0.12);
   color: #b91c1c;
 }
@@ -1579,8 +1579,8 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   color: #166534 !important;
   border-color: #bbf7d0 !important;
 }
-.unblock-btn .menu-button-icon,
-.unlimit-btn .menu-button-icon {
+.unblock-btn .profile-control__icon,
+.unlimit-btn .profile-control__icon {
   background: rgba(34, 197, 94, 0.14);
   color: #166534;
 }
@@ -1761,7 +1761,7 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   background: white;
   text-align: center;
 }
-.inline-action-btn {
+.inline-control {
   border: 1px solid #cbd5e1;
   background: white;
   color: #0f172a;
@@ -1771,7 +1771,7 @@ input[type="number"].form-input::-webkit-inner-spin-button {
   font-weight: 700;
   cursor: pointer;
 }
-.inline-action-btn.is-disabled {
+.inline-control.is-disabled {
   color: #991b1b;
   background: #fef2f2;
   border-color: #fecaca;

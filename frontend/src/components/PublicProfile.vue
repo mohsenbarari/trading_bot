@@ -1399,7 +1399,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
          </h2>
          <h2 v-else>پروفایل</h2>
       </div>
-      <button class="back-button" @click="$emit('navigate', 'home')"><ChevronLeft :size="24" /></button>
+      <button class="profile-nav-back" @click="$emit('navigate', 'home')"><ChevronLeft :size="24" /></button>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">
@@ -1450,14 +1450,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           />
         </section>
 
-        <div class="ds-accordion mt-4 card-with-help" :class="{ open: openSections.info }">
-          <div class="ds-accordion-header" @click="openSections.info = !openSections.info">
-            <div class="ds-accordion-header-info">
+        <div class="profile-accordion mt-4 card-with-help" :class="{ open: openSections.info }">
+          <div class="profile-accordion-header" @click="openSections.info = !openSections.info">
+            <div class="profile-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>اطلاعات شخصی</h2>
             </div>
             <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <ChevronLeft :size="20" class="profile-accordion-icon" />
               <HelpPopover
                 button-test="public-profile-info-help"
                 note-test="public-profile-info-help-note"
@@ -1467,7 +1467,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             </div>
           </div>
           
-          <div v-show="openSections.info" class="ds-accordion-body">
+          <div v-show="openSections.info" class="profile-accordion-body">
             <div class="info-section">
               <div class="info-row">
                   <span class="label">شماره تماس</span>
@@ -1497,10 +1497,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                   />
                   <p v-if="addressError" class="error-text address-error-text">{{ addressError }}</p>
                   <div class="address-edit-actions">
-                    <button type="submit" class="history-action-btn primary" :disabled="addressBusy">
+                    <button type="submit" class="history-control primary" :disabled="addressBusy">
                       {{ addressBusy ? 'در حال ذخیره...' : 'ذخیره آدرس' }}
                     </button>
-                    <button type="button" class="history-action-btn" :disabled="addressBusy" @click.stop="cancelAddressEdit">
+                    <button type="button" class="history-control" :disabled="addressBusy" @click.stop="cancelAddressEdit">
                       انصراف
                     </button>
                   </div>
@@ -1512,14 +1512,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showProjectUsersSection" class="profile-section project-users-section">
-        <div class="ds-accordion card-with-help" :class="{ open: openSections.projectUsers }">
-          <div class="ds-accordion-header" @click="toggleProjectUsersSection">
-            <div class="ds-accordion-header-info">
+        <div class="profile-accordion card-with-help" :class="{ open: openSections.projectUsers }">
+          <div class="profile-accordion-header" @click="toggleProjectUsersSection">
+            <div class="profile-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>لیست همکاران</h2>
             </div>
             <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <ChevronLeft :size="20" class="profile-accordion-icon" />
               <HelpPopover
                 button-test="public-profile-project-users-help"
                 note-test="public-profile-project-users-help-note"
@@ -1529,7 +1529,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             </div>
           </div>
 
-          <div v-show="openSections.projectUsers" class="ds-accordion-body">
+          <div v-show="openSections.projectUsers" class="profile-accordion-body">
             <form class="project-users-search" @submit.prevent="submitProjectUsersSearch">
               <input
                 v-model="projectUsersQuery"
@@ -1569,7 +1569,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               <div v-if="projectUsersHasMore" class="project-users-footer">
                 <button
                   type="button"
-                  class="history-action-btn project-users-load-more"
+                  class="history-control project-users-load-more"
                   :disabled="projectUsersLoadingMore"
                   @click="loadMoreProjectUsers"
                 >
@@ -1582,14 +1582,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="accountantRelations.length > 0" class="profile-section accountant-relations-section">
-        <div class="ds-accordion card-with-help" :class="{ open: openSections.accountants }">
-          <div class="ds-accordion-header" @click="openSections.accountants = !openSections.accountants">
-            <div class="ds-accordion-header-info">
+        <div class="profile-accordion card-with-help" :class="{ open: openSections.accountants }">
+          <div class="profile-accordion-header" @click="openSections.accountants = !openSections.accountants">
+            <div class="profile-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>{{ showOwnerSections ? 'لیست حسابداران' : 'حسابداران این مالک' }}</h2>
             </div>
             <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <ChevronLeft :size="20" class="profile-accordion-icon" />
               <HelpPopover
                 button-test="public-profile-accountants-help"
                 note-test="public-profile-accountants-help-note"
@@ -1599,7 +1599,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             </div>
           </div>
 
-          <div v-show="openSections.accountants" class="ds-accordion-body">
+          <div v-show="openSections.accountants" class="profile-accordion-body">
             <div class="public-accountant-list">
               <article
                 v-for="relation in accountantRelations"
@@ -1622,14 +1622,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section v-if="showCustomerListSection" class="profile-section customer-relations-section">
-        <div class="ds-accordion card-with-help" :class="{ open: openSections.customers }">
-          <div class="ds-accordion-header" @click="openSections.customers = !openSections.customers">
-            <div class="ds-accordion-header-info">
+        <div class="profile-accordion card-with-help" :class="{ open: openSections.customers }">
+          <div class="profile-accordion-header" @click="openSections.customers = !openSections.customers">
+            <div class="profile-accordion-header-info">
               <UserIcon :size="18" class="text-amber-600" />
               <h2>مشتریان این مالک</h2>
             </div>
             <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <ChevronLeft :size="20" class="profile-accordion-icon" />
               <HelpPopover
                 button-test="public-profile-customers-help"
                 note-test="public-profile-customers-help-note"
@@ -1639,7 +1639,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             </div>
           </div>
 
-          <div v-show="openSections.customers" class="ds-accordion-body">
+          <div v-show="openSections.customers" class="profile-accordion-body">
             <div class="public-customer-list">
               <article
                 v-for="relation in customerRelations"
@@ -1685,8 +1685,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             <AppActionCard
             v-for="action in visitorActionCards"
             :key="action.key"
-            class="menu-button"
-            :class="[getActionButtonClass(action), { 'menu-button--disabled': Boolean(action.disabled) }]"
+            class="profile-action-card"
+            :class="[getActionButtonClass(action), { 'profile-action-card--disabled': Boolean(action.disabled) }]"
             :title="action.label"
             :description="action.description || undefined"
             :disabled="Boolean(action.disabled)"
@@ -1694,7 +1694,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             @select="handleActionClick(action)"
           >
             <template #icon>
-              <span class="menu-button-icon" aria-hidden="true">
+              <span class="profile-action-card__icon" aria-hidden="true">
                 <component :is="getActionIconComponent(action)" :size="18" />
               </span>
             </template>
@@ -1719,7 +1719,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             <AppActionCard
             v-for="action in adminActionCards"
             :key="action.key"
-            class="menu-button"
+            class="profile-action-card"
             :class="getActionButtonClass(action)"
             :title="adminUserLoading ? 'در حال بارگذاری...' : action.label"
             tone="warning"
@@ -1727,7 +1727,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             @select="handleActionClick(action)"
           >
             <template #icon>
-              <span class="menu-button-icon" aria-hidden="true">
+              <span class="profile-action-card__icon" aria-hidden="true">
                 <component :is="getActionIconComponent(action)" :size="18" />
               </span>
             </template>
@@ -1737,14 +1737,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section class="profile-section">
-        <div class="ds-accordion card-with-help" :class="{ open: openSections.history }">
-          <div class="ds-accordion-header" @click="toggleHistory">
-            <div class="ds-accordion-header-info">
+        <div class="profile-accordion card-with-help" :class="{ open: openSections.history }">
+          <div class="profile-accordion-header" @click="toggleHistory">
+            <div class="profile-accordion-header-info">
               <Activity :size="18" class="text-amber-600" />
               <h2>{{ tradeHistoryTitle }}</h2>
             </div>
             <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="ds-accordion-icon" />
+              <ChevronLeft :size="20" class="profile-accordion-icon" />
               <HelpPopover
                 button-test="public-profile-history-help"
                 note-test="public-profile-history-help-note"
@@ -1754,7 +1754,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             </div>
           </div>
 
-          <div v-show="openSections.history" class="ds-accordion-body">
+          <div v-show="openSections.history" class="profile-accordion-body">
             <div class="history-toolbar">
               <div class="history-presets">
                 <button
@@ -1822,10 +1822,10 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               </div>
 
               <div class="history-filter-actions">
-                <button type="button" class="history-action-btn primary" @click.stop="applyHistoryFilters">اعمال فیلتر</button>
+                <button type="button" class="history-control primary" @click.stop="applyHistoryFilters">اعمال فیلتر</button>
                 <button
                   type="button"
-                  class="history-action-btn"
+                  class="history-control"
                   :disabled="!hasActiveHistoryFilters && !historyLoadedQueryKey"
                   @click.stop="resetHistoryFilters"
                 >
@@ -1833,7 +1833,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                 </button>
                 <button
                   type="button"
-                  class="history-action-btn"
+                  class="history-control"
                   :disabled="isHistoryLoading || historyExportingFormat !== null"
                   @click.stop="downloadHistoryExport('excel')"
                 >
@@ -1841,7 +1841,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                 </button>
                 <button
                   type="button"
-                  class="history-action-btn"
+                  class="history-control"
                   :disabled="isHistoryLoading || historyExportingFormat !== null"
                   @click.stop="downloadHistoryExport('pdf')"
                 >
@@ -1922,14 +1922,14 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
             <AppActionCard
             v-for="action in ownerOnlyActions"
             :key="action.key"
-            class="menu-button"
+            class="profile-action-card"
             :class="getActionButtonClass(action)"
             :title="action.label"
             tone="warning"
             @select="handleActionClick(action)"
           >
             <template #icon>
-              <span class="menu-button-icon" aria-hidden="true">
+              <span class="profile-action-card__icon" aria-hidden="true">
                 <component :is="getActionIconComponent(action)" :size="18" />
               </span>
             </template>
@@ -1981,11 +1981,11 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   width: 100%;
 }
 
-.profile-content--own .ds-accordion {
+.profile-content--own .profile-accordion {
   margin-bottom: 0.35rem;
 }
 
-.profile-content--own .ds-accordion-header {
+.profile-content--own .profile-accordion-header {
   padding-top: 0.74rem;
   padding-bottom: 0.74rem;
 }
@@ -2438,7 +2438,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   overflow: visible;
 }
 
-.card-with-help > .ds-accordion-header {
+.card-with-help > .profile-accordion-header {
   gap: 12px;
 }
 
@@ -2505,7 +2505,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   color: #92400e;
 }
 
-.menu-button {
+.profile-action-card {
   width: 100%;
   min-height: 3.4rem;
   padding: 0.78rem 0.9rem;
@@ -2525,23 +2525,23 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   -webkit-tap-highlight-color: transparent;
 }
 
-.menu-button:hover {
+.profile-action-card:hover {
   border-color: rgba(245, 158, 11, 0.3);
   background: #fffbeb;
 }
 
-.menu-button:active {
+.profile-action-card:active {
   transform: scale(0.98);
 }
 
-.menu-button:disabled,
-.menu-button--disabled {
+.profile-action-card:disabled,
+.profile-action-card--disabled {
   cursor: not-allowed;
   opacity: 0.78;
   transform: none;
 }
 
-.menu-button-icon {
+.profile-action-card__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2555,7 +2555,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   flex: 0 0 auto;
 }
 
-.menu-button-copy {
+.profile-action-card__copy {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -2564,12 +2564,12 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   gap: 0.18rem;
 }
 
-.menu-button-label {
+.profile-action-card__label {
   flex: 1;
   min-width: 0;
 }
 
-.menu-button-note {
+.profile-action-card__note {
   font-size: 0.72rem;
   line-height: 1.55;
   font-weight: 600;
@@ -2582,7 +2582,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-color: rgba(14, 165, 233, 0.22) !important;
 }
 
-.message-menu-btn .menu-button-icon {
+.message-menu-btn .profile-action-card__icon {
   background: rgba(14, 165, 233, 0.14);
   color: #0369a1;
 }
@@ -2599,7 +2599,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-color: #fecaca !important;
 }
 
-.block-btn .menu-button-icon {
+.block-btn .profile-action-card__icon {
   background: rgba(239, 68, 68, 0.12);
   color: #b91c1c;
 }
@@ -2610,7 +2610,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-color: #bbf7d0 !important;
 }
 
-.unblock-btn .menu-button-icon {
+.unblock-btn .profile-action-card__icon {
   background: rgba(34, 197, 94, 0.14);
   color: #166534;
 }
@@ -2629,7 +2629,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 
 
-/* Accordion Styles removed as they are now global ds-accordion */
+/* Accordion Styles removed as they are now global profile-accordion */
 
 .mt-4 {
   margin-top: 1rem;
@@ -2724,7 +2724,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   gap: 8px;
 }
 
-.history-action-btn {
+.history-control {
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 12px;
   background: white;
@@ -2734,13 +2734,13 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   cursor: pointer;
 }
 
-.history-action-btn.primary {
+.history-control.primary {
   background: linear-gradient(135deg, #f59e0b, #d97706);
   border-color: transparent;
   color: white;
 }
 
-.history-action-btn:disabled {
+.history-control:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

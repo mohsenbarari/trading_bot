@@ -154,21 +154,21 @@ describe('TradingSettings.vue', () => {
     expect(wrapper.text()).toContain('امنیت و نشست‌ها')
     expect(wrapper.text()).toContain('برنامه بازار')
 
-    const headers = wrapper.findAll('.ds-accordion-header')
+    const headers = wrapper.findAll('.settings-section__header')
     await headers[0]!.trigger('click')
     await headers[3]!.trigger('click')
     await headers[4]!.trigger('click')
     await headers[5]!.trigger('click')
     await flushPromises()
 
-    const accordions = wrapper.findAll('.ds-accordion')
+    const accordions = wrapper.findAll('.settings-section')
     expect(accordions[0]!.classes()).toContain('open')
     expect(accordions[3]!.classes()).toContain('open')
     expect(wrapper.get('[data-testid="market-state-card"]').text()).toContain('بسته')
     expect(wrapper.get('[data-testid="market-state-card"]').text()).toContain('یادآور فعال')
     expect(wrapper.findAll('[data-testid="market-override-row"]').length).toBe(2)
 
-    const inputs = wrapper.findAll('.ds-input')
+    const inputs = wrapper.findAll('.settings-input')
     expect(inputs[0]!.attributes('placeholder')).toBe('3')
     expect(inputs[0]!.classes()).not.toContain('is-default')
 
@@ -197,14 +197,14 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    const inputs = wrapper.findAll('.ds-input')
+    const inputs = wrapper.findAll('.settings-input')
     await inputs[1]!.setValue('30')
     await inputs[8]!.setValue('14')
     await wrapper.get('[data-testid="market-schedule-enabled"]').setValue(false)
     await wrapper.get('[data-testid="market-open-time"]').setValue('09:30')
     await wrapper.get('[data-testid="market-close-time"]').setValue('16:45')
     await wrapper.get('[data-testid="weekday-3"]').setValue(true)
-    await wrapper.find('.ds-btn.primary.action-btn').trigger('click')
+    await wrapper.find('.settings-button.settings-button--primary.footer-control').trigger('click')
     await flushPromises()
 
     expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith(
@@ -243,7 +243,7 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    const headers = wrapper.findAll('.ds-accordion-header')
+    const headers = wrapper.findAll('.settings-section__header')
     await headers[5]!.trigger('click')
     await flushPromises()
 
@@ -291,7 +291,7 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    await wrapper.find('.ds-btn.primary.action-btn').trigger('click')
+    await wrapper.find('.settings-button.settings-button--primary.footer-control').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('ذخیره نشد')
@@ -307,7 +307,7 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    await wrapper.find('.ds-btn.danger.action-btn').trigger('click')
+    await wrapper.find('.settings-button.settings-button--danger.footer-control').trigger('click')
     await flushPromises()
 
     expect(confirmMock).toHaveBeenCalledOnce()
@@ -323,7 +323,7 @@ describe('TradingSettings.vue', () => {
     const wrapper = await mountTradingSettings()
     await flushPromises()
 
-    await wrapper.find('.ds-btn.danger.action-btn').trigger('click')
+    await wrapper.find('.settings-button.settings-button--danger.footer-control').trigger('click')
     await flushPromises()
 
     expect(tradingSettingsMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/reset', { method: 'POST' })
@@ -341,7 +341,7 @@ describe('TradingSettings.vue', () => {
       return responseOf(defaultSettings)
     })
 
-    await wrapper.find('.ds-btn.danger.action-btn').trigger('click')
+    await wrapper.find('.settings-button.settings-button--danger.footer-control').trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('خطا در بازنشانی تنظیمات')

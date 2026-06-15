@@ -25,7 +25,7 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    const buttons = wrapper.findAll('.admin-action-btn')
+    const buttons = wrapper.findAll('.admin-panel-action')
     expect(buttons).toHaveLength(2)
     expect(wrapper.text()).toContain('ارسال لینک دعوت')
     expect(wrapper.text()).toContain('مدیریت کاربران')
@@ -43,7 +43,7 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    expect(wrapper.findAll('.admin-action-btn')).toHaveLength(6)
+    expect(wrapper.findAll('.admin-panel-action')).toHaveLength(6)
     expect(wrapper.findAll('.admin-accordion')).toHaveLength(3)
     expect(wrapper.find('#admin-system-header').attributes('aria-expanded')).toBe('true')
     expect(wrapper.find('#admin-system-panel').attributes('role')).toBe('region')
@@ -60,7 +60,7 @@ describe('AdminPanel.vue', () => {
     const wrapper = mount(AdminPanel)
     await flushPromises()
 
-    expect(wrapper.findAll('.admin-action-btn')).toHaveLength(3)
+    expect(wrapper.findAll('.admin-panel-action')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('تنظیمات سیستم')
   })
 })

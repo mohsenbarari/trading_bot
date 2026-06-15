@@ -161,7 +161,7 @@ watch(
     <AppPage narrow>
       <AppPageHeader eyebrow="حساب" :title="pageTitle" :description="settingsDescription">
         <template #actions>
-          <AppButton class="settings-back-button" variant="ghost" size="sm" @click="router.back()">
+          <AppButton class="settings-return-control" variant="ghost" size="sm" @click="router.back()">
             <template #icon>
               <ChevronLeft :size="18" />
             </template>
@@ -314,7 +314,7 @@ watch(
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
-.settings-back-button {
+.settings-return-control {
   white-space: nowrap;
 }
 

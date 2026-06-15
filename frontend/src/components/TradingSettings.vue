@@ -318,7 +318,7 @@ const saveSettings = async () => {
   try {
     saving.value = true
     message.value = ''
-    
+
     // فقط کلیدهای قابل ویرایش را بفرست تا به فیلدهای محاسباتی/اضافی تکیه نکنیم.
     const payload = editableSettingKeys.reduce((acc, key) => {
       acc[key] = getResolvedSettingValue(key)
@@ -331,12 +331,12 @@ const saveSettings = async () => {
       market_close_time_local: scheduleForm.value.market_close_time_local,
       market_closed_weekdays: [...scheduleForm.value.market_closed_weekdays].sort((a, b) => a - b),
     }
-    
+
     const data = await fetchApi('PUT', '/trading-settings/', fullPayload)
     applySettingsResponse(data)
     form.value = {} // بعد از ذخیره، فرم را خالی کن تا دوباره Placeholderها نمایش داده شوند
     await loadMarketState()
-    
+
     message.value = 'تنظیمات با موفقیت ذخیره شد'
     messageType.value = 'success'
     showViewportToast('success', message.value)
@@ -353,17 +353,17 @@ const resetSettings = async () => {
   if (!confirm('آیا از بازنشانی تنظیمات به مقادیر پیش‌فرض مطمئن هستید؟')) {
     return
   }
-  
+
   try {
     saving.value = true
     message.value = ''
-    
+
     const data = await fetchApi('POST', '/trading-settings/reset')
     applySettingsResponse(data)
     form.value = {}
     resetOverrideForm()
     await loadMarketState()
-    
+
     message.value = 'تنظیمات به مقادیر پیش‌فرض بازنشانی شد'
     messageType.value = 'success'
     showViewportToast('success', message.value)
@@ -398,7 +398,7 @@ onBeforeUnmount(() => {
     >
       {{ viewportToast.text }}
     </div>
-    
+
     <div v-if="loading" class="ds-loading-state">
        <Loader2 class="ds-spinner" :size="32" />
        <p>در حال بارگذاری تنظیمات...</p>
@@ -410,184 +410,184 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- دعوت‌نامه -->
-      <div class="ds-accordion" :class="{ open: openSections.invitation }">
+      <div class="settings-section" :class="{ open: openSections.invitation }">
         <button
           id="trading-settings-invitation-header"
-          class="ds-accordion-header"
+          class="settings-section__header"
           type="button"
           :aria-expanded="openSections.invitation"
           aria-controls="trading-settings-invitation-panel"
           @click="toggleSection('invitation')"
         >
-          <div class="ds-accordion-header-info">
+          <div class="settings-section__header-info">
             <Mail class="section-icon" :size="18" />
             <h2 class="section-title">دعوت‌نامه</h2>
           </div>
-          <ChevronLeft class="ds-accordion-icon" :size="18" />
+          <ChevronLeft class="settings-section__chevron" :size="18" />
         </button>
         <div
           id="trading-settings-invitation-panel"
           v-show="openSections.invitation"
-          class="ds-accordion-body"
+          class="settings-section__body"
           role="region"
           aria-labelledby="trading-settings-invitation-header"
         >
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لینک دعوت (روز)</label>
-            <input 
-              type="number" 
-              v-model.number="form.invitation_expiry_days" 
-              :placeholder="settings.invitation_expiry_days?.toString()" 
-              min="1" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('invitation_expiry_days')}" 
+            <input
+              type="number"
+              v-model.number="form.invitation_expiry_days"
+              :placeholder="settings.invitation_expiry_days?.toString()"
+              min="1"
+              class="settings-input"
+              :class="{'is-default': isDefault('invitation_expiry_days')}"
             />
           </div>
         </div>
       </div>
 
       <!-- لفظ -->
-      <div class="ds-accordion" :class="{ open: openSections.offer }">
+      <div class="settings-section" :class="{ open: openSections.offer }">
         <button
           id="trading-settings-offer-header"
-          class="ds-accordion-header"
+          class="settings-section__header"
           type="button"
           :aria-expanded="openSections.offer"
           aria-controls="trading-settings-offer-panel"
           @click="toggleSection('offer')"
         >
-          <div class="ds-accordion-header-info">
+          <div class="settings-section__header-info">
             <ClipboardList class="section-icon" :size="18" />
             <h2 class="section-title">لفظ معاملاتی</h2>
           </div>
-          <ChevronLeft class="ds-accordion-icon" :size="18" />
+          <ChevronLeft class="settings-section__chevron" :size="18" />
         </button>
         <div
           id="trading-settings-offer-panel"
           v-show="openSections.offer"
-          class="ds-accordion-body"
+          class="settings-section__body"
           role="region"
           aria-labelledby="trading-settings-offer-header"
         >
           <div class="ds-form-group">
             <label class="ds-label">مدت اعتبار لفظ (دقیقه)</label>
-            <input 
-              type="number" 
-              v-model.number="form.offer_expiry_minutes" 
-              :placeholder="settings.offer_expiry_minutes?.toString()" 
-              min="1" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('offer_expiry_minutes')}" 
+            <input
+              type="number"
+              v-model.number="form.offer_expiry_minutes"
+              :placeholder="settings.offer_expiry_minutes?.toString()"
+              min="1"
+              class="settings-input"
+              :class="{'is-default': isDefault('offer_expiry_minutes')}"
             />
           </div>
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">حداقل تعداد کالا</label>
-              <input 
-                type="number" 
-                v-model.number="form.offer_min_quantity" 
-                :placeholder="settings.offer_min_quantity?.toString()" 
-                min="1" 
-                class="ds-input" 
-                :class="{'is-default': isDefault('offer_min_quantity')}" 
+              <input
+                type="number"
+                v-model.number="form.offer_min_quantity"
+                :placeholder="settings.offer_min_quantity?.toString()"
+                min="1"
+                class="settings-input"
+                :class="{'is-default': isDefault('offer_min_quantity')}"
               />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">حداکثر تعداد کالا</label>
-              <input 
-                type="number" 
-                v-model.number="form.offer_max_quantity" 
-                :placeholder="settings.offer_max_quantity?.toString()" 
-                min="1" 
-                class="ds-input" 
-                :class="{'is-default': isDefault('offer_max_quantity')}" 
+              <input
+                type="number"
+                v-model.number="form.offer_max_quantity"
+                :placeholder="settings.offer_max_quantity?.toString()"
+                min="1"
+                class="settings-input"
+                :class="{'is-default': isDefault('offer_max_quantity')}"
               />
             </div>
           </div>
           <div class="ds-form-group">
             <label class="ds-label">حداکثر لفظ‌های فعال همزمان</label>
-            <input 
-              type="number" 
-              v-model.number="form.max_active_offers" 
-              :placeholder="settings.max_active_offers?.toString()" 
-              min="1" 
-              max="20" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('max_active_offers')}" 
+            <input
+              type="number"
+              v-model.number="form.max_active_offers"
+              :placeholder="settings.max_active_offers?.toString()"
+              min="1"
+              max="20"
+              class="settings-input"
+              :class="{'is-default': isDefault('max_active_offers')}"
             />
           </div>
         </div>
       </div>
 
       <!-- محدودیت منقضی کردن -->
-      <div class="ds-accordion" :class="{ open: openSections.expire }">
+      <div class="settings-section" :class="{ open: openSections.expire }">
         <button
           id="trading-settings-expire-header"
-          class="ds-accordion-header"
+          class="settings-section__header"
           type="button"
           :aria-expanded="openSections.expire"
           aria-controls="trading-settings-expire-panel"
           @click="toggleSection('expire')"
         >
-          <div class="ds-accordion-header-info">
+          <div class="settings-section__header-info">
             <Clock class="section-icon" :size="18" />
             <h2 class="section-title">محدودیت منقضی کردن</h2>
           </div>
-          <ChevronLeft class="ds-accordion-icon" :size="18" />
+          <ChevronLeft class="settings-section__chevron" :size="18" />
         </button>
         <div
           id="trading-settings-expire-panel"
           v-show="openSections.expire"
-          class="ds-accordion-body"
+          class="settings-section__body"
           role="region"
           aria-labelledby="trading-settings-expire-header"
         >
           <div class="ds-form-group">
             <label class="ds-label">حداکثر منقضی شدن در دقیقه</label>
-            <input 
-              type="number" 
-              v-model.number="form.offer_expire_rate_per_minute" 
-              :placeholder="settings.offer_expire_rate_per_minute?.toString()" 
-              min="1" 
-              max="10" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('offer_expire_rate_per_minute')}" 
+            <input
+              type="number"
+              v-model.number="form.offer_expire_rate_per_minute"
+              :placeholder="settings.offer_expire_rate_per_minute?.toString()"
+              min="1"
+              max="10"
+              class="settings-input"
+              :class="{'is-default': isDefault('offer_expire_rate_per_minute')}"
             />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه منقضی شدن روزانه</label>
-            <input 
-              type="number" 
-              v-model.number="form.offer_expire_daily_limit_after_threshold" 
-              :placeholder="settings.offer_expire_daily_limit_after_threshold?.toString()" 
-              min="1" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}" 
+            <input
+              type="number"
+              v-model.number="form.offer_expire_daily_limit_after_threshold"
+              :placeholder="settings.offer_expire_daily_limit_after_threshold?.toString()"
+              min="1"
+              class="settings-input"
+              :class="{'is-default': isDefault('offer_expire_daily_limit_after_threshold')}"
             />
           </div>
         </div>
       </div>
 
       <!-- امنیت -->
-      <div class="ds-accordion" :class="{ open: openSections.security }">
+      <div class="settings-section" :class="{ open: openSections.security }">
         <button
           id="trading-settings-security-header"
-          class="ds-accordion-header"
+          class="settings-section__header"
           type="button"
           :aria-expanded="openSections.security"
           aria-controls="trading-settings-security-panel"
           @click="toggleSection('security')"
         >
-          <div class="ds-accordion-header-info">
+          <div class="settings-section__header-info">
             <ShieldCheck class="section-icon" :size="18" />
             <h2 class="section-title">امنیت و نشست‌ها</h2>
           </div>
-          <ChevronLeft class="ds-accordion-icon" :size="18" />
+          <ChevronLeft class="settings-section__chevron" :size="18" />
         </button>
         <div
           id="trading-settings-security-panel"
           v-show="openSections.security"
-          class="ds-accordion-body"
+          class="settings-section__body"
           role="region"
           aria-labelledby="trading-settings-security-header"
         >
@@ -597,60 +597,60 @@ onBeforeUnmount(() => {
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه روزانه</label>
-            <input 
-              type="number" 
-              v-model.number="form.anti_abuse_daily_base" 
-              :placeholder="settings.anti_abuse_daily_base?.toString()" 
-              min="1" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('anti_abuse_daily_base')}" 
+            <input
+              type="number"
+              v-model.number="form.anti_abuse_daily_base"
+              :placeholder="settings.anti_abuse_daily_base?.toString()"
+              min="1"
+              class="settings-input"
+              :class="{'is-default': isDefault('anti_abuse_daily_base')}"
             />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه هفتگی</label>
-            <input 
-              type="number" 
-              v-model.number="form.anti_abuse_weekly_base" 
-              :placeholder="settings.anti_abuse_weekly_base?.toString()" 
-              min="1" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('anti_abuse_weekly_base')}" 
+            <input
+              type="number"
+              v-model.number="form.anti_abuse_weekly_base"
+              :placeholder="settings.anti_abuse_weekly_base?.toString()"
+              min="1"
+              class="settings-input"
+              :class="{'is-default': isDefault('anti_abuse_weekly_base')}"
             />
           </div>
           <div class="ds-form-group">
             <label class="ds-label">آستانه پایه ماهانه</label>
-            <input 
-              type="number" 
-              v-model.number="form.anti_abuse_monthly_base" 
-              :placeholder="settings.anti_abuse_monthly_base?.toString()" 
-              min="1" 
-              class="ds-input" 
-              :class="{'is-default': isDefault('anti_abuse_monthly_base')}" 
+            <input
+              type="number"
+              v-model.number="form.anti_abuse_monthly_base"
+              :placeholder="settings.anti_abuse_monthly_base?.toString()"
+              min="1"
+              class="settings-input"
+              :class="{'is-default': isDefault('anti_abuse_monthly_base')}"
             />
           </div>
         </div>
       </div>
 
       <!-- برنامه بازار -->
-      <div class="ds-accordion" :class="{ open: openSections.marketSchedule }">
+      <div class="settings-section" :class="{ open: openSections.marketSchedule }">
         <button
           id="trading-settings-market-schedule-header"
-          class="ds-accordion-header"
+          class="settings-section__header"
           type="button"
           :aria-expanded="openSections.marketSchedule"
           aria-controls="trading-settings-market-schedule-panel"
           @click="toggleSection('marketSchedule')"
         >
-          <div class="ds-accordion-header-info">
+          <div class="settings-section__header-info">
             <Clock class="section-icon" :size="18" />
             <h2 class="section-title">برنامه بازار</h2>
           </div>
-          <ChevronLeft class="ds-accordion-icon" :size="18" />
+          <ChevronLeft class="settings-section__chevron" :size="18" />
         </button>
         <div
           id="trading-settings-market-schedule-panel"
           v-show="openSections.marketSchedule"
-          class="ds-accordion-body"
+          class="settings-section__body"
           role="region"
           aria-labelledby="trading-settings-market-schedule-header"
         >
@@ -686,11 +686,11 @@ onBeforeUnmount(() => {
           <div class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">ساعت شروع روزانه</label>
-              <input data-testid="market-open-time" type="time" v-model="scheduleForm.market_open_time_local" class="ds-input" />
+              <input data-testid="market-open-time" type="time" v-model="scheduleForm.market_open_time_local" class="settings-input" />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">ساعت پایان روزانه</label>
-              <input data-testid="market-close-time" type="time" v-model="scheduleForm.market_close_time_local" class="ds-input" />
+              <input data-testid="market-close-time" type="time" v-model="scheduleForm.market_close_time_local" class="settings-input" />
             </div>
           </div>
 
@@ -718,25 +718,25 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- استثناهای تقویمی -->
-      <div class="ds-accordion" :class="{ open: openSections.marketCalendar }">
+      <div class="settings-section" :class="{ open: openSections.marketCalendar }">
         <button
           id="trading-settings-market-calendar-header"
-          class="ds-accordion-header"
+          class="settings-section__header"
           type="button"
           :aria-expanded="openSections.marketCalendar"
           aria-controls="trading-settings-market-calendar-panel"
           @click="toggleSection('marketCalendar')"
         >
-          <div class="ds-accordion-header-info">
+          <div class="settings-section__header-info">
             <ClipboardList class="section-icon" :size="18" />
             <h2 class="section-title">استثناهای تقویمی بازار</h2>
           </div>
-          <ChevronLeft class="ds-accordion-icon" :size="18" />
+          <ChevronLeft class="settings-section__chevron" :size="18" />
         </button>
         <div
           id="trading-settings-market-calendar-panel"
           v-show="openSections.marketCalendar"
-          class="ds-accordion-body"
+          class="settings-section__body"
           role="region"
           aria-labelledby="trading-settings-market-calendar-header"
         >
@@ -752,7 +752,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="ds-form-group">
               <label class="ds-label">نوع استثنا</label>
-              <select data-testid="override-type" v-model="overrideForm.override_type" class="ds-input">
+              <select data-testid="override-type" v-model="overrideForm.override_type" class="settings-input">
                 <option v-for="option in overrideTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
             </div>
@@ -761,25 +761,25 @@ onBeforeUnmount(() => {
           <div v-if="isCustomHoursOverride" class="form-row">
             <div class="ds-form-group">
               <label class="ds-label">ساعت شروع استثنا</label>
-              <input data-testid="override-open-time" type="time" v-model="overrideForm.open_time_local" class="ds-input" />
+              <input data-testid="override-open-time" type="time" v-model="overrideForm.open_time_local" class="settings-input" />
             </div>
             <div class="ds-form-group">
               <label class="ds-label">ساعت پایان استثنا</label>
-              <input data-testid="override-close-time" type="time" v-model="overrideForm.close_time_local" class="ds-input" />
+              <input data-testid="override-close-time" type="time" v-model="overrideForm.close_time_local" class="settings-input" />
             </div>
           </div>
 
           <div class="ds-form-group">
             <label class="ds-label">یادداشت</label>
-            <input data-testid="override-note" type="text" v-model="overrideForm.note" class="ds-input" placeholder="مثلاً تعطیلی مناسبت یا نیمه‌وقت" />
+            <input data-testid="override-note" type="text" v-model="overrideForm.note" class="settings-input" placeholder="مثلاً تعطیلی مناسبت یا نیمه‌وقت" />
           </div>
 
           <div class="override-actions">
-            <button data-testid="override-save" class="ds-btn primary" @click="saveOverride" :disabled="overrideSaving">
+            <button data-testid="override-save" class="settings-button settings-button--primary" @click="saveOverride" :disabled="overrideSaving">
               <Loader2 v-if="overrideSaving" class="animate-spin" :size="16" />
               <span>{{ editingOverrideId ? 'ذخیره ویرایش استثنا' : 'ثبت استثنا' }}</span>
             </button>
-            <button v-if="editingOverrideId" data-testid="override-cancel" class="ds-btn secondary" @click="resetOverrideForm" :disabled="overrideSaving">
+            <button v-if="editingOverrideId" data-testid="override-cancel" class="settings-button settings-button--secondary" @click="resetOverrideForm" :disabled="overrideSaving">
               <span>لغو ویرایش</span>
             </button>
           </div>
@@ -804,8 +804,8 @@ onBeforeUnmount(() => {
                 <div v-if="item.note" class="override-note">{{ item.note }}</div>
               </div>
               <div class="override-card__actions">
-                <button :data-testid="`override-edit-${item.id}`" class="mini-action-btn" @click="startEditingOverride(item)">ویرایش</button>
-                <button :data-testid="`override-delete-${item.id}`" class="mini-action-btn danger" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
+                <button :data-testid="`override-edit-${item.id}`" class="mini-footer-control" @click="startEditingOverride(item)">ویرایش</button>
+                <button :data-testid="`override-delete-${item.id}`" class="mini-footer-control danger" @click="deleteOverride(item.id)" :disabled="overrideDeletingId === item.id">
                   {{ overrideDeletingId === item.id ? 'در حال حذف...' : 'حذف' }}
                 </button>
               </div>
@@ -816,12 +816,12 @@ onBeforeUnmount(() => {
 
       <!-- دکمه‌ها -->
       <div class="footer-actions">
-        <button class="ds-btn primary action-btn" @click="saveSettings" :disabled="saving">
+        <button class="settings-button settings-button--primary footer-control" @click="saveSettings" :disabled="saving">
           <Loader2 v-if="saving" class="animate-spin" :size="18" />
           <Save v-else :size="18" />
           <span>ذخیره تنظیمات</span>
         </button>
-        <button class="ds-btn danger action-btn" @click="resetSettings" :disabled="saving">
+        <button class="settings-button settings-button--danger footer-control" @click="resetSettings" :disabled="saving">
           <RotateCcw :size="18" />
           <span>بازنشانی به پیش‌فرض</span>
         </button>
@@ -919,7 +919,7 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--ds-border-light);
 }
 
-.action-btn {
+.footer-control {
   flex: 1;
   display: flex;
   align-items: center;
@@ -1077,7 +1077,7 @@ onBeforeUnmount(() => {
   align-items: flex-end;
 }
 
-.mini-action-btn {
+.mini-footer-control {
   border: 1px solid var(--ds-border-light);
   background: var(--ds-bg-card);
   color: var(--ds-text-primary);
@@ -1087,7 +1087,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.mini-action-btn.danger {
+.mini-footer-control.danger {
   color: var(--ds-danger-700);
 }
 

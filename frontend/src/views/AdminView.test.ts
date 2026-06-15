@@ -105,7 +105,7 @@ describe('AdminView.vue', () => {
     expect(wrapper.text()).toContain('ارسال دعوت‌نامه')
     expect(wrapper.get('.create-invitation-stub').text()).toBe('admin-jwt-token')
 
-    await wrapper.get('.back-button').trigger('click')
+    await wrapper.get('.admin-subview-return').trigger('click')
     await flushPromises()
 
     expect(adminViewMocks.popBackStateMock).toHaveBeenCalledTimes(1)

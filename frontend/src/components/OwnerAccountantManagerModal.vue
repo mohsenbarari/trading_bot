@@ -505,23 +505,23 @@ onBeforeUnmount(() => {
         class="accountant-manager-shell"
         :class="{ 'accountant-manager-shell--workspace': isWorkspace }"
       >
-        <div v-if="!isWorkspace" class="accountant-manager-header">
+        <div v-if="!isWorkspace" class="accountant-owner-header">
           <button type="button" class="accountant-manager-back" aria-label="بازگشت" @click="closeManager">
             <ChevronLeft :size="24" />
           </button>
           <div class="accountant-manager-title">
             <h3>حسابداران</h3>
           </div>
-          <span class="accountant-manager-header-spacer" aria-hidden="true"></span>
+          <span class="accountant-owner-header-spacer" aria-hidden="true"></span>
         </div>
 
         <div v-if="notice" class="accountant-banner success">{{ notice }}</div>
         <div v-if="error" class="accountant-banner error">{{ error }}</div>
 
         <section class="accountant-panel accountant-panel--accordion">
-          <div class="ds-accordion" :class="{ open: openSections.create }">
-            <div class="ds-accordion-header accountant-main-menu-header" @click="toggleSection('create')">
-              <div class="ds-accordion-header-info accountant-menu-title">
+          <div class="accountant-accordion-panel" :class="{ open: openSections.create }">
+            <div class="accountant-accordion-header accountant-main-menu-header" @click="toggleSection('create')">
+              <div class="accountant-accordion-header-info accountant-menu-title">
                 <UserPlus :size="18" class="accountant-section-icon" />
                 <h4>افزودن حسابدار جدید</h4>
               </div>
@@ -532,11 +532,11 @@ onBeforeUnmount(() => {
                   label="راهنمای افزودن حسابدار"
                   text="پس از ثبت، لینک ثبت‌نام مخصوص همان حسابدار ساخته می‌شود."
                 />
-                <ChevronLeft :size="20" class="ds-accordion-icon" />
+                <ChevronLeft :size="20" class="accountant-accordion-chevron" />
               </div>
             </div>
 
-            <div v-show="openSections.create" class="ds-accordion-body accountant-accordion-body">
+            <div v-show="openSections.create" class="accountant-accordion-body-shell accountant-accordion-body">
               <div class="accountant-form-sections accountant-form-sections--stacked">
                 <section class="form-subpanel">
                   <div class="form-subpanel-head">
@@ -560,18 +560,18 @@ onBeforeUnmount(() => {
                 </section>
 
                 <section class="form-subpanel form-subpanel--accordion">
-                  <div class="ds-accordion" :class="{ open: openSections.createDuty }">
-                    <div class="ds-accordion-header" @click.stop="toggleSection('createDuty')">
-                      <div class="ds-accordion-header-info">
+                  <div class="accountant-accordion-panel" :class="{ open: openSections.createDuty }">
+                    <div class="accountant-accordion-header" @click.stop="toggleSection('createDuty')">
+                      <div class="accountant-accordion-header-info">
                         <SlidersHorizontal :size="16" class="accountant-subsection-icon" />
                         <div>
                           <h5>شرح وظیفه</h5>
                           <p>اختیاری، برای تفکیک نقش حسابداران در گروه کاری</p>
                         </div>
                       </div>
-                      <ChevronLeft :size="18" class="ds-accordion-icon" />
+                      <ChevronLeft :size="18" class="accountant-accordion-chevron" />
                     </div>
-                    <div v-show="openSections.createDuty" class="ds-accordion-body">
+                    <div v-show="openSections.createDuty" class="accountant-accordion-body-shell">
                       <label class="field-block">
                         <span>شرح وظیفه</span>
                         <textarea v-model="createForm.duty_description" class="accountant-input accountant-textarea create-duty-description" rows="3" placeholder="مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه"></textarea>
@@ -582,8 +582,8 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="panel-actions">
-                <button type="button" class="secondary-btn" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن</button>
-                <button type="button" class="primary-btn submit-create" :disabled="isSubmitting" @click="createRelation">
+                <button type="button" class="accountant-secondary-control" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن</button>
+                <button type="button" class="accountant-primary-control submit-create" :disabled="isSubmitting" @click="createRelation">
                   {{ isSubmitting ? 'در حال ثبت...' : 'ثبت حسابدار' }}
                 </button>
               </div>
@@ -592,9 +592,9 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="accountant-panel accountant-panel--accordion">
-          <div class="ds-accordion" :class="{ open: openSections.relations }">
-            <div class="ds-accordion-header accountant-main-menu-header" @click="toggleSection('relations')">
-              <div class="ds-accordion-header-info accountant-menu-title">
+          <div class="accountant-accordion-panel" :class="{ open: openSections.relations }">
+            <div class="accountant-accordion-header accountant-main-menu-header" @click="toggleSection('relations')">
+              <div class="accountant-accordion-header-info accountant-menu-title">
                 <Users :size="18" class="accountant-section-icon" />
                 <h4>مدیریت حسابداران</h4>
               </div>
@@ -605,11 +605,11 @@ onBeforeUnmount(() => {
                   label="راهنمای لیست حسابداران"
                   text="برای حسابدار فعال می‌توانید شرح وظیفه، نشست‌ها و قطع ارتباط را از صفحه تنظیمات مدیریت کنید."
                 />
-                <ChevronLeft :size="20" class="ds-accordion-icon" />
+                <ChevronLeft :size="20" class="accountant-accordion-chevron" />
               </div>
             </div>
 
-            <div v-show="openSections.relations" class="ds-accordion-body accountant-accordion-body">
+            <div v-show="openSections.relations" class="accountant-accordion-body-shell accountant-accordion-body">
               <div v-if="selectedRelation" class="accountant-detail-page">
                 <div class="accountant-detail-topbar">
                   <button type="button" class="ghost-btn ghost-btn--inline" @click="backToAccountantList">بازگشت به لیست</button>
@@ -619,18 +619,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailOverview }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailOverview')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion accountant-accordion-panel" :class="{ open: openSections.detailOverview }">
+                  <div class="accountant-accordion-header" @click="toggleDetailSection('detailOverview')">
+                    <div class="accountant-accordion-header-info">
                       <SlidersHorizontal :size="18" class="accountant-section-icon" />
                       <div>
                         <h4>مشخصات و شرح وظیفه</h4>
                         <p>وضعیت، زمان‌ها و شرح وظیفه قابل ویرایش حسابدار</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="accountant-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailOverview" class="ds-accordion-body accountant-accordion-body">
+                  <div v-show="openSections.detailOverview" class="accountant-accordion-body-shell accountant-accordion-body">
                     <div class="accountant-meta-grid">
                       <div class="meta-item">
                         <span class="meta-label">وضعیت</span>
@@ -668,8 +668,8 @@ onBeforeUnmount(() => {
                         <textarea v-model="editForm.duty_description" class="accountant-input accountant-textarea edit-duty-description" rows="3" :placeholder="selectedRelation.duty_description || 'مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه'"></textarea>
                       </label>
                       <div class="panel-actions compact">
-                        <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="editForm.duty_description = selectedRelation.duty_description || ''">بازنشانی</button>
-                        <button type="button" class="primary-btn save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
+                        <button type="button" class="accountant-secondary-control" :disabled="isSavingEdit" @click="editForm.duty_description = selectedRelation.duty_description || ''">بازنشانی</button>
+                        <button type="button" class="accountant-primary-control save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
                           {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
                         </button>
                       </div>
@@ -678,18 +678,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailSessions }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailSessions')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion accountant-accordion-panel" :class="{ open: openSections.detailSessions }">
+                  <div class="accountant-accordion-header" @click="toggleDetailSection('detailSessions')">
+                    <div class="accountant-accordion-header-info">
                       <ShieldCheck :size="18" class="accountant-section-icon" />
                       <div>
                         <h4>نشست حسابدار</h4>
                         <p>مشاهده و منقضی کردن نشست‌های فعال حسابدار</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="accountant-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailSessions" class="ds-accordion-body accountant-accordion-body">
+                  <div v-show="openSections.detailSessions" class="accountant-accordion-body-shell accountant-accordion-body">
                     <div v-if="selectedRelation.status !== 'active' || !selectedRelation.accountant_user_id" class="accountant-empty">نشست فقط برای حسابدار فعال قابل مدیریت است.</div>
                     <div v-else-if="loadingSessionsRelationId === selectedRelation.id" class="accountant-loading session-loading">در حال دریافت نشست‌های حسابدار...</div>
                     <div v-else-if="!getRelationSessions(selectedRelation.id).length" class="accountant-empty session-empty">در حال حاضر نشست فعالی برای این حسابدار ثبت نشده است.</div>
@@ -721,18 +721,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion danger-accordion" :class="{ open: openSections.detailDanger }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailDanger')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion accountant-accordion-panel danger-accordion" :class="{ open: openSections.detailDanger }">
+                  <div class="accountant-accordion-header" @click="toggleDetailSection('detailDanger')">
+                    <div class="accountant-accordion-header-info">
                       <Users :size="18" class="accountant-section-icon" />
                       <div>
                         <h4>قطع رابطه با حسابدار</h4>
                         <p>غیرفعال کردن رابطه و دسترسی حسابدار</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="accountant-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailDanger" class="ds-accordion-body accountant-accordion-body">
+                  <div v-show="openSections.detailDanger" class="accountant-accordion-body-shell accountant-accordion-body">
                     <p class="danger-copy">این عملیات رابطه حسابدار را غیرفعال می‌کند و نشست‌های مربوط به او باید جداگانه مدیریت شوند.</p>
                     <button v-if="selectedRelation.status === 'active'" type="button" class="danger-btn unlink-active" @click="unlinkRelation(selectedRelation)">قطع ارتباط با حسابدار</button>
                     <button v-else-if="selectedRelation.status === 'pending'" type="button" class="danger-btn cancel-pending" @click="unlinkRelation(selectedRelation)">لغو دعوت حسابدار</button>
@@ -760,7 +760,7 @@ onBeforeUnmount(() => {
                       <p>{{ getRelationStateText(relation) }}</p>
                     </div>
                     <div class="pending-invitation-actions">
-                      <button v-if="relation.registration_link" type="button" class="secondary-btn copy-link" @click="copyRegistrationLink(relation)">
+                      <button v-if="relation.registration_link" type="button" class="accountant-secondary-control copy-link" @click="copyRegistrationLink(relation)">
                         {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
                       </button>
                       <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
@@ -801,7 +801,7 @@ onBeforeUnmount(() => {
                         </div>
                         <p v-if="relation.duty_description" class="accountant-duty compact-duty">{{ relation.duty_description }}</p>
                         <div class="accountant-card-footer">
-                          <button type="button" class="primary-btn accountant-settings-btn" @click="openAccountantDetail(relation)">
+                          <button type="button" class="accountant-primary-control accountant-settings-btn" @click="openAccountantDetail(relation)">
                             تنظیمات حسابدار
                           </button>
                         </div>
@@ -860,7 +860,7 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
-.accountant-manager-header {
+.accountant-owner-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -874,15 +874,15 @@ onBeforeUnmount(() => {
   color: #d97706;
 }
 
-.accountant-manager-header h3 {
+.accountant-owner-header h3 {
   margin: 0;
   font-size: 1.35rem;
   color: #111827;
 }
 
 .ghost-btn,
-.primary-btn,
-.secondary-btn,
+.accountant-primary-control,
+.accountant-secondary-control,
 .danger-btn {
   border: 0;
   border-radius: 999px;
@@ -893,12 +893,12 @@ onBeforeUnmount(() => {
 }
 
 .ghost-btn,
-.secondary-btn {
+.accountant-secondary-control {
   background: rgba(148, 163, 184, 0.14);
   color: #334155;
 }
 
-.primary-btn {
+.accountant-primary-control {
   background: linear-gradient(135deg, #f59e0b, #f97316);
   color: #fff;
   box-shadow: 0 10px 24px rgba(249, 115, 22, 0.24);
@@ -948,29 +948,29 @@ onBeforeUnmount(() => {
   display: block;
 }
 
-.accountant-panel--accordion .ds-accordion {
+.accountant-panel--accordion .accountant-accordion-panel {
   border-radius: 24px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.82);
   overflow: hidden;
 }
 
-.accountant-panel--accordion .ds-accordion-header {
+.accountant-panel--accordion .accountant-accordion-header {
   gap: 14px;
 }
 
-.accountant-panel--accordion .ds-accordion-header-info {
+.accountant-panel--accordion .accountant-accordion-header-info {
   gap: 12px;
 }
 
-.accountant-panel--accordion .ds-accordion-header-info h4,
-.form-subpanel--accordion .ds-accordion-header-info h5 {
+.accountant-panel--accordion .accountant-accordion-header-info h4,
+.form-subpanel--accordion .accountant-accordion-header-info h5 {
   margin: 0;
   color: #0f172a;
 }
 
-.accountant-panel--accordion .ds-accordion-header-info p,
-.form-subpanel--accordion .ds-accordion-header-info p {
+.accountant-panel--accordion .accountant-accordion-header-info p,
+.form-subpanel--accordion .accountant-accordion-header-info p {
   margin: 3px 0 0;
   font-size: 0.84rem;
   color: #64748b;
@@ -1041,13 +1041,13 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.form-subpanel--accordion .ds-accordion {
+.form-subpanel--accordion .accountant-accordion-panel {
   border: 0;
   border-radius: 20px;
   background: transparent;
 }
 
-.form-subpanel--accordion .ds-accordion-body {
+.form-subpanel--accordion .accountant-accordion-body-shell {
   padding-top: 2px;
 }
 
@@ -1324,7 +1324,7 @@ onBeforeUnmount(() => {
   gap: 0.625rem;
 }
 
-.accountant-manager-header {
+.accountant-owner-header {
   display: grid;
   grid-template-columns: 44px 1fr 44px;
   align-items: center;
@@ -1355,7 +1355,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.accountant-manager-header-spacer {
+.accountant-owner-header-spacer {
   width: 44px;
   height: 44px;
 }
@@ -1400,7 +1400,7 @@ onBeforeUnmount(() => {
   border-radius: 1rem;
 }
 
-.accountant-panel--accordion .ds-accordion {
+.accountant-panel--accordion .accountant-accordion-panel {
   border-radius: 1rem;
   border: 1px solid rgba(245, 158, 11, 0.18);
   background: linear-gradient(135deg, #fffbeb, #fef3c7);
@@ -1408,18 +1408,18 @@ onBeforeUnmount(() => {
   box-shadow: 0 10px 28px rgba(245, 158, 11, 0.08);
 }
 
-.accountant-panel--accordion .ds-accordion-header {
+.accountant-panel--accordion .accountant-accordion-header {
   gap: 0.6rem;
   min-height: 3.28rem;
   padding: 0.72rem 0.82rem;
 }
 
-.accountant-panel--accordion .ds-accordion-header-info {
+.accountant-panel--accordion .accountant-accordion-header-info {
   gap: 0.58rem;
 }
 
-.accountant-panel--accordion .ds-accordion-header-info h4,
-.form-subpanel--accordion .ds-accordion-header-info h5 {
+.accountant-panel--accordion .accountant-accordion-header-info h4,
+.form-subpanel--accordion .accountant-accordion-header-info h5 {
   color: #92400e;
 }
 
@@ -1741,12 +1741,12 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.detail-accordion .ds-accordion-header-info h4 {
+.detail-accordion .accountant-accordion-header-info h4 {
   font-size: 0.86rem;
   line-height: 1.7;
 }
 
-.detail-accordion .ds-accordion-header-info p {
+.detail-accordion .accountant-accordion-header-info p {
   margin: 2px 0 0;
   color: #64748b;
   font-size: 0.74rem;

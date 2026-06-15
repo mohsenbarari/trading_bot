@@ -63,7 +63,7 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    await wrapper.get('.back-button').trigger('click')
+    await wrapper.get('.notifications-return').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/')
 
     await wrapper.get('.clear-btn').trigger('click')

@@ -64,7 +64,7 @@ onMounted(fetchUsers);
   <div class="user-manager ds-page-content">
     
     <div class="ds-card">
-      <div class="manager-header">
+      <div class="user-search-toolbar">
         <button class="search-toggle-btn" :class="{ active: showSearch }" @click="toggleSearch">
           <Search v-if="!showSearch" :size="20" />
           <X v-else :size="20" />
@@ -79,9 +79,9 @@ onMounted(fetchUsers);
               v-model="searchQuery" 
               @keyup.enter="fetchUsers" 
               placeholder="نام، نام کاربری یا موبایل..." 
-              class="ds-input"
+              class="user-search-input"
             />
-            <button @click="fetchUsers" class="ds-btn primary search-submit-btn">جستجو</button>
+            <button @click="fetchUsers" class="user-search-submit search-submit-btn">جستجو</button>
           </div>
         </div>
       </transition>
@@ -126,7 +126,7 @@ onMounted(fetchUsers);
   gap: 1rem;
 }
 
-.manager-header {
+.user-search-toolbar {
   margin-bottom: 1rem;
 }
 

@@ -299,7 +299,7 @@ onUnmounted(() => clearBackStack())
       <template v-else>
         <section class="admin-subview-shell">
           <header class="admin-subview-header">
-            <button @click="handleNavigate('admin_panel')" class="back-button" type="button">
+            <button @click="handleNavigate('admin_panel')" class="admin-subview-return" type="button">
               <ChevronLeft :size="20" />
             </button>
             <div class="admin-subview-copy">
@@ -421,7 +421,7 @@ onUnmounted(() => clearBackStack())
   min-width: 0;
 }
 
-.back-button {
+.admin-subview-return {
   width: 2.5rem;
   height: 2.5rem;
   display: inline-flex;
@@ -435,7 +435,7 @@ onUnmounted(() => clearBackStack())
   transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
-.back-button:hover {
+.admin-subview-return:hover {
   border-color: var(--ds-primary-300);
   background: var(--ds-primary-50);
   color: var(--ds-primary-700);

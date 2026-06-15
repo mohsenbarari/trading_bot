@@ -116,7 +116,7 @@ describe('SettingsView.vue', () => {
     expect(settingsViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/sessions/session-secondary', { method: 'DELETE' })
     expect(wrapper.text()).not.toContain('Android')
 
-    await wrapper.find('.settings-back-button').trigger('click')
+    await wrapper.find('.settings-return-control').trigger('click')
     expect(settingsViewMocks.backMock).toHaveBeenCalled()
 
     wrapper.unmount()

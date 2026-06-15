@@ -58,7 +58,7 @@ async function submitBroadcast() {
             <h2 id="broadcast-modal-title">ارسال پیام مدیریت</h2>
             <p>این پیام مستقل از کانال‌ها برای گیرندگان انتخاب‌شده در پیام‌رسان ارسال می‌شود.</p>
           </div>
-          <button type="button" class="icon-btn" aria-label="بستن" @click="emit('close')">
+          <button type="button" class="broadcast-close-control" aria-label="بستن" @click="emit('close')">
             <X :size="20" />
           </button>
         </header>
@@ -76,8 +76,8 @@ async function submitBroadcast() {
         <div v-if="success" class="form-alert success">{{ success }}</div>
 
         <footer class="broadcast-actions">
-          <button type="button" class="ghost-btn" @click="emit('close')">بستن</button>
-          <button type="button" class="primary-btn" :disabled="!canSubmit" @click="submitBroadcast">
+          <button type="button" class="broadcast-dismiss-button" @click="emit('close')">بستن</button>
+          <button type="button" class="broadcast-submit-button" :disabled="!canSubmit" @click="submitBroadcast">
             {{ isSubmitting ? 'در حال ارسال...' : 'ارسال' }}
           </button>
         </footer>
@@ -132,15 +132,15 @@ async function submitBroadcast() {
   color: #64748b;
 }
 
-.icon-btn,
-.ghost-btn,
-.primary-btn {
+.broadcast-close-control,
+.broadcast-dismiss-button,
+.broadcast-submit-button {
   border: 0;
   font: inherit;
   cursor: pointer;
 }
 
-.icon-btn {
+.broadcast-close-control {
   display: grid;
   place-items: center;
   width: 38px;
@@ -207,25 +207,25 @@ async function submitBroadcast() {
   margin-top: 1rem;
 }
 
-.ghost-btn,
-.primary-btn {
+.broadcast-dismiss-button,
+.broadcast-submit-button {
   min-height: 42px;
   padding: 0 1rem;
   border-radius: 999px;
   font-weight: 900;
 }
 
-.ghost-btn {
+.broadcast-dismiss-button {
   background: rgba(15, 23, 42, 0.06);
   color: #334155;
 }
 
-.primary-btn {
+.broadcast-submit-button {
   background: linear-gradient(135deg, #0f766e, #f59e0b);
   color: #fff;
 }
 
-.primary-btn:disabled {
+.broadcast-submit-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

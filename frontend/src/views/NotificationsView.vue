@@ -162,7 +162,7 @@ onMounted(async () => {
         title="مرکز اعلان‌ها"
       >
         <template #actions>
-          <AppIconButton type="button" class="back-button notifications-back-button" label="بازگشت" size="sm" @click="goBack">
+          <AppIconButton type="button" class="notifications-return" label="بازگشت" size="sm" @click="goBack">
             <ChevronLeft :size="24" />
           </AppIconButton>
         </template>
@@ -293,7 +293,7 @@ onMounted(async () => {
               <div class="notif-actions">
                 <button
                   type="button"
-                  class="action-btn toggle-read-btn"
+                  class="notification-control toggle-read-btn"
                   :aria-label="notif.is_read ? `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌نشده` : `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌شده`"
                   @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)"
                 >
@@ -301,7 +301,7 @@ onMounted(async () => {
                 </button>
                 <button
                   type="button"
-                  class="action-btn delete-btn"
+                  class="notification-control delete-btn"
                   :aria-label="`حذف اعلان ${notif.title || 'اعلان جدید'}`"
                   @click.stop="requestDelete(notif)"
                 >
@@ -371,7 +371,7 @@ onMounted(async () => {
 }
 
 .notif-item:focus-visible,
-.action-btn:focus-visible {
+.notification-control:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
 }
@@ -424,7 +424,7 @@ onMounted(async () => {
   gap: 0.5rem;
 }
 
-.action-btn {
+.notification-control {
   min-width: var(--ds-touch-target);
   min-height: var(--ds-touch-target);
   border-radius: 10px;

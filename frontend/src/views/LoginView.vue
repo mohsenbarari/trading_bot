@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Smartphone, Lock, Loader2, Download, Clock } from 'lucide-vue-next'
+import { Smartphone, Lock, Loader2, Download, Clock, CheckCircle2, XCircle, ShieldCheck } from 'lucide-vue-next'
 import { apiFetch, setupExpiryTimer } from '../utils/auth'
 import { primeCurrentUserSummary } from '../utils/currentUser'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
+import { AppButton, AppFormField, AppInput, AppPage, AppSectionCard, AppStatusBadge, AppTextarea } from '../components/ui'
 
 const router = useRouter()
 type LoginStep =
@@ -765,353 +766,411 @@ function goBackToMobile() {
 </script>
 
 <template>
-  <div class="min-h-[100dvh] flex items-center justify-center p-4 overflow-hidden relative">
-    
-    <!-- Background Elements -->
-    <div class="absolute inset-0 overflow-hidden pointer-events-none">
-       <div class="absolute -top-[20%] -right-[10%] w-[70vw] h-[70vw] bg-amber-200/20 rounded-full blur-3xl animate-pulse-slow"></div>
-       <div class="absolute top-[40%] -left-[10%] w-[50vw] h-[50vw] bg-yellow-400/10 rounded-full blur-3xl animate-pulse-slower"></div>
-    </div>
+  <AppPage narrow>
+    <section class="login-view">
+      <AppSectionCard
+        class="login-card"
+        title="ورود به بازار"
+        description="ورود و بازیابی نشست از همین صفحه انجام می‌شود."
+      >
+        <template #actions>
+          <AppStatusBadge tone="warning">نسخه وب</AppStatusBadge>
+        </template>
 
-    <div class="w-full max-w-sm relative z-10 perspective-1000">
-      
-      <!-- Glass Card -->
-      <div class="relative bg-white/70 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-[2rem] p-8 overflow-hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(251,191,36,0.1)]">
-        
-        <!-- Header -->
-        <div class="text-center mb-10 relative">
-          <div class="w-20 h-20 bg-gradient-to-br from-amber-400 to-amber-600 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-amber-500/30 mb-5 relative group transform transition-transform hover:scale-105 duration-300">
-             <div class="absolute inset-0 bg-white/20 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
-             <span class="text-4xl filter drop-shadow-md pb-1">💎</span>
-          </div>
-          <h1 class="text-2xl font-black text-gray-800 tracking-tight">Gold Market</h1>
-          <p class="text-gray-500 mt-2 text-sm font-medium">ورود به بازار امن طلا</p>
+        <div class="login-brand-mark" aria-hidden="true">
+          <ShieldCheck :size="24" />
         </div>
 
-        <!-- Transitions -->
         <transition name="slide-up" mode="out-in">
-          
-          <!-- Step 1: Mobile -->
-          <div v-if="step === 'mobile'" key="mobile" class="space-y-6">
-            <div class="space-y-3">
-              <label class="text-sm font-bold text-gray-700 block text-right pr-1">شماره موبایل</label>
-              <div class="relative group">
-                <input 
-                  v-model="form.mobile"
-                  type="tel" 
-                  class="input-premium peer"
-                  style="direction: ltr; text-align: left !important; padding-left: 3.5rem !important;"
-                  placeholder="0912..."
-                  dir="ltr"
-                />
-                <Smartphone class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 peer-focus:text-amber-500 transition-colors" :size="20"/>
-                <div class="absolute inset-0 rounded-xl border border-amber-500/0 peer-focus:border-amber-500/50 pointer-events-none transition-all duration-300 peer-focus:ring-4 peer-focus:ring-amber-500/10"></div>
-              </div>
-            </div>
-
-            <button 
-              @click="requestOtp" 
-              :disabled="loading" 
-              class="btn-primary group relative overflow-hidden disabled:opacity-75 disabled:cursor-not-allowed"
-            >
-              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-              
-              <Loader2 v-if="loading" class="animate-spin" />
-              <div v-else-if="countdown > 0" class="flex items-center gap-2">
-                <span>وارد کردن کد</span>
-                <span class="font-mono text-xs opacity-75 dir-ltr">({{ formattedTimer }})</span>
-              </div>
-              <span v-else>دریافت کد تایید</span>
-            </button>
-
-            <!-- PWA PROMOTION -->
-            <div v-if="shouldShowManualInstallEntry" class="pt-6 border-t border-gray-100/50 space-y-4">
-                <button @click="installPWA" class="w-full py-3.5 px-4 bg-gradient-to-r from-amber-50 to-orange-50 text-amber-800 font-bold rounded-xl border border-amber-200/50 hover:bg-amber-100 transition-all flex items-center justify-center gap-3 shadow-sm hover:shadow-md">
-                   <Download class="w-5 h-5"/>
-                   <span>نصب اپلیکیشن</span>
-                </button>
-
-                <div v-if="showManualInstallGuide" class="text-xs text-gray-600 bg-gray-50/70 p-3 rounded-xl border border-gray-100 leading-6 text-right space-y-2">
-                  <p class="font-bold text-gray-700">{{ manualInstallGuideTitle }}</p>
-                  <template v-if="isIOS">
-                    <p>برای نصب در iPhone یا iPad، نصب مستقیم از داخل Chrome یا مرورگر داخلی تلگرام انجام نمی‌شود. سایت را در Safari باز کنید و این مراحل را انجام دهید:</p>
-                    <ol class="list-decimal list-inside space-y-1">
-                      <li>آدرس سایت را کپی کنید و در Safari باز کنید.</li>
-                      <li>در نوار پایین Safari دکمه Share، یعنی مربع با فلش رو به بالا، را بزنید.</li>
-                      <li>در فهرست باز شده کمی پایین بروید و Add to Home Screen را انتخاب کنید.</li>
-                      <li>نام Gold را تایید کنید و از بالای صفحه Add را بزنید.</li>
-                      <li>بعد از نصب، از آیکن Gold روی Home Screen وارد شوید تا برنامه بدون نوار مرورگر باز شود.</li>
-                    </ol>
-                  </template>
-                  <template v-else>
-                    <p>این مرورگر نصب مستقیم داخل صفحه را پشتیبانی نمی‌کند. برای نصب شبیه اپ، سایت را با Chrome یا Edge باز کنید؛ یا از منوی مرورگر گزینه Add to Home Screen / Install App را انتخاب کنید.</p>
-                  </template>
+          <div v-if="step === 'mobile'" key="mobile" class="login-step">
+            <AppFormField label="شماره موبایل">
+              <template #default="{ id }">
+                <div class="login-field-shell">
+                  <Smartphone class="login-field-icon" :size="18" />
+                  <AppInput
+                    :id="id"
+                    v-model="form.mobile"
+                    type="tel"
+                    dir="ltr"
+                    placeholder="0912..."
+                    autocomplete="tel"
+                    class="login-input login-input--ltr"
+                  />
                 </div>
-            </div>
-          </div>
+              </template>
+            </AppFormField>
 
-          <!-- Step 2: OTP -->
-          <div v-else-if="step === 'otp'" key="otp" class="space-y-6">
-            <div class="text-center mb-6">
-              <p class="text-sm text-gray-500 mb-1">کد ارسال شده به {{ form.mobile }}</p>
-              <button @click="goBackToMobile()" class="text-xs text-amber-600 font-bold hover:text-amber-700 transition-colors bg-amber-50 px-3 py-1 rounded-full">ویرایش شماره</button>
-            </div>
+            <AppButton
+              block
+              :loading="loading"
+              @click="requestOtp"
+            >
+              {{ countdown > 0 ? 'وارد کردن کد' : 'دریافت کد تایید' }}
+            </AppButton>
 
-            <div class="space-y-2">
-              <div class="relative group">
-                <input 
-                  v-model="form.code"
-                  type="text" 
-                  inputmode="numeric"
-                  pattern="[0-9]*"
-                  class="input-premium !pl-14 !pr-14 tracking-[0.5em] font-mono text-xl font-bold text-gray-800"
-                  style="direction: ltr; text-align: center;"
-                  placeholder="_____"
-                  maxlength="5"
-                  dir="ltr"
-                  autocomplete="one-time-code"
-                  autofocus
-                />
-                <Lock class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 peer-focus:text-amber-500 transition-colors" :size="20"/>
-                <div class="absolute inset-0 rounded-xl border border-amber-500/0 peer-focus:border-amber-500/50 pointer-events-none transition-all duration-300 peer-focus:ring-4 peer-focus:ring-amber-500/10"></div>
-              </div>
+            <div v-if="countdown > 0" class="login-timer">
+              <Clock :size="14" />
+              <bdi>{{ formattedTimer }}</bdi>
             </div>
 
-            <button @click="verifyOtp" :disabled="loading" class="btn-primary group relative overflow-hidden">
-               <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-              <Loader2 v-if="loading" class="animate-spin" />
-              <span v-else>ورود به بازار</span>
-            </button>
-            
-            <div class="text-center mt-4">
-                 <div v-if="countdown > 0" class="inline-flex items-center gap-2 text-xs font-mono text-gray-400 bg-gray-50 px-3 py-1 rounded-full">
-                    <Clock :size="14" />
-                    <span>{{ formattedTimer }} تا ارسال مجدد</span>
-                 </div>
-                 <button v-else @click="handleResend" class="text-xs text-amber-600 hover:text-amber-700 font-bold transition-colors">
-                    ارسال مجدد کد
-                 </button>
+            <div v-if="shouldShowManualInstallEntry" class="login-install">
+              <AppButton block variant="secondary" @click="installPWA">
+                <template #icon>
+                  <Download :size="16" />
+                </template>
+                نصب اپلیکیشن
+              </AppButton>
 
-            </div>
-          </div>
-
-          <!-- Step 3: Waiting for Approval -->
-          <div v-else-if="step === 'waiting_approval'" key="waiting" class="space-y-6 text-center">
-            <div class="flex flex-col items-center gap-4">
-              <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center animate-pulse">
-                <Loader2 class="w-8 h-8 text-amber-500 animate-spin" />
-              </div>
-              <h3 class="text-lg font-bold text-gray-800">در انتظار تایید</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                درخواست ورود شما به دستگاه اصلی ارسال شد.
-                <br/>لطفاً از دستگاه اصلی خود تایید کنید.
-              </p>
-              <div v-if="approvalCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
-                <Clock :size="16" />
-                <span>{{ formattedApprovalTimer }}</span>
-              </div>
-            </div>
-            <div class="space-y-3">
-              <button
-                @click="startRecoveryFlow"
-                :disabled="loading"
-                class="w-full py-3 rounded-xl border border-amber-200 text-amber-700 font-bold text-sm bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50"
-              >
-                به دستگاه قبلی دسترسی ندارم
-              </button>
-              <button @click="stopApprovalPolling(); step = 'otp'; error = ''" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
-                بازگشت به مرحله قبل
-              </button>
-            </div>
-          </div>
-
-          <div v-else-if="step === 'recovery_waiting'" key="recovery-waiting" class="space-y-6 text-center">
-            <div class="flex flex-col items-center gap-4">
-              <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center animate-pulse">
-                <Loader2 class="w-8 h-8 text-amber-500 animate-spin" />
-              </div>
-              <h3 class="text-lg font-bold text-gray-800">در حال بررسی توسط مدیریت</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                درخواست شما برای بررسی توسط تیم مدیریت ثبت شد.
-                <br/>نتیجه از طریق پیامک و همین صفحه به شما اعلام می‌شود.
-              </p>
-              <div v-if="recoveryCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
-                <Clock :size="16" />
-                <span>{{ formattedRecoveryTimer }}</span>
-              </div>
-            </div>
-            <button @click="cancelRecoveryFlow" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
-              انصراف از درخواست
-            </button>
-          </div>
-
-          <div v-else-if="step === 'recovery_identity'" key="recovery-identity" class="space-y-5 text-right">
-            <div class="text-center space-y-3">
-              <h3 class="text-lg font-bold text-gray-800">ارسال مدرک احراز هویت</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                تیم مدیریت برای ادامه بررسی، تصویر کارت شناسایی یا فایل مدرک شما را نیاز دارد.
-                <br/>در صورت تمایل می‌توانید توضیح کوتاه هم همراه آن ارسال کنید.
-              </p>
-              <div v-if="recoveryCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
-                <Clock :size="16" />
-                <span>{{ formattedRecoveryTimer }}</span>
-              </div>
-            </div>
-
-            <div class="space-y-3">
-              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <button @click="openRecoveryPicker('gallery')" type="button" class="py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
-                  گالری
-                </button>
-                <button @click="openRecoveryPicker('camera')" type="button" class="py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
-                  دوربین
-                </button>
-                <button @click="openRecoveryPicker('file')" type="button" class="py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
-                  فایل
-                </button>
-              </div>
-
-              <div class="rounded-xl border border-dashed border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-gray-600 text-center min-h-[58px] flex items-center justify-center">
-                <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
-                <span v-else>هنوز فایلی انتخاب نشده است</span>
-              </div>
-
-              <textarea
-                v-model="recoveryCaption"
-                rows="3"
-                class="input-premium !min-h-[96px] !py-3"
-                placeholder="توضیح اختیاری..."
-              />
-            </div>
-
-            <div class="space-y-3 text-center">
-              <button @click="submitRecoveryIdentity" :disabled="loading" class="btn-primary group relative overflow-hidden">
-                <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                <Loader2 v-if="loading" class="animate-spin" />
-                <span v-else>ارسال مدارک</span>
-              </button>
-              <button @click="cancelRecoveryFlow" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">
-                انصراف از درخواست
-              </button>
-            </div>
-          </div>
-
-          <div v-else-if="step === 'recovery_submitted'" key="recovery-submitted" class="space-y-6 text-center">
-            <div class="flex flex-col items-center gap-4">
-              <div class="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center animate-pulse">
-                <Loader2 class="w-8 h-8 text-amber-500 animate-spin" />
-              </div>
-              <h3 class="text-lg font-bold text-gray-800">مدرک ارسال شد</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                مدارک شما برای بررسی ارسال شد.
-                <br/>نتیجه از طریق پیامک و همین صفحه به شما اعلام می‌شود.
-              </p>
-              <div v-if="recoveryCountdown > 0" class="inline-flex items-center gap-2 text-sm font-mono text-amber-600 bg-amber-50 px-4 py-2 rounded-full">
-                <Clock :size="16" />
-                <span>{{ formattedRecoveryTimer }}</span>
+              <div v-if="showManualInstallGuide" class="login-note-card">
+                <p class="login-note-title">{{ manualInstallGuideTitle }}</p>
+                <template v-if="isIOS">
+                  <p>برای نصب در iPhone یا iPad، سایت را در Safari باز کنید و سپس از منوی Share گزینه Add to Home Screen را بزنید. از آیکن Gold روی Home Screen وارد شوید.</p>
+                </template>
+                <template v-else>
+                  <p>اگر نصب مستقیم فعال نبود، سایت را با Chrome یا Edge باز کنید و از منوی مرورگر گزینه Add to Home Screen یا Install App را بزنید.</p>
+                </template>
               </div>
             </div>
           </div>
 
-          <div v-else-if="step === 'recovery_approved'" key="recovery-approved" class="space-y-6 text-center">
-            <div class="flex flex-col items-center gap-4">
-              <div class="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center">
-                <span class="text-3xl">✓</span>
-              </div>
-              <h3 class="text-lg font-bold text-gray-800">درخواست شما تایید شد</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                اطلاعات لاگین دستگاه قبلی شما منقضی شد.
-                <br/>اکنون می‌توانید وارد سامانه شوید.
-              </p>
+          <div v-else-if="step === 'otp'" key="otp" class="login-step">
+            <div class="login-step-meta">
+              <span>کد ارسال شده به {{ form.mobile }}</span>
+              <button type="button" class="login-link-btn" @click="goBackToMobile()">ویرایش شماره</button>
             </div>
-            <button @click="enterWithApprovedRecovery" :disabled="loading" class="btn-primary group relative overflow-hidden">
-              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-              <span>ورود به سامانه</span>
-            </button>
+
+            <AppFormField label="کد تایید">
+              <template #default="{ id }">
+                <div class="login-field-shell">
+                  <Lock class="login-field-icon" :size="18" />
+                  <AppInput
+                    :id="id"
+                    v-model="form.code"
+                    type="text"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    maxlength="5"
+                    dir="ltr"
+                    autocomplete="one-time-code"
+                    placeholder="_____"
+                    class="login-input login-input--code"
+                    autofocus
+                  />
+                </div>
+              </template>
+            </AppFormField>
+
+            <AppButton block :loading="loading" @click="verifyOtp">ورود به بازار</AppButton>
+
+            <div class="login-inline-actions">
+              <div v-if="countdown > 0" class="login-timer">
+                <Clock :size="14" />
+                <span>{{ formattedTimer }} تا ارسال مجدد</span>
+              </div>
+              <button v-else type="button" class="login-link-btn" @click="handleResend">ارسال مجدد کد</button>
+            </div>
           </div>
 
-          <div v-else-if="step === 'recovery_rejected'" key="recovery-rejected" class="space-y-6 text-center">
-            <div class="flex flex-col items-center gap-4">
-              <div class="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
-                <span class="text-3xl">✕</span>
-              </div>
-              <h3 class="text-lg font-bold text-gray-800">درخواست شما رد شد</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                درخواست بازیابی نشست توسط تیم مدیریت رد شد.
-                <br/>در صورت نیاز می‌توانید دوباره درخواست خود را ثبت کنید.
-              </p>
+          <div v-else-if="step === 'waiting_approval'" key="waiting" class="login-step login-step--centered">
+            <Loader2 class="spin text-amber-600" :size="28" />
+            <h3>در انتظار تایید</h3>
+            <p>درخواست ورود شما به دستگاه اصلی ارسال شد. تایید را از همان دستگاه انجام دهید.</p>
+            <div v-if="approvalCountdown > 0" class="login-timer">
+              <Clock :size="14" />
+              <span>{{ formattedApprovalTimer }}</span>
             </div>
-            <button @click="restartLoginFlow" class="btn-primary group relative overflow-hidden">
-              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-              <span>شروع دوباره</span>
-            </button>
+            <div class="login-stack-actions">
+              <AppButton block variant="secondary" :disabled="loading" @click="startRecoveryFlow">به دستگاه قبلی دسترسی ندارم</AppButton>
+              <button type="button" class="login-link-btn" @click="stopApprovalPolling(); step = 'otp'; error = ''">بازگشت به مرحله قبل</button>
+            </div>
           </div>
 
-          <div v-else-if="step === 'recovery_expired'" key="recovery-expired" class="space-y-6 text-center">
-            <div class="flex flex-col items-center gap-4">
-              <div class="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
-                <Clock class="w-8 h-8 text-gray-500" />
-              </div>
-              <h3 class="text-lg font-bold text-gray-800">مهلت درخواست به پایان رسید</h3>
-              <p class="text-sm text-gray-500 leading-relaxed">
-                برای این درخواست در مهلت تعیین‌شده پاسخی ثبت نشد.
-                <br/>در صورت نیاز می‌توانید دوباره درخواست خود را ثبت کنید.
-              </p>
+          <div v-else-if="step === 'recovery_waiting'" key="recovery-waiting" class="login-step login-step--centered">
+            <Loader2 class="spin text-amber-600" :size="28" />
+            <h3>در حال بررسی توسط مدیریت</h3>
+            <p>درخواست بازیابی ثبت شد و نتیجه از همین صفحه اعلام می‌شود.</p>
+            <div v-if="recoveryCountdown > 0" class="login-timer">
+              <Clock :size="14" />
+              <span>{{ formattedRecoveryTimer }}</span>
             </div>
-            <button @click="restartLoginFlow" class="btn-primary group relative overflow-hidden">
-              <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-              <span>شروع دوباره</span>
-            </button>
+            <button type="button" class="login-link-btn" @click="cancelRecoveryFlow">انصراف از درخواست</button>
           </div>
 
+          <div v-else-if="step === 'recovery_identity'" key="recovery-identity" class="login-step">
+            <div class="login-step-copy">
+              <h3>ارسال مدرک احراز هویت</h3>
+              <p>تصویر کارت شناسایی یا فایل مدرک را همراه با توضیح اختیاری ارسال کنید.</p>
+            </div>
+
+            <div v-if="recoveryCountdown > 0" class="login-timer">
+              <Clock :size="14" />
+              <span>{{ formattedRecoveryTimer }}</span>
+            </div>
+
+            <div class="login-picker-grid">
+              <AppButton variant="secondary" @click="openRecoveryPicker('gallery')">گالری</AppButton>
+              <AppButton variant="secondary" @click="openRecoveryPicker('camera')">دوربین</AppButton>
+              <AppButton variant="secondary" @click="openRecoveryPicker('file')">فایل</AppButton>
+            </div>
+
+            <div class="login-upload-state">
+              <span v-if="selectedRecoveryFileName">{{ selectedRecoveryFileName }}</span>
+              <span v-else>هنوز فایلی انتخاب نشده است</span>
+            </div>
+
+            <AppFormField label="توضیح اختیاری">
+              <template #default="{ id }">
+                <AppTextarea :id="id" v-model="recoveryCaption" rows="3" placeholder="توضیح اختیاری..." />
+              </template>
+            </AppFormField>
+
+            <div class="login-stack-actions">
+              <AppButton block :loading="loading" @click="submitRecoveryIdentity">ارسال مدارک</AppButton>
+              <button type="button" class="login-link-btn" @click="cancelRecoveryFlow">انصراف از درخواست</button>
+            </div>
+          </div>
+
+          <div v-else-if="step === 'recovery_submitted'" key="recovery-submitted" class="login-step login-step--centered">
+            <Loader2 class="spin text-amber-600" :size="28" />
+            <h3>مدرک ارسال شد</h3>
+            <p>مدارک برای بررسی ارسال شد و نتیجه از همین صفحه اعلام می‌شود.</p>
+            <div v-if="recoveryCountdown > 0" class="login-timer">
+              <Clock :size="14" />
+              <span>{{ formattedRecoveryTimer }}</span>
+            </div>
+          </div>
+
+          <div v-else-if="step === 'recovery_approved'" key="recovery-approved" class="login-step login-step--centered">
+            <CheckCircle2 class="text-emerald-600" :size="32" />
+            <h3>درخواست شما تایید شد</h3>
+            <p>نشست قدیمی منقضی شد و اکنون می‌توانید وارد سامانه شوید.</p>
+            <AppButton block :loading="loading" @click="enterWithApprovedRecovery">ورود به سامانه</AppButton>
+          </div>
+
+          <div v-else-if="step === 'recovery_rejected'" key="recovery-rejected" class="login-step login-step--centered">
+            <XCircle class="text-rose-600" :size="32" />
+            <h3>درخواست شما رد شد</h3>
+            <p>در صورت نیاز می‌توانید دوباره درخواست بازیابی را ثبت کنید.</p>
+            <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+          </div>
+
+          <div v-else-if="step === 'recovery_expired'" key="recovery-expired" class="login-step login-step--centered">
+            <Clock class="text-slate-500" :size="32" />
+            <h3>مهلت درخواست به پایان رسید</h3>
+            <p>در مهلت تعیین‌شده پاسخی ثبت نشد. در صورت نیاز درخواست جدید ثبت کنید.</p>
+            <AppButton block @click="restartLoginFlow">شروع دوباره</AppButton>
+          </div>
         </transition>
 
-        <!-- Error Message -->
         <transition name="fade">
-          <div v-if="error" class="mt-6 p-4 bg-red-50/80 border border-red-100 text-red-600 text-sm rounded-xl text-center shadow-sm backdrop-blur-sm relative overflow-hidden">
-             <div class="absolute top-0 left-0 w-1 h-full bg-red-400"></div>
-             <div>{{ error }}</div>
-             <div v-if="canOfferAppRecovery" class="mt-3 flex flex-col items-center gap-2 text-xs text-red-500">
-               <span>اگر نسخهٔ قدیمی برنامه یا کش PWA گیر کرده، این بازنشانی امن را اجرا کنید.</span>
-               <button
-                 type="button"
-                 class="px-4 py-2 rounded-full bg-white text-red-600 font-bold border border-red-200 hover:bg-red-50 transition-colors"
-                 @click="startAppRecovery"
-               >
-                 پاک‌سازی کش برنامه و بارگذاری مجدد
-               </button>
-             </div>
+          <div v-if="error" class="login-error-box" role="alert">
+            <div>{{ error }}</div>
+            <div v-if="canOfferAppRecovery" class="login-error-actions">
+              <span>اگر نسخه قدیمی برنامه یا کش PWA گیر کرده، بازنشانی امن را اجرا کنید.</span>
+              <AppButton variant="danger" size="sm" @click="startAppRecovery">پاک‌سازی کش برنامه و بارگذاری مجدد</AppButton>
+            </div>
           </div>
         </transition>
-
-      </div>
+      </AppSectionCard>
 
       <input ref="recoveryFileInput" type="file" accept="image/*" class="hidden" @change="handleRecoveryFileInput" />
       <input ref="recoveryCameraInput" type="file" accept="image/*" capture="environment" class="hidden" @change="handleRecoveryFileInput" />
       <input ref="recoveryDocumentInput" type="file" accept="image/*,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden" @change="handleRecoveryFileInput" />
-      
-      <!-- Footer Info -->
-      <div class="text-center mt-8 text-xs text-gray-400 font-medium opacity-60 flex flex-col gap-2 relative z-50">
-        <div>نسخه ۲.۴.۰ • طراحی شده برای معامله‌گران</div>
-        
-        <button 
-          v-if="isDevMode" 
-          @click="startDevLogin" 
-          class="inline-block mt-2 px-3 py-1 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 transition-colors mx-auto w-max font-bold border border-amber-300">
-             ورود سریع ۱ ساله (توسعه‌دهنده)
-        </button>
-      </div>
-      
-    </div>
-  </div>
+
+      <footer class="login-footer">
+        <span>نسخه ۲.۴.۰</span>
+        <span>ویب‌اپ ویژه معامله‌گران</span>
+        <AppButton v-if="isDevMode" size="sm" variant="secondary" @click="startDevLogin">ورود سریع ۱ ساله</AppButton>
+      </footer>
+    </section>
+  </AppPage>
 </template>
 
 <style scoped>
-.animate-pulse-slow {
-  animation: pulse 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+.login-view {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.25rem 0;
 }
-.animate-pulse-slower {
-  animation: pulse 12s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+.login-card {
+  gap: 1rem;
+}
+
+.login-brand-mark {
+  width: 3rem;
+  height: 3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.login-step {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-step--centered {
+  text-align: center;
+  align-items: center;
+}
+
+.login-step--centered p,
+.login-step-copy p,
+.login-note-card,
+.login-footer {
+  color: var(--ds-text-muted);
+}
+
+.login-field-shell {
+  position: relative;
+}
+
+.login-field-icon {
+  position: absolute;
+  top: 50%;
+  left: 0.95rem;
+  transform: translateY(-50%);
+  color: var(--ds-text-muted);
+  pointer-events: none;
+}
+
+.login-input {
+  width: 100%;
+  min-height: 3rem;
+}
+
+.login-input--ltr {
+  padding-left: 2.75rem;
+  direction: ltr;
+  text-align: left;
+}
+
+.login-input--code {
+  padding-left: 2.75rem;
+  direction: ltr;
+  text-align: center;
+  letter-spacing: 0.4em;
+  font-weight: 800;
+}
+
+.login-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  background: rgba(245, 158, 11, 0.08);
+  color: #b45309;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.login-install,
+.login-stack-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.login-note-card,
+.login-upload-state,
+.login-error-box {
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--ds-surface-subtle);
+  font-size: 0.82rem;
+  line-height: 1.9;
+}
+
+.login-note-title {
+  color: var(--ds-text-strong);
+  font-weight: 800;
+  margin-bottom: 0.35rem;
+}
+
+.login-step-meta,
+.login-inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--ds-text-muted);
+}
+
+.login-link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ds-color-info-700, #0369a1);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.login-link-btn:hover {
+  opacity: 0.85;
+}
+
+.login-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.login-upload-state {
+  text-align: center;
+}
+
+.login-step h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 850;
+  color: var(--ds-text-strong);
+}
+
+.login-step p,
+.login-step-copy {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.9;
+}
+
+.login-error-box {
+  color: var(--ds-color-danger-700, #b91c1c);
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(254, 242, 242, 0.9);
+}
+
+.login-error-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.login-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+  font-size: 0.76rem;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
 }
 
 /* Slide Up Transition */
@@ -1130,7 +1189,15 @@ function goBackToMobile() {
   transform: translateY(-20px) scale(0.98);
 }
 
-.perspective-1000 {
-  perspective: 1000px;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 480px) {
+  .login-picker-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

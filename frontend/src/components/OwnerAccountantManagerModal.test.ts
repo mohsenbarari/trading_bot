@@ -65,7 +65,7 @@ async function openFirstAccountantDetail(wrapper: any) {
 }
 
 async function openDetailSection(wrapper: any, index: number) {
-  await wrapper.findAll('.detail-accordion > .ds-accordion-header')[index].trigger('click')
+  await wrapper.findAll('.detail-accordion > .accountant-accordion-header')[index].trigger('click')
   await flushPromises()
 }
 
@@ -143,7 +143,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
 
     expect(wrapper.find('.accountant-manager-page').exists()).toBe(true)
     expect(wrapper.find('.accountant-manager-backdrop').exists()).toBe(false)
-    expect(wrapper.find('.accountant-manager-header').exists()).toBe(false)
+    expect(wrapper.find('.accountant-owner-header').exists()).toBe(false)
     expect(wrapper.find('.accountant-manager-shell--workspace').exists()).toBe(true)
 
     await openRelationsPanel(wrapper)
@@ -334,7 +334,7 @@ describe('OwnerAccountantManagerModal.vue', () => {
     await wrapper.get('.create-display-name').setValue('حسابدار موقت')
     await wrapper.get('.create-mobile-number').setValue('09125555555')
     await wrapper.get('.create-duty-description').setValue('توضیح موقت')
-    await wrapper.get('.secondary-btn').trigger('click')
+    await wrapper.get('.accountant-secondary-control').trigger('click')
 
     expect((wrapper.get('.create-account-name').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('.create-display-name').element as HTMLInputElement).value).toBe('')

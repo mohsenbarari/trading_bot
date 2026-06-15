@@ -785,23 +785,23 @@ onBeforeUnmount(() => {
         class="customer-manager-shell"
         :class="{ 'customer-manager-shell--workspace': isWorkspace }"
       >
-        <div v-if="!isWorkspace" class="customer-manager-header">
+        <div v-if="!isWorkspace" class="customer-owner-header">
           <button type="button" class="customer-manager-back" aria-label="بازگشت" @click="closeManager">
             <ChevronLeft :size="24" />
           </button>
           <div class="customer-manager-title">
             <h3>مشتریان</h3>
           </div>
-          <span class="customer-manager-header-spacer" aria-hidden="true"></span>
+          <span class="customer-owner-header-spacer" aria-hidden="true"></span>
         </div>
 
         <div v-if="notice" class="customer-banner success">{{ notice }}</div>
         <div v-if="error" class="customer-banner error">{{ error }}</div>
 
         <section class="customer-panel customer-panel--accordion">
-          <div class="ds-accordion" :class="{ open: openSections.create }">
-            <div class="ds-accordion-header customer-main-menu-header" @click="toggleSection('create')">
-              <div class="ds-accordion-header-info customer-menu-title">
+          <div class="customer-accordion-panel" :class="{ open: openSections.create }">
+            <div class="customer-accordion-header customer-main-menu-header" @click="toggleSection('create')">
+              <div class="customer-accordion-header-info customer-menu-title">
                 <UserPlus :size="18" class="customer-section-icon" />
                 <h4>افزودن مشتری جدید</h4>
               </div>
@@ -812,10 +812,10 @@ onBeforeUnmount(() => {
                   label="راهنمای افزودن مشتری"
                   text="دعوت مشتری از همین پنل ثبت می‌شود و در صورت نیاز می‌توانید لینک ثبت‌نام را کپی کنید."
                 />
-                <ChevronLeft :size="20" class="ds-accordion-icon" />
+                <ChevronLeft :size="20" class="customer-accordion-chevron" />
               </div>
             </div>
-            <div v-show="openSections.create" class="ds-accordion-body customer-accordion-body">
+            <div v-show="openSections.create" class="customer-accordion-body-shell customer-accordion-body">
               <div class="customer-form-sections customer-form-sections--stacked">
                 <section class="form-subpanel">
                   <div class="form-subpanel-head">
@@ -883,18 +883,18 @@ onBeforeUnmount(() => {
                 </section>
 
                 <section class="form-subpanel form-subpanel--accordion">
-                  <div class="ds-accordion" :class="{ open: openSections.createLimits }">
-                    <div class="ds-accordion-header" @click.stop="toggleSection('createLimits')">
-                      <div class="ds-accordion-header-info">
+                  <div class="customer-accordion-panel" :class="{ open: openSections.createLimits }">
+                    <div class="customer-accordion-header" @click.stop="toggleSection('createLimits')">
+                      <div class="customer-accordion-header-info">
                         <SlidersHorizontal :size="16" class="customer-subsection-icon" />
                         <div>
                           <h5>محدودیت‌های معاملاتی</h5>
                           <p>همه فیلدهای این بخش اختیاری هستند</p>
                         </div>
                       </div>
-                      <ChevronLeft :size="18" class="ds-accordion-icon" />
+                      <ChevronLeft :size="18" class="customer-accordion-chevron" />
                     </div>
-                    <div v-show="openSections.createLimits" class="ds-accordion-body">
+                    <div v-show="openSections.createLimits" class="customer-accordion-body-shell">
                       <div class="customer-form-grid">
                         <label class="field-block">
                           <span>حداقل مقدار معامله</span>
@@ -923,8 +923,8 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="panel-actions">
-                <button type="button" class="secondary-btn" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن فرم</button>
-                <button type="button" class="primary-btn submit-create" :disabled="isSubmitting" @click="createRelation">
+                <button type="button" class="customer-secondary-control" :disabled="isSubmitting" @click="resetCreateForm">پاک کردن فرم</button>
+                <button type="button" class="customer-primary-control submit-create" :disabled="isSubmitting" @click="createRelation">
                   {{ isSubmitting ? 'در حال ثبت...' : 'ثبت مشتری' }}
                 </button>
               </div>
@@ -933,9 +933,9 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="customer-panel customer-panel--accordion">
-          <div class="ds-accordion" :class="{ open: openSections.relations }">
-            <div class="ds-accordion-header customer-main-menu-header" @click="toggleSection('relations')">
-              <div class="ds-accordion-header-info customer-menu-title">
+          <div class="customer-accordion-panel" :class="{ open: openSections.relations }">
+            <div class="customer-accordion-header customer-main-menu-header" @click="toggleSection('relations')">
+              <div class="customer-accordion-header-info customer-menu-title">
                 <Users :size="18" class="customer-section-icon" />
                 <h4>مدیریت مشتریان</h4>
               </div>
@@ -946,10 +946,10 @@ onBeforeUnmount(() => {
                   label="راهنمای لیست مشتریان"
                   text="برای مشتری فعال می‌توانید سطح و محدودیت‌ها را به‌روزرسانی یا ارتباط را قطع کنید."
                 />
-                <ChevronLeft :size="20" class="ds-accordion-icon" />
+                <ChevronLeft :size="20" class="customer-accordion-chevron" />
               </div>
             </div>
-            <div v-show="openSections.relations" class="ds-accordion-body customer-accordion-body">
+            <div v-show="openSections.relations" class="customer-accordion-body-shell customer-accordion-body">
               <div v-if="selectedRelation" class="customer-detail-page">
                 <div class="customer-detail-topbar">
                   <button type="button" class="ghost-btn ghost-btn--inline" @click="backToCustomerList">بازگشت به لیست</button>
@@ -959,18 +959,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailOverview }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailOverview')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailOverview }">
+                  <div class="customer-accordion-header" @click="toggleDetailSection('detailOverview')">
+                    <div class="customer-accordion-header-info">
                       <SlidersHorizontal :size="18" class="customer-section-icon" />
                       <div>
                         <h4>مشخصات و محدودیت‌ها</h4>
                         <p>سطح، کمیسیون و محدودیت‌های فعلی مشتری</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailOverview" class="ds-accordion-body customer-accordion-body">
+                  <div v-show="openSections.detailOverview" class="customer-accordion-body-shell customer-accordion-body">
                     <div class="form-subpanel">
                       <div class="form-subpanel-head">
                         <h5>ویرایش سریع</h5>
@@ -1041,8 +1041,8 @@ onBeforeUnmount(() => {
                         </label>
                       </div>
                       <div class="panel-actions compact">
-                        <button type="button" class="secondary-btn" :disabled="isSavingEdit" @click="clearDetailEditState">پاک کردن تغییرات</button>
-                        <button type="button" class="primary-btn save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
+                        <button type="button" class="customer-secondary-control" :disabled="isSavingEdit" @click="clearDetailEditState">پاک کردن تغییرات</button>
+                        <button type="button" class="customer-primary-control save-edit" :disabled="isSavingEdit" @click="saveDetailEdit">
                           {{ isSavingEdit ? 'در حال ذخیره...' : 'ذخیره تغییرات' }}
                         </button>
                       </div>
@@ -1051,18 +1051,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailTrades }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailTrades')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailTrades }">
+                  <div class="customer-accordion-header" @click="toggleDetailSection('detailTrades')">
+                    <div class="customer-accordion-header-info">
                       <ReceiptText :size="18" class="customer-section-icon" />
                       <div>
                         <h4>معاملات</h4>
                         <p>آخرین معاملات مشتری، مشابه تاریخچه معاملات</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailTrades" class="ds-accordion-body customer-accordion-body">
+                  <div v-show="openSections.detailTrades" class="customer-accordion-body-shell customer-accordion-body">
                     <div v-if="!selectedRelation.customer_user_id" class="customer-empty">این دعوت هنوز به کاربر فعال وصل نشده است.</div>
                     <div v-else-if="loadingTradesRelationId === selectedRelation.id" class="customer-loading">در حال دریافت معاملات...</div>
                     <div v-else-if="selectedRelationTrades.length === 0" class="customer-empty">معامله‌ای برای این مشتری ثبت نشده است.</div>
@@ -1086,18 +1086,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailStats }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailStats')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailStats }">
+                  <div class="customer-accordion-header" @click="toggleDetailSection('detailStats')">
+                    <div class="customer-accordion-header-info">
                       <BarChart3 :size="18" class="customer-section-icon" />
                       <div>
                         <h4>آمار</h4>
                         <p>تعداد معاملات، حجم کالا و سود کمیسیون در بازه انتخابی</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailStats" class="ds-accordion-body customer-accordion-body">
+                  <div v-show="openSections.detailStats" class="customer-accordion-body-shell customer-accordion-body">
                     <div class="stats-periods">
                       <button v-for="days in [1, 3, 7, 30, 90, 180]" :key="days" type="button" class="history-chip" :class="{ active: statsPeriodDays === days }" @click="setStatsPeriod(days)">
                         {{ days === 1 ? '۱ روز' : days === 3 ? '۳ روز' : days === 7 ? '۱ هفته' : days === 30 ? '۱ ماه' : days === 90 ? '۳ ماه' : '۶ ماه' }}
@@ -1134,18 +1134,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion" :class="{ open: openSections.detailSessions }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailSessions')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion customer-accordion-panel" :class="{ open: openSections.detailSessions }">
+                  <div class="customer-accordion-header" @click="toggleDetailSection('detailSessions')">
+                    <div class="customer-accordion-header-info">
                       <ShieldCheck :size="18" class="customer-section-icon" />
                       <div>
                         <h4>نشست مشتری</h4>
                         <p>مشاهده و منقضی کردن نشست‌های فعال مشتری</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailSessions" class="ds-accordion-body customer-accordion-body">
+                  <div v-show="openSections.detailSessions" class="customer-accordion-body-shell customer-accordion-body">
                     <div v-if="selectedRelation.status !== 'active' || !selectedRelation.customer_user_id" class="customer-empty">نشست فقط برای مشتری فعال قابل مدیریت است.</div>
                     <div v-else-if="loadingSessionsRelationId === selectedRelation.id" class="customer-loading session-loading">در حال دریافت نشست‌های مشتری...</div>
                     <div v-else-if="!getRelationSessions(selectedRelation.id).length" class="customer-empty session-empty">در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.</div>
@@ -1177,18 +1177,18 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="detail-accordion ds-accordion danger-accordion" :class="{ open: openSections.detailDanger }">
-                  <div class="ds-accordion-header" @click="toggleDetailSection('detailDanger')">
-                    <div class="ds-accordion-header-info">
+                <div class="detail-accordion customer-accordion-panel danger-accordion" :class="{ open: openSections.detailDanger }">
+                  <div class="customer-accordion-header" @click="toggleDetailSection('detailDanger')">
+                    <div class="customer-accordion-header-info">
                       <Users :size="18" class="customer-section-icon" />
                       <div>
                         <h4>قطع رابطه با مشتری</h4>
                         <p>غیرفعال کردن رابطه و دسترسی مشتری</p>
                       </div>
                     </div>
-                    <ChevronLeft :size="20" class="ds-accordion-icon" />
+                    <ChevronLeft :size="20" class="customer-accordion-chevron" />
                   </div>
-                  <div v-show="openSections.detailDanger" class="ds-accordion-body customer-accordion-body">
+                  <div v-show="openSections.detailDanger" class="customer-accordion-body-shell customer-accordion-body">
                     <p class="danger-copy">این عملیات رابطه این مشتری را غیرفعال می‌کند و باید فقط در صورت اطمینان انجام شود.</p>
                     <button v-if="selectedRelation.status === 'active'" type="button" class="danger-btn unlink-active" @click="unlinkRelation(selectedRelation)">قطع ارتباط با مشتری</button>
                     <button v-else-if="selectedRelation.status === 'pending'" type="button" class="danger-btn cancel-pending" @click="unlinkRelation(selectedRelation)">لغو دعوت مشتری</button>
@@ -1220,7 +1220,7 @@ onBeforeUnmount(() => {
                       <p>{{ getRelationStateText(relation) }}</p>
                     </div>
                     <div class="pending-invitation-actions">
-                      <button v-if="relation.registration_link" type="button" class="secondary-btn copy-link" @click="copyRegistrationLink(relation)">
+                      <button v-if="relation.registration_link" type="button" class="customer-secondary-control copy-link" @click="copyRegistrationLink(relation)">
                         {{ copiedRelationId === relation.id ? 'کپی شد' : 'کپی لینک' }}
                       </button>
                       <button type="button" class="danger-btn cancel-pending expire-pending-invitation" @click="unlinkRelation(relation)">
@@ -1271,7 +1271,7 @@ onBeforeUnmount(() => {
                         </span>
                       </div>
                       <div class="customer-card-footer">
-                        <button type="button" class="primary-btn customer-settings-btn" @click="openCustomerDetail(relation)">
+                        <button type="button" class="customer-primary-control customer-settings-btn" @click="openCustomerDetail(relation)">
                           تنظیمات مشتری
                         </button>
                       </div>
@@ -1330,7 +1330,7 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
-.customer-manager-header {
+.customer-owner-header {
   display: grid;
   grid-template-columns: 44px 1fr 44px;
   align-items: center;
@@ -1351,7 +1351,7 @@ onBeforeUnmount(() => {
   color: #d97706;
 }
 
-.customer-manager-header h3 {
+.customer-owner-header h3 {
   margin: 0;
   font-size: 1.35rem;
   color: #111827;
@@ -1359,8 +1359,8 @@ onBeforeUnmount(() => {
 
 .customer-manager-back,
 .ghost-btn,
-.primary-btn,
-.secondary-btn,
+.customer-primary-control,
+.customer-secondary-control,
 .danger-btn {
   border: 0;
   border-radius: 999px;
@@ -1385,18 +1385,18 @@ onBeforeUnmount(() => {
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
-.customer-manager-header-spacer {
+.customer-owner-header-spacer {
   width: 44px;
   height: 44px;
 }
 
 .ghost-btn,
-.secondary-btn {
+.customer-secondary-control {
   background: rgba(148, 163, 184, 0.14);
   color: #334155;
 }
 
-.primary-btn {
+.customer-primary-control {
   background: linear-gradient(135deg, #f59e0b, #f97316);
   color: #fff;
   box-shadow: 0 10px 24px rgba(249, 115, 22, 0.24);
@@ -1489,7 +1489,7 @@ onBeforeUnmount(() => {
   color: #92400e;
 }
 
-.menu-button {
+.customer-menu-action {
   width: 100%;
   min-height: 3.4rem;
   padding: 0.78rem 0.9rem;
@@ -1509,16 +1509,16 @@ onBeforeUnmount(() => {
   -webkit-tap-highlight-color: transparent;
 }
 
-.menu-button:hover {
+.customer-menu-action:hover {
   border-color: rgba(245, 158, 11, 0.3);
   background: #fffbeb;
 }
 
-.menu-button:active {
+.customer-menu-action:active {
   transform: scale(0.98);
 }
 
-.menu-button-icon {
+.customer-menu-action-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1530,7 +1530,7 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
 }
 
-.menu-button-copy {
+.customer-menu-action-copy {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -1539,12 +1539,12 @@ onBeforeUnmount(() => {
   gap: 0.18rem;
 }
 
-.menu-button-label {
+.customer-menu-action-label {
   flex: 1;
   min-width: 0;
 }
 
-.menu-button-note {
+.customer-menu-action-note {
   font-size: 0.72rem;
   line-height: 1.55;
   font-weight: 600;
@@ -1557,7 +1557,7 @@ onBeforeUnmount(() => {
   border-color: rgba(245, 158, 11, 0.2) !important;
 }
 
-.settings-btn .menu-button-icon {
+.settings-btn .customer-menu-action-icon {
   background: rgba(245, 158, 11, 0.12);
   color: #92400e;
 }
@@ -1566,7 +1566,7 @@ onBeforeUnmount(() => {
   border-radius: 1rem;
 }
 
-.customer-panel--accordion .ds-accordion {
+.customer-panel--accordion .customer-accordion-panel {
   border-radius: 1rem;
   border: 1px solid rgba(245, 158, 11, 0.18);
   background: linear-gradient(135deg, #fffbeb, #fef3c7);
@@ -1574,18 +1574,18 @@ onBeforeUnmount(() => {
   box-shadow: 0 10px 28px rgba(245, 158, 11, 0.08);
 }
 
-.customer-panel--accordion .ds-accordion-header {
+.customer-panel--accordion .customer-accordion-header {
   gap: 0.6rem;
   min-height: 3.28rem;
   padding: 0.72rem 0.82rem;
 }
 
-.customer-panel--accordion .ds-accordion-header-info {
+.customer-panel--accordion .customer-accordion-header-info {
   gap: 0.58rem;
 }
 
-.customer-panel--accordion .ds-accordion-header-info h4,
-.form-subpanel--accordion .ds-accordion-header-info h5 {
+.customer-panel--accordion .customer-accordion-header-info h4,
+.form-subpanel--accordion .customer-accordion-header-info h5 {
   margin: 0;
   color: #92400e;
 }
@@ -1622,20 +1622,20 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
-.form-subpanel--accordion .ds-accordion-header-info p {
+.form-subpanel--accordion .customer-accordion-header-info p {
   margin: 3px 0 0;
   font-size: 0.74rem;
   line-height: 1.55;
   color: #64748b;
 }
 
-.form-subpanel--accordion .ds-accordion-header-info h5,
-.detail-accordion .ds-accordion-header-info h4 {
+.form-subpanel--accordion .customer-accordion-header-info h5,
+.detail-accordion .customer-accordion-header-info h4 {
   font-size: 0.86rem;
   line-height: 1.7;
 }
 
-.detail-accordion .ds-accordion-header-info p {
+.detail-accordion .customer-accordion-header-info p {
   margin: 2px 0 0;
   color: #64748b;
   font-size: 0.74rem;
@@ -1711,13 +1711,13 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.form-subpanel--accordion .ds-accordion {
+.form-subpanel--accordion .customer-accordion-panel {
   border: 0;
   border-radius: 20px;
   background: transparent;
 }
 
-.form-subpanel--accordion .ds-accordion-body {
+.form-subpanel--accordion .customer-accordion-body-shell {
   padding-top: 2px;
 }
 

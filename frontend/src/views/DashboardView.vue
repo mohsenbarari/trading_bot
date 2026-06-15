@@ -410,13 +410,13 @@ onMounted(fetchUser)
         </AppSectionCard>
 
         <section class="dashboard-shortcuts" aria-label="میانبرهای اصلی">
-          <AppActionCard class="dashboard-shortcut-card dashboard-action-card" title="عملیات" description="مشتریان، حسابداران و مدیریت" @select="openOperations">
+          <AppActionCard class="dashboard-action-card dashboard-action-card" title="عملیات" description="مشتریان، حسابداران و مدیریت" @select="openOperations">
             <template #icon>
               <BriefcaseBusiness :size="20" />
             </template>
           </AppActionCard>
 
-          <AppActionCard class="dashboard-shortcut-card dashboard-action-card" title="حساب" description="پروفایل، تنظیمات و اعلان‌ها" @select="openAccountHub">
+          <AppActionCard class="dashboard-action-card dashboard-action-card" title="حساب" description="پروفایل، تنظیمات و اعلان‌ها" @select="openAccountHub">
             <template #icon>
               <UserRound :size="20" />
             </template>
@@ -511,7 +511,7 @@ onMounted(fetchUser)
 .notif-btn:focus-visible,
 .logout-btn:focus-visible,
 .hero-btn:focus-visible,
-.dashboard-shortcut-card:focus-visible,
+.dashboard-action-card:focus-visible,
 .today-trades-refresh:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
@@ -678,7 +678,7 @@ onMounted(fetchUser)
   gap: 0.75rem;
 }
 
-.dashboard-shortcut-card {
+.dashboard-action-card {
   min-width: 0;
   min-height: 96px;
 }
