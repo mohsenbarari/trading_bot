@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-15
-وضعیت: Stage 1 تا Stage 11 تکمیل شدند؛ Stage 11.1 مرحله بعدی است.
+وضعیت: Stage 1 تا Stage 11.1 تکمیل شدند؛ Stage 12 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -343,6 +343,7 @@ Gate نهایی Stage 12:
 | Stage 9 | Dashboard, Operations and Market polish | Completed |
 | Stage 10 | Small surfaces and auth/public utility pages | Completed |
 | Stage 11 | Micro-interaction and accessibility | Completed |
+| Stage 11.1 | Typography Consistency Audit | Completed |
 | Stage 12 | Visual QA and testing | Pending |
 | Stage 13 | Final Persian report | Pending |
 
@@ -579,9 +580,23 @@ Gate نهایی Stage 12:
 
 ### Stage 11.1 - Typography Consistency Audit
 
-- تمام badge/tag/caption/helper/eyebrow/meta textها از نظر اندازه، weight و کاربرد audit شوند.
-- نوشته‌های role/tag/status نباید بزرگ‌تر از اهمیت بصری خود باشند.
-- heading/body/meta/badge scale باید به semantic typography tokens متکی شود، نه مقادیر feature-level پراکنده.
+وضعیت: Completed on 2026-06-15.
+
+خروجی انجام‌شده:
+
+- در shared design tokens چهار semantic typography token اضافه شد: `--ds-font-eyebrow`, `--ds-font-badge`, `--ds-font-meta`, `--ds-font-helper`.
+- shared primitives به این scale جدید متکی شدند تا eyebrow/badge/meta/helper دیگر فقط به `xs` خام یا اندازه‌های پراکنده متکی نباشند. این شامل `ds-hint`, `ds-workspace-eyebrow`, `ds-action-tile-badge`, `ds-stat-label`, `ui-page-header__eyebrow`, `ui-status-badge`, `ui-action-card__badge`, `ui-metric-card__label`, `ui-metric-card__hint`, `ui-form-field__hint`, `ui-form-field__error` و eyebrow دیالوگ تایید است.
+- `AdminMessagesView.vue` از نظر meta/badge typography جمع شد: `status-meta`, `composer-hint`, `target-summary`, `market-pin-footer`, `inline-help-note`, `admin-market-preview-title`, `date-chip`, `status-pill`, `history-badge` و `audience-title` حالا روی scale مشترک کوچک‌تر و متناسب‌تر نشسته‌اند.
+- `CreateChannelView.vue` از نظر tag/meta typography یکدست شد: `avatar-edit-badge`, `hero-meta`, `hero-description`, `row-subtitle`, `row-meta`, `field-label`, `section-heading` و badgeهای نقش کانال (`admin/member/creator`) به tokenهای جدید متصل شدند.
+- `PublicProfile.vue` هم در بخش‌های non-messenger مربوط به history/customer/accountant consistency گرفت: `history-chip`, `history-filter-field`, `history-filter-hint`, `history-filter-summary`, badgeهای highlight/tier و `trade-counterparty` به scale مشترک meta/helper/badge منتقل شدند.
+- در این stage headingهای اصلی و body text عمداً دست‌کاری گسترده نشدند؛ تمرکز فقط روی متن‌هایی بود که اهمیت بصری‌شان از نقش واقعی‌شان بزرگ‌تر شده بود.
+
+اعتبارسنجی Stage 11.1:
+
+- `npm run test:unit:run -- src/components/AdminMessagesView.test.ts src/components/CreateChannelView.test.ts src/components/PublicProfile.test.ts` پاس شد: `53/53`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 12 - Visual QA
 

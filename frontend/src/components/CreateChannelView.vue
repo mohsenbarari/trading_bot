@@ -1692,7 +1692,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.82);
   color: #fff;
-  font-size: 0.64rem;
+  font-size: var(--ds-font-badge);
   font-weight: 900;
   display: inline-flex;
   align-items: center;
@@ -1767,6 +1767,7 @@ onBeforeUnmount(() => {
 .hero-meta,
 .hero-description {
   color: #64748b;
+  font-size: var(--ds-font-meta);
 }
 
 .hero-description {
@@ -1839,7 +1840,7 @@ onBeforeUnmount(() => {
 }
 
 .row-subtitle {
-  font-size: 0.8rem;
+  font-size: var(--ds-font-meta);
   color: #64748b;
   line-height: 1.7;
   white-space: nowrap;
@@ -1901,7 +1902,7 @@ onBeforeUnmount(() => {
 
 .row-meta {
   color: #64748b;
-  font-size: 0.82rem;
+  font-size: var(--ds-font-meta);
   font-weight: 800;
 }
 
@@ -1929,7 +1930,7 @@ onBeforeUnmount(() => {
 
 .field-label,
 .section-heading {
-  font-size: 0.84rem;
+  font-size: var(--ds-font-helper);
   font-weight: 800;
   color: #475569;
 }
@@ -1941,7 +1942,7 @@ onBeforeUnmount(() => {
   min-height: 22px;
   padding: 0 9px;
   border-radius: 999px;
-  font-size: 0.7rem;
+  font-size: var(--ds-font-badge);
   font-weight: 900;
 }
 

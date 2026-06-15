@@ -2664,7 +2664,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   color: #9a3412;
   border-radius: 999px;
   padding: 8px 12px;
-  font-size: 0.82rem;
+  font-size: var(--ds-font-helper);
   font-weight: 700;
   cursor: pointer;
 }
@@ -2685,7 +2685,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 0.84rem;
+  font-size: var(--ds-font-helper);
   color: var(--ds-text-secondary);
 }
 
@@ -2710,7 +2710,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .history-filter-hint {
   color: var(--ds-text-secondary);
-  font-size: 0.78rem;
+  font-size: var(--ds-font-helper);
   font-weight: 700;
 }
 
@@ -2748,7 +2748,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 .history-filter-summary {
   margin: 0;
   color: var(--ds-text-secondary);
-  font-size: 0.82rem;
+  font-size: var(--ds-font-meta);
 }
 
 .history-error-text {
@@ -2828,7 +2828,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-radius: 999px;
   background: rgba(245, 158, 11, 0.12);
   color: var(--ds-primary-700);
-  font-size: 0.78rem;
+  font-size: var(--ds-font-badge);
   font-weight: 700;
 }
 
@@ -2838,7 +2838,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-radius: 999px;
   background: var(--ds-primary-50);
   color: var(--ds-primary-700);
-  font-size: 0.78rem;
+  font-size: var(--ds-font-badge);
   font-weight: 700;
 }
 
@@ -2931,7 +2931,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   border-top: 1px dashed var(--ds-border-medium);
   display: flex;
   justify-content: space-between;
-  font-size: 0.8rem;
+  font-size: var(--ds-font-meta);
 }
 
 .trade-counterparty .label {

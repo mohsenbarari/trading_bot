@@ -114,6 +114,10 @@
     --ds-font-lg:   1rem;
     --ds-font-xl:   1.1rem;
     --ds-font-2xl:  1.2rem;
+    --ds-font-eyebrow: var(--ds-font-xs);
+    --ds-font-badge: var(--ds-font-xs);
+    --ds-font-meta: var(--ds-font-xs);
+    --ds-font-helper: var(--ds-font-xs);
 
     /* Page max-width */
     --ds-page-max-width: 480px;
@@ -643,7 +647,7 @@
   }
 
   .ds-hint {
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-helper);
     color: var(--ds-text-muted);
     padding: 0 4px;
   }
@@ -692,7 +696,7 @@
   .ds-workspace-eyebrow {
     margin: 0;
     color: var(--ds-primary-700);
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-eyebrow);
     font-weight: 800;
   }
 
@@ -883,7 +887,7 @@
     background: var(--ds-primary-100);
     color: var(--ds-primary-700);
     padding: 0.15rem 0.5rem;
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-badge);
     font-weight: 800;
   }
 
@@ -978,7 +982,7 @@
   .ds-stat-label,
   .ds-stat-hint {
     color: var(--ds-text-muted);
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-meta);
     line-height: 1.7;
   }
 
@@ -1119,7 +1123,7 @@
   .ui-page-header__eyebrow {
     margin: 0 0 0.2rem;
     color: var(--ds-primary-700);
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-eyebrow);
     font-weight: 900;
     line-height: 1.6;
   }
@@ -1495,7 +1499,7 @@
   .ui-status-badge {
     border-radius: var(--ds-radius-full);
     padding: 0.16rem 0.55rem;
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-badge);
     font-weight: 850;
     line-height: 1.6;
   }
@@ -1523,7 +1527,7 @@
   .ui-metric-card__label,
   .ui-metric-card__hint {
     color: var(--ds-text-muted);
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-meta);
     line-height: 1.7;
   }
 
@@ -1660,7 +1664,7 @@
 
   .ui-form-field__hint,
   .ui-form-field__error {
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-helper);
     line-height: 1.7;
     padding-inline-start: 0.15rem;
   }
@@ -2051,7 +2055,7 @@
   .ui-confirm-dialog__eyebrow {
     margin: 0 0 0.2rem;
     color: var(--ds-text-placeholder);
-    font-size: var(--ds-font-xs);
+    font-size: var(--ds-font-eyebrow);
     font-weight: 800;
     line-height: 1.6;
   }

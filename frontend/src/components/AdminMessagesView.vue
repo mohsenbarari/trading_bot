@@ -699,6 +699,7 @@ onMounted(loadDashboard)
 .target-summary {
   margin: 0;
   color: #64748b;
+  font-size: var(--ds-font-meta);
   line-height: 1.75;
 }
 
@@ -713,7 +714,7 @@ onMounted(loadDashboard)
 .admin-market-preview-title {
   margin: 0 0 0.2rem;
   color: #b45309;
-  font-size: 0.82rem;
+  font-size: var(--ds-font-helper);
   font-weight: 950;
 }
 
@@ -739,7 +740,7 @@ onMounted(loadDashboard)
   align-items: center;
   gap: 0.8rem;
   color: #64748b;
-  font-size: 0.8rem;
+  font-size: var(--ds-font-meta);
 }
 
 .history-header--market {
@@ -807,7 +808,7 @@ onMounted(loadDashboard)
   border: 1px solid rgba(15, 118, 110, 0.12);
   background: rgba(240, 253, 250, 0.92);
   color: #0f4c48;
-  font-size: 0.78rem;
+  font-size: var(--ds-font-helper);
   line-height: 1.8;
   box-shadow: 0 10px 20px rgba(15, 118, 110, 0.08);
 }
@@ -855,7 +856,7 @@ onMounted(loadDashboard)
   min-height: 1.9rem;
   padding: 0 0.75rem;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: var(--ds-font-badge);
   font-weight: 900;
 }
 
@@ -892,7 +893,7 @@ onMounted(loadDashboard)
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
-  font-size: 0.82rem;
+  font-size: var(--ds-font-helper);
   font-weight: 900;
   color: #0f172a;
 }
