@@ -150,6 +150,31 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
+  it('routes invited users to registration completion after OTP verification', async () => {
+    const fetchMock = vi.mocked(fetch)
+    fetchMock
+      .mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
+      .mockResolvedValueOnce(
+        makeJsonResponse({
+          status: 'registration_required',
+          registration_token: 'REG-123',
+        }) as any,
+      )
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    await wrapper.get('input[type="tel"]').setValue('09123456789')
+    await flushPromises()
+    await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
+    await flushPromises()
+
+    expect(clearBackStackMock).toHaveBeenCalled()
+    expect(routerPushMock).toHaveBeenCalledWith('/register?registration_token=REG-123')
+    expect(localStorage.getItem('auth_token')).toBeNull()
+    wrapper.unmount()
+  })
+
   it('primes the current user cache before routing after a successful OTP verification', async () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock

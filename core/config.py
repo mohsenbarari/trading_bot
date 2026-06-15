@@ -95,8 +95,13 @@ class Settings(BaseSettings):
     smsir_line_number: int | None = None
     smsir_base_url: str = "https://api.sms.ir"
     smsir_timeout_seconds: float = 10.0
-    smsir_otp_template_id: str | None = None
-    smsir_otp_template_parameter: str = "Code"
+    smsir_otp_template_id: str | None = "585147"
+    smsir_otp_template_parameter: str = "CODE"
+    smsir_invitation_template_id: str | None = "657938"
+    smsir_invitation_template_parameter: str = "NAME"
+    smsir_accountant_invitation_template_id: str | None = "162103"
+    smsir_customer_invitation_template_id: str | None = "903643"
+    invitation_registration_session_ttl_seconds: int = 600
     
     class Config:
         env_file = ".env"

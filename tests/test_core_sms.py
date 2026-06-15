@@ -131,7 +131,10 @@ class CoreSmsTests(unittest.TestCase):
 
         args = send_sms_mock.call_args.args
         self.assertEqual(args[0], "09120000000")
-        self.assertIn("12345", args[1])
+        self.assertEqual(
+            args[1],
+            "کد تایید شما: 12345\nاین کد تا ۲ دقیقه معتبر است.\ncoin.gold-trade.ir/",
+        )
 
     def test_send_otp_sms_returns_false_for_invalid_template_id(self):
         with patch.object(sms.settings, "smsir_otp_template_id", "abc"), patch(
@@ -179,8 +182,10 @@ class CoreSmsTests(unittest.TestCase):
             },
         )
 
-    def test_send_invitation_sms_formats_message_and_delegates(self):
-        with patch("core.sms.send_sms", return_value=True) as send_sms_mock:
+    def test_send_invitation_sms_uses_template_parameters(self):
+        with patch.object(sms.settings, "smsir_invitation_template_id", "657938"), patch.object(
+            sms.settings, "smsir_invitation_template_parameter", "NAME"
+        ), patch("core.sms._send_template_sms", return_value=True) as template_mock:
             self.assertTrue(
                 sms.send_invitation_sms(
                     "09120000000",
@@ -190,21 +195,16 @@ class CoreSmsTests(unittest.TestCase):
                 )
             )
 
-        message = send_sms_mock.call_args.args[1]
-        self.assertEqual(
-            message,
-            (
-                "کاربر گرامی شما بعنوان معامله گر به سامانه معاملاتی دعوت شدین.\n"
-                "برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
-                "https://app.example/register"
-            ),
+        template_mock.assert_called_once_with(
+            "09120000000",
+            template_id=657938,
+            parameters=[{"name": "NAME", "value": "demo"}],
         )
-        self.assertNotIn("demo", message)
-        self.assertNotIn("https://t.me/demo", message)
-        self.assertNotIn("تلگرام", message)
 
-    def test_send_accountant_invitation_sms_formats_message_and_delegates(self):
-        with patch("core.sms.send_sms", return_value=True) as send_sms_mock:
+    def test_send_accountant_invitation_sms_uses_template_parameters(self):
+        with patch.object(sms.settings, "smsir_accountant_invitation_template_id", "162103"), patch.object(
+            sms.settings, "smsir_invitation_template_parameter", "NAME"
+        ), patch("core.sms._send_template_sms", return_value=True) as template_mock:
             self.assertTrue(
                 sms.send_accountant_invitation_sms(
                     "09120000000",
@@ -213,20 +213,16 @@ class CoreSmsTests(unittest.TestCase):
                 )
             )
 
-        args = send_sms_mock.call_args.args
-        self.assertEqual(args[0], "09120000000")
-        self.assertEqual(
-            args[1],
-            (
-                "کاربر گرامی شما بعنوان حسابدار به سامانه معاملاتی دعوت شدین\n"
-                "برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
-                "https://app.example/accountant-register"
-            ),
+        template_mock.assert_called_once_with(
+            "09120000000",
+            template_id=162103,
+            parameters=[{"name": "NAME", "value": "accountant demo"}],
         )
-        self.assertNotIn("accountant demo", args[1])
 
-    def test_send_customer_invitation_sms_formats_message_and_delegates(self):
-        with patch("core.sms.send_sms", return_value=True) as send_sms_mock:
+    def test_send_customer_invitation_sms_uses_template_parameters(self):
+        with patch.object(sms.settings, "smsir_customer_invitation_template_id", "903643"), patch.object(
+            sms.settings, "smsir_invitation_template_parameter", "NAME"
+        ), patch("core.sms._send_template_sms", return_value=True) as template_mock:
             self.assertTrue(
                 sms.send_customer_invitation_sms(
                     "09120000000",
@@ -235,17 +231,11 @@ class CoreSmsTests(unittest.TestCase):
                 )
             )
 
-        args = send_sms_mock.call_args.args
-        self.assertEqual(args[0], "09120000000")
-        self.assertEqual(
-            args[1],
-            (
-                "کاربر گرامی شما بعنوان مشتری به سامانه معاملاتی دعوت شدین\n"
-                "برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
-                "https://app.example/customer-register"
-            ),
+        template_mock.assert_called_once_with(
+            "09120000000",
+            template_id=903643,
+            parameters=[{"name": "NAME", "value": "customer alias"}],
         )
-        self.assertNotIn("customer alias", args[1])
 
 
 if __name__ == "__main__":

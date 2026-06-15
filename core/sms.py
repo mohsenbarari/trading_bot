@@ -1,7 +1,5 @@
 # core/sms.py
-"""
-SMS service using SMS.ir REST APIs for OTP delivery and notifications.
-"""
+"""SMS service using SMS.ir template/bulk APIs for OTP delivery and notifications."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +8,6 @@ from typing import Any
 import httpx
 
 from core.config import settings
-from core.deployment_surface import sms_public_host
 from core.log_redaction import mask_mobile
 from core.utils import normalize_persian_numerals
 
@@ -89,29 +86,27 @@ def _post_smsir(path: str, payload: dict[str, Any]) -> dict[str, Any] | None:
     return data
 
 
-def _configured_otp_template_id() -> int | None:
-    raw_template_id = settings.smsir_otp_template_id
+def _configured_template_id(raw_template_id: str | int | None, *, setting_name: str) -> int | None:
     if raw_template_id is None or str(raw_template_id).strip() == "":
         return None
 
     try:
         return int(str(raw_template_id).strip())
     except ValueError as exc:
-        raise RuntimeError("SMSIR_OTP_TEMPLATE_ID must be an integer") from exc
+        raise RuntimeError(f"{setting_name} must be an integer") from exc
 
 
-def _send_verify_sms(mobile: str, code: str, template_id: int) -> bool:
-    parameter_name = (settings.smsir_otp_template_parameter or "Code").strip() or "Code"
+def _send_template_sms(
+    mobile: str,
+    *,
+    template_id: int,
+    parameters: list[dict[str, str]],
+) -> bool:
     normalized_mobile = _normalize_mobile(mobile)
     payload = {
         "mobile": normalized_mobile,
         "templateId": template_id,
-        "parameters": [
-            {
-                "name": parameter_name,
-                "value": str(code),
-            }
-        ],
+        "parameters": parameters,
     }
     data = _post_smsir("v1/send/verify", payload)
     if data is None:
@@ -122,7 +117,7 @@ def _send_verify_sms(mobile: str, code: str, template_id: int) -> bool:
         logger.error("SMS.ir verify send returned no usable messageId for %s", mask_mobile(normalized_mobile))
         return False
 
-    logger.info("SMS.ir verify SMS sent to %s", mask_mobile(normalized_mobile))
+    logger.info("SMS.ir template SMS sent to %s template_id=%s", mask_mobile(normalized_mobile), template_id)
     return True
 
 
@@ -167,20 +162,26 @@ def send_sms(mobile: str, message: str) -> bool:
 def send_otp_sms(mobile: str, code: str) -> bool:
     """Send OTP code via SMS.ir verify template when configured, otherwise via plain SMS."""
     try:
-        template_id = _configured_otp_template_id()
+        template_id = _configured_template_id(
+            settings.smsir_otp_template_id,
+            setting_name="SMSIR_OTP_TEMPLATE_ID",
+        )
     except RuntimeError as exc:
         logger.error("Invalid SMS.ir OTP configuration: %s", exc)
         return False
 
     if template_id is not None:
-        return _send_verify_sms(mobile, code, template_id)
+        parameter_name = (settings.smsir_otp_template_parameter or "CODE").strip() or "CODE"
+        return _send_template_sms(
+            mobile,
+            template_id=template_id,
+            parameters=[{"name": parameter_name, "value": str(code)}],
+        )
 
-    public_host = sms_public_host(settings)
     message = (
         f"کد تایید شما: {code}\n"
         f"این کد تا ۲ دقیقه معتبر است.\n"
-        f"\n"
-        f"@{public_host} #{code}"
+        f"coin.gold-trade.ir/"
     )
     return send_sms(mobile, message)
 
@@ -191,18 +192,27 @@ def send_invitation_sms(
     bot_link: str,
     web_link: str,
 ) -> bool:
-    """
-    Send invitation SMS with the web registration link only.
+    """Send general invitation SMS through the dedicated SMS.ir template."""
+    del bot_link, web_link
+    try:
+        template_id = _configured_template_id(
+            settings.smsir_invitation_template_id,
+            setting_name="SMSIR_INVITATION_TEMPLATE_ID",
+        )
+    except RuntimeError as exc:
+        logger.error("Invalid SMS.ir invitation configuration: %s", exc)
+        return False
 
-    bot_link is kept in the signature for caller compatibility while Telegram
-    registration links are temporarily paused in SMS content.
-    """
-    message = (
-        f"کاربر گرامی شما بعنوان معامله گر به سامانه معاملاتی دعوت شدین.\n"
-        f"برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
-        f"{web_link}"
+    if template_id is None:
+        logger.error("SMSIR_INVITATION_TEMPLATE_ID is not configured")
+        return False
+
+    parameter_name = (settings.smsir_invitation_template_parameter or "NAME").strip() or "NAME"
+    return _send_template_sms(
+        mobile,
+        template_id=template_id,
+        parameters=[{"name": parameter_name, "value": str(account_name).strip() or "کاربر"}],
     )
-    return send_sms(mobile, message)
 
 
 def send_accountant_invitation_sms(
@@ -210,13 +220,27 @@ def send_accountant_invitation_sms(
     relation_display_name: str,
     web_link: str,
 ) -> bool:
-    """Send accountant invitation SMS with a web-only registration link."""
-    message = (
-        f"کاربر گرامی شما بعنوان حسابدار به سامانه معاملاتی دعوت شدین\n"
-        f"برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
-        f"{web_link}"
+    """Send accountant invitation SMS through the dedicated SMS.ir template."""
+    del web_link
+    try:
+        template_id = _configured_template_id(
+            settings.smsir_accountant_invitation_template_id,
+            setting_name="SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID",
+        )
+    except RuntimeError as exc:
+        logger.error("Invalid SMS.ir accountant invitation configuration: %s", exc)
+        return False
+
+    if template_id is None:
+        logger.error("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID is not configured")
+        return False
+
+    parameter_name = (settings.smsir_invitation_template_parameter or "NAME").strip() or "NAME"
+    return _send_template_sms(
+        mobile,
+        template_id=template_id,
+        parameters=[{"name": parameter_name, "value": str(relation_display_name).strip() or "کاربر"}],
     )
-    return send_sms(mobile, message)
 
 
 def send_customer_invitation_sms(
@@ -224,10 +248,24 @@ def send_customer_invitation_sms(
     management_name: str,
     web_link: str,
 ) -> bool:
-    """Send customer invitation SMS with a web-only registration link."""
-    message = (
-        f"کاربر گرامی شما بعنوان مشتری به سامانه معاملاتی دعوت شدین\n"
-        f"برای تکمیل ثبت نام از طریق لینک زیر اقدام فرمایید:\n"
-        f"{web_link}"
+    """Send customer invitation SMS through the dedicated SMS.ir template."""
+    del web_link
+    try:
+        template_id = _configured_template_id(
+            settings.smsir_customer_invitation_template_id,
+            setting_name="SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID",
+        )
+    except RuntimeError as exc:
+        logger.error("Invalid SMS.ir customer invitation configuration: %s", exc)
+        return False
+
+    if template_id is None:
+        logger.error("SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID is not configured")
+        return False
+
+    parameter_name = (settings.smsir_invitation_template_parameter or "NAME").strip() or "NAME"
+    return _send_template_sms(
+        mobile,
+        template_id=template_id,
+        parameters=[{"name": parameter_name, "value": str(management_name).strip() or "کاربر"}],
     )
-    return send_sms(mobile, message)

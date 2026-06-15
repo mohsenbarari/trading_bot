@@ -16,6 +16,7 @@ vi.mock('vue-router', () => ({
 describe('WebRegister.vue', () => {
   beforeEach(() => {
     webRegisterMocks.route.query.token = 'invite-token'
+    delete (webRegisterMocks.route.query as any).registration_token
     webRegisterMocks.replace.mockReset()
     webRegisterMocks.fetch.mockReset()
     localStorage.clear()
@@ -99,5 +100,32 @@ describe('WebRegister.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('آدرس باید حداقل ۱۰ کاراکتر باشد.')
+  })
+
+  it('loads the registration session flow after login OTP verification', async () => {
+    delete (webRegisterMocks.route.query as any).token
+    ;(webRegisterMocks.route.query as any).registration_token = 'REG-123'
+
+    webRegisterMocks.fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ account_name: 'test_user', mobile_number: '09120000000', role: 'عادی' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-2', refresh_token: 'refresh-2' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+
+    const wrapper = mount(WebRegister)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('آدرس دقیق پستی:')
+    expect(wrapper.text()).toContain('test_user')
+    await wrapper.get('textarea.address-input').setValue('تهران، خیابان مثال، پلاک ۹۹')
+    await wrapper.findAll('button').find((button) => button.text().includes('تکمیل ثبت‌نام'))!.trigger('click')
+    await flushPromises()
+
+    expect(localStorage.getItem('auth_token')).toBe('access-2')
+    expect(localStorage.getItem('refresh_token')).toBe('refresh-2')
   })
 })

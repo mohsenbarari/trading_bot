@@ -271,14 +271,20 @@ async function verifyOtp() {
     }
     
     const data = await res.json()
-      localStorage.removeItem('suspended_refresh_token')
-    
+    localStorage.removeItem('suspended_refresh_token')
+
     // Session management: check if approval is required
     if (data.status === 'approval_required') {
       loginRequestId.value = data.login_request_id
       approvalExpiresAt.value = data.expires_at
       step.value = 'waiting_approval'
       startApprovalPolling()
+      return
+    }
+
+    if (data.status === 'registration_required' && data.registration_token) {
+      clearBackStack()
+      router.push(`/register?registration_token=${encodeURIComponent(data.registration_token)}`)
       return
     }
     

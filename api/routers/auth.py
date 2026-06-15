@@ -6,6 +6,7 @@ import logging
 from pydantic import BaseModel
 from typing import Optional
 import random
+import secrets
 import hashlib
 import hmac
 import time
@@ -238,7 +239,8 @@ class RegisterOTPVerify(BaseModel):
     code: str
 
 class RegisterComplete(BaseModel):
-    token: str
+    token: str | None = None
+    registration_token: str | None = None
     address: str
 
 class RefreshTokenRequest(BaseModel):
@@ -255,7 +257,105 @@ class TestSwitchUserOption(BaseModel):
     is_customer: bool = False
     customer_tier: CustomerTier | None = None
 
+
+class PendingRegistrationContext(BaseModel):
+    token: str
+    account_name: str
+    mobile_number: str
+    role: UserRole
+
 # --- Endpoints ---
+
+def _registration_session_key(registration_token: str) -> str:
+    return f"registration_session:{registration_token}"
+
+
+async def _load_valid_invitation_by_token(
+    db: AsyncSession,
+    token: str,
+    *,
+    missing_detail: str = "دعوت‌نامه نامعتبر است",
+) -> tuple[Invitation, object | None, object | None]:
+    stmt = select(Invitation).where(Invitation.token == token)
+    invitation = (await db.execute(stmt)).scalar_one_or_none()
+    if not invitation:
+        raise HTTPException(status_code=404, detail=missing_detail)
+    if invitation.is_used:
+        raise HTTPException(status_code=400, detail="دعوت‌نامه قبلاً استفاده شده است")
+    if invitation.expires_at < utc_now_naive():
+        raise HTTPException(status_code=400, detail="دعوت‌نامه منقضی شده است")
+
+    accountant_relation = None
+    customer_relation = None
+    if is_accountant_invitation_token(token):
+        accountant_relation = await get_pending_accountant_relation_by_invitation_token(db, token)
+        if not accountant_relation:
+            raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
+    elif is_customer_invitation_token(token):
+        customer_relation = await get_pending_customer_relation_by_invitation_token(db, token)
+        if not customer_relation:
+            raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
+
+    return invitation, accountant_relation, customer_relation
+
+
+async def _find_pending_invitation_for_mobile(
+    db: AsyncSession,
+    mobile: str,
+) -> tuple[Invitation, object | None, object | None] | None:
+    stmt = (
+        select(Invitation)
+        .where(
+            Invitation.mobile_number == mobile,
+            Invitation.is_used == False,
+        )
+        .order_by(Invitation.created_at.desc(), Invitation.id.desc())
+    )
+    invitations = list((await db.execute(stmt)).scalars().all())
+    for invitation in invitations:
+        if invitation.expires_at < utc_now_naive():
+            continue
+        try:
+            return await _load_valid_invitation_by_token(
+                db,
+                invitation.token,
+                missing_detail="دعوت‌نامه نامعتبر است",
+            )
+        except HTTPException:
+            continue
+    return None
+
+
+def _serialize_pending_registration_context(invitation: Invitation) -> PendingRegistrationContext:
+    return PendingRegistrationContext(
+        token=invitation.token,
+        account_name=invitation.account_name,
+        mobile_number=invitation.mobile_number,
+        role=invitation.role,
+    )
+
+
+async def _store_registration_session(
+    redis,
+    *,
+    invitation_token: str,
+) -> tuple[str, int]:
+    registration_token = f"REG-{secrets.token_hex(16)}"
+    ttl = max(60, int(settings.invitation_registration_session_ttl_seconds))
+    await redis.setex(_registration_session_key(registration_token), ttl, invitation_token)
+    return registration_token, ttl
+
+
+async def _load_registration_session_invitation(
+    db: AsyncSession,
+    redis,
+    *,
+    registration_token: str,
+) -> tuple[Invitation, object | None, object | None]:
+    invitation_token = await redis.get(_registration_session_key(registration_token))
+    if not invitation_token:
+        raise HTTPException(status_code=400, detail="جلسه تکمیل ثبت‌نام منقضی شده است")
+    return await _load_valid_invitation_by_token(db, invitation_token, missing_detail="دعوت‌نامه نامعتبر است")
 
 def _serialize_current_user_response(
     current_user: User,
@@ -353,25 +453,7 @@ async def register_otp_request(
     req: RegisterOTPRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    # Validate invitation
-    stmt = select(Invitation).where(Invitation.token == req.token)
-    inv = (await db.execute(stmt)).scalar_one_or_none()
-    
-    if not inv:
-        raise HTTPException(status_code=404, detail="دعوت‌نامه نامعتبر است")
-    if inv.is_used:
-        raise HTTPException(status_code=400, detail="دعوت‌نامه قبلاً استفاده شده است")
-    if inv.expires_at < utc_now_naive():
-        raise HTTPException(status_code=400, detail="دعوت‌نامه منقضی شده است")
-
-    if is_accountant_invitation_token(req.token):
-        relation = await get_pending_accountant_relation_by_invitation_token(db, req.token)
-        if not relation:
-            raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
-    elif is_customer_invitation_token(req.token):
-        relation = await get_pending_customer_relation_by_invitation_token(db, req.token)
-        if not relation:
-            raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
+    inv, _, _ = await _load_valid_invitation_by_token(db, req.token)
     mobile = inv.mobile_number
     
     # Rate limiting
@@ -420,31 +502,30 @@ async def register_complete(
     raw_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    # 1. Check verify flag
     redis = await get_redis()
-    verify_key = f"reg_verified:{req.token}"
-    if not await redis.get(verify_key):
-        raise HTTPException(status_code=400, detail="لطفاً ابتدا کد تایید را وارد کنید")
-    
-    # 2. Validate invitation again
-    stmt = select(Invitation).where(Invitation.token == req.token)
-    inv = (await db.execute(stmt)).scalar_one_or_none()
-    
-    if not inv or inv.is_used or inv.expires_at < utc_now_naive():
-        raise HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")
 
-    accountant_relation = None
-    customer_relation = None
-    if is_accountant_invitation_token(req.token):
-        accountant_relation = await get_pending_accountant_relation_by_invitation_token(db, req.token)
-        if not accountant_relation:
-            raise HTTPException(status_code=400, detail="دعوت‌نامه حسابدار نامعتبر یا منقضی شده است")
-    elif is_customer_invitation_token(req.token):
-        customer_relation = await get_pending_customer_relation_by_invitation_token(db, req.token)
-        if not customer_relation:
-            raise HTTPException(status_code=400, detail="دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
-        
-    # 3. Create User
+    invitation_token = (req.token or "").strip()
+    registration_token = (req.registration_token or "").strip()
+
+    if registration_token:
+        inv, accountant_relation, customer_relation = await _load_registration_session_invitation(
+            db,
+            redis,
+            registration_token=registration_token,
+        )
+        verify_key = None
+    else:
+        if not invitation_token:
+            raise HTTPException(status_code=400, detail="توکن دعوت یا جلسه ثبت‌نام الزامی است")
+        verify_key = f"reg_verified:{invitation_token}"
+        if not await redis.get(verify_key):
+            raise HTTPException(status_code=400, detail="لطفاً ابتدا کد تایید را وارد کنید")
+        inv, accountant_relation, customer_relation = await _load_valid_invitation_by_token(
+            db,
+            invitation_token,
+            missing_detail="دعوت‌نامه نامعتبر است",
+        )
+
     new_user = User(
         account_name=inv.account_name,
         mobile_number=inv.mobile_number,
@@ -462,7 +543,6 @@ async def register_complete(
     
     db.add(new_user)
     
-    # 4. Mark invitation as used
     inv.is_used = True
     if accountant_relation:
         accountant_relation.accountant_user_id = new_user.id
@@ -489,11 +569,13 @@ async def register_complete(
         logger.error(f"Registration error: {e}")
         raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
         
-    # 5. Cleanup Redis
-    await redis.delete(f"reg_otp:{req.token}")
-    await redis.delete(verify_key)
-    
-    # 6. Generate refresh token first
+    if invitation_token:
+        await redis.delete(f"reg_otp:{invitation_token}")
+    if verify_key:
+        await redis.delete(verify_key)
+    if registration_token:
+        await redis.delete(_registration_session_key(registration_token))
+
     refresh_token_expires = timedelta(days=30)
     access_token_expires = timedelta(minutes=60)
     
@@ -502,7 +584,6 @@ async def register_complete(
         expires_delta=refresh_token_expires
     )
     
-    # 7. Create first session (always succeeds for new user - primary)
     device_info = _extract_device_info(raw_request)
     session_result = await handle_login_session(
         db, new_user, refresh_token,
@@ -526,6 +607,20 @@ async def register_complete(
         "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+
+
+@router.get("/pending-registration/{registration_token}", response_model=PendingRegistrationContext)
+async def get_pending_registration(
+    registration_token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    redis = await get_redis()
+    invitation, _, _ = await _load_registration_session_invitation(
+        db,
+        redis,
+        registration_token=registration_token,
+    )
+    return _serialize_pending_registration_context(invitation)
 
 @router.post("/refresh", response_model=Token)
 async def refresh_access_token(
@@ -804,21 +899,22 @@ async def request_otp(
     if not mobile.startswith("09") or len(mobile) != 11:
         raise HTTPException(status_code=400, detail="شماره موبایل نامعتبر است")
 
-    # پیدا کردن کاربر
+    pending_invitation = None
     stmt = select(User).where(User.mobile_number == mobile)
     result = (await db.execute(stmt)).scalar_one_or_none()
-    
-    if not result:
-        raise HTTPException(status_code=404, detail="کاربری با این شماره موبایل یافت نشد")
+    if result:
+        if result.is_deleted:
+            raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
 
-    if result.is_deleted:
-        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+        if get_user_account_status(result).value == "inactive":
+            _raise_inactive_account_error()
 
-    if get_user_account_status(result).value == "inactive":
-        _raise_inactive_account_error()
-
-    login_home_server = _login_home_server(raw_request)
-    await assert_login_allowed_for_server(db, result, requested_server=login_home_server)
+        login_home_server = _login_home_server(raw_request)
+        await assert_login_allowed_for_server(db, result, requested_server=login_home_server)
+    else:
+        pending_invitation = await _find_pending_invitation_for_mobile(db, mobile)
+        if not pending_invitation:
+            raise HTTPException(status_code=404, detail="کاربری با این شماره موبایل یافت نشد")
 
     # Rate limiting
     redis = await get_redis()
@@ -849,9 +945,15 @@ async def request_otp(
 
     # تصمیم‌گیری برای روش ارسال
     is_connected = await is_internet_connected()
-    has_telegram = result.telegram_id is not None
+    has_telegram = result.telegram_id is not None if result else False
     
-    logger.info(f"OTP Request for {mobile}: Connected={is_connected}, HasTelegram={has_telegram}, TelegramID={result.telegram_id}")
+    logger.info(
+        "OTP Request for %s: Connected=%s, HasTelegram=%s, TelegramID=%s",
+        mobile,
+        is_connected,
+        has_telegram,
+        result.telegram_id if result else None,
+    )
 
     sent_via_telegram = False
     sent_via_sms = False
@@ -912,13 +1014,16 @@ async def resend_otp_sms(
 
     stmt = select(User).where(User.mobile_number == mobile)
     user = (await db.execute(stmt)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
-    if user.is_deleted or get_user_account_status(user).value == "inactive":
-        _raise_inactive_account_error()
+    if user:
+        if user.is_deleted or get_user_account_status(user).value == "inactive":
+            _raise_inactive_account_error()
 
-    login_home_server = _login_home_server(raw_request)
-    await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
+        login_home_server = _login_home_server(raw_request)
+        await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
+    else:
+        pending_invitation = await _find_pending_invitation_for_mobile(db, mobile)
+        if not pending_invitation:
+            raise HTTPException(status_code=404, detail="کاربر یافت نشد")
          
     # Rate limit for SMS resend (prevent spamming button)
     sms_limit_key = f"sms_limit:{mobile}"
@@ -972,9 +1077,24 @@ async def verify_otp(
     # کد درست است
     stmt = select(User).where(User.mobile_number == mobile)
     user = (await db.execute(stmt)).scalar_one_or_none()
-    
     if not user:
-        raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+        pending_invitation = await _find_pending_invitation_for_mobile(db, mobile)
+        if not pending_invitation:
+            raise HTTPException(status_code=404, detail="کاربر یافت نشد")
+
+        invitation, _, _ = pending_invitation
+        await redis.delete(otp_key)
+        await redis.delete(f"otp_limit:{mobile}")
+        registration_token, expires_in = await _store_registration_session(
+            redis,
+            invitation_token=invitation.token,
+        )
+        return {
+            "status": "registration_required",
+            "registration_token": registration_token,
+            "expires_in": expires_in,
+            "invitation": _serialize_pending_registration_context(invitation).model_dump(),
+        }
 
     if get_user_account_status(user).value == "inactive":
         await redis.delete(otp_key)

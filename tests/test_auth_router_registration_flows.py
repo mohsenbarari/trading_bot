@@ -6,14 +6,17 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.auth import (
+    PendingRegistrationContext,
     RegisterComplete,
     RegisterOTPRequest,
     RegisterOTPVerify,
+    get_pending_registration,
     register_complete,
     register_otp_request,
     register_otp_verify,
 )
 from models.session import Platform
+from models.user import UserRole
 
 
 class FakeExecuteResult:
@@ -79,32 +82,13 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         req = RegisterOTPRequest(token="abc")
         redis = FakeRedis()
 
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(side_effect=HTTPException(status_code=404, detail="دعوت‌نامه نامعتبر است")),
+        ):
             with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(None)]))
+                await register_otp_request(req, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 404)
-
-        used_invitation = SimpleNamespace(
-            is_used=True,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-            mobile_number="0912",
-        )
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
-            with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(used_invitation)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "دعوت‌نامه قبلاً استفاده شده است")
-
-        expired_invitation = SimpleNamespace(
-            is_used=False,
-            expires_at=datetime.utcnow() - timedelta(seconds=1),
-            mobile_number="0912",
-        )
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
-            with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(expired_invitation)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "دعوت‌نامه منقضی شده است")
 
         valid_invitation = SimpleNamespace(
             is_used=False,
@@ -112,9 +96,12 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             mobile_number="0912",
         )
         rate_limited_redis = FakeRedis({"otp_limit:0912": "1"})
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=rate_limited_redis)):
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=rate_limited_redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(valid_invitation, None, None)),
+        ):
             with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(valid_invitation)]))
+                await register_otp_request(req, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 429)
         self.assertEqual(exc_info.exception.detail, "لطفاً ۲ دقیقه صبر کنید")
 
@@ -128,10 +115,13 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         redis = FakeRedis()
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
             "api.routers.auth.random.randint",
             return_value=12345,
         ), patch("api.routers.auth.send_otp_sms", return_value=True) as send_sms_mock:
-            result = await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
+            result = await register_otp_request(req, db=FakeDB())
 
         self.assertEqual(
             redis.setex_calls,
@@ -142,48 +132,16 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
 
         redis = FakeRedis()
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
             "api.routers.auth.random.randint",
             return_value=12345,
         ), patch("api.routers.auth.send_otp_sms", return_value=False):
             with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
+                await register_otp_request(req, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "خطا در ارسال پیامک")
-
-    async def test_register_otp_request_rejects_invalid_accountant_relation_tokens(self):
-        req = RegisterOTPRequest(token="ACCT-token")
-        invitation = SimpleNamespace(
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-            mobile_number="09120000000",
-        )
-        redis = FakeRedis()
-
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
-        ):
-            with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-
-    async def test_register_otp_request_rejects_invalid_customer_relation_tokens(self):
-        req = RegisterOTPRequest(token="CUST-token")
-        invitation = SimpleNamespace(
-            is_used=False,
-            expires_at=datetime.utcnow() + timedelta(minutes=5),
-            mobile_number="09120000000",
-        )
-        redis = FakeRedis()
-
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
-            "api.routers.auth.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
-        ):
-            with self.assertRaises(HTTPException) as exc_info:
-                await register_otp_request(req, db=FakeDB([FakeExecuteResult(invitation)]))
-        self.assertEqual(exc_info.exception.status_code, 400)
-        self.assertEqual(exc_info.exception.detail, "دعوت‌نامه مشتری نامعتبر یا منقضی شده است")
 
     async def test_register_otp_verify_rejects_invalid_code_and_persists_verified_flag(self):
         req = RegisterOTPVerify(token="abc", code="12345")
@@ -214,9 +172,12 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "لطفاً ابتدا کد تایید را وارد کنید")
 
         redis = FakeRedis({"reg_verified:abc": "1"})
-        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(side_effect=HTTPException(status_code=400, detail="دعوت‌نامه نامعتبر است")),
+        ):
             with self.assertRaises(HTTPException) as exc_info:
-                await register_complete(req, raw_request=make_request(), db=FakeDB([FakeExecuteResult(None)]))
+                await register_complete(req, raw_request=make_request(), db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "دعوت‌نامه نامعتبر است")
 
@@ -230,9 +191,12 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             expires_at=datetime.utcnow() + timedelta(minutes=5),
         )
         redis = FakeRedis({"reg_verified:abc": "1"})
-        db = FakeDB([FakeExecuteResult(invitation)], commit_side_effect=RuntimeError("db down"))
+        db = FakeDB(commit_side_effect=RuntimeError("db down"))
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
             "api.routers.auth._login_home_server",
             return_value="foreign",
         ), patch(
@@ -256,7 +220,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             expires_at=datetime.utcnow() + timedelta(minutes=5),
         )
         redis = FakeRedis({"reg_verified:abc": "1", "reg_otp:abc": "12345"})
-        db = FakeDB([FakeExecuteResult(invitation)])
+        db = FakeDB()
         request = make_request(
             headers={"user-agent": "Mobile Safari", "x-platform": "web", "x-device-name": "iPhone"},
             host="10.0.0.8",
@@ -264,6 +228,9 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         session = SimpleNamespace(id="session-1")
 
         with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
             "api.routers.auth._login_home_server",
             return_value="iran",
         ), patch(
@@ -320,6 +287,64 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 "token_type": "bearer",
             },
         )
+
+    async def test_get_pending_registration_and_registration_session_complete(self):
+        invitation = SimpleNamespace(
+            token="INV-123",
+            account_name="user1",
+            mobile_number="09120000000",
+            role=UserRole.STANDARD,
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+        )
+        redis = FakeRedis({"registration_session:REG-123": "INV-123"})
+        db = FakeDB()
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ):
+            context = await get_pending_registration("REG-123", db=db)
+
+        self.assertEqual(
+            context,
+            PendingRegistrationContext(
+                token="INV-123",
+                account_name="user1",
+                mobile_number="09120000000",
+                role=UserRole.STANDARD,
+            ),
+        )
+
+        redis = FakeRedis({"registration_session:REG-123": "INV-123"})
+        session = SimpleNamespace(id="session-1")
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
+            "api.routers.auth._login_home_server",
+            return_value="iran",
+        ), patch(
+            "api.routers.auth.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"session": session}),
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-token",
+        ):
+            result = await register_complete(
+                RegisterComplete(registration_token="REG-123", address="Tehran"),
+                raw_request=make_request(),
+                db=db,
+            )
+
+        self.assertIn("registration_session:REG-123", redis.delete_calls)
+        self.assertEqual(result["access_token"], "access-token")
 
     async def test_register_complete_binds_pending_accountant_relation_and_disables_bot_access(self):
         invitation = SimpleNamespace(

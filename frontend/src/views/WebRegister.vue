@@ -5,7 +5,8 @@ import { AppButton, AppCard, AppErrorState, AppFormField, AppInput, AppLoadingSt
 
 const route = useRoute()
 const router = useRouter()
-const token = route.query.token as string
+const token = route.query.token as string | undefined
+const registrationToken = route.query.registration_token as string | undefined
 
 const step = ref(1)
 const loading = ref(true)
@@ -23,12 +24,20 @@ const stepTitle = computed(() => {
 })
 
 onMounted(async () => {
-  if (!token) {
-    error.value = 'توکن دعوت یافت نشد.'
-    loading.value = false
-    return
-  }
   try {
+    if (registrationToken) {
+      const res = await fetch(`${apiBaseUrl}/api/auth/pending-registration/${registrationToken}`)
+      if (!res.ok) throw new Error('جلسه تکمیل ثبت‌نام نامعتبر یا منقضی شده است.')
+      inviteInfo.value = await res.json()
+      step.value = 3
+      return
+    }
+
+    if (!token) {
+      error.value = 'توکن دعوت یافت نشد.'
+      return
+    }
+
     const res = await fetch(`${apiBaseUrl}/api/invitations/validate/${token}`)
     if (!res.ok) throw new Error('دعوت‌نامه نامعتبر است.')
     inviteInfo.value = await res.json()
@@ -88,10 +97,13 @@ async function submitRegistration() {
   }
   loading.value = true
   try {
+    const payload = registrationToken
+      ? { registration_token: registrationToken, address: address.value }
+      : { token, address: address.value }
     const res = await fetch(`${apiBaseUrl}/api/auth/register-complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, address: address.value }),
+      body: JSON.stringify(payload),
     })
 
     if (!res.ok) throw new Error('خطا در ثبت‌نام')
@@ -157,6 +169,12 @@ async function submitRegistration() {
         </div>
 
         <div v-else-if="step === 3" class="step-content">
+          <div v-if="inviteInfo" class="invite-info">
+            <p class="info-row"><span>نام کاربری:</span> <strong>{{ inviteInfo.account_name }}</strong></p>
+            <p class="info-row"><span>موبایل:</span> <strong>{{ inviteInfo.mobile_number }}</strong></p>
+            <p class="info-row"><span>نقش:</span> <strong>{{ inviteInfo.role }}</strong></p>
+          </div>
+
           <AppFormField label="آدرس دقیق پستی:" hint="استان، شهر، خیابان، پلاک و هر توضیح لازم را کامل وارد کنید.">
             <template #default="{ id, describedby }">
               <AppTextarea
