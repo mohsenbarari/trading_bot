@@ -202,18 +202,24 @@ def print_user(user: User) -> None:
 
 
 async def find_user(db, identity: str) -> User | None:
-    if identity.isdigit():
-        user = await db.get(User, int(identity))
-        if user:
-            return user
+    normalized_identity = str(identity).strip()
     stmt = select(User).where(
         or_(
-            User.mobile_number == identity,
-            User.account_name == identity,
-            User.username == identity,
+            User.mobile_number == normalized_identity,
+            User.account_name == normalized_identity,
+            User.username == normalized_identity,
         )
     )
-    return (await db.execute(stmt)).scalar_one_or_none()
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if user:
+        return user
+
+    if normalized_identity.isdigit():
+        user_id = int(normalized_identity)
+        if 0 < user_id <= 2_147_483_647:
+            return await db.get(User, user_id)
+
+    return None
 
 
 async def require_user(db, identity: str) -> User:
