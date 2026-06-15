@@ -45,6 +45,8 @@ const supportsNativeInstallPrompt = ref(isLikelyBeforeInstallPromptBrowser(initi
 const showManualInstallGuide = ref(isIOSUserAgent(initialUserAgent))
 const isIOS = ref(isIOSUserAgent(initialUserAgent))
 const isInstalled = ref(false)
+const isInstallButtonDelayElapsed = ref(false)
+let installButtonDelayTimer: number | null = null
 
 // OTP Timer State
 const countdown = ref(0)
@@ -612,6 +614,7 @@ function restartLoginFlow() {
 }
 
 const shouldShowInstallEntry = computed(() => (
+  isInstallButtonDelayElapsed.value &&
   !isStandalone.value &&
   !isInstalled.value
 ))
@@ -708,6 +711,10 @@ onMounted(() => {
     supportsNativeInstallPrompt.value = true
     showManualInstallGuide.value = false
   }
+
+  installButtonDelayTimer = window.setTimeout(() => {
+    isInstallButtonDelayElapsed.value = true
+  }, 4000)
 })
 
 watch(() => form.code, (newVal) => {
@@ -756,6 +763,7 @@ watch(() => step.value, (newStep) => {
 onUnmounted(() => {
   if (ac) ac.abort();
   if (timerInterval) clearInterval(timerInterval)
+  if (installButtonDelayTimer !== null) window.clearTimeout(installButtonDelayTimer)
   if (beforeInstallPromptHandler) window.removeEventListener('beforeinstallprompt', beforeInstallPromptHandler)
   if (pwaInstallReadyHandler) window.removeEventListener('pwa-install-ready', pwaInstallReadyHandler)
   if (appInstalledHandler) window.removeEventListener('appinstalled', appInstalledHandler)

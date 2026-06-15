@@ -633,6 +633,7 @@ describe('LoginView.vue', () => {
   })
 
   it('shows the login install button for native install prompt browsers and falls back to manual guidance otherwise', async () => {
+    vi.useFakeTimers()
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
       value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36',
@@ -646,6 +647,9 @@ describe('LoginView.vue', () => {
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
+    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
+    await vi.advanceTimersByTimeAsync(4000)
+    await flushPromises()
     expect(wrapper.text()).toContain('نصب اپلیکیشن')
 
     window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), promptEvent))
@@ -665,6 +669,8 @@ describe('LoginView.vue', () => {
     })
 
     const fallbackWrapper = mount(LoginView)
+    await vi.advanceTimersByTimeAsync(4000)
+    await flushPromises()
     expect(fallbackWrapper.text()).toContain('نصب اپلیکیشن')
 
     await findButtonByText(fallbackWrapper, 'نصب اپلیکیشن').trigger('click')
@@ -1093,6 +1099,8 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
     const vm = wrapper.vm as any
 
+    await vi.advanceTimersByTimeAsync(4000)
+    await flushPromises()
     expect(wrapper.text()).toContain('نصب اپلیکیشن')
     await (wrapper.vm as any).$nextTick()
     expect(wrapper.text()).toContain('راهنمای نصب در آیفون')
