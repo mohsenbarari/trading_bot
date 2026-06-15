@@ -6,7 +6,7 @@ import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
-import { AppActionCard, AppIconButton, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
+import { AppActionCard, AppEmptyState, AppIconButton, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
 
 interface DashboardTrade {
   id: number
@@ -21,6 +21,17 @@ interface DashboardTrade {
   counterparty_name?: string | null
 }
 
+interface DashboardCommodityAlias {
+  id?: number | null
+  alias?: string | null
+}
+
+interface DashboardCommodity {
+  id: number
+  name: string
+  aliases: DashboardCommodityAlias[]
+}
+
 const router = useRouter()
 const notificationStore = useNotificationStore()
 const user = ref<any>(null)
@@ -28,6 +39,9 @@ const loading = ref(true)
 const todayTrades = ref<DashboardTrade[]>([])
 const todayTradesLoading = ref(false)
 const todayTradesError = ref('')
+const allowedCommodities = ref<DashboardCommodity[]>([])
+const allowedCommoditiesLoading = ref(false)
+const allowedCommoditiesError = ref('')
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -47,6 +61,11 @@ const marketEntrySubtitle = computed(() => (
 ))
 
 const isGloballyLockedAccount = computed(() => Boolean(user.value?.global_web_locked_at))
+const showAllowedCommoditiesSection = computed(() => {
+  if (!user.value) return false
+  if (isAccountant.value) return false
+  return user.value.customer_tier !== 'tier2'
+})
 
 const globalLockGraceExpiresAtText = computed(() => {
   if (!user.value?.global_lock_grace_expires_at) return ''
@@ -118,6 +137,8 @@ const userInitial = computed(() => {
   const name = user.value.full_name || user.value.account_name
   return name ? name[0] : '?'
 })
+
+const allowedCommodityCountLabel = computed(() => `${formatDashboardNumber(allowedCommodities.value.length)} کالا`)
 
 const tradeHistoryPerspectiveUserId = computed(() => {
   if (!user.value) return null
@@ -204,12 +225,73 @@ async function loadTodayTrades() {
   }
 }
 
+function normalizeCommodityAliasLabel(alias: unknown) {
+  if (typeof alias === 'string') return alias.trim()
+  if (alias && typeof alias === 'object' && 'alias' in alias) {
+    const value = (alias as DashboardCommodityAlias).alias
+    return typeof value === 'string' ? value.trim() : ''
+  }
+  return ''
+}
+
+function getCommodityAliasLabels(commodity: DashboardCommodity) {
+  const aliases = Array.isArray(commodity.aliases)
+    ? commodity.aliases
+        .map((alias) => normalizeCommodityAliasLabel(alias))
+        .filter(Boolean)
+    : []
+  return Array.from(new Set(aliases.filter((alias) => alias !== commodity.name)))
+}
+
+async function loadAllowedCommodities() {
+  if (!showAllowedCommoditiesSection.value) {
+    allowedCommodities.value = []
+    allowedCommoditiesError.value = ''
+    allowedCommoditiesLoading.value = false
+    return
+  }
+  allowedCommoditiesLoading.value = true
+  allowedCommoditiesError.value = ''
+
+  try {
+    const response = await apiFetch('/api/commodities/')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(payload?.detail || 'دریافت فهرست کالاها ناموفق بود')
+    }
+    allowedCommodities.value = Array.isArray(payload)
+      ? payload
+          .map((commodity) => {
+            const id = Number((commodity as { id?: unknown }).id)
+            const name = typeof (commodity as { name?: unknown }).name === 'string'
+              ? (commodity as { name: string }).name.trim()
+              : ''
+            if (!Number.isInteger(id) || id <= 0 || !name) return null
+            return {
+              id,
+              name,
+              aliases: Array.isArray((commodity as { aliases?: unknown[] }).aliases)
+                ? ((commodity as { aliases?: unknown[] }).aliases as DashboardCommodityAlias[])
+                : [],
+            } satisfies DashboardCommodity
+          })
+          .filter((commodity): commodity is DashboardCommodity => commodity !== null)
+      : []
+  } catch (error: any) {
+    allowedCommodities.value = []
+    allowedCommoditiesError.value = error?.message || 'دریافت فهرست کالاها ناموفق بود'
+  } finally {
+    allowedCommoditiesLoading.value = false
+  }
+}
+
 async function fetchUser() {
   try {
     const res = await apiFetch('/api/auth/me')
     if (res.ok) {
       user.value = await res.json()
       void loadTodayTrades()
+      void loadAllowedCommodities()
     }
     // 401 handling is automatic via apiFetch → forceLogout
   } catch (e) {
@@ -410,18 +492,66 @@ onMounted(fetchUser)
         </AppSectionCard>
 
         <section class="dashboard-shortcuts" aria-label="میانبرهای اصلی">
-          <AppActionCard class="dashboard-action-card dashboard-action-card" title="عملیات" description="مشتریان، حسابداران و مدیریت" @select="openOperations">
+          <AppActionCard class="dashboard-action-card" title="عملیات" description="مشتریان، حسابداران و مدیریت" @select="openOperations">
             <template #icon>
               <BriefcaseBusiness :size="20" />
             </template>
           </AppActionCard>
 
-          <AppActionCard class="dashboard-action-card dashboard-action-card" title="حساب" description="پروفایل، تنظیمات و اعلان‌ها" @select="openAccountHub">
+          <AppActionCard class="dashboard-action-card" title="حساب" description="پروفایل، تنظیمات و اعلان‌ها" @select="openAccountHub">
             <template #icon>
               <UserRound :size="20" />
             </template>
           </AppActionCard>
         </section>
+
+        <AppSectionCard
+          v-if="showAllowedCommoditiesSection"
+          class="dashboard-commodities-card"
+          title="کالاهای مجاز برای معامله"
+          description="کالاهای فعال بازار را به همراه نام‌های مستعار ثبت‌شده در همین بخش ببینید."
+        >
+          <template #actions>
+            <AppStatusBadge tone="info">{{ allowedCommodityCountLabel }}</AppStatusBadge>
+          </template>
+
+          <div v-if="allowedCommoditiesLoading" class="dashboard-commodities-state">
+            در حال دریافت فهرست کالاها...
+          </div>
+          <div v-else-if="allowedCommoditiesError" class="dashboard-commodities-state dashboard-commodities-state--error">
+            {{ allowedCommoditiesError }}
+          </div>
+          <AppEmptyState
+            v-else-if="allowedCommodities.length === 0"
+            title="هنوز کالایی برای معامله ثبت نشده است"
+            message="پس از تعریف کالاها در مدیریت سیستم، فهرست کامل همین‌جا نمایش داده می‌شود."
+          />
+          <div v-else class="dashboard-commodities-grid">
+            <article
+              v-for="commodity in allowedCommodities"
+              :key="commodity.id"
+              class="dashboard-commodity-card"
+            >
+              <div class="dashboard-commodity-head">
+                <strong class="dashboard-commodity-title">{{ commodity.name }}</strong>
+                <AppStatusBadge tone="neutral">
+                  {{ formatDashboardNumber(getCommodityAliasLabels(commodity).length) }} نام مستعار
+                </AppStatusBadge>
+              </div>
+              <p class="dashboard-commodity-caption">نام‌های قابل استفاده برای جستجو و ثبت سریع این کالا</p>
+              <div v-if="getCommodityAliasLabels(commodity).length > 0" class="dashboard-commodity-aliases">
+                <span
+                  v-for="alias in getCommodityAliasLabels(commodity)"
+                  :key="`${commodity.id}-${alias}`"
+                  class="dashboard-commodity-alias-chip"
+                >
+                  {{ alias }}
+                </span>
+              </div>
+              <p v-else class="dashboard-commodity-empty">برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است.</p>
+            </article>
+          </div>
+        </AppSectionCard>
 
       </main>
 
@@ -681,6 +811,99 @@ onMounted(fetchUser)
 .dashboard-action-card {
   min-width: 0;
   min-height: 96px;
+}
+
+.dashboard-commodities-card :deep(.ui-section-card__body) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.dashboard-commodities-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 5.5rem;
+  border: 1px dashed var(--ds-border-subtle);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-soft);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+  line-height: 1.8;
+  text-align: center;
+  padding: 1rem;
+}
+
+.dashboard-commodities-state--error {
+  color: var(--ds-danger-700);
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(254, 242, 242, 0.92);
+}
+
+.dashboard-commodities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.dashboard-commodity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.95rem;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-border-subtle);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+}
+
+.dashboard-commodity-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dashboard-commodity-title {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-md);
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+.dashboard-commodity-caption,
+.dashboard-commodity-empty {
+  margin: 0;
+  font-size: var(--ds-font-xs);
+  line-height: 1.8;
+}
+
+.dashboard-commodity-caption {
+  color: var(--ds-text-secondary);
+}
+
+.dashboard-commodity-empty {
+  color: var(--ds-text-placeholder);
+}
+
+.dashboard-commodity-aliases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dashboard-commodity-alias-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  max-width: 100%;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--ds-primary-700);
+  font-size: var(--ds-font-xs);
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 @media (max-width: 380px) {

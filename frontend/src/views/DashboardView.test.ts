@@ -38,6 +38,7 @@ function makeJsonResponse(payload: unknown, ok = true) {
 function mockDashboardApi(options: {
   user: Record<string, unknown>
   trades?: unknown[]
+  commodities?: unknown[]
   activeSessions?: unknown[]
   failSessionLookup?: boolean
 }) {
@@ -47,6 +48,9 @@ function mockDashboardApi(options: {
     }
     if (url.startsWith('/api/trades/my?')) {
       return makeJsonResponse(options.trades || [])
+    }
+    if (url === '/api/commodities/') {
+      return makeJsonResponse(options.commodities || [])
     }
     if (url === '/api/sessions/active') {
       if (options.failSessionLookup) {
@@ -118,12 +122,25 @@ describe('DashboardView.vue', () => {
           price: 170000,
         },
       ],
+      commodities: [
+        {
+          id: 1,
+          name: 'سکه',
+          aliases: [{ alias: 'امامی' }, { alias: 'طرح جدید' }],
+        },
+        {
+          id: 2,
+          name: 'طلای آب‌شده',
+          aliases: [],
+        },
+      ],
     })
 
     const wrapper = await mountView()
 
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trades/my?from_date=2026-05-14&to_date=2026-05-14&limit=20')
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/')
     expect(wrapper.text()).toContain('صبح بخیر')
     expect(wrapper.text()).toContain('رضا محمدی')
     expect(wrapper.get('.avatar').text()).toContain('ر')
@@ -142,6 +159,12 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('بازار باز')
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('کار امروز ۱ معامله')
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('۱ اعلان')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('کالاهای مجاز برای معامله')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('سکه')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('امامی')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طرح جدید')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طلای آب‌شده')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است')
 
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
@@ -241,9 +264,34 @@ describe('DashboardView.vue', () => {
 
     expect(wrapper.find('.hero-btn').exists()).toBe(false)
     expect(wrapper.find('.logout-btn').exists()).toBe(false)
+    expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
     expect(wrapper.get('.today-trades-card').text()).toContain('طرف مالک')
     expect(wrapper.get('.today-trades-card').text()).toContain('فروش')
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith('/market')
+  })
+
+  it('hides the commodities section for tier-2 customers', async () => {
+    mockDashboardApi({
+      user: {
+        id: 22,
+        full_name: 'مشتری سطح دو',
+        account_name: 'customer22',
+        customer_tier: 'tier2',
+        account_status: 'active',
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      },
+      trades: [],
+      commodities: [
+        { id: 1, name: 'سکه', aliases: [{ alias: 'امامی' }] },
+      ],
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
+    expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
   })
 
   it('shows the stronger lock copy when the account is already globally locked', async () => {
