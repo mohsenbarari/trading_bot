@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BriefcaseBusiness, Store, LogOut, AlertTriangle, Ban, UserRound, Users } from 'lucide-vue-next'
+import { Bell, BriefcaseBusiness, Store, LogOut, AlertTriangle, Ban, UserRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
@@ -28,14 +28,6 @@ const loading = ref(true)
 const todayTrades = ref<DashboardTrade[]>([])
 const todayTradesLoading = ref(false)
 const todayTradesError = ref('')
-const isSwitchModalOpen = ref(false)
-const switchUsers = ref<any[]>([])
-const switchLoading = ref(false)
-const switchError = ref('')
-const switchSearch = ref('')
-const switchingUserId = ref<number | null>(null)
-let switchSearchTimer: ReturnType<typeof setTimeout> | null = null
-let switchRequestId = 0
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -127,16 +119,6 @@ const userInitial = computed(() => {
   return name ? name[0] : '?'
 })
 
-const canUseTestAccountSwitcher = computed(() => {
-  if (!user.value) return false
-  return user.value.role === 'مدیر ارشد' || hasTestAccountSwitchClaim()
-})
-
-const currentSwitchUserLabel = computed(() => {
-  if (!user.value) return ''
-  return user.value.full_name || user.value.account_name || ''
-})
-
 const tradeHistoryPerspectiveUserId = computed(() => {
   if (!user.value) return null
   const ownerUserId = Number(user.value.accountant_owner_user_id)
@@ -222,106 +204,6 @@ async function loadTodayTrades() {
   }
 }
 
-function hasTestAccountSwitchClaim() {
-  const token = localStorage.getItem('auth_token')
-  if (!token) return false
-
-  try {
-    const payloadPart = token.split('.')[1]
-    if (!payloadPart) return false
-    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/')
-    const decoded = JSON.parse(window.atob(base64))
-    return decoded?.dev_account_switch === true
-  } catch {
-    return false
-  }
-}
-
-function buildSwitchUsersUrl(search: string) {
-  const params = new URLSearchParams()
-  const trimmed = search.trim()
-  if (trimmed) params.set('search', trimmed)
-  const query = params.toString()
-  return query ? `/api/auth/dev-switch/users?${query}` : '/api/auth/dev-switch/users'
-}
-
-async function loadSwitchUsers(search = switchSearch.value) {
-  const requestId = ++switchRequestId
-  switchLoading.value = true
-  switchError.value = ''
-
-  try {
-    const response = await apiFetch(buildSwitchUsersUrl(search))
-    const payload = await response.json().catch(() => null)
-    if (!response.ok) {
-      throw new Error(payload?.detail || 'دریافت لیست کاربران تستی ممکن نشد')
-    }
-    if (requestId !== switchRequestId) return
-    switchUsers.value = Array.isArray(payload) ? payload : []
-  } catch (error: any) {
-    if (requestId !== switchRequestId) return
-    switchUsers.value = []
-    switchError.value = error?.message || 'دریافت لیست کاربران تستی ممکن نشد'
-  } finally {
-    if (requestId === switchRequestId) {
-      switchLoading.value = false
-    }
-  }
-}
-
-async function openAccountSwitchModal() {
-  isSwitchModalOpen.value = true
-  await loadSwitchUsers(switchSearch.value)
-}
-
-function closeAccountSwitchModal() {
-  isSwitchModalOpen.value = false
-  switchError.value = ''
-  switchSearch.value = ''
-  if (switchSearchTimer) {
-    clearTimeout(switchSearchTimer)
-    switchSearchTimer = null
-  }
-}
-
-function queueSwitchSearch() {
-  if (switchSearchTimer) {
-    clearTimeout(switchSearchTimer)
-  }
-  switchSearchTimer = setTimeout(() => {
-    void loadSwitchUsers(switchSearch.value)
-  }, 220)
-}
-
-function customerTierLabel(tier: string | null | undefined) {
-  if (tier === 'tier1') return 'مشتری سطح ۱'
-  if (tier === 'tier2') return 'مشتری سطح ۲'
-  return 'مشتری'
-}
-
-async function switchToAccount(targetUser: any) {
-  if (!targetUser?.id || switchingUserId.value !== null) return
-  switchingUserId.value = Number(targetUser.id)
-  switchError.value = ''
-
-  try {
-    const response = await apiFetch(`/api/auth/dev-switch/${targetUser.id}`, { method: 'POST' })
-    const payload = await response.json().catch(() => null)
-    if (!response.ok || !payload?.access_token || !payload?.refresh_token) {
-      throw new Error(payload?.detail || 'سوییچ حساب انجام نشد')
-    }
-
-    localStorage.setItem('auth_token', payload.access_token)
-    localStorage.setItem('refresh_token', payload.refresh_token)
-    localStorage.removeItem('current_user_summary')
-    window.location.assign('/')
-  } catch (error: any) {
-    switchError.value = error?.message || 'سوییچ حساب انجام نشد'
-  } finally {
-    switchingUserId.value = null
-  }
-}
-
 async function fetchUser() {
   try {
     const res = await apiFetch('/api/auth/me')
@@ -365,13 +247,6 @@ function openAccountHub() {
 }
 
 onMounted(fetchUser)
-
-onBeforeUnmount(() => {
-  if (switchSearchTimer) {
-    clearTimeout(switchSearchTimer)
-    switchSearchTimer = null
-  }
-})
 </script>
 
 <template>
@@ -548,19 +423,6 @@ onBeforeUnmount(() => {
           </AppActionCard>
         </section>
 
-        <button
-          v-if="canUseTestAccountSwitcher"
-          class="switcher-entry-btn"
-          type="button"
-          @click="openAccountSwitchModal"
-        >
-          <span class="switcher-entry-icon"><Users :size="20" /></span>
-          <span class="switcher-entry-text">
-            <strong>سوییچ حساب</strong>
-            <small>بدون OTP و خروج، بین اکانت‌های موجود جابه‌جا شوید</small>
-          </span>
-        </button>
-
       </main>
 
       <!-- Footer -->
@@ -568,60 +430,6 @@ onBeforeUnmount(() => {
         <span>نسخه ۲.۵.۰</span>
       </footer>
 
-    </div>
-
-
-
-  </div>
-
-  <div v-if="isSwitchModalOpen" class="switcher-modal-backdrop" @click.self="closeAccountSwitchModal">
-    <div class="switcher-modal" role="dialog" aria-modal="true" aria-label="سوییچ حساب">
-      <div class="switcher-modal-header">
-        <div>
-          <h3>سوییچ حساب</h3>
-          <p>حساب فعلی: <strong>{{ currentSwitchUserLabel }}</strong></p>
-        </div>
-        <button type="button" class="switcher-close-btn" aria-label="بستن سوییچ حساب" @click="closeAccountSwitchModal">×</button>
-      </div>
-
-      <div class="switcher-search-box">
-        <input
-          v-model="switchSearch"
-          type="text"
-          placeholder="جستجو با نام، نام کاربری یا موبایل"
-          @input="queueSwitchSearch"
-        />
-      </div>
-
-      <p v-if="switchError" class="switcher-error">{{ switchError }}</p>
-      <p v-else-if="switchLoading" class="switcher-empty">در حال دریافت کاربران...</p>
-      <p v-else-if="switchUsers.length === 0" class="switcher-empty">کاربری برای سوییچ پیدا نشد.</p>
-
-      <div v-else class="switcher-user-list">
-        <button
-          v-for="switchUser in switchUsers"
-          :key="switchUser.id"
-          type="button"
-          class="switcher-user-row"
-          :disabled="switchingUserId !== null || Number(switchUser.id) === Number(user.id)"
-          @click="switchToAccount(switchUser)"
-        >
-          <div class="switcher-user-main">
-            <div class="switcher-user-title-row">
-              <strong>{{ switchUser.full_name || switchUser.account_name }}</strong>
-              <span v-if="Number(switchUser.id) === Number(user.id)" class="switcher-current-pill">حساب فعلی</span>
-              <span v-else-if="switchingUserId === Number(switchUser.id)" class="switcher-current-pill switcher-current-pill--busy">در حال سوییچ...</span>
-            </div>
-            <span class="switcher-user-meta">@{{ switchUser.account_name }} · {{ switchUser.mobile_number }}</span>
-            <div class="switcher-badges">
-              <span class="switcher-badge">{{ switchUser.role }}</span>
-              <span v-if="switchUser.is_accountant" class="switcher-badge switcher-badge--accountant">حسابدار</span>
-              <span v-if="switchUser.is_customer" class="switcher-badge switcher-badge--customer">{{ customerTierLabel(switchUser.customer_tier) }}</span>
-            </div>
-          </div>
-          <span class="switcher-user-arrow">←</span>
-        </button>
-      </div>
     </div>
   </div>
 </template>
@@ -704,10 +512,7 @@ onBeforeUnmount(() => {
 .logout-btn:focus-visible,
 .hero-btn:focus-visible,
 .dashboard-shortcut-card:focus-visible,
-.switcher-entry-btn:focus-visible,
-.today-trades-refresh:focus-visible,
-.switcher-close-btn:focus-visible,
-.switcher-user-row:focus-visible {
+.today-trades-refresh:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
 }
@@ -876,58 +681,6 @@ onBeforeUnmount(() => {
 .dashboard-shortcut-card {
   min-width: 0;
   min-height: 96px;
-}
-
-.switcher-entry-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  width: 100%;
-  padding: 1rem 1.1rem;
-  border-radius: var(--ds-radius-xl);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.05), rgba(148, 163, 184, 0.08));
-  color: var(--ds-text-primary);
-  text-align: right;
-  cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.switcher-entry-btn:active {
-  transform: scale(0.985);
-}
-
-.switcher-entry-btn:hover {
-  border-color: rgba(245, 158, 11, 0.35);
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
-}
-
-.switcher-entry-icon {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  background: rgba(245, 158, 11, 0.12);
-  color: var(--ds-primary-600);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.switcher-entry-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.switcher-entry-text strong {
-  font-size: var(--ds-font-md);
-}
-
-.switcher-entry-text small {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-sm);
-  line-height: 1.5;
 }
 
 @media (max-width: 380px) {
@@ -1180,201 +933,5 @@ onBeforeUnmount(() => {
   font-size: var(--ds-font-xs);
   color: var(--ds-text-faint);
   font-weight: 500;
-}
-
-.switcher-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  z-index: 1200;
-}
-
-.switcher-modal {
-  width: min(100%, 620px);
-  max-height: min(78vh, 760px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 24px;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
-}
-
-.switcher-modal-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.2rem 1.2rem 1rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-}
-
-.switcher-modal-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: var(--ds-text-primary);
-}
-
-.switcher-modal-header p {
-  margin: 0.3rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ds-text-secondary);
-}
-
-.switcher-close-btn {
-  width: 38px;
-  height: 38px;
-  border: none;
-  border-radius: 12px;
-  background: rgba(148, 163, 184, 0.14);
-  color: var(--ds-text-primary);
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.switcher-search-box {
-  padding: 1rem 1.2rem 0.25rem;
-}
-
-.switcher-search-box input {
-  width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 16px;
-  padding: 0.92rem 1rem;
-  font: inherit;
-  background: rgba(248, 250, 252, 0.92);
-  color: var(--ds-text-primary);
-}
-
-.switcher-search-box input:focus {
-  outline: none;
-  border-color: rgba(245, 158, 11, 0.42);
-  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
-}
-
-.switcher-error,
-.switcher-empty {
-  padding: 0.9rem 1.2rem;
-  margin: 0;
-  font-size: 0.88rem;
-}
-
-.switcher-error {
-  color: var(--ds-danger-600);
-}
-
-.switcher-empty {
-  color: var(--ds-text-secondary);
-}
-
-.switcher-user-list {
-  padding: 0.35rem 0.7rem 1rem;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.switcher-user-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.85rem;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.88);
-  padding: 0.9rem 1rem;
-  cursor: pointer;
-  text-align: right;
-}
-
-.switcher-user-row:disabled {
-  cursor: default;
-  opacity: 0.72;
-}
-
-.switcher-user-main {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.switcher-user-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-}
-
-.switcher-user-title-row strong {
-  font-size: 0.95rem;
-  color: var(--ds-text-primary);
-}
-
-.switcher-user-meta {
-  font-size: 0.82rem;
-  color: var(--ds-text-secondary);
-  direction: ltr;
-  text-align: right;
-}
-
-.switcher-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.switcher-badge,
-.switcher-current-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.22rem 0.55rem;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 700;
-}
-
-.switcher-badge {
-  background: rgba(148, 163, 184, 0.16);
-  color: var(--ds-text-secondary);
-}
-
-.switcher-badge--accountant {
-  background: rgba(14, 165, 233, 0.14);
-  color: #0369a1;
-}
-
-.switcher-badge--customer {
-  background: rgba(245, 158, 11, 0.14);
-  color: #b45309;
-}
-
-.switcher-current-pill {
-  background: rgba(15, 23, 42, 0.08);
-  color: var(--ds-text-secondary);
-}
-
-.switcher-current-pill--busy {
-  background: rgba(245, 158, 11, 0.16);
-  color: #b45309;
-}
-
-.switcher-user-arrow {
-  color: var(--ds-text-placeholder);
-  font-size: 1.1rem;
-  flex-shrink: 0;
 }
 </style>

@@ -35,16 +35,9 @@ function makeJsonResponse(payload: unknown, ok = true) {
   }
 }
 
-function makeToken(payload: Record<string, unknown>) {
-  return `header.${window.btoa(JSON.stringify(payload))}.signature`
-}
-
 function mockDashboardApi(options: {
   user: Record<string, unknown>
   trades?: unknown[]
-  switchUsers?: unknown[]
-  searchedSwitchUsers?: unknown[]
-  switchResponse?: { payload: unknown; ok?: boolean }
   activeSessions?: unknown[]
   failSessionLookup?: boolean
 }) {
@@ -54,18 +47,6 @@ function mockDashboardApi(options: {
     }
     if (url.startsWith('/api/trades/my?')) {
       return makeJsonResponse(options.trades || [])
-    }
-    if (url === '/api/auth/dev-switch/users') {
-      return makeJsonResponse(options.switchUsers || [])
-    }
-    if (url.startsWith('/api/auth/dev-switch/users?search=')) {
-      return makeJsonResponse(options.searchedSwitchUsers || [])
-    }
-    if (url.startsWith('/api/auth/dev-switch/')) {
-      return makeJsonResponse(
-        options.switchResponse?.payload || {},
-        options.switchResponse?.ok ?? true,
-      )
     }
     if (url === '/api/sessions/active') {
       if (options.failSessionLookup) {
@@ -354,180 +335,6 @@ describe('DashboardView.vue', () => {
     const eveningWrapper = await mountView()
     expect(eveningWrapper.text()).toContain('عصر بخیر')
     eveningWrapper.unmount()
-  })
-
-  it('shows the temporary account switcher for super admins and swaps tokens on selection', async () => {
-    localStorage.setItem('current_user_summary', JSON.stringify({ role: 'مدیر ارشد' }))
-    mockDashboardApi({
-      user: {
-        id: 50,
-        full_name: 'مدیر تست',
-        account_name: 'root50',
-        role: 'مدیر ارشد',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      switchUsers: [
-        {
-          id: 61,
-          full_name: 'حسابدار تست',
-          account_name: 'accountant61',
-          mobile_number: '09120000061',
-          role: 'عادی',
-          is_accountant: true,
-          is_customer: false,
-          customer_tier: null,
-        },
-      ],
-      switchResponse: {
-        payload: {
-        access_token: 'switched-access',
-        refresh_token: 'switched-refresh',
-        token_type: 'bearer',
-        },
-      },
-    })
-
-    const wrapper = await mountView()
-    await wrapper.get('.switcher-entry-btn').trigger('click')
-    await flushPromises()
-
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/dev-switch/users')
-    expect(wrapper.text()).toContain('سوییچ حساب')
-    expect(wrapper.text()).toContain('حسابدار تست')
-
-    await wrapper.get('.switcher-user-row').trigger('click')
-    await flushPromises()
-
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/dev-switch/61', { method: 'POST' })
-    expect(localStorage.getItem('auth_token')).toBe('switched-access')
-    expect(localStorage.getItem('refresh_token')).toBe('switched-refresh')
-    expect(localStorage.getItem('current_user_summary')).toBeNull()
-    expect(dashboardViewMocks.locationAssignMock).toHaveBeenCalledWith('/')
-  })
-
-  it('keeps the temporary account switcher visible for switched non-admin sessions via token claim', async () => {
-    localStorage.setItem('auth_token', makeToken({ dev_account_switch: true }))
-    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse({
-      id: 71,
-      full_name: 'مشتری تست',
-      account_name: 'customer71',
-      role: 'عادی',
-      account_status: 'active',
-      global_lock_grace_expires_at: null,
-      global_web_locked_at: null,
-      trading_restricted_until: null,
-    }))
-
-    const wrapper = await mountView()
-
-    expect(wrapper.find('.switcher-entry-btn').exists()).toBe(true)
-    expect(wrapper.text()).toContain('سوییچ حساب')
-  })
-
-  it('hides the temporary account switcher when a non-admin session has an invalid token claim payload', async () => {
-    localStorage.setItem('auth_token', 'broken.token.payload')
-    dashboardViewMocks.apiFetchMock.mockResolvedValueOnce(makeJsonResponse({
-      id: 72,
-      full_name: 'کاربر عادی',
-      account_name: 'user72',
-      role: 'عادی',
-      account_status: 'active',
-      global_lock_grace_expires_at: null,
-      global_web_locked_at: null,
-      trading_restricted_until: null,
-    }))
-
-    const wrapper = await mountView()
-
-    expect(wrapper.find('.switcher-entry-btn').exists()).toBe(false)
-  })
-
-  it('debounces account-switch search requests, shows the empty state, and clears the modal on close', async () => {
-    mockDashboardApi({
-      user: {
-        id: 80,
-        full_name: 'مدیر جستجو',
-        account_name: 'root80',
-        role: 'مدیر ارشد',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      switchUsers: [
-        {
-          id: 81,
-          full_name: 'کاربر اول',
-          account_name: 'user81',
-          mobile_number: '09120000081',
-          role: 'عادی',
-          is_accountant: false,
-          is_customer: false,
-          customer_tier: null,
-        },
-      ],
-      searchedSwitchUsers: [],
-    })
-
-    const wrapper = await mountView()
-    await wrapper.get('.switcher-entry-btn').trigger('click')
-    await flushPromises()
-
-    await wrapper.get('.switcher-search-box input').setValue('ali')
-    await vi.advanceTimersByTimeAsync(220)
-    await flushPromises()
-
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/dev-switch/users?search=ali')
-    expect(wrapper.text()).toContain('کاربری برای سوییچ پیدا نشد.')
-
-    await wrapper.get('.switcher-close-btn').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.switcher-modal-backdrop').exists()).toBe(false)
-  })
-
-  it('shows switch errors when the target account cannot be activated', async () => {
-    mockDashboardApi({
-      user: {
-        id: 90,
-        full_name: 'مدیر خطا',
-        account_name: 'root90',
-        role: 'مدیر ارشد',
-        account_status: 'active',
-        global_lock_grace_expires_at: null,
-        global_web_locked_at: null,
-        trading_restricted_until: null,
-      },
-      switchUsers: [
-        {
-          id: 91,
-          full_name: 'هدف خطا',
-          account_name: 'target91',
-          mobile_number: '09120000091',
-          role: 'عادی',
-          is_accountant: false,
-          is_customer: true,
-          customer_tier: 'tier2',
-        },
-      ],
-      switchResponse: {
-        payload: { detail: 'سوییچ حساب انجام نشد' },
-        ok: false,
-      },
-    })
-
-    const wrapper = await mountView()
-    await wrapper.get('.switcher-entry-btn').trigger('click')
-    await flushPromises()
-
-    await wrapper.get('.switcher-user-row').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('.switcher-error').text()).toBe('سوییچ حساب انجام نشد')
-    expect(dashboardViewMocks.locationAssignMock).not.toHaveBeenCalled()
   })
 
   it('forces a local logout even when session lookup fails', async () => {
