@@ -1249,20 +1249,20 @@ async function deleteUser() {
 }
 
 /* Hide header submit/check buttons to prevent reset bug */
-.vpd-header .vpd-icon-btn svg {
+.vpd-header button[class*="vpd-"][class$="-btn"] svg {
     display: block;
 }
 
 /* Specific fix for the top-left button in Time View (which resets date) */
 /* In RTL, :last-child is usually the left-most element in a flex row */
-.vpd-content.vpd-is-time .vpd-header .vpd-icon-btn:last-child,
-.vpd-time .vpd-header .vpd-icon-btn:last-child {
+.vpd-content.vpd-is-time .vpd-header button[class*="vpd-"][class$="-btn"]:last-child,
+.vpd-time .vpd-header button[class*="vpd-"][class$="-btn"]:last-child {
     display: none !important;
 }
 
 /* Hide any button explicitly named 'submit' or having check icon class in header */
-.vpd-header .vpd-icon-btn.vpd-check,
-.vpd-header .vpd-icon-btn.vpd-tick {
+.vpd-header button[class*="vpd-"][class$="-btn"].vpd-check,
+.vpd-header button[class*="vpd-"][class$="-btn"].vpd-tick {
     display: none !important;
 }
 
@@ -1319,14 +1319,14 @@ async function deleteUser() {
 
 /* Fix for top-left header button in Time View */
 /* Hide ALL icon buttons in header in time view to prevent accidental resets */
-.vpd-content.vpd-is-time .vpd-header .vpd-icon-btn,
-.vpd-time .vpd-header .vpd-icon-btn {
+.vpd-content.vpd-is-time .vpd-header button[class*="vpd-"][class$="-btn"],
+.vpd-time .vpd-header button[class*="vpd-"][class$="-btn"] {
     display: none !important;
 }
 
 /* Just in case, explicit hide for check/tick class if present */
-.vpd-header .vpd-icon-btn.vpd-check,
-.vpd-header .vpd-icon-btn.vpd-tick {
+.vpd-header button[class*="vpd-"][class$="-btn"].vpd-check,
+.vpd-header button[class*="vpd-"][class$="-btn"].vpd-tick {
     display: none !important;
 }
 

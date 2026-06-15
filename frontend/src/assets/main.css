@@ -195,63 +195,6 @@
 }
 
 
-@layer utilities {
-  .btn-primary {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    background: linear-gradient(
-      to right,
-      var(--color-primary-500, #f59e0b),
-      var(--color-primary-600, #d97706)
-    );
-    color: white;
-    font-weight: 700;
-    border-radius: 0.75rem;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
-  .btn-primary:hover {
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-  }
-  .btn-primary:active {
-    transform: scale(0.95);
-  }
-
-  .input-premium {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    background-color: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 0.75rem;
-    outline: none;
-    transition: all 0.2s;
-    text-align: right;
-  }
-  .input-premium:focus {
-    box-shadow: 0 0 0 2px var(--color-primary-500);
-    border-color: transparent;
-  }
-  .input-premium::placeholder {
-    color: #9ca3af;
-  }
-  
-  .input-premium {
-    direction: rtl;
-  }
-
-  .card-glass {
-    background-color: rgba(255, 255, 255, 0.8);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-    border-radius: 1rem;
-  }
-}
-
 /* Animations */
 .fade-enter-active,
 .fade-leave-active {
@@ -322,44 +265,6 @@
     justify-content: flex-start; /* Right side in RTL */
   }
 
-  .back-button {
-    width: 40px;
-    height: 40px;
-    min-width: 40px;
-    min-height: 40px;
-    background: var(--ds-bg-card);
-    border: 1px solid var(--ds-border-medium);
-    border-radius: var(--ds-radius-md);
-    cursor: pointer;
-    color: var(--ds-text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: var(--ds-shadow-sm);
-    justify-self: flex-end; /* Left side in RTL */
-  }
-
-  .back-button:focus-visible {
-    outline: 3px solid rgba(245, 158, 11, 0.35);
-    outline-offset: 3px;
-    border-color: var(--ds-primary-500);
-  }
-  
-  .back-button:hover {
-    background: var(--ds-bg-page);
-    border-color: var(--ds-border-strong);
-    color: var(--ds-text-primary);
-    transform: translateY(-1px);
-    box-shadow: var(--ds-shadow-lg);
-  }
-  
-  .back-button:active {
-    background: var(--ds-bg-hover);
-    transform: scale(0.95) translateY(0);
-    box-shadow: none;
-  }
-
   /* ═══ Shared Page Container ═══ */
   .ds-page {
     min-height: 100dvh;
@@ -375,85 +280,8 @@
     flex-direction: column;
   }
 
-  /* ═══ Shared Accordion ═══ */
-  .ds-accordion {
-    margin-bottom: var(--ds-section-gap);
-    background: var(--ds-bg-card);
-    border: 1px solid var(--ds-border-accent);
-    border-radius: var(--ds-radius-lg);
-    overflow: hidden;
-    box-shadow: var(--ds-shadow-md);
-  }
-
-  .ds-accordion-header {
-    width: 100%;
-    min-height: 56px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--ds-card-padding);
-    border: 0;
-    background: var(--ds-gradient-amber-bg);
-    color: inherit;
-    cursor: pointer;
-    font: inherit;
-    text-align: right;
-    transition: all 0.2s ease;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-    user-select: none;
-  }
-
-  .ds-accordion-header:focus-visible {
-    outline: 3px solid rgba(245, 158, 11, 0.34);
-    outline-offset: -3px;
-    background: var(--ds-primary-50);
-  }
-  
-  .ds-accordion-header:hover {
-    background: var(--ds-primary-50);
-  }
-
-  .ds-accordion-header:active {
-    background: var(--ds-primary-100);
-    transform: scale(0.995);
-  }
-
-  .ds-accordion-header-info {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    min-width: 0;
-  }
-
-  .ds-accordion-header h2 {
-    min-width: 0;
-    font-size: var(--ds-font-md);
-    font-weight: 800;
-    margin: 0;
-    color: var(--ds-text-primary);
-    line-height: 1.45;
-  }
-
-  .ds-accordion-icon {
-    color: var(--ds-primary-600);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  
-  .ds-accordion.open .ds-accordion-icon {
-    transform: rotate(-90deg);
-  }
-
-  .ds-accordion-body {
-    padding: var(--ds-card-padding);
-    border-top: 1px solid rgba(245, 158, 11, 0.08);
-    background: var(--ds-bg-card);
-    animation: ds-slideDown 0.2s ease-out;
-  }
-
   .hub-action:focus-visible,
   .admin-action-btn:focus-visible,
-  .ds-btn:focus-visible,
   .storage-clear-btn:focus-visible,
   .session-delete-btn:focus-visible,
   .logout-all-btn:focus-visible {
@@ -463,13 +291,8 @@
   }
 
   .hub-action,
-  .admin-action-btn,
-  .ds-btn {
+  .admin-action-btn {
     touch-action: manipulation;
-  }
-  @keyframes ds-slideDown {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
   }
 
   /* ═══ Shared Loading / Empty States ═══ */
@@ -515,135 +338,6 @@
     border: 1px solid var(--ds-border-light);
     border-radius: var(--ds-radius-md);
     padding: 0.875rem;
-  }
-
-  /* ═══ Shared Icon Button ═══ */
-  .ds-icon-btn {
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
-    border: 1px solid var(--ds-border-light);
-    background: var(--ds-bg-card);
-    color: var(--ds-text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    box-shadow: var(--ds-shadow-sm);
-    transition: all 0.2s;
-    position: relative;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .ds-icon-btn:active {
-    transform: scale(0.9);
-  }
-
-  /* ═══ Shared Form Elements ═══ */
-  .ds-form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1.25rem;
-    width: 100%;
-  }
-
-  .ds-label {
-    font-size: var(--ds-font-sm);
-    font-weight: 700;
-    color: var(--ds-text-secondary);
-    padding-right: 4px;
-  }
-
-  .ds-input {
-    width: 100%;
-    height: 48px;
-    padding: 0 1rem;
-    background: var(--ds-bg-card);
-    border: 1.5px solid var(--ds-border-medium);
-    border-radius: var(--ds-radius-md);
-    font-size: var(--ds-font-md);
-    font-weight: 600;
-    color: var(--ds-text-primary);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    outline: none;
-    text-align: left; /* Numbers are LTR */
-    direction: ltr;   /* For proper placeholder/value align */
-  }
-
-  .ds-input:focus {
-    border-color: var(--ds-primary-500);
-    box-shadow: 0 0 0 4px var(--ds-primary-50);
-    background: #fff;
-  }
-
-  .ds-input::placeholder {
-    color: var(--ds-text-placeholder);
-    font-weight: 400;
-    opacity: 0.6;
-  }
-
-  .ds-input.is-default {
-    color: var(--ds-text-placeholder);
-  }
-
-  /* ═══ Shared Buttons ═══ */
-  .ds-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    height: 48px;
-    border-radius: var(--ds-radius-md);
-    font-size: var(--ds-font-md);
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-    border: none;
-    -webkit-tap-highlight-color: transparent;
-    user-select: none;
-    white-space: nowrap;
-  }
-
-  .ds-btn:active {
-    transform: scale(0.98);
-  }
-
-  .ds-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .ds-btn.primary {
-    background: var(--ds-gradient-primary);
-    color: white;
-    box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
-  }
-  
-  .ds-btn.primary:hover {
-    box-shadow: 0 6px 16px rgba(217, 119, 6, 0.4);
-    transform: translateY(-1px);
-  }
-
-  .ds-btn.danger {
-    background: var(--ds-danger-500);
-    color: white;
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
-  }
-
-  .ds-btn.danger:hover {
-    background: var(--ds-danger-600);
-    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.3);
-  }
-
-  .ds-btn.secondary {
-    background: var(--ds-bg-hover);
-    color: var(--ds-text-primary);
-    border: 1px solid var(--ds-border-medium);
-  }
-
-  .ds-btn.secondary:hover {
-    background: var(--ds-border-light);
   }
 
   .ds-hint {

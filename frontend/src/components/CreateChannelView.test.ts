@@ -152,7 +152,7 @@ describe('CreateChannelView.vue', () => {
 
     const memberRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
     expect(memberRow).toBeTruthy()
-    const profileButton = memberRow!.findAll('.chat-user-row__action-btn').find((button) => button.text().includes('پروفایل'))
+    const profileButton = memberRow!.findAll('.channel-member-action').find((button) => button.text().includes('پروفایل'))
     expect(profileButton).toBeTruthy()
     await profileButton!.trigger('click')
     await flushPromises()
@@ -464,7 +464,7 @@ describe('CreateChannelView.vue', () => {
     await adminsEntry!.trigger('click')
     await flushPromises()
 
-    const promoteButton = wrapper.findAll('.chat-user-row__action-btn').find((button) => button.text().includes('ارتقا به ادمین'))
+    const promoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('ارتقا به ادمین'))
     expect(promoteButton).toBeTruthy()
     await promoteButton!.trigger('click')
     await flushPromises()
@@ -473,7 +473,7 @@ describe('CreateChannelView.vue', () => {
     expect(wrapper.emitted('refresh-conversations')).toHaveLength(2)
     expect(currentMembers.find((member) => member.user_id === 2)?.role).toBe('admin')
 
-    const demoteButton = wrapper.findAll('.chat-user-row__action-btn').find((button) => button.text().includes('حذف ادمین'))
+    const demoteButton = wrapper.findAll('.channel-member-action').find((button) => button.text().includes('حذف ادمین'))
     expect(demoteButton).toBeTruthy()
     await demoteButton!.trigger('click')
     await flushPromises()

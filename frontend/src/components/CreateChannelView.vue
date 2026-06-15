@@ -1185,7 +1185,7 @@ onBeforeUnmount(() => {
             <template #actions>
               <button
                 type="button"
-                class="chat-user-row__action-btn"
+                class="channel-member-action"
                 @click.stop="openMemberProfile(member)"
               >
                 پروفایل
@@ -1193,7 +1193,7 @@ onBeforeUnmount(() => {
               <button
                 v-if="!isMembershipManagementLocked && canRemoveMember(member)"
                 type="button"
-                class="chat-user-row__action-btn chat-user-row__action-btn--danger"
+                class="channel-member-action channel-member-action--danger"
                 :disabled="mutatingUserId === member.user_id"
                 @click.stop="removeMember(member)"
               >
@@ -1225,7 +1225,7 @@ onBeforeUnmount(() => {
               <template #actions>
                 <button
                   type="button"
-                  class="chat-user-row__action-btn"
+                  class="channel-member-action"
                   @click.stop="openMemberProfile(member)"
                 >
                   پروفایل
@@ -1233,7 +1233,7 @@ onBeforeUnmount(() => {
                 <button
                   v-if="canDemoteMember(member)"
                   type="button"
-                  class="chat-user-row__action-btn"
+                  class="channel-member-action"
                   :disabled="mutatingUserId === member.user_id"
                   @click.stop="demoteMember(member)"
                 >
@@ -1261,14 +1261,14 @@ onBeforeUnmount(() => {
               <template #actions>
                 <button
                   type="button"
-                  class="chat-user-row__action-btn"
+                  class="channel-member-action"
                   @click.stop="openMemberProfile(member)"
                 >
                   پروفایل
                 </button>
                 <button
                   type="button"
-                  class="chat-user-row__action-btn chat-user-row__action-btn--primary"
+                  class="channel-member-action channel-member-action--primary"
                   :disabled="mutatingUserId === member.user_id"
                   @click.stop="promoteMember(member)"
                 >
@@ -1967,6 +1967,55 @@ onBeforeUnmount(() => {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.channel-member-action {
+  min-height: 36px;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #475569;
+  font-size: var(--ds-font-badge);
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.channel-member-action:hover:not(:disabled),
+.channel-member-action:focus-visible {
+  background: rgba(241, 245, 249, 0.98);
+  border-color: rgba(51, 65, 85, 0.2);
+  color: #1e293b;
+}
+
+.channel-member-action:focus-visible {
+  outline: 3px solid rgba(245, 158, 11, 0.18);
+  outline-offset: 2px;
+}
+
+.channel-member-action:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.channel-member-action:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.channel-member-action--primary {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.18);
+  color: #b45309;
+}
+
+.channel-member-action--danger {
+  background: rgba(254, 242, 242, 0.96);
+  border-color: rgba(239, 68, 68, 0.16);
+  color: #b91c1c;
 }
 
 .channel-soft-button {
