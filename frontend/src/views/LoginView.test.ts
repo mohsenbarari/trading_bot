@@ -632,7 +632,7 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('hides the login install button for native install prompt browsers and shows manual fallback otherwise', async () => {
+  it('shows the login install button for native install prompt browsers and falls back to manual guidance otherwise', async () => {
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
       value: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36',
@@ -646,14 +646,16 @@ describe('LoginView.vue', () => {
     const LoginView = (await import('./LoginView.vue')).default
     const wrapper = mount(LoginView)
 
-    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
+    expect(wrapper.text()).toContain('نصب اپلیکیشن')
 
     window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), promptEvent))
     await flushPromises()
 
     expect(promptEvent.preventDefault).toHaveBeenCalled()
-    expect(promptEvent.prompt).not.toHaveBeenCalled()
-    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
+    await findButtonByText(wrapper, 'نصب اپلیکیشن').trigger('click')
+    await flushPromises()
+    expect(promptEvent.prompt).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).not.toContain('راهنمای نصب دستی')
 
     wrapper.unmount()
 

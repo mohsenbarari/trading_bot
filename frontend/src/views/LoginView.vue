@@ -611,17 +611,33 @@ function restartLoginFlow() {
   step.value = 'mobile'
 }
 
-const shouldShowManualInstallEntry = computed(() => (
+const shouldShowInstallEntry = computed(() => (
   !isStandalone.value &&
-  !isInstalled.value &&
-  !supportsNativeInstallPrompt.value
+  !isInstalled.value
 ))
 
 const manualInstallGuideTitle = computed(() => (
   isIOS.value ? 'راهنمای نصب در آیفون' : 'راهنمای نصب دستی'
 ))
 
-function installPWA() {
+async function installPWA() {
+  const deferredPrompt = (window as any).deferredPrompt
+  if (supportsNativeInstallPrompt.value && !isIOS.value && deferredPrompt?.prompt) {
+    showManualInstallGuide.value = false
+    try {
+      deferredPrompt.prompt()
+      const result = await deferredPrompt.userChoice
+      if (result?.outcome === 'accepted') {
+        isInstalled.value = true
+        return
+      }
+    } catch {
+      // Fall back to manual instructions below when the browser prompt fails.
+    } finally {
+      ;(window as any).deferredPrompt = null
+    }
+  }
+
   showManualInstallGuide.value = true
 }
 
@@ -669,6 +685,7 @@ onMounted(() => {
 
   beforeInstallPromptHandler = (e: Event) => {
     e.preventDefault()
+    ;(window as any).deferredPrompt = e
     supportsNativeInstallPrompt.value = true
     showManualInstallGuide.value = false
   }
@@ -807,7 +824,7 @@ function goBackToMobile() {
               <bdi>{{ formattedTimer }}</bdi>
             </div>
 
-            <div v-if="shouldShowManualInstallEntry" class="login-install">
+            <div v-if="shouldShowInstallEntry" class="login-install">
               <AppButton block variant="secondary" @click="installPWA">
                 <template #icon>
                   <Download :size="16" />
