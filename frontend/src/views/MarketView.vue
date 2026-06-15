@@ -847,6 +847,7 @@ onUnmounted(() => {
             @click="parseAndSubmitTextOffer"
             :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
             class="send-btn"
+            variant="primary"
             label="ارسال لفظ برای پیش‌نمایش"
           >
             <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
