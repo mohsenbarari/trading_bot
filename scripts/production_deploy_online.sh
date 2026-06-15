@@ -960,6 +960,16 @@ render_nginx_config() {
     printf '%s\n' "$RELEASE_ARTIFACT_DIR/iran-online-nginx.conf"
 }
 
+render_nginx_https_config() {
+    local template="$PROJECT_DIR/deploy/production/nginx-iran-online-https.conf.template"
+    mkdir -p "$RELEASE_ARTIFACT_DIR"
+    python3 "$RELEASE_ARTIFACT_RENDERER" \
+        --manifest "$MANIFEST_PATH" \
+        --template "$template" \
+        --output-dir "$RELEASE_ARTIFACT_DIR" >/dev/null
+    printf '%s\n' "$RELEASE_ARTIFACT_DIR/iran-online-nginx.conf"
+}
+
 configure_nginx() {
     log "Rendering and installing Iran Nginx config"
     local rendered
@@ -971,6 +981,19 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx"
     log "Iran Nginx config installed"
+}
+
+configure_nginx_https() {
+    log "Rendering and installing Iran HTTPS Nginx config"
+    local rendered
+    rendered="$(render_nginx_https_config)"
+    scp_iran "$rendered" "$IRAN_SSH_TARGET:/etc/nginx/sites-available/trading-bot"
+    ssh_iran "set -euo pipefail
+ln -sf /etc/nginx/sites-available/trading-bot /etc/nginx/sites-enabled/trading-bot
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl reload nginx"
+    log "Iran HTTPS Nginx config installed"
 }
 
 issue_cert() {
@@ -1007,6 +1030,7 @@ else
   fi
 fi
 $cert_renewal_guard"
+    configure_nginx_https
     assert_iran_public_listener_ready
     log "SSL certificate step completed"
 }
