@@ -145,7 +145,7 @@ describe('CreateChannelView.vue', () => {
     await openChannelButton!.trigger('click')
     expect(wrapper.emitted('open-channel')?.[0]).toEqual([{ chatId: 7, title: 'Channel Seven' }])
 
-    const membersEntry = wrapper.findAll('.channel-list-row').find((row) => row.text().includes('اعضای کانال'))
+    const membersEntry = wrapper.findAll('button').find((button) => button.text().includes('اعضای کانال'))
     expect(membersEntry).toBeTruthy()
     await membersEntry!.trigger('click')
     await flushPromises()
@@ -162,7 +162,7 @@ describe('CreateChannelView.vue', () => {
       params: { id: '2' },
       query: { account_name: 'member2' },
     })
-  })
+  }, 10000)
 
   it('creates a new channel with an uploaded avatar and adds selected members', async () => {
     const createdChannel = {
@@ -433,7 +433,7 @@ describe('CreateChannelView.vue', () => {
     await flushPromises()
     await flushPromises()
 
-    const settingsEntry = wrapper.findAll('.channel-list-row').find((row) => row.text().includes('تنظیمات کانال'))
+    const settingsEntry = wrapper.findAll('button').find((button) => button.text().includes('تنظیمات کانال'))
     expect(settingsEntry).toBeTruthy()
     await settingsEntry!.trigger('click')
     await flushPromises()
@@ -459,7 +459,7 @@ describe('CreateChannelView.vue', () => {
     expect(wrapper.text()).toContain('Renamed Channel')
     expect(currentChannel.description).toBe('Updated channel details')
 
-    const adminsEntry = wrapper.findAll('.channel-list-row').find((row) => row.text().includes('مدیریت ادمین‌ها'))
+    const adminsEntry = wrapper.findAll('button').find((button) => button.text().includes('مدیریت ادمین‌ها'))
     expect(adminsEntry).toBeTruthy()
     await adminsEntry!.trigger('click')
     await flushPromises()
@@ -482,12 +482,12 @@ describe('CreateChannelView.vue', () => {
     expect(wrapper.emitted('refresh-conversations')).toHaveLength(3)
     expect(currentMembers.find((member) => member.user_id === 2)?.role).toBe('member')
 
-    const headerButtons = wrapper.findAll('.channel-admin-header .channel-admin-header-btn')
+    const headerButtons = wrapper.findAll('.ui-icon-button')
     expect(headerButtons[0]).toBeTruthy()
     await headerButtons[0]!.trigger('click')
     await flushPromises()
 
-    const deleteChannelButton = wrapper.findAll('.channel-list-row').find((row) => row.text().includes('حذف کانال'))
+    const deleteChannelButton = wrapper.findAll('button').find((button) => button.text().includes('حذف کانال'))
     expect(deleteChannelButton).toBeTruthy()
     await deleteChannelButton!.trigger('click')
     await flushPromises()

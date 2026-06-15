@@ -18,8 +18,14 @@ import HelpPopover from './HelpPopover.vue';
 import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import {
+  AppButton,
   AppActionCard,
+  AppEmptyState,
   AppErrorState,
+  AppFilterChips,
+  AppFormField,
+  AppInput,
+  AppListItem,
   AppMetricCard,
   AppSectionCard,
   AppStatusBadge,
@@ -172,13 +178,6 @@ const historyCounterpartyOptions = ref<ProjectUserDirectoryEntry[]>([]);
 const historyCounterpartyOptionsLoading = ref(false);
 const historyCounterpartyOptionsLoaded = ref(false);
 const historyCounterpartyError = ref('');
-const openSections = ref({
-  info: false,
-  history: false,
-  accountants: false,
-  customers: false,
-  projectUsers: false,
-});
 const avatarBusy = ref(false);
 const avatarInput = ref<HTMLInputElement | null>(null);
 const addressEditing = ref(false);
@@ -291,11 +290,20 @@ const historyPresetOptions = [
   { label: '۶ ماه', months: 6 },
   { label: '۱۲ ماه', months: 12 },
 ];
+const historyPresetChipOptions = computed(() => historyPresetOptions.map((preset) => ({
+  key: String(preset.months),
+  label: preset.label,
+})));
+const historyPresetChipValue = computed(() => historyActivePresetMonths.value ? String(historyActivePresetMonths.value) : '');
+function getNormalizedHistoryCommodityQuery() {
+  return typeof historyCommodityQuery.value === 'string' ? historyCommodityQuery.value.trim() : '';
+}
+const hasLoadedHistoryOnce = computed(() => Boolean(historyLoadedQueryKey.value));
 const hasActiveHistoryFilters = computed(() => {
   return Boolean(
     historyFromDate.value
     || historyToDate.value
-    || historyCommodityQuery.value.trim()
+    || getNormalizedHistoryCommodityQuery()
     || historyCounterpartyUserId.value,
   );
 });
@@ -339,7 +347,7 @@ const historyFilterSummary = computed(() => {
       parts.push(`تا ${toLabel}`);
     }
   }
-  const commodityLabel = historyCommodityQuery.value.trim();
+  const commodityLabel = getNormalizedHistoryCommodityQuery();
   if (commodityLabel) {
     parts.push(`کالا: ${commodityLabel}`);
   }
@@ -386,6 +394,7 @@ const showProjectUsersSection = computed(() => {
   if (customerProfileContext.value !== null) return false;
   return isOwnProfile.value || viewerIsDisplayedOwnerAccountant.value;
 });
+const hasLoadedProjectUsersOnce = computed(() => projectUsersLoaded.value || projectUsersLoading.value || projectUsersLoadingMore.value || Boolean(projectUsersError.value));
 const showPublicBlockAction = computed(() => {
   return showVisitorSections.value
     && !!profileData.value
@@ -516,12 +525,6 @@ async function loadProfile() {
       publicBlockState.value = null;
       publicBlockStatus.value = null;
     }
-    if (!isOwnProfile.value && highlightedAccountantUserId.value && accountantRelations.value.length > 0) {
-      openSections.value.accountants = true;
-    }
-    if (!isOwnProfile.value && showCustomerListSection.value) {
-      openSections.value.customers = true;
-    }
     applyInitialOwnerWorkspace();
   } catch (e: any) {
     error.value = e.message || 'خطا در برقراری ارتباط';
@@ -589,7 +592,7 @@ function buildHistoryQueryKey() {
   return JSON.stringify({
     from_date: historyFromDate.value || null,
     to_date: historyToDate.value || null,
-    commodity_query: historyCommodityQuery.value.trim() || null,
+    commodity_query: getNormalizedHistoryCommodityQuery() || null,
     counterparty_user_id: historyCounterpartyUserId.value || null,
     self: isOwnProfile.value,
     target_id: profileData.value?.id ?? null,
@@ -607,7 +610,7 @@ function buildHistoryQueryParams(format?: 'excel' | 'pdf') {
   if (historyToDate.value) {
     params.set('to_date', historyToDate.value);
   }
-  const commodityQuery = historyCommodityQuery.value.trim();
+  const commodityQuery = getNormalizedHistoryCommodityQuery();
   if (commodityQuery) {
     params.set('commodity_query', commodityQuery);
   }
@@ -755,7 +758,7 @@ async function resetHistoryFilters() {
   historyCounterpartyUserId.value = null;
   historyLoadedQueryKey.value = '';
   historyError.value = '';
-  if (openSections.value.history) {
+  if (hasLoadedHistoryOnce.value) {
     await loadMutualTrades(true);
   }
 }
@@ -902,14 +905,6 @@ async function handleAvatarSelected(event: Event) {
   }
 }
 
-async function toggleHistory() {
-  openSections.value.history = !openSections.value.history;
-  if (!openSections.value.history) return;
-  await loadMutualTrades();
-  void loadHistoryCommodityOptions();
-  void loadHistoryCounterpartyOptions();
-}
-
 async function loadMutualTrades(force = false) {
     if (!profileData.value || isHistoryLoading.value) return;
 
@@ -1004,12 +999,6 @@ async function loadProjectUsersDirectory(force = false) {
     projectUsersLoading.value = false;
     projectUsersLoadingMore.value = false;
   }
-}
-
-async function toggleProjectUsersSection() {
-  openSections.value.projectUsers = !openSections.value.projectUsers;
-  if (!openSections.value.projectUsers) return;
-  await loadProjectUsersDirectory();
 }
 
 async function submitProjectUsersSearch() {
@@ -1269,6 +1258,17 @@ function getTradeCounterpartyLabel(trade: MutualTradePreview) {
     : trade.responder_user_name;
 }
 
+function formatTradePrice(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value.toLocaleString();
+  }
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue)) {
+    return numericValue.toLocaleString();
+  }
+  return 'نامشخص';
+}
+
 function getTradeCounterpartyProfileTarget(trade: MutualTradePreview) {
   if (!profileData.value?.id) {
     return null;
@@ -1350,6 +1350,15 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
     id: user.id,
     account_name: user.account_name,
   });
+}
+
+function handleHistoryPresetChipChange(value: string) {
+  const months = Number(value);
+  if (!Number.isInteger(months) || months <= 0) {
+    historyActivePresetMonths.value = null;
+    return;
+  }
+  void applyHistoryPreset(months);
 }
 </script>
 
@@ -1450,24 +1459,17 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
           />
         </section>
 
-        <div class="profile-accordion mt-4 card-with-help" :class="{ open: openSections.info }">
-          <div class="profile-accordion-header" @click="openSections.info = !openSections.info">
-            <div class="profile-accordion-header-info">
-              <UserIcon :size="18" class="text-amber-600" />
-              <h2>اطلاعات شخصی</h2>
-            </div>
-            <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="profile-accordion-icon" />
-              <HelpPopover
-                button-test="public-profile-info-help"
-                note-test="public-profile-info-help-note"
-                label="راهنمای اطلاعات پروفایل"
-                text="در این بخش شماره تماس و آدرس ثبت‌شده نمایش داده می‌شود. در پروفایل خودتان می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید."
-              />
-            </div>
-          </div>
+        <AppSectionCard class="profile-section-card mt-4 card-with-help" title="اطلاعات شخصی" description="شماره تماس و آدرس ثبت‌شده این کاربر در این بخش نمایش داده می‌شود.">
+          <template #actions>
+            <HelpPopover
+              button-test="public-profile-info-help"
+              note-test="public-profile-info-help-note"
+              label="راهنمای اطلاعات پروفایل"
+              text="در این بخش شماره تماس و آدرس ثبت‌شده نمایش داده می‌شود. در پروفایل خودتان می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید."
+            />
+          </template>
           
-          <div v-show="openSections.info" class="profile-accordion-body">
+          <div class="profile-section-card__body">
             <div class="info-section">
               <div class="info-row">
                   <span class="label">شماره تماس</span>
@@ -1489,117 +1491,108 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                     </button>
                   </div>
                 <form v-else-if="isOwnProfile" class="address-edit-form" @submit.prevent="saveOwnAddress">
-                  <textarea
-                    v-model="addressDraft"
-                    rows="3"
-                    class="address-edit-textarea"
-                    placeholder="آدرس کامل خود را وارد کنید"
-                  />
+                  <AppFormField label="آدرس" :error="addressError || undefined">
+                    <template #default="{ id, describedby, invalid }">
+                      <textarea
+                        :id="id"
+                        v-model="addressDraft"
+                        rows="3"
+                        class="ui-input ui-textarea address-edit-textarea"
+                        :aria-describedby="describedby"
+                        :aria-invalid="invalid || undefined"
+                        placeholder="آدرس کامل خود را وارد کنید"
+                      />
+                    </template>
+                  </AppFormField>
                   <p v-if="addressError" class="error-text address-error-text">{{ addressError }}</p>
                   <div class="address-edit-actions">
-                    <button type="submit" class="history-control primary" :disabled="addressBusy">
-                      {{ addressBusy ? 'در حال ذخیره...' : 'ذخیره آدرس' }}
-                    </button>
-                    <button type="button" class="history-control" :disabled="addressBusy" @click.stop="cancelAddressEdit">
-                      انصراف
-                    </button>
+                    <AppButton type="submit" size="sm" :loading="addressBusy">ذخیره آدرس</AppButton>
+                    <AppButton type="button" variant="secondary" size="sm" :disabled="addressBusy" @click.stop="cancelAddressEdit">انصراف</AppButton>
                   </div>
                 </form>
               </div>
             </div>
           </div>
-        </div>
+        </AppSectionCard>
       </section>
 
       <section v-if="showProjectUsersSection" class="profile-section project-users-section">
-        <div class="profile-accordion card-with-help" :class="{ open: openSections.projectUsers }">
-          <div class="profile-accordion-header" @click="toggleProjectUsersSection">
-            <div class="profile-accordion-header-info">
-              <UserIcon :size="18" class="text-amber-600" />
-              <h2>لیست همکاران</h2>
-            </div>
-            <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="profile-accordion-icon" />
-              <HelpPopover
-                button-test="public-profile-project-users-help"
-                note-test="public-profile-project-users-help-note"
-                label="راهنمای لیست همکاران"
-                text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
-              />
-            </div>
-          </div>
+        <AppSectionCard class="profile-section-card card-with-help" title="لیست همکاران" description="اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید.">
+          <template #actions>
+            <HelpPopover
+              button-test="public-profile-project-users-help"
+              note-test="public-profile-project-users-help-note"
+              label="راهنمای لیست همکاران"
+              text="لیست همکاران، اعضای قابل مشاهده پروژه را نشان می‌دهد. با انتخاب نام هر همکار، پروفایل عمومی همان کاربر باز می‌شود."
+            />
+          </template>
 
-          <div v-show="openSections.projectUsers" class="profile-accordion-body">
+          <div class="profile-section-card__body">
             <form class="project-users-search" @submit.prevent="submitProjectUsersSearch">
-              <input
+              <AppInput
                 v-model="projectUsersQuery"
-                type="search"
                 class="project-users-search-input"
+                type="search"
                 placeholder="جستجو با نام کاربری یا شماره تماس"
               />
-              <button type="submit" class="project-users-search-submit" :disabled="projectUsersLoading">
-                {{ projectUsersLoading ? 'در حال جستجو...' : 'جستجو' }}
-              </button>
+              <AppButton type="submit" size="sm" :loading="projectUsersLoading">جستجو</AppButton>
             </form>
 
             <p v-if="projectUsersError" class="admin-user-error">{{ projectUsersError }}</p>
-            <div v-else-if="projectUsersLoading">
-              <LoadingSkeleton :count="3" :height="52" />
-            </div>
-            <p v-else-if="projectUsers.length === 0" class="empty-text">
-              {{ projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.' }}
-            </p>
+            <LoadingSkeleton v-else-if="projectUsersLoading" :count="3" :height="52" />
+            <AppEmptyState
+              v-else-if="!hasLoadedProjectUsersOnce"
+              title="فهرست همکاران هنوز بارگذاری نشده است"
+              message="برای مشاهده فهرست کامل، جستجو را اجرا کنید."
+            />
+            <AppEmptyState
+              v-else-if="projectUsers.length === 0"
+              title="همکاری برای نمایش پیدا نشد"
+              :message="projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.'"
+            />
             <template v-else>
               <div class="project-users-list">
-                <article
+                <AppListItem
                   v-for="projectUser in projectUsers"
                   :key="projectUser.id"
+                  :title="projectUser.account_name"
+                  :description="projectUser.mobile_number"
+                  interactive
                   class="project-user-card"
+                  @select="openProjectUserProfile(projectUser)"
                 >
-                  <button
-                    type="button"
-                    class="profile-link-btn project-user-link-btn"
-                    @click.stop="openProjectUserProfile(projectUser)"
-                  >
-                    {{ projectUser.account_name }}
-                  </button>
-                  <span class="project-user-mobile">{{ projectUser.mobile_number }}</span>
-                </article>
+                  <template #trailing>
+                    <span class="project-user-mobile" dir="ltr">{{ projectUser.mobile_number }}</span>
+                  </template>
+                </AppListItem>
               </div>
               <div v-if="projectUsersHasMore" class="project-users-footer">
-                <button
+                <AppButton
                   type="button"
-                  class="history-control project-users-load-more"
-                  :disabled="projectUsersLoadingMore"
+                  variant="secondary"
+                  size="sm"
+                  class="project-users-load-more"
+                  :loading="projectUsersLoadingMore"
                   @click="loadMoreProjectUsers"
-                >
-                  {{ projectUsersLoadingMore ? 'در حال دریافت...' : 'نمایش بیشتر' }}
-                </button>
+                >نمایش بیشتر</AppButton>
               </div>
             </template>
           </div>
-        </div>
+        </AppSectionCard>
       </section>
 
       <section v-if="accountantRelations.length > 0" class="profile-section accountant-relations-section">
-        <div class="profile-accordion card-with-help" :class="{ open: openSections.accountants }">
-          <div class="profile-accordion-header" @click="openSections.accountants = !openSections.accountants">
-            <div class="profile-accordion-header-info">
-              <UserIcon :size="18" class="text-amber-600" />
-              <h2>{{ showOwnerSections ? 'لیست حسابداران' : 'حسابداران این مالک' }}</h2>
-            </div>
-            <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="profile-accordion-icon" />
-              <HelpPopover
-                button-test="public-profile-accountants-help"
-                note-test="public-profile-accountants-help-note"
-                label="راهنمای لیست حسابداران"
-                text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
-              />
-            </div>
-          </div>
+        <AppSectionCard class="profile-section-card card-with-help" :title="showOwnerSections ? 'لیست حسابداران' : 'حسابداران این مالک'" description="عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید.">
+          <template #actions>
+            <HelpPopover
+              button-test="public-profile-accountants-help"
+              note-test="public-profile-accountants-help-note"
+              label="راهنمای لیست حسابداران"
+              text="این لیست حسابداران فعال مالک را نشان می‌دهد. عنوان هر ردیف همان نام نمایشی رابطه است و توضیح وظیفه، در صورت ثبت، زیر آن می‌آید."
+            />
+          </template>
 
-          <div v-show="openSections.accountants" class="profile-accordion-body">
+          <div class="profile-section-card__body">
             <div class="public-accountant-list">
               <article
                 v-for="relation in accountantRelations"
@@ -1618,28 +1611,21 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               </article>
             </div>
           </div>
-        </div>
+        </AppSectionCard>
       </section>
 
       <section v-if="showCustomerListSection" class="profile-section customer-relations-section">
-        <div class="profile-accordion card-with-help" :class="{ open: openSections.customers }">
-          <div class="profile-accordion-header" @click="openSections.customers = !openSections.customers">
-            <div class="profile-accordion-header-info">
-              <UserIcon :size="18" class="text-amber-600" />
-              <h2>مشتریان این مالک</h2>
-            </div>
-            <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="profile-accordion-icon" />
-              <HelpPopover
-                button-test="public-profile-customers-help"
-                note-test="public-profile-customers-help-note"
-                label="راهنمای مشتریان این مالک"
-                text="این بخش مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به حسابداران همان مالک و مدیر ارشد محدود است."
-              />
-            </div>
-          </div>
+        <AppSectionCard class="profile-section-card card-with-help" title="مشتریان این مالک" description="نمایش این بخش به حسابداران همان مالک و مدیر ارشد محدود است.">
+          <template #actions>
+            <HelpPopover
+              button-test="public-profile-customers-help"
+              note-test="public-profile-customers-help-note"
+              label="راهنمای مشتریان این مالک"
+              text="این بخش مشتریان ثبت‌شده زیر این مالک را نشان می‌دهد. نمایش آن به حسابداران همان مالک و مدیر ارشد محدود است."
+            />
+          </template>
 
-          <div v-show="openSections.customers" class="profile-accordion-body">
+          <div class="profile-section-card__body">
             <div class="public-customer-list">
               <article
                 v-for="relation in customerRelations"
@@ -1667,7 +1653,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
               </article>
             </div>
           </div>
-        </div>
+        </AppSectionCard>
       </section>
 
       <section v-if="showVisitorSections && visitorActionCards.length > 0" class="profile-section visitor-profile-section">
@@ -1737,41 +1723,27 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
       </section>
 
       <section class="profile-section">
-        <div class="profile-accordion card-with-help" :class="{ open: openSections.history }">
-          <div class="profile-accordion-header" @click="toggleHistory">
-            <div class="profile-accordion-header-info">
-              <Activity :size="18" class="text-amber-600" />
-              <h2>{{ tradeHistoryTitle }}</h2>
-            </div>
-            <div class="accordion-header-actions">
-              <ChevronLeft :size="20" class="profile-accordion-icon" />
-              <HelpPopover
-                button-test="public-profile-history-help"
-                note-test="public-profile-history-help-note"
-                label="راهنمای تاریخچه معاملات"
-                text="در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند."
-              />
-            </div>
-          </div>
+        <AppSectionCard class="profile-section-card card-with-help history-section-card" :title="tradeHistoryTitle" description="فیلترها و خروجی‌ها دقیقاً روی همین بازه و کالا اعمال می‌شوند.">
+          <template #actions>
+            <HelpPopover
+              button-test="public-profile-history-help"
+              note-test="public-profile-history-help-note"
+              label="راهنمای تاریخچه معاملات"
+              text="در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند."
+            />
+          </template>
 
-          <div v-show="openSections.history" class="profile-accordion-body">
+          <div class="profile-section-card__body">
             <div class="history-toolbar">
-              <div class="history-presets">
-                <button
-                  v-for="preset in historyPresetOptions"
-                  :key="preset.months"
-                  type="button"
-                  class="history-chip"
-                  :class="{ active: historyActivePresetMonths === preset.months }"
-                  @click.stop="applyHistoryPreset(preset.months)"
-                >
-                  {{ preset.label }}
-                </button>
-              </div>
+              <AppFilterChips
+                :model-value="historyPresetChipValue"
+                :options="historyPresetChipOptions"
+                label="بازه‌های آماده تاریخچه معاملات"
+                @update:model-value="handleHistoryPresetChipChange"
+              />
 
               <div class="history-filter-grid">
-                <label class="history-filter-field">
-                  <span>از تاریخ</span>
+                <AppFormField label="از تاریخ" class="history-filter-field">
                   <JalaliDatePicker
                     v-model="historyFromDate"
                     value-type="gregorian"
@@ -1779,9 +1751,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                     trigger-test-id="history-from-date"
                     @change="handleHistoryDateInput"
                   />
-                </label>
-                <label class="history-filter-field">
-                  <span>تا تاریخ</span>
+                </AppFormField>
+                <AppFormField label="تا تاریخ" class="history-filter-field">
                   <JalaliDatePicker
                     v-model="historyToDate"
                     value-type="gregorian"
@@ -1789,9 +1760,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                     trigger-test-id="history-to-date"
                     @change="handleHistoryDateInput"
                   />
-                </label>
-                <label class="history-filter-field history-filter-field-wide">
-                  <span>کالا</span>
+                </AppFormField>
+                <AppFormField label="کالا" class="history-filter-field history-filter-field-wide">
                   <select
                     v-model="historyCommodityQuery"
                     :disabled="historyCommodityOptionsLoading"
@@ -1802,9 +1772,8 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                       {{ option.name }}
                     </option>
                   </select>
-                </label>
-                <label v-if="isOwnProfile" class="history-filter-field history-filter-field-wide">
-                  <span>طرف دیگر معامله</span>
+                </AppFormField>
+                <AppFormField v-if="isOwnProfile" label="طرف دیگر معامله" class="history-filter-field history-filter-field-wide">
                   <select
                     :value="historyCounterpartyUserId ?? ''"
                     :disabled="historyCounterpartyOptionsLoading"
@@ -1818,47 +1787,49 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                   </select>
                   <span v-if="historyCounterpartyOptionsLoading" class="history-filter-hint">در حال دریافت لیست همکاران...</span>
                   <span v-else-if="historyCounterpartyError" class="history-filter-hint error">{{ historyCounterpartyError }}</span>
-                </label>
+                </AppFormField>
               </div>
 
               <div class="history-filter-actions">
-                <button type="button" class="history-control primary" @click.stop="applyHistoryFilters">اعمال فیلتر</button>
-                <button
+                <AppButton type="button" size="sm" @click.stop="applyHistoryFilters">اعمال فیلتر</AppButton>
+                <AppButton
                   type="button"
-                  class="history-control"
+                  size="sm"
+                  variant="secondary"
                   :disabled="!hasActiveHistoryFilters && !historyLoadedQueryKey"
                   @click.stop="resetHistoryFilters"
-                >
-                  حذف فیلتر
-                </button>
-                <button
+                >حذف فیلتر</AppButton>
+                <AppButton
                   type="button"
-                  class="history-control"
+                  size="sm"
+                  variant="secondary"
                   :disabled="isHistoryLoading || historyExportingFormat !== null"
                   @click.stop="downloadHistoryExport('excel')"
-                >
-                  {{ historyExportingFormat === 'excel' ? 'در حال دانلود...' : 'خروجی Excel' }}
-                </button>
-                <button
+                >{{ historyExportingFormat === 'excel' ? 'در حال دانلود...' : 'خروجی Excel' }}</AppButton>
+                <AppButton
                   type="button"
-                  class="history-control"
+                  size="sm"
+                  variant="secondary"
                   :disabled="isHistoryLoading || historyExportingFormat !== null"
                   @click.stop="downloadHistoryExport('pdf')"
-                >
-                  {{ historyExportingFormat === 'pdf' ? 'در حال دانلود...' : 'خروجی PDF' }}
-                </button>
+                >{{ historyExportingFormat === 'pdf' ? 'در حال دانلود...' : 'خروجی PDF' }}</AppButton>
               </div>
 
               <p v-if="historyFilterSummary" class="history-filter-summary">{{ historyFilterSummary }}</p>
               <p v-if="historyError" class="error-text history-error-text">{{ historyError }}</p>
             </div>
 
-            <div v-if="isHistoryLoading">
-               <LoadingSkeleton :count="3" :height="60" />
-            </div>
-            <p v-else-if="mutualTrades.length === 0" class="empty-text">
-              {{ tradeHistoryEmptyText }}
-            </p>
+            <LoadingSkeleton v-if="isHistoryLoading" :count="3" :height="60" />
+            <AppEmptyState
+              v-else-if="!hasLoadedHistoryOnce"
+              title="تاریخچه هنوز بارگذاری نشده است"
+              message="بازه دلخواه را انتخاب کنید و فیلترها را اعمال کنید."
+            />
+            <AppEmptyState
+              v-else-if="mutualTrades.length === 0"
+              title="نتیجه‌ای پیدا نشد"
+              :message="tradeHistoryEmptyText"
+            />
             <div v-else class="history-list">
                 <div v-for="trade in mutualTrades" :key="trade.id" class="mini-trade-card">
                     <div class="trade-row">
@@ -1874,7 +1845,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                     <div class="trade-details">
                         <span class="trade-amount">{{ trade.quantity }} عدد</span>
                         <span class="trade-commodity">{{ trade.commodity_name }}</span>
-                        <span class="trade-price">{{ trade.price.toLocaleString() }} ریال</span>
+                        <span class="trade-price">{{ formatTradePrice(trade.price) }} ریال</span>
                     </div>
                     <div class="trade-counterparty">
                       <span class="label">طرف معامله:</span>
@@ -1904,7 +1875,7 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
                 </div>
             </div>
           </div>
-        </div>
+        </AppSectionCard>
       </section>
 
       <section v-if="showOwnerSections && ownerOnlyActions.length > 0" class="profile-section owner-profile-section">
@@ -1979,15 +1950,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 
 .profile-content--own .profile-section {
   width: 100%;
-}
-
-.profile-content--own .profile-accordion {
-  margin-bottom: 0.35rem;
-}
-
-.profile-content--own .profile-accordion-header {
-  padding-top: 0.74rem;
-  padding-bottom: 0.74rem;
 }
 
 .profile-stats-grid {
@@ -2438,10 +2400,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
   overflow: visible;
 }
 
-.card-with-help > .profile-accordion-header {
-  gap: 12px;
-}
-
 .accordion-header-actions {
   display: inline-flex;
   align-items: center;
@@ -2628,8 +2586,6 @@ function openProjectUserProfile(user: ProjectUserDirectoryEntry) {
 }
 
 
-
-/* Accordion Styles removed as they are now global profile-accordion */
 
 .mt-4 {
   margin-top: 1rem;

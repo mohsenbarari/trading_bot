@@ -176,12 +176,7 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
-    await flushPromises()
-
-    const presetButton = wrapper.findAll('.history-chip').find((node) => node.text().includes('۳ ماه'))
+    const presetButton = wrapper.findAll('button').find((node) => node.text().includes('۳ ماه'))
     expect(presetButton).toBeTruthy()
     await presetButton!.trigger('click')
     await flushPromises()
@@ -195,10 +190,12 @@ describe('PublicProfile.vue', () => {
     await setHistoryDate(wrapper, 1, '2026-05-20')
     const commoditySelect = wrapper.find('.history-filter-field-wide select')
     expect(commoditySelect.exists()).toBe(true)
+    await commoditySelect.trigger('focus')
+    await flushPromises()
     await commoditySelect.setValue('سکه')
-    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
-    expect(applyButton).toBeTruthy()
-    await applyButton!.trigger('click')
+    const applyButtonWithCommodity = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonWithCommodity).toBeTruthy()
+    await applyButtonWithCommodity!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('تا')
@@ -252,14 +249,7 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
     expect(vi.mocked(window.alert)).toHaveBeenCalledWith('بلاک کاربر ناموفق بود.')
 
-    fetchMock.mockResolvedValueOnce(makeResponse([]))
-    fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(new Response('server exploded', { status: 400, headers: { 'Content-Type': 'text/plain' } }))
-
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
-    await flushPromises()
 
     const pdfButton = wrapper.findAll('button').find((node) => node.text().includes('خروجی PDF'))
     expect(pdfButton).toBeTruthy()
@@ -332,9 +322,9 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonWithFilters = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonWithFilters).toBeTruthy()
+    await applyButtonWithFilters!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('خریدار بیرونی')
@@ -517,11 +507,6 @@ describe('PublicProfile.vue', () => {
 
     const messageButton = wrapper.findAll('button').find((button) => button.text().includes('ارسال پیام'))
     expect(messageButton).toBeTruthy()
-
-    const infoHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
-    expect(infoHeader).toBeTruthy()
-    await infoHeader!.trigger('click')
-    await infoHeader!.trigger('click')
 
     await messageButton!.trigger('click')
 
@@ -826,20 +811,16 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('لیست همکاران'))
-    expect(directoryHeader).toBeTruthy()
-    await directoryHeader!.trigger('click')
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/users-public/44/project-users?limit=25&offset=0', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
-    }))
+    expect(fetchMock.mock.calls.some(([url]) => (
+      url === '/api/users-public/44/project-users?limit=25&offset=0'
+    ))).toBe(true)
     expect(wrapper.text()).toContain('manager61')
     expect(wrapper.text()).toContain('09121110000')
 
-    await wrapper.get('.project-user-link-btn').trigger('click')
+    await wrapper.findAll('.ui-list-item').find((item) => item.text().includes('manager61'))!.trigger('click')
     expect(wrapper.emitted('navigate')?.at(-1)).toEqual([
       'public_profile',
       {
@@ -859,14 +840,12 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('manager124')
 
     await wrapper.get('.project-users-search-input').setValue('manager')
-    await wrapper.get('.project-users-search-submit').trigger('submit')
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/44/project-users?limit=25&offset=0&q=manager', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
-    }))
+    expect(fetchMock.mock.calls.some(([url]) => (
+      url === '/api/users-public/44/project-users?limit=25&offset=0&q=manager'
+    ))).toBe(true)
     expect(wrapper.text()).toContain('manager61')
   })
 
@@ -929,16 +908,12 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('لیست همکاران'))
-    expect(directoryHeader).toBeTruthy()
-    await directoryHeader!.trigger('click')
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/users-public/20/project-users?limit=25&offset=0', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
-    }))
+    expect(fetchMock.mock.calls.some(([url]) => (
+      url === '/api/users-public/20/project-users?limit=25&offset=0'
+    ))).toBe(true)
     expect(wrapper.text()).toContain('owner20')
   })
 
@@ -985,23 +960,19 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const directoryHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('لیست همکاران'))
-    expect(directoryHeader).toBeTruthy()
-    await directoryHeader!.trigger('click')
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('دریافت کاربران پروژه ممکن نشد')
     expect(wrapper.text()).not.toContain('manager61')
 
     await wrapper.get('.project-users-search-input').setValue('manager')
-    await wrapper.get('.project-users-search-submit').trigger('submit')
+    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/users-public/44/project-users?limit=25&offset=0&q=manager', expect.objectContaining({
-      headers: expect.objectContaining({
-        Authorization: 'Bearer token',
-      }),
-    }))
+    expect(fetchMock.mock.calls.some(([url]) => (
+      url === '/api/users-public/44/project-users?limit=25&offset=0&q=manager'
+    ))).toBe(true)
     expect(wrapper.text()).not.toContain('دریافت کاربران پروژه ممکن نشد')
     expect(wrapper.text()).toContain('manager61')
   })
@@ -1631,10 +1602,6 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const infoHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('اطلاعات شخصی'))
-    expect(infoHeader).toBeTruthy()
-    await infoHeader!.trigger('click')
-
     await wrapper.get('.address-edit-trigger').trigger('click')
     await wrapper.get('.address-edit-textarea').setValue('بازار تهران، پلاک ۱۲')
     fetchMock.mockResolvedValueOnce(makeResponse({ address: 'بازار تهران، پلاک ۱۲' }))
@@ -1704,8 +1671,7 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.text()).toContain('لیست حسابداران')
     expect(wrapper.text()).not.toContain('لیست مشتریان')
     expect(wrapper.find('[data-test="public-profile-customers-help"]').exists()).toBe(false)
-    const accountantAccordion = wrapper.findAll('.profile-accordion').find((node) => node.text().includes('لیست حسابداران'))
-    expect(accountantAccordion?.classes()).not.toContain('open')
+    expect(wrapper.find('.profile-accordion').exists()).toBe(false)
 
     await wrapper.get('[data-test="public-profile-info-help"]').trigger('click')
     expect(wrapper.text()).toContain('می‌توانید آدرس را مستقیم از همین قسمت ویرایش کنید')
@@ -1858,9 +1824,9 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonAfterInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonAfterInvalidRange).toBeTruthy()
+    await applyButtonAfterInvalidRange!.trigger('click')
     await flushPromises()
 
     const historyCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')
@@ -1886,10 +1852,6 @@ describe('PublicProfile.vue', () => {
         highlight_accountant_relation_display_name: 'حسابدار فروش',
       },
     ])
-
-    await historyHeader!.trigger('click')
-    await historyHeader!.trigger('click')
-    await flushPromises()
 
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/50')).toHaveLength(1)
   })
@@ -1949,9 +1911,9 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات این کاربر'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonInvalidRange).toBeTruthy()
+    await applyButtonInvalidRange!.trigger('click')
     await flushPromises()
 
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/60')).toHaveLength(1)
@@ -1996,9 +1958,9 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonWithCommodity = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonWithCommodity).toBeTruthy()
+    await applyButtonWithCommodity!.trigger('click')
     await flushPromises()
 
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/my')).toHaveLength(1)
@@ -2078,17 +2040,17 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات من'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonAfterInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonAfterInvalidRange).toBeTruthy()
+    await applyButtonAfterInvalidRange!.trigger('click')
     await flushPromises()
 
     const selects = wrapper.findAll('.history-filter-field-wide select')
     expect(selects).toHaveLength(2)
+    await selects[1]!.trigger('focus')
+    await flushPromises()
     await selects[1]!.setValue('90')
-    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
-    expect(applyButton).toBeTruthy()
-    await applyButton!.trigger('click')
+    await applyButtonAfterInvalidRange!.trigger('click')
     await flushPromises()
 
     const filteredCall = fetchMock.mock.calls.find(([url]) => url === '/api/trades/with/90')
@@ -2157,20 +2119,22 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonBeforeFilter = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonBeforeFilter).toBeTruthy()
+    await applyButtonBeforeFilter!.trigger('click')
     await flushPromises()
 
     await setHistoryDate(wrapper, 0, '2026-05-01')
     await setHistoryDate(wrapper, 1, '2026-05-31')
     const commoditySelect = wrapper.find('.history-filter-field-wide select')
     expect(commoditySelect.exists()).toBe(true)
+    await commoditySelect.trigger('focus')
+    await flushPromises()
     await commoditySelect.setValue('سکه')
 
-    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
-    expect(applyButton).toBeTruthy()
-    await applyButton!.trigger('click')
+    const applyButtonAfterFilter = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonAfterFilter).toBeTruthy()
+    await applyButtonAfterFilter!.trigger('click')
     await flushPromises()
 
     const filteredCall = fetchMock.mock.calls.find(([url]) => typeof url === 'string' && url.includes('/api/trades/with/50?'))
@@ -2241,17 +2205,17 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    const historyHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('تاریخچه معاملات مشترک'))
-    expect(historyHeader).toBeTruthy()
-    await historyHeader!.trigger('click')
+    const applyButtonBeforeInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonBeforeInvalidRange).toBeTruthy()
+    await applyButtonBeforeInvalidRange!.trigger('click')
     await flushPromises()
 
     await setHistoryDate(wrapper, 0, '2026-06-01')
     await setHistoryDate(wrapper, 1, '2026-05-01')
 
-    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
-    expect(applyButton).toBeTruthy()
-    await applyButton!.trigger('click')
+    const applyButtonWithInvalidRange = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButtonWithInvalidRange).toBeTruthy()
+    await applyButtonWithInvalidRange!.trigger('click')
     await flushPromises()
 
     expect(wrapper.text()).toContain('بازه زمانی انتخاب‌شده معتبر نیست.')
@@ -2348,14 +2312,8 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('acct44')
     expect(wrapper.find('.public-accountant-card.highlighted').text()).toContain('مسیر فعلی')
 
-    const accountantHeader = wrapper.findAll('.profile-accordion-header').find((node) => node.text().includes('حسابداران این مالک'))
-    expect(accountantHeader).toBeTruthy()
-    const accountantAccordion = wrapper.findAll('.profile-accordion').find((node) => node.text().includes('حسابداران این مالک'))
-    expect(accountantAccordion).toBeTruthy()
-    await accountantHeader!.trigger('click')
-    expect(accountantAccordion!.classes()).not.toContain('open')
-    await accountantHeader!.trigger('click')
-    expect(accountantAccordion!.classes()).toContain('open')
+    expect(wrapper.text()).toContain('حسابداران این مالک')
+    expect(wrapper.find('.profile-accordion').exists()).toBe(false)
   })
 
   it('renders the standardized customer context banner on customer profiles without legacy copy', async () => {

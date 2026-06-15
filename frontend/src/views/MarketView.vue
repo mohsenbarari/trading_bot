@@ -162,9 +162,6 @@ const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
 const filteredOfferCountLabel = computed(() => `${filteredOffers.value.length.toLocaleString('fa-IR')} لفظ`)
 const marketStatusTone = computed(() => (isMarketOpen.value ? 'success' : 'danger'))
-const marketHeaderStatusText = computed(() => (
-  isMarketOpen.value ? 'بازار فعال است' : 'ثبت لفظ جدید غیرفعال است'
-))
 const shouldCollapseAdminMarketMessage = computed(() => (
   !!adminMarketMessage.value
   && isMarketOpen.value
@@ -664,7 +661,6 @@ onUnmounted(() => {
             <AppStatusBadge class="market-count-chip" tone="primary">{{ filteredOfferCountLabel }}</AppStatusBadge>
           </div>
         </div>
-        <small class="market-shell-status-text">{{ marketHeaderStatusText }}</small>
       </section>
 
       <div class="header-controls">
@@ -873,14 +869,6 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-.market-shell-status-text {
-  display: block;
-  margin-top: 0.28rem;
-  color: var(--ds-text-muted);
-  font-size: 0.72rem;
-  line-height: 1.5;
-}
-
 .market-shell-meta {
   flex: 0 0 auto;
   display: flex;
@@ -925,7 +913,7 @@ onUnmounted(() => {
   outline-offset: 3px;
 }
 
-@media (max-width: 420px) {
+@media (max-width: 430px) {
   .market-shell-main {
     flex-direction: column;
   }
