@@ -26,6 +26,7 @@ window.addEventListener('vite:preloadError', (event) => {
 import { registerSW } from 'virtual:pwa-register'
 
 let didRegisterPwa = false
+const PWA_REGISTRATION_DELAY_MS = 250
 
 function registerPwaWhenStable() {
   if (didRegisterPwa) return
@@ -95,10 +96,6 @@ try {
   // Ignore storage failures in stricter privacy contexts.
 }
 
-if (document.readyState === 'complete') {
-  window.setTimeout(registerPwaWhenStable, 1500)
-} else {
-  window.addEventListener('load', () => {
-    window.setTimeout(registerPwaWhenStable, 1500)
-  }, { once: true })
-}
+// Register early enough for Android installability/WebAPK evaluation, but keep
+// a small delay so first paint and route bootstrap win the critical path.
+window.setTimeout(registerPwaWhenStable, PWA_REGISTRATION_DELAY_MS)

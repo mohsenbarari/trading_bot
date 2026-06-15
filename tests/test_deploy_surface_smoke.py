@@ -144,6 +144,11 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['make', '-n', 'status'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_makefile_reset_sessions_uses_local_compose_fallback(self):
+        makefile = (REPO_ROOT / 'Makefile').read_text(encoding='utf-8')
+        self.assertIn('LOCAL_COMPOSE ?=', makefile)
+        self.assertIn('@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py reset-sessions', makefile)
+
     def test_compose_files_render_valid_config(self):
         compose_command = resolve_docker_compose_command()
         if compose_command is None:

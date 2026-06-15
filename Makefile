@@ -11,6 +11,7 @@ IRAN_DIR ?= $(shell python3 scripts/deploy_config.py --key IRAN_PROJECT_DIR 2>/d
 IRAN_HOST_DISPLAY ?= $(shell python3 scripts/deploy_config.py --key IRAN_HOST 2>/dev/null)
 IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>/dev/null)
 SSH_IRAN_OPTS = -o StrictHostKeyChecking=no -p $(IRAN_SSH_PORT)
+LOCAL_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; else printf '%s' 'docker compose'; fi)
 IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 
 .PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
@@ -172,46 +173,46 @@ deployment-surface-guard:
 	@python3 scripts/check_deployment_surface_guard.py
 
 restore-default-commodities:
-	@docker compose run --rm migration python scripts/restore_default_commodities.py
+	@$(LOCAL_COMPOSE) run --rm migration python scripts/restore_default_commodities.py
 
 dev-admin:
-	@docker compose exec -T app python scripts/dev_admin.py $${ARGS}
+	@$(LOCAL_COMPOSE) exec -T app python scripts/dev_admin.py $${ARGS}
 
 create-superadmin:
-	@docker compose exec app python scripts/dev_admin.py create-superadmin
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py create-superadmin
 
 create-admin:
-	@docker compose exec app python scripts/dev_admin.py create-admin
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py create-admin
 
 create-user:
-	@docker compose exec app python scripts/dev_admin.py create-user
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py create-user
 
 list-users:
-	@docker compose exec -T app python scripts/dev_admin.py list-users $${ARGS}
+	@$(LOCAL_COMPOSE) exec -T app python scripts/dev_admin.py list-users $${ARGS}
 
 show-user:
-	@docker compose exec app python scripts/dev_admin.py show-user
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py show-user
 
 change-password:
-	@docker compose exec app python scripts/dev_admin.py change-password
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py change-password
 
 force-password-change:
-	@docker compose exec app python scripts/dev_admin.py force-password-change
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py force-password-change
 
 set-role:
-	@docker compose exec app python scripts/dev_admin.py set-role
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py set-role
 
 set-status:
-	@docker compose exec app python scripts/dev_admin.py set-status
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py set-status
 
 set-max-sessions:
-	@docker compose exec app python scripts/dev_admin.py set-max-sessions
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py set-max-sessions
 
 reset-sessions:
-	@docker compose exec app python scripts/dev_admin.py reset-sessions
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py reset-sessions
 
 unlock-login:
-	@docker compose exec app python scripts/dev_admin.py unlock-login
+	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py unlock-login
 
 # --- Management Commands ---
 

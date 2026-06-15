@@ -173,7 +173,7 @@ describe('main.ts', () => {
     expect(preloadEvent.preventDefault).toHaveBeenCalled()
     expect(mainMocks.reloadSpy).toHaveBeenCalledTimes(1)
 
-    getTimeoutByDelay(1500)?.fn()
+    getTimeoutByDelay(250)?.fn()
     expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
 
     const registerOptions = mainMocks.registerSW.mock.calls[0]?.[0]
@@ -188,13 +188,13 @@ describe('main.ts', () => {
     expect(mainMocks.reloadSpy).toHaveBeenCalledTimes(2)
   })
 
-  it('retries Telegram init later and waits for window load before registering the service worker', async () => {
+  it('retries Telegram init later and still registers the service worker without waiting for window load', async () => {
     setReadyState('loading')
 
     await importFreshMain()
 
     expect(mainMocks.telegram.ready).not.toHaveBeenCalled()
-    expect(getFirstListener('load')).toBeTypeOf('function')
+    expect(mainMocks.registerSW).not.toHaveBeenCalled()
 
     setTelegram(true)
     getTimeoutByDelay(500)?.fn()
@@ -203,10 +203,12 @@ describe('main.ts', () => {
     expect(mainMocks.telegram.expand).toHaveBeenCalled()
     expect(mainMocks.registerSW).not.toHaveBeenCalled()
 
-    dispatchStoredListeners('load')
-    getTimeoutByDelay(1500)?.fn()
-    getTimeoutByDelay(1500)?.fn()
+    getTimeoutByDelay(250)?.fn()
+    getTimeoutByDelay(250)?.fn()
 
+    expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
+
+    dispatchStoredListeners('load')
     expect(mainMocks.registerSW).toHaveBeenCalledTimes(1)
   })
 
@@ -230,7 +232,7 @@ describe('main.ts', () => {
     })
 
     await importFreshMain()
-    getTimeoutByDelay(1500)?.fn()
+    getTimeoutByDelay(250)?.fn()
 
     expect(warnSpy).toHaveBeenCalledWith('Telegram WebApp not initialized', expect.any(Error))
     expect(logSpy).toHaveBeenCalledWith('App ready to work offline')
