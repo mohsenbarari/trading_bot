@@ -2,12 +2,14 @@
 import { useRoute, useRouter } from 'vue-router'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { isAppConnecting } from './utils/auth'
+import { usePWAInstall } from './utils/pwaInstall'
 
 
 const route = useRoute()
 const router = useRouter()
 const AuthenticatedShell = defineAsyncComponent(() => import('./components/AppAuthenticatedShell.vue'))
 const PWAInstallOverlay = defineAsyncComponent(() => import('./components/PWAInstallOverlay.vue'))
+usePWAInstall()
 
 // Track whether the router's FIRST navigation (which includes loading the
 // lazy-loaded route component chunk from the network) has completed.

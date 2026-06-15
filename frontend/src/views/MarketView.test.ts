@@ -278,7 +278,7 @@ describe('MarketView.vue', () => {
     expect(wrapper.findAll('[role="tab"]')[0]?.attributes('aria-selected')).toBe('true')
     expect(wrapper.find('.text-offer-input').attributes('aria-label')).toBe('متن لفظ بازار')
     expect(wrapper.find('.send-btn').attributes('aria-label')).toBe('ارسال لفظ برای پیش‌نمایش')
-    expect(wrapper.find('.send-btn').classes()).toContain('ui-icon-button--primary')
+    expect(wrapper.find('.send-btn').classes()).toContain('ui-icon-button--neutral')
 
     marketViewMocks.fetchOffersMock.mockClear()
     await wrapper.find('.emit-trade-completed').trigger('click')

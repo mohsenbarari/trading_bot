@@ -7,6 +7,11 @@ const appMocks = vi.hoisted(() => ({
   route: { name: 'dashboard' as string | undefined },
   isReadyMock: vi.fn<() => Promise<void>>(),
   isAppConnecting: null as any,
+  usePWAInstallMock: vi.fn(() => ({
+    isInstallable: { value: false },
+    isInstalled: { value: false },
+    installApp: vi.fn(),
+  })),
 }))
 
 vi.mock('vue-router', () => ({
@@ -22,6 +27,10 @@ vi.mock('./utils/auth', async () => {
   appMocks.isAppConnecting = isAppConnecting
   return { isAppConnecting }
 })
+
+vi.mock('./utils/pwaInstall', () => ({
+  usePWAInstall: appMocks.usePWAInstallMock,
+}))
 
 const RouterViewStub = defineComponent({
   name: 'RouterView',
@@ -69,6 +78,7 @@ describe('App.vue', () => {
   beforeEach(() => {
     appMocks.route.name = 'dashboard'
     appMocks.isReadyMock.mockReset()
+    appMocks.usePWAInstallMock.mockClear()
     if (appMocks.isAppConnecting) {
       appMocks.isAppConnecting.value = false
     }
@@ -86,6 +96,7 @@ describe('App.vue', () => {
 
     const wrapper = mountApp()
 
+    expect(appMocks.usePWAInstallMock).toHaveBeenCalledTimes(1)
     expect(wrapper.find('.animate-spin').exists()).toBe(true)
     expect(wrapper.find('[data-test="route-component"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="auth-shell"]').exists()).toBe(false)
@@ -112,6 +123,7 @@ describe('App.vue', () => {
     const wrapper = mountApp()
     await flushPromises()
 
+    expect(appMocks.usePWAInstallMock).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('در حال اتصال...')
     expect(wrapper.find('[data-test="route-component"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="auth-shell"]').exists()).toBe(false)

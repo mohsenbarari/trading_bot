@@ -847,7 +847,7 @@ onUnmounted(() => {
             @click="parseAndSubmitTextOffer"
             :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
             class="send-btn"
-            variant="primary"
+            variant="neutral"
             label="ارسال لفظ برای پیش‌نمایش"
           >
             <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
@@ -1187,7 +1187,6 @@ onUnmounted(() => {
   min-width: var(--ds-touch-target, 48px);
   min-height: var(--ds-touch-target, 48px);
   padding: 0;
-  color: white;
   border-radius: var(--ds-radius-md);
   box-shadow: var(--ds-shadow-sm);
   transition: all 0.2s;
