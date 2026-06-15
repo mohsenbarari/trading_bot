@@ -123,18 +123,13 @@ class CoreSmsTests(unittest.TestCase):
             },
         )
 
-    def test_send_otp_sms_falls_back_to_plain_sms_without_template(self):
+    def test_send_otp_sms_returns_false_without_template(self):
         with patch.object(sms.settings, "smsir_otp_template_id", None), patch(
-            "core.sms.send_sms", return_value=True
+            "core.sms.send_sms"
         ) as send_sms_mock:
-            self.assertTrue(sms.send_otp_sms("09120000000", "12345"))
+            self.assertFalse(sms.send_otp_sms("09120000000", "12345"))
 
-        args = send_sms_mock.call_args.args
-        self.assertEqual(args[0], "09120000000")
-        self.assertEqual(
-            args[1],
-            "کد تایید شما: 12345\nاین کد تا ۲ دقیقه معتبر است.\ncoin.gold-trade.ir/",
-        )
+        send_sms_mock.assert_not_called()
 
     def test_send_otp_sms_returns_false_for_invalid_template_id(self):
         with patch.object(sms.settings, "smsir_otp_template_id", "abc"), patch(

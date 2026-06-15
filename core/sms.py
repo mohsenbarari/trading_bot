@@ -160,7 +160,7 @@ def send_sms(mobile: str, message: str) -> bool:
 
 
 def send_otp_sms(mobile: str, code: str) -> bool:
-    """Send OTP code via SMS.ir verify template when configured, otherwise via plain SMS."""
+    """Send OTP code strictly through the configured SMS.ir verify template."""
     try:
         template_id = _configured_template_id(
             settings.smsir_otp_template_id,
@@ -170,20 +170,16 @@ def send_otp_sms(mobile: str, code: str) -> bool:
         logger.error("Invalid SMS.ir OTP configuration: %s", exc)
         return False
 
-    if template_id is not None:
-        parameter_name = (settings.smsir_otp_template_parameter or "CODE").strip() or "CODE"
-        return _send_template_sms(
-            mobile,
-            template_id=template_id,
-            parameters=[{"name": parameter_name, "value": str(code)}],
-        )
+    if template_id is None:
+        logger.error("SMSIR_OTP_TEMPLATE_ID is not configured")
+        return False
 
-    message = (
-        f"کد تایید شما: {code}\n"
-        f"این کد تا ۲ دقیقه معتبر است.\n"
-        f"coin.gold-trade.ir/"
+    parameter_name = (settings.smsir_otp_template_parameter or "CODE").strip() or "CODE"
+    return _send_template_sms(
+        mobile,
+        template_id=template_id,
+        parameters=[{"name": parameter_name, "value": str(code)}],
     )
-    return send_sms(mobile, message)
 
 
 def send_invitation_sms(

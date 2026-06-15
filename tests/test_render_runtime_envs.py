@@ -27,7 +27,11 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "SMSIR_API_KEY": "sms-key",
             "SMSIR_LINE_NUMBER": "3000",
             "SMSIR_OTP_TEMPLATE_ID": "123456",
-            "SMSIR_OTP_TEMPLATE_PARAMETER": "Code",
+            "SMSIR_OTP_TEMPLATE_PARAMETER": "CODE",
+            "SMSIR_INVITATION_TEMPLATE_ID": "657938",
+            "SMSIR_INVITATION_TEMPLATE_PARAMETER": "NAME",
+            "SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID": "162103",
+            "SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID": "903643",
             "ERROR_TRACKING_DSN": "dsn",
             "TRUSTED_PROXY_CIDRS": "127.0.0.1/32,::1/128,10.0.0.0/24",
             "OBSERVABILITY_TELEGRAM_USER_HASH_SALT": "salt",
@@ -171,7 +175,11 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("IRAN_SERVER_URL=https://coin.gold-trade.ir", foreign_lines)
             self.assertIn("FOREIGN_SERVER_URL=https://coin.362514.ir", iran_lines)
             self.assertIn("SMSIR_OTP_TEMPLATE_ID=123456", iran_lines)
-            self.assertIn("SMSIR_OTP_TEMPLATE_PARAMETER=Code", iran_lines)
+            self.assertIn("SMSIR_OTP_TEMPLATE_PARAMETER=CODE", iran_lines)
+            self.assertIn("SMSIR_INVITATION_TEMPLATE_ID=657938", iran_lines)
+            self.assertIn("SMSIR_INVITATION_TEMPLATE_PARAMETER=NAME", iran_lines)
+            self.assertIn("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID=162103", iran_lines)
+            self.assertIn("SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID=903643", iran_lines)
 
     def test_collect_runtime_values_reads_non_shell_safe_source_env_and_allows_overrides(self):
         values = self.sample_values()
@@ -179,6 +187,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values.pop("ERROR_TRACKING_DSN")
         values.pop("SMSIR_OTP_TEMPLATE_ID")
         values.pop("SMSIR_OTP_TEMPLATE_PARAMETER")
+        values.pop("SMSIR_INVITATION_TEMPLATE_ID")
+        values.pop("SMSIR_INVITATION_TEMPLATE_PARAMETER")
+        values.pop("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID")
+        values.pop("SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID")
         values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_WARNING_RECEIVER"] = "Trading Bot Production Email"
@@ -195,8 +207,12 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
 
         self.assertEqual(collected["CHANNEL_INVITE_LINK"], "")
         self.assertEqual(collected["ERROR_TRACKING_DSN"], "")
-        self.assertEqual(collected["SMSIR_OTP_TEMPLATE_ID"], "")
-        self.assertEqual(collected["SMSIR_OTP_TEMPLATE_PARAMETER"], "Code")
+        self.assertEqual(collected["SMSIR_OTP_TEMPLATE_ID"], "585147")
+        self.assertEqual(collected["SMSIR_OTP_TEMPLATE_PARAMETER"], "CODE")
+        self.assertEqual(collected["SMSIR_INVITATION_TEMPLATE_ID"], "657938")
+        self.assertEqual(collected["SMSIR_INVITATION_TEMPLATE_PARAMETER"], "NAME")
+        self.assertEqual(collected["SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID"], "162103")
+        self.assertEqual(collected["SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID"], "903643")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
         self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")

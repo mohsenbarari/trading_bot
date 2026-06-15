@@ -1343,8 +1343,12 @@ ensure_runtime_env_file() {
     local channel_invite_link=""
     local smsir_api_key=""
     local smsir_line_number=""
-    local smsir_otp_template_id=""
-    local smsir_otp_template_parameter="Code"
+    local smsir_otp_template_id="585147"
+    local smsir_otp_template_parameter="CODE"
+    local smsir_invitation_template_id="657938"
+    local smsir_invitation_template_parameter="NAME"
+    local smsir_accountant_invitation_template_id="162103"
+    local smsir_customer_invitation_template_id="903643"
     local error_tracking_dsn=""
     local trusted_proxy_cidrs="127.0.0.1/32,::1/128"
     local observability_telegram_user_hash_salt=""
@@ -1374,6 +1378,10 @@ ensure_runtime_env_file() {
     prompt_value smsir_line_number "SMSIR_LINE_NUMBER"
     prompt_value smsir_otp_template_id "SMSIR_OTP_TEMPLATE_ID"
     prompt_value smsir_otp_template_parameter "SMSIR_OTP_TEMPLATE_PARAMETER" "$smsir_otp_template_parameter"
+    prompt_value smsir_invitation_template_id "SMSIR_INVITATION_TEMPLATE_ID" "$smsir_invitation_template_id"
+    prompt_value smsir_invitation_template_parameter "SMSIR_INVITATION_TEMPLATE_PARAMETER" "$smsir_invitation_template_parameter"
+    prompt_value smsir_accountant_invitation_template_id "SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID" "$smsir_accountant_invitation_template_id"
+    prompt_value smsir_customer_invitation_template_id "SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID" "$smsir_customer_invitation_template_id"
     prompt_value error_tracking_dsn "ERROR_TRACKING_DSN"
     prompt_value trusted_proxy_cidrs "TRUSTED_PROXY_CIDRS" "$trusted_proxy_cidrs"
     prompt_value observability_telegram_user_hash_salt "OBSERVABILITY_TELEGRAM_USER_HASH_SALT" "" 1
@@ -1401,6 +1409,10 @@ ensure_runtime_env_file() {
     SMSIR_LINE_NUMBER="$smsir_line_number" \
     SMSIR_OTP_TEMPLATE_ID="$smsir_otp_template_id" \
     SMSIR_OTP_TEMPLATE_PARAMETER="$smsir_otp_template_parameter" \
+    SMSIR_INVITATION_TEMPLATE_ID="$smsir_invitation_template_id" \
+    SMSIR_INVITATION_TEMPLATE_PARAMETER="$smsir_invitation_template_parameter" \
+    SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID="$smsir_accountant_invitation_template_id" \
+    SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID="$smsir_customer_invitation_template_id" \
     ERROR_TRACKING_DSN="$error_tracking_dsn" \
     TRUSTED_PROXY_CIDRS="$trusted_proxy_cidrs" \
     OBSERVABILITY_TELEGRAM_USER_HASH_SALT="$observability_telegram_user_hash_salt" \
