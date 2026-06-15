@@ -236,6 +236,7 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "خطا در ارسال کد تایید")
+        self.assertEqual(redis.delete_calls, ["otp:09120000000", "otp_limit:09120000000"])
 
     async def test_resend_otp_sms_blocks_remote_home_active_session_before_sms(self):
         user = SimpleNamespace(id=7, is_deleted=False, home_server="iran")

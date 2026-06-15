@@ -142,6 +142,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
                 await register_otp_request(req, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "خطا در ارسال پیامک")
+        self.assertEqual(redis.delete_calls, ["reg_otp:abc", "otp_limit:09120000000"])
 
     async def test_register_otp_verify_rejects_invalid_code_and_persists_verified_flag(self):
         req = RegisterOTPVerify(token="abc", code="12345")

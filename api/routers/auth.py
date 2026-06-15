@@ -380,6 +380,8 @@ async def register_otp_request(
     if send_otp_sms(mobile, otp_code):
         return {"detail": "کد تایید ارسال شد", "expires_in": 120}
     else:
+        await redis.delete(otp_key)
+        await redis.delete(rate_limit_key)
         raise HTTPException(status_code=500, detail="خطا در ارسال پیامک")
 
 @router.post("/register-otp-verify", response_model=dict)
@@ -769,6 +771,8 @@ async def request_otp(
             logger.info(f"OTP sent via SMS to {mobile}")
         else:
             logger.error(f"Failed to send OTP via SMS to {mobile}")
+            await redis.delete(otp_key)
+            await redis.delete(rate_limit_key)
             raise HTTPException(status_code=500, detail="خطا در ارسال کد تایید")
 
     return {
