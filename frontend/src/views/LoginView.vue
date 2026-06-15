@@ -736,12 +736,6 @@ watch(() => step.value, (newStep) => {
   }
 });
 
-watch(() => form.mobile, (newVal) => {
-  if (newVal && newVal.length === 11 && /^09\d{9}$/.test(newVal) && !loading.value && countdown.value === 0) {
-    requestOtp()
-  }
-})
-
 onUnmounted(() => {
   if (ac) ac.abort();
   if (timerInterval) clearInterval(timerInterval)

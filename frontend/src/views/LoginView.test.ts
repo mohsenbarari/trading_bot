@@ -48,6 +48,11 @@ function findButtonByText(wrapper: ReturnType<typeof mount>, text: string) {
   return button
 }
 
+async function requestOtpFromMobileStep(wrapper: ReturnType<typeof mount>) {
+  await findButtonByText(wrapper, 'دریافت کد تایید').trigger('click')
+  await flushPromises()
+}
+
 describe('LoginView.vue', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -108,7 +113,7 @@ describe('LoginView.vue', () => {
 
     const wrapper = mount(LoginView)
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/auth/request-otp',
@@ -136,7 +141,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
 
@@ -165,7 +170,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
 
@@ -204,7 +209,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await flushPromises()
@@ -232,7 +237,7 @@ describe('LoginView.vue', () => {
     expect(wrapper.text()).toContain('شماره موبایل معتبر نیست')
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/auth/request-otp',
@@ -270,7 +275,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
 
     vi.advanceTimersByTime(30000)
     await flushPromises()
@@ -327,7 +332,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(2000)
@@ -371,7 +376,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
 
@@ -423,7 +428,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
@@ -494,7 +499,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
 
@@ -569,7 +574,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
@@ -678,7 +683,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     expect(wrapper.text()).toContain('خطا در ارسال کد')
 
     fetchMock.mockResolvedValueOnce(makeJsonResponse({ method: 'sms' }) as any)
@@ -749,7 +754,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(1000)
@@ -785,7 +790,7 @@ describe('LoginView.vue', () => {
 
     const rejectedWrapper = mount(LoginView)
     await rejectedWrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(rejectedWrapper)
     await rejectedWrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await findButtonByText(rejectedWrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
@@ -815,7 +820,7 @@ describe('LoginView.vue', () => {
 
     const expiredWrapper = mount(LoginView)
     await expiredWrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(expiredWrapper)
     await expiredWrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await findButtonByText(expiredWrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
@@ -843,7 +848,7 @@ describe('LoginView.vue', () => {
     const wrapper = mount(LoginView)
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await wrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await findButtonByText(wrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
@@ -879,7 +884,7 @@ describe('LoginView.vue', () => {
 
     const errorWrapper = mount(LoginView)
     await errorWrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(errorWrapper)
     await errorWrapper.get('input[autocomplete="one-time-code"]').setValue('12345')
     await flushPromises()
     await findButtonByText(errorWrapper, 'به دستگاه قبلی دسترسی ندارم').trigger('click')
@@ -959,7 +964,7 @@ describe('LoginView.vue', () => {
     expect(wrapper.text()).not.toContain('برای نصب در iOS')
 
     await wrapper.get('input[type="tel"]').setValue('09123456789')
-    await flushPromises()
+    await requestOtpFromMobileStep(wrapper)
     await vi.advanceTimersByTimeAsync(100)
     await flushPromises()
     await flushPromises()
