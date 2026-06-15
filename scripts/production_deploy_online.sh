@@ -1688,8 +1688,10 @@ backup_iran_database_before_shared_reset() {
     local backup_path="$IRAN_DEPLOY_BASE_DIR/backups/iran-shared-reset-$(date -u +%Y%m%dT%H%M%SZ).sql"
     log "Backing up Iran database before shared-table reset: $backup_path"
     ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
 mkdir -p '$IRAN_DEPLOY_BASE_DIR/backups'
-docker exec trading_bot_db sh -lc 'pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\"' > '$backup_path'"
+\$compose_cmd -f docker-compose.iran.yml exec -T db pg_dump -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" > '$backup_path'"
     log "Iran database backup completed: $backup_path"
 }
 
@@ -1712,8 +1714,10 @@ reset_iran_shared_tables() {
     confirm_iran_shared_reset
     backup_iran_database_before_shared_reset
     log "Resetting Iran shared tables"
-    ssh_iran "set -euo pipefail
-docker exec -i trading_bot_db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At' <<'SQL'
+ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml exec -T db psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At <<'SQL'
 TRUNCATE TABLE change_log, $SHARED_SYNC_TABLES_SQL RESTART IDENTITY CASCADE;
 SQL"
     log "Iran shared-table reset completed"
@@ -1735,7 +1739,9 @@ RETURNING table_name;"
 mark_iran_seed_generated_backlog_synced() {
     log "Marking Iran seed-generated mandatory/system backlog as synced"
     ssh_iran "set -euo pipefail
-docker exec -i trading_bot_db sh -lc 'psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At' <<'SQL'
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml exec -T db psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At <<'SQL'
 UPDATE change_log
 SET synced = true
 WHERE synced = false
