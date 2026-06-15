@@ -272,12 +272,12 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.offers-user-id').text()).toBe('77')
     expect(wrapper.find('.sort-toggle-btn').exists()).toBe(false)
     expect(wrapper.find('.clear-sort-btn').exists()).toBe(false)
-    expect(wrapper.get('.market-shell-card').text()).toContain('بازار معاملات')
+    expect(wrapper.get('.market-shell-card').text()).toContain('بازار')
     expect(wrapper.get('.market-shell-card').text()).toContain('بازار باز')
     expect(wrapper.get('.market-shell-card').text()).toContain('۱ لفظ')
     expect(wrapper.get('.tabs-container').attributes('role')).toBe('tablist')
-    expect(wrapper.findAll('.tab-btn').every((btn) => btn.attributes('role') === 'tab')).toBe(true)
-    expect(wrapper.find('.tab-btn.active').attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="tab"]').every((btn) => btn.attributes('role') === 'tab')).toBe(true)
+    expect(wrapper.findAll('[role="tab"]')[0]?.attributes('aria-selected')).toBe('true')
     expect(wrapper.find('.text-offer-input').attributes('aria-label')).toBe('متن لفظ بازار')
     expect(wrapper.find('.send-btn').attributes('aria-label')).toBe('ارسال لفظ برای پیش‌نمایش')
 
@@ -294,19 +294,19 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect(wrapper.find('[data-market-filter="all"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="tab"]')[0]?.attributes('aria-selected')).toBe('true')
 
-    await wrapper.find('[data-market-filter="all"]').trigger('keydown', { key: 'ArrowLeft' })
+    await wrapper.findAll('[role="tab"]')[0]!.trigger('keydown', { key: 'ArrowLeft' })
     await nextTick()
-    expect(wrapper.find('[data-market-filter="buy"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="tab"]')[1]?.attributes('aria-selected')).toBe('true')
 
-    await wrapper.find('[data-market-filter="buy"]').trigger('keydown', { key: 'End' })
+    await wrapper.findAll('[role="tab"]')[1]!.trigger('keydown', { key: 'End' })
     await nextTick()
-    expect(wrapper.find('[data-market-filter="my"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="tab"]')[3]?.attributes('aria-selected')).toBe('true')
 
-    await wrapper.find('[data-market-filter="my"]').trigger('keydown', { key: 'Home' })
+    await wrapper.findAll('[role="tab"]')[3]!.trigger('keydown', { key: 'Home' })
     await nextTick()
-    expect(wrapper.find('[data-market-filter="all"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="tab"]')[0]?.attributes('aria-selected')).toBe('true')
 
     wrapper.unmount()
   })
@@ -800,7 +800,7 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.tier2-offer-note').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('ثبت لفظ برای مشتری سطح 2 غیرفعال است')
     expect(wrapper.text()).not.toContain('شما فقط می‌توانید روی لفظ‌های دیگر درخواست بزنید.')
-    expect(wrapper.findAll('.tab-btn').some((btn) => btn.text().includes('لفظ‌های شما'))).toBe(false)
+    expect(wrapper.findAll('[role="tab"]').some((btn) => btn.text().includes('لفظ‌های شما'))).toBe(false)
 
     wrapper.unmount()
   })
@@ -834,7 +834,7 @@ describe('MarketView.vue', () => {
     await nextTick()
 
     expect(wrapper.find('.market-action-bar').exists()).toBe(false)
-    expect(wrapper.findAll('.tab-btn').some((btn) => btn.text().includes('لفظ‌های شما'))).toBe(false)
+    expect(wrapper.findAll('[role="tab"]').some((btn) => btn.text().includes('لفظ‌های شما'))).toBe(false)
 
     if (!resolveMe) {
       throw new Error('Expected auth/me resolver')
@@ -863,10 +863,10 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await nextTick()
 
-    const myTab = wrapper.findAll('.tab-btn').find((btn) => btn.text().includes('لفظ‌های شما'))
+    const myTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('لفظ‌های شما'))
     expect(myTab?.exists()).toBe(true)
     await myTab!.trigger('click')
-    expect(wrapper.find('.tab-btn.active').text()).toContain('لفظ‌های شما')
+    expect(wrapper.findAll('[role="tab"]').find((btn) => btn.attributes('aria-selected') === 'true')?.text()).toContain('لفظ‌های شما')
 
     if (!resolveMe) {
       throw new Error('Expected auth/me resolver')
@@ -874,8 +874,8 @@ describe('MarketView.vue', () => {
     ;(resolveMe as (value: unknown) => void)(responseOf({ id: 77, customer_tier: 'tier2' }))
     await flushPromises()
 
-    expect(wrapper.findAll('.tab-btn').some((btn) => btn.text().includes('لفظ‌های شما'))).toBe(false)
-    expect(wrapper.find('.tab-btn.active').text()).toContain('همه')
+    expect(wrapper.findAll('[role="tab"]').some((btn) => btn.text().includes('لفظ‌های شما'))).toBe(false)
+    expect(wrapper.findAll('[role="tab"]').find((btn) => btn.attributes('aria-selected') === 'true')?.text()).toContain('همه')
     expect(wrapper.find('.market-action-bar').exists()).toBe(false)
 
     wrapper.unmount()

@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { Bell, ChevronLeft, Database, Settings, ShieldCheck, Smartphone, UserRound } from 'lucide-vue-next'
 import {
   AppActionCard,
-  AppButton,
+  AppIconButton,
   AppPage,
   AppPageHeader,
   AppSectionCard,
@@ -25,12 +25,6 @@ interface AccountAction {
 
 const user = computed(() => currentUserSummary.value)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
-
-const userDisplayName = computed(() => {
-  const fullName = user.value?.full_name?.trim()
-  const accountName = user.value?.account_name?.trim()
-  return fullName || accountName || 'حساب کاربری'
-})
 
 const profileActions = computed<AccountAction[]>(() => [
   {
@@ -102,15 +96,11 @@ onMounted(() => {
       <AppPageHeader
         eyebrow="حساب"
         title="مرکز حساب کاربری"
-        :description="`${userDisplayName}؛ پروفایل، امنیت، اعلان‌ها و داده‌های دستگاه از اینجا مدیریت می‌شوند.`"
       >
         <template #actions>
-          <AppButton class="account-back-button" variant="ghost" size="sm" @click="router.back()">
-            <template #icon>
-              <ChevronLeft :size="18" />
-            </template>
-            بازگشت
-          </AppButton>
+          <AppIconButton type="button" class="account-back-button" label="بازگشت" size="sm" @click="router.back()">
+            <ChevronLeft :size="18" />
+          </AppIconButton>
         </template>
       </AppPageHeader>
 

@@ -25,7 +25,7 @@ const ROUTES = [
   { path: '/account', label: 'account', expectedText: 'حساب' },
   { path: '/account/security', label: 'security', expectedText: 'امنیت حساب' },
   { path: '/account/notifications', label: 'notifications', expectedText: 'مرکز اعلان‌ها' },
-  { path: '/market', label: 'market', expectedText: 'لفظ‌های فعال' },
+  { path: '/market', label: 'market', expectedText: 'بازار' },
   { path: '/admin', label: 'admin', expectedText: 'پنل مدیریت' },
 ]
 

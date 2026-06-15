@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BriefcaseBusiness, ChevronLeft, Store, LogOut, AlertTriangle, Ban, UserRound, Users } from 'lucide-vue-next'
+import { Bell, BriefcaseBusiness, Store, LogOut, AlertTriangle, Ban, UserRound, Users } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
-import AppLoadingState from '../components/ui/AppLoadingState.vue'
-import AppStatusBadge from '../components/ui/AppStatusBadge.vue'
-import AppSectionCard from '../components/ui/AppSectionCard.vue'
+import { AppActionCard, AppIconButton, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
 
 interface DashboardTrade {
   id: number
@@ -105,6 +103,16 @@ const notificationCountLabel = computed(() => {
 
 const todayActivityTone = computed(() => (todayTradesError.value ? 'danger' : 'primary'))
 const marketStatusTone = computed(() => (isMarketOpen.value && !isAccountant.value ? 'success' : 'neutral'))
+const dashboardHeaderTone = computed(() => {
+  if (isInactiveAccount.value) return 'danger'
+  if (isRestricted.value) return 'warning'
+  return 'primary'
+})
+const dashboardHeaderStatusSummary = computed(() => {
+  const marketLabel = isAccountant.value ? 'مشاهده محدود بازار' : marketEntryStatusLabel.value
+  const tradesLabel = todayTradesLoading.value ? 'کار امروز در حال دریافت است' : `کار امروز ${todayTradesCountLabel.value}`
+  return [accountStateDescription.value, marketLabel, tradesLabel].filter(Boolean).join(' • ')
+})
 
 const greeting = computed(() => {
   const hour = getIranHour()
@@ -374,15 +382,15 @@ onBeforeUnmount(() => {
 
     <div v-else-if="user" class="dashboard-content">
 
-      <!-- ═══ Top Bar ═══ -->
-      <header class="top-bar">
-        <!-- Notifications on the far Right (in RTL) -->
-        <button type="button" class="ds-icon-btn notif-btn" @click="router.push('/notifications')" aria-label="اعلان‌ها">
-          <Bell :size="22" />
-          <div v-if="notificationStore.appNotifications.length > 0" class="notif-dot"></div>
-        </button>
+      <header class="dashboard-header-card" :class="`dashboard-header-card--${dashboardHeaderTone}`">
+        <div class="dashboard-header-main">
+          <div class="dashboard-header-actions">
+            <AppIconButton type="button" class="notif-btn" label="اعلان‌ها" size="sm" @click="router.push('/notifications')">
+              <Bell :size="22" />
+              <div v-if="notificationStore.appNotifications.length > 0" class="notif-dot"></div>
+            </AppIconButton>
+          </div>
 
-        <!-- User Info in the Center -->
         <button
           type="button"
           class="user-info-center"
@@ -398,10 +406,33 @@ onBeforeUnmount(() => {
           </div>
         </button>
 
-        <!-- Logout on the far Left (in RTL) -->
-        <button v-if="!isAccountant" type="button" class="ds-icon-btn logout-btn" @click="logout" aria-label="خروج">
-          <LogOut :size="20" />
-        </button>
+          <div class="dashboard-header-actions">
+            <AppIconButton v-if="!isAccountant" type="button" class="logout-btn" label="خروج" size="sm" @click="logout">
+              <LogOut :size="20" />
+            </AppIconButton>
+          </div>
+        </div>
+
+        <div class="dashboard-header-summary">
+          <div class="dashboard-header-copy">
+            <strong>{{ accountStateLabel }}</strong>
+            <p>{{ dashboardHeaderStatusSummary }}</p>
+          </div>
+          <div class="dashboard-header-badges">
+            <AppStatusBadge :tone="accountStateTone">
+              {{ accountStateLabel }}
+            </AppStatusBadge>
+            <AppStatusBadge :tone="marketStatusTone">
+              {{ isAccountant ? 'مشاهده محدود' : marketEntryStatusLabel }}
+            </AppStatusBadge>
+            <AppStatusBadge :tone="todayActivityTone">
+              {{ todayTradesLoading ? 'در حال دریافت' : todayTradesCountLabel }}
+            </AppStatusBadge>
+            <AppStatusBadge v-if="notificationStore.appNotifications.length > 0" tone="info">
+              {{ notificationCountLabel }}
+            </AppStatusBadge>
+          </div>
+        </div>
       </header>
 
       <!-- ═══ Blocked Warning ═══ -->
@@ -426,27 +457,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section class="dashboard-status-strip" aria-label="خلاصه وضعیت روزانه">
-        <div class="dashboard-status-copy">
-          <strong>{{ accountStateLabel }}</strong>
-          <p>{{ accountStateDescription }}</p>
-        </div>
-        <div class="dashboard-status-badges">
-          <AppStatusBadge :tone="accountStateTone">
-            وضعیت حساب: {{ accountStateLabel }}
-          </AppStatusBadge>
-          <AppStatusBadge :tone="marketStatusTone">
-            {{ isAccountant ? 'بازار: مشاهده محدود' : `بازار: ${marketEntryStatusLabel}` }}
-          </AppStatusBadge>
-          <AppStatusBadge :tone="todayActivityTone">
-            {{ todayTradesLoading ? 'کار امروز: در حال دریافت' : `کار امروز: ${todayTradesCountLabel}` }}
-          </AppStatusBadge>
-          <AppStatusBadge v-if="notificationStore.appNotifications.length > 0" tone="info">
-            {{ notificationCountLabel }}
-          </AppStatusBadge>
-        </div>
-      </section>
-
       <!-- ═══ Main Content ═══ -->
       <main class="main-section">
 
@@ -459,9 +469,8 @@ onBeforeUnmount(() => {
           :disabled="isInactiveAccount"
           @click="openMarket"
         >
-          <div class="hero-btn-bg"></div>
           <div class="hero-btn-content">
-            <div class="hero-icon">
+            <div class="hero-icon-box">
               <Store :size="32" />
             </div>
             <div class="hero-text">
@@ -474,44 +483,7 @@ onBeforeUnmount(() => {
               <span class="hero-subtitle">{{ marketEntrySubtitle }}</span>
             </div>
           </div>
-          <div class="hero-arrow">←</div>
-        </button>
-
-        <section class="dashboard-shortcuts" aria-label="میانبرهای اصلی">
-          <button type="button" class="dashboard-shortcut-card" @click="openOperations">
-            <span class="shortcut-icon">
-              <BriefcaseBusiness :size="20" />
-            </span>
-            <span class="shortcut-copy">
-              <strong>عملیات</strong>
-              <small>مشتریان، حسابداران و مدیریت</small>
-            </span>
-            <ChevronLeft :size="18" class="shortcut-chevron" />
-          </button>
-
-          <button type="button" class="dashboard-shortcut-card" @click="openAccountHub">
-            <span class="shortcut-icon">
-              <UserRound :size="20" />
-            </span>
-            <span class="shortcut-copy">
-              <strong>حساب</strong>
-              <small>پروفایل، تنظیمات و اعلان‌ها</small>
-            </span>
-            <ChevronLeft :size="18" class="shortcut-chevron" />
-          </button>
-        </section>
-
-        <button
-          v-if="canUseTestAccountSwitcher"
-          class="switcher-entry-btn"
-          type="button"
-          @click="openAccountSwitchModal"
-        >
-          <span class="switcher-entry-icon"><Users :size="20" /></span>
-          <span class="switcher-entry-text">
-            <strong>سوییچ حساب</strong>
-            <small>بدون OTP و خروج، بین اکانت‌های موجود جابه‌جا شوید</small>
-          </span>
+          <div class="hero-cta-tail">ورود</div>
         </button>
 
         <AppSectionCard
@@ -561,6 +533,33 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </AppSectionCard>
+
+        <section class="dashboard-shortcuts" aria-label="میانبرهای اصلی">
+          <AppActionCard class="dashboard-shortcut-card dashboard-action-card" title="عملیات" description="مشتریان، حسابداران و مدیریت" @select="openOperations">
+            <template #icon>
+              <BriefcaseBusiness :size="20" />
+            </template>
+          </AppActionCard>
+
+          <AppActionCard class="dashboard-shortcut-card dashboard-action-card" title="حساب" description="پروفایل، تنظیمات و اعلان‌ها" @select="openAccountHub">
+            <template #icon>
+              <UserRound :size="20" />
+            </template>
+          </AppActionCard>
+        </section>
+
+        <button
+          v-if="canUseTestAccountSwitcher"
+          class="switcher-entry-btn"
+          type="button"
+          @click="openAccountSwitchModal"
+        >
+          <span class="switcher-entry-icon"><Users :size="20" /></span>
+          <span class="switcher-entry-text">
+            <strong>سوییچ حساب</strong>
+            <small>بدون OTP و خروج، بین اکانت‌های موجود جابه‌جا شوید</small>
+          </span>
+        </button>
 
       </main>
 
@@ -649,15 +648,39 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-/* ═══ Top Bar ═══ */
-.top-bar {
+.dashboard-header-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 1.25rem;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-bottom: 1rem;
   background: var(--ds-bg-card);
-  padding: 0.75rem 0.5rem;
+  padding: 0.9rem;
   border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-border-subtle);
+  box-shadow: var(--ds-shadow-xs);
+}
+
+.dashboard-header-card--danger {
+  border-color: rgba(220, 38, 38, 0.16);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.dashboard-header-card--warning {
+  border-color: rgba(217, 119, 6, 0.18);
+  background: linear-gradient(135deg, rgba(255, 251, 235, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.dashboard-header-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dashboard-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .user-info-center {
@@ -727,15 +750,10 @@ onBeforeUnmount(() => {
 .logout-btn {
   color: var(--ds-danger-500);
 }
-.logout-btn:active {
-  background: var(--ds-danger-50);
-}
 
 .notif-btn {
+  position: relative;
   color: var(--ds-primary-600);
-}
-.notif-btn:active {
-  background: var(--ds-primary-50);
 }
 
 .notif-dot {
@@ -815,88 +833,38 @@ onBeforeUnmount(() => {
   gap: 1.25rem;
 }
 
-.dashboard-status-strip {
+.dashboard-header-summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 1rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-xs);
 }
 
-.dashboard-status-copy {
+.dashboard-header-copy {
   min-width: 0;
   display: grid;
   gap: 0.2rem;
 }
 
-.dashboard-status-copy strong {
+.dashboard-header-copy strong {
   color: var(--ds-text-primary);
   font-size: var(--ds-font-sm);
   font-weight: 850;
   line-height: 1.5;
 }
 
-.dashboard-status-copy p {
+.dashboard-header-copy p {
   margin: 0;
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
   line-height: 1.8;
 }
 
-.dashboard-status-badges {
+.dashboard-header-badges {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.45rem;
-}
-
-.dashboard-stat-card {
-  min-width: 0;
-}
-
-.dashboard-overview :deep(.ui-metric-card) {
-  min-height: 100%;
-}
-
-.dashboard-overview :deep(.ui-metric-card__label) {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  font-weight: 800;
-}
-
-.dashboard-overview :deep(.ui-metric-card__value) {
-  min-width: 0;
-  color: var(--ds-text-primary);
-  font-size: 0.98rem;
-  font-weight: 900;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.dashboard-overview :deep(.ui-metric-card__hint) {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.65;
-}
-
-.dashboard-stat-card--warning {
-  border-color: rgba(217, 119, 6, 0.24);
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.95), var(--ds-bg-card));
-}
-
-.dashboard-stat-card--danger {
-  border-color: rgba(220, 38, 38, 0.2);
-  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95), var(--ds-bg-card));
-}
-
-.dashboard-stat-card--primary {
-  border-color: rgba(245, 158, 11, 0.2);
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.92), var(--ds-bg-card));
 }
 
 .dashboard-shortcuts {
@@ -907,61 +875,7 @@ onBeforeUnmount(() => {
 
 .dashboard-shortcut-card {
   min-width: 0;
-  min-height: 86px;
-  display: grid;
-  grid-template-columns: 38px 1fr 18px;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.75rem;
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-border-accent);
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
-  font: inherit;
-  text-align: right;
-  cursor: pointer;
-  transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
-}
-
-.dashboard-shortcut-card:active {
-  transform: scale(0.985);
-  background: var(--ds-primary-50);
-}
-
-.shortcut-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--ds-radius-md);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--ds-primary-50);
-  color: var(--ds-primary-700);
-}
-
-.shortcut-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-}
-
-.shortcut-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-md);
-  font-weight: 850;
-  line-height: 1.35;
-}
-
-.shortcut-copy small {
-  color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.55;
-}
-
-.shortcut-chevron {
-  color: var(--ds-text-placeholder);
+  min-height: 96px;
 }
 
 .switcher-entry-btn {
@@ -1017,19 +931,18 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 380px) {
-  .dashboard-overview,
   .dashboard-shortcuts {
     grid-template-columns: 1fr;
   }
 }
 
 @media (min-width: 381px) and (max-width: 680px) {
-  .dashboard-status-strip {
+  .dashboard-header-summary {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .dashboard-status-badges {
+  .dashboard-header-badges {
     justify-content: flex-start;
   }
 }
@@ -1155,66 +1068,48 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 126px;
-  padding: 1.5rem;
-  border-radius: var(--ds-radius-xl);
-  border: none;
+  min-height: 112px;
+  padding: 1.1rem 1.15rem;
+  border-radius: var(--ds-radius-lg);
+  border: 1px solid var(--ds-border-subtle);
   cursor: pointer;
-  overflow: hidden;
   -webkit-tap-highlight-color: transparent;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
-  transition: transform 0.2s, box-shadow 0.2s;
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-sm);
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s, background 0.2s;
 }
 .hero-btn:active {
   transform: scale(0.98);
 }
 .hero-btn:hover {
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
 }
-
-.hero-btn-bg {
-  position: absolute;
-  inset: 0;
-  background: var(--ds-gradient-primary);
+.hero-btn--open {
+  border-color: rgba(15, 118, 110, 0.18);
+  background: linear-gradient(135deg, rgba(240, 253, 250, 0.98), rgba(255, 255, 255, 0.96));
 }
-.hero-btn--open .hero-btn-bg {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 58%, #16a34a 125%);
-}
-.hero-btn--closed .hero-btn-bg {
-  background: linear-gradient(135deg, #991b1b 0%, #dc2626 54%, #334155 128%);
-}
-.hero-btn-bg::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%);
-  animation: shimmer 3s ease-in-out infinite;
-}
-@keyframes shimmer {
-  0%, 100% { transform: translateX(-100%); }
-  50% { transform: translateX(100%); }
+.hero-btn--closed {
+  border-color: rgba(148, 163, 184, 0.18);
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(255, 255, 255, 0.96));
 }
 
 .hero-btn-content {
   display: flex;
   align-items: center;
   gap: 1rem;
-  position: relative;
-  z-index: 1;
   min-width: 0;
   flex: 1;
 }
 
-.hero-icon {
+.hero-icon-box {
   width: 56px;
   height: 56px;
-  background: rgba(255,255,255,0.2);
-  backdrop-filter: blur(10px);
+  background: rgba(15, 23, 42, 0.04);
   border-radius: var(--ds-radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--ds-text-primary);
 }
 
 .hero-text {
@@ -1230,9 +1125,9 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .hero-title {
-  font-size: var(--ds-font-2xl);
-  font-weight: 800;
-  color: white;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: var(--ds-text-primary);
   line-height: 1.25;
 }
 .hero-status-pill {
@@ -1242,40 +1137,40 @@ onBeforeUnmount(() => {
   min-height: 1.55rem;
   padding: 0.18rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.32);
-  color: white;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--ds-text-primary);
   font-size: 0.72rem;
   font-weight: 800;
   white-space: nowrap;
 }
 .hero-status-pill--open {
-  background: rgba(22, 163, 74, 0.38);
-  box-shadow: inset 0 0 0 1px rgba(187, 247, 208, 0.22);
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
 }
 .hero-status-pill--closed {
-  background: rgba(254, 226, 226, 0.2);
-  box-shadow: inset 0 0 0 1px rgba(254, 202, 202, 0.18);
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--ds-text-secondary);
 }
 .hero-subtitle {
   font-size: var(--ds-font-sm);
-  color: rgba(255,255,255,0.84);
+  color: var(--ds-text-secondary);
   margin-top: 0.15rem;
   font-weight: 500;
   line-height: 1.55;
 }
 
-.hero-arrow {
-  position: relative;
-  z-index: 1;
-  color: rgba(255,255,255,0.6);
-  font-size: 1.5rem;
-  font-weight: 300;
+.hero-cta-tail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--ds-primary-700);
+  font-size: 0.72rem;
+  font-weight: 900;
   flex-shrink: 0;
-  animation: arrowBounce 2s ease-in-out infinite;
-}
-@keyframes arrowBounce {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(-6px); }
 }
 
 /* ═══ Footer ═══ */

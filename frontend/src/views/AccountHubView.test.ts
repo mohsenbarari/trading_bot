@@ -55,7 +55,6 @@ describe('AccountHubView.vue', () => {
     expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('.account-section-card')).toHaveLength(4)
     expect(wrapper.text()).toContain('مرکز حساب کاربری')
-    expect(wrapper.text()).toContain('محمد')
     expect(wrapper.text()).toContain('نشست‌های فعال')
 
     await findAction(wrapper, 'پروفایل من')!.trigger('click')

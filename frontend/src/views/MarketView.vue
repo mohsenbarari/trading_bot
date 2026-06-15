@@ -6,7 +6,7 @@ import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
-import { AppEmptyState, AppLoadingState, AppStatusBadge } from '../components/ui'
+import { AppEmptyState, AppFilterChips, AppIconButton, AppLoadingState, AppStatusBadge } from '../components/ui'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
@@ -152,33 +152,18 @@ const marketFilterLabels: Record<MarketFilterType, string> = {
   sell: 'فروشنده',
   my: 'لفظ‌های شما',
 }
-const marketFilterDescriptions: Record<MarketFilterType, string> = {
-  all: 'کل بازار',
-  buy: 'درخواست خرید',
-  sell: 'درخواست فروش',
-  my: 'فعال‌های شما',
-}
 const visibleFilterOptions = computed(() => visibleTabs.value.map((tab) => ({
   key: tab,
   label: marketFilterLabels[tab],
-  description: marketFilterDescriptions[tab],
 })))
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
 const filteredOfferCountLabel = computed(() => `${filteredOffers.value.length.toLocaleString('fa-IR')} لفظ`)
-const totalOfferCountLabel = computed(() => `${(offers.value || []).length.toLocaleString('fa-IR')} کل`)
 const marketStatusTone = computed(() => (isMarketOpen.value ? 'success' : 'danger'))
-const marketShellDescription = computed(() => (
-  isMarketOpen.value
-    ? 'وضعیت لحظه‌ای بازار و لفظ‌های قابل معامله'
-    : 'بازار بسته است و ثبت لفظ جدید تا باز شدن بازار غیرفعال می‌ماند'
-))
-const marketComposerDescription = computed(() => (
-  isMarketOpen.value
-    ? 'لفظ جدید را مستقیم و متنی ثبت کنید یا یکی از لفظ‌های اخیر را بازنشر کنید.'
-    : 'ثبت لفظ جدید موقتاً غیرفعال است و بعد از باز شدن بازار دوباره فعال می‌شود.'
+const marketHeaderStatusText = computed(() => (
+  isMarketOpen.value ? 'بازار فعال است' : 'ثبت لفظ جدید غیرفعال است'
 ))
 const shouldCollapseAdminMarketMessage = computed(() => (
   !!adminMarketMessage.value
@@ -186,35 +171,6 @@ const shouldCollapseAdminMarketMessage = computed(() => (
   && filteredOffers.value.length > 0
   && !adminMarketMessageExpanded.value
 ))
-
-function activateMarketFilter(tab: MarketFilterType, focusTab = false) {
-  filterType.value = tab
-  if (!focusTab) return
-  void nextTick(() => {
-    document.querySelector<HTMLButtonElement>(`[data-market-filter="${tab}"]`)?.focus()
-  })
-}
-
-function handleMarketFilterKeydown(event: KeyboardEvent, tab: MarketFilterType) {
-  const options = visibleTabs.value
-  const currentIndex = options.indexOf(tab)
-  if (currentIndex === -1) return
-
-  let nextTab: MarketFilterType | null = null
-  if (event.key === 'Home') {
-    nextTab = options[0] ?? null
-  } else if (event.key === 'End') {
-    nextTab = options[options.length - 1] ?? null
-  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-    nextTab = options[(currentIndex + 1) % options.length] ?? null
-  } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-    nextTab = options[(currentIndex - 1 + options.length) % options.length] ?? null
-  }
-
-  if (!nextTab) return
-  event.preventDefault()
-  activateMarketFilter(nextTab, true)
-}
 
 // Computed
 const randomPlaceholder = computed(() => {
@@ -695,8 +651,7 @@ onUnmounted(() => {
       <section class="market-shell-card" aria-label="وضعیت بازار">
         <div class="market-shell-main">
           <div class="market-shell-title">
-            <p>بازار معاملات</p>
-            <h1>لفظ‌های فعال</h1>
+            <h1>بازار</h1>
           </div>
           <div class="market-shell-meta" aria-label="خلاصه وضعیت بازار">
             <AppStatusBadge
@@ -707,30 +662,13 @@ onUnmounted(() => {
               {{ isMarketOpen ? 'بازار باز' : 'بازار بسته' }}
             </AppStatusBadge>
             <AppStatusBadge class="market-count-chip" tone="primary">{{ filteredOfferCountLabel }}</AppStatusBadge>
-            <AppStatusBadge class="market-total-chip" tone="neutral">{{ totalOfferCountLabel }}</AppStatusBadge>
           </div>
         </div>
-        <p>{{ marketShellDescription }}</p>
+        <small class="market-shell-status-text">{{ marketHeaderStatusText }}</small>
       </section>
 
       <div class="header-controls">
-        <div class="tabs-container" role="tablist" aria-label="فیلتر لفظ‌های بازار">
-          <button 
-            v-for="option in visibleFilterOptions"
-            :key="option.key"
-            @click="activateMarketFilter(option.key)"
-            @keydown="handleMarketFilterKeydown($event, option.key)"
-            class="tab-btn"
-            :class="{ active: filterType === option.key }"
-            role="tab"
-            :aria-selected="filterType === option.key"
-            type="button"
-            :data-market-filter="option.key"
-          >
-            <span>{{ option.label }}</span>
-            <small>{{ option.description }}</small>
-          </button>
-        </div>
+        <AppFilterChips v-model="filterType" class="tabs-container market-filter-chips" label="فیلتر لفظ‌های بازار" :options="visibleFilterOptions" />
       </div>
     </div>
 
@@ -790,35 +728,22 @@ onUnmounted(() => {
     <!-- Bottom Action Bar -->
     <div v-if="!isTier2Customer" class="market-action-bar">
       <div class="action-bar-inner">
-        <div class="action-bar-summary">
-          <div class="action-bar-copy">
-            <strong>ثبت لفظ</strong>
-            <p>{{ marketComposerDescription }}</p>
-          </div>
-          <AppStatusBadge tone="neutral">لفظ‌های اخیر</AppStatusBadge>
-        </div>
-
         <!-- Text Input Row -->
         <div ref="recentOffersRef" class="input-wrapper">
-          <button
-            type="button"
+          <AppIconButton
             class="recent-offers-toggle"
             :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
             :disabled="isSubmitting"
-            aria-label="نمایش لفظ‌های اخیر"
+            label="نمایش لفظ‌های اخیر"
             :aria-expanded="recentOffersOpen"
             aria-controls="recent-offers-dropdown"
             @click="toggleRecentOffersMenu"
           >
             <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
             <ChevronDown v-else :size="17" />
-          </button>
+          </AppIconButton>
           <transition name="recent-offers-dropdown">
             <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown">
-              <div class="recent-offers-header">
-                <strong>لفظ‌های اخیر</strong>
-                <span>بازنشر سریع از یک ساعت گذشته</span>
-              </div>
               <AppLoadingState
                 v-if="recentOffersLoading"
                 class="recent-offers-state"
@@ -875,16 +800,15 @@ onUnmounted(() => {
             @input="syncOfferInputHeight"
             @keydown.enter.prevent="parseAndSubmitTextOffer"
           ></textarea>
-          <button 
+          <AppIconButton
             @click="parseAndSubmitTextOffer"
             :disabled="!isMarketOpen || !offerText.trim() || isSubmitting"
             class="send-btn"
-            type="button"
-            aria-label="ارسال لفظ برای پیش‌نمایش"
+            label="ارسال لفظ برای پیش‌نمایش"
           >
             <Loader2 v-if="isSubmitting" class="animate-spin" :size="20" />
             <Send v-else :size="20" />
-          </button>
+          </AppIconButton>
         </div>
         <div v-if="parseError" class="parse-error">{{ parseError }}</div>
       </div>
@@ -921,11 +845,11 @@ onUnmounted(() => {
   max-width: var(--ds-page-max-width);
   width: 100%;
   margin: 0 auto;
-  padding: 0.85rem 0.95rem;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--ds-border-subtle);
   border-radius: var(--ds-radius-lg);
-  background: linear-gradient(135deg, rgba(255, 251, 235, 0.76), rgba(255, 255, 255, 0.94));
-  box-shadow: var(--ds-shadow-sm);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-xs);
 }
 
 .market-shell-main {
@@ -941,30 +865,20 @@ onUnmounted(() => {
   gap: 0.1rem;
 }
 
-.market-shell-title p,
-.market-shell-card p {
-  margin: 0;
-}
-
-.market-shell-title p {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  font-weight: 800;
-}
-
 .market-shell-title h1 {
   margin: 0;
   color: var(--ds-text-primary);
-  font-size: 1.06rem;
+  font-size: 0.98rem;
   font-weight: 950;
   line-height: 1.4;
 }
 
-.market-shell-card > p {
-  margin-top: 0.4rem;
+.market-shell-status-text {
+  display: block;
+  margin-top: 0.28rem;
   color: var(--ds-text-muted);
-  font-size: var(--ds-font-xs);
-  line-height: 1.65;
+  font-size: 0.72rem;
+  line-height: 1.5;
 }
 
 .market-shell-meta {
@@ -977,8 +891,7 @@ onUnmounted(() => {
 }
 
 .market-status-chip,
-.market-count-chip,
-.market-total-chip {
+.market-count-chip {
   white-space: nowrap;
 }
 
@@ -992,54 +905,17 @@ onUnmounted(() => {
 
 .tabs-container {
   flex: 1;
-  display: flex;
-  padding: 3px;
-  background: var(--ds-bg-inset);
-  border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-border-light);
 }
 
-.tab-btn {
-  min-width: 0;
-  min-height: 3rem;
-  flex: 1;
-  display: grid;
-  place-items: center;
-  gap: 0.12rem;
-  padding: 0.42rem 0.32rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  border-radius: var(--ds-radius-md);
-  color: var(--ds-text-secondary);
-  transition: all 0.2s;
+.market-filter-chips :deep(.ui-filter-chips) {
+  width: 100%;
 }
 
-.tab-btn span,
-.tab-btn small {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.market-filter-chips :deep(.ui-filter-chip) {
+  min-height: 2.85rem;
 }
 
-.tab-btn small {
-  color: var(--ds-text-muted);
-  font-size: 0.66rem;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.tab-btn.active {
-  background: var(--ds-bg-card);
-  color: var(--ds-text-primary);
-  box-shadow: var(--ds-shadow-sm);
-}
-
-.tab-btn.active small {
-  color: var(--ds-primary-700);
-}
-
-.tab-btn:focus-visible,
+.market-filter-chips :deep(.ui-filter-chip:focus-visible),
 .recent-offers-toggle:focus-visible,
 .text-offer-input:focus-visible,
 .send-btn:focus-visible,
@@ -1059,12 +935,8 @@ onUnmounted(() => {
     justify-content: flex-start;
   }
 
-  .tab-btn {
+  .market-filter-chips :deep(.ui-filter-chip) {
     min-height: 2.72rem;
-  }
-
-  .tab-btn small {
-    display: none;
   }
 }
 
@@ -1172,33 +1044,6 @@ onUnmounted(() => {
   gap: 0.75rem;
 }
 
-.action-bar-summary {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.action-bar-copy {
-  min-width: 0;
-  display: grid;
-  gap: 0.2rem;
-}
-
-.action-bar-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 900;
-  line-height: 1.5;
-}
-
-.action-bar-copy p {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.65;
-}
-
 .input-wrapper {
   position: relative;
 }
@@ -1216,8 +1061,6 @@ onUnmounted(() => {
   justify-content: center;
   border-radius: 999px;
   color: var(--ds-accent, #b45309);
-  background: rgba(245, 158, 11, 0.08);
-  border: 1px solid rgba(245, 158, 11, 0.14);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
   transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -1253,25 +1096,6 @@ onUnmounted(() => {
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-}
-
-.recent-offers-header {
-  display: grid;
-  gap: 0.1rem;
-  padding: 0.45rem 0.55rem 0.3rem;
-}
-
-.recent-offers-header strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 900;
-  line-height: 1.5;
-}
-
-.recent-offers-header span {
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.6;
 }
 
 .recent-offers-state {
@@ -1384,8 +1208,7 @@ onUnmounted(() => {
   bottom: 0.5rem;
   min-width: var(--ds-touch-target, 48px);
   min-height: var(--ds-touch-target, 48px);
-  padding: 0.5rem;
-  background: var(--ds-gradient-primary);
+  padding: 0;
   color: white;
   border-radius: var(--ds-radius-md);
   box-shadow: var(--ds-shadow-sm);
@@ -1416,24 +1239,8 @@ onUnmounted(() => {
   transform: translateY(0.35rem);
 }
 
-.slide-enter-active, .slide-leave-active {
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  max-height: 400px;
-}
-.slide-enter-from, .slide-leave-to {
-  max-height: 0;
-  opacity: 0;
-  transform: translateY(-10px);
-}
-
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .ltr { direction: ltr; }
-
-@media (max-width: 420px) {
-  .action-bar-summary {
-    flex-direction: column;
-  }
-}
 </style>

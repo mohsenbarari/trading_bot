@@ -7,6 +7,7 @@ import {
   AppConfirmDialog,
   AppEmptyState,
   AppFilterChips,
+  AppIconButton,
   AppLoadingState,
   AppPage,
   AppPageHeader,
@@ -159,12 +160,11 @@ onMounted(async () => {
       <AppPageHeader
         eyebrow="حساب کاربری"
         title="مرکز اعلان‌ها"
-        description="اعلان‌های سیستم، بازار و معاملات را در یک inbox یکپارچه دنبال و مدیریت کنید."
       >
         <template #actions>
-          <button type="button" class="back-button" aria-label="بازگشت" @click="goBack">
+          <AppIconButton type="button" class="back-button notifications-back-button" label="بازگشت" size="sm" @click="goBack">
             <ChevronLeft :size="24" />
-          </button>
+          </AppIconButton>
         </template>
       </AppPageHeader>
 
