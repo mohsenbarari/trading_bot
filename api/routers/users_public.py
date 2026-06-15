@@ -31,6 +31,7 @@ router = APIRouter(
 
 
 PROJECT_DIRECTORY_ROLES = (
+    UserRole.WATCH,
     UserRole.STANDARD,
     UserRole.MIDDLE_MANAGER,
     UserRole.SUPER_ADMIN,
@@ -320,34 +321,15 @@ async def _ensure_customer_viewer_can_access_public_user(
 
 def _build_project_user_directory_stmt(
     *,
+    current_user_id: int,
     q: str | None,
     limit: int,
     offset: int,
 ):
-    active_accountant_exists = (
-        select(AccountantRelation.id)
-        .where(
-            AccountantRelation.accountant_user_id == User.id,
-            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
-            AccountantRelation.deleted_at.is_(None),
-        )
-        .exists()
-    )
-    active_customer_exists = (
-        select(CustomerRelation.id)
-        .where(
-            CustomerRelation.customer_user_id == User.id,
-            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
-            CustomerRelation.deleted_at.is_(None),
-        )
-        .exists()
-    )
-
     stmt = select(User).where(
         User.is_deleted == False,
         User.role.in_(PROJECT_DIRECTORY_ROLES),
-        ~active_accountant_exists,
-        ~active_customer_exists,
+        User.id != current_user_id,
     )
 
     normalized_query = (q or "").strip()
@@ -614,7 +596,12 @@ async def list_project_users_directory(
 
     normalized_limit = limit if isinstance(limit, int) else 25
     normalized_offset = offset if isinstance(offset, int) else 0
-    stmt = _build_project_user_directory_stmt(q=q, limit=normalized_limit, offset=normalized_offset)
+    stmt = _build_project_user_directory_stmt(
+        current_user_id=current_user.id,
+        q=q,
+        limit=normalized_limit,
+        offset=normalized_offset,
+    )
     rows = (await db.execute(stmt)).scalars().all()
     return [_serialize_project_user_directory_entry(user) for user in rows]
 
