@@ -42,6 +42,7 @@ from core.services.session_service import (
     get_effective_max_sessions,
     provision_session_for_login_request,
 )
+from core.services.session_reset_service import reset_user_session_state
 from core.session_authority import (
     inspect_local_session_authority,
     verify_session_authority_signature,
@@ -115,6 +116,12 @@ class MaxSessionsUpdate(BaseModel):
 
 class InternalSessionAuthorityCheck(BaseModel):
     user_id: int
+    source_server: Optional[str] = None
+
+
+class InternalSessionResetRequest(BaseModel):
+    user_id: int
+    mobile_number: str
     source_server: Optional[str] = None
 
 
@@ -544,6 +551,37 @@ async def internal_session_authority_check(
         raise HTTPException(status_code=404, detail="User not found")
 
     return await inspect_local_session_authority(db, user)
+
+
+@router.post("/internal/reset-user-sessions")
+async def internal_reset_user_sessions(
+    payload: InternalSessionResetRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await request.body()
+    if not verify_session_authority_signature(
+        body,
+        timestamp=request.headers.get("X-Timestamp"),
+        signature=request.headers.get("X-Signature"),
+        api_key=request.headers.get("X-API-Key"),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid internal signature")
+
+    stmt = select(User).where(User.id == payload.user_id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.mobile_number != payload.mobile_number:
+        raise HTTPException(status_code=409, detail="User identity mismatch")
+
+    return await reset_user_session_state(
+        db,
+        user_id=user.id,
+        mobile_number=user.mobile_number,
+        delete_session_rows=True,
+        clear_login_limits=True,
+    )
 
 
 @router.get("/login-requests/pending", response_model=List[dict])

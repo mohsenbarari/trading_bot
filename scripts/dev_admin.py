@@ -15,10 +15,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
+import httpx
 from sqlalchemy import delete, func, or_, select
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -27,24 +30,25 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.db import AsyncSessionLocal, init_db
 from core.enums import UserAccountStatus
-from core.redis import pool
+from core.config import settings
 from core.security import get_password_hash
 from core.services.chat_room_service import (
     ensure_mandatory_channel_membership,
     sync_mandatory_channel_for_user_state_change,
 )
-from core.services.session_service import force_clear_sessions
+from core.services.session_reset_service import (
+    collect_login_limit_keys,
+    redis_delete_keys,
+    reset_user_session_state,
+)
+from core.server_routing import current_server, normalize_server, peer_server_url_for
+from core.trade_forwarding import sign_internal_payload
 from models.session import (
     SessionLoginRequest,
     SingleSessionRecoveryRequest,
     UserSession,
 )
 from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
-
-try:
-    import redis.asyncio as redis
-except Exception:  # pragma: no cover - dependency exists in app runtime
-    redis = None
 
 
 ROLE_ALIASES = {
@@ -461,36 +465,47 @@ async def set_max_sessions(args) -> None:
         print_user(user)
 
 
-async def redis_delete_keys(keys: Iterable[str]) -> int:
-    if redis is None:
-        return 0
-    client = redis.Redis(connection_pool=pool, decode_responses=True)
-    try:
-        actual = []
-        for key in sorted(set(keys)):
-            if await client.exists(key):
-                actual.append(key)
-        if actual:
-            await client.delete(*actual)
-        return len(actual)
-    finally:
-        await client.close()
+def _json_body(payload: dict) -> str:
+    return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
 
 
-async def collect_login_limit_keys(user: User) -> list[str]:
-    keys = [
-        f"otp_limit:{user.mobile_number}",
-        f"banned:{user.mobile_number}",
-    ]
-    if redis is None:
-        return keys
-    client = redis.Redis(connection_pool=pool, decode_responses=True)
+async def forward_remote_session_reset(user: User, target_server: str) -> tuple[int, dict]:
+    target_url = peer_server_url_for(target_server)
+    if not target_url:
+        return 503, {"detail": "Home server URL is not configured."}
+
+    payload = {
+        "user_id": int(user.id),
+        "mobile_number": user.mobile_number,
+        "source_server": current_server(),
+    }
+    body = _json_body(payload)
+    timestamp = int(time.time())
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": settings.sync_api_key or "",
+        "X-Timestamp": str(timestamp),
+        "X-Signature": sign_internal_payload(body, timestamp),
+        "X-Source-Server": current_server(),
+    }
+
     try:
-        async for key in client.scan_iter(f"session_req:{user.id}:*"):
-            keys.append(key)
-    finally:
-        await client.close()
-    return keys
+        async with httpx.AsyncClient(timeout=settings.trade_forward_timeout_seconds, verify=False) as client:
+            response = await client.post(
+                f"{target_url}/api/sessions/internal/reset-user-sessions",
+                content=body,
+                headers=headers,
+            )
+    except httpx.TimeoutException:
+        return 504, {"detail": "Timed out while contacting the home server."}
+    except httpx.RequestError:
+        return 503, {"detail": "Could not connect to the home server."}
+
+    try:
+        body_data = response.json()
+    except ValueError:
+        body_data = {"detail": response.text or "Invalid home server response"}
+    return response.status_code, body_data if isinstance(body_data, dict) else {"detail": body_data}
 
 
 async def reset_sessions(args) -> None:
@@ -508,21 +523,30 @@ async def reset_sessions(args) -> None:
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
         print(f"Resetting sessions for {user.full_name or user.account_name} ({user.mobile_number})")
-        cleared = await force_clear_sessions(db, user.id)
+        user_home_server = normalize_server(getattr(user, "home_server", None), current_server())
 
-        async with AsyncSessionLocal() as cleanup_db:
-            await cleanup_db.execute(delete(SessionLoginRequest).where(SessionLoginRequest.user_id == user.id))
-            await cleanup_db.execute(delete(SingleSessionRecoveryRequest).where(SingleSessionRecoveryRequest.user_id == user.id))
-            if args.delete_session_rows:
-                await cleanup_db.execute(delete(UserSession).where(UserSession.user_id == user.id))
-            await cleanup_db.commit()
+        if user_home_server != current_server():
+            status_code, remote_result = await forward_remote_session_reset(user, user_home_server)
+            if status_code != 200:
+                detail = remote_result.get("detail") if isinstance(remote_result, dict) else str(remote_result)
+                raise SystemExit(f"❌ home-server reset failed on {user_home_server}: {detail}")
+            print(
+                "✅ Home server reset completed "
+                f"({user_home_server}): active={remote_result.get('revoked_active_sessions', 0)}, "
+                f"session_rows={remote_result.get('deleted_session_rows', 0)}, "
+                f"redis={remote_result.get('deleted_redis_keys', 0)}"
+            )
 
-        redis_deleted = 0
-        if args.clear_login_limits:
-            redis_deleted = await redis_delete_keys(await collect_login_limit_keys(user))
+        local_result = await reset_user_session_state(
+            db,
+            user_id=user.id,
+            mobile_number=user.mobile_number,
+            delete_session_rows=args.delete_session_rows,
+            clear_login_limits=args.clear_login_limits,
+        )
 
-        print(f"✅ Revoked active sessions: {cleared}")
-        print(f"✅ Deleted Redis login/OTP keys: {redis_deleted}")
+        print(f"✅ Revoked active sessions: {local_result['revoked_active_sessions']}")
+        print(f"✅ Deleted Redis login/OTP keys: {local_result['deleted_redis_keys']}")
         if args.delete_session_rows:
             print("✅ Deleted session rows from database.")
 
@@ -532,7 +556,7 @@ async def unlock_login(args) -> None:
     await init_db()
     async with AsyncSessionLocal() as db:
         user = await require_user(db, args.identity)
-        deleted = await redis_delete_keys(await collect_login_limit_keys(user))
+        deleted = await redis_delete_keys(await collect_login_limit_keys(user.id, user.mobile_number))
         await db.execute(delete(SessionLoginRequest).where(SessionLoginRequest.user_id == user.id))
         await db.execute(delete(SingleSessionRecoveryRequest).where(SingleSessionRecoveryRequest.user_id == user.id))
         await db.commit()

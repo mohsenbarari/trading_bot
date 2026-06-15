@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from api.routers.sessions import InternalSessionAuthorityCheck, internal_session_authority_check
+from api.routers.sessions import (
+    InternalSessionAuthorityCheck,
+    InternalSessionResetRequest,
+    internal_reset_user_sessions,
+    internal_session_authority_check,
+)
 from core import session_authority
 from core.session_authority import (
     ACTIVE_SESSION_ON_HOME_SERVER_MESSAGE,
@@ -123,6 +128,82 @@ class SessionAuthorityTests(unittest.IsolatedAsyncioTestCase):
                 db=FakeDB([FakeExecuteResult(user)]),
             )
         self.assertEqual(exc_info.exception.status_code, 401)
+
+    async def test_internal_reset_user_sessions_requires_signature_and_resets_matching_user(self):
+        payload_body = session_authority._json_body(
+            {"mobile_number": "09370809280", "source_server": "foreign", "user_id": 5}
+        )
+        timestamp = 1_700_000_000
+        user = SimpleNamespace(id=5, home_server="iran", mobile_number="09370809280")
+        reset_snapshot = {
+            "revoked_active_sessions": 1,
+            "deleted_session_rows": 2,
+            "deleted_redis_keys": 3,
+        }
+
+        async def request_body():
+            return payload_body.encode()
+
+        with patch.object(session_authority.settings, "sync_api_key", "secret"), patch(
+            "core.session_authority.time.time",
+            return_value=timestamp,
+        ), patch(
+            "api.routers.sessions.reset_user_session_state",
+            new=AsyncMock(return_value=reset_snapshot),
+        ) as reset_mock:
+            request = SimpleNamespace(
+                headers={
+                    "X-API-Key": "secret",
+                    "X-Timestamp": str(timestamp),
+                    "X-Signature": session_authority.sign_internal_payload(payload_body, timestamp),
+                },
+                body=request_body,
+            )
+            result = await internal_reset_user_sessions(
+                InternalSessionResetRequest(user_id=5, mobile_number="09370809280", source_server="foreign"),
+                request=request,
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+
+        self.assertEqual(result, reset_snapshot)
+        reset_mock.assert_awaited_once_with(
+            unittest.mock.ANY,
+            user_id=5,
+            mobile_number="09370809280",
+            delete_session_rows=True,
+            clear_login_limits=True,
+        )
+
+    async def test_internal_reset_user_sessions_rejects_mobile_mismatch(self):
+        payload_body = session_authority._json_body(
+            {"mobile_number": "09370809280", "source_server": "foreign", "user_id": 5}
+        )
+        timestamp = 1_700_000_000
+        user = SimpleNamespace(id=5, home_server="iran", mobile_number="09120000000")
+
+        async def request_body():
+            return payload_body.encode()
+
+        with patch.object(session_authority.settings, "sync_api_key", "secret"), patch(
+            "core.session_authority.time.time",
+            return_value=timestamp,
+        ):
+            request = SimpleNamespace(
+                headers={
+                    "X-API-Key": "secret",
+                    "X-Timestamp": str(timestamp),
+                    "X-Signature": session_authority.sign_internal_payload(payload_body, timestamp),
+                },
+                body=request_body,
+            )
+            with self.assertRaises(HTTPException) as exc_info:
+                await internal_reset_user_sessions(
+                    InternalSessionResetRequest(user_id=5, mobile_number="09370809280", source_server="foreign"),
+                    request=request,
+                    db=FakeDB([FakeExecuteResult(user)]),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 409)
 
 
 if __name__ == "__main__":
