@@ -1687,17 +1687,17 @@ seed_shared_tables_to_iran() {
 
 verify_shared_sync_health_clean() {
     log "Verifying cross-server sync health"
-    local foreign_dev_api_key iran_dev_api_key foreign_health iran_health foreign_unsynced iran_unsynced iran_header
-    foreign_dev_api_key="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "DEV_API_KEY")"
-    iran_dev_api_key="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "DEV_API_KEY")"
-    [[ -n "$foreign_dev_api_key" ]] || die "DEV_API_KEY is missing from $LOCAL_ENV_SOURCE_PATH"
-    [[ -n "$iran_dev_api_key" ]] || die "DEV_API_KEY is missing from $IRAN_ENV_SOURCE_PATH"
+    local foreign_observability_key iran_observability_key foreign_health iran_health foreign_unsynced iran_unsynced iran_header
+    foreign_observability_key="$(read_env_value "$LOCAL_ENV_SOURCE_PATH" "OBSERVABILITY_API_KEY")"
+    iran_observability_key="$(read_env_value "$IRAN_ENV_SOURCE_PATH" "OBSERVABILITY_API_KEY")"
+    [[ -n "$foreign_observability_key" ]] || die "OBSERVABILITY_API_KEY is missing from $LOCAL_ENV_SOURCE_PATH"
+    [[ -n "$iran_observability_key" ]] || die "OBSERVABILITY_API_KEY is missing from $IRAN_ENV_SOURCE_PATH"
 
-    foreign_health="$(curl -fsS "http://127.0.0.1:8000/api/sync/health" -H "X-Dev-Api-Key: $foreign_dev_api_key")"
+    foreign_health="$(curl -fsS "http://127.0.0.1:8000/api/sync/health" -H "X-Observability-Api-Key: $foreign_observability_key")"
     foreign_unsynced="$(printf '%s' "$foreign_health" | extract_sync_unsynced_count)"
     [[ "$foreign_unsynced" == "0" ]] || die "Foreign sync backlog is not clean after shared-table seed: $foreign_health"
 
-    iran_header="$(shell_quote "X-Dev-Api-Key: $iran_dev_api_key")"
+    iran_header="$(shell_quote "X-Observability-Api-Key: $iran_observability_key")"
     iran_health="$(ssh_iran "curl -fsS 'http://127.0.0.1:8000/api/sync/health' -H $iran_header")"
     iran_unsynced="$(printf '%s' "$iran_health" | extract_sync_unsynced_count)"
     [[ "$iran_unsynced" == "0" ]] || die "Iran sync backlog is not clean after shared-table seed: $iran_health"
