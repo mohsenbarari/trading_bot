@@ -47,6 +47,14 @@ describe('pwaInstall', () => {
     delete (window as any).deferredPrompt
   })
 
+  it('marks the app as installed immediately when already running standalone', async () => {
+    setStandalone(true)
+    const module = await importFreshModule()
+    const pwa = module.usePWAInstall()
+
+    expect(pwa.isInstalled.value).toBe(true)
+  })
+
   it('marks the app as installed on load when the browser is already standalone', async () => {
     setStandalone(true)
     const module = await importFreshModule()

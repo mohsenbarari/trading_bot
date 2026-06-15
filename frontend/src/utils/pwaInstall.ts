@@ -4,15 +4,18 @@ const deferredPrompt = ref<any>(null)
 const isInstallable = ref(false)
 const isInstalled = ref(false)
 
+function syncInstalledState() {
+  if (typeof window === 'undefined') return
+
+  const isStandaloneDisplay = typeof window.matchMedia === 'function'
+    && window.matchMedia('(display-mode: standalone)').matches
+  isInstalled.value = Boolean((window.navigator as any).standalone || isStandaloneDisplay)
+}
+
 if (typeof window !== 'undefined') {
-  // Check if already installed
-  window.addEventListener('load', () => {
-    const isStandaloneDisplay = typeof window.matchMedia === 'function'
-      && window.matchMedia('(display-mode: standalone)').matches
-    if ((window.navigator as any).standalone || isStandaloneDisplay) {
-      isInstalled.value = true
-    }
-  })
+  // Keep standalone state in sync even when the module loads after window.load.
+  syncInstalledState()
+  window.addEventListener('load', syncInstalledState)
 
   window.addEventListener('beforeinstallprompt', (e) => {
     // Prevent the mini-infobar from appearing on mobile
@@ -31,6 +34,7 @@ if (typeof window !== 'undefined') {
     deferredPrompt.value = null
     ;(window as any).deferredPrompt = null
     isInstallable.value = false
+    syncInstalledState()
     isInstalled.value = true
     console.log('PWA: Application installed successfully')
   })

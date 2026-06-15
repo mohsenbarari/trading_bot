@@ -140,6 +140,7 @@ const recentOffersLoading = ref(false)
 const recentOffersError = ref('')
 const recentOffersRef = ref<HTMLElement | null>(null)
 const recentOffersToggleRef = ref<any>(null)
+const recentOffersOpenDirection = ref<'above' | 'below'>('above')
 const recentOffersDropdownStyle = ref<Record<string, string>>({})
 const offerInputRef = ref<HTMLTextAreaElement | null>(null)
 const adminMarketMessage = ref<AdminMarketMessage | null>(null)
@@ -409,6 +410,7 @@ function updateRecentOffersMenuPosition() {
   const spaceAbove = Math.max(0, toggleRect.top - edgePadding)
   const spaceBelow = Math.max(0, viewportHeight - toggleRect.bottom - edgePadding)
   const shouldOpenAbove = spaceAbove >= measuredHeight + gap || spaceAbove > spaceBelow
+  recentOffersOpenDirection.value = shouldOpenAbove ? 'above' : 'below'
   const availableHeight = Math.max(160, (shouldOpenAbove ? spaceAbove : spaceBelow) - gap)
   const dropdownHeight = Math.min(measuredHeight, availableHeight)
   const left = Math.min(
@@ -428,6 +430,8 @@ function updateRecentOffersMenuPosition() {
     top: `${top}px`,
     width: `${dropdownWidth}px`,
     maxHeight: `${availableHeight}px`,
+    transformOrigin: shouldOpenAbove ? 'bottom left' : 'top left',
+    '--recent-offers-enter-offset': shouldOpenAbove ? '0.35rem' : '-0.35rem',
   }
 }
 
@@ -786,7 +790,13 @@ onUnmounted(() => {
             <ChevronDown v-else :size="17" />
           </AppIconButton>
           <transition name="recent-offers-dropdown">
-            <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown" :style="recentOffersDropdownStyle">
+            <div
+              v-if="recentOffersOpen"
+              id="recent-offers-dropdown"
+              class="recent-offers-dropdown"
+              :class="recentOffersOpenDirection === 'above' ? 'recent-offers-dropdown--above' : 'recent-offers-dropdown--below'"
+              :style="recentOffersDropdownStyle"
+            >
               <AppLoadingState
                 v-if="recentOffersLoading"
                 class="recent-offers-state"
@@ -1213,7 +1223,7 @@ onUnmounted(() => {
 .recent-offers-dropdown-enter-from,
 .recent-offers-dropdown-leave-to {
   opacity: 0;
-  transform: translateY(0.35rem);
+  transform: translateY(var(--recent-offers-enter-offset, 0.35rem));
 }
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
