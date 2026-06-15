@@ -811,9 +811,6 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    await wrapper.get('.project-users-search').trigger('submit')
-    await flushPromises()
-
     expect(fetchMock.mock.calls.some(([url]) => (
       url === '/api/users-public/44/project-users?limit=25&offset=0'
     ))).toBe(true)
@@ -908,9 +905,6 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
-    await wrapper.get('.project-users-search').trigger('submit')
-    await flushPromises()
-
     expect(fetchMock.mock.calls.some(([url]) => (
       url === '/api/users-public/20/project-users?limit=25&offset=0'
     ))).toBe(true)
@@ -958,9 +952,6 @@ describe('PublicProfile.vue', () => {
       },
     })
 
-    await flushPromises()
-
-    await wrapper.get('.project-users-search').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('دریافت کاربران پروژه ممکن نشد')
@@ -1477,6 +1468,7 @@ describe('PublicProfile.vue', () => {
       accountant_relations: [],
     }))
     uploadAvatarImageMock.mockResolvedValue({ file_id: 'avatar-99' })
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(makeResponse({ avatar_file_id: 'avatar-99' }))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default
@@ -1512,10 +1504,11 @@ describe('PublicProfile.vue', () => {
     await flushPromises()
 
     expect(uploadAvatarImageMock).toHaveBeenCalledWith(file, '')
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/auth/me/avatar', expect.objectContaining({
-      method: 'PUT',
-      body: JSON.stringify({ avatar_file_id: 'avatar-99' }),
-    }))
+    expect(fetchMock.mock.calls.some(([url, init]) => (
+      url === '/api/auth/me/avatar'
+      && (init as RequestInit | undefined)?.method === 'PUT'
+      && (init as RequestInit | undefined)?.body === JSON.stringify({ avatar_file_id: 'avatar-99' })
+    ))).toBe(true)
 
     inputClickSpy.mockRestore()
   })
@@ -1938,6 +1931,7 @@ describe('PublicProfile.vue', () => {
       highlight_accountant_relation_display_name: null,
       accountant_relations: [],
     }))
+    fetchMock.mockResolvedValueOnce(makeResponse([]))
     fetchMock.mockResolvedValueOnce(makeResponse([]))
 
     const PublicProfile = (await import('./PublicProfile.vue')).default

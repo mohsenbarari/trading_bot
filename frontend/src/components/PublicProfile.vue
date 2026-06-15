@@ -512,6 +512,8 @@ async function loadProfile() {
     return;
   }
 
+  resetProjectUsersDirectoryState();
+
   try {
     const response = await apiFetch(`/api/users-public/${props.user.id}`);
 
@@ -526,6 +528,9 @@ async function loadProfile() {
       publicBlockStatus.value = null;
     }
     applyInitialOwnerWorkspace();
+    if (showProjectUsersSection.value) {
+      await loadProjectUsersDirectory(true);
+    }
   } catch (e: any) {
     error.value = e.message || 'خطا در برقراری ارتباط';
   } finally {
@@ -1001,11 +1006,19 @@ async function loadProjectUsersDirectory(force = false) {
   }
 }
 
-async function submitProjectUsersSearch() {
+function resetProjectUsersDirectoryState() {
   projectUsers.value = [];
+  projectUsersLoading.value = false;
+  projectUsersLoadingMore.value = false;
+  projectUsersError.value = '';
+  projectUsersLoaded.value = false;
+  lastLoadedProjectUsersQuery.value = '';
   projectUsersOffset.value = 0;
   projectUsersHasMore.value = false;
-  projectUsersLoaded.value = false;
+}
+
+async function submitProjectUsersSearch() {
+  resetProjectUsersDirectoryState();
   await loadProjectUsersDirectory(true);
 }
 
@@ -1542,8 +1555,8 @@ function handleHistoryPresetChipChange(value: string) {
             <LoadingSkeleton v-else-if="projectUsersLoading" :count="3" :height="52" />
             <AppEmptyState
               v-else-if="!hasLoadedProjectUsersOnce"
-              title="فهرست همکاران هنوز بارگذاری نشده است"
-              message="برای مشاهده فهرست کامل، جستجو را اجرا کنید."
+              title="فهرست همکاران آماده نمایش نیست"
+              message="در صورت بروز مشکل می‌توانید دوباره جستجو یا بارگذاری را تکرار کنید."
             />
             <AppEmptyState
               v-else-if="projectUsers.length === 0"
