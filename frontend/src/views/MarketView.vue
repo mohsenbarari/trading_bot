@@ -139,6 +139,8 @@ const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
 const recentOffersError = ref('')
 const recentOffersRef = ref<HTMLElement | null>(null)
+const recentOffersToggleRef = ref<any>(null)
+const recentOffersDropdownStyle = ref<Record<string, string>>({})
 const offerInputRef = ref<HTMLTextAreaElement | null>(null)
 const adminMarketMessage = ref<AdminMarketMessage | null>(null)
 const adminMarketMessageExpanded = ref(false)
@@ -160,8 +162,6 @@ const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
-const filteredOfferCountLabel = computed(() => `${filteredOffers.value.length.toLocaleString('fa-IR')} لفظ`)
-const marketStatusTone = computed(() => (isMarketOpen.value ? 'success' : 'danger'))
 const shouldCollapseAdminMarketMessage = computed(() => (
   !!adminMarketMessage.value
   && isMarketOpen.value
@@ -384,6 +384,53 @@ function closeRecentOffersMenu() {
   recentOffersOpen.value = false
 }
 
+function getRecentOffersToggleElement() {
+  const raw = recentOffersToggleRef.value
+  if (!raw) return null
+  if (raw instanceof HTMLElement) return raw
+  if (raw.$el instanceof HTMLElement) return raw.$el as HTMLElement
+  return null
+}
+
+function updateRecentOffersMenuPosition() {
+  if (!recentOffersOpen.value) return
+
+  const toggleEl = getRecentOffersToggleElement()
+  const dropdownEl = recentOffersRef.value?.querySelector('.recent-offers-dropdown') as HTMLElement | null
+  if (!toggleEl) return
+
+  const toggleRect = toggleEl.getBoundingClientRect()
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 360
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 640
+  const gap = 12
+  const edgePadding = 8
+  const dropdownWidth = Math.min(304, viewportWidth - (edgePadding * 2))
+  const measuredHeight = dropdownEl?.offsetHeight || 280
+  const spaceAbove = Math.max(0, toggleRect.top - edgePadding)
+  const spaceBelow = Math.max(0, viewportHeight - toggleRect.bottom - edgePadding)
+  const shouldOpenAbove = spaceAbove >= measuredHeight + gap || spaceAbove > spaceBelow
+  const availableHeight = Math.max(160, (shouldOpenAbove ? spaceAbove : spaceBelow) - gap)
+  const dropdownHeight = Math.min(measuredHeight, availableHeight)
+  const left = Math.min(
+    Math.max(toggleRect.left, edgePadding),
+    Math.max(edgePadding, viewportWidth - dropdownWidth - edgePadding),
+  )
+  const top = shouldOpenAbove
+    ? Math.max(edgePadding, toggleRect.top - dropdownHeight - gap)
+    : Math.min(
+        Math.max(edgePadding, viewportHeight - dropdownHeight - edgePadding),
+        toggleRect.bottom + gap,
+      )
+
+  recentOffersDropdownStyle.value = {
+    position: 'fixed',
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${dropdownWidth}px`,
+    maxHeight: `${availableHeight}px`,
+  }
+}
+
 function handleRecentOffersPointerDown(event: PointerEvent) {
   if (!recentOffersOpen.value) {
     return
@@ -402,6 +449,7 @@ function toggleRecentOffersMenu() {
   }
   recentOffersOpen.value = true
   void fetchRecentOffers()
+  void nextTick(() => updateRecentOffersMenuPosition())
 }
 
 function openRecentOfferPreview(offer: RecentOfferSummary) {
@@ -437,6 +485,10 @@ function focusOfferInput() {
     const end = input.value.length
     input.setSelectionRange(end, end)
   })
+}
+
+function handleRecentOffersViewportChange() {
+  updateRecentOffersMenuPosition()
 }
 
 function editPendingOfferPreview() {
@@ -614,6 +666,14 @@ watch(offerText, () => {
   syncOfferInputHeight()
 })
 
+watch(
+  () => [recentOffersOpen.value, recentOffersLoading.value, recentOffersError.value, recentOffers.value.length],
+  () => {
+    if (!recentOffersOpen.value) return
+    void nextTick(() => updateRecentOffersMenuPosition())
+  },
+)
+
 onMounted(() => {
     fetchOffers()
     startPolling()
@@ -623,6 +683,8 @@ onMounted(() => {
     fetchAdminMarketMessage()
     fetchCurrentUser()
   document.addEventListener('pointerdown', handleRecentOffersPointerDown)
+  window.addEventListener('resize', handleRecentOffersViewportChange)
+  document.addEventListener('scroll', handleRecentOffersViewportChange, true)
   wsOn('market:opened', handleMarketOpened)
   wsOn('market:closed', handleMarketClosed)
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
@@ -634,6 +696,8 @@ onUnmounted(() => {
     stopPolling()
     clearBackStack()
   document.removeEventListener('pointerdown', handleRecentOffersPointerDown)
+  window.removeEventListener('resize', handleRecentOffersViewportChange)
+  document.removeEventListener('scroll', handleRecentOffersViewportChange, true)
   wsOff('market:opened', handleMarketOpened)
   wsOff('market:closed', handleMarketClosed)
   wsOff('market:notice_hidden', handleMarketNoticeHidden)
@@ -645,24 +709,6 @@ onUnmounted(() => {
   <div class="market-page ds-page">
 
     <div class="market-header">
-      <section class="market-summary-shell" aria-label="وضعیت بازار">
-        <div class="market-shell-main">
-          <div class="market-shell-title">
-            <h1>بازار</h1>
-          </div>
-          <div class="market-shell-meta" aria-label="خلاصه وضعیت بازار">
-            <AppStatusBadge
-              class="market-status-chip"
-              :class="isMarketOpen ? 'market-status-chip--open' : 'market-status-chip--closed'"
-              :tone="marketStatusTone"
-            >
-              {{ isMarketOpen ? 'بازار باز' : 'بازار بسته' }}
-            </AppStatusBadge>
-            <AppStatusBadge class="market-count-chip" tone="primary">{{ filteredOfferCountLabel }}</AppStatusBadge>
-          </div>
-        </div>
-      </section>
-
       <div class="header-controls">
         <AppFilterChips v-model="filterType" class="tabs-container market-filter-chips" label="فیلتر لفظ‌های بازار" :options="visibleFilterOptions" />
       </div>
@@ -727,6 +773,7 @@ onUnmounted(() => {
         <!-- Text Input Row -->
         <div ref="recentOffersRef" class="input-wrapper">
           <AppIconButton
+            ref="recentOffersToggleRef"
             class="recent-offers-toggle"
             :class="{ 'recent-offers-toggle--open': recentOffersOpen }"
             :disabled="isSubmitting"
@@ -739,7 +786,7 @@ onUnmounted(() => {
             <ChevronDown v-else :size="17" />
           </AppIconButton>
           <transition name="recent-offers-dropdown">
-            <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown">
+            <div v-if="recentOffersOpen" id="recent-offers-dropdown" class="recent-offers-dropdown" :style="recentOffersDropdownStyle">
               <AppLoadingState
                 v-if="recentOffersLoading"
                 class="recent-offers-state"
@@ -837,52 +884,6 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--ds-border-light);
 }
 
-.market-summary-shell {
-  max-width: var(--ds-page-max-width);
-  width: 100%;
-  margin: 0 auto;
-  padding: 0.8rem 0.95rem;
-  border: 1px solid var(--ds-border-subtle);
-  border-radius: var(--ds-radius-lg);
-  background: var(--ds-bg-card);
-  box-shadow: var(--ds-shadow-xs);
-}
-
-.market-shell-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.85rem;
-}
-
-.market-shell-title {
-  min-width: 0;
-  display: grid;
-  gap: 0.1rem;
-}
-
-.market-shell-title h1 {
-  margin: 0;
-  color: var(--ds-text-primary);
-  font-size: 0.98rem;
-  font-weight: 950;
-  line-height: 1.4;
-}
-
-.market-shell-meta {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.market-status-chip,
-.market-count-chip {
-  white-space: nowrap;
-}
-
 .header-controls {
   display: flex;
   gap: 0.75rem;
@@ -914,15 +915,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 430px) {
-  .market-shell-main {
-    flex-direction: column;
-  }
-
-  .market-shell-meta {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
   .market-filter-chips :deep(.ui-filter-chip) {
     min-height: 2.72rem;
   }
@@ -1071,10 +1063,6 @@ onUnmounted(() => {
 }
 
 .recent-offers-dropdown {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 0.65rem);
-  width: min(19rem, calc(100dvw - 2rem));
   padding: 0.45rem;
   display: grid;
   gap: 0.3rem;
@@ -1084,6 +1072,7 @@ onUnmounted(() => {
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  overflow-y: auto;
 }
 
 .recent-offers-state {

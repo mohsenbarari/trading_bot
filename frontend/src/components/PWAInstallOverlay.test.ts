@@ -47,7 +47,7 @@ describe('PWAInstallOverlay.vue', () => {
     const wrapper = mount(PWAInstallOverlay)
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(true)
@@ -62,7 +62,7 @@ describe('PWAInstallOverlay.vue', () => {
     localStorage.setItem(PROMPT_DISMISSED_KEY, String(Date.now()))
 
     const wrapper = mount(PWAInstallOverlay)
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
@@ -70,7 +70,7 @@ describe('PWAInstallOverlay.vue', () => {
 
   it('shows the prompt when installability becomes available after the initial delay', async () => {
     const wrapper = mount(PWAInstallOverlay)
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(false)
@@ -86,7 +86,7 @@ describe('PWAInstallOverlay.vue', () => {
     setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1')
 
     const wrapper = mount(PWAInstallOverlay)
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
 
     expect(wrapper.find('.pwa-install-overlay').exists()).toBe(true)
@@ -103,7 +103,7 @@ describe('PWAInstallOverlay.vue', () => {
     pwaOverlayMocks.installAppMock.mockResolvedValue(true)
 
     const wrapper = mount(PWAInstallOverlay)
-    await vi.advanceTimersByTimeAsync(3000)
+    await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
 
     await wrapper.get('.pwa-action-install').trigger('click')

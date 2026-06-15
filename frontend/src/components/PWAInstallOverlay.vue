@@ -55,7 +55,7 @@ onMounted(() => {
   promptDelayTimer = window.setTimeout(() => {
     isPromptDelayElapsed.value = true
     maybeShowOverlay()
-  }, 3000)
+  }, 4000)
 })
 
 onBeforeUnmount(() => {

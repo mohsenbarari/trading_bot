@@ -632,7 +632,7 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
-  it('shows the login install button for native install prompt browsers and falls back to manual guidance otherwise', async () => {
+  it('keeps native-install browsers on the global prompt path and only shows the inline helper for manual-install browsers', async () => {
     vi.useFakeTimers()
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,
@@ -650,18 +650,17 @@ describe('LoginView.vue', () => {
     expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
     await vi.advanceTimersByTimeAsync(4000)
     await flushPromises()
-    expect(wrapper.text()).toContain('نصب اپلیکیشن')
+    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
 
     window.dispatchEvent(Object.assign(new Event('beforeinstallprompt'), promptEvent))
     await flushPromises()
 
     expect(promptEvent.preventDefault).toHaveBeenCalled()
-    await findButtonByText(wrapper, 'نصب اپلیکیشن').trigger('click')
-    await flushPromises()
-    expect(promptEvent.prompt).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).not.toContain('راهنمای نصب دستی')
+    expect(wrapper.text()).not.toContain('نصب اپلیکیشن')
+    expect(promptEvent.prompt).not.toHaveBeenCalled()
 
     wrapper.unmount()
+    ;(window as any).deferredPrompt = null
 
     Object.defineProperty(window.navigator, 'userAgent', {
       configurable: true,

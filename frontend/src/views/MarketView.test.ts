@@ -272,9 +272,7 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.offers-user-id').text()).toBe('77')
     expect(wrapper.find('.sort-toggle-btn').exists()).toBe(false)
     expect(wrapper.find('.clear-sort-btn').exists()).toBe(false)
-    expect(wrapper.get('.market-summary-shell').text()).toContain('بازار')
-    expect(wrapper.get('.market-summary-shell').text()).toContain('بازار باز')
-    expect(wrapper.get('.market-summary-shell').text()).toContain('۱ لفظ')
+    expect(wrapper.find('.market-summary-shell').exists()).toBe(false)
     expect(wrapper.get('.tabs-container').attributes('role')).toBe('tablist')
     expect(wrapper.findAll('[role="tab"]').every((btn) => btn.attributes('role') === 'tab')).toBe(true)
     expect(wrapper.findAll('[role="tab"]')[0]?.attributes('aria-selected')).toBe('true')
@@ -445,6 +443,41 @@ describe('MarketView.vue', () => {
     await nextTick()
 
     expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('anchors the recent offers menu to the toggle and opens downward when the toggle is near the top', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    const toggle = wrapper.get('.recent-offers-toggle').element as HTMLElement
+    toggle.getBoundingClientRect = () => ({
+      x: 24,
+      y: 48,
+      top: 48,
+      right: 72,
+      bottom: 96,
+      left: 24,
+      width: 48,
+      height: 48,
+      toJSON: () => ({}),
+    })
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    const dropdown = wrapper.get('.recent-offers-dropdown').element as HTMLElement
+    Object.defineProperty(dropdown, 'offsetHeight', { configurable: true, value: 280 })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+
+    expect(dropdown.style.position).toBe('fixed')
+    expect(dropdown.style.left).toBe('24px')
+    expect(dropdown.style.top).toBe('108px')
 
     wrapper.unmount()
   })

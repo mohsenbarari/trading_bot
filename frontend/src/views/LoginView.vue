@@ -616,7 +616,8 @@ function restartLoginFlow() {
 const shouldShowInstallEntry = computed(() => (
   isInstallButtonDelayElapsed.value &&
   !isStandalone.value &&
-  !isInstalled.value
+  !isInstalled.value &&
+  (isIOS.value || !supportsNativeInstallPrompt.value)
 ))
 
 const manualInstallGuideTitle = computed(() => (
