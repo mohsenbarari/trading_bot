@@ -146,9 +146,11 @@ def collect_runtime_values(source_env_file: str | None = None) -> dict[str, str]
     missing: list[str] = []
     for key in COMMON_RUNTIME_KEYS:
         value = os.environ.get(key, source_values.get(key))
-        if value is None and key in OPTIONAL_RUNTIME_DEFAULTS:
+        if isinstance(value, str):
+            value = value.strip()
+        if (value is None or value == "") and key in OPTIONAL_RUNTIME_DEFAULTS:
             value = OPTIONAL_RUNTIME_DEFAULTS[key]
-        if value is None:
+        if value is None or value == "":
             missing.append(key)
             continue
         values[key] = value
