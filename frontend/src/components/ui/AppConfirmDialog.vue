@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, toRef } from 'vue'
+import { useOverlayA11y } from './useOverlayA11y'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -16,25 +17,37 @@ const props = withDefaults(defineProps<{
 
 const toneLabel = computed(() => (props.tone === 'danger' ? 'اقدام حساس' : 'نیازمند تایید'))
 
-defineEmits<{
+const emit = defineEmits<{
   confirm: []
   cancel: []
 }>()
+
+const containerRef = ref<HTMLElement | null>(null)
+
+const { titleId, descriptionId, ariaDescriptionId } = useOverlayA11y({
+  open: toRef(props, 'open'),
+  description: computed(() => props.message || undefined),
+  containerRef,
+  close: () => emit('cancel'),
+})
 </script>
 
 <template>
   <div v-if="open" class="ui-dialog-backdrop">
     <section
+      ref="containerRef"
       class="ui-confirm-dialog"
       :class="`ui-confirm-dialog--${tone}`"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="ui-confirm-dialog-title"
+      :aria-labelledby="titleId"
+      :aria-describedby="ariaDescriptionId"
+      tabindex="-1"
     >
       <header class="ui-confirm-dialog__header">
         <p class="ui-confirm-dialog__eyebrow">{{ toneLabel }}</p>
-        <h2 id="ui-confirm-dialog-title">{{ title }}</h2>
-        <p v-if="message">{{ message }}</p>
+        <h2 :id="titleId">{{ title }}</h2>
+        <p v-if="message" :id="descriptionId">{{ message }}</p>
       </header>
       <footer class="ui-confirm-dialog__actions">
         <button type="button" class="ui-button ui-button--secondary ui-button--md" @click="$emit('cancel')">

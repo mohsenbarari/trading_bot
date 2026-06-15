@@ -1,4 +1,5 @@
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
 import {
   AppActionCard,
@@ -177,6 +178,11 @@ describe('ui primitives', () => {
     await item.trigger('click')
     expect(item.emitted('select')).toHaveLength(1)
 
+    const trigger = document.createElement('button')
+    trigger.textContent = 'open'
+    document.body.appendChild(trigger)
+    trigger.focus()
+
     const dialog = mount(AppConfirmDialog, {
       props: {
         open: true,
@@ -185,12 +191,22 @@ describe('ui primitives', () => {
         confirmLabel: 'قطع رابطه',
         tone: 'danger',
       },
+      attachTo: document.body,
     })
+    await nextTick()
     expect(dialog.find('[role="dialog"]').exists()).toBe(true)
+    expect(document.activeElement).toBe(dialog.findAll('button')[0]!.element)
+    expect(document.body.classList.contains('ui-overlay-open')).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    expect(dialog.emitted('cancel')).toHaveLength(1)
     await dialog.findAll('button')[0]!.trigger('click')
     await dialog.findAll('button')[1]!.trigger('click')
-    expect(dialog.emitted('cancel')).toHaveLength(1)
+    expect(dialog.emitted('cancel')).toHaveLength(2)
     expect(dialog.emitted('confirm')).toHaveLength(1)
+    dialog.unmount()
+    await nextTick()
+    expect(document.body.classList.contains('ui-overlay-open')).toBe(false)
+    trigger.remove()
   })
 
   it('renders page, workspace, master-detail, toolbar, and page header primitives', () => {
@@ -271,22 +287,56 @@ describe('ui primitives', () => {
     expect(toast.attributes('role')).toBe('status')
     expect(toast.classes()).toContain('ui-toast--success')
 
+    const sheetTrigger = document.createElement('button')
+    sheetTrigger.textContent = 'open-sheet'
+    document.body.appendChild(sheetTrigger)
+    sheetTrigger.focus()
+
     const sheet = mount(AppBottomSheet, {
       props: { open: true, title: 'فیلترها' },
       slots: { default: '<p>گزینه‌ها</p>', actions: '<button>اعمال</button>' },
       attachTo: document.body,
     })
-    expect(document.body.querySelector('.ui-bottom-sheet')).toBeTruthy()
-    await sheet.findComponent(AppButton).trigger('click')
+    await nextTick()
+    const sheetDialog = document.body.querySelector('.ui-bottom-sheet') as HTMLElement | null
+    expect(sheetDialog).toBeTruthy()
+    expect(sheetDialog?.getAttribute('aria-labelledby')).toBeTruthy()
+    expect(document.activeElement).toBe(sheet.findComponent(AppButton).element)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(sheet.emitted('close')).toHaveLength(1)
+    await sheet.findComponent(AppButton).trigger('click')
+    expect(sheet.emitted('close')).toHaveLength(2)
     sheet.unmount()
+    await nextTick()
+    expect(document.activeElement).toBe(sheetTrigger)
+    sheetTrigger.remove()
+
+    const dialogTrigger = document.createElement('button')
+    dialogTrigger.textContent = 'open-dialog'
+    document.body.appendChild(dialogTrigger)
+    dialogTrigger.focus()
 
     const dialog = mount(AppResponsiveDialog, {
       props: { open: true, title: 'جزئیات' },
-      slots: { default: '<p>متن</p>' },
+      slots: { default: '<input aria-label="نام" /><button>ذخیره</button>' },
       attachTo: document.body,
     })
-    expect(document.body.querySelector('.ui-responsive-dialog')).toBeTruthy()
+    await nextTick()
+    const dialogElement = document.body.querySelector('.ui-responsive-dialog') as HTMLElement | null
+    const dialogInput = document.body.querySelector('.ui-responsive-dialog input') as HTMLInputElement | null
+    const dialogButtons = Array.from(document.body.querySelectorAll('.ui-responsive-dialog button')) as HTMLButtonElement[]
+    expect(dialogElement).toBeTruthy()
+    expect(dialogInput).toBeTruthy()
+    expect(dialogButtons).toHaveLength(2)
+    expect(document.activeElement).toBe(dialog.findComponent(AppButton).element)
+    await dialog.findComponent(AppButton).trigger('keydown', { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(dialogButtons[1]!)
+    dialogButtons[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    await nextTick()
+    expect(document.activeElement).toBe(dialog.findComponent(AppButton).element)
     dialog.unmount()
+    await nextTick()
+    expect(document.activeElement).toBe(dialogTrigger)
+    dialogTrigger.remove()
   })
 })

@@ -1926,6 +1926,11 @@
     background: var(--ds-info-50);
   }
 
+  html.ui-overlay-open,
+  body.ui-overlay-open {
+    overflow: hidden;
+  }
+
   .ui-sheet-backdrop,
   .ui-responsive-dialog-backdrop {
     position: fixed;
@@ -1967,6 +1972,13 @@
   .ui-responsive-dialog {
     max-height: calc(100dvh - var(--ds-safe-area-top) - var(--ds-safe-area-bottom) - 2rem);
     border-radius: var(--ds-radius-lg);
+  }
+
+  .ui-bottom-sheet:focus-visible,
+  .ui-responsive-dialog:focus-visible,
+  .ui-confirm-dialog:focus-visible {
+    outline: 0;
+    box-shadow: var(--ds-shadow-lg), var(--ds-focus-ring);
   }
 
   .ui-bottom-sheet__header,
@@ -2078,7 +2090,13 @@
     .ui-list-item--interactive,
     .ui-search-field,
     .ui-number-stepper,
-    .ui-number-stepper button {
+    .ui-number-stepper button,
+    .ui-bottom-sheet,
+    .ui-responsive-dialog,
+    .ui-confirm-dialog,
+    .ui-sheet-backdrop,
+    .ui-responsive-dialog-backdrop,
+    .ui-dialog-backdrop {
       transition: none;
     }
 

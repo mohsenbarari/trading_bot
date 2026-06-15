@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
-آخرین به‌روزرسانی: 2026-06-14
-وضعیت: Stage 1 تا Stage 10 تکمیل شدند؛ Stage 11 مرحله بعدی است.
+آخرین به‌روزرسانی: 2026-06-15
+وضعیت: Stage 1 تا Stage 11 تکمیل شدند؛ Stage 11.1 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -342,7 +342,7 @@ Gate نهایی Stage 12:
 | Stage 8 | Notifications final polish | Completed |
 | Stage 9 | Dashboard, Operations and Market polish | Completed |
 | Stage 10 | Small surfaces and auth/public utility pages | Completed |
-| Stage 11 | Micro-interaction and accessibility | Pending |
+| Stage 11 | Micro-interaction and accessibility | Completed |
 | Stage 12 | Visual QA and testing | Pending |
 | Stage 13 | Final Persian report | Pending |
 
@@ -558,9 +558,24 @@ Gate نهایی Stage 12:
 
 ### Stage 11 - Accessibility
 
-- real button، keyboard navigation، aria contracts، focus-visible، reduced-motion و semantic headings را enforce کن.
-- `AppBottomSheet` و `AppResponsiveDialog` در این stage باید Escape close، focus management، focus restore، scroll lock و keyboard-safe behavior بگیرند.
-- primitive overlayها نباید فقط render shell باشند؛ باید accessibility-grade شوند.
+وضعیت: Completed on 2026-06-15.
+
+خروجی انجام‌شده:
+
+- gap اصلی accessibility در primitive overlayها بسته شد. برای `AppBottomSheet`, `AppResponsiveDialog` و `AppConfirmDialog` یک hook مشترک accessibility اضافه شد تا این overlayها دیگر فقط shell بصری نباشند.
+- این overlayها حالا `Escape close`، focus management اولیه، focus trap روی edgeها، focus restore بعد از بستن، و scroll lock روی `html/body` دارند.
+- به‌جای `aria-label` ساده، dialogها حالا از `aria-labelledby` و در صورت وجود توضیح از `aria-describedby` استفاده می‌کنند و خود container هم `tabindex="-1"` دارد تا fallback focus معتبر بماند.
+- scroll lock به‌صورت count-based پیاده شد تا اگر بیش از یک overlay هم‌زمان باز بود، با بسته شدن یکی از آن‌ها کل lock اشتباهاً آزاد نشود.
+- reduced-motion برای خود overlay/backdropها و transitionهای مرتبط در CSS shared enforce شد تا interaction این سطح با تنظیمات accessibility سیستم‌عامل سازگار بماند.
+- focus-visible و keyboard contract سطوح non-messenger از Stageهای قبل حفظ شد و در این stage روی consumerهای overlay دوباره smoke شد: customer workspace، accountant workspace و notifications.
+
+اعتبارسنجی Stage 11:
+
+- `npm run test:unit:run -- src/components/ui/AppPrimitives.test.ts` پاس شد: `8/8`.
+- `npm run test:unit:run -- src/views/CustomerWorkspaceView.test.ts src/views/AccountantWorkspaceView.test.ts src/views/NotificationsView.test.ts src/components/ui/AppPrimitives.test.ts` پاس شد: `29/29`.
+- `npm run build` پاس شد.
+- `npm run test:e2e -- e2e/non-messenger-viewport.spec.ts --project=chromium --reporter=line` پاس شد: `8/8`.
+- `git diff --check` پاس شد.
 
 ### Stage 11.1 - Typography Consistency Audit
 
