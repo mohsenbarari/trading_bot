@@ -47,7 +47,6 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
             FakeExecuteResult([
                 make_user(id=8, account_name="acct8", role=UserRole.WATCH, mobile_number="09120000008"),
                 make_user(id=9, account_name="manager9", role=UserRole.MIDDLE_MANAGER, mobile_number="09120000009"),
-                make_user(id=10, account_name="customer10", role=UserRole.STANDARD, mobile_number="09120000010"),
             ])
         ])
 
@@ -62,7 +61,7 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
             result = await list_project_users_directory(7, q="0912", limit=25, db=db, current_user=current_user)
 
         accountant_lookup.assert_not_awaited()
-        self.assertEqual([row.id for row in result], [8, 9, 10])
+        self.assertEqual([row.id for row in result], [8, 9])
         self.assertEqual(result[0].account_name, "acct8")
         self.assertEqual(result[0].mobile_number, "09120000008")
         self.assertEqual(result[0].model_dump(), {
@@ -73,7 +72,9 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
 
         stmt_text = str(db.stmts[0]).lower()
         self.assertIn("users.role in", stmt_text)
-        self.assertNotIn("not (exists", stmt_text)
+        self.assertIn("accountant_relations", stmt_text)
+        self.assertIn("customer_relations", stmt_text)
+        self.assertIn("not (exists", stmt_text)
         self.assertIn("users.id !=", stmt_text)
         self.assertIn("lower(users.account_name) like lower", stmt_text)
         self.assertIn("lower(users.mobile_number) like lower", stmt_text)
