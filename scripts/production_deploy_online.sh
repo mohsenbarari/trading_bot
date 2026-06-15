@@ -1007,6 +1007,7 @@ else
   fi
 fi
 $cert_renewal_guard"
+    assert_iran_public_listener_ready
     log "SSL certificate step completed"
 }
 
@@ -1585,6 +1586,43 @@ extract_sync_unsynced_count() {
     python3 -c 'import json, sys; print(int(json.load(sys.stdin).get("unsynced_change_log_count", 0)))'
 }
 
+url_scheme() {
+    python3 -c 'from urllib.parse import urlparse; import sys; print((urlparse(sys.argv[1]).scheme or "").lower())' "$1"
+}
+
+assert_iran_public_listener_ready() {
+    local scheme
+    scheme="$(url_scheme "$IRAN_HEALTHCHECK_URL")"
+    case "$scheme" in
+        https)
+            ssh_iran "set -euo pipefail
+if ! ss -ltn | awk 'NR > 1 {print \$4}' | grep -Eq '(^|:)443$'; then
+  echo 'Iran reverse proxy is not listening on TCP 443.' >&2
+  exit 21
+fi
+nginx_dump=\$(nginx -T 2>/dev/null || true)
+printf '%s\n' \"\$nginx_dump\" | grep -Eq 'listen[[:space:]]+443([^0-9]|$)' || {
+  echo 'Iran active Nginx config has no listen 443 server block.' >&2
+  exit 22
+}
+printf '%s\n' \"\$nginx_dump\" | grep -q 'ssl_certificate ' || {
+  echo 'Iran active Nginx config has no ssl_certificate directive.' >&2
+  exit 23
+}"
+            ;;
+        http)
+            ssh_iran "set -euo pipefail
+if ! ss -ltn | awk 'NR > 1 {print \$4}' | grep -Eq '(^|:)80$'; then
+  echo 'Iran reverse proxy is not listening on TCP 80.' >&2
+  exit 24
+fi"
+            ;;
+        *)
+            log "Skipping Iran public listener assertion for unsupported URL scheme: $scheme"
+            ;;
+    esac
+}
+
 run_iran_migration_python() {
     local script_args="$*"
     local compose_resolver
@@ -1807,6 +1845,7 @@ healthcheck() {
     verify_sync_sampler_local
     verify_sync_sampler_remote
     if [[ "$IRAN_RUN_POST_DEPLOY_HEALTHCHECK" == "1" ]]; then
+        assert_iran_public_listener_ready
         for _attempt in $(seq 1 24); do
             if curl -kfsS "$IRAN_HEALTHCHECK_URL" >/dev/null; then
                 break
