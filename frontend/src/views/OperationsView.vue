@@ -20,7 +20,6 @@ import {
 import {
   AppActionCard,
   AppButton,
-  AppMetricCard,
   AppStatusBadge,
 } from '../components/ui'
 import { currentUserSummary, isAdminRole, primeCurrentUserSummary } from '../utils/currentUser'
@@ -116,24 +115,6 @@ const adminActions = computed<OperationAction[]>(() => {
   return actions
 })
 
-const utilityActions = computed<OperationAction[]>(() => [
-  {
-    key: 'notifications',
-    title: 'اعلان‌ها',
-    description: 'مشاهده اعلان‌های سیستم و معاملات',
-    icon: Bell,
-    action: () => router.push({ name: 'notifications' }),
-  },
-  {
-    key: 'admin_panel',
-    title: 'پنل مدیریت',
-    description: 'ورود به منوی کامل مدیریت',
-    icon: WalletCards,
-    action: () => router.push({ name: 'admin' }),
-    hidden: !isAdmin.value,
-  },
-].filter(action => !action.hidden))
-
 const relationsEmptyState = computed(() => {
   if (isCustomer.value) {
     return {
@@ -168,17 +149,8 @@ const managementNote = computed(() => {
   return 'دسترسی مدیر میانی؛ تنظیمات سیستم و پیام‌های مدیریت فقط برای مدیر ارشد است.'
 })
 
-const roleLabel = computed(() => {
-  if (!user.value) return 'در حال دریافت'
-  if (isSuperAdmin.value) return 'مدیر ارشد'
-  if (isAdmin.value) return 'مدیر میانی'
-  if (isCustomer.value) return 'مشتری'
-  return 'کاربر عادی'
-})
-
 const relationAccessLabel = computed(() => (ownerActions.value.length ? `${ownerActions.value.length} مسیر` : 'غیرفعال'))
 const adminAccessLabel = computed(() => (adminActions.value.length ? `${adminActions.value.length} ابزار` : 'ندارد'))
-const shortcutAccessLabel = computed(() => `${utilityActions.value.length} میانبر`)
 
 onMounted(() => {
   void primeCurrentUserSummary()
@@ -271,41 +243,11 @@ onMounted(() => {
           />
       </WorkspaceSection>
 
-      <WorkspaceSection
-        title="میانبرها"
-        description="مسیرهای سریع برای کارهای کم‌تکرار یا عمومی."
-      >
-        <template #actions>
-          <AppStatusBadge tone="neutral">{{ shortcutAccessLabel }}</AppStatusBadge>
-        </template>
-        <div class="action-grid">
-          <AppActionCard
-            v-for="action in utilityActions"
-            :key="action.key"
-            class="operations-action-tile"
-            :title="action.title"
-            :description="action.description"
-            @select="action.action"
-          >
-            <template #icon>
-              <component :is="action.icon" :size="20" />
-            </template>
-          </AppActionCard>
-        </div>
-      </WorkspaceSection>
-
       <template #aside>
         <WorkspaceSection
           title="وضعیت دسترسی"
-          description="خلاصه مسیرهایی که برای نقش فعلی شما فعال است."
+          description="فقط مسیرهای مجاز نقش فعلی شما در این بخش فعال است."
         >
-          <div class="operations-stat-grid">
-            <AppMetricCard label="نقش" :value="roleLabel" />
-            <AppMetricCard label="روابط کاری" :value="relationAccessLabel" tone="primary" />
-            <AppMetricCard label="مدیریت" :value="adminAccessLabel" :tone="isAdmin ? 'success' : 'neutral'" />
-            <AppMetricCard label="میانبرها" :value="shortcutAccessLabel" />
-          </div>
-
           <div class="operations-access-badges" aria-label="خلاصه وضعیت دسترسی">
             <AppStatusBadge :tone="ownerActions.length ? 'primary' : 'neutral'">
               روابط کاری: {{ relationAccessLabel }}
@@ -336,7 +278,7 @@ onMounted(() => {
 <style scoped>
 .operations-page {
   min-height: 100dvh;
-  padding-bottom: 5rem;
+  padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 5rem);
 }
 
 .operations-header-action {
@@ -347,16 +289,15 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.65rem;
+  padding-bottom: 0.9rem;
 }
 
 .operations-action-tile {
   font-family: inherit;
 }
 
-.operations-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
+.action-grid > .operations-action-tile:last-child {
+  margin-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1rem);
 }
 
 .operations-aside-note {
@@ -378,11 +319,21 @@ onMounted(() => {
   .action-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}
 
-@media (max-width: 520px) {
-  .operations-stat-grid {
-    grid-template-columns: 1fr;
+  .action-grid > .operations-action-tile:last-child {
+    margin-bottom: 0;
   }
 }
+
+@media (max-width: 767px) {
+  .operations-page :deep(.ds-workspace-main),
+  .operations-page :deep(.ds-workspace-aside) {
+    padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1.5rem);
+  }
+
+  .operations-admin-full {
+    margin-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1rem);
+  }
+}
+
 </style>

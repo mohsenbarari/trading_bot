@@ -53,7 +53,7 @@ describe('OperationsView.vue', () => {
 
     expect(operationsViewMocks.primeCurrentUserSummaryMock).toHaveBeenCalledTimes(1)
     expect(wrapper.find('.ds-workspace').exists()).toBe(true)
-    expect(wrapper.findAll('.ds-workspace-section')).toHaveLength(4)
+    expect(wrapper.findAll('.ds-workspace-section')).toHaveLength(3)
     expect(wrapper.text()).toContain('دسترسی کامل مدیریتی')
     expect(wrapper.text()).toContain('تنظیمات سیستم')
     expect(wrapper.text()).not.toContain('مسیر جدید')
@@ -82,7 +82,7 @@ describe('OperationsView.vue', () => {
     expect(wrapper.text()).toContain('دسترسی مدیریتی فعال نیست')
     expect(wrapper.text()).not.toContain('ارسال دعوت‌نامه')
     expect(findAction(wrapper, 'مشتریان')?.exists()).toBe(true)
-    expect(wrapper.text()).toContain('کاربر عادی')
+    expect(wrapper.text()).toContain('مدیریت: ندارد')
     expect(wrapper.text()).toContain('ندارد')
   })
 
@@ -97,6 +97,6 @@ describe('OperationsView.vue', () => {
 
     expect(wrapper.text()).toContain('این بخش برای حساب مشتری فعال نیست')
     expect(wrapper.findAll('.operations-action-tile').some((action) => action.text().includes('دعوت، مدیریت، محدودیت'))).toBe(false)
-    expect(findAction(wrapper, 'اعلان‌ها')?.exists()).toBe(true)
+    expect(wrapper.find('.operations-header-action').exists()).toBe(true)
   })
 })

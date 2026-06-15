@@ -87,7 +87,7 @@ describe('AccountHubView.vue', () => {
     expect(wrapper.text()).toContain('دسترسی‌های مجاز حسابدار و حافظه دستگاه')
   })
 
-  it('renders metrics and guidance instead of the old accordion layout', async () => {
+  it('renders guidance without reviving the old accordion or summary-card layout', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 3,
       role: 'عادی',
@@ -97,7 +97,7 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(wrapper.findAll('.ui-metric-card')).toHaveLength(3)
+    expect(wrapper.findAll('.ui-metric-card')).toHaveLength(0)
     expect(wrapper.findAll('.account-guidance-item')).toHaveLength(2)
     expect(wrapper.findAll('.account-accordion')).toHaveLength(0)
   })

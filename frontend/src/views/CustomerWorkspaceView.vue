@@ -660,20 +660,6 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <WorkspaceSection
-          title="نمای کلی مشتریان"
-          description="مرور سریع روابط، دعوت‌ها و مشتریان سطح ۲ بدون ورود به فرم‌های مدیریتی."
-          tone="primary"
-        >
-          <div class="customer-summary-grid">
-            <AppMetricCard label="کل روابط" :value="customerState.relations.value.length" />
-            <AppMetricCard label="فعال" :value="activeCount" tone="success" />
-            <AppMetricCard label="دعوت‌ها" :value="customerState.pendingInvitationRelations.value.length" tone="warning" />
-            <AppMetricCard label="سطح ۲" :value="tier2Count" tone="primary" />
-            <AppMetricCard label="غیرفعال" :value="inactiveCount" tone="neutral" />
-          </div>
-        </WorkspaceSection>
-
-        <WorkspaceSection
           v-if="relationIdNumber"
           title="پرونده مشتری"
           description="مشخصات، محدودیت‌ها، معاملات، آمار، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
@@ -931,8 +917,19 @@ onBeforeUnmount(() => {
 
         <WorkspaceSection
           title="لیست مشتریان"
-          description="جستجو، فیلتر و انتخاب مشتری با ساختار روشن و بدون accordion تو در تو."
+          description="جستجو، فیلتر و انتخاب مشتری با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
         >
+          <template #actions>
+            <div class="workspace-summary-badges">
+              <AppStatusBadge tone="primary">{{ customerState.relations.value.length.toLocaleString('fa-IR') }} رابطه</AppStatusBadge>
+              <AppStatusBadge v-if="activeCount" tone="success">{{ activeCount.toLocaleString('fa-IR') }} فعال</AppStatusBadge>
+              <AppStatusBadge v-if="customerState.pendingInvitationRelations.value.length" tone="warning">
+                {{ customerState.pendingInvitationRelations.value.length.toLocaleString('fa-IR') }} دعوت
+              </AppStatusBadge>
+              <AppStatusBadge v-if="tier2Count" tone="primary">{{ tier2Count.toLocaleString('fa-IR') }} سطح ۲</AppStatusBadge>
+              <AppStatusBadge v-if="inactiveCount" tone="neutral">{{ inactiveCount.toLocaleString('fa-IR') }} غیرفعال</AppStatusBadge>
+            </div>
+          </template>
           <div class="customer-list-controls">
             <AppSearchField
               v-model="searchQuery"
@@ -1209,17 +1206,18 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 
-.customer-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.65rem;
-}
-
 .workspace-relation-list,
 .workspace-side-actions {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+
+.workspace-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .customer-list-controls,
@@ -1426,7 +1424,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 520px) {
-  .customer-summary-grid,
   .customer-detail-grid,
   .customer-stats-grid {
     grid-template-columns: 1fr;

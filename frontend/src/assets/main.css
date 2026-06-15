@@ -1065,6 +1065,13 @@
     }
   }
 
+  @media (max-width: 767px) {
+    .ds-workspace-main,
+    .ds-workspace-aside {
+      padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 1.5rem);
+    }
+  }
+
   /* ═══ Product UI Primitives — Stage 1 Visual Unification ═══ */
   .ui-button,
   .ui-icon-button,

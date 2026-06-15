@@ -7,7 +7,7 @@ import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import AppLoadingState from '../components/ui/AppLoadingState.vue'
-import AppMetricCard from '../components/ui/AppMetricCard.vue'
+import AppStatusBadge from '../components/ui/AppStatusBadge.vue'
 import AppSectionCard from '../components/ui/AppSectionCard.vue'
 
 interface DashboardTrade {
@@ -103,29 +103,8 @@ const notificationCountLabel = computed(() => {
   return count > 0 ? `${formatDashboardNumber(count)} اعلان` : 'بدون اعلان'
 })
 
-const dashboardSummaryCards = computed(() => [
-  {
-    key: 'account',
-    label: 'وضعیت حساب',
-    value: accountStateLabel.value,
-    description: accountStateDescription.value,
-    tone: accountStateTone.value,
-  },
-  {
-    key: 'market',
-    label: 'وضعیت بازار',
-    value: isAccountant.value ? 'مشاهده محدود' : marketEntryStatusLabel.value,
-    description: isAccountant.value ? 'حسابدار مجاز به ورود مستقیم بازار نیست' : marketEntrySubtitle.value,
-    tone: isMarketOpen.value && !isAccountant.value ? 'success' : 'neutral',
-  },
-  {
-    key: 'today',
-    label: 'کار امروز',
-    value: todayTradesLoading.value ? 'در حال دریافت' : todayTradesCountLabel.value,
-    description: todayTradesError.value || notificationCountLabel.value,
-    tone: todayTradesError.value ? 'danger' : 'primary',
-  },
-])
+const todayActivityTone = computed(() => (todayTradesError.value ? 'danger' : 'primary'))
+const marketStatusTone = computed(() => (isMarketOpen.value && !isAccountant.value ? 'success' : 'neutral'))
 
 const greeting = computed(() => {
   const hour = getIranHour()
@@ -447,16 +426,25 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <section class="dashboard-overview" aria-label="خلاصه وضعیت روزانه">
-        <AppMetricCard
-          v-for="card in dashboardSummaryCards"
-          :key="card.key"
-          class="dashboard-stat-card"
-          :label="card.label"
-          :value="card.value"
-          :hint="card.description"
-          :tone="card.tone"
-        />
+      <section class="dashboard-status-strip" aria-label="خلاصه وضعیت روزانه">
+        <div class="dashboard-status-copy">
+          <strong>{{ accountStateLabel }}</strong>
+          <p>{{ accountStateDescription }}</p>
+        </div>
+        <div class="dashboard-status-badges">
+          <AppStatusBadge :tone="accountStateTone">
+            وضعیت حساب: {{ accountStateLabel }}
+          </AppStatusBadge>
+          <AppStatusBadge :tone="marketStatusTone">
+            {{ isAccountant ? 'بازار: مشاهده محدود' : `بازار: ${marketEntryStatusLabel}` }}
+          </AppStatusBadge>
+          <AppStatusBadge :tone="todayActivityTone">
+            {{ todayTradesLoading ? 'کار امروز: در حال دریافت' : `کار امروز: ${todayTradesCountLabel}` }}
+          </AppStatusBadge>
+          <AppStatusBadge v-if="notificationStore.appNotifications.length > 0" tone="info">
+            {{ notificationCountLabel }}
+          </AppStatusBadge>
+        </div>
       </section>
 
       <!-- ═══ Main Content ═══ -->
@@ -827,11 +815,44 @@ onBeforeUnmount(() => {
   gap: 1.25rem;
 }
 
-.dashboard-overview {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.dashboard-status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-card);
+  box-shadow: var(--ds-shadow-xs);
+}
+
+.dashboard-status-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dashboard-status-copy strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 850;
+  line-height: 1.5;
+}
+
+.dashboard-status-copy p {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.8;
+}
+
+.dashboard-status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
 }
 
 .dashboard-stat-card {
@@ -1003,8 +1024,13 @@ onBeforeUnmount(() => {
 }
 
 @media (min-width: 381px) and (max-width: 680px) {
-  .dashboard-overview {
-    grid-template-columns: 1fr;
+  .dashboard-status-strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-status-badges {
+    justify-content: flex-start;
   }
 }
 

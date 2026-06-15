@@ -499,19 +499,6 @@ onBeforeUnmount(() => {
 
       <template v-else>
         <WorkspaceSection
-          title="نمای کلی حسابداران"
-          description="مرور سریع حسابداران فعال، دعوت‌ها و وضعیت دسترسی‌های قابل مدیریت."
-          tone="primary"
-        >
-          <div class="accountant-summary-grid">
-            <AppMetricCard label="کل روابط" :value="accountantState.relations.value.length" />
-            <AppMetricCard label="فعال" :value="activeCount" tone="success" />
-            <AppMetricCard label="دعوت‌ها" :value="accountantState.pendingInvitationRelations.value.length" tone="warning" />
-            <AppMetricCard label="غیرفعال" :value="inactiveCount" tone="neutral" />
-          </div>
-        </WorkspaceSection>
-
-        <WorkspaceSection
           v-if="relationIdNumber"
           title="پرونده حسابدار"
           description="مشخصات، شرح وظیفه، نشست‌ها و اقدامات حساس در یک نمای یکپارچه."
@@ -664,8 +651,18 @@ onBeforeUnmount(() => {
 
         <WorkspaceSection
           title="لیست حسابداران"
-          description="جستجو، فیلتر و انتخاب حسابدار با ساختار روشن و بدون accordionهای تو در تو."
+          description="جستجو، فیلتر و انتخاب حسابدار با دسترسی مستقیم به دعوت‌ها و پرونده‌های فعال."
         >
+          <template #actions>
+            <div class="workspace-summary-badges">
+              <AppStatusBadge tone="primary">{{ accountantState.relations.value.length.toLocaleString('fa-IR') }} رابطه</AppStatusBadge>
+              <AppStatusBadge v-if="activeCount" tone="success">{{ activeCount.toLocaleString('fa-IR') }} فعال</AppStatusBadge>
+              <AppStatusBadge v-if="accountantState.pendingInvitationRelations.value.length" tone="warning">
+                {{ accountantState.pendingInvitationRelations.value.length.toLocaleString('fa-IR') }} دعوت
+              </AppStatusBadge>
+              <AppStatusBadge v-if="inactiveCount" tone="neutral">{{ inactiveCount.toLocaleString('fa-IR') }} غیرفعال</AppStatusBadge>
+            </div>
+          </template>
           <div class="accountant-list-controls">
             <AppSearchField
               v-model="searchQuery"
@@ -902,17 +899,18 @@ onBeforeUnmount(() => {
   min-height: 100%;
 }
 
-.accountant-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.65rem;
-}
-
 .workspace-relation-list,
 .workspace-side-actions {
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
+}
+
+.workspace-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .accountant-list-controls,
@@ -1066,7 +1064,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 520px) {
-  .accountant-summary-grid,
   .accountant-detail-grid {
     grid-template-columns: 1fr;
   }

@@ -209,7 +209,7 @@ describe('CustomerWorkspaceView.vue', () => {
 
     expect(wrapper.find('.ds-workspace').exists()).toBe(true)
     expect(wrapper.text()).toContain('مشتریان')
-    expect(wrapper.text()).toContain('نمای کلی مشتریان')
+    expect(wrapper.text()).toContain('لیست مشتریان')
     expect(wrapper.text()).toContain('مشتری تست')
     expect(wrapper.find('.customer-manager-stub').exists()).toBe(false)
   })

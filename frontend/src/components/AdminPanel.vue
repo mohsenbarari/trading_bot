@@ -13,7 +13,6 @@ import { computed, ref } from 'vue'
 import type { Component } from 'vue'
 import { isCachedMiddleManager, isCachedSuperAdmin } from '../utils/adminAccess'
 import AppActionCard from './ui/AppActionCard.vue'
-import AppMetricCard from './ui/AppMetricCard.vue'
 import AppPageHeader from './ui/AppPageHeader.vue'
 import AppSectionCard from './ui/AppSectionCard.vue'
 import AppStatusBadge from './ui/AppStatusBadge.vue'
@@ -169,27 +168,6 @@ const actionGroups = computed(() => {
     .filter((group) => group.actions.length > 0)
 })
 
-const adminMetrics = computed(() => [
-  {
-    label: 'سطح دسترسی',
-    value: accessNote.value,
-    hint: isCachedSuperAdmin() ? 'همه ابزارها فعال است' : 'ابزارها براساس نقش محدود شده‌اند',
-    tone: isCachedSuperAdmin() ? 'success' : 'info',
-  },
-  {
-    label: 'دسته‌های فعال',
-    value: actionGroups.value.length,
-    hint: 'پنل‌های قابل استفاده',
-    tone: 'primary',
-  },
-  {
-    label: 'ابزارهای مجاز',
-    value: actions.value.length,
-    hint: 'عملیات در دسترس',
-    tone: 'neutral',
-  },
-] as const)
-
 const accessNote = computed(() => {
   if (isCachedSuperAdmin()) return 'دسترسی کامل مدیریتی'
   if (isCachedMiddleManager()) return 'دسترسی مدیر میانی'
@@ -220,17 +198,14 @@ function toggleSection(section: AdminSectionKey) {
         </template>
       </AppPageHeader>
       <span class="admin-intro-kicker">{{ accessNote }}</span>
-    </section>
-
-    <section class="admin-metrics" aria-label="وضعیت پنل مدیریت">
-      <AppMetricCard
-        v-for="metric in adminMetrics"
-        :key="metric.label"
-        :label="metric.label"
-        :value="metric.value"
-        :hint="metric.hint"
-        :tone="metric.tone"
-      />
+      <div class="admin-intro-badges" aria-label="وضعیت پنل مدیریت">
+        <AppStatusBadge tone="primary">
+          {{ actionGroups.length }} دسته
+        </AppStatusBadge>
+        <AppStatusBadge tone="neutral">
+          {{ actions.length }} ابزار
+        </AppStatusBadge>
+      </div>
     </section>
 
     <AppSectionCard
@@ -321,10 +296,10 @@ function toggleSection(section: AdminSectionKey) {
   font-weight: 800;
 }
 
-.admin-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.65rem;
+.admin-intro-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .admin-accordion {
@@ -385,9 +360,4 @@ function toggleSection(section: AdminSectionKey) {
   line-height: 1.8;
 }
 
-@media (max-width: 640px) {
-  .admin-metrics {
-    grid-template-columns: 1fr;
-  }
-}
 </style>

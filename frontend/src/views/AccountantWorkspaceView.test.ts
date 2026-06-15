@@ -158,7 +158,7 @@ describe('AccountantWorkspaceView.vue', () => {
 
     expect(wrapper.find('.ds-workspace').exists()).toBe(true)
     expect(wrapper.text()).toContain('حسابداران')
-    expect(wrapper.text()).toContain('نمای کلی حسابداران')
+    expect(wrapper.text()).toContain('لیست حسابداران')
     expect(wrapper.text()).toContain('حسابدار تست')
     expect(wrapper.find('.accountant-manager-stub').exists()).toBe(false)
   })

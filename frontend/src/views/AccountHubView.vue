@@ -6,7 +6,6 @@ import { Bell, ChevronLeft, Database, Settings, ShieldCheck, Smartphone, UserRou
 import {
   AppActionCard,
   AppButton,
-  AppMetricCard,
   AppPage,
   AppPageHeader,
   AppSectionCard,
@@ -32,12 +31,6 @@ const userDisplayName = computed(() => {
   const accountName = user.value?.account_name?.trim()
   return fullName || accountName || 'حساب کاربری'
 })
-
-const accountMetrics = computed(() => [
-  { label: 'پروفایل', value: '۱', tone: 'primary' as const },
-  { label: 'تنظیمات امنیت', value: isAccountant.value ? 'محدود' : 'فعال', tone: isAccountant.value ? 'warning' as const : 'success' as const },
-  { label: 'اعلان‌ها', value: 'آماده', tone: 'neutral' as const },
-])
 
 const profileActions = computed<AccountAction[]>(() => [
   {
@@ -120,16 +113,6 @@ onMounted(() => {
           </AppButton>
         </template>
       </AppPageHeader>
-
-      <section class="account-metrics-grid">
-        <AppMetricCard
-          v-for="metric in accountMetrics"
-          :key="metric.label"
-          :label="metric.label"
-          :value="metric.value"
-          :tone="metric.tone"
-        />
-      </section>
 
       <AppSectionCard
         class="account-section-card"
@@ -231,13 +214,6 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.account-metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
 .account-section-card + .account-section-card {
   margin-top: 0.75rem;
 }
@@ -268,7 +244,6 @@ onMounted(() => {
 }
 
 @media (max-width: 700px) {
-  .account-metrics-grid,
   .account-action-grid {
     grid-template-columns: 1fr;
   }
