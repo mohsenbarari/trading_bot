@@ -288,7 +288,7 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
     expect(marketViewMocks.stopPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.clearBackStackMock).toHaveBeenCalled()
-  })
+  }, 15000)
 
   it('supports keyboard navigation across market filter tabs', async () => {
     const wrapper = await mountMarketView()

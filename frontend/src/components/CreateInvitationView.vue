@@ -306,7 +306,6 @@ function normalizeMobile(mobile: string): string {
 
 <template>
   <div class="card">
-    <h2>ارسال لینک دعوت جدید</h2>
     <form @submit.prevent="createInvite" autocomplete="off">
       <div class="form-group">
         <label for="account_name">نام کاربری (Account Name)</label>
@@ -406,7 +405,6 @@ function normalizeMobile(mobile: string): string {
   padding: 1.25rem;
   box-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }
-h2 { margin-top: 0; margin-bottom: 1.25rem; font-size: 1rem; font-weight: 800; color: #1f2937; }
 .form-group { margin-bottom: 1rem; }
 label { display: block; margin-bottom: 0.375rem; font-weight: 700; font-size: 0.78rem; color: #6b7280; }
 input, select {

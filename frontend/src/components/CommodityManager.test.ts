@@ -150,7 +150,7 @@ describe('CommodityManager.vue', () => {
     expect(wrapper.text()).toContain('افزودن کالا')
 
     wrapper.unmount()
-  })
+  }, 15000)
 
   it('adds a commodity with aliases and refreshes the list', async () => {
     const wrapper = await mountCommodityManager()

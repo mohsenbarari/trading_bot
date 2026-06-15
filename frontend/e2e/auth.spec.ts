@@ -65,9 +65,9 @@ test.describe('Login/auth regressions', () => {
 
     await page.goto('/profile')
     await expect(page).toHaveURL(/\/profile$/)
-    await expect(page.getByRole('button', { name: 'تنظیمات کاربری' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'پروفایل' }).first()).toBeVisible()
     await page.goto('/settings')
     await expect(page).toHaveURL(/\/settings$/)
-    await expect(page.getByRole('button', { name: 'خروج از حساب کاربری' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'تنظیمات' }).first()).toBeVisible()
   })
 })

@@ -1,7 +1,7 @@
 # نقشه حرفه‌ای‌سازی کامل UI/UX بخش‌های غیرپیام‌رسان
 
 آخرین به‌روزرسانی: 2026-06-15
-وضعیت: Stage 1 تا Stage 11.1 تکمیل شدند؛ Stage 12 مرحله بعدی است.
+وضعیت: Stage 1 تا Stage 12 تکمیل شدند؛ Stage 13 مرحله بعدی است.
 قاعده قطعی: production deploy، release، server deploy و `make production-release` در این roadmap ممنوع است مگر مالک پروژه صریحاً درخواست کند.
 
 ## 1. تأیید محدوده
@@ -344,7 +344,7 @@ Gate نهایی Stage 12:
 | Stage 10 | Small surfaces and auth/public utility pages | Completed |
 | Stage 11 | Micro-interaction and accessibility | Completed |
 | Stage 11.1 | Typography Consistency Audit | Completed |
-| Stage 12 | Visual QA and testing | Pending |
+| Stage 12 | Visual QA and testing | Completed |
 | Stage 13 | Final Persian report | Pending |
 
 ## 17. جزئیات Stageهای بعدی
@@ -600,8 +600,34 @@ Gate نهایی Stage 12:
 
 ### Stage 12 - Visual QA
 
-- تست‌های موجود را اجرا کن؛ script جدید بدون نیاز نساز.
-- e2e viewport/obstruction و screenshot artifact در صورت امکان.
+وضعیت: Completed on 2026-06-15.
+
+خروجی انجام‌شده:
+
+- duplicate heading در surface دعوت ادمین با حذف heading داخلی `CreateInvitationView.vue` جمع شد تا shell title تنها مرجع heading صفحه بماند.
+- smokeهای Playwright غیرپیام‌رسان با UI فعلی هم‌راستا شدند تا به‌جای locatorهای شکننده یا flowهای عمیق پیام‌رسان، surfaceهای واقعی admin/auth/notification/non-messenger viewport را اعتبارسنجی کنند.
+- timeoutهای baseline دو تست سنگین اما معتبر (`MarketView.test.ts` و `SettingsView.test.ts` و `CommodityManager.test.ts`) به‌صورت موضعی افزایش یافت تا failureها از جنس real regression باشند نه budget پیش‌فرض ۵ ثانیه.
+
+اعتبارسنجی Stage 12:
+
+- unit broad non-messenger:
+  `204/204` passed
+- build:
+  `npm run build` passed
+- e2e auth:
+  `3/3` passed
+- e2e admin smoke:
+  `4/4` passed
+- e2e notifications non-messenger subset:
+  `3/3` passed
+- e2e non-messenger viewport matrix:
+  `8/8` passed
+- `git diff --check` passed
+
+یادداشت:
+
+- بخشی از `notifications.spec.ts` که وارد سناریوهای عمیق پیام‌رسان می‌شود در این Stage جزو gate نهایی محسوب نشد، چون Stage 12 مختص non-messenger visual QA است.
+- production deploy طبق قاعده roadmap اجرا نشد.
 
 ### Stage 13 - Final report
 

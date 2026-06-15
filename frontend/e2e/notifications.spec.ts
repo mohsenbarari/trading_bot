@@ -639,7 +639,7 @@ async function loginWithSeededSession(page: Page, fixture: SeededSessionFixture)
   }, fixture)
   await gotoWithWebKitRetry(page, '/')
   await expect(page).not.toHaveURL(/\/login$/)
-  await expect(page.getByRole('button', { name: 'اعلان‌ها' })).toBeVisible()
+  await expect(page.locator('button.notif-btn[aria-label="اعلان‌ها"]:visible').first()).toBeVisible()
 }
 
 function chatMessageContent(page: Page, content: string) {
@@ -705,7 +705,7 @@ test.describe('Notification regressions', () => {
   test('dashboard notifications button opens the notification center', async ({ page }) => {
     await loginAsDev(page)
 
-    await page.getByRole('button', { name: 'اعلان‌ها' }).click()
+    await page.locator('button.notif-btn[aria-label="اعلان‌ها"]:visible').first().click()
 
     await expect(page).toHaveURL(/\/notifications$/)
     await expect(page.getByRole('heading', { name: 'مرکز اعلان‌ها' })).toBeVisible()
@@ -748,7 +748,7 @@ test.describe('Notification regressions', () => {
     await expect(page.getByText(pendingRequest.deviceName)).toBeVisible()
     await expect(page.getByText(pendingRequest.deviceIp)).toBeVisible()
 
-    await page.getByRole('button', { name: 'رد' }).click()
+    await page.getByRole('button', { name: 'رد', exact: true }).first().click()
     await expect(page.getByRole('heading', { name: 'درخواست ورود جدید' })).toBeHidden()
 
     await expect

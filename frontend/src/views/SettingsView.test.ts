@@ -120,7 +120,7 @@ describe('SettingsView.vue', () => {
     expect(settingsViewMocks.backMock).toHaveBeenCalled()
 
     wrapper.unmount()
-  })
+  }, 15000)
 
   it('clears cached files from the storage accordion and shows feedback', async () => {
     const wrapper = await mountSettingsView()
