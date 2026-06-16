@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG8` complete on `candidate/trading-production-grade`; `TG9` is next.
+Status: `TG9` complete on `candidate/trading-production-grade`; `TG10` is next.
 
 Last updated: 2026-06-16
 
@@ -94,7 +94,7 @@ targets:
 | `TG6` | Complete | Harden customer/accountant economic semantics, commission snapshots, history visibility, and notification audiences. |
 | `TG7` | Complete | Harden frontend market mutation UX: submit locks, idempotency keys, conflict handling, and visible recovery states. |
 | `TG8` | Complete | Add trading observability/audit signals and redacted structured logs. |
-| `TG9` | Pending | Run staging validation with isolated synthetic fixtures and no production sync. |
+| `TG9` | Complete | Run staging validation with isolated synthetic fixtures and no production sync. |
 | `TG10` | Pending | Run targeted benchmark/load proof only after TG1-TG9 pass; production run requires explicit user approval. |
 | `TG11` | Pending | Final production-readiness review, rollback notes, accepted-risk table, and promotion decision. |
 
@@ -490,6 +490,47 @@ Acceptance:
 - Staging health passes.
 - Synthetic fixture cleanup passes.
 - No production deploy or production data mutation occurs.
+
+Completed on 2026-06-16:
+
+- Ran `scripts/deploy_staging.sh check` and confirmed the staging runtime points
+  at `https://staging.362514.ir`.
+- Verified `.env.staging` has no production sync peer configured:
+  `PEER_SERVER_URL`, `FOREIGN_SERVER_URL`, `IRAN_SERVER_URL`,
+  `GERMANY_SERVER_URL`, and `IRAN_SERVER_DOMAIN` are empty, and the staging bot
+  token is blank.
+- Deployed the isolated staging stack through `scripts/deploy_staging.sh deploy`
+  only; no production deploy, production benchmark, production sync, or
+  production data mutation was run.
+- Ran the synthetic trading probe inside the staging app container with isolated
+  `TG9_STAGE_*` prefixes. The probe covered offer parsing, bot text offer
+  handling, offer creation/list/expire, trade execution, notification fanout,
+  and a concurrent retail-lot race. The race produced exactly one persisted
+  winning trade and left the offer completed with zero remaining quantity.
+- Cleaned the synthetic prefixes twice and verified zero remaining synthetic
+  users, offers, trades, notifications, Redis keys, and matching change-log rows.
+- Fixed a staging-only log-noise issue where cancelled Web Push background tasks
+  were logged as callback exceptions. The scheduler callbacks now ignore
+  `asyncio.CancelledError`, and focused tests cover both market-offer and
+  notification Web Push schedulers.
+- Re-deployed staging after the fix, confirmed staging health through
+  `scripts/deploy_staging.sh health`, and scanned recent app logs for
+  `Traceback`, `CancelledError`, `ERROR`, `CRITICAL`, callback exceptions, and
+  Web Push task failures. No matching runtime errors were found.
+- Verified focused backend/frontend gates:
+  `python3 -m unittest tests.test_trading_observability tests.test_metrics
+  tests.test_web_push tests.test_offers_router_create_success
+  tests.test_trading_production_contract_matrix
+  tests.test_trades_router_authoritative_success
+  tests.test_trades_router_authoritative_guards
+  tests.test_trades_router_execution_wrappers tests.test_trades_router_helpers
+  tests.test_trade_service_validation_and_payloads`,
+  `python3 -m py_compile core/web_push.py core/trading_observability.py
+  core/trade_forwarding.py api/routers/offers.py api/routers/trades.py`,
+  `npm run test:unit:run -- src/views/MarketView.test.ts
+  src/components/OffersList.test.ts`, and
+  `npm run test:e2e -- e2e/market-mutation-ux.spec.ts --project=chromium
+  --reporter=line`.
 
 ## Stage TG10 - Targeted Benchmark / Load Proof
 

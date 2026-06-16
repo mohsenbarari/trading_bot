@@ -1,6 +1,7 @@
 import unittest
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from core import web_push
 
@@ -103,6 +104,50 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
             result = await web_push.send_web_push_to_user(object(), 1, {"title": "x"})
 
         self.assertEqual(result, {"total": 0, "sent": 0, "failed": 0, "disabled": 0})
+
+    def test_market_offer_scheduler_ignores_cancelled_background_task(self):
+        class FakeTask:
+            callback = None
+
+            def add_done_callback(self, callback):
+                self.callback = callback
+
+        class FakeDoneTask:
+            def result(self):
+                raise asyncio.CancelledError()
+
+        task = FakeTask()
+        loop = SimpleNamespace(create_task=Mock(side_effect=lambda coro: (coro.close(), task)[1]))
+
+        with patch.object(web_push, "is_web_push_configured", return_value=True), patch.object(
+            web_push.asyncio, "get_running_loop", return_value=loop
+        ), patch.object(web_push.logger, "exception") as exception_mock:
+            web_push.schedule_market_offer_web_push(42)
+            task.callback(FakeDoneTask())
+
+        exception_mock.assert_not_called()
+
+    def test_notification_scheduler_ignores_cancelled_background_task(self):
+        class FakeTask:
+            callback = None
+
+            def add_done_callback(self, callback):
+                self.callback = callback
+
+        class FakeDoneTask:
+            def result(self):
+                raise asyncio.CancelledError()
+
+        task = FakeTask()
+        loop = SimpleNamespace(create_task=Mock(side_effect=lambda coro: (coro.close(), task)[1]))
+
+        with patch.object(web_push, "is_web_push_configured", return_value=True), patch.object(
+            web_push.asyncio, "get_running_loop", return_value=loop
+        ), patch.object(web_push.logger, "exception") as exception_mock:
+            web_push.schedule_notification_web_push(9)
+            task.callback(FakeDoneTask())
+
+        exception_mock.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -336,6 +336,8 @@ def schedule_market_offer_web_push(offer_id: int) -> None:
     def _log_task_error(done_task: asyncio.Task) -> None:
         try:
             done_task.result()
+        except asyncio.CancelledError:
+            return
         except Exception:
             logger.exception(
                 "Market offer Web Push background delivery task failed",
@@ -380,6 +382,8 @@ def schedule_notification_web_push(
     def _log_task_error(done_task: asyncio.Task) -> None:
         try:
             done_task.result()
+        except asyncio.CancelledError:
+            return
         except Exception:
             logger.exception(
                 "Web Push background delivery task failed",
