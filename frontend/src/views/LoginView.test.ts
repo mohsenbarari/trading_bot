@@ -623,7 +623,10 @@ describe('LoginView.vue', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/dev-login', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/dev-login', {
+      method: 'POST',
+      credentials: 'include',
+    })
     expect(localStorage.getItem('auth_token')).toBe('dev-access')
     expect(localStorage.getItem('refresh_token')).toBe('dev-refresh')
     expect(localStorage.getItem('suspended_refresh_token')).toBeNull()

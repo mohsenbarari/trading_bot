@@ -660,7 +660,10 @@ async function startDevLogin() {
   error.value = ''
   try {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
-    const res = await fetch(`${baseUrl}/api/auth/dev-login`, { method: 'POST' })
+    const res = await fetch(`${baseUrl}/api/auth/dev-login`, {
+      method: 'POST',
+      credentials: 'include',
+    })
     if (!res.ok) {
         const err = await res.json()
         throw new Error(err.detail || 'دسترسی مجاز نیست')
