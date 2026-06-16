@@ -81,6 +81,7 @@ describe('LoginView.vue', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     window.matchMedia = originalMatchMedia
     ;(window as any).deferredPrompt = originalDeferredPrompt ?? null
 
@@ -629,6 +630,25 @@ describe('LoginView.vue', () => {
     expect(setupExpiryTimerMock).toHaveBeenCalledTimes(1)
     expect(clearBackStackMock).toHaveBeenCalledTimes(1)
     expect(routerPushMock).toHaveBeenCalledWith('/')
+    wrapper.unmount()
+  })
+
+  it('shows developer quick-login on staging builds with public hostnames', async () => {
+    vi.stubEnv('VITE_STAGING_DEV_LOGIN', 'true')
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalWindowLocation,
+        hostname: 'staging.362514.ir',
+        href: 'http://staging.362514.ir/login',
+      },
+    })
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+
+    expect(wrapper.text()).toContain('ورود سریع ۱ ساله')
+
     wrapper.unmount()
   })
 

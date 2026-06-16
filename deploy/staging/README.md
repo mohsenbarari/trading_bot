@@ -20,7 +20,8 @@ The public staging site is protected with Basic Auth. Credentials are generated
 in `.env.staging` as `STAGING_BASIC_AUTH_USER` and
 `STAGING_BASIC_AUTH_PASSWORD`. The Nginx staging site also injects the staging
 `DEV_API_KEY` only for `/api/auth/dev-login`, so the frontend dev-login flow can
-be used for manual testing after Basic Auth succeeds.
+be used for manual testing after Basic Auth succeeds. The staging frontend build
+exposes this quick-login button when `STAGING_ENABLE_DEV_LOGIN=true`.
 
 Common commands:
 

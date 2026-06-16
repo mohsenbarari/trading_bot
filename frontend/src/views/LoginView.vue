@@ -645,11 +645,14 @@ async function installPWA() {
   showManualInstallGuide.value = true
 }
 
-const isDevMode = window.location.hostname === 'localhost' || 
-                    window.location.hostname === '127.0.0.1' || 
-                    window.location.hostname.startsWith('192.168.') || 
-                    window.location.hostname.startsWith('172.') || 
-                    window.location.hostname.startsWith('10.');
+const stagingDevLoginFlag = String(import.meta.env.VITE_STAGING_DEV_LOGIN ?? '').trim().toLowerCase()
+const isDevMode = stagingDevLoginFlag === 'true' ||
+                    stagingDevLoginFlag === '1' ||
+                    window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1' ||
+                    window.location.hostname.startsWith('192.168.') ||
+                    window.location.hostname.startsWith('172.') ||
+                    window.location.hostname.startsWith('10.')
 
 async function startDevLogin() {
   if (loading.value) return

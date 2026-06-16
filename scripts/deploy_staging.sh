@@ -12,6 +12,7 @@ STAGING_APP_PORT="${STAGING_APP_PORT:-8100}"
 STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
+STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_BASIC_AUTH_FILE="${STAGING_BASIC_AUTH_FILE:-/etc/nginx/.htpasswd-trading-bot-staging}"
 
 compose_cmd=(docker compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
@@ -80,6 +81,7 @@ OBSERVABILITY_API_KEY=$observability_key
 OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$hash_salt
 STAGING_BASIC_AUTH_USER=staging
 STAGING_BASIC_AUTH_PASSWORD=$(secret_hex 8)
+STAGING_ENABLE_DEV_LOGIN=true
 
 PEER_SERVER_URL=
 FOREIGN_SERVER_URL=
@@ -116,10 +118,17 @@ release_sha() {
 
 build_frontend() {
     require_cmd npm
+    local dev_login_enabled="${STAGING_ENABLE_DEV_LOGIN:-}"
+    if [[ -z "$dev_login_enabled" && -f "$ENV_FILE" ]]; then
+        dev_login_enabled="$(env_value STAGING_ENABLE_DEV_LOGIN || true)"
+    fi
+    dev_login_enabled="${dev_login_enabled:-true}"
     log "building frontend for $STAGING_FRONTEND_URL"
     (
         cd "$PROJECT_DIR/frontend"
-        VITE_API_BASE_URL="${STAGING_VITE_API_BASE_URL:-}" npm run build
+        VITE_API_BASE_URL="${STAGING_VITE_API_BASE_URL:-}" \
+        VITE_STAGING_DEV_LOGIN="$dev_login_enabled" \
+        npm run build
     )
 }
 
@@ -180,6 +189,25 @@ health() {
     printf '\n'
 }
 
+wait_for_app_health() {
+    local attempts="${STAGING_HEALTH_WAIT_ATTEMPTS:-30}"
+    local delay="${STAGING_HEALTH_WAIT_DELAY:-2}"
+    local cid status
+    log "waiting for staging app health"
+    cid="$(compose ps -q app)"
+    [[ -n "$cid" ]] || die "staging app container was not created"
+    for _ in $(seq 1 "$attempts"); do
+        status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+        if [[ "$status" == "healthy" || "$status" == "running" ]]; then
+            log "staging app is $status"
+            return
+        fi
+        sleep "$delay"
+    done
+    compose ps
+    die "staging app did not become healthy"
+}
+
 check() {
     require_cmd docker
     require_cmd curl
@@ -202,6 +230,7 @@ deploy() {
     else
         compose up -d --build
     fi
+    wait_for_app_health
     install_nginx
     compose ps
     health
