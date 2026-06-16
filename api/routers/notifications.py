@@ -1,21 +1,28 @@
 # trading_bot/api/routers/notifications.py
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
 from core.db import get_db
 from models.notification import Notification
+from models.push_subscription import PushSubscription
 from models.user import User
 from api.deps import get_current_user
 
 from core.redis import get_redis, Redis 
 from core.enums import NotificationLevel, NotificationCategory
+from core.web_push import (
+    build_push_payload,
+    hash_endpoint,
+    send_web_push_to_user,
+    web_push_config_status,
+)
 
 router = APIRouter(
     tags=["Notifications"],
@@ -33,6 +40,46 @@ class NotificationRead(BaseModel):
 
     class Config:
         from_attributes = True 
+
+
+class PushPublicKeyResponse(BaseModel):
+    enabled: bool
+    public_key: str | None = None
+    missing: list[str] = Field(default_factory=list)
+
+
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str = Field(min_length=1)
+    auth: str = Field(min_length=1)
+
+
+class PushSubscriptionUpsert(BaseModel):
+    endpoint: str = Field(min_length=1)
+    keys: PushSubscriptionKeys
+    platform: str | None = Field(default=None, max_length=80)
+    expirationTime: int | None = None
+
+
+class PushSubscriptionDelete(BaseModel):
+    endpoint: str = Field(min_length=1)
+
+
+class PushSubscriptionResponse(BaseModel):
+    id: int
+    enabled: bool
+    platform: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PushTestResponse(BaseModel):
+    total: int
+    sent: int
+    failed: int
+    disabled: int
 
 
 def _normalize_notification_pagination(limit: int | None, offset: int) -> tuple[int | None, int]:
@@ -62,6 +109,93 @@ async def get_unread_count(
     count_key = f"user:{current_user.id}:unread_count"
     count = await redis.get(count_key)
     return int(count or 0)
+
+
+@router.get("/push/public-key", response_model=PushPublicKeyResponse)
+async def get_push_public_key():
+    return web_push_config_status()
+
+
+@router.post("/push/subscription", response_model=PushSubscriptionResponse)
+async def upsert_push_subscription(
+    payload: PushSubscriptionUpsert,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    config_status = web_push_config_status()
+    if not config_status["enabled"]:
+        raise HTTPException(status_code=503, detail="Web Push is not configured")
+
+    endpoint = payload.endpoint.strip()
+    p256dh = payload.keys.p256dh.strip()
+    auth = payload.keys.auth.strip()
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(status_code=422, detail="Invalid push subscription")
+
+    endpoint_digest = hash_endpoint(endpoint)
+    result = await db.execute(
+        select(PushSubscription).where(PushSubscription.endpoint_hash == endpoint_digest)
+    )
+    subscription = result.scalar_one_or_none()
+    if subscription is None:
+        subscription = PushSubscription(endpoint_hash=endpoint_digest)
+        db.add(subscription)
+
+    subscription.user_id = current_user.id
+    subscription.endpoint = endpoint
+    subscription.p256dh = p256dh
+    subscription.auth = auth
+    subscription.platform = payload.platform.strip()[:80] if payload.platform else None
+    subscription.user_agent = request.headers.get("user-agent")
+    subscription.enabled = True
+    subscription.last_error = None
+
+    await db.commit()
+    await db.refresh(subscription)
+    return subscription
+
+
+@router.delete("/push/subscription", status_code=status.HTTP_204_NO_CONTENT)
+async def disable_push_subscription(
+    payload: PushSubscriptionDelete,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    endpoint = payload.endpoint.strip()
+    if not endpoint:
+        return None
+
+    result = await db.execute(
+        select(PushSubscription).where(
+            PushSubscription.endpoint_hash == hash_endpoint(endpoint),
+            PushSubscription.user_id == current_user.id,
+        )
+    )
+    subscription = result.scalar_one_or_none()
+    if subscription is not None and subscription.enabled:
+        subscription.enabled = False
+        await db.commit()
+    return None
+
+
+@router.post("/push/test", response_model=PushTestResponse)
+async def send_test_push_notification(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    config_status = web_push_config_status()
+    if not config_status["enabled"]:
+        raise HTTPException(status_code=503, detail="Web Push is not configured")
+
+    payload = build_push_payload(
+        title="اعلان تست",
+        body="تست دریافت اعلان دستگاه",
+        route="/notifications",
+        tag="push-test",
+        data={"kind": "push_test"},
+    )
+    return await send_web_push_to_user(db, current_user.id, payload)
 
 @router.get("/unread", response_model=List[NotificationRead])
 async def get_unread_notifications(

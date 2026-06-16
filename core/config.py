@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     dev_api_key: str | None = None
     invitation_expiry_days: int = 1
 
+    # Web Push Notifications
+    web_push_enabled: bool = True
+    web_push_vapid_public_key: str | None = None
+    web_push_vapid_private_key: str | None = None
+    web_push_vapid_subject: str | None = None
+    web_push_ttl_seconds: int = 3600
+    web_push_timeout_seconds: float = 5.0
+
     # SMS.ir Service
     smsir_api_key: str | None = None
     smsir_line_number: int | None = None

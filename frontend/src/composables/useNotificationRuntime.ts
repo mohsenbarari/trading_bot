@@ -9,13 +9,13 @@ import {
 } from '../types/notifications'
 import {
     BROWSER_NOTIFICATION_CLICK_EVENT,
-    requestNotificationPermission,
     showBrowserNotification,
 } from '../utils/browserNotifications'
 import { unlockAudioContext } from '../utils/audio'
 import { resolveRoomConversationKey } from '../utils/chatRoomRouting'
 import { currentUserSummary } from '../utils/currentUser'
 import { useConversationsStore } from '../stores/chat/conversations'
+import { promptAndEnableWebPushNotifications } from '../services/webPush'
 
 type WebSocketEventHandler<T = any> = (data: T) => void
 
@@ -86,6 +86,7 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     let skipNextReconnectCountsFetch = false
     let flushScheduled = false
     let isUnmounted = false
+    let hasAttemptedWebPushBootstrap = false
     const pendingAppMessages: AppRealtimeNotificationPayload[] = []
     const pendingChatMessages: ChatRealtimeNotificationPayload[] = []
 
@@ -271,8 +272,12 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     }
 
     const handleFirstInteraction = () => {
-        void requestNotificationPermission()
         unlockAudioContext()
+        const authToken = localStorage.getItem('auth_token')
+        if (authToken && !hasAttemptedWebPushBootstrap) {
+            hasAttemptedWebPushBootstrap = true
+            void promptAndEnableWebPushNotifications().catch(() => undefined)
+        }
         window.removeEventListener('click', handleFirstInteraction)
         window.removeEventListener('touchstart', handleFirstInteraction)
     }
@@ -294,6 +299,7 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
         if (!authToken) {
             hasBootstrappedAuthenticatedRuntime = false
             skipNextReconnectCountsFetch = false
+            hasAttemptedWebPushBootstrap = false
             return
         }
 
