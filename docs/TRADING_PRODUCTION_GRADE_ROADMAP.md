@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG7` complete on `candidate/trading-production-grade`; `TG8` is next.
+Status: `TG8` complete on `candidate/trading-production-grade`; `TG9` is next.
 
 Last updated: 2026-06-16
 
@@ -93,7 +93,7 @@ targets:
 | `TG5` | Complete | Harden offer lifecycle consistency: create, republish, expire, cancel, active-count cache, and channel side effects. |
 | `TG6` | Complete | Harden customer/accountant economic semantics, commission snapshots, history visibility, and notification audiences. |
 | `TG7` | Complete | Harden frontend market mutation UX: submit locks, idempotency keys, conflict handling, and visible recovery states. |
-| `TG8` | Pending | Add trading observability/audit signals and redacted structured logs. |
+| `TG8` | Complete | Add trading observability/audit signals and redacted structured logs. |
 | `TG9` | Pending | Run staging validation with isolated synthetic fixtures and no production sync. |
 | `TG10` | Pending | Run targeted benchmark/load proof only after TG1-TG9 pass; production run requires explicit user approval. |
 | `TG11` | Pending | Final production-readiness review, rollback notes, accepted-risk table, and promotion decision. |
@@ -436,6 +436,40 @@ Acceptance:
 
 - Focused logging tests or snapshot assertions prove redaction.
 - No raw exception/body text is added to hot-path logs.
+
+Safe trading observability fields:
+
+- Allowed identifiers: `offer_id`, `trade_id`, `trade_number`.
+- Allowed topology fields: normalized `source_server`, normalized
+  `target_server`.
+- Allowed outcome fields: `action`, `result`, `status_code`, `status_class`,
+  `error_class`, `reason`, `side_effect`, `chain_length`,
+  `has_idempotency_key`, and `delegated_actor`.
+- HTTP response payloads from side-effect services may only be represented as
+  `response_body_size` and `response_body_sha256`; raw response bodies must not
+  be logged.
+- Raw mobile numbers, OTPs, JWTs, signatures, request bodies, idempotency key
+  values, Telegram notification text, and full external response bodies are not
+  safe fields.
+
+Completion notes:
+
+- Added `core/trading_observability.py` as the single policy/helper surface for
+  trading logs and low-cardinality trading counters.
+- Added `trading_bot_trading_events_total` and
+  `trading_bot_trading_side_effects_total` counters using bounded labels only;
+  no new metrics backend/exporter was added.
+- Instrumented offer create success, offer idempotent replay, offer
+  idempotency insert-race replay, remote trade forwarding attempts/results,
+  authoritative trade attempts, accepted trades, and trade idempotent replays.
+- Replaced raw Telegram/channel/Web Push/realtime side-effect failure logs in
+  the trading money path with structured records carrying only safe IDs,
+  status class/code, error class, and response hash/size where needed.
+- Realtime publish failures after committed trades are now logged as side
+  effect failures instead of turning an already accepted trade into an API
+  failure.
+- Added focused tests in `tests/test_trading_observability.py` to prove safe
+  field filtering, response-body summarization, and metric label hygiene.
 
 ## Stage TG9 - Staging Validation
 

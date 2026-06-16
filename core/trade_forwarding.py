@@ -12,6 +12,7 @@ import httpx
 
 from core.config import settings
 from core.server_routing import current_server, normalize_server, peer_server_url_for
+from core.trading_observability import log_trading_event, summarize_response_body
 
 
 logger = logging.getLogger(__name__)
@@ -57,12 +58,7 @@ def _safe_forward_log_context(target_server: str, payload: dict[str, Any]) -> di
 
 
 def _body_summary(text: str) -> dict[str, Any]:
-    if not text:
-        return {"response_body_size": 0, "response_body_sha256": None}
-    return {
-        "response_body_size": len(text),
-        "response_body_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
-    }
+    return summarize_response_body(text)
 
 
 async def forward_trade_to_home_server(target_server: str, payload: dict[str, Any]) -> Tuple[int, Any]:
@@ -70,7 +66,14 @@ async def forward_trade_to_home_server(target_server: str, payload: dict[str, An
     source_server = current_server()
     log_context = _safe_forward_log_context(target_server, payload)
     if not target_url:
-        logger.warning("trade_forward.peer_unavailable", extra=log_context)
+        log_trading_event(
+            logger,
+            "trade_forward.peer_unavailable",
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            **log_context,
+        )
         return 503, {"detail": "سرور مرجع معامله در دسترس نیست."}
 
     body = _json_body(payload)
@@ -94,27 +97,60 @@ async def forward_trade_to_home_server(target_server: str, payload: dict[str, An
                 headers=headers,
             )
     except httpx.TimeoutException:
-        logger.warning("trade_forward.timeout", extra=log_context)
+        log_trading_event(
+            logger,
+            "trade_forward.timeout",
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            error_class="TimeoutException",
+            **log_context,
+        )
         return 504, {"detail": "مهلت ارتباط با سرور مرجع معامله تمام شد. لطفاً دوباره تلاش کنید."}
     except httpx.RequestError as exc:
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_forward.request_error",
-            extra={**log_context, "error_class": type(exc).__name__},
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            error_class=type(exc).__name__,
+            **log_context,
         )
         return 503, {"detail": "ارتباط با سرور مرجع معامله برقرار نشد. لطفاً دوباره تلاش کنید."}
 
     try:
         body = response.json()
     except ValueError:
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_forward.invalid_json_response",
-            extra={**log_context, "status_code": response.status_code, **_body_summary(response.text)},
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            status_code=response.status_code,
+            **log_context,
+            **_body_summary(response.text),
         )
         return response.status_code, {"detail": "پاسخ نامعتبر از سرور مرجع معامله"}
 
     if response.status_code >= 500:
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_forward.remote_server_error",
-            extra={**log_context, "status_code": response.status_code},
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            status_code=response.status_code,
+            **log_context,
+        )
+    else:
+        log_trading_event(
+            logger,
+            "trade_forward.response",
+            action="trade_forward",
+            result="success" if response.status_code < 400 else "denied",
+            status_code=response.status_code,
+            **log_context,
         )
     return response.status_code, body

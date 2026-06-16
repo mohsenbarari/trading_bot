@@ -54,6 +54,7 @@ from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
+from core.trading_observability import log_trading_event
 
 
 logger = logging.getLogger(__name__)
@@ -1059,7 +1060,21 @@ async def _publish_trade_created_realtime(
             recipient_specific=True,
         )
         for audience_user_id in audience_user_ids:
-            await publish_user_event(audience_user_id, "trade:created", recipient_payload)
+            try:
+                await publish_user_event(audience_user_id, "trade:created", recipient_payload)
+            except Exception as exc:
+                log_trading_event(
+                    logger,
+                    "trade_realtime_publish_failed",
+                    level="warning",
+                    action="trading_side_effect",
+                    result="failure",
+                    side_effect="realtime_publish",
+                    offer_id=common_payload.get("offer_id"),
+                    trade_id=common_payload.get("trade_id"),
+                    trade_number=common_payload.get("trade_number"),
+                    error_class=type(exc).__name__,
+                )
 
     generic_audience = sorted(
         {
@@ -1072,13 +1087,27 @@ async def _publish_trade_created_realtime(
             if normalized_user_id is not None
         }
     )
-    await publish_event(
-        "trade:created",
-        _build_trade_created_event_payload(
-            **common_payload,
-            audience_user_ids=generic_audience,
-        ),
-    )
+    try:
+        await publish_event(
+            "trade:created",
+            _build_trade_created_event_payload(
+                **common_payload,
+                audience_user_ids=generic_audience,
+            ),
+        )
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_realtime_publish_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="realtime_publish",
+            offer_id=common_payload.get("offer_id"),
+            trade_id=common_payload.get("trade_id"),
+            trade_number=common_payload.get("trade_number"),
+            error_class=type(exc).__name__,
+        )
 
 
 def _build_trade_profile_route_from_payload(
@@ -1424,8 +1453,16 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
             return response.status_code == 200
-    except Exception as e:
-        logger.error(f"Error sending telegram message: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_telegram_message_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1473,8 +1510,17 @@ async def update_channel_buttons(offer: Offer) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
             return response.status_code == 200
-    except Exception as e:
-        logger.error(f"Error updating channel buttons: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=getattr(offer, "id", None),
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1494,8 +1540,16 @@ def send_telegram_message_sync(chat_id: int, text: str) -> bool:
         # استفاده از httpx sync client به جای asyncio.run
         response = httpx.post(url, json=payload, timeout=10)
         return response.status_code == 200
-    except Exception as e:
-        logger.error(f"[Background] Error sending telegram message: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_telegram_message_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1521,8 +1575,17 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
             )
         finally:
             loop.close()
-    except Exception as e:
-        logger.error(f"[Background] Error updating channel buttons: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=offer_id,
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1629,26 +1692,42 @@ async def _forward_trade_if_remote_home(
     }
     if getattr(actor_user, "id", None) != owner_user.id:
         payload["actor_user_id"] = actor_user.id
-    logger.info(
+    log_trading_event(
+        logger,
         "trade_forward.remote_home",
-        extra={
-            "source_server": payload["source_server"],
-            "target_server": normalize_server(offer.home_server),
-            "offer_id": trade_data.offer_id,
-            "has_idempotency_key": bool(trade_data.idempotency_key),
-            "delegated_actor": getattr(actor_user, "id", None) != owner_user.id,
-        },
+        action="trade_forward",
+        result="attempt",
+        source_server=payload["source_server"],
+        target_server=normalize_server(offer.home_server),
+        offer_id=trade_data.offer_id,
+        has_idempotency_key=bool(trade_data.idempotency_key),
+        delegated_actor=getattr(actor_user, "id", None) != owner_user.id,
     )
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
     if status_code >= 400:
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_forward.remote_home_failed",
-            extra={
-                "source_server": payload["source_server"],
-                "target_server": normalize_server(offer.home_server),
-                "offer_id": trade_data.offer_id,
-                "status_code": status_code,
-            },
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            source_server=payload["source_server"],
+            target_server=normalize_server(offer.home_server),
+            offer_id=trade_data.offer_id,
+            status_code=status_code,
+            has_idempotency_key=bool(trade_data.idempotency_key),
+        )
+    else:
+        log_trading_event(
+            logger,
+            "trade_forward.remote_home_completed",
+            action="trade_forward",
+            result="success",
+            source_server=payload["source_server"],
+            target_server=normalize_server(offer.home_server),
+            offer_id=trade_data.offer_id,
+            status_code=status_code,
+            has_idempotency_key=bool(trade_data.idempotency_key),
         )
     return JSONResponse(status_code=status_code, content=body)
 
@@ -1667,6 +1746,16 @@ async def _execute_trade_authoritatively(
     owner_user = context.owner_user
     actor_user = context.actor_user
     _ensure_accountant_market_access_allowed(context)
+    log_trading_event(
+        logger,
+        "trade_execute.attempt",
+        action="trade_execute",
+        result="attempt",
+        offer_id=trade_data.offer_id,
+        source_server=current_server(),
+        has_idempotency_key=bool(trade_data.idempotency_key),
+        delegated_actor=getattr(actor_user, "id", None) != getattr(owner_user, "id", None),
+    )
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -1885,6 +1974,18 @@ async def _execute_trade_authoritatively(
                 db,
                 [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
             )
+            log_trading_event(
+                logger,
+                "trade_idempotent_replay",
+                action="trade_idempotent_replay",
+                result="replay",
+                offer_id=trade_data.offer_id,
+                trade_id=getattr(existing_trade_obj, "id", None),
+                trade_number=getattr(existing_trade_obj, "trade_number", None),
+                source_server=current_server(),
+                has_idempotency_key=True,
+                chain_length=len(trade_execution_nodes) - 1,
+            )
             return trade_to_response(
                 existing_trade_obj,
                 identity_map=existing_identity_map,
@@ -2025,12 +2126,36 @@ async def _execute_trade_authoritatively(
     # آپدیت دکمه‌های کانال (مستقیم - نه در background)
     try:
         await update_channel_buttons(offer)
-    except Exception as e:
-        logger.error(f"Failed to update channel buttons: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=getattr(offer, "id", None),
+            trade_id=getattr(response_trade_record, "id", None),
+            trade_number=response_trade_number,
+            error_class=type(exc).__name__,
+        )
     
     # ارسال نوتیفیکیشن‌ها
     trade_timestamp = getattr(response_trade, "created_at", None) or getattr(created_trade, "created_at", None) or datetime.now(timezone.utc)
     trade_datetime = to_jalali_str(trade_timestamp, "%Y/%m/%d   %H:%M") or ""
+    log_trading_event(
+        logger,
+        "trade_execute.accepted",
+        action="trade_execute",
+        result="success",
+        offer_id=getattr(offer, "id", None),
+        trade_id=getattr(response_trade, "id", None) or getattr(response_trade_record, "id", None),
+        trade_number=response_trade_number,
+        source_server=current_server(),
+        has_idempotency_key=bool(trade_data.idempotency_key),
+        delegated_actor=getattr(actor_user, "id", None) != getattr(owner_user, "id", None),
+        chain_length=len(trade_execution_nodes) - 1,
+    )
     
     # تعیین نوع و ایموجی
     if responder_trade_type == TradeType.BUY:
@@ -2189,8 +2314,19 @@ async def _execute_trade_authoritatively(
                         trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     ),
                 )
-            except:
-                pass
+            except Exception as exc:
+                log_trading_event(
+                    logger,
+                    "trade_notification_create_failed",
+                    level="warning",
+                    action="trading_side_effect",
+                    result="failure",
+                    side_effect="notification",
+                    offer_id=getattr(offer, "id", None),
+                    trade_id=getattr(leg_trade_obj, "id", None),
+                    trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                    error_class=type(exc).__name__,
+                )
     else:
         responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner = _build_trade_message_bundle(
             responder_trade_emoji=respond_emoji,
@@ -2260,8 +2396,19 @@ async def _execute_trade_authoritatively(
                 ).get("trade_path_summary"),
                 extra_payload=offer_owner_notification_payload,
             )
-        except:
-            pass
+        except Exception as exc:
+            log_trading_event(
+                logger,
+                "trade_notification_create_failed",
+                level="warning",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="notification",
+                offer_id=getattr(offer, "id", None),
+                trade_id=getattr(response_trade_record, "id", None),
+                trade_number=response_trade_number,
+                error_class=type(exc).__name__,
+            )
     
     # افزایش شمارنده معامله
     # فقط پاسخ‌دهنده (کسی که روی لفظ دیگران معامله می‌کند) شمارنده‌اش افزایش می‌یابد
@@ -2317,12 +2464,26 @@ async def _execute_trade_authoritatively(
         )
 
     from .realtime import publish_event
-    await publish_event("offer:updated", {
-        "id": offer.id,
-        "remaining_quantity": offer.remaining_quantity,
-        "lot_sizes": offer.lot_sizes,
-        "status": offer.status.value
-    })
+    try:
+        await publish_event("offer:updated", {
+            "id": offer.id,
+            "remaining_quantity": offer.remaining_quantity,
+            "lot_sizes": offer.lot_sizes,
+            "status": offer.status.value
+        })
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "offer_update_realtime_publish_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="realtime_publish",
+            offer_id=getattr(offer, "id", None),
+            trade_id=getattr(response_trade, "id", None) or getattr(response_trade_record, "id", None),
+            trade_number=response_trade_number,
+            error_class=type(exc).__name__,
+        )
     
     return trade_to_response(
         response_trade,
@@ -2373,15 +2534,17 @@ async def execute_trade_internal(
         raw_request.headers.get("x-signature"),
         raw_request.headers.get("x-api-key"),
     ):
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_internal_execute.rejected",
-            extra={
-                "reason": "bad_signature",
-                "source_server": payload_source_server or header_source_server,
-                "target_server": target_server,
-                "offer_id": internal_data.offer_id,
-                "status_code": status.HTTP_401_UNAUTHORIZED,
-            },
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="bad_signature",
+            source_server=payload_source_server or header_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_401_UNAUTHORIZED,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade signature")
 
@@ -2391,43 +2554,49 @@ async def execute_trade_internal(
         or payload_source_server != header_source_server
         or payload_source_server == target_server
     ):
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_internal_execute.rejected",
-            extra={
-                "reason": "invalid_source_server",
-                "source_server": payload_source_server or header_source_server,
-                "target_server": target_server,
-                "offer_id": internal_data.offer_id,
-                "status_code": status.HTTP_401_UNAUTHORIZED,
-            },
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="invalid_source_server",
+            source_server=payload_source_server or header_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_401_UNAUTHORIZED,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade source")
 
     offer = await db.get(Offer, internal_data.offer_id)
     if offer and normalize_server(offer.home_server) != target_server:
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_internal_execute.rejected",
-            extra={
-                "reason": "wrong_authoritative_server",
-                "source_server": payload_source_server,
-                "target_server": target_server,
-                "offer_id": internal_data.offer_id,
-                "status_code": status.HTTP_409_CONFLICT,
-            },
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="wrong_authoritative_server",
+            source_server=payload_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_409_CONFLICT,
         )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع آفر نیست.")
 
     responder = await db.get(User, internal_data.responder_user_id)
     if not responder or responder.is_deleted:
-        logger.warning(
+        log_trading_event(
+            logger,
             "trade_internal_execute.rejected",
-            extra={
-                "reason": "missing_responder",
-                "source_server": payload_source_server,
-                "target_server": target_server,
-                "offer_id": internal_data.offer_id,
-                "status_code": status.HTTP_404_NOT_FOUND,
-            },
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="missing_responder",
+            source_server=payload_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_404_NOT_FOUND,
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر درخواست‌دهنده یافت نشد")
 
@@ -2435,15 +2604,17 @@ async def execute_trade_internal(
     if internal_data.actor_user_id and internal_data.actor_user_id != responder.id:
         actor_user = await db.get(User, internal_data.actor_user_id)
         if not actor_user or actor_user.is_deleted:
-            logger.warning(
+            log_trading_event(
+                logger,
                 "trade_internal_execute.rejected",
-                extra={
-                    "reason": "missing_actor",
-                    "source_server": payload_source_server,
-                    "target_server": target_server,
-                    "offer_id": internal_data.offer_id,
-                    "status_code": status.HTTP_404_NOT_FOUND,
-                },
+                level="warning",
+                action="trade_internal_execute",
+                result="denied",
+                reason="missing_actor",
+                source_server=payload_source_server,
+                target_server=target_server,
+                offer_id=internal_data.offer_id,
+                status_code=status.HTTP_404_NOT_FOUND,
             )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر اجراکننده یافت نشد")
 

@@ -31,6 +31,7 @@ from core.services.customer_relation_service import (
     load_offer_customer_read_context,
 )
 from core.services.user_account_status_service import is_user_market_blocked
+from core.trading_observability import log_trading_event, summarize_response_body
 from models.user import User
 from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
@@ -205,8 +206,11 @@ def offer_to_response(
             expiry_seconds = ts.offer_expiry_minutes * 60
             expires_at_ts = int(created_ts + expiry_seconds)
             logger.debug("offer_expiry_result id=%s expires_at_ts=%s", offer.id, expires_at_ts)
-        except Exception as e:
-            logger.error(f"Error calculating expiry for offer {offer.id}: {e}")
+        except Exception as exc:
+            logger.error(
+                "offer_expiry_projection_failed",
+                extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
+            )
 
     return OfferResponse(
         id=offer.id,
@@ -282,9 +286,15 @@ async def _cached_active_offer_count(user_id: int) -> Optional[int]:
 
         return await get_active_offer_count(user_id)
     except Exception as exc:
-        logger.warning(
+        log_trading_event(
+            logger,
             "offer_active_count_cache_read_failed",
-            extra={"user_id": user_id, "error_class": type(exc).__name__},
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="active_offer_count_cache",
+            reason="create_offer_guard_repair",
+            error_class=type(exc).__name__,
         )
         return None
 
@@ -295,9 +305,15 @@ async def _set_active_offer_count_safely(user_id: int, count: int, *, reason: st
 
         await set_active_offer_count(user_id, max(0, int(count)))
     except Exception as exc:
-        logger.warning(
+        log_trading_event(
+            logger,
             "offer_active_count_cache_write_failed",
-            extra={"user_id": user_id, "active_offer_count": max(0, int(count)), "reason": reason, "error_class": type(exc).__name__},
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="active_offer_count_cache",
+            reason=reason,
+            error_class=type(exc).__name__,
         )
 
 
@@ -307,14 +323,16 @@ async def _publish_offer_event_safely(event_type: str, payload: dict, *, reason:
 
         await publish_event(event_type, payload)
     except Exception as exc:
-        logger.warning(
+        log_trading_event(
+            logger,
             "offer_lifecycle_realtime_publish_failed",
-            extra={
-                "event_type": event_type,
-                "offer_id": payload.get("id"),
-                "reason": reason,
-                "error_class": type(exc).__name__,
-            },
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="realtime_publish",
+            offer_id=payload.get("id"),
+            reason=reason,
+            error_class=type(exc).__name__,
         )
 
 
@@ -334,14 +352,16 @@ async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, tim
         async with httpx.AsyncClient() as client:
             await client.post(url, json=payload, timeout=timeout)
     except Exception as exc:
-        logger.warning(
+        log_trading_event(
+            logger,
             "offer_channel_buttons_remove_failed",
-            extra={
-                "offer_id": getattr(offer, "id", None),
-                "channel_message_id": channel_message_id,
-                "reason": reason,
-                "error_class": type(exc).__name__,
-            },
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="offer_channel_buttons_remove",
+            offer_id=getattr(offer, "id", None),
+            reason=reason,
+            error_class=type(exc).__name__,
         )
 
 
@@ -390,19 +410,35 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
         "reply_markup": reply_markup
     }
     
-    logger.info(f"DEBUG CHANNEL: Sending offer {offer.id} to channel {channel_id}")
-    
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
-            logger.info(f"DEBUG CHANNEL: Response status={response.status_code}, body={response.text[:500]}")
             if response.status_code == 200:
                 result = response.json()
                 return result.get("result", {}).get("message_id")
             else:
-                logger.error(f"Channel send failed: {response.status_code} - {response.text}")
-    except Exception as e:
-        logger.error(f"Error sending to channel: {e}")
+                log_trading_event(
+                    logger,
+                    "offer_channel_send_failed",
+                    level="warning",
+                    action="trading_side_effect",
+                    result="failure",
+                    side_effect="telegram_message",
+                    offer_id=getattr(offer, "id", None),
+                    status_code=response.status_code,
+                    **summarize_response_body(response.text),
+                )
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "offer_channel_send_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            offer_id=getattr(offer, "id", None),
+            error_class=type(exc).__name__,
+        )
     
     return None
 
@@ -438,6 +474,14 @@ async def create_offer(
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
+        log_trading_event(
+            logger,
+            "offer_idempotent_replay",
+            action="offer_idempotent_replay",
+            result="replay",
+            offer_id=getattr(existing_offer, "id", None),
+            has_idempotency_key=bool(idempotency_key),
+        )
         return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
     
     # بررسی نقش
@@ -621,6 +665,15 @@ async def create_offer(
         from core.trading_settings import get_trading_settings_async
 
         ts = await get_trading_settings_async()
+        log_trading_event(
+            logger,
+            "offer_idempotent_replay_after_integrity_conflict",
+            action="offer_idempotent_replay",
+            result="replay",
+            offer_id=getattr(existing_offer, "id", None),
+            has_idempotency_key=bool(idempotency_key),
+            reason="idempotency_integrity_conflict",
+        )
         return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
     await db.refresh(new_offer)
     
@@ -645,6 +698,16 @@ async def create_offer(
     if message_id:
         new_offer.channel_message_id = message_id
         await db.commit()
+
+    log_trading_event(
+        logger,
+        "offer_create.accepted",
+        action="offer_create",
+        result="success",
+        offer_id=getattr(new_offer, "id", None),
+        source_server=getattr(new_offer, "home_server", None) or current_server(),
+        has_idempotency_key=bool(idempotency_key),
+    )
     
     expected_active_count = active_count if republishing_active_offer else active_count + 1
     await _set_active_offer_count_safely(owner_user.id, expected_active_count, reason="create_offer_final")
@@ -694,8 +757,17 @@ async def create_offer(
         from core.web_push import schedule_market_offer_web_push
 
         schedule_market_offer_web_push(new_offer.id)
-    except Exception as e:
-        logger.warning(f"Market offer Web Push schedule error: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "market_offer_web_push_schedule_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="web_push_schedule",
+            offer_id=getattr(new_offer, "id", None),
+            error_class=type(exc).__name__,
+        )
     
     return offer_to_response(new_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
 
