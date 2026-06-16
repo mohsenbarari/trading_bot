@@ -112,7 +112,16 @@ async def timed_ms(fn: Callable[[], Awaitable[Any]]) -> tuple[Any, float]:
     return result, round((time.perf_counter() - started) * 1000.0, 3)
 
 
-def assert_race_acceptance(*, winner_count: int, trade_count: int, remaining_quantity: int | None, status: str | None) -> None:
+def assert_race_acceptance(
+    *,
+    winner_count: int,
+    trade_count: int,
+    remaining_quantity: int | None,
+    status: str | None,
+    error_count: int = 0,
+) -> None:
+    if error_count:
+        raise TradingProbeError(f"race expected zero errored attempts, got {error_count}")
     if winner_count != 1:
         raise TradingProbeError(f"race expected exactly one winner, got {winner_count}")
     if trade_count != 1:
@@ -612,6 +621,7 @@ async def run_race_probe(
 
     attempts = await asyncio.gather(*[_attempt(index) for index in range(concurrency)])
     winner_count = sum(1 for item in attempts if item["status"] == "success")
+    error_count = sum(1 for item in attempts if item["status"] == "error")
     async with AsyncSessionLocal() as db:
         trade_count = int(await db.scalar(select(func.count(Trade.id)).where(Trade.offer_id == offer_id)) or 0)
         offer = await db.get(Offer, offer_id)
@@ -623,6 +633,7 @@ async def run_race_probe(
         trade_count=trade_count,
         remaining_quantity=remaining_quantity,
         status=status_value,
+        error_count=error_count,
     )
     return {
         "offer_id": offer_id,

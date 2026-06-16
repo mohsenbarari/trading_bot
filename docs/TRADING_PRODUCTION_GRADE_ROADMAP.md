@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG9` complete on `candidate/trading-production-grade`; `TG10` is next.
+Status: `TG10` complete on `candidate/trading-production-grade`; `TG11` is next.
 
 Last updated: 2026-06-16
 
@@ -95,7 +95,7 @@ targets:
 | `TG7` | Complete | Harden frontend market mutation UX: submit locks, idempotency keys, conflict handling, and visible recovery states. |
 | `TG8` | Complete | Add trading observability/audit signals and redacted structured logs. |
 | `TG9` | Complete | Run staging validation with isolated synthetic fixtures and no production sync. |
-| `TG10` | Pending | Run targeted benchmark/load proof only after TG1-TG9 pass; production run requires explicit user approval. |
+| `TG10` | Complete | Run targeted benchmark/load proof only after TG1-TG9 pass; production run requires explicit user approval. |
 | `TG11` | Pending | Final production-readiness review, rollback notes, accepted-risk table, and promotion decision. |
 
 ## Stage TG0 - Audit And Roadmap
@@ -553,6 +553,44 @@ Acceptance:
 
 - Trading targeted benchmark passes or the regression is classified with a
   rollback recommendation.
+
+Completed on 2026-06-16:
+
+- Ran TG10 only against the isolated staging stack. No production benchmark,
+  production deploy, production sync, or production data mutation was run.
+- Confirmed staging health before and after the benchmark through
+  `scripts/deploy_staging.sh health`.
+- Tightened the benchmark race gate in `scripts/trading_core_probe_worker.py`:
+  race attempts with unexpected errors such as `TimeoutError` now fail the
+  probe instead of being hidden behind a final `status=ok` payload. Focused unit
+  coverage in `tests/test_trading_core_probe_worker.py` proves the stricter
+  acceptance contract.
+- First oversized profiles intentionally exposed domain and capacity limits:
+  `create-iterations=18` violated the active-offer cap of 4, `expire-iterations=3`
+  violated the expire rate-limit of 2 per minute, and `race-concurrency=12`
+  produced DB pool pressure with `TimeoutError`/long-tail race attempts on the
+  staging pool. These are classified as invalid/over-capacity staging profiles,
+  not accepted TG10 pass evidence.
+- Final accepted staging profile:
+  `parse=200`, `bot=12`, `create=4`, `list=60`, `expire=2`, `trade=20`,
+  `notification=20`, `race-concurrency=6`.
+- Final accepted result:
+  parser p95 `2.811ms`, bot handler p95 `168.844ms`, offer create p95
+  `456.273ms`, offer list p95 `28.977ms`, offer expire p95 `29.522ms`,
+  trade execute p95 `244.512ms`, notification fanout p95 `62.543ms`, and race
+  p95 `487.631ms`.
+- The accepted race had exactly one successful trade, five clean 400 rejections,
+  zero unexpected errors, one persisted trade, zero remaining quantity, and
+  completed offer status.
+- Cleaned the accepted synthetic prefix twice. Verification reported zero
+  remaining synthetic users, offers, trades, notifications, Redis keys, and
+  matching change-log rows.
+- Recent staging app logs after the accepted run were scanned for `Traceback`,
+  `CancelledError`, `ERROR`, `CRITICAL`, callback exceptions, `QueuePool limit`,
+  `TimeoutError`, and Web Push background failures; no matches were found.
+- Log artifact for the run was kept locally at
+  `tmp/tg10-staging-targeted-benchmark.log` and is intentionally not part of the
+  committed source tree.
 
 ## Stage TG11 - Promotion Review
 

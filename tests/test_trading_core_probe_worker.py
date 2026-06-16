@@ -23,6 +23,7 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
             trade_count=1,
             remaining_quantity=0,
             status="completed",
+            error_count=0,
         )
 
         with self.assertRaises(TradingProbeError):
@@ -31,6 +32,16 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
                 trade_count=2,
                 remaining_quantity=0,
                 status="completed",
+            )
+
+    def test_race_acceptance_rejects_timeout_or_unexpected_errors(self) -> None:
+        with self.assertRaises(TradingProbeError):
+            assert_race_acceptance(
+                winner_count=1,
+                trade_count=1,
+                remaining_quantity=0,
+                status="completed",
+                error_count=1,
             )
 
 
