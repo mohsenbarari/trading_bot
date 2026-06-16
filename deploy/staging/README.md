@@ -12,6 +12,8 @@ Defaults:
 - Env file: `.env.staging`
 - Nginx site: `/etc/nginx/sites-available/trading-bot-staging`
 - Basic Auth file: `/etc/nginx/.htpasswd-trading-bot-staging`
+- Frontend dist: `mini_app_dist_staging` by default, separate from production
+  `mini_app_dist`
 
 Staging is intentionally isolated from production sync. The default compose file
 does not start `sync_worker`, and `.env.staging` leaves peer URLs empty.
@@ -22,6 +24,12 @@ in `.env.staging` as `STAGING_BASIC_AUTH_USER` and
 `DEV_API_KEY` only for `/api/auth/dev-login`, so the frontend dev-login flow can
 be used for manual testing after Basic Auth succeeds. The staging frontend build
 exposes this quick-login button when `STAGING_ENABLE_DEV_LOGIN=true`.
+
+Staging frontend builds must never write to the production `mini_app_dist`
+directory. `scripts/deploy_staging.sh` passes `FRONTEND_BUILD_OUT_DIR` to Vite,
+serves `mini_app_dist_staging` from the staging Nginx site, and passes the same
+directory into the staging Docker build. Override `STAGING_FRONTEND_DIST_DIR`
+only with a project-local path that is not `mini_app_dist`.
 
 Common commands:
 

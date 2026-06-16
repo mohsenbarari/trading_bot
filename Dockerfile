@@ -13,6 +13,7 @@ RUN if find /tmp/pip_packages -maxdepth 1 -type f -name '*.whl' | grep -q .; the
             pip install --no-cache-dir -r requirements.txt; \
         fi \
         && rm -rf /tmp/pip_packages/
+ARG FRONTEND_DIST_DIR=mini_app_dist
 COPY api/ ./api/
 COPY bot/ ./bot/
 COPY core/ ./core/
@@ -29,4 +30,4 @@ COPY schemas.py .
 COPY seed_fake_data.py .
 COPY scripts/ ./scripts/
 
-COPY mini_app_dist/ /app/mini_app_dist/
+COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/

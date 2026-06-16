@@ -9,6 +9,9 @@ production-grade change that must be proven before production promotion.
   `make up`, `make iran`, `make foreign`, or any production deploy command
   unless the user explicitly asks for production deployment in the same turn.
 - Use only `scripts/deploy_staging.sh` for staging lifecycle work.
+- Staging frontend builds must use an isolated artifact directory, defaulting to
+  `mini_app_dist_staging`, and must never write to or serve production
+  `mini_app_dist`.
 - Never point staging at production data, production Redis, production Docker
   volumes, or production sync peers.
 - Never enable cross-server sync in staging unless a dedicated non-production
@@ -39,6 +42,7 @@ production-grade change that must be proven before production promotion.
 | Compose file | `deploy/staging/docker-compose.staging.yml` |
 | Runtime env | `.env.staging` |
 | API loopback port | `127.0.0.1:8100` by default |
+| Frontend dist | `mini_app_dist_staging`; never production `mini_app_dist` |
 | Nginx template | `deploy/staging/nginx-staging.conf.template` |
 | Deploy script | `scripts/deploy_staging.sh` |
 | Default services | `app`, `migration`, `db`, `redis` |
@@ -46,7 +50,7 @@ production-grade change that must be proven before production promotion.
 
 Staging must remain isolated through a separate Docker Compose project, separate
 PostgreSQL and Redis volumes, separate uploads/audit volumes, separate Nginx
-site, and separate env file.
+site, separate env file, and separate frontend build artifact.
 
 ## Safe Commands
 
@@ -125,5 +129,6 @@ For production-grade application changes:
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-06-16 | Codex | Added the staging frontend artifact guardrail: staging builds into `mini_app_dist_staging`, staging Nginx serves that isolated directory, the staging Docker build copies that same artifact, and regression coverage rejects sharing production `mini_app_dist`. |
 | 2026-06-16 | Codex | Updated the `candidate/trading-production-grade` registry entry to include market notification work after Web Push and market-offer push changes moved onto that production-candidate branch for staging validation. |
 | 2026-06-16 | Codex | Added the staging guardrail document to `candidate/trading-production-grade` so the production-grade trading roadmap can proceed from a compliant candidate branch instead of a staging-only branch. |

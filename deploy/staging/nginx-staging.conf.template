@@ -10,7 +10,7 @@ server {
     __SSL_DIRECTIVES__
 
     client_max_body_size 50M;
-    root __APP_ROOT__/mini_app_dist;
+    root __FRONTEND_ROOT__;
     index index.html;
 
     add_header X-Frame-Options "SAMEORIGIN" always;

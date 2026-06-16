@@ -5,6 +5,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/deploy/staging/docker-compose.staging.yml"
 NGINX_TEMPLATE="$PROJECT_DIR/deploy/staging/nginx-staging.conf.template"
 ENV_FILE="$PROJECT_DIR/.env.staging"
+PRODUCTION_FRONTEND_DIST_DIR="$(realpath -m "$PROJECT_DIR/mini_app_dist")"
 
 STAGING_DOMAIN="${STAGING_DOMAIN:-staging.362514.ir}"
 STAGING_ENABLE_SSL="${STAGING_ENABLE_SSL:-auto}"
@@ -49,6 +50,12 @@ STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
 STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_BASIC_AUTH_FILE="${STAGING_BASIC_AUTH_FILE:-/etc/nginx/.htpasswd-trading-bot-staging}"
+STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"
+case "$STAGING_FRONTEND_DIST_DIR" in
+    /*) ;;
+    *) STAGING_FRONTEND_DIST_DIR="$PROJECT_DIR/$STAGING_FRONTEND_DIST_DIR" ;;
+esac
+STAGING_FRONTEND_DIST_DIR="$(realpath -m "$STAGING_FRONTEND_DIST_DIR")"
 
 compose_cmd=(docker compose -p "$STAGING_PROJECT_NAME" --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
@@ -63,6 +70,23 @@ die() {
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+staging_frontend_dist_relpath() {
+    case "$STAGING_FRONTEND_DIST_DIR" in
+        "$PROJECT_DIR"/*)
+            printf '%s\n' "${STAGING_FRONTEND_DIST_DIR#"$PROJECT_DIR"/}"
+            ;;
+        *)
+            die "STAGING_FRONTEND_DIST_DIR must stay inside $PROJECT_DIR so the staging Docker build can copy it"
+            ;;
+    esac
+}
+
+assert_staging_frontend_dist_isolated() {
+    if [[ "$STAGING_FRONTEND_DIST_DIR" == "$PRODUCTION_FRONTEND_DIST_DIR" ]]; then
+        die "staging frontend dist must not share production mini_app_dist"
+    fi
 }
 
 secret_hex() {
@@ -211,14 +235,16 @@ release_sha() {
 
 build_frontend() {
     require_cmd npm
+    assert_staging_frontend_dist_isolated
     local dev_login_enabled="${STAGING_ENABLE_DEV_LOGIN:-}"
     if [[ -z "$dev_login_enabled" && -f "$ENV_FILE" ]]; then
         dev_login_enabled="$(env_value STAGING_ENABLE_DEV_LOGIN || true)"
     fi
     dev_login_enabled="${dev_login_enabled:-true}"
-    log "building frontend for $STAGING_FRONTEND_URL"
+    log "building frontend for $STAGING_FRONTEND_URL into $STAGING_FRONTEND_DIST_DIR"
     (
         cd "$PROJECT_DIR/frontend"
+        FRONTEND_BUILD_OUT_DIR="$STAGING_FRONTEND_DIST_DIR" \
         VITE_API_BASE_URL="${STAGING_VITE_API_BASE_URL:-}" \
         VITE_STAGING_DEV_LOGIN="$dev_login_enabled" \
         npm run build
@@ -227,7 +253,9 @@ build_frontend() {
 
 compose() {
     ensure_env
+    assert_staging_frontend_dist_isolated
     STAGING_APP_PORT="$STAGING_APP_PORT" \
+    STAGING_FRONTEND_DOCKER_DIST_DIR="$(staging_frontend_dist_relpath)" \
     STAGING_RELEASE_SHA="$(release_sha)" \
     "${compose_cmd[@]}" "$@"
 }
@@ -292,6 +320,7 @@ install_nginx() {
     render_nginx_template | sed \
         -e "s#__SERVER_NAME__#$STAGING_DOMAIN#g" \
         -e "s#__APP_ROOT__#$PROJECT_DIR#g" \
+        -e "s#__FRONTEND_ROOT__#$STAGING_FRONTEND_DIST_DIR#g" \
         -e "s#__APP_PORT__#$STAGING_APP_PORT#g" \
         -e "s#__BASIC_AUTH_FILE__#$STAGING_BASIC_AUTH_FILE#g" \
         -e "s#__DEV_API_KEY__#$dev_key#g" \
@@ -342,6 +371,7 @@ wait_for_app_health() {
 }
 
 check() {
+    assert_staging_frontend_dist_isolated
     require_cmd docker
     require_cmd curl
     require_cmd git
@@ -350,7 +380,7 @@ check() {
     docker compose version >/dev/null
     [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
-    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT project=$STAGING_PROJECT_NAME"
+    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR"
     getent hosts "$STAGING_DOMAIN" || true
 }
 
@@ -410,7 +440,7 @@ Usage: scripts/deploy_staging.sh <command>
 Commands:
   check           Validate local prerequisites and show staging settings
   ensure-env      Create .env.staging if missing
-  build-frontend  Build frontend into mini_app_dist
+  build-frontend  Build frontend into mini_app_dist_staging
   nginx           Install/reload the staging Nginx server block
   up              Compose up -d --build
   deploy          check + ensure-env + build frontend + nginx + compose up + health

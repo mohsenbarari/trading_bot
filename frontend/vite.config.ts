@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const frontendBuildOutDir = process.env.FRONTEND_BUILD_OUT_DIR?.trim() || '../mini_app_dist'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -88,7 +90,7 @@ export default defineConfig({
     })
   ],
   build: {
-    outDir: '../mini_app_dist',
+    outDir: frontendBuildOutDir,
     emptyOutDir: true,
     target: 'es2018',
   },
