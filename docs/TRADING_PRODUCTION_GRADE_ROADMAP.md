@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG4` complete on `candidate/trading-production-grade`; `TG5` is next.
+Status: `TG5` complete on `candidate/trading-production-grade`; `TG6` is next.
 
 Last updated: 2026-06-16
 
@@ -309,6 +309,25 @@ Acceptance:
 - Failed Telegram/channel side effects are visible in logs but do not corrupt DB
   state.
 - Realtime `offer:*` events match final DB state.
+
+Completion notes:
+
+- Replaced post-create incremental active-offer cache updates with exact
+  cache writes derived from the authoritative lifecycle outcome, including the
+  active republish case where the old active offer expires and the new offer
+  keeps the final active count unchanged.
+- Hardened active republish at the max-offer limit: the old active offer is
+  excluded from the limit calculation, linked only when it belongs to the
+  owner, emits `offer:expired`, and has channel buttons removed best-effort
+  after the DB state is committed.
+- Moved `cancel-all` side effects after the DB commit so realtime `offer:*`
+  events cannot announce a state that failed to persist.
+- Wrapped active-count cache writes, realtime offer events, and channel button
+  removal in visible best-effort logging so these side-effect failures do not
+  corrupt committed offer state or fail the user response.
+- Added focused lifecycle coverage for active republish at limit, post-commit
+  cache/realtime failure tolerance, exact cache writes for create/expire/cancel,
+  and the existing local-authority auto-expiry coverage.
 
 ## Stage TG6 - Customer, Accountant, And Commission Semantics
 

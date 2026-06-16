@@ -114,6 +114,10 @@ CONTRACT_COVERAGE = {
         "tests/test_offers_router_create_guards.py",
         "test_create_offer_rejects_accountant_context",
     ),
+    "offer_lifecycle_consistency": (
+        "tests/test_offers_router_create_success.py",
+        "test_create_offer_tolerates_post_commit_cache_and_realtime_failures",
+    ),
     "trade_standard_success": (
         "tests/test_trades_router_authoritative_success.py",
         "test_execute_trade_authoritatively_persists_trade_and_runs_side_effects",

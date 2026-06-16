@@ -243,6 +243,85 @@ async def _serialize_offer_responses(
     ]
 
 
+async def _read_active_offer_count(db: AsyncSession, user_id: int) -> int:
+    count = await db.scalar(
+        select(func.count(Offer.id)).where(
+            Offer.user_id == user_id,
+            Offer.status == OfferStatus.ACTIVE,
+        )
+    )
+    return int(count or 0)
+
+
+async def _cached_active_offer_count(user_id: int) -> Optional[int]:
+    try:
+        from core.cache import get_active_offer_count
+
+        return await get_active_offer_count(user_id)
+    except Exception as exc:
+        logger.warning(
+            "offer_active_count_cache_read_failed",
+            extra={"user_id": user_id, "error_class": type(exc).__name__},
+        )
+        return None
+
+
+async def _set_active_offer_count_safely(user_id: int, count: int, *, reason: str) -> None:
+    try:
+        from core.cache import set_active_offer_count
+
+        await set_active_offer_count(user_id, max(0, int(count)))
+    except Exception as exc:
+        logger.warning(
+            "offer_active_count_cache_write_failed",
+            extra={"user_id": user_id, "active_offer_count": max(0, int(count)), "reason": reason, "error_class": type(exc).__name__},
+        )
+
+
+async def _publish_offer_event_safely(event_type: str, payload: dict, *, reason: str) -> None:
+    try:
+        from .realtime import publish_event
+
+        await publish_event(event_type, payload)
+    except Exception as exc:
+        logger.warning(
+            "offer_lifecycle_realtime_publish_failed",
+            extra={
+                "event_type": event_type,
+                "offer_id": payload.get("id"),
+                "reason": reason,
+                "error_class": type(exc).__name__,
+            },
+        )
+
+
+async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, timeout: float = 10) -> None:
+    channel_message_id = getattr(offer, "channel_message_id", None)
+    if not channel_message_id:
+        return
+
+    bot_token = os.getenv("BOT_TOKEN") or settings.bot_token
+    channel_id = settings.channel_id
+    if not bot_token or not channel_id:
+        return
+
+    url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
+    payload = {"chat_id": channel_id, "message_id": channel_message_id}
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(url, json=payload, timeout=timeout)
+    except Exception as exc:
+        logger.warning(
+            "offer_channel_buttons_remove_failed",
+            extra={
+                "offer_id": getattr(offer, "id", None),
+                "channel_message_id": channel_message_id,
+                "reason": reason,
+                "error_class": type(exc).__name__,
+            },
+        )
+
+
 async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
     bot_token = os.getenv("BOT_TOKEN")
@@ -381,22 +460,20 @@ async def create_offer(
     # بررسی تعداد لفظ‌های فعال
     ts = get_trading_settings()
 
-    # Redis count can drift behind cross-surface writes (for example bot-created offers).
-    # Use the DB as the authoritative guard here, then repair the shared cache for fast
-    # readers and later increment/decrement paths.
-    from core.cache import get_active_offer_count, set_active_offer_count
+    old_offer = None
+    republishing_active_offer = False
+    if offer_data.republished_from_id:
+        old_offer = await db.get(Offer, offer_data.republished_from_id)
+        if old_offer and old_offer.user_id == owner_user.id:
+            republishing_active_offer = old_offer.status == OfferStatus.ACTIVE
 
-    cached_active_count = await get_active_offer_count(owner_user.id)
-    active_count = await db.scalar(
-        select(func.count(Offer.id)).where(
-            Offer.user_id == owner_user.id,
-            Offer.status == OfferStatus.ACTIVE,
-        )
-    )
+    active_count = await _read_active_offer_count(db, owner_user.id)
+    cached_active_count = await _cached_active_offer_count(owner_user.id)
     if cached_active_count != active_count:
-        await set_active_offer_count(owner_user.id, active_count)
-    
-    if active_count >= ts.max_active_offers:
+        await _set_active_offer_count_safely(owner_user.id, active_count, reason="create_offer_guard_repair")
+
+    effective_active_count = max(0, active_count - 1) if republishing_active_offer else active_count
+    if effective_active_count >= ts.max_active_offers:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"شما حداکثر {ts.max_active_offers} لفظ فعال دارید. لطفاً ابتدا یکی را منقضی کنید."
@@ -470,12 +547,10 @@ async def create_offer(
         )
 
     # مدیریت تکرار لفظ قدیمی
-    if offer_data.republished_from_id:
-        old_offer = await db.get(Offer, offer_data.republished_from_id)
-        if old_offer and old_offer.user_id == owner_user.id:
-            # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
-            if old_offer.status == OfferStatus.ACTIVE:
-                 old_offer.status = OfferStatus.EXPIRED
+    if old_offer and old_offer.user_id == owner_user.id:
+        # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
+        if old_offer.status == OfferStatus.ACTIVE:
+            old_offer.status = OfferStatus.EXPIRED
 
     # ایجاد لفظ
     new_offer = Offer(
@@ -503,7 +578,7 @@ async def create_offer(
     if offer_data.republished_from_id:
         # دوباره لود می‌کنیم چون ممکن است سشن بسته شده باشد یا نیاز به اتچ مجدد باشد، اما اینجا سشن باز است
         # فقط باید مطمئن شویم old_offer در سشن است
-        if old_offer: 
+        if old_offer and old_offer.user_id == owner_user.id:
             old_offer.republished_offer_id = new_offer.id
             await db.commit()
     
@@ -521,10 +596,8 @@ async def create_offer(
         new_offer.channel_message_id = message_id
         await db.commit()
     
-    # ===== Increment Offer Count Cache =====
-    from core.cache import incr_active_offer_count
-    await incr_active_offer_count(owner_user.id)
-    # =======================================
+    expected_active_count = active_count if republishing_active_offer else active_count + 1
+    await _set_active_offer_count_safely(owner_user.id, expected_active_count, reason="create_offer_final")
     
     # افزایش شمارنده
     await increment_user_counter(db, owner_user, 'channel_message')
@@ -535,9 +608,6 @@ async def create_offer(
     from core.trading_settings import get_trading_settings_async
     ts = await get_trading_settings_async()
     
-    # ارسال رویداد SSE
-    from .realtime import publish_event
-    
     # محاسبه expires_at_ts برای SSE event
     sse_expires_at_ts = None
     try:
@@ -546,7 +616,11 @@ async def create_offer(
     except Exception:
         pass
     
-    await publish_event("offer:created", {
+    if republishing_active_offer and old_offer:
+        await _remove_offer_channel_buttons_safely(old_offer, reason="republish_old_offer", timeout=10)
+        await _publish_offer_event_safely("offer:expired", {"id": old_offer.id}, reason="republish_old_offer")
+
+    await _publish_offer_event_safely("offer:created", {
         "id": new_offer.id,
         "user_id": None,
         "offer_type": new_offer.offer_type.value,
@@ -564,7 +638,7 @@ async def create_offer(
         "lot_sizes": new_offer.lot_sizes,
         "original_lot_sizes": new_offer.original_lot_sizes,
         "expires_at_ts": sse_expires_at_ts,
-    })
+    }, reason="create_offer")
 
     try:
         from core.web_push import schedule_market_offer_web_push
@@ -740,29 +814,13 @@ async def expire_offer(
     await db.commit()
     
     # حذف دکمه‌ها از کانال
-    if offer.channel_message_id:
-        bot_token = os.getenv("BOT_TOKEN")
-        channel_id = settings.channel_id
-        if bot_token and channel_id:
-            url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-            payload = {
-                "chat_id": channel_id,
-                "message_id": offer.channel_message_id
-            }
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(url, json=payload, timeout=10)
-            except Exception as e:
-                logger.warning(f"Error removing channel buttons: {e}")
+    await _remove_offer_channel_buttons_safely(offer, reason="manual_expire", timeout=10)
     
     # ارسال رویداد SSE
-    from .realtime import publish_event
-    await publish_event("offer:expired", {"id": offer_id})
-    
-    # ===== Decrement Offer Count Cache =====
-    from core.cache import decr_active_offer_count
-    await decr_active_offer_count(offer.user_id)
-    # =======================================
+    await _publish_offer_event_safely("offer:expired", {"id": offer_id}, reason="manual_expire")
+
+    active_count = await _read_active_offer_count(db, offer.user_id)
+    await _set_active_offer_count_safely(offer.user_id, active_count, reason="manual_expire")
     
     return None
 
@@ -788,30 +846,16 @@ async def cancel_all_active_offers(
     if not offers:
         return {"cancelled_count": 0}
         
-    bot_token = os.getenv("BOT_TOKEN")
-    channel_id = settings.channel_id
-    from .realtime import publish_event
-    from core.cache import decr_active_offer_count
-    
-    async with httpx.AsyncClient() as client:
-        for offer in offers:
-            offer.status = OfferStatus.EXPIRED
-            
-            if offer.channel_message_id and bot_token and channel_id:
-                url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-                payload = {
-                    "chat_id": channel_id,
-                    "message_id": offer.channel_message_id
-                }
-                try:
-                    await client.post(url, json=payload, timeout=5)
-                except Exception as e:
-                    logger.warning(f"Error removing channel buttons for offer {offer.id}: {e}")
-            
-            await publish_event("offer:expired", {"id": offer.id})
-            await decr_active_offer_count(owner_user.id)
-            
+    for offer in offers:
+        offer.status = OfferStatus.EXPIRED
+
     await db.commit()
+
+    for offer in offers:
+        await _remove_offer_channel_buttons_safely(offer, reason="cancel_all_active_offers", timeout=5)
+        await _publish_offer_event_safely("offer:expired", {"id": offer.id}, reason="cancel_all_active_offers")
+
+    await _set_active_offer_count_safely(owner_user.id, 0, reason="cancel_all_active_offers")
     
     return {"cancelled_count": len(offers)}
 
