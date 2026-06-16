@@ -17,6 +17,7 @@ from .session import (
 )
 from .commodity import Commodity, CommodityAlias
 from .notification import Notification
+from .push_subscription import PushSubscription
 from .admin_message import AdminBroadcastMessage, AdminMarketMessage
 from .trading_setting import TradingSetting
 from .market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
@@ -78,6 +79,7 @@ __all__ = [
     "Conversation",
     # Other
     "Notification",
+    "PushSubscription",
     "AdminBroadcastMessage",
     "AdminMarketMessage",
     "TradingSetting",

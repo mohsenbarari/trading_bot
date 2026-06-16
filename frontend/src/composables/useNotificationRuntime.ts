@@ -9,7 +9,6 @@ import {
 } from '../types/notifications'
 import {
     BROWSER_NOTIFICATION_CLICK_EVENT,
-    requestNotificationPermission,
     showBrowserNotification,
 } from '../utils/browserNotifications'
 import { unlockAudioContext } from '../utils/audio'
@@ -271,7 +270,6 @@ export function useNotificationRuntime({ connect, on, off, ensureSessionValidati
     }
 
     const handleFirstInteraction = () => {
-        void requestNotificationPermission()
         unlockAudioContext()
         window.removeEventListener('click', handleFirstInteraction)
         window.removeEventListener('touchstart', handleFirstInteraction)

@@ -160,7 +160,7 @@ describe('useNotificationRuntime', () => {
 
     window.dispatchEvent(new Event('click'))
     window.dispatchEvent(new Event('touchstart'))
-    expect(notificationRuntimeMocks.requestNotificationPermission).toHaveBeenCalledTimes(1)
+    expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.unlockAudioContext).toHaveBeenCalledTimes(1)
     expect(removeWindowSpy).toHaveBeenCalledWith('click', expect.any(Function))
     expect(removeWindowSpy).toHaveBeenCalledWith('touchstart', expect.any(Function))

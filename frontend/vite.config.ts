@@ -12,7 +12,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
-        importScripts: ['share-target-sw.js', 'upload-background-sw.js'],
+        importScripts: ['share-target-sw.js', 'upload-background-sw.js', 'push-notifications-sw.js'],
         // Don't intercept POST navigations — let our share-target handler
         // (above) own POST /share-receive, and let normal API POSTs hit the
         // network without going through the navigation fallback.
@@ -26,6 +26,7 @@ export default defineConfig({
         'pwa-maskable-512x512.png',
         'share-target-sw.js',
         'upload-background-sw.js',
+        'push-notifications-sw.js',
       ],
       manifest: {
         id: '/?source=pwa',

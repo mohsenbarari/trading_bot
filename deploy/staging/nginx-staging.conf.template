@@ -3,10 +3,11 @@ map $http_authorization $staging_api_basic_realm {
     ~*^Bearer[[:space:]]+ off;
 }
 
+__HTTP_REDIRECT_SERVER__
 server {
-    listen 80;
-    listen [::]:80;
+    __LISTEN_DIRECTIVES__
     server_name __SERVER_NAME__;
+    __SSL_DIRECTIVES__
 
     client_max_body_size 50M;
     root __APP_ROOT__/mini_app_dist;
@@ -111,6 +112,13 @@ server {
     }
 
     location = /share-target-sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx-staging" always;
+    }
+
+    location = /push-notifications-sw.js {
         try_files $uri =404;
         add_header Cache-Control "no-cache, no-store, must-revalidate" always;
         add_header Service-Worker-Allowed "/" always;

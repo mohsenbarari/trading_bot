@@ -1153,7 +1153,7 @@ prepare_pip_packages() {
         fi
     fi
     if [[ "$needs_refresh" == "1" ]]; then
-        rm -f "$output_dir"/*.whl "$output_dir"/.requirements_hash 2>/dev/null || true
+        rm -f "$output_dir"/*.whl "$output_dir"/*.tar.gz "$output_dir"/*.zip "$output_dir"/.requirements_hash 2>/dev/null || true
         mapfile -t pip_platform_args < <(append_pip_platform_args "$target_arch")
         python3 -m pip download -r "$bootstrap_requirements" \
             -d "$output_dir/" \
@@ -1168,7 +1168,8 @@ prepare_pip_packages() {
             --implementation cp \
             --abi cp311 \
             "${pip_platform_args[@]}" \
-            --only-binary=:all:
+            --only-binary=:all: \
+            --no-binary=http-ece
         printf '%s' "$current_hash" > "$hash_file"
     else
         log "Wheel cache already matches requirements for arch=$target_arch; skipping rebuild."

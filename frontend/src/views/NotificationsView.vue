@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, ChevronLeft, Mail, MailOpen, Trash2 } from 'lucide-vue-next'
+import { Bell, BellOff, BellRing, ChevronLeft, Mail, MailOpen, Send, Trash2 } from 'lucide-vue-next'
 import {
   AppButton,
   AppConfirmDialog,
@@ -18,6 +18,13 @@ import { useNotificationStore } from '../stores/notifications'
 import type { NormalizedAppNotification } from '../types/notifications'
 import { formatIranTime } from '../utils/iranTime'
 import { getNotificationIconComponent } from '../utils/notificationUi'
+import {
+  disableWebPushNotifications,
+  enableWebPushNotifications,
+  getWebPushStatus,
+  sendWebPushTestNotification,
+  type WebPushRuntimeState,
+} from '../services/webPush'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -25,6 +32,9 @@ const isClearingAll = ref(false)
 const activeFilter = ref<'all' | 'unread' | 'read'>('all')
 const confirmClearAllOpen = ref(false)
 const pendingDeleteNotification = ref<NormalizedAppNotification | null>(null)
+const pushState = ref<WebPushRuntimeState>('checking')
+const isPushBusy = ref(false)
+const pushActionMessage = ref('')
 
 const unreadCount = computed(() => notificationStore.appNotifications.filter((notification) => !notification.is_read).length)
 const readCount = computed(() => notificationStore.appNotifications.length - unreadCount.value)
@@ -48,6 +58,30 @@ const activeFilterLabel = computed(() => {
   if (activeFilter.value === 'read') return 'خوانده‌شده'
   return 'همه اعلان‌ها'
 })
+const pushStatusLabel = computed(() => {
+  if (pushState.value === 'checking') return 'در حال بررسی'
+  if (pushState.value === 'unsupported') return 'پشتیبانی نمی‌شود'
+  if (pushState.value === 'insecure') return 'نیازمند HTTPS'
+  if (pushState.value === 'server-disabled') return 'غیرفعال در سرور'
+  if (pushState.value === 'permission-blocked') return 'مسدود در مرورگر'
+  if (pushState.value === 'permission-default') return 'آماده فعال‌سازی'
+  if (pushState.value === 'subscribed') return 'فعال'
+  if (pushState.value === 'unsubscribed') return 'غیرفعال'
+  return 'خطا'
+})
+const pushStatusTone = computed<'neutral' | 'success' | 'warning' | 'danger'>(() => {
+  if (pushState.value === 'subscribed') return 'success'
+  if (pushState.value === 'permission-default' || pushState.value === 'unsubscribed') return 'warning'
+  if (pushState.value === 'checking') return 'neutral'
+  return 'danger'
+})
+const canEnablePush = computed(() => (
+  pushState.value === 'permission-default'
+  || pushState.value === 'unsubscribed'
+  || pushState.value === 'error'
+))
+const canDisablePush = computed(() => pushState.value === 'subscribed')
+const canTestPush = computed(() => pushState.value === 'subscribed')
 
 const goBack = () => {
   router.push('/')
@@ -124,6 +158,63 @@ const clearAll = async () => {
   }
 }
 
+async function refreshPushState() {
+  pushActionMessage.value = ''
+  pushState.value = 'checking'
+  try {
+    const status = await getWebPushStatus()
+    pushState.value = status.state
+  } catch (error) {
+    pushState.value = 'error'
+  }
+}
+
+async function enablePush() {
+  if (isPushBusy.value) return
+  isPushBusy.value = true
+  pushActionMessage.value = ''
+  try {
+    const status = await enableWebPushNotifications()
+    pushState.value = status.state
+    pushActionMessage.value = status.state === 'subscribed' ? 'فعال شد' : pushStatusLabel.value
+  } catch (error) {
+    pushState.value = 'error'
+    pushActionMessage.value = 'فعال‌سازی ناموفق بود'
+  } finally {
+    isPushBusy.value = false
+  }
+}
+
+async function disablePush() {
+  if (isPushBusy.value) return
+  isPushBusy.value = true
+  pushActionMessage.value = ''
+  try {
+    const status = await disableWebPushNotifications()
+    pushState.value = status.state
+    pushActionMessage.value = 'غیرفعال شد'
+  } catch (error) {
+    pushState.value = 'error'
+    pushActionMessage.value = 'غیرفعال‌سازی ناموفق بود'
+  } finally {
+    isPushBusy.value = false
+  }
+}
+
+async function sendPushTest() {
+  if (isPushBusy.value) return
+  isPushBusy.value = true
+  pushActionMessage.value = ''
+  try {
+    const result = await sendWebPushTestNotification()
+    pushActionMessage.value = result.sent > 0 ? 'تست ارسال شد' : 'دستگاهی ثبت نشده است'
+  } catch (error) {
+    pushActionMessage.value = 'ارسال تست ناموفق بود'
+  } finally {
+    isPushBusy.value = false
+  }
+}
+
 const openNotificationRoute = (notification: NormalizedAppNotification) => {
   const routePath = typeof notification.route === 'string' ? notification.route.trim() : ''
   if (!routePath) return
@@ -150,6 +241,7 @@ async function confirmDeleteNotification() {
 }
 
 onMounted(async () => {
+  void refreshPushState()
   await notificationStore.openNotificationCenter()
 })
 </script>
@@ -169,6 +261,58 @@ onMounted(async () => {
       </AppPageHeader>
 
       <main class="content">
+        <AppSectionCard
+          title="اعلان دستگاه"
+          :description="pushStatusLabel"
+          class="push-section"
+        >
+          <template #actions>
+            <AppStatusBadge :tone="pushStatusTone">{{ pushStatusLabel }}</AppStatusBadge>
+          </template>
+
+          <div class="push-controls">
+            <AppButton
+              v-if="canEnablePush"
+              class="push-enable-btn"
+              size="sm"
+              :loading="isPushBusy"
+              @click="enablePush"
+            >
+              <template #icon>
+                <BellRing :size="16" />
+              </template>
+              فعال‌سازی
+            </AppButton>
+            <AppButton
+              v-if="canTestPush"
+              class="push-test-btn"
+              variant="secondary"
+              size="sm"
+              :loading="isPushBusy"
+              @click="sendPushTest"
+            >
+              <template #icon>
+                <Send :size="16" />
+              </template>
+              تست
+            </AppButton>
+            <AppButton
+              v-if="canDisablePush"
+              class="push-disable-btn"
+              variant="ghost"
+              size="sm"
+              :loading="isPushBusy"
+              @click="disablePush"
+            >
+              <template #icon>
+                <BellOff :size="16" />
+              </template>
+              غیرفعال
+            </AppButton>
+          </div>
+          <p v-if="pushActionMessage" class="push-action-message">{{ pushActionMessage }}</p>
+        </AppSectionCard>
+
         <AppLoadingState v-if="notificationStore.isLoadingHistory" class="ds-loading-state" label="در حال دریافت اعلان‌ها" />
 
         <AppEmptyState
@@ -368,6 +512,25 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.push-section :deep(.ui-section-card__body) {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.push-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.push-action-message {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
 }
 
 .notif-item:focus-visible,
