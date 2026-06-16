@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG0` complete on `candidate/trading-production-grade`; `TG1` is next.
+Status: `TG1` complete on `candidate/trading-production-grade`; `TG2` is next.
 
 Last updated: 2026-06-16
 
@@ -86,7 +86,7 @@ targets:
 | Stage | Status | Scope |
 |---|---|---|
 | `TG0` | Complete | Branch safety, staging guardrails on this candidate branch, trading audit, and roadmap. |
-| `TG1` | Pending | Build the executable trading contract matrix with focused backend tests before behavior changes. |
+| `TG1` | Complete | Build the executable trading contract matrix with focused backend tests before behavior changes. |
 | `TG2` | Pending | Extract pure planning/serialization seams from trade execution without changing behavior. |
 | `TG3` | Pending | Harden atomic trade execution: idempotency, trade-number allocation, lot/quantity concurrency, and rollback behavior. |
 | `TG4` | Pending | Harden cross-server trade authority and failure semantics. |
@@ -153,6 +153,20 @@ Acceptance:
   forwarding.
 - No production deploy.
 - If any test exposes a real bug, fix that bug before moving to TG2.
+
+Completion notes:
+
+- Added `tests/test_trading_production_contract_matrix.py` as the executable
+  TG1 contract matrix.
+- The matrix maps money-path invariants to the focused backend test files that
+  own them, so later refactors have an explicit regression surface.
+- Added direct contract assertions for DB/model safety constraints,
+  idempotent replay with no offer mutation or extra commit, and remote-home
+  forwarding with delegated `actor_user_id` preserved.
+- Isolated existing cross-server routing coverage from machine env aliases so
+  the test proves configured authority behavior deterministically.
+- No runtime behavior, production deploy, production benchmark, or production
+  data mutation was performed in TG1.
 
 ## Stage TG2 - Trade Execution Service Seams
 

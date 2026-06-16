@@ -49,7 +49,10 @@ class ServerRoutingTests(unittest.TestCase):
         request_unknown = SimpleNamespace(headers={"host": "unknown.internal"})
 
         with patch.object(server_routing.settings, "iran_server_domain", "iran.custom.example"), \
+             patch.object(server_routing.settings, "iran_server_url", None), \
+             patch.object(server_routing.settings, "frontend_url", "https://iran.custom.example"), \
              patch.object(server_routing.settings, "foreign_server_domain", "foreign.custom.example"), \
+             patch.object(server_routing.settings, "iran_server_aliases", ""), \
              patch.object(server_routing.settings, "foreign_server_aliases", "coin.362514.ir"), \
              patch.object(server_routing.settings, "server_mode", "IRAN"):
             self.assertEqual(server_routing.server_from_request(request_iran), server_routing.SERVER_IRAN)
