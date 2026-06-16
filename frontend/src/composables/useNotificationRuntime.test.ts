@@ -27,6 +27,7 @@ const notificationRuntimeMocks = vi.hoisted(() => ({
     patchConversation: vi.fn(),
   },
   requestNotificationPermission: vi.fn(),
+  promptAndEnableWebPushNotifications: vi.fn(),
   showBrowserNotification: vi.fn(),
   unlockAudioContext: vi.fn(),
   handlers: new Map<string, Array<(payload?: any) => void>>(),
@@ -74,6 +75,10 @@ vi.mock('../utils/browserNotifications', () => ({
 
 vi.mock('../utils/audio', () => ({
   unlockAudioContext: notificationRuntimeMocks.unlockAudioContext,
+}))
+
+vi.mock('../services/webPush', () => ({
+  promptAndEnableWebPushNotifications: notificationRuntimeMocks.promptAndEnableWebPushNotifications,
 }))
 
 function emitWsEvent(event: string, payload?: any) {
@@ -125,6 +130,8 @@ describe('useNotificationRuntime', () => {
     notificationRuntimeMocks.off.mockClear()
     notificationRuntimeMocks.ensureSessionValidation.mockReset()
     notificationRuntimeMocks.requestNotificationPermission.mockReset()
+    notificationRuntimeMocks.promptAndEnableWebPushNotifications.mockReset()
+    notificationRuntimeMocks.promptAndEnableWebPushNotifications.mockResolvedValue({ state: 'subscribed' })
     notificationRuntimeMocks.showBrowserNotification.mockReset()
     notificationRuntimeMocks.unlockAudioContext.mockReset()
     notificationRuntimeMocks.store.addAppNotification.mockReset()
@@ -161,6 +168,7 @@ describe('useNotificationRuntime', () => {
     window.dispatchEvent(new Event('click'))
     window.dispatchEvent(new Event('touchstart'))
     expect(notificationRuntimeMocks.requestNotificationPermission).not.toHaveBeenCalled()
+    expect(notificationRuntimeMocks.promptAndEnableWebPushNotifications).toHaveBeenCalledTimes(1)
     expect(notificationRuntimeMocks.unlockAudioContext).toHaveBeenCalledTimes(1)
     expect(removeWindowSpy).toHaveBeenCalledWith('click', expect.any(Function))
     expect(removeWindowSpy).toHaveBeenCalledWith('touchstart', expect.any(Function))
@@ -343,6 +351,9 @@ describe('useNotificationRuntime', () => {
     expect(notificationRuntimeMocks.connect).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.store.fetchInitialCounts).not.toHaveBeenCalled()
     expect(notificationRuntimeMocks.ensureSessionValidation).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new Event('click'))
+    expect(notificationRuntimeMocks.promptAndEnableWebPushNotifications).not.toHaveBeenCalled()
 
     setDocumentHidden(true)
     emitWsEvent(WS_NOTIFICATION_EVENTS.chatMessage, {

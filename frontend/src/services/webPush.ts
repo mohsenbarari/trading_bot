@@ -134,27 +134,9 @@ async function subscribeWithKey(
   })
 }
 
-export async function enableWebPushNotifications(): Promise<WebPushStatus> {
-  if (!isWebPushRuntimeSupported()) {
-    return { state: 'unsupported' }
-  }
-  if (!window.isSecureContext) {
-    return { state: 'insecure' }
-  }
-
-  const config = await fetchWebPushPublicConfig()
+async function subscribeAndRegisterWebPush(config: WebPushPublicConfig): Promise<WebPushStatus> {
   if (!config.enabled || !config.public_key) {
     return { state: 'server-disabled', config }
-  }
-
-  const permission = Notification.permission === 'granted'
-    ? 'granted'
-    : await Notification.requestPermission()
-  if (permission === 'denied') {
-    return { state: 'permission-blocked', config }
-  }
-  if (permission !== 'granted') {
-    return { state: 'permission-default', config }
   }
 
   const registration = await getReadyServiceWorker()
@@ -172,6 +154,56 @@ export async function enableWebPushNotifications(): Promise<WebPushStatus> {
   }
 
   return { state: 'subscribed', config }
+}
+
+export async function promptAndEnableWebPushNotifications(): Promise<WebPushStatus> {
+  if (!isWebPushRuntimeSupported()) {
+    return { state: 'unsupported' }
+  }
+  if (!window.isSecureContext) {
+    return { state: 'insecure' }
+  }
+  if (Notification.permission === 'denied') {
+    return { state: 'permission-blocked' }
+  }
+
+  const permission = Notification.permission === 'granted'
+    ? 'granted'
+    : await Notification.requestPermission()
+  if (permission === 'denied') {
+    return { state: 'permission-blocked' }
+  }
+  if (permission !== 'granted') {
+    return { state: 'permission-default' }
+  }
+
+  const config = await fetchWebPushPublicConfig()
+  return subscribeAndRegisterWebPush(config)
+}
+
+export async function enableWebPushNotifications(): Promise<WebPushStatus> {
+  if (!isWebPushRuntimeSupported()) {
+    return { state: 'unsupported' }
+  }
+  if (!window.isSecureContext) {
+    return { state: 'insecure' }
+  }
+
+  const config = await fetchWebPushPublicConfig()
+  if (!config.enabled || !config.public_key) {
+    return { state: 'server-disabled', config }
+  }
+  const permission = Notification.permission === 'granted'
+    ? 'granted'
+    : await Notification.requestPermission()
+  if (permission === 'denied') {
+    return { state: 'permission-blocked', config }
+  }
+  if (permission !== 'granted') {
+    return { state: 'permission-default', config }
+  }
+
+  return subscribeAndRegisterWebPush(config)
 }
 
 export async function disableWebPushNotifications(): Promise<WebPushStatus> {
