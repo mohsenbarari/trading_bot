@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG1` complete on `candidate/trading-production-grade`; `TG2` is next.
+Status: `TG2` complete on `candidate/trading-production-grade`; `TG3` is next.
 
 Last updated: 2026-06-16
 
@@ -87,7 +87,7 @@ targets:
 |---|---|---|
 | `TG0` | Complete | Branch safety, staging guardrails on this candidate branch, trading audit, and roadmap. |
 | `TG1` | Complete | Build the executable trading contract matrix with focused backend tests before behavior changes. |
-| `TG2` | Pending | Extract pure planning/serialization seams from trade execution without changing behavior. |
+| `TG2` | Complete | Extract pure planning/serialization seams from trade execution without changing behavior. |
 | `TG3` | Pending | Harden atomic trade execution: idempotency, trade-number allocation, lot/quantity concurrency, and rollback behavior. |
 | `TG4` | Pending | Harden cross-server trade authority and failure semantics. |
 | `TG5` | Pending | Harden offer lifecycle consistency: create, republish, expire, cancel, active-count cache, and channel side effects. |
@@ -186,6 +186,20 @@ Acceptance:
 - TG1 tests still pass.
 - Helper-level tests cover extracted pure functions.
 - Diff is behavior-neutral except for bug fixes explicitly found in TG1.
+
+Completion notes:
+
+- Extracted pure execution-chain planning helpers in `api/routers/trades.py`:
+  `TradeExecutionNode`, `TradeExecutionPlan`, `_build_trade_execution_plan`,
+  and related validation error handling.
+- Extracted pure trade notification/message formatting helpers:
+  `_build_trade_notification_message`, `_build_trade_message_bundle`, and
+  `_recipient_is_tier2_customer`.
+- Added `tests/test_trade_execution_seams.py` for direct helper-level coverage
+  of standard direct trades, customer-chain planning, invalid node rejection,
+  Tier 2 notification privacy, and Telegram/notification text contracts.
+- Route signatures, response schemas, SQLAlchemy locking, commit/rollback
+  boundaries, and DB mutation order were intentionally left unchanged.
 
 ## Stage TG3 - Atomic Execution Hardening
 

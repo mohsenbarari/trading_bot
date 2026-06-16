@@ -4,6 +4,7 @@ API Router for Trade Management - MiniApp Integration
 """
 import logging
 import os
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import List, Optional, Mapping
@@ -59,6 +60,7 @@ logger = logging.getLogger(__name__)
 
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
+TRADE_UNAVAILABLE_DETAIL = "امکان انجام این معامله وجود ندارد."
 
 
 router = APIRouter(
@@ -72,6 +74,25 @@ def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> No
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ACCOUNTANT_MARKET_BLOCKED_DETAIL,
         )
+
+
+class TradeExecutionPlanError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class TradeExecutionNode:
+    user_id: int
+    user: object
+
+
+@dataclass(frozen=True)
+class TradeExecutionPlan:
+    nodes: tuple[TradeExecutionNode, ...]
+
+    @property
+    def uses_customer_trade_chain(self) -> bool:
+        return len(self.nodes) > 2
 
 
 # --- Pydantic Schemas ---
@@ -145,6 +166,60 @@ def _coerce_trade_user_id(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return normalized if normalized > 0 else None
+
+
+def _build_trade_execution_node(user_id: object, user: object | None) -> TradeExecutionNode:
+    normalized_user_id = _coerce_trade_user_id(user_id)
+    if normalized_user_id is None or user is None:
+        raise TradeExecutionPlanError(TRADE_UNAVAILABLE_DETAIL)
+    return TradeExecutionNode(user_id=normalized_user_id, user=user)
+
+
+def _append_trade_execution_node(
+    nodes: list[TradeExecutionNode],
+    *,
+    user_id: object,
+    user: object | None,
+) -> None:
+    normalized_user_id = _coerce_trade_user_id(user_id)
+    if normalized_user_id is None:
+        raise TradeExecutionPlanError(TRADE_UNAVAILABLE_DETAIL)
+    if nodes and nodes[-1].user_id == normalized_user_id:
+        return
+    if user is None:
+        raise TradeExecutionPlanError(TRADE_UNAVAILABLE_DETAIL)
+    nodes.append(TradeExecutionNode(user_id=normalized_user_id, user=user))
+
+
+def _build_trade_execution_plan(
+    *,
+    offer_user_id: object,
+    offer_user: object | None,
+    source_principal_user_id: object,
+    source_principal_user: object | None,
+    responder_principal_user_id: object,
+    responder_principal_user: object | None,
+    owner_user_id: object,
+    owner_user: object | None,
+) -> TradeExecutionPlan:
+    nodes = [_build_trade_execution_node(offer_user_id, offer_user)]
+    if source_principal_user_id != offer_user_id:
+        _append_trade_execution_node(
+            nodes,
+            user_id=source_principal_user_id,
+            user=source_principal_user,
+        )
+    _append_trade_execution_node(
+        nodes,
+        user_id=responder_principal_user_id,
+        user=responder_principal_user,
+    )
+    _append_trade_execution_node(
+        nodes,
+        user_id=owner_user_id,
+        user=owner_user,
+    )
+    return TradeExecutionPlan(nodes=tuple(nodes))
 
 
 def _resolve_trade_participant_name(
@@ -840,6 +915,111 @@ def _build_trade_notification_extra_payload(
     }
 
 
+def _recipient_is_tier2_customer(
+    audience_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> bool:
+    if audience_user_id is None or not customer_relation_map:
+        return False
+    relation = customer_relation_map.get(audience_user_id)
+    return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
+
+
+def _build_trade_notification_message(
+    *,
+    trade_emoji: str,
+    trade_type_label: str,
+    trade_price: int,
+    trade_quantity: int,
+    commodity_name: str,
+    trade_number: int,
+    trade_datetime: str,
+    counterparty_name: str | None,
+    audience_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    trade_path_summary: str | None = None,
+) -> str:
+    lines = [
+        f"{trade_emoji} {trade_type_label}",
+        f"💰 فی: {trade_price:,}",
+        f"📦 تعداد: {trade_quantity}",
+        f"🏷️ کالا: {commodity_name}",
+    ]
+    if counterparty_name and not _recipient_is_tier2_customer(audience_user_id, customer_relation_map):
+        lines.append(f"👤 طرف معامله: {counterparty_name}")
+    lines.append(f"🔢 شماره معامله: {trade_number}")
+    lines.append(f"🕐 زمان معامله: {trade_datetime}")
+    if trade_path_summary:
+        lines.append(f"🧭 مسیر: {trade_path_summary}")
+    return "\n".join(lines)
+
+
+def _build_trade_message_bundle(
+    *,
+    responder_trade_emoji: str,
+    responder_trade_label: str,
+    offer_trade_emoji: str,
+    offer_trade_label: str,
+    trade_price: int,
+    trade_quantity: int,
+    commodity_name: str,
+    trade_number: int,
+    trade_datetime: str,
+    offer_user_name: str,
+    responder_user_name: str,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    trade_path_summary: str | None = None,
+) -> tuple[str, str, str, str]:
+    trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
+    responder_msg = (
+        f"{responder_trade_emoji} <b>{responder_trade_label}</b>\n\n"
+        f"💰 فی: {trade_price:,}\n"
+        f"📦 تعداد: {trade_quantity}\n"
+        f"🏷️ کالا: {commodity_name}\n"
+        f"👤 طرف معامله: {offer_user_name}\n"
+        f"🔢 شماره معامله: {trade_number}\n"
+        f"🕐 زمان معامله: {trade_datetime}"
+        f"{trade_path_line}"
+    )
+    offer_owner_msg = (
+        f"{offer_trade_emoji} <b>{offer_trade_label}</b>\n\n"
+        f"💰 فی: {trade_price:,}\n"
+        f"📦 تعداد: {trade_quantity}\n"
+        f"🏷️ کالا: {commodity_name}\n"
+        f"👤 طرف معامله: {responder_user_name}\n"
+        f"🔢 شماره معامله: {trade_number}\n"
+        f"🕐 زمان معامله: {trade_datetime}"
+        f"{trade_path_line}"
+    )
+    notif_msg_responder = _build_trade_notification_message(
+        trade_emoji=responder_trade_emoji,
+        trade_type_label=responder_trade_label,
+        trade_price=trade_price,
+        trade_quantity=trade_quantity,
+        commodity_name=commodity_name,
+        trade_number=trade_number,
+        trade_datetime=trade_datetime,
+        counterparty_name=offer_user_name,
+        audience_user_id=None,
+        customer_relation_map=customer_relation_map,
+        trade_path_summary=trade_path_summary,
+    )
+    notif_msg_owner = _build_trade_notification_message(
+        trade_emoji=offer_trade_emoji,
+        trade_type_label=offer_trade_label,
+        trade_price=trade_price,
+        trade_quantity=trade_quantity,
+        commodity_name=commodity_name,
+        trade_number=trade_number,
+        trade_datetime=trade_datetime,
+        counterparty_name=responder_user_name,
+        audience_user_id=None,
+        customer_relation_map=customer_relation_map,
+        trade_path_summary=trade_path_summary,
+    )
+    return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
+
+
 def _resolve_trade_history_subject_prefix(
     *,
     trade: Trade | object,
@@ -1372,14 +1552,6 @@ async def _execute_trade_authoritatively(
             offer.offer_type,
         )
 
-    def _require_trade_node_user(user_obj: object | None) -> object:
-        if user_obj is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="امکان انجام این معامله وجود ندارد.",
-            )
-        return user_obj
-
     source_principal_user: object | None = offer.user if source_principal_user_id == offer.user_id else None
     responder_principal_user: object | None = owner_user if responder_principal_user_id == owner_user.id else None
 
@@ -1405,38 +1577,31 @@ async def _execute_trade_authoritatively(
                     detail="امکان انجام این معامله وجود ندارد.",
                 )
 
-    source_principal_user = _require_trade_node_user(source_principal_user)
-    responder_principal_user = _require_trade_node_user(responder_principal_user)
-
-    trade_execution_nodes: list[dict[str, object]] = [
-        {
-            "user_id": offer.user_id,
-            "user": _require_trade_node_user(offer.user),
-        }
-    ]
-
-    def _append_trade_execution_node(user_obj: object | None, user_id: object) -> None:
-        normalized_user_id = _coerce_trade_user_id(user_id)
-        if normalized_user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="امکان انجام این معامله وجود ندارد.",
-            )
-        if trade_execution_nodes[-1]["user_id"] == normalized_user_id:
-            return
-        trade_execution_nodes.append(
-            {
-                "user_id": normalized_user_id,
-                "user": _require_trade_node_user(user_obj),
-            }
+    try:
+        trade_execution_plan = _build_trade_execution_plan(
+            offer_user_id=offer.user_id,
+            offer_user=offer.user,
+            source_principal_user_id=source_principal_user_id,
+            source_principal_user=source_principal_user,
+            responder_principal_user_id=responder_principal_user_id,
+            responder_principal_user=responder_principal_user,
+            owner_user_id=owner_user.id,
+            owner_user=owner_user,
         )
+    except TradeExecutionPlanError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or TRADE_UNAVAILABLE_DETAIL,
+        ) from exc
 
-    if source_principal_user_id != offer.user_id:
-        _append_trade_execution_node(source_principal_user, source_principal_user_id)
-    _append_trade_execution_node(responder_principal_user, responder_principal_user_id)
-    _append_trade_execution_node(owner_user, owner_user.id)
-
-    uses_customer_trade_chain = len(trade_execution_nodes) > 2
+    trade_execution_nodes = [
+        {
+            "user_id": node.user_id,
+            "user": node.user,
+        }
+        for node in trade_execution_plan.nodes
+    ]
+    uses_customer_trade_chain = trade_execution_plan.uses_customer_trade_chain
 
     if trade_data.idempotency_key:
         existing_trade = await db.execute(
@@ -1637,89 +1802,6 @@ async def _execute_trade_authoritatively(
         offer_emoji = "🟢"
         offer_type_fa = "خرید"
 
-    def _recipient_is_tier2_customer(audience_user_id: int | None) -> bool:
-        if audience_user_id is None or not participant_customer_relation_map:
-            return False
-        relation = participant_customer_relation_map.get(audience_user_id)
-        return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
-
-    def _build_trade_notification_message(
-        *,
-        trade_emoji: str,
-        trade_type_label: str,
-        trade_price: int,
-        trade_number: int,
-        counterparty_name: str | None,
-        audience_user_id: int | None,
-        trade_path_summary: str | None = None,
-    ) -> str:
-        lines = [
-            f"{trade_emoji} {trade_type_label}",
-            f"💰 فی: {trade_price:,}",
-            f"📦 تعداد: {trade_quantity}",
-            f"🏷️ کالا: {offer.commodity.name}",
-        ]
-        if counterparty_name and not _recipient_is_tier2_customer(audience_user_id):
-            lines.append(f"👤 طرف معامله: {counterparty_name}")
-        lines.append(f"🔢 شماره معامله: {trade_number}")
-        lines.append(f"🕐 زمان معامله: {trade_datetime}")
-        if trade_path_summary:
-            lines.append(f"🧭 مسیر: {trade_path_summary}")
-        return "\n".join(lines)
-
-    def _build_trade_message_bundle(
-        *,
-        trade_price: int,
-        trade_number: int,
-        offer_user_name: str,
-        responder_user_name: str,
-        trade_path_summary: str | None = None,
-    ) -> tuple[str, str, str, str]:
-        trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
-        responder_msg = (
-            f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
-            f"💰 فی: {trade_price:,}\n"
-            f"📦 تعداد: {trade_quantity}\n"
-            f"🏷️ کالا: {offer.commodity.name}\n"
-            f"👤 طرف معامله: {offer_user_name}\n"
-            f"🔢 شماره معامله: {trade_number}\n"
-            f"🕐 زمان معامله: {trade_datetime}"
-            f"{trade_path_line}"
-        )
-        offer_owner_msg = (
-            f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
-            f"💰 فی: {trade_price:,}\n"
-            f"📦 تعداد: {trade_quantity}\n"
-            f"🏷️ کالا: {offer.commodity.name}\n"
-            f"👤 طرف معامله: {responder_user_name}\n"
-            f"🔢 شماره معامله: {trade_number}\n"
-            f"🕐 زمان معامله: {trade_datetime}"
-            f"{trade_path_line}"
-        )
-        notif_msg_responder = (
-            _build_trade_notification_message(
-                trade_emoji=respond_emoji,
-                trade_type_label=respond_type_fa,
-                trade_price=trade_price,
-                trade_number=trade_number,
-                counterparty_name=offer_user_name,
-                audience_user_id=None,
-                trade_path_summary=trade_path_summary,
-            )
-        )
-        notif_msg_owner = (
-            _build_trade_notification_message(
-                trade_emoji=offer_emoji,
-                trade_type_label=offer_type_fa,
-                trade_price=trade_price,
-                trade_number=trade_number,
-                counterparty_name=responder_user_name,
-                audience_user_id=None,
-                trade_path_summary=trade_path_summary,
-            )
-        )
-        return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
-
     async def _create_trade_notifications_for_leg(
         *,
         audience_user_ids: list[int],
@@ -1739,9 +1821,13 @@ async def _execute_trade_authoritatively(
                     trade_emoji=trade_emoji,
                     trade_type_label=trade_type_label,
                     trade_price=trade_price,
+                    trade_quantity=trade_quantity,
+                    commodity_name=offer.commodity.name,
                     trade_number=trade_number,
+                    trade_datetime=trade_datetime,
                     counterparty_name=counterparty_name,
                     audience_user_id=audience_user_id,
+                    customer_relation_map=participant_customer_relation_map,
                     trade_path_summary=trade_path_summary,
                 ),
                 level=NotificationLevel.SUCCESS,
@@ -1800,10 +1886,18 @@ async def _execute_trade_authoritatively(
                 customer_relation_map=participant_customer_relation_map,
             ).get("trade_path_summary")
             leg_responder_msg, leg_offer_owner_msg, leg_notif_responder, leg_notif_owner = _build_trade_message_bundle(
+                responder_trade_emoji=respond_emoji,
+                responder_trade_label=respond_type_fa,
+                offer_trade_emoji=offer_emoji,
+                offer_trade_label=offer_type_fa,
                 trade_price=getattr(leg_trade_obj, "price", offer.price),
+                trade_quantity=trade_quantity,
+                commodity_name=offer.commodity.name,
                 trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                trade_datetime=trade_datetime,
                 offer_user_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
                 responder_user_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
+                customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=leg_trade_path_summary,
             )
 
@@ -1857,10 +1951,18 @@ async def _execute_trade_authoritatively(
                 pass
     else:
         responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner = _build_trade_message_bundle(
+            responder_trade_emoji=respond_emoji,
+            responder_trade_label=respond_type_fa,
+            offer_trade_emoji=offer_emoji,
+            offer_trade_label=offer_type_fa,
             trade_price=executed_trade_price,
+            trade_quantity=trade_quantity,
+            commodity_name=offer.commodity.name,
             trade_number=response_trade_number,
+            trade_datetime=trade_datetime,
             offer_user_name=offer_user_display_name,
             responder_user_name=responder_user_display_name,
+            customer_relation_map=participant_customer_relation_map,
             trade_path_summary=_build_trade_path_payload(
                 offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
                 responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
