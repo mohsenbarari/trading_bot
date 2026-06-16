@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     sms_public_host: str | None = None
     trade_forward_timeout_seconds: float = 3.0
     trade_forward_grace_seconds: int = 3
+    trade_forward_verify_tls: bool = False
+    trade_forward_ca_bundle: str | None = None
     foreign_server_url: str | None = None
     sync_api_key: str | None = None
     sync_direct_push_cooldown_seconds: float = 90.0

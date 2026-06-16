@@ -154,6 +154,10 @@ CONTRACT_COVERAGE = {
         "tests/test_server_routing_and_trade_forwarding.py",
         "test_verify_internal_signature_rejects_stale_missing_or_wrong_key_payloads",
     ),
+    "cross_server_authority_hardening": (
+        "tests/test_trades_router_execution_wrappers.py",
+        "test_forward_trade_if_remote_home_covers_both_cross_server_directions_and_idempotency",
+    ),
     "trade_payload_validation": (
         "tests/test_trade_service_validation_and_payloads.py",
         "test_validate_offer_trade_amount_covers_error_paths_and_success",

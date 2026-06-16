@@ -1,3 +1,4 @@
+import logging
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -190,6 +191,44 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["X-Source-Server"], "foreign")
         self.assertEqual(headers["X-Signature"], expected_signature)
 
+    async def test_forward_trade_tls_verification_can_use_boolean_or_ca_bundle(self):
+        recorded: list[dict[str, object]] = []
+
+        class Response:
+            status_code = 200
+            text = ""
+
+            def json(self):
+                return {"ok": True}
+
+        class ClientSpy:
+            def __init__(self, *args, **kwargs):
+                recorded.append(kwargs)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, content, headers):
+                return Response()
+
+        with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+             patch("core.trade_forwarding.httpx.AsyncClient", ClientSpy), \
+             patch.object(trade_forwarding.settings, "trade_forward_verify_tls", True), \
+             patch.object(trade_forwarding.settings, "trade_forward_ca_bundle", None):
+            await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 1})
+
+        with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+             patch("core.trade_forwarding.httpx.AsyncClient", ClientSpy), \
+             patch.object(trade_forwarding.settings, "trade_forward_verify_tls", False), \
+             patch.object(trade_forwarding.settings, "trade_forward_ca_bundle", "/etc/ssl/internal-ca.pem"):
+            await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 1})
+
+        self.assertEqual(recorded[0]["verify"], True)
+        self.assertEqual(recorded[1]["verify"], "/etc/ssl/internal-ca.pem")
+
     async def test_forward_trade_maps_timeout_and_request_errors(self):
         class TimeoutClient:
             def __init__(self, *args, **kwargs):
@@ -231,10 +270,10 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 503)
         self.assertIn("ارتباط با سرور مرجع معامله برقرار نشد", body["detail"])
 
-    async def test_forward_trade_returns_text_fallback_for_invalid_json(self):
+    async def test_forward_trade_returns_safe_fallback_for_invalid_json(self):
         class Response:
             status_code = 502
-            text = "bad gateway"
+            text = "bad gateway with internal upstream detail"
 
             def json(self):
                 raise ValueError("invalid json")
@@ -257,7 +296,51 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
             status_code, body = await trade_forwarding.forward_trade_to_home_server("iran", {"offer_id": 1})
 
         self.assertEqual(status_code, 502)
-        self.assertEqual(body, {"detail": "bad gateway"})
+        self.assertEqual(body, {"detail": "پاسخ نامعتبر از سرور مرجع معامله"})
+
+    async def test_forward_trade_warning_logs_are_structured_and_redacted(self):
+        records: list[logging.LogRecord] = []
+
+        class CaptureHandler(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        class TimeoutClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, url, content, headers):
+                raise httpx.TimeoutException("timed out")
+
+        logger = logging.getLogger("core.trade_forwarding")
+        handler = CaptureHandler()
+        logger.addHandler(handler)
+        try:
+            with patch("core.trade_forwarding.peer_server_url_for", return_value="https://iran.example"), \
+                 patch("core.trade_forwarding.current_server", return_value="foreign"), \
+                 patch("core.trade_forwarding.httpx.AsyncClient", TimeoutClient):
+                await trade_forwarding.forward_trade_to_home_server(
+                    "iran",
+                    {"offer_id": 1, "idempotency_key": "secret-idem", "responder_mobile": "09120000000"},
+                )
+        finally:
+            logger.removeHandler(handler)
+
+        self.assertTrue(records)
+        record = records[-1]
+        self.assertEqual(record.getMessage(), "trade_forward.timeout")
+        self.assertEqual(record.source_server, "foreign")
+        self.assertEqual(record.target_server, "iran")
+        self.assertEqual(record.offer_id, 1)
+        self.assertTrue(record.has_idempotency_key)
+        self.assertNotIn("09120000000", str(record.__dict__))
+        self.assertNotIn("secret-idem", str(record.__dict__))
 
 
 if __name__ == "__main__":

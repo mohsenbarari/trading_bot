@@ -52,7 +52,7 @@ from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
-from core.server_routing import current_server, is_remote_home, normalize_server
+from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 
 
@@ -1512,6 +1512,13 @@ def _normalize_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
+def _normalize_internal_trade_source(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = normalize_server(value, default="")
+    return normalized if normalized in KNOWN_SERVERS else None
+
+
 async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
     from core.trading_settings import get_trading_settings_async
 
@@ -1554,7 +1561,27 @@ async def _forward_trade_if_remote_home(
     }
     if getattr(actor_user, "id", None) != owner_user.id:
         payload["actor_user_id"] = actor_user.id
+    logger.info(
+        "trade_forward.remote_home",
+        extra={
+            "source_server": payload["source_server"],
+            "target_server": normalize_server(offer.home_server),
+            "offer_id": trade_data.offer_id,
+            "has_idempotency_key": bool(trade_data.idempotency_key),
+            "delegated_actor": getattr(actor_user, "id", None) != owner_user.id,
+        },
+    )
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
+    if status_code >= 400:
+        logger.warning(
+            "trade_forward.remote_home_failed",
+            extra={
+                "source_server": payload["source_server"],
+                "target_server": normalize_server(offer.home_server),
+                "offer_id": trade_data.offer_id,
+                "status_code": status_code,
+            },
+        )
     return JSONResponse(status_code=status_code, content=body)
 
 
@@ -2269,26 +2296,87 @@ async def execute_trade_internal(
     db: AsyncSession = Depends(get_db),
 ):
     body = await raw_request.body()
+    target_server = current_server()
+    payload_source_server = _normalize_internal_trade_source(internal_data.source_server)
+    header_source_server = _normalize_internal_trade_source(raw_request.headers.get("x-source-server"))
     if not verify_internal_signature(
         body,
         raw_request.headers.get("x-timestamp"),
         raw_request.headers.get("x-signature"),
         raw_request.headers.get("x-api-key"),
     ):
+        logger.warning(
+            "trade_internal_execute.rejected",
+            extra={
+                "reason": "bad_signature",
+                "source_server": payload_source_server or header_source_server,
+                "target_server": target_server,
+                "offer_id": internal_data.offer_id,
+                "status_code": status.HTTP_401_UNAUTHORIZED,
+            },
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade signature")
 
+    if (
+        not payload_source_server
+        or not header_source_server
+        or payload_source_server != header_source_server
+        or payload_source_server == target_server
+    ):
+        logger.warning(
+            "trade_internal_execute.rejected",
+            extra={
+                "reason": "invalid_source_server",
+                "source_server": payload_source_server or header_source_server,
+                "target_server": target_server,
+                "offer_id": internal_data.offer_id,
+                "status_code": status.HTTP_401_UNAUTHORIZED,
+            },
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade source")
+
     offer = await db.get(Offer, internal_data.offer_id)
-    if offer and normalize_server(offer.home_server) != current_server():
+    if offer and normalize_server(offer.home_server) != target_server:
+        logger.warning(
+            "trade_internal_execute.rejected",
+            extra={
+                "reason": "wrong_authoritative_server",
+                "source_server": payload_source_server,
+                "target_server": target_server,
+                "offer_id": internal_data.offer_id,
+                "status_code": status.HTTP_409_CONFLICT,
+            },
+        )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع آفر نیست.")
 
     responder = await db.get(User, internal_data.responder_user_id)
     if not responder or responder.is_deleted:
+        logger.warning(
+            "trade_internal_execute.rejected",
+            extra={
+                "reason": "missing_responder",
+                "source_server": payload_source_server,
+                "target_server": target_server,
+                "offer_id": internal_data.offer_id,
+                "status_code": status.HTTP_404_NOT_FOUND,
+            },
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر درخواست‌دهنده یافت نشد")
 
     actor_user = responder
     if internal_data.actor_user_id and internal_data.actor_user_id != responder.id:
         actor_user = await db.get(User, internal_data.actor_user_id)
         if not actor_user or actor_user.is_deleted:
+            logger.warning(
+                "trade_internal_execute.rejected",
+                extra={
+                    "reason": "missing_actor",
+                    "source_server": payload_source_server,
+                    "target_server": target_server,
+                    "offer_id": internal_data.offer_id,
+                    "status_code": status.HTTP_404_NOT_FOUND,
+                },
+            )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر اجراکننده یافت نشد")
 
     return await _execute_trade_authoritatively(

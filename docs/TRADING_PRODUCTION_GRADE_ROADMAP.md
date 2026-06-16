@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG3` complete on `candidate/trading-production-grade`; `TG4` is next.
+Status: `TG4` complete on `candidate/trading-production-grade`; `TG5` is next.
 
 Last updated: 2026-06-16
 
@@ -267,6 +267,26 @@ Acceptance:
   authoritative server, and idempotent remote retry.
 - Structured logs identify source/target server and offer id without exposing
   tokens, signatures, or mobile numbers.
+
+Completion notes:
+
+- Added env-controlled trade-forward TLS verification through
+  `TRADE_FORWARD_VERIFY_TLS` and optional `TRADE_FORWARD_CA_BUNDLE`, while
+  preserving the current default behavior until internal certificates are
+  promoted.
+- Added redacted structured logs for unavailable peers, timeouts, request
+  errors, invalid upstream JSON, remote 5xx responses, and rejected internal
+  trade execution attempts.
+- Hardened `/api/trades/internal/execute` so payload and `X-Source-Server`
+  must resolve to the same known remote server and cannot equal the local
+  authoritative target.
+- Kept remote timeout/503/504 responses as forwarded responses before local
+  authoritative execution, preventing local partial state when the authoritative
+  peer is unavailable.
+- Added focused coverage for both Iran-to-foreign and foreign-to-Iran
+  forwarding, TLS verify options, bad signature/source checks, wrong
+  authoritative server rejection, redacted logs, and idempotent remote retry
+  payload preservation.
 
 ## Stage TG5 - Offer Lifecycle Consistency
 
