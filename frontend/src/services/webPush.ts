@@ -29,6 +29,10 @@ export interface WebPushTestResult {
   disabled: number
 }
 
+export interface NotificationPreferences {
+  market_offer_push_enabled: boolean
+}
+
 function hasWindowRuntime(): boolean {
   return typeof window !== 'undefined' && typeof navigator !== 'undefined'
 }
@@ -231,6 +235,27 @@ export async function sendWebPushTestNotification(): Promise<WebPushTestResult> 
   const response = await apiFetch('/api/notifications/push/test', { method: 'POST' })
   if (!response.ok) {
     throw new Error('push_test_failed')
+  }
+  return response.json()
+}
+
+export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
+  const response = await apiFetch('/api/notifications/preferences')
+  if (!response.ok) {
+    throw new Error('notification_preferences_unavailable')
+  }
+  return response.json()
+}
+
+export async function updateNotificationPreferences(
+  preferences: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  const response = await apiFetch('/api/notifications/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(preferences),
+  })
+  if (!response.ok) {
+    throw new Error('notification_preferences_update_failed')
   }
   return response.json()
 }

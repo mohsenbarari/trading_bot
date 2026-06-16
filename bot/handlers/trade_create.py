@@ -712,6 +712,13 @@ async def _handle_trade_confirm_core(
 
         await incr_active_offer_count(user.id)
 
+        try:
+            from core.web_push import schedule_market_offer_web_push
+
+            schedule_market_offer_web_push(offer_id)
+        except Exception as push_error:
+            logger.warning(f"Market offer Web Push schedule error: {push_error}")
+
         await callback.message.edit_text(success_message_text, parse_mode="Markdown")
         await bot.send_message(
             chat_id=callback.from_user.id,
@@ -1123,4 +1130,3 @@ async def handle_text_offer_cancel(callback: types.CallbackQuery, state: FSMCont
     await callback.message.edit_text("❌ لفظ لغو شد.")
     await state.clear()
     await callback.answer()
-

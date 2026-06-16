@@ -88,7 +88,7 @@ Rules:
 
 | Branch | Intent | Main promotion |
 |---|---|---|
-| `candidate/trading-production-grade` | Production-grade trade/offer hardening validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
+| `candidate/trading-production-grade` | Production-grade trade/offer hardening and market notification work validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
 | `candidate/web-push-notifications` | Web Push notification work that should be merged to `main` only at the correct release point after staging validation and explicit approval. | Allowed after approval |
 | `staging/user-switcher` | Staging-only user-switcher/reference branch. | Not allowed |
 | `staging/web-push-user-switcher` | Active staging branch for Web Push/user-switcher validation and staging guardrail work. | Not allowed as-is; promote through `candidate/*` only if explicitly approved |
@@ -125,4 +125,5 @@ For production-grade application changes:
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-06-16 | Codex | Updated the `candidate/trading-production-grade` registry entry to include market notification work after Web Push and market-offer push changes moved onto that production-candidate branch for staging validation. |
 | 2026-06-16 | Codex | Added the staging guardrail document to `candidate/trading-production-grade` so the production-grade trading roadmap can proceed from a compliant candidate branch instead of a staging-only branch. |

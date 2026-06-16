@@ -12,6 +12,7 @@ import json
 from core.db import get_db
 from models.notification import Notification
 from models.push_subscription import PushSubscription
+from models.user_notification_preference import UserNotificationPreference
 from models.user import User
 from api.deps import get_current_user
 
@@ -82,10 +83,28 @@ class PushTestResponse(BaseModel):
     disabled: int
 
 
+class NotificationPreferencesRead(BaseModel):
+    market_offer_push_enabled: bool = True
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    market_offer_push_enabled: bool
+
+
 def _normalize_notification_pagination(limit: int | None, offset: int) -> tuple[int | None, int]:
     normalized_limit = limit if isinstance(limit, int) else None
     normalized_offset = offset if isinstance(offset, int) else 0
     return normalized_limit, normalized_offset
+
+
+async def _load_user_notification_preferences(
+    db: AsyncSession,
+    user_id: int,
+) -> UserNotificationPreference | None:
+    result = await db.execute(
+        select(UserNotificationPreference).where(UserNotificationPreference.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
 
 
 async def sync_unread_count(db: AsyncSession, redis: Redis, user_id: int) -> int:
@@ -196,6 +215,38 @@ async def send_test_push_notification(
         data={"kind": "push_test"},
     )
     return await send_web_push_to_user(db, current_user.id, payload)
+
+
+@router.get("/preferences", response_model=NotificationPreferencesRead)
+async def get_notification_preferences(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    preferences = await _load_user_notification_preferences(db, current_user.id)
+    if preferences is None:
+        return NotificationPreferencesRead()
+    return NotificationPreferencesRead(
+        market_offer_push_enabled=bool(preferences.market_offer_push_enabled)
+    )
+
+
+@router.patch("/preferences", response_model=NotificationPreferencesRead)
+async def update_notification_preferences(
+    payload: NotificationPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    preferences = await _load_user_notification_preferences(db, current_user.id)
+    if preferences is None:
+        preferences = UserNotificationPreference(user_id=current_user.id)
+        db.add(preferences)
+
+    preferences.market_offer_push_enabled = payload.market_offer_push_enabled
+    await db.commit()
+    await db.refresh(preferences)
+    return NotificationPreferencesRead(
+        market_offer_push_enabled=bool(preferences.market_offer_push_enabled)
+    )
 
 @router.get("/unread", response_model=List[NotificationRead])
 async def get_unread_notifications(

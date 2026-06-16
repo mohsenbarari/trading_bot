@@ -35,6 +35,7 @@ Iran is identical but **no bot service**. Nginx proxies `/api/` → backend, `/`
 - **messages**: id, sender_id, receiver_id, reply_to_message_id, forwarded_from_id, content, message_type (text/image/sticker), is_read, is_deleted, edit_history (JSON)
 - **conversations**: id, user1_id (smaller), user2_id (larger), last_message_id, unread_count_user1/2
 - **notifications**: id, user_id, message, is_read, level (INFO/SUCCESS/WARNING/ERROR), category (SYSTEM/USER/TRADE)
+- **push_subscriptions** + **user_notification_preferences**: Web Push endpoint/key storage plus per-user toggles such as market-offer push enablement
 - **commodities** + **commodity_aliases**: name/alias with cascade delete
 - **user_blocks**: blocker_id, blocked_id (unidirectional data, bidirectional logic)
 - **chat_files**: UUID pk, uploader_id, s3_key (disk path), file_name, mime_type, size, thumbnail (base64)
@@ -54,7 +55,7 @@ Iran is identical but **no bot service**. Nginx proxies `/api/` → backend, `/`
 ### Offers (`/api/offers`): CRUD + /parse (NLP). Creates Telegram channel messages
 ### Trades (`/api/trades`): POST (execute on offer with FOR UPDATE lock), GET my/with/{user_id}
 ### Chat (`/api/chat`): conversations, messages, send, edit (48h), delete (48h), upload-image, files/{id}, stickers, typing, read, poll
-### Notifications (`/api/notifications`): CRUD + SSE stream
+### Notifications (`/api/notifications`): CRUD + SSE stream + Web Push subscription/test + per-user preferences
 ### Blocks (`/api/blocks`): block/unblock/check/search
 ### Realtime (`/api/realtime`): WebSocket + SSE via Redis pub/sub
 ### Sync (`/api/sync/receive`): HMAC-signed cross-server sync
@@ -202,6 +203,7 @@ make status      # Container status
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-06-16 16:09 UTC | Codex | **Market Offer Web Push Notifications Added**: Merged the Web Push candidate foundation into `candidate/trading-production-grade`, added `user_notification_preferences` for per-user market-offer push enablement, wired successful new offer creation from the web market and bot flow to best-effort background Web Push delivery for active subscribed users who have not muted market offers, and added a compact MarketView header bell toggle beside the market filter chips. Added backend/frontend focused tests for market payloads, recipient filtering, preference endpoints, and the UI toggle. Production deploy was not run. |
 | 2026-06-16 15:59 UTC | Codex | **Trading Production Contract Matrix Added**: Completed `TG1` on `candidate/trading-production-grade` by adding `tests/test_trading_production_contract_matrix.py` as an executable contract matrix for the money path before runtime refactors. The new tests map trading invariants to focused backend coverage and directly assert model safety constraints, idempotent replay without offer mutation or extra commit, and remote-home forwarding with delegated actor context preserved. Also isolated a server-routing test from machine env aliases so cross-server authority coverage is deterministic. Updated `docs/TRADING_PRODUCTION_GRADE_ROADMAP.md` to mark `TG1` complete and `TG2` next. No production deploy, benchmark, or data mutation was performed. |
 | 2026-06-16 15:46 UTC | Codex | **Trading Production-Grade Roadmap Started**: Created the `candidate/trading-production-grade` branch from `main`, added `.github/staging-instructions.md` to this candidate because `main` did not yet contain the dedicated staging guardrail file, restored explicit branch naming/promotion rules in this instruction file, and added `docs/TRADING_PRODUCTION_GRADE_ROADMAP.md` as the staged contract for hardening offers, trade execution, customer/accountant mediation, cross-server authority, market mutation UX, observability, staging validation, and final promotion review. No runtime behavior or production deploy was changed. |
 | 2026-06-15 15:38 UTC | Codex | **Production Release Iran DB Env Scope Restored**: Followed up the Iran seed repair after the first compose-based exec refactor still failed with `POSTGRES_USER: unbound variable` because the `psql`/`pg_dump` calls were being expanded by the remote shell instead of the container shell. Adjusted `scripts/production_deploy_online.sh` so Iran database backup, shared-table reset, and seed-generated backlog marking again run through `docker-compose.iran.yml exec -T db sh -lc ...`, which preserves the container-provided Postgres environment while still avoiding any hard-coded container name. Revalidated the script syntax so the release flow can finish on fresh Iran hosts. |

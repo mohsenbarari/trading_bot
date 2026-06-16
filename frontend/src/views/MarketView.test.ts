@@ -213,7 +213,13 @@ describe('MarketView.vue', () => {
     marketViewMocks.apiFetchJsonMock.mockReset()
     marketViewMocks.wsHandlers.clear()
 
-    marketViewMocks.apiFetchMock.mockImplementation(async (path: string) => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') {
+        return responseOf({ market_offer_push_enabled: true })
+      }
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
       if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
@@ -267,6 +273,7 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/')
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trading-settings/market-state')
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/notifications/preferences')
     expect(wrapper.find('.offers-count').text()).toBe('1')
     expect(wrapper.find('.offers-expiry').text()).toBe('45')
     expect(wrapper.find('.offers-user-id').text()).toBe('77')
@@ -279,6 +286,8 @@ describe('MarketView.vue', () => {
     expect(wrapper.find('.text-offer-input').attributes('aria-label')).toBe('متن لفظ بازار')
     expect(wrapper.find('.send-btn').attributes('aria-label')).toBe('ارسال لفظ برای پیش‌نمایش')
     expect(wrapper.find('.send-btn').classes()).toContain('ui-icon-button--neutral')
+    expect(wrapper.find('.market-notification-toggle').attributes('aria-label')).toBe('خاموش کردن اعلان آفرهای بازار')
+    expect(wrapper.find('.market-notification-toggle').attributes('aria-pressed')).toBe('true')
 
     marketViewMocks.fetchOffersMock.mockClear()
     await wrapper.find('.emit-trade-completed').trigger('click')
@@ -288,6 +297,28 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.stopPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.clearBackStackMock).toHaveBeenCalled()
   }, 15000)
+
+  it('toggles market offer notification preference from the header icon', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+
+    const toggle = wrapper.get('.market-notification-toggle')
+    expect(toggle.attributes('aria-pressed')).toBe('true')
+
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/notifications/preferences', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ market_offer_push_enabled: false }),
+    }))
+    expect(wrapper.get('.market-notification-toggle').attributes('aria-label')).toBe('روشن کردن اعلان آفرهای بازار')
+    expect(wrapper.get('.market-notification-toggle').attributes('aria-pressed')).toBe('false')
+    expect(wrapper.get('.market-notification-toggle').classes()).toContain('market-notification-toggle--muted')
+
+    wrapper.unmount()
+  })
 
   it('supports keyboard navigation across market filter tabs', async () => {
     const wrapper = await mountMarketView()

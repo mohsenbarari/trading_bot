@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
@@ -131,6 +131,48 @@ def build_notification_push_payload(
     )
 
 
+def _enum_value(value: Any) -> str:
+    if hasattr(value, "value"):
+        value = getattr(value, "value")
+    return str(value or "").strip()
+
+
+def _format_market_number(value: Any) -> str:
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return str(value or "")
+
+
+def build_market_offer_push_payload(offer: Any) -> dict[str, Any]:
+    offer_type = _enum_value(getattr(offer, "offer_type", "")).lower()
+    type_label = "خرید" if offer_type == "buy" else "فروش"
+    commodity = getattr(offer, "commodity", None)
+    commodity_name = getattr(commodity, "name", None) or "کالا"
+    quantity = getattr(offer, "quantity", None)
+    price = getattr(offer, "price", None)
+
+    body = f"{type_label} {commodity_name}"
+    if quantity is not None:
+        body += f"، {_format_market_number(quantity)} عدد"
+    if price is not None:
+        body += f"، قیمت {_format_market_number(price)}"
+
+    return build_push_payload(
+        title="آفر جدید بازار",
+        body=body,
+        route="/market",
+        tag=f"market-offer:{getattr(offer, 'id', 'new')}",
+        data={
+            "kind": "market_offer",
+            "offer_id": getattr(offer, "id", None),
+            "offer_type": offer_type,
+            "commodity_id": getattr(offer, "commodity_id", None),
+            "commodity_name": commodity_name,
+        },
+    )
+
+
 def _subscription_info(subscription: PushSubscription) -> dict[str, Any]:
     return {
         "endpoint": subscription.endpoint,
@@ -218,6 +260,89 @@ async def send_web_push_to_user(
 
     await db.commit()
     return {"total": len(subscriptions), "sent": sent, "failed": failed, "disabled": disabled}
+
+
+async def load_market_offer_push_target_user_ids(
+    db: AsyncSession,
+    excluded_user_ids: set[int] | None = None,
+) -> list[int]:
+    from core.enums import UserAccountStatus
+    from models.user import User
+    from models.user_notification_preference import UserNotificationPreference
+
+    query = (
+        select(User.id)
+        .join(PushSubscription, PushSubscription.user_id == User.id)
+        .outerjoin(UserNotificationPreference, UserNotificationPreference.user_id == User.id)
+        .where(
+            PushSubscription.enabled == True,
+            User.account_status == UserAccountStatus.ACTIVE,
+            or_(User.is_deleted == False, User.is_deleted.is_(None)),
+            or_(
+                UserNotificationPreference.id.is_(None),
+                UserNotificationPreference.market_offer_push_enabled == True,
+            ),
+        )
+        .distinct()
+    )
+    excluded = {int(user_id) for user_id in (excluded_user_ids or set()) if user_id is not None}
+    if excluded:
+        query = query.where(~User.id.in_(excluded))
+
+    result = await db.execute(query)
+    return [int(user_id) for user_id in result.scalars().all()]
+
+
+async def send_market_offer_web_push(offer_id: int) -> None:
+    if not is_web_push_configured():
+        return
+
+    from core.db import AsyncSessionLocal
+    from models.offer import Offer
+    from sqlalchemy.orm import selectinload
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Offer).options(selectinload(Offer.commodity)).where(Offer.id == offer_id)
+        )
+        offer = result.scalar_one_or_none()
+        if offer is None:
+            return
+
+        excluded_user_ids = {
+            getattr(offer, "user_id", None),
+            getattr(offer, "actor_user_id", None),
+        }
+        target_user_ids = await load_market_offer_push_target_user_ids(db, excluded_user_ids)
+        if not target_user_ids:
+            return
+
+        payload = build_market_offer_push_payload(offer)
+        for user_id in target_user_ids:
+            await send_web_push_to_user(db, user_id, payload)
+
+
+def schedule_market_offer_web_push(offer_id: int) -> None:
+    if not is_web_push_configured():
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    task = loop.create_task(send_market_offer_web_push(offer_id))
+
+    def _log_task_error(done_task: asyncio.Task) -> None:
+        try:
+            done_task.result()
+        except Exception:
+            logger.exception(
+                "Market offer Web Push background delivery task failed",
+                extra={"event": "web_push.market_offer_task_failed", "offer_id": offer_id},
+            )
+
+    task.add_done_callback(_log_task_error)
 
 
 async def send_notification_web_push(

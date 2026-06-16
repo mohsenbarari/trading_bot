@@ -565,6 +565,13 @@ async def create_offer(
         "original_lot_sizes": new_offer.original_lot_sizes,
         "expires_at_ts": sse_expires_at_ts,
     })
+
+    try:
+        from core.web_push import schedule_market_offer_web_push
+
+        schedule_market_offer_web_push(new_offer.id)
+    except Exception as e:
+        logger.warning(f"Market offer Web Push schedule error: {e}")
     
     return offer_to_response(new_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
 

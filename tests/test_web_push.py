@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from core import web_push
@@ -46,6 +47,56 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["body"], "پیام تست")
         self.assertEqual(payload["route"], "/notifications")
         self.assertEqual(payload["data"]["notification_id"], 12)
+
+    def test_market_offer_payload_routes_to_market_without_owner_identity(self):
+        offer = SimpleNamespace(
+            id=42,
+            offer_type=SimpleNamespace(value="buy"),
+            commodity_id=3,
+            commodity=SimpleNamespace(name="سکه"),
+            quantity=12,
+            price=345678,
+        )
+
+        payload = web_push.build_market_offer_push_payload(offer)
+
+        self.assertEqual(payload["title"], "آفر جدید بازار")
+        self.assertEqual(payload["route"], "/market")
+        self.assertEqual(payload["tag"], "market-offer:42")
+        self.assertEqual(payload["data"]["kind"], "market_offer")
+        self.assertEqual(payload["data"]["offer_id"], 42)
+        self.assertEqual(payload["data"]["offer_type"], "buy")
+        self.assertEqual(payload["data"]["commodity_id"], 3)
+        self.assertEqual(payload["data"]["commodity_name"], "سکه")
+        self.assertIn("خرید سکه", payload["body"])
+        self.assertIn("12", payload["body"])
+        self.assertNotIn("091", repr(payload))
+
+    async def test_market_offer_targets_require_enabled_subscription_and_preference(self):
+        class FakeExecuteResult:
+            def scalars(self):
+                return SimpleNamespace(all=lambda: [2, 3])
+
+        class FakeDB:
+            def __init__(self):
+                self.statement = None
+
+            async def execute(self, stmt):
+                self.statement = stmt
+                return FakeExecuteResult()
+
+        db = FakeDB()
+        target_user_ids = await web_push.load_market_offer_push_target_user_ids(
+            db,
+            excluded_user_ids={1, 4},
+        )
+
+        self.assertEqual(target_user_ids, [2, 3])
+        compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("push_subscriptions", compiled)
+        self.assertIn("user_notification_preferences", compiled)
+        self.assertIn("market_offer_push_enabled", compiled)
+        self.assertIn("users.id NOT IN", compiled)
 
     async def test_send_returns_zero_summary_when_unconfigured(self):
         with patch.object(web_push, "is_web_push_configured", return_value=False):
