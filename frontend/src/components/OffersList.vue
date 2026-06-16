@@ -3,6 +3,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
+import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
 
 interface TradeLotSuggestionState {
@@ -39,6 +40,7 @@ const tradingAmount = ref<number | null>(null);
 const tradeError = ref('');
 const tradeSuggestion = ref<TradeLotSuggestionState | null>(null);
 const cancelingOfferId = ref<number | null>(null);
+const tradeIdempotencyKeys = new Map<string, string>();
 
 // Confirmation state (double-tap like Telegram)
 const pendingConfirm = ref<string | null>(null); // "offerId:amount"
@@ -154,8 +156,69 @@ function isOwnOffer(offer: any): boolean {
   return props.currentUserId ? offer.user_id === props.currentUserId : false;
 }
 
+function createMutationIdempotencyKey(prefix: string): string {
+  const randomPart = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}:${randomPart}`.slice(0, 64);
+}
+
+function tradeKeyFor(offerId: number, quantity: number): string {
+  return `${offerId}:${quantity}`;
+}
+
+function getTradeIdempotencyKey(offerId: number, quantity: number): string {
+  const key = tradeKeyFor(offerId, quantity);
+  const existing = tradeIdempotencyKeys.get(key);
+  if (existing) return existing;
+  const next = createMutationIdempotencyKey('trade');
+  tradeIdempotencyKeys.set(key, next);
+  return next;
+}
+
+function clearTradeIdempotencyKey(offerId: number, quantity: number) {
+  tradeIdempotencyKeys.delete(tradeKeyFor(offerId, quantity));
+}
+
+function pruneTradeIdempotencyKeys() {
+  const activeOfferIds = new Set((Array.isArray(props.offers) ? props.offers : []).map((offer: any) => Number(offer.id)));
+  for (const key of tradeIdempotencyKeys.keys()) {
+    const offerId = Number(key.split(':')[0]);
+    if (!activeOfferIds.has(offerId)) {
+      tradeIdempotencyKeys.delete(key);
+    }
+  }
+}
+
+function isRetryableMutationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const normalized = message.toLowerCase();
+  return message === 'NetworkError'
+    || normalized.includes('network')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('load failed')
+    || normalized.includes('سرور در دسترس نیست');
+}
+
+async function readMarketMutationErrorMessage(response: Response, payload: any, fallbackMessage: string): Promise<string> {
+  const error = await createHttpErrorFromResponse(response, {
+    surface: 'market',
+    scope: 'action',
+    operation: 'submit',
+    userInitiated: true,
+    fallbackMessage,
+  }, payload);
+  return getUserFacingErrorMessage(error, {
+    surface: 'market',
+    scope: 'action',
+    operation: 'submit',
+    userInitiated: true,
+    fallbackMessage,
+  });
+}
+
 // --- Trade execution with double-tap confirm ---
 function handleLotClick(offerId: number, amount: number) {
+  if (tradingOfferId.value !== null) return;
   const key = `${offerId}:${amount}`;
   
   if (pendingConfirm.value === key) {
@@ -241,7 +304,10 @@ function syncTradeSuggestionFromOffers() {
   };
 }
 
-watch(() => props.offers, () => syncTradeSuggestionFromOffers(), { deep: true });
+watch(() => props.offers, () => {
+  syncTradeSuggestionFromOffers();
+  pruneTradeIdempotencyKeys();
+}, { deep: true });
 watch(now, () => {
   if (tradeSuggestion.value?.expiresAtTs && tradeSuggestion.value.expiresAtTs <= now.value) {
     closeTradeSuggestion();
@@ -249,15 +315,18 @@ watch(now, () => {
 });
 
 async function executeTrade(offerId: number, quantity: number) {
+  if (tradingOfferId.value !== null) return;
   tradingOfferId.value = offerId;
   tradingAmount.value = quantity;
   tradeError.value = '';
+  const idempotencyKey = getTradeIdempotencyKey(offerId, quantity);
   
   try {
     const response = await apiFetch('/api/trades/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ offer_id: offerId, quantity })
+      body: JSON.stringify({ offer_id: offerId, quantity, idempotency_key: idempotencyKey }),
+      retryNetwork: false,
     });
     
     let data: any = null;
@@ -269,17 +338,31 @@ async function executeTrade(offerId: number, quantity: number) {
 
     if (response.ok) {
       tradeSuggestion.value = null;
+      clearTradeIdempotencyKey(offerId, quantity);
       emit('trade-completed');
     } else {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
         tradeSuggestion.value = createTradeSuggestionState(data);
+        clearTradeIdempotencyKey(offerId, quantity);
         return;
       }
-      tradeError.value = data?.detail || 'خطا در انجام معامله';
+      tradeError.value = await readMarketMutationErrorMessage(response as Response, data, 'خطا در انجام معامله');
+      clearTradeIdempotencyKey(offerId, quantity);
       setTimeout(() => tradeError.value = '', 5000);
     }
   } catch (e: any) {
-    tradeError.value = e.message || 'خطا در ارتباط با سرور';
+    tradeError.value = isRetryableMutationError(e)
+      ? 'ارتباط با سرور قطع شد. اگر معامله ثبت شده باشد، تکرار همین درخواست معامله دوم نمی‌سازد.'
+      : getUserFacingErrorMessage(e, {
+          surface: 'market',
+          scope: 'action',
+          operation: 'submit',
+          userInitiated: true,
+          fallbackMessage: 'خطا در ارتباط با سرور',
+        });
+    if (!isRetryableMutationError(e)) {
+      clearTradeIdempotencyKey(offerId, quantity);
+    }
     setTimeout(() => tradeError.value = '', 5000);
   } finally {
     tradingOfferId.value = null;
@@ -292,19 +375,28 @@ function closeTradeSuggestion() {
 }
 
 async function cancelOwnOffer(offerId: number) {
+  if (cancelingOfferId.value !== null) return;
   cancelingOfferId.value = offerId;
   tradeError.value = '';
   try {
-    const response = await apiFetch(`/api/offers/${offerId}`, { method: 'DELETE' });
+    const response = await apiFetch(`/api/offers/${offerId}`, { method: 'DELETE', retryNetwork: false });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
-      tradeError.value = data?.detail || 'خطا در منقضی کردن لفظ';
+      tradeError.value = await readMarketMutationErrorMessage(response as Response, data, 'خطا در منقضی کردن لفظ');
       setTimeout(() => tradeError.value = '', 5000);
     } else {
       emit('trade-completed');
     }
   } catch (e: any) {
-    tradeError.value = e.message || 'خطا در ارتباط با سرور';
+    tradeError.value = isRetryableMutationError(e)
+      ? 'ارتباط با سرور قطع شد. وضعیت لفظ را چند لحظه بعد بررسی کنید.'
+      : getUserFacingErrorMessage(e, {
+          surface: 'market',
+          scope: 'action',
+          operation: 'delete',
+          userInitiated: true,
+          fallbackMessage: 'خطا در ارتباط با سرور',
+        });
     setTimeout(() => tradeError.value = '', 5000);
   } finally {
     cancelingOfferId.value = null;

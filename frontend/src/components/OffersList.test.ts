@@ -168,8 +168,115 @@ describe('OffersList.vue', () => {
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/trades/', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ offer_id: 9, quantity: 25 }),
+      retryNetwork: false,
     }))
+    expect(JSON.parse(String(apiFetchMock.mock.calls[0]![1].body))).toEqual({
+      offer_id: 9,
+      quantity: 25,
+      idempotency_key: expect.any(String),
+    })
+    expect(wrapper.emitted('trade-completed')).toHaveLength(1)
+
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('locks trade execution during an in-flight request and does not duplicate rapid taps', async () => {
+    vi.useFakeTimers()
+    let resolveTrade: ((value: any) => void) | null = null
+    apiFetchMock.mockImplementation(() => new Promise((resolve) => {
+      resolveTrade = resolve
+    }))
+
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 19,
+          user_id: 15,
+          offer_type: 'sell',
+          commodity_name: 'سکه',
+          quantity: 10,
+          remaining_quantity: 10,
+          price: 52000,
+          viewer_effective_price: 52000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+        },
+      ],
+    })
+
+    const tradeButton = wrapper.get('.trade-btn')
+    await tradeButton.trigger('click')
+    await tradeButton.trigger('click')
+    await tradeButton.trigger('click')
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/trades/', expect.objectContaining({
+      method: 'POST',
+      retryNetwork: false,
+    }))
+
+    if (!resolveTrade) {
+      throw new Error('Expected pending trade resolver')
+    }
+    ;(resolveTrade as (value: any) => void)({ ok: true, json: async () => ({}) })
+    await flushPromises()
+
+    expect(wrapper.emitted('trade-completed')).toHaveLength(1)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('keeps the same trade idempotency key after an ambiguous network failure retry', async () => {
+    vi.useFakeTimers()
+    apiFetchMock
+      .mockRejectedValueOnce(new Error('NetworkError'))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 29,
+          user_id: 15,
+          offer_type: 'sell',
+          commodity_name: 'سکه',
+          quantity: 10,
+          remaining_quantity: 10,
+          price: 52000,
+          viewer_effective_price: 52000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+          status: 'active',
+        },
+      ],
+    })
+
+    const tradeButton = () => wrapper.get('.trade-btn')
+    await tradeButton().trigger('click')
+    await tradeButton().trigger('click')
+    await flushPromises()
+
+    const firstBody = JSON.parse(String(apiFetchMock.mock.calls[0]![1].body))
+    expect(wrapper.text()).toContain('تکرار همین درخواست معامله دوم نمی‌سازد')
+
+    await tradeButton().trigger('click')
+    await tradeButton().trigger('click')
+    await flushPromises()
+
+    const secondBody = JSON.parse(String(apiFetchMock.mock.calls[1]![1].body))
+    expect(secondBody.idempotency_key).toBe(firstBody.idempotency_key)
     expect(wrapper.emitted('trade-completed')).toHaveLength(1)
 
     wrapper.unmount()
@@ -209,7 +316,7 @@ describe('OffersList.vue', () => {
     await wrapper.find('.cancel-own-offer-btn').trigger('click')
     await flushPromises()
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/offers/12', expect.objectContaining({ method: 'DELETE' }))
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/offers/12', expect.objectContaining({ method: 'DELETE', retryNetwork: false }))
     expect(wrapper.emitted('trade-completed')).toHaveLength(1)
   })
 
@@ -473,7 +580,7 @@ describe('OffersList.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.trade-suggestion-card').exists()).toBe(false)
-    expect(wrapper.text()).toContain('سرور در دسترس نیست')
+    expect(wrapper.text()).toContain('تکرار همین درخواست معامله دوم نمی‌سازد')
 
     wrapper.unmount()
     vi.useRealTimers()

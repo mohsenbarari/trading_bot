@@ -135,6 +135,7 @@ const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const republishedFromOfferId = ref<number | null>(null)
+const pendingOfferIdempotencyKey = ref<string | null>(null)
 const recentOffers = ref<RecentOfferSummary[]>([])
 const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
@@ -326,6 +327,19 @@ function buildOfferCreatePayload(offer: ParsedOfferPreview) {
   }
 }
 
+function createMutationIdempotencyKey(prefix: string) {
+  const randomPart = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+  return `${prefix}:${randomPart}`.slice(0, 64)
+}
+
+function getPendingOfferIdempotencyKey() {
+  if (!pendingOfferIdempotencyKey.value) {
+    pendingOfferIdempotencyKey.value = createMutationIdempotencyKey('offer')
+  }
+  return pendingOfferIdempotencyKey.value
+}
+
 function getRecentOfferRepublishQuantity(offer: RecentOfferSummary) {
   if (offer.status === 'active' && offer.remaining_quantity > 0) {
     return offer.remaining_quantity
@@ -500,6 +514,7 @@ function toggleRecentOffersMenu() {
 
 function openRecentOfferPreview(offer: RecentOfferSummary) {
   republishedFromOfferId.value = offer.id
+  pendingOfferIdempotencyKey.value = null
   pendingOfferPreview.value = {
     trade_type: offer.offer_type,
     commodity_id: offer.commodity_id,
@@ -521,6 +536,7 @@ function cancelOfferPreview() {
   previewError.value = ''
   previewWarning.value = null
   republishedFromOfferId.value = null
+  pendingOfferIdempotencyKey.value = null
 }
 
 function focusOfferInput() {
@@ -547,6 +563,7 @@ function editPendingOfferPreview() {
 
 async function confirmOfferPreview() {
   if (!pendingOfferPreview.value) return
+  if (isSubmitting.value) return
   if (!isMarketOpen.value) {
     previewError.value = MARKET_CLOSED_DETAIL
     return
@@ -565,7 +582,9 @@ async function confirmOfferPreview() {
         ...buildOfferCreatePayload(pendingOfferPreview.value),
         republished_from_id: republishedFromOfferId.value,
         warning_acknowledged: !!previewWarning.value,
+        idempotency_key: getPendingOfferIdempotencyKey(),
       }),
+      retryNetwork: false,
     })
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}))
@@ -586,6 +605,7 @@ async function confirmOfferPreview() {
     pendingOfferPreview.value = null
     previewWarning.value = null
     republishedFromOfferId.value = null
+    pendingOfferIdempotencyKey.value = null
     fetchOffers()
     void fetchRecentOffers(true)
   } catch (e: any) {
@@ -602,6 +622,7 @@ async function confirmOfferPreview() {
 }
 
 function parseAndSubmitTextOffer() {
+  if (isSubmitting.value) return
   if (isTier2Customer.value) {
     parseError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
     return
@@ -616,6 +637,7 @@ function parseAndSubmitTextOffer() {
     return
   }
   republishedFromOfferId.value = null
+  pendingOfferIdempotencyKey.value = null
   isSubmitting.value = true
   parseError.value = ''
   previewError.value = ''
@@ -623,7 +645,8 @@ function parseAndSubmitTextOffer() {
   
   apiFetchJson('/api/offers/parse', {
       method: 'POST',
-      body: JSON.stringify({ text: offerText.value })
+      body: JSON.stringify({ text: offerText.value }),
+      retryNetwork: false,
     }, {
       surface: 'market',
       scope: 'field',
@@ -650,10 +673,11 @@ function parseAndSubmitTextOffer() {
 }
 
 async function cancelAllOffers() {
+  if (isSubmitting.value) return
   isSubmitting.value = true
   parseError.value = ''
   try {
-    const response = await apiFetch('/api/offers/cancel-all', { method: 'POST' })
+    const response = await apiFetch('/api/offers/cancel-all', { method: 'POST', retryNetwork: false })
     if (!response.ok) {
       throw await createHttpErrorFromResponse(response, {
         surface: 'market',
@@ -704,6 +728,7 @@ watch(isTier2Customer, (blocked) => {
   previewWarning.value = null
   previewError.value = ''
   republishedFromOfferId.value = null
+  pendingOfferIdempotencyKey.value = null
   closeRecentOffersMenu()
   recentOffers.value = []
 })

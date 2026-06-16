@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -83,6 +84,27 @@ def build_offer_read_options(*, include_owner_identity: bool):
     return tuple(options)
 
 
+async def _load_offer_idempotency_replay(
+    db: AsyncSession,
+    *,
+    owner_user_id: int,
+    idempotency_key: str | None,
+) -> Offer | None:
+    normalized_key = (idempotency_key or "").strip()
+    if not normalized_key:
+        return None
+
+    result = await db.execute(
+        select(Offer)
+        .options(*build_offer_read_options(include_owner_identity=True))
+        .where(
+            Offer.user_id == owner_user_id,
+            Offer.idempotency_key == normalized_key,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 router = APIRouter(
     tags=["Offers"],
 )
@@ -101,6 +123,7 @@ class OfferCreate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=200)
     republished_from_id: Optional[int] = Field(default=None, description="شناسه لفظ قدیمی برای تکرار")
     warning_acknowledged: bool = Field(default=False, description="آیا هشدار قیمت غیرعادی توسط کاربر تایید شده است")
+    idempotency_key: Optional[str] = Field(default=None, max_length=64, description="شناسه یکتای تلاش ثبت لفظ")
 
 
 class OfferResponse(BaseModel):
@@ -404,6 +427,18 @@ async def create_offer(
     _ensure_accountant_market_access_allowed(context)
     owner_user = context.owner_user
     actor_user = context.actor_user
+    idempotency_key = (offer_data.idempotency_key or "").strip() or None
+
+    existing_offer = await _load_offer_idempotency_replay(
+        db,
+        owner_user_id=owner_user.id,
+        idempotency_key=idempotency_key,
+    )
+    if existing_offer is not None:
+        from core.trading_settings import get_trading_settings_async
+
+        ts = await get_trading_settings_async()
+        return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -568,10 +603,25 @@ async def create_offer(
         lot_sizes=offer_data.lot_sizes,
         original_lot_sizes=offer_data.lot_sizes,  # ذخیره ترکیب اولیه برای تکرار
         notes=offer_data.notes,
+        idempotency_key=idempotency_key,
         status=OfferStatus.ACTIVE
     )
     db.add(new_offer)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing_offer = await _load_offer_idempotency_replay(
+            db,
+            owner_user_id=owner_user.id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_offer is None:
+            raise
+        from core.trading_settings import get_trading_settings_async
+
+        ts = await get_trading_settings_async()
+        return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
     await db.refresh(new_offer)
     
     # لینک کردن لفظ قدیمی به جدید

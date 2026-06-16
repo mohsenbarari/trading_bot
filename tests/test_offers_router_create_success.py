@@ -15,6 +15,9 @@ class FakeExecuteResult:
     def scalar_one(self):
         return self._value
 
+    def scalar_one_or_none(self):
+        return self._value
+
 
 class FakeDB:
     def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
@@ -22,6 +25,7 @@ class FakeDB:
         self.execute_results = list(execute_results or [])
         self.scalar_results = list(scalar_results or [])
         self.commit = AsyncMock()
+        self.rollback = AsyncMock()
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
 
@@ -188,6 +192,41 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 77, "user_id": 5})
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
+
+    async def test_create_offer_idempotent_replay_returns_existing_offer_without_side_effects(self):
+        existing_offer = make_reloaded_offer(offer_id=72)
+        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer)])
+        current_user = make_user()
+        async_settings = SimpleNamespace(offer_expiry_minutes=30)
+
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 72, "replayed": True},
+        ) as response_mock, patch(
+            "api.routers.offers.send_offer_to_channel",
+            new=AsyncMock(),
+        ) as channel_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock:
+            result = await create_offer(
+                make_offer(idempotency_key="offer-create-1"),
+                db=db,
+                context=make_context(current_user),
+            )
+
+        self.assertEqual(result, {"id": 72, "replayed": True})
+        self.assertEqual(db.added, [])
+        db.commit.assert_not_awaited()
+        db.refresh.assert_not_awaited()
+        channel_mock.assert_not_awaited()
+        publish_mock.assert_not_awaited()
+        counter_mock.assert_not_awaited()
+        self.register_market_offer_created_mock.assert_not_awaited()
+        response_mock.assert_called_once_with(existing_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
 
     async def test_create_offer_persists_channel_message_and_publishes_created_event(self):
         commodity = SimpleNamespace(id=1)

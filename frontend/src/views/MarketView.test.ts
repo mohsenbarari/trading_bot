@@ -355,6 +355,7 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.apiFetchJsonMock).toHaveBeenCalledWith('/api/offers/parse', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ text: 'خرید طلای آب‌شده 50 عدد 222222' }),
+      retryNetwork: false,
     }), expect.objectContaining({
       surface: 'market',
       scope: 'field',
@@ -367,21 +368,73 @@ describe('MarketView.vue', () => {
 
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({
-        offer_type: 'buy',
-        commodity_id: 2,
-        quantity: 50,
-        price: 222222,
-        is_wholesale: true,
-        lot_sizes: null,
-        notes: 'از متن بازار',
-        republished_from_id: null,
-        warning_acknowledged: false,
-      }),
+      retryNetwork: false,
     }))
+    expect(JSON.parse(String(marketViewMocks.apiFetchMock.mock.calls[0]![1].body))).toEqual({
+      offer_type: 'buy',
+      commodity_id: 2,
+      quantity: 50,
+      price: 222222,
+      is_wholesale: true,
+      lot_sizes: null,
+      notes: 'از متن بازار',
+      republished_from_id: null,
+      warning_acknowledged: false,
+      idempotency_key: expect.any(String),
+    })
     expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('')
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
 
+    wrapper.unmount()
+  })
+
+  it('locks offer publishing during in-flight confirmation and uses one stable idempotency key', async () => {
+    let resolvePost: ((value: any) => void) | null = null
+    marketViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/api/commodities/') return Promise.resolve(responseOf(commoditiesFixture))
+      if (path === '/api/trading-settings/') return Promise.resolve(responseOf(settingsFixture))
+      if (path === '/api/trading-settings/market-state') {
+        return Promise.resolve(responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        }))
+      }
+      if (path === '/api/auth/me') return Promise.resolve(responseOf({ id: 77, customer_tier: null }))
+      if (path === '/api/offers/' && options?.method === 'POST') {
+        return new Promise((resolve) => {
+          resolvePost = resolve
+        }) as Promise<any>
+      }
+      return Promise.resolve(responseOf(null))
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.text-offer-input').setValue('خرید طلای آب‌شده 50 عدد 222222')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    marketViewMocks.apiFetchMock.mockClear()
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCalls = marketViewMocks.apiFetchMock.mock.calls.filter(([path, options]) => path === '/api/offers/' && options?.method === 'POST')
+    expect(postCalls).toHaveLength(1)
+    expect(postCalls[0]![1]).toEqual(expect.objectContaining({ retryNetwork: false }))
+    expect(JSON.parse(String(postCalls[0]![1].body)).idempotency_key).toEqual(expect.any(String))
+
+    if (!resolvePost) {
+      throw new Error('Expected pending offer publish resolver')
+    }
+    ;(resolvePost as (value: any) => void)(responseOf({ success: true, id: 1001 }))
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -449,7 +502,9 @@ describe('MarketView.vue', () => {
       notes: null,
       republished_from_id: 92,
       warning_acknowledged: false,
+      idempotency_key: expect.any(String),
     })
+    expect(republishCall![1]).toEqual(expect.objectContaining({ retryNetwork: false }))
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalled()
 
     wrapper.unmount()
@@ -673,7 +728,9 @@ describe('MarketView.vue', () => {
       notes: '   ',
       republished_from_id: 93,
       warning_acknowledged: false,
+      idempotency_key: expect.any(String),
     })
+    expect(republishCall![1]).toEqual(expect.objectContaining({ retryNetwork: false }))
 
     wrapper.unmount()
   })
@@ -842,6 +899,7 @@ describe('MarketView.vue', () => {
     const postCalls = marketViewMocks.apiFetchMock.mock.calls.filter(([path, options]) => path === '/api/offers/' && options?.method === 'POST')
     expect(postCalls).toHaveLength(2)
     expect(JSON.parse(String(postCalls[1]![1].body)).warning_acknowledged).toBe(true)
+    expect(JSON.parse(String(postCalls[1]![1].body)).idempotency_key).toBe(JSON.parse(String(postCalls[0]![1].body)).idempotency_key)
 
     wrapper.unmount()
   })
@@ -1103,7 +1161,7 @@ describe('MarketView.vue', () => {
     await wrapper.find('.send-btn').trigger('click')
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/cancel-all', { method: 'POST' })
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/cancel-all', { method: 'POST', retryNetwork: false })
     expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('')
     expect(marketViewMocks.fetchOffersMock).toHaveBeenCalledTimes(1)
 

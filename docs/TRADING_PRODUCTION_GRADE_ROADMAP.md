@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG6` complete on `candidate/trading-production-grade`; `TG7` is next.
+Status: `TG7` complete on `candidate/trading-production-grade`; `TG8` is next.
 
 Last updated: 2026-06-16
 
@@ -92,7 +92,7 @@ targets:
 | `TG4` | Complete | Harden cross-server trade authority and failure semantics. |
 | `TG5` | Complete | Harden offer lifecycle consistency: create, republish, expire, cancel, active-count cache, and channel side effects. |
 | `TG6` | Complete | Harden customer/accountant economic semantics, commission snapshots, history visibility, and notification audiences. |
-| `TG7` | Pending | Harden frontend market mutation UX: submit locks, idempotency keys, conflict handling, and visible recovery states. |
+| `TG7` | Complete | Harden frontend market mutation UX: submit locks, idempotency keys, conflict handling, and visible recovery states. |
 | `TG8` | Pending | Add trading observability/audit signals and redacted structured logs. |
 | `TG9` | Pending | Run staging validation with isolated synthetic fixtures and no production sync. |
 | `TG10` | Pending | Run targeted benchmark/load proof only after TG1-TG9 pass; production run requires explicit user approval. |
@@ -396,6 +396,25 @@ Acceptance:
 
 - Focused Vitest and Playwright coverage for publish/execute conflict states.
 - No hidden duplicate request on rapid taps.
+
+Completion notes:
+
+- Offer publish now sends a stable mutation idempotency key, disables duplicate
+  in-flight submit attempts, opts out of unbounded global network retry, and
+  reuses the same key across warning-confirm retry paths.
+- Offer creation can replay an existing offer for the same owner/idempotency
+  key without repeating side effects, and handles insert-time uniqueness races
+  by rolling back and returning the existing offer response when present.
+- Trade execution buttons now lock while a trade mutation is in flight, attach
+  a stable idempotency key per offer/quantity tap, preserve that key after
+  ambiguous network failures, and clear it after success or deterministic
+  validation/conflict errors.
+- Market publish/cancel and trade execute mutations now request bounded
+  responses with `retryNetwork: false`, so user-visible mutation states do not
+  get trapped behind indefinite background retries.
+- Added focused backend, Vitest, and Playwright coverage for idempotent offer
+  replay, duplicate rapid taps, publish/trade conflict visibility, and stable
+  retry keys after ambiguous network failure.
 
 ## Stage TG8 - Observability And Audit
 
