@@ -4,6 +4,7 @@ API Router for Trade Management - MiniApp Integration
 """
 import logging
 import os
+import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
@@ -61,6 +62,9 @@ logger = logging.getLogger(__name__)
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
 TRADE_UNAVAILABLE_DETAIL = "امکان انجام این معامله وجود ندارد."
+TRADE_CONFLICT_DETAIL = "این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید."
+TRADE_NUMBER_ALLOCATION_LOCK_ID = 362_514_001
+TRADE_IDEMPOTENCY_LOCK_NAMESPACE = 362_514
 
 
 router = APIRouter(
@@ -77,6 +81,14 @@ def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> No
 
 
 class TradeExecutionPlanError(ValueError):
+    pass
+
+
+class TradeAtomicityError(ValueError):
+    pass
+
+
+class TradeIdempotencyConflictError(ValueError):
     pass
 
 
@@ -220,6 +232,145 @@ def _build_trade_execution_plan(
         user=owner_user,
     )
     return TradeExecutionPlan(nodes=tuple(nodes))
+
+
+def _db_dialect_name(db: AsyncSession | object) -> str | None:
+    get_bind = getattr(db, "get_bind", None)
+    bind = None
+    if callable(get_bind):
+        try:
+            bind = get_bind()
+        except Exception:
+            bind = None
+    if bind is None:
+        bind = getattr(db, "bind", None)
+    dialect = getattr(bind, "dialect", None)
+    dialect_name = getattr(dialect, "name", None)
+    return str(dialect_name).lower() if dialect_name else None
+
+
+def _stable_advisory_lock_id(value: str) -> int:
+    digest = hashlib.sha256(value.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
+async def _lock_trade_number_allocation(db: AsyncSession) -> bool:
+    if _db_dialect_name(db) != "postgresql":
+        return False
+    await db.execute(select(func.pg_advisory_xact_lock(TRADE_NUMBER_ALLOCATION_LOCK_ID)))
+    return True
+
+
+async def _lock_trade_idempotency_key(db: AsyncSession, idempotency_key: str | None) -> bool:
+    if not idempotency_key or _db_dialect_name(db) != "postgresql":
+        return False
+    await db.execute(
+        select(
+            func.pg_advisory_xact_lock(
+                TRADE_IDEMPOTENCY_LOCK_NAMESPACE,
+                _stable_advisory_lock_id(idempotency_key),
+            )
+        )
+    )
+    return True
+
+
+async def _allocate_next_trade_number(db: AsyncSession) -> int:
+    await _lock_trade_number_allocation(db)
+    max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
+    return (max_trade_number or 9999) + 1
+
+
+def _validate_idempotent_trade_replay(
+    *,
+    existing_trade: Trade | object,
+    offer: Offer | object,
+    owner_user: User | object,
+    actor_user: User | object,
+    trade_quantity: int,
+    expected_price: int,
+    uses_customer_trade_chain: bool,
+) -> None:
+    mismatches: list[str] = []
+
+    if hasattr(existing_trade, "offer_id"):
+        existing_offer_id = getattr(existing_trade, "offer_id", None)
+        if not uses_customer_trade_chain and existing_offer_id != getattr(offer, "id", None):
+            mismatches.append("offer_id")
+        if uses_customer_trade_chain and existing_offer_id not in (None, getattr(offer, "id", None)):
+            mismatches.append("chain_offer_id")
+
+    if hasattr(existing_trade, "offer_user_id") and not uses_customer_trade_chain:
+        if _coerce_trade_user_id(getattr(existing_trade, "offer_user_id", None)) != _coerce_trade_user_id(getattr(offer, "user_id", None)):
+            mismatches.append("offer_user_id")
+    if hasattr(existing_trade, "responder_user_id"):
+        if _coerce_trade_user_id(getattr(existing_trade, "responder_user_id", None)) != _coerce_trade_user_id(getattr(owner_user, "id", None)):
+            mismatches.append("responder_user_id")
+    if hasattr(existing_trade, "actor_user_id"):
+        existing_actor_user_id = _coerce_trade_user_id(getattr(existing_trade, "actor_user_id", None))
+        expected_actor_user_id = _coerce_trade_user_id(getattr(actor_user, "id", None))
+        if existing_actor_user_id is not None and existing_actor_user_id != expected_actor_user_id:
+            mismatches.append("actor_user_id")
+    if hasattr(existing_trade, "commodity_id") and getattr(existing_trade, "commodity_id", None) != getattr(offer, "commodity_id", None):
+        mismatches.append("commodity_id")
+    if hasattr(existing_trade, "quantity") and getattr(existing_trade, "quantity", None) != trade_quantity:
+        mismatches.append("quantity")
+    if hasattr(existing_trade, "price") and getattr(existing_trade, "price", None) != expected_price:
+        mismatches.append("price")
+
+    if mismatches:
+        raise TradeIdempotencyConflictError("کلید تکرار این معامله با درخواست فعلی همخوانی ندارد.")
+
+
+def _apply_offer_trade_mutation(offer: Offer | object, trade_quantity: int) -> bool:
+    offer.remaining_quantity -= trade_quantity
+    if offer.remaining_quantity < 0:
+        raise TradeAtomicityError("موجودی این لفظ برای انجام معامله کافی نیست.")
+
+    lot_sizes_modified = False
+    if offer.remaining_quantity <= 0:
+        if offer.lot_sizes is not None:
+            offer.lot_sizes = None
+            lot_sizes_modified = True
+        offer.status = OfferStatus.COMPLETED
+        return lot_sizes_modified
+
+    if offer.lot_sizes:
+        new_lot_sizes = list(offer.lot_sizes)
+        if not getattr(offer, "is_wholesale", False) and trade_quantity not in new_lot_sizes:
+            raise TradeAtomicityError("این لات دیگر موجود نیست.")
+        if trade_quantity in new_lot_sizes:
+            new_lot_sizes.remove(trade_quantity)
+            offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
+            lot_sizes_modified = True
+    return lot_sizes_modified
+
+
+def _is_stale_trade_commit_error(exc: Exception) -> bool:
+    return "StaleDataError" in str(type(exc).__name__) or "could not update" in str(exc).lower()
+
+
+def _is_trade_unique_constraint_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "unique" in text or "duplicate key" in text or "uniqueviolation" in str(type(exc).__name__).lower()
+
+
+async def _commit_trade_execution(db: AsyncSession) -> None:
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        if _is_stale_trade_commit_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=TRADE_CONFLICT_DETAIL,
+            ) from exc
+        if _is_trade_unique_constraint_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="این معامله قبلاً ثبت شده یا شماره معامله تکراری است. لطفاً وضعیت معاملات را بروزرسانی کنید.",
+            ) from exc
+        raise
 
 
 def _resolve_trade_participant_name(
@@ -1604,6 +1755,7 @@ async def _execute_trade_authoritatively(
     uses_customer_trade_chain = trade_execution_plan.uses_customer_trade_chain
 
     if trade_data.idempotency_key:
+        await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
         existing_trade = await db.execute(
             select(Trade)
             .options(
@@ -1615,6 +1767,21 @@ async def _execute_trade_authoritatively(
         )
         existing_trade_obj = existing_trade.scalar_one_or_none()
         if existing_trade_obj:
+            try:
+                _validate_idempotent_trade_replay(
+                    existing_trade=existing_trade_obj,
+                    offer=offer,
+                    owner_user=owner_user,
+                    actor_user=actor_user,
+                    trade_quantity=trade_quantity,
+                    expected_price=executed_trade_price,
+                    uses_customer_trade_chain=uses_customer_trade_chain,
+                )
+            except TradeIdempotencyConflictError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
             existing_identity_map = await _load_trade_identity_map_for_user_ids(
                 db,
                 [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
@@ -1630,8 +1797,7 @@ async def _execute_trade_authoritatively(
             )
     
     # گرفتن شماره معامله جدید
-    max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
-    next_trade_number = (max_trade_number or 9999) + 1
+    next_trade_number = await _allocate_next_trade_number(db)
     
     # نوع معامله از دید پاسخ‌دهنده
     responder_trade_type = TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL
@@ -1687,38 +1853,19 @@ async def _execute_trade_authoritatively(
 
     response_trade_number = response_trade_record.trade_number
     
-    # آپدیت لفظ
-    offer.remaining_quantity -= trade_quantity
-    
-    # بروزرسانی لات‌ها - حذف مقدار معامله شده از لیست
-    if offer.remaining_quantity <= 0:
-        if offer.lot_sizes is not None:
-            from sqlalchemy.orm.attributes import flag_modified
-            offer.lot_sizes = None
-            flag_modified(offer, "lot_sizes")
-    elif offer.lot_sizes:
+    try:
+        lot_sizes_modified = _apply_offer_trade_mutation(offer, trade_quantity)
+    except TradeAtomicityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if lot_sizes_modified:
         from sqlalchemy.orm.attributes import flag_modified
-        new_lot_sizes = list(offer.lot_sizes)
-        if trade_quantity in new_lot_sizes:
-            new_lot_sizes.remove(trade_quantity)
-        offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
         flag_modified(offer, "lot_sizes")  # اجبار SQLAlchemy برای تشخیص تغییر
     
-    if offer.remaining_quantity <= 0:
-        offer.status = OfferStatus.COMPLETED
-    
     # Commit با محافظت Optimistic Locking
-    try:
-        await db.commit()
-    except Exception as e:
-        # بررسی StaleDataError (تغییر همزمان توسط کاربر دیگر)
-        if "StaleDataError" in str(type(e).__name__) or "could not update" in str(e).lower():
-            await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید."
-            )
-        raise
+    await _commit_trade_execution(db)
     
     # بارگذاری روابط معامله
     result = await db.execute(

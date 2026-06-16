@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG2` complete on `candidate/trading-production-grade`; `TG3` is next.
+Status: `TG3` complete on `candidate/trading-production-grade`; `TG4` is next.
 
 Last updated: 2026-06-16
 
@@ -88,7 +88,7 @@ targets:
 | `TG0` | Complete | Branch safety, staging guardrails on this candidate branch, trading audit, and roadmap. |
 | `TG1` | Complete | Build the executable trading contract matrix with focused backend tests before behavior changes. |
 | `TG2` | Complete | Extract pure planning/serialization seams from trade execution without changing behavior. |
-| `TG3` | Pending | Harden atomic trade execution: idempotency, trade-number allocation, lot/quantity concurrency, and rollback behavior. |
+| `TG3` | Complete | Harden atomic trade execution: idempotency, trade-number allocation, lot/quantity concurrency, and rollback behavior. |
 | `TG4` | Pending | Harden cross-server trade authority and failure semantics. |
 | `TG5` | Pending | Harden offer lifecycle consistency: create, republish, expire, cancel, active-count cache, and channel side effects. |
 | `TG6` | Pending | Harden customer/accountant economic semantics, commission snapshots, history visibility, and notification audiences. |
@@ -227,6 +227,21 @@ Acceptance:
   consumption.
 - Idempotent replay returns the same economic response.
 - Rollback leaves no partial chain.
+
+Completion notes:
+
+- Added PostgreSQL transaction-scoped advisory locks for trade-number
+  allocation and idempotency-key execution paths, with non-PostgreSQL no-op
+  behavior for local/unit test contexts.
+- Added stricter idempotent replay validation so a reused idempotency key must
+  match the current economic request instead of silently returning an unrelated
+  trade.
+- Centralized offer quantity/lot mutation with explicit guards for negative
+  remaining quantity and missing retail lots.
+- Centralized commit handling so stale/unique conflicts map to deterministic
+  `409` responses and unknown commit failures roll back before re-raising.
+- Added `tests/test_trade_atomicity_hardening.py` covering advisory lock
+  behavior, idempotency conflicts, quantity/lot guards, and rollback behavior.
 
 ## Stage TG4 - Cross-Server Authority Hardening
 
