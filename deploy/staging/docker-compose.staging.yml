@@ -1,0 +1,138 @@
+x-app-image: &app_image trading_bot_staging_app:${STAGING_IMAGE_TAG:-latest}
+x-app-build: &app_build
+  context: ../..
+  dockerfile: Dockerfile
+
+services:
+  app:
+    image: *app_image
+    build: *app_build
+    restart: unless-stopped
+    command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${STAGING_API_WORKERS:-2}"
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: api
+      ENVIRONMENT: staging
+      RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
+      API_WORKERS: ${STAGING_API_WORKERS:-2}
+      DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    ports:
+      - "127.0.0.1:${STAGING_APP_PORT:-8100}:8000"
+    volumes:
+      - staging_uploads:/app/uploads
+      - staging_audit:/app/audit_trail
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/config', timeout=5).read(); sys.exit(0)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - staging_net
+
+  migration:
+    image: *app_image
+    build: *app_build
+    command: ["python", "manage.py"]
+    environment:
+      TZ: UTC
+      ENVIRONMENT: staging
+      DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - staging_net
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    command: postgres -c max_connections=${STAGING_POSTGRES_MAX_CONNECTIONS:-100} -c timezone=UTC -c log_timezone=UTC
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    env_file:
+      - ../../.env.staging
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - staging_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - ${REDIS_APPENDONLY:-yes}
+      - --appendfsync
+      - ${REDIS_APPENDFSYNC:-everysec}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-0}
+      - --maxmemory-policy
+      - ${REDIS_MAXMEMORY_POLICY:-noeviction}
+    environment:
+      TZ: UTC
+    volumes:
+      - staging_redis_data:/data
+    networks:
+      - staging_net
+
+  bot:
+    image: *app_image
+    build: *app_build
+    profiles:
+      - staging-bot
+    restart: unless-stopped
+    command: python run_bot.py
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: bot
+      ENVIRONMENT: staging
+      DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    networks:
+      - staging_net
+
+networks:
+  staging_net:
+    driver: bridge
+
+volumes:
+  staging_postgres_data:
+  staging_redis_data:
+  staging_uploads:
+  staging_audit:

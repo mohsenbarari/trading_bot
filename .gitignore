@@ -10,6 +10,8 @@ docs/*
 !docs/messenger-surface-report.md
 !docs/PRODUCTION_DEPLOYMENT_ONLINE.md
 .env
+.env.staging
+.env.staging.*
 .env.iran
 # Environments
 frontend/node_modules/
