@@ -1,5 +1,5 @@
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, or_, select
@@ -216,6 +216,32 @@ def calculate_customer_trade_commission_profit(
     return abs(trade_price - base_price) * quantity * CUSTOMER_COMMISSION_PRICE_UNIT_TOMAN
 
 
+def _normalize_customer_history_bound_datetime(value: object) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _customer_relation_trade_stats_bounds(relation: CustomerRelation | object) -> tuple[datetime | None, datetime | None]:
+    start_at = _normalize_customer_history_bound_datetime(
+        getattr(relation, "activated_at", None) or getattr(relation, "created_at", None)
+    )
+    raw_status_value = getattr(relation, "status", None)
+    status_value = getattr(raw_status_value, "value", raw_status_value)
+    end_at = _normalize_customer_history_bound_datetime(getattr(relation, "deleted_at", None))
+    if end_at is None and status_value in {
+        CustomerRelationStatus.EXPIRED.value,
+        CustomerRelationStatus.REVOKED.value,
+        CustomerRelationStatus.DELETED.value,
+    }:
+        end_at = _normalize_customer_history_bound_datetime(
+            getattr(relation, "expires_at", None) or getattr(relation, "updated_at", None)
+        )
+    return start_at, end_at
+
+
 async def ensure_owner_context(context: EffectiveOwnerActor, db: AsyncSession) -> None:
     if context.is_accountant_context:
         raise HTTPException(status_code=403, detail="Accountants cannot manage owner customers")
@@ -429,18 +455,21 @@ async def get_my_customer_trade_stats(
         owner_user_id=context.owner_user.id,
         relation_id=relation_id,
     )
-    if relation.deleted_at is not None or relation.status != CustomerRelationStatus.ACTIVE or relation.customer_user_id is None:
-        raise HTTPException(status_code=400, detail="آمار فقط برای مشتری فعال قابل محاسبه است")
+    if relation.customer_user_id is None:
+        raise HTTPException(status_code=400, detail="آمار فقط برای مشتری ثبت‌شده قابل محاسبه است")
 
     to_date = utc_now_naive()
     from_date = to_date - timedelta(days=days)
+    relation_start_at, relation_end_at = _customer_relation_trade_stats_bounds(relation)
+    query_from_date = max(from_date, relation_start_at) if relation_start_at is not None else from_date
+    query_to_date = min(to_date, relation_end_at) if relation_end_at is not None else to_date
     stmt = (
         select(Trade)
         .options(selectinload(Trade.offer), selectinload(Trade.commodity))
         .where(
             Trade.status == TradeStatus.COMPLETED,
-            Trade.created_at >= from_date,
-            Trade.created_at <= to_date,
+            Trade.created_at >= query_from_date,
+            Trade.created_at <= query_to_date,
             or_(
                 Trade.offer_user_id == relation.customer_user_id,
                 Trade.responder_user_id == relation.customer_user_id,

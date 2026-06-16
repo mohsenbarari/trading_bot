@@ -151,7 +151,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_authoritatively_persists_trade_and_runs_side_effects(self):
         locked_user = make_user()
         context = make_context(locked_user)
-        offer = make_offer()
+        offer = make_offer(
+            user=SimpleNamespace(id=9, account_name="seller", mobile_number="09125555555", telegram_id=999),
+        )
         reloaded_trade = SimpleNamespace(id=88, created_at=datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc))
         db = FakeDB(
             get_results=[offer],
@@ -171,7 +173,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             return_value=(True, None, 4, []),
         ), patch(
             "api.routers.trades.build_trade_notification_audience_user_ids",
-            new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
+            new=AsyncMock(side_effect=[[locked_user.id, 15], [offer.user_id, 19]]),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
             new=AsyncMock(return_value={}),
@@ -207,7 +209,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         update_buttons_mock.assert_awaited_once_with(offer)
         self.assertEqual(len(background_tasks.tasks), 2)
-        self.assertEqual(notif_mock.await_count, 2)
+        self.assertEqual(notif_mock.await_count, 4)
         responder_notification_message = notif_mock.await_args_list[0].args[2]
         self.assertNotIn("|", responder_notification_message)
         self.assertIn("👤 طرف معامله: seller", responder_notification_message)
@@ -233,12 +235,19 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(publish_mock.await_args_list[0].args[0], "trade:created")
         self.assertEqual(publish_mock.await_args_list[1].args[0], "offer:updated")
         self.assertEqual(publish_mock.await_args_list[1].args[1]["status"], "completed")
-        self.assertEqual(self.publish_user_event_mock.await_count, 1)
-        self.assertEqual(self.publish_user_event_mock.await_args_list[0].args[0], locked_user.id)
-        self.assertEqual(self.publish_user_event_mock.await_args_list[0].args[1], "trade:created")
-        self.assertTrue(self.publish_user_event_mock.await_args_list[0].args[2]["recipient_specific"])
-        self.assertEqual(self.publish_user_event_mock.await_args_list[0].args[2]["trade_number"], 10000)
-        self.assertEqual(publish_mock.await_args_list[0].args[1]["audience_user_ids"], [locked_user.id, offer.user_id])
+        self.assertEqual(self.publish_user_event_mock.await_count, 4)
+        self.assertEqual(
+            [call.args[0] for call in self.publish_user_event_mock.await_args_list],
+            [locked_user.id, 15, offer.user_id, 19],
+        )
+        self.assertTrue(all(call.args[1] == "trade:created" for call in self.publish_user_event_mock.await_args_list))
+        self.assertTrue(
+            all(call.args[2]["recipient_specific"] for call in self.publish_user_event_mock.await_args_list)
+        )
+        self.assertTrue(
+            all(call.args[2]["trade_number"] == 10000 for call in self.publish_user_event_mock.await_args_list)
+        )
+        self.assertEqual(publish_mock.await_args_list[0].args[1]["audience_user_ids"], [locked_user.id, offer.user_id, 15, 19])
         response_mock.assert_called_once_with(
             reloaded_trade,
             identity_map={},

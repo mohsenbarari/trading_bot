@@ -1,6 +1,6 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG5` complete on `candidate/trading-production-grade`; `TG6` is next.
+Status: `TG6` complete on `candidate/trading-production-grade`; `TG7` is next.
 
 Last updated: 2026-06-16
 
@@ -89,9 +89,9 @@ targets:
 | `TG1` | Complete | Build the executable trading contract matrix with focused backend tests before behavior changes. |
 | `TG2` | Complete | Extract pure planning/serialization seams from trade execution without changing behavior. |
 | `TG3` | Complete | Harden atomic trade execution: idempotency, trade-number allocation, lot/quantity concurrency, and rollback behavior. |
-| `TG4` | Pending | Harden cross-server trade authority and failure semantics. |
-| `TG5` | Pending | Harden offer lifecycle consistency: create, republish, expire, cancel, active-count cache, and channel side effects. |
-| `TG6` | Pending | Harden customer/accountant economic semantics, commission snapshots, history visibility, and notification audiences. |
+| `TG4` | Complete | Harden cross-server trade authority and failure semantics. |
+| `TG5` | Complete | Harden offer lifecycle consistency: create, republish, expire, cancel, active-count cache, and channel side effects. |
+| `TG6` | Complete | Harden customer/accountant economic semantics, commission snapshots, history visibility, and notification audiences. |
 | `TG7` | Pending | Harden frontend market mutation UX: submit locks, idempotency keys, conflict handling, and visible recovery states. |
 | `TG8` | Pending | Add trading observability/audit signals and redacted structured logs. |
 | `TG9` | Pending | Run staging validation with isolated synthetic fixtures and no production sync. |
@@ -350,6 +350,30 @@ Acceptance:
 - Historical reports remain correct after commission-rate edits.
 - No actor-only leakage into trade history.
 - Tests cover customer relation status changes after trades.
+
+Completion notes:
+
+- Confirmed the Tier 2 commission model does not need a new snapshot column at
+  this stage: the executed customer leg price is already persisted on the
+  `trades.price` row, and owner profit reporting is derived from historical
+  trade-leg prices rather than the current customer relation commission rate.
+- Relaxed customer trade statistics from active-only relation status to
+  registered-customer history, while keeping session/update management
+  active-only. Inactive relation reports are bounded by the relation historical
+  window when timestamps are present, so post-revoke/post-delete trades do not
+  leak into a previous owner's report.
+- Added a historical customer-relation resolver for trade-history access. It
+  prefers active relations, falls back to revoked/expired/deleted historical
+  relations, and applies relation date bounds when showing target-customer
+  history.
+- Strengthened trade execution audience coverage so responder-owner and
+  offer-owner audiences can independently include their accountants, and
+  recipient-specific realtime events are emitted to each computed audience
+  member.
+- Added production-contract coverage for historical commission reporting after
+  relation status/rate changes, customer-history access after relation status
+  changes, owner/accountant audience independence, and existing actor-only
+  leakage protection.
 
 ## Stage TG7 - Frontend Market Mutation UX
 

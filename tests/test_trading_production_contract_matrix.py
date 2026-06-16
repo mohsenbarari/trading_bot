@@ -150,6 +150,18 @@ CONTRACT_COVERAGE = {
         "tests/test_customers_router.py",
         "test_get_my_customer_trade_stats_uses_historical_trade_prices",
     ),
+    "customer_profit_survives_relation_status_and_rate_changes": (
+        "tests/test_customers_router.py",
+        "test_get_my_customer_trade_stats_preserves_historical_profit_after_relation_status_and_rate_changes",
+    ),
+    "customer_history_survives_relation_status_change": (
+        "tests/test_trades_router_reads.py",
+        "test_get_trades_with_user_preserves_target_customer_history_after_relation_status_change",
+    ),
+    "trade_owner_accountant_audience_independence": (
+        "tests/test_trades_router_authoritative_success.py",
+        "test_execute_trade_authoritatively_persists_trade_and_runs_side_effects",
+    ),
     "trade_forwarding_wrapper": (
         "tests/test_trades_router_execution_wrappers.py",
         "test_create_trade_returns_forwarded_response_when_remote_home",

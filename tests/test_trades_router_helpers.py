@@ -249,6 +249,40 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(relation_map[41], deleted_relation)
         self.assertIs(relation_map[42], active_relation)
 
+    async def test_get_customer_history_relation_for_customer_falls_back_to_inactive_relation(self):
+        stale_relation = SimpleNamespace(
+            customer_user_id=42,
+            owner_user_id=7,
+            status=CustomerRelationStatus.REVOKED,
+            deleted_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+            expires_at=None,
+            activated_at=None,
+            created_at=datetime(2024, 12, 1, tzinfo=timezone.utc),
+        )
+        latest_relation = SimpleNamespace(
+            customer_user_id=42,
+            owner_user_id=7,
+            status=CustomerRelationStatus.DELETED,
+            deleted_at=datetime(2025, 1, 8, tzinfo=timezone.utc),
+            updated_at=datetime(2025, 1, 8, tzinfo=timezone.utc),
+            expires_at=None,
+            activated_at=None,
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+        db = AsyncMock()
+        db.execute.return_value = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [stale_relation, latest_relation])
+        )
+
+        with patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            relation = await trades._get_customer_history_relation_for_customer(db, 42)
+
+        self.assertIs(relation, latest_relation)
+
     async def test_trade_to_response_and_telegram_helpers(self):
         trade = SimpleNamespace(
             id=1,

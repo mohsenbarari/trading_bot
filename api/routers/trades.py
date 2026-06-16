@@ -453,10 +453,102 @@ async def _resolve_viewable_customer_history_relation(
     customer_user_id: int,
     context: EffectiveOwnerActor,
 ) -> CustomerRelation | None:
-    relation = await get_active_customer_relation_for_customer(db, customer_user_id)
+    relation = await _get_customer_history_relation_for_customer(db, customer_user_id)
     if not _viewer_can_access_customer_history_relation(relation=relation, context=context):
         return None
     return relation
+
+
+def _trade_customer_relation_sort_timestamp(relation: CustomerRelation | object) -> datetime:
+    timestamp = (
+        getattr(relation, "deleted_at", None)
+        or getattr(relation, "updated_at", None)
+        or getattr(relation, "expires_at", None)
+        or getattr(relation, "activated_at", None)
+        or getattr(relation, "created_at", None)
+    )
+    if timestamp is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
+
+
+def _trade_customer_relation_sort_key(relation: CustomerRelation | object) -> tuple[int, datetime, datetime]:
+    raw_status_value = getattr(relation, "status", None)
+    status_value = getattr(raw_status_value, "value", raw_status_value)
+    is_active = int(
+        status_value == CustomerRelationStatus.ACTIVE.value
+        and getattr(relation, "deleted_at", None) is None
+    )
+    created_at = getattr(relation, "created_at", None)
+    if created_at is None:
+        created_at = datetime.min.replace(tzinfo=timezone.utc)
+    elif created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return (is_active, _trade_customer_relation_sort_timestamp(relation), created_at)
+
+
+def _normalize_trade_history_bound_datetime(value: object) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _customer_relation_history_bounds(relation: CustomerRelation | object | None) -> tuple[datetime | None, datetime | None]:
+    if relation is None:
+        return None, None
+
+    start_at = _normalize_trade_history_bound_datetime(
+        getattr(relation, "activated_at", None) or getattr(relation, "created_at", None)
+    )
+    raw_status_value = getattr(relation, "status", None)
+    status_value = getattr(raw_status_value, "value", raw_status_value)
+    end_at = _normalize_trade_history_bound_datetime(getattr(relation, "deleted_at", None))
+    if end_at is None and status_value in {
+        CustomerRelationStatus.EXPIRED.value,
+        CustomerRelationStatus.REVOKED.value,
+        CustomerRelationStatus.DELETED.value,
+    }:
+        end_at = _normalize_trade_history_bound_datetime(
+            getattr(relation, "expires_at", None) or getattr(relation, "updated_at", None)
+        )
+    return start_at, end_at
+
+
+async def _get_customer_history_relation_for_customer(
+    db: AsyncSession,
+    customer_user_id: object,
+) -> CustomerRelation | None:
+    normalized_customer_user_id = _coerce_trade_user_id(customer_user_id)
+    if normalized_customer_user_id is None:
+        return None
+
+    active_relation = await get_active_customer_relation_for_customer(db, normalized_customer_user_id)
+    if active_relation is not None:
+        return active_relation
+
+    result = await db.execute(
+        select(CustomerRelation).where(
+            CustomerRelation.customer_user_id == normalized_customer_user_id,
+            CustomerRelation.status.in_(
+                [
+                    CustomerRelationStatus.ACTIVE,
+                    CustomerRelationStatus.EXPIRED,
+                    CustomerRelationStatus.REVOKED,
+                    CustomerRelationStatus.DELETED,
+                ]
+            ),
+        )
+    )
+    relations = list(result.scalars().all())
+    if not relations:
+        return None
+    return sorted(relations, key=_trade_customer_relation_sort_key, reverse=True)[0]
 
 
 def _normalize_history_commodity_query(value: str | None) -> str | None:
@@ -573,6 +665,12 @@ async def _build_trades_with_user_query(
                 Trade.responder_user_id == other_user_id,
             )
         )
+        if target_customer_relation is not None and not _is_super_admin_trade_history_viewer(context):
+            relation_start_at, relation_end_at = _customer_relation_history_bounds(target_customer_relation)
+            if relation_start_at is not None:
+                query = query.where(Trade.created_at >= relation_start_at)
+            if relation_end_at is not None:
+                query = query.where(Trade.created_at <= relation_end_at)
     else:
         query = query.where(
             or_(
@@ -628,7 +726,7 @@ async def _viewer_can_access_trade_history_row(
         return True
 
     for participant_user_id in participant_user_ids:
-        relation = await get_active_customer_relation_for_customer(db, participant_user_id)
+        relation = await _get_customer_history_relation_for_customer(db, participant_user_id)
         if _viewer_can_access_customer_history_relation(relation=relation, context=context):
             return True
 
@@ -682,38 +780,8 @@ async def _load_trade_customer_relation_map_for_user_ids(
             if _coerce_trade_user_id(getattr(relation, "customer_user_id", None)) is not None
         }
 
-    def _relation_sort_timestamp(relation: CustomerRelation | object) -> datetime:
-        timestamp = (
-            getattr(relation, "deleted_at", None)
-            or getattr(relation, "updated_at", None)
-            or getattr(relation, "expires_at", None)
-            or getattr(relation, "activated_at", None)
-            or getattr(relation, "created_at", None)
-        )
-        if timestamp is None:
-            return datetime.min.replace(tzinfo=timezone.utc)
-        if timestamp.tzinfo is None:
-            return timestamp.replace(tzinfo=timezone.utc)
-        return timestamp.astimezone(timezone.utc)
-
-    def _relation_sort_key(relation: CustomerRelation | object) -> tuple[int, datetime, datetime]:
-        raw_status_value = getattr(relation, "status", None)
-        status_value = getattr(raw_status_value, "value", raw_status_value)
-        is_active = int(
-            status_value == CustomerRelationStatus.ACTIVE.value
-            and getattr(relation, "deleted_at", None) is None
-        )
-        created_at = getattr(relation, "created_at", None)
-        if created_at is None:
-            created_at = datetime.min.replace(tzinfo=timezone.utc)
-        elif created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        else:
-            created_at = created_at.astimezone(timezone.utc)
-        return (is_active, _relation_sort_timestamp(relation), created_at)
-
     relation_map: dict[int, CustomerRelation] = {}
-    for relation in sorted(relations, key=_relation_sort_key, reverse=True):
+    for relation in sorted(relations, key=_trade_customer_relation_sort_key, reverse=True):
         customer_user_id = _coerce_trade_user_id(getattr(relation, "customer_user_id", None))
         if customer_user_id is None or customer_user_id in relation_map:
             continue
