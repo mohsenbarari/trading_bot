@@ -657,6 +657,7 @@ async function cancelOwnOffer(offerId: number) {
 .offer-card-wrap.is-expired .offer-card-inner {
   background: var(--ds-bg-surface);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  padding-top: 38px;
 }
 
 .offer-card-wrap.is-expired .price,
@@ -666,21 +667,43 @@ async function cancelOwnOffer(offerId: number) {
 
 .expired-ribbon {
   position: absolute;
-  top: 9px;
-  left: -24px;
+  top: 8px;
+  left: 50%;
   z-index: 2;
-  width: 92px;
-  transform: rotate(-38deg);
+  min-width: 74px;
+  transform: translateX(-50%) rotate(-7deg);
   transform-origin: center;
-  background: var(--ds-bg-muted);
-  color: var(--ds-text-muted);
-  border: 1px solid var(--ds-border-subtle);
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1;
+  background: rgba(239, 68, 68, 0.06);
+  color: #b91c1c;
+  border: 2px solid rgba(185, 28, 28, 0.72);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.1;
   text-align: center;
-  padding: 4px 0;
+  letter-spacing: 0;
+  padding: 4px 10px 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(185, 28, 28, 0.22),
+    0 1px 0 rgba(185, 28, 28, 0.08);
+  opacity: 0.9;
   pointer-events: none;
+}
+
+.expired-ribbon::before,
+.expired-ribbon::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 1px solid rgba(185, 28, 28, 0.32);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.expired-ribbon::after {
+  inset: -1px 5px;
+  border-color: rgba(185, 28, 28, 0.14);
+  transform: rotate(2deg);
 }
 
 /* Subtle outer shadow for depth */
