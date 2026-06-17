@@ -339,6 +339,12 @@ async def create_user_notification(
     
     # انتشار در کانال (با فرمت جدید)
     await publish_user_event(user_id, "message", payload)
+    try:
+        from core.web_push import schedule_notification_web_push
+
+        schedule_notification_web_push(new_notif.id, extra_payload)
+    except Exception as e:
+        logger.warning(f"Web Push Schedule Error: {e}")
 
     return new_notif
 

@@ -111,6 +111,40 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         result = run_checked(['bash', '-n', 'deploy.sh'])
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
+    def test_staging_deploy_script_has_valid_bash_syntax(self):
+        result = run_checked(['bash', '-n', 'scripts/deploy_staging.sh'])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+    def test_staging_frontend_dist_isolated_from_production_artifact(self):
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        vite_config = (REPO_ROOT / 'frontend/vite.config.ts').read_text(encoding='utf-8')
+        staging_nginx = (REPO_ROOT / 'deploy/staging/nginx-staging.conf.template').read_text(encoding='utf-8')
+        staging_compose = (REPO_ROOT / 'deploy/staging/docker-compose.staging.yml').read_text(encoding='utf-8')
+        dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
+        gitignore = (REPO_ROOT / '.gitignore').read_text(encoding='utf-8')
+
+        self.assertIn('process.env.FRONTEND_BUILD_OUT_DIR', vite_config)
+        self.assertIn('FRONTEND_BUILD_OUT_DIR="$STAGING_FRONTEND_DIST_DIR"', staging_script)
+        self.assertIn('STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"', staging_script)
+        self.assertIn('realpath -m "$STAGING_FRONTEND_DIST_DIR"', staging_script)
+        self.assertIn('staging frontend dist must not share production mini_app_dist', staging_script)
+        self.assertIn('root __FRONTEND_ROOT__;', staging_nginx)
+        self.assertNotIn('root __APP_ROOT__/mini_app_dist;', staging_nginx)
+        self.assertIn('FRONTEND_DIST_DIR:', staging_compose)
+        self.assertIn('STAGING_FRONTEND_DOCKER_DIST_DIR', staging_compose)
+        self.assertIn('ARG FRONTEND_DIST_DIR=mini_app_dist', dockerfile)
+        self.assertIn('COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/', dockerfile)
+        self.assertIn('mini_app_dist_staging/', gitignore)
+
+    def test_staging_deploy_rejects_shared_production_frontend_dist(self):
+        result = run_checked(
+            ['scripts/deploy_staging.sh', 'check'],
+            extra_env={'STAGING_FRONTEND_DIST_DIR': str(REPO_ROOT / 'mini_app_dist')},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('staging frontend dist must not share production mini_app_dist', result.stderr + result.stdout)
+
     def test_deploy_script_keeps_foreign_rebuild_steps_cache_aware(self):
         deploy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import BottomNav from './BottomNav.vue'
 import SessionApprovalModal from './SessionApprovalModal.vue'
 import AppToasts from './AppToasts.vue'
@@ -12,7 +13,20 @@ import {
 } from '../services/chatTransferResumeHints'
 import { initChatFileDebugOverlay } from '../composables/chat/useChatFileHandler'
 
-const { on, off, connect } = useWebSocket()
+const route = useRoute()
+const { on, off, connect, sendPresenceUpdate } = useWebSocket()
+
+const publishRoutePresence = () => {
+  sendPresenceUpdate(route.path, !document.hidden)
+}
+
+const handleVisibilityChange = () => {
+  publishRoutePresence()
+}
+
+const handleWsReconnect = () => {
+  publishRoutePresence()
+}
 
 const ensureSessionValidation = async () => {
   const refreshToken = localStorage.getItem('refresh_token')
@@ -50,12 +64,28 @@ onMounted(() => {
   }
 
   initChatFileDebugOverlay()
+  publishRoutePresence()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  on('ws:reconnect', handleWsReconnect)
 
   window.addEventListener('beforeinstallprompt', (event) => {
     event.preventDefault()
     ;(window as any).deferredPrompt = event
     window.dispatchEvent(new Event('pwa-install-ready'))
   })
+})
+
+watch(
+  () => route.path,
+  () => {
+    publishRoutePresence()
+  },
+)
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  off('ws:reconnect', handleWsReconnect)
+  sendPresenceUpdate(route.path, false)
 })
 
 useNotificationRuntime({ connect, on, off, ensureSessionValidation })

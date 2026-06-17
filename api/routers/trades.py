@@ -4,6 +4,8 @@ API Router for Trade Management - MiniApp Integration
 """
 import logging
 import os
+import hashlib
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from typing import List, Optional, Mapping
@@ -50,8 +52,9 @@ from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
-from core.server_routing import current_server, is_remote_home, normalize_server
+from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
+from core.trading_observability import log_trading_event
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +62,10 @@ logger = logging.getLogger(__name__)
 
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
+TRADE_UNAVAILABLE_DETAIL = "امکان انجام این معامله وجود ندارد."
+TRADE_CONFLICT_DETAIL = "این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید."
+TRADE_NUMBER_ALLOCATION_LOCK_ID = 362_514_001
+TRADE_IDEMPOTENCY_LOCK_NAMESPACE = 362_514
 
 
 router = APIRouter(
@@ -72,6 +79,33 @@ def _ensure_accountant_market_access_allowed(context: EffectiveOwnerActor) -> No
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ACCOUNTANT_MARKET_BLOCKED_DETAIL,
         )
+
+
+class TradeExecutionPlanError(ValueError):
+    pass
+
+
+class TradeAtomicityError(ValueError):
+    pass
+
+
+class TradeIdempotencyConflictError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class TradeExecutionNode:
+    user_id: int
+    user: object
+
+
+@dataclass(frozen=True)
+class TradeExecutionPlan:
+    nodes: tuple[TradeExecutionNode, ...]
+
+    @property
+    def uses_customer_trade_chain(self) -> bool:
+        return len(self.nodes) > 2
 
 
 # --- Pydantic Schemas ---
@@ -145,6 +179,199 @@ def _coerce_trade_user_id(value: object) -> int | None:
     except (TypeError, ValueError):
         return None
     return normalized if normalized > 0 else None
+
+
+def _build_trade_execution_node(user_id: object, user: object | None) -> TradeExecutionNode:
+    normalized_user_id = _coerce_trade_user_id(user_id)
+    if normalized_user_id is None or user is None:
+        raise TradeExecutionPlanError(TRADE_UNAVAILABLE_DETAIL)
+    return TradeExecutionNode(user_id=normalized_user_id, user=user)
+
+
+def _append_trade_execution_node(
+    nodes: list[TradeExecutionNode],
+    *,
+    user_id: object,
+    user: object | None,
+) -> None:
+    normalized_user_id = _coerce_trade_user_id(user_id)
+    if normalized_user_id is None:
+        raise TradeExecutionPlanError(TRADE_UNAVAILABLE_DETAIL)
+    if nodes and nodes[-1].user_id == normalized_user_id:
+        return
+    if user is None:
+        raise TradeExecutionPlanError(TRADE_UNAVAILABLE_DETAIL)
+    nodes.append(TradeExecutionNode(user_id=normalized_user_id, user=user))
+
+
+def _build_trade_execution_plan(
+    *,
+    offer_user_id: object,
+    offer_user: object | None,
+    source_principal_user_id: object,
+    source_principal_user: object | None,
+    responder_principal_user_id: object,
+    responder_principal_user: object | None,
+    owner_user_id: object,
+    owner_user: object | None,
+) -> TradeExecutionPlan:
+    nodes = [_build_trade_execution_node(offer_user_id, offer_user)]
+    if source_principal_user_id != offer_user_id:
+        _append_trade_execution_node(
+            nodes,
+            user_id=source_principal_user_id,
+            user=source_principal_user,
+        )
+    _append_trade_execution_node(
+        nodes,
+        user_id=responder_principal_user_id,
+        user=responder_principal_user,
+    )
+    _append_trade_execution_node(
+        nodes,
+        user_id=owner_user_id,
+        user=owner_user,
+    )
+    return TradeExecutionPlan(nodes=tuple(nodes))
+
+
+def _db_dialect_name(db: AsyncSession | object) -> str | None:
+    get_bind = getattr(db, "get_bind", None)
+    bind = None
+    if callable(get_bind):
+        try:
+            bind = get_bind()
+        except Exception:
+            bind = None
+    if bind is None:
+        bind = getattr(db, "bind", None)
+    dialect = getattr(bind, "dialect", None)
+    dialect_name = getattr(dialect, "name", None)
+    return str(dialect_name).lower() if dialect_name else None
+
+
+def _stable_advisory_lock_id(value: str) -> int:
+    digest = hashlib.sha256(value.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
+async def _lock_trade_number_allocation(db: AsyncSession) -> bool:
+    if _db_dialect_name(db) != "postgresql":
+        return False
+    await db.execute(select(func.pg_advisory_xact_lock(TRADE_NUMBER_ALLOCATION_LOCK_ID)))
+    return True
+
+
+async def _lock_trade_idempotency_key(db: AsyncSession, idempotency_key: str | None) -> bool:
+    if not idempotency_key or _db_dialect_name(db) != "postgresql":
+        return False
+    await db.execute(
+        select(
+            func.pg_advisory_xact_lock(
+                TRADE_IDEMPOTENCY_LOCK_NAMESPACE,
+                _stable_advisory_lock_id(idempotency_key),
+            )
+        )
+    )
+    return True
+
+
+async def _allocate_next_trade_number(db: AsyncSession) -> int:
+    await _lock_trade_number_allocation(db)
+    max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
+    return (max_trade_number or 9999) + 1
+
+
+def _validate_idempotent_trade_replay(
+    *,
+    existing_trade: Trade | object,
+    offer: Offer | object,
+    owner_user: User | object,
+    actor_user: User | object,
+    trade_quantity: int,
+    expected_price: int,
+    uses_customer_trade_chain: bool,
+) -> None:
+    mismatches: list[str] = []
+
+    if hasattr(existing_trade, "offer_id"):
+        existing_offer_id = getattr(existing_trade, "offer_id", None)
+        if not uses_customer_trade_chain and existing_offer_id != getattr(offer, "id", None):
+            mismatches.append("offer_id")
+        if uses_customer_trade_chain and existing_offer_id not in (None, getattr(offer, "id", None)):
+            mismatches.append("chain_offer_id")
+
+    if hasattr(existing_trade, "offer_user_id") and not uses_customer_trade_chain:
+        if _coerce_trade_user_id(getattr(existing_trade, "offer_user_id", None)) != _coerce_trade_user_id(getattr(offer, "user_id", None)):
+            mismatches.append("offer_user_id")
+    if hasattr(existing_trade, "responder_user_id"):
+        if _coerce_trade_user_id(getattr(existing_trade, "responder_user_id", None)) != _coerce_trade_user_id(getattr(owner_user, "id", None)):
+            mismatches.append("responder_user_id")
+    if hasattr(existing_trade, "actor_user_id"):
+        existing_actor_user_id = _coerce_trade_user_id(getattr(existing_trade, "actor_user_id", None))
+        expected_actor_user_id = _coerce_trade_user_id(getattr(actor_user, "id", None))
+        if existing_actor_user_id is not None and existing_actor_user_id != expected_actor_user_id:
+            mismatches.append("actor_user_id")
+    if hasattr(existing_trade, "commodity_id") and getattr(existing_trade, "commodity_id", None) != getattr(offer, "commodity_id", None):
+        mismatches.append("commodity_id")
+    if hasattr(existing_trade, "quantity") and getattr(existing_trade, "quantity", None) != trade_quantity:
+        mismatches.append("quantity")
+    if hasattr(existing_trade, "price") and getattr(existing_trade, "price", None) != expected_price:
+        mismatches.append("price")
+
+    if mismatches:
+        raise TradeIdempotencyConflictError("کلید تکرار این معامله با درخواست فعلی همخوانی ندارد.")
+
+
+def _apply_offer_trade_mutation(offer: Offer | object, trade_quantity: int) -> bool:
+    offer.remaining_quantity -= trade_quantity
+    if offer.remaining_quantity < 0:
+        raise TradeAtomicityError("موجودی این لفظ برای انجام معامله کافی نیست.")
+
+    lot_sizes_modified = False
+    if offer.remaining_quantity <= 0:
+        if offer.lot_sizes is not None:
+            offer.lot_sizes = None
+            lot_sizes_modified = True
+        offer.status = OfferStatus.COMPLETED
+        return lot_sizes_modified
+
+    if offer.lot_sizes:
+        new_lot_sizes = list(offer.lot_sizes)
+        if not getattr(offer, "is_wholesale", False) and trade_quantity not in new_lot_sizes:
+            raise TradeAtomicityError("این لات دیگر موجود نیست.")
+        if trade_quantity in new_lot_sizes:
+            new_lot_sizes.remove(trade_quantity)
+            offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
+            lot_sizes_modified = True
+    return lot_sizes_modified
+
+
+def _is_stale_trade_commit_error(exc: Exception) -> bool:
+    return "StaleDataError" in str(type(exc).__name__) or "could not update" in str(exc).lower()
+
+
+def _is_trade_unique_constraint_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "unique" in text or "duplicate key" in text or "uniqueviolation" in str(type(exc).__name__).lower()
+
+
+async def _commit_trade_execution(db: AsyncSession) -> None:
+    try:
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        if _is_stale_trade_commit_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=TRADE_CONFLICT_DETAIL,
+            ) from exc
+        if _is_trade_unique_constraint_error(exc):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="این معامله قبلاً ثبت شده یا شماره معامله تکراری است. لطفاً وضعیت معاملات را بروزرسانی کنید.",
+            ) from exc
+        raise
 
 
 def _resolve_trade_participant_name(
@@ -227,10 +454,102 @@ async def _resolve_viewable_customer_history_relation(
     customer_user_id: int,
     context: EffectiveOwnerActor,
 ) -> CustomerRelation | None:
-    relation = await get_active_customer_relation_for_customer(db, customer_user_id)
+    relation = await _get_customer_history_relation_for_customer(db, customer_user_id)
     if not _viewer_can_access_customer_history_relation(relation=relation, context=context):
         return None
     return relation
+
+
+def _trade_customer_relation_sort_timestamp(relation: CustomerRelation | object) -> datetime:
+    timestamp = (
+        getattr(relation, "deleted_at", None)
+        or getattr(relation, "updated_at", None)
+        or getattr(relation, "expires_at", None)
+        or getattr(relation, "activated_at", None)
+        or getattr(relation, "created_at", None)
+    )
+    if timestamp is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
+
+
+def _trade_customer_relation_sort_key(relation: CustomerRelation | object) -> tuple[int, datetime, datetime]:
+    raw_status_value = getattr(relation, "status", None)
+    status_value = getattr(raw_status_value, "value", raw_status_value)
+    is_active = int(
+        status_value == CustomerRelationStatus.ACTIVE.value
+        and getattr(relation, "deleted_at", None) is None
+    )
+    created_at = getattr(relation, "created_at", None)
+    if created_at is None:
+        created_at = datetime.min.replace(tzinfo=timezone.utc)
+    elif created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return (is_active, _trade_customer_relation_sort_timestamp(relation), created_at)
+
+
+def _normalize_trade_history_bound_datetime(value: object) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _customer_relation_history_bounds(relation: CustomerRelation | object | None) -> tuple[datetime | None, datetime | None]:
+    if relation is None:
+        return None, None
+
+    start_at = _normalize_trade_history_bound_datetime(
+        getattr(relation, "activated_at", None) or getattr(relation, "created_at", None)
+    )
+    raw_status_value = getattr(relation, "status", None)
+    status_value = getattr(raw_status_value, "value", raw_status_value)
+    end_at = _normalize_trade_history_bound_datetime(getattr(relation, "deleted_at", None))
+    if end_at is None and status_value in {
+        CustomerRelationStatus.EXPIRED.value,
+        CustomerRelationStatus.REVOKED.value,
+        CustomerRelationStatus.DELETED.value,
+    }:
+        end_at = _normalize_trade_history_bound_datetime(
+            getattr(relation, "expires_at", None) or getattr(relation, "updated_at", None)
+        )
+    return start_at, end_at
+
+
+async def _get_customer_history_relation_for_customer(
+    db: AsyncSession,
+    customer_user_id: object,
+) -> CustomerRelation | None:
+    normalized_customer_user_id = _coerce_trade_user_id(customer_user_id)
+    if normalized_customer_user_id is None:
+        return None
+
+    active_relation = await get_active_customer_relation_for_customer(db, normalized_customer_user_id)
+    if active_relation is not None:
+        return active_relation
+
+    result = await db.execute(
+        select(CustomerRelation).where(
+            CustomerRelation.customer_user_id == normalized_customer_user_id,
+            CustomerRelation.status.in_(
+                [
+                    CustomerRelationStatus.ACTIVE,
+                    CustomerRelationStatus.EXPIRED,
+                    CustomerRelationStatus.REVOKED,
+                    CustomerRelationStatus.DELETED,
+                ]
+            ),
+        )
+    )
+    relations = list(result.scalars().all())
+    if not relations:
+        return None
+    return sorted(relations, key=_trade_customer_relation_sort_key, reverse=True)[0]
 
 
 def _normalize_history_commodity_query(value: str | None) -> str | None:
@@ -347,6 +666,12 @@ async def _build_trades_with_user_query(
                 Trade.responder_user_id == other_user_id,
             )
         )
+        if target_customer_relation is not None and not _is_super_admin_trade_history_viewer(context):
+            relation_start_at, relation_end_at = _customer_relation_history_bounds(target_customer_relation)
+            if relation_start_at is not None:
+                query = query.where(Trade.created_at >= relation_start_at)
+            if relation_end_at is not None:
+                query = query.where(Trade.created_at <= relation_end_at)
     else:
         query = query.where(
             or_(
@@ -402,7 +727,7 @@ async def _viewer_can_access_trade_history_row(
         return True
 
     for participant_user_id in participant_user_ids:
-        relation = await get_active_customer_relation_for_customer(db, participant_user_id)
+        relation = await _get_customer_history_relation_for_customer(db, participant_user_id)
         if _viewer_can_access_customer_history_relation(relation=relation, context=context):
             return True
 
@@ -456,38 +781,8 @@ async def _load_trade_customer_relation_map_for_user_ids(
             if _coerce_trade_user_id(getattr(relation, "customer_user_id", None)) is not None
         }
 
-    def _relation_sort_timestamp(relation: CustomerRelation | object) -> datetime:
-        timestamp = (
-            getattr(relation, "deleted_at", None)
-            or getattr(relation, "updated_at", None)
-            or getattr(relation, "expires_at", None)
-            or getattr(relation, "activated_at", None)
-            or getattr(relation, "created_at", None)
-        )
-        if timestamp is None:
-            return datetime.min.replace(tzinfo=timezone.utc)
-        if timestamp.tzinfo is None:
-            return timestamp.replace(tzinfo=timezone.utc)
-        return timestamp.astimezone(timezone.utc)
-
-    def _relation_sort_key(relation: CustomerRelation | object) -> tuple[int, datetime, datetime]:
-        raw_status_value = getattr(relation, "status", None)
-        status_value = getattr(raw_status_value, "value", raw_status_value)
-        is_active = int(
-            status_value == CustomerRelationStatus.ACTIVE.value
-            and getattr(relation, "deleted_at", None) is None
-        )
-        created_at = getattr(relation, "created_at", None)
-        if created_at is None:
-            created_at = datetime.min.replace(tzinfo=timezone.utc)
-        elif created_at.tzinfo is None:
-            created_at = created_at.replace(tzinfo=timezone.utc)
-        else:
-            created_at = created_at.astimezone(timezone.utc)
-        return (is_active, _relation_sort_timestamp(relation), created_at)
-
     relation_map: dict[int, CustomerRelation] = {}
-    for relation in sorted(relations, key=_relation_sort_key, reverse=True):
+    for relation in sorted(relations, key=_trade_customer_relation_sort_key, reverse=True):
         customer_user_id = _coerce_trade_user_id(getattr(relation, "customer_user_id", None))
         if customer_user_id is None or customer_user_id in relation_map:
             continue
@@ -765,7 +1060,21 @@ async def _publish_trade_created_realtime(
             recipient_specific=True,
         )
         for audience_user_id in audience_user_ids:
-            await publish_user_event(audience_user_id, "trade:created", recipient_payload)
+            try:
+                await publish_user_event(audience_user_id, "trade:created", recipient_payload)
+            except Exception as exc:
+                log_trading_event(
+                    logger,
+                    "trade_realtime_publish_failed",
+                    level="warning",
+                    action="trading_side_effect",
+                    result="failure",
+                    side_effect="realtime_publish",
+                    offer_id=common_payload.get("offer_id"),
+                    trade_id=common_payload.get("trade_id"),
+                    trade_number=common_payload.get("trade_number"),
+                    error_class=type(exc).__name__,
+                )
 
     generic_audience = sorted(
         {
@@ -778,13 +1087,27 @@ async def _publish_trade_created_realtime(
             if normalized_user_id is not None
         }
     )
-    await publish_event(
-        "trade:created",
-        _build_trade_created_event_payload(
-            **common_payload,
-            audience_user_ids=generic_audience,
-        ),
-    )
+    try:
+        await publish_event(
+            "trade:created",
+            _build_trade_created_event_payload(
+                **common_payload,
+                audience_user_ids=generic_audience,
+            ),
+        )
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_realtime_publish_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="realtime_publish",
+            offer_id=common_payload.get("offer_id"),
+            trade_id=common_payload.get("trade_id"),
+            trade_number=common_payload.get("trade_number"),
+            error_class=type(exc).__name__,
+        )
 
 
 def _build_trade_profile_route_from_payload(
@@ -838,6 +1161,111 @@ def _build_trade_notification_extra_payload(
             f"{field_prefix}_highlight_accountant_relation_display_name"
         ),
     }
+
+
+def _recipient_is_tier2_customer(
+    audience_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> bool:
+    if audience_user_id is None or not customer_relation_map:
+        return False
+    relation = customer_relation_map.get(audience_user_id)
+    return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
+
+
+def _build_trade_notification_message(
+    *,
+    trade_emoji: str,
+    trade_type_label: str,
+    trade_price: int,
+    trade_quantity: int,
+    commodity_name: str,
+    trade_number: int,
+    trade_datetime: str,
+    counterparty_name: str | None,
+    audience_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    trade_path_summary: str | None = None,
+) -> str:
+    lines = [
+        f"{trade_emoji} {trade_type_label}",
+        f"💰 فی: {trade_price:,}",
+        f"📦 تعداد: {trade_quantity}",
+        f"🏷️ کالا: {commodity_name}",
+    ]
+    if counterparty_name and not _recipient_is_tier2_customer(audience_user_id, customer_relation_map):
+        lines.append(f"👤 طرف معامله: {counterparty_name}")
+    lines.append(f"🔢 شماره معامله: {trade_number}")
+    lines.append(f"🕐 زمان معامله: {trade_datetime}")
+    if trade_path_summary:
+        lines.append(f"🧭 مسیر: {trade_path_summary}")
+    return "\n".join(lines)
+
+
+def _build_trade_message_bundle(
+    *,
+    responder_trade_emoji: str,
+    responder_trade_label: str,
+    offer_trade_emoji: str,
+    offer_trade_label: str,
+    trade_price: int,
+    trade_quantity: int,
+    commodity_name: str,
+    trade_number: int,
+    trade_datetime: str,
+    offer_user_name: str,
+    responder_user_name: str,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    trade_path_summary: str | None = None,
+) -> tuple[str, str, str, str]:
+    trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
+    responder_msg = (
+        f"{responder_trade_emoji} <b>{responder_trade_label}</b>\n\n"
+        f"💰 فی: {trade_price:,}\n"
+        f"📦 تعداد: {trade_quantity}\n"
+        f"🏷️ کالا: {commodity_name}\n"
+        f"👤 طرف معامله: {offer_user_name}\n"
+        f"🔢 شماره معامله: {trade_number}\n"
+        f"🕐 زمان معامله: {trade_datetime}"
+        f"{trade_path_line}"
+    )
+    offer_owner_msg = (
+        f"{offer_trade_emoji} <b>{offer_trade_label}</b>\n\n"
+        f"💰 فی: {trade_price:,}\n"
+        f"📦 تعداد: {trade_quantity}\n"
+        f"🏷️ کالا: {commodity_name}\n"
+        f"👤 طرف معامله: {responder_user_name}\n"
+        f"🔢 شماره معامله: {trade_number}\n"
+        f"🕐 زمان معامله: {trade_datetime}"
+        f"{trade_path_line}"
+    )
+    notif_msg_responder = _build_trade_notification_message(
+        trade_emoji=responder_trade_emoji,
+        trade_type_label=responder_trade_label,
+        trade_price=trade_price,
+        trade_quantity=trade_quantity,
+        commodity_name=commodity_name,
+        trade_number=trade_number,
+        trade_datetime=trade_datetime,
+        counterparty_name=offer_user_name,
+        audience_user_id=None,
+        customer_relation_map=customer_relation_map,
+        trade_path_summary=trade_path_summary,
+    )
+    notif_msg_owner = _build_trade_notification_message(
+        trade_emoji=offer_trade_emoji,
+        trade_type_label=offer_trade_label,
+        trade_price=trade_price,
+        trade_quantity=trade_quantity,
+        commodity_name=commodity_name,
+        trade_number=trade_number,
+        trade_datetime=trade_datetime,
+        counterparty_name=responder_user_name,
+        audience_user_id=None,
+        customer_relation_map=customer_relation_map,
+        trade_path_summary=trade_path_summary,
+    )
+    return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
 
 
 def _resolve_trade_history_subject_prefix(
@@ -1025,8 +1453,16 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
             return response.status_code == 200
-    except Exception as e:
-        logger.error(f"Error sending telegram message: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_telegram_message_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1074,8 +1510,17 @@ async def update_channel_buttons(offer: Offer) -> bool:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=10)
             return response.status_code == 200
-    except Exception as e:
-        logger.error(f"Error updating channel buttons: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=getattr(offer, "id", None),
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1095,8 +1540,16 @@ def send_telegram_message_sync(chat_id: int, text: str) -> bool:
         # استفاده از httpx sync client به جای asyncio.run
         response = httpx.post(url, json=payload, timeout=10)
         return response.status_code == 200
-    except Exception as e:
-        logger.error(f"[Background] Error sending telegram message: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_telegram_message_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1122,8 +1575,17 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
             )
         finally:
             loop.close()
-    except Exception as e:
-        logger.error(f"[Background] Error updating channel buttons: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=offer_id,
+            error_class=type(exc).__name__,
+        )
         return False
 
 
@@ -1181,6 +1643,13 @@ def _normalize_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
+def _normalize_internal_trade_source(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = normalize_server(value, default="")
+    return normalized if normalized in KNOWN_SERVERS else None
+
+
 async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
     from core.trading_settings import get_trading_settings_async
 
@@ -1223,7 +1692,43 @@ async def _forward_trade_if_remote_home(
     }
     if getattr(actor_user, "id", None) != owner_user.id:
         payload["actor_user_id"] = actor_user.id
+    log_trading_event(
+        logger,
+        "trade_forward.remote_home",
+        action="trade_forward",
+        result="attempt",
+        source_server=payload["source_server"],
+        target_server=normalize_server(offer.home_server),
+        offer_id=trade_data.offer_id,
+        has_idempotency_key=bool(trade_data.idempotency_key),
+        delegated_actor=getattr(actor_user, "id", None) != owner_user.id,
+    )
     status_code, body = await forward_trade_to_home_server(offer.home_server, payload)
+    if status_code >= 400:
+        log_trading_event(
+            logger,
+            "trade_forward.remote_home_failed",
+            level="warning",
+            action="trade_forward",
+            result="failure",
+            source_server=payload["source_server"],
+            target_server=normalize_server(offer.home_server),
+            offer_id=trade_data.offer_id,
+            status_code=status_code,
+            has_idempotency_key=bool(trade_data.idempotency_key),
+        )
+    else:
+        log_trading_event(
+            logger,
+            "trade_forward.remote_home_completed",
+            action="trade_forward",
+            result="success",
+            source_server=payload["source_server"],
+            target_server=normalize_server(offer.home_server),
+            offer_id=trade_data.offer_id,
+            status_code=status_code,
+            has_idempotency_key=bool(trade_data.idempotency_key),
+        )
     return JSONResponse(status_code=status_code, content=body)
 
 
@@ -1241,6 +1746,16 @@ async def _execute_trade_authoritatively(
     owner_user = context.owner_user
     actor_user = context.actor_user
     _ensure_accountant_market_access_allowed(context)
+    log_trading_event(
+        logger,
+        "trade_execute.attempt",
+        action="trade_execute",
+        result="attempt",
+        offer_id=trade_data.offer_id,
+        source_server=current_server(),
+        has_idempotency_key=bool(trade_data.idempotency_key),
+        delegated_actor=getattr(actor_user, "id", None) != getattr(owner_user, "id", None),
+    )
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -1372,14 +1887,6 @@ async def _execute_trade_authoritatively(
             offer.offer_type,
         )
 
-    def _require_trade_node_user(user_obj: object | None) -> object:
-        if user_obj is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="امکان انجام این معامله وجود ندارد.",
-            )
-        return user_obj
-
     source_principal_user: object | None = offer.user if source_principal_user_id == offer.user_id else None
     responder_principal_user: object | None = owner_user if responder_principal_user_id == owner_user.id else None
 
@@ -1405,40 +1912,34 @@ async def _execute_trade_authoritatively(
                     detail="امکان انجام این معامله وجود ندارد.",
                 )
 
-    source_principal_user = _require_trade_node_user(source_principal_user)
-    responder_principal_user = _require_trade_node_user(responder_principal_user)
-
-    trade_execution_nodes: list[dict[str, object]] = [
-        {
-            "user_id": offer.user_id,
-            "user": _require_trade_node_user(offer.user),
-        }
-    ]
-
-    def _append_trade_execution_node(user_obj: object | None, user_id: object) -> None:
-        normalized_user_id = _coerce_trade_user_id(user_id)
-        if normalized_user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="امکان انجام این معامله وجود ندارد.",
-            )
-        if trade_execution_nodes[-1]["user_id"] == normalized_user_id:
-            return
-        trade_execution_nodes.append(
-            {
-                "user_id": normalized_user_id,
-                "user": _require_trade_node_user(user_obj),
-            }
+    try:
+        trade_execution_plan = _build_trade_execution_plan(
+            offer_user_id=offer.user_id,
+            offer_user=offer.user,
+            source_principal_user_id=source_principal_user_id,
+            source_principal_user=source_principal_user,
+            responder_principal_user_id=responder_principal_user_id,
+            responder_principal_user=responder_principal_user,
+            owner_user_id=owner_user.id,
+            owner_user=owner_user,
         )
+    except TradeExecutionPlanError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or TRADE_UNAVAILABLE_DETAIL,
+        ) from exc
 
-    if source_principal_user_id != offer.user_id:
-        _append_trade_execution_node(source_principal_user, source_principal_user_id)
-    _append_trade_execution_node(responder_principal_user, responder_principal_user_id)
-    _append_trade_execution_node(owner_user, owner_user.id)
-
-    uses_customer_trade_chain = len(trade_execution_nodes) > 2
+    trade_execution_nodes = [
+        {
+            "user_id": node.user_id,
+            "user": node.user,
+        }
+        for node in trade_execution_plan.nodes
+    ]
+    uses_customer_trade_chain = trade_execution_plan.uses_customer_trade_chain
 
     if trade_data.idempotency_key:
+        await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
         existing_trade = await db.execute(
             select(Trade)
             .options(
@@ -1450,6 +1951,21 @@ async def _execute_trade_authoritatively(
         )
         existing_trade_obj = existing_trade.scalar_one_or_none()
         if existing_trade_obj:
+            try:
+                _validate_idempotent_trade_replay(
+                    existing_trade=existing_trade_obj,
+                    offer=offer,
+                    owner_user=owner_user,
+                    actor_user=actor_user,
+                    trade_quantity=trade_quantity,
+                    expected_price=executed_trade_price,
+                    uses_customer_trade_chain=uses_customer_trade_chain,
+                )
+            except TradeIdempotencyConflictError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
             existing_identity_map = await _load_trade_identity_map_for_user_ids(
                 db,
                 [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
@@ -1458,6 +1974,18 @@ async def _execute_trade_authoritatively(
                 db,
                 [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
             )
+            log_trading_event(
+                logger,
+                "trade_idempotent_replay",
+                action="trade_idempotent_replay",
+                result="replay",
+                offer_id=trade_data.offer_id,
+                trade_id=getattr(existing_trade_obj, "id", None),
+                trade_number=getattr(existing_trade_obj, "trade_number", None),
+                source_server=current_server(),
+                has_idempotency_key=True,
+                chain_length=len(trade_execution_nodes) - 1,
+            )
             return trade_to_response(
                 existing_trade_obj,
                 identity_map=existing_identity_map,
@@ -1465,8 +1993,7 @@ async def _execute_trade_authoritatively(
             )
     
     # گرفتن شماره معامله جدید
-    max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))
-    next_trade_number = (max_trade_number or 9999) + 1
+    next_trade_number = await _allocate_next_trade_number(db)
     
     # نوع معامله از دید پاسخ‌دهنده
     responder_trade_type = TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL
@@ -1522,38 +2049,19 @@ async def _execute_trade_authoritatively(
 
     response_trade_number = response_trade_record.trade_number
     
-    # آپدیت لفظ
-    offer.remaining_quantity -= trade_quantity
-    
-    # بروزرسانی لات‌ها - حذف مقدار معامله شده از لیست
-    if offer.remaining_quantity <= 0:
-        if offer.lot_sizes is not None:
-            from sqlalchemy.orm.attributes import flag_modified
-            offer.lot_sizes = None
-            flag_modified(offer, "lot_sizes")
-    elif offer.lot_sizes:
+    try:
+        lot_sizes_modified = _apply_offer_trade_mutation(offer, trade_quantity)
+    except TradeAtomicityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if lot_sizes_modified:
         from sqlalchemy.orm.attributes import flag_modified
-        new_lot_sizes = list(offer.lot_sizes)
-        if trade_quantity in new_lot_sizes:
-            new_lot_sizes.remove(trade_quantity)
-        offer.lot_sizes = new_lot_sizes if new_lot_sizes else None
         flag_modified(offer, "lot_sizes")  # اجبار SQLAlchemy برای تشخیص تغییر
     
-    if offer.remaining_quantity <= 0:
-        offer.status = OfferStatus.COMPLETED
-    
     # Commit با محافظت Optimistic Locking
-    try:
-        await db.commit()
-    except Exception as e:
-        # بررسی StaleDataError (تغییر همزمان توسط کاربر دیگر)
-        if "StaleDataError" in str(type(e).__name__) or "could not update" in str(e).lower():
-            await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید."
-            )
-        raise
+    await _commit_trade_execution(db)
     
     # بارگذاری روابط معامله
     result = await db.execute(
@@ -1618,12 +2126,36 @@ async def _execute_trade_authoritatively(
     # آپدیت دکمه‌های کانال (مستقیم - نه در background)
     try:
         await update_channel_buttons(offer)
-    except Exception as e:
-        logger.error(f"Failed to update channel buttons: {e}")
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=getattr(offer, "id", None),
+            trade_id=getattr(response_trade_record, "id", None),
+            trade_number=response_trade_number,
+            error_class=type(exc).__name__,
+        )
     
     # ارسال نوتیفیکیشن‌ها
     trade_timestamp = getattr(response_trade, "created_at", None) or getattr(created_trade, "created_at", None) or datetime.now(timezone.utc)
     trade_datetime = to_jalali_str(trade_timestamp, "%Y/%m/%d   %H:%M") or ""
+    log_trading_event(
+        logger,
+        "trade_execute.accepted",
+        action="trade_execute",
+        result="success",
+        offer_id=getattr(offer, "id", None),
+        trade_id=getattr(response_trade, "id", None) or getattr(response_trade_record, "id", None),
+        trade_number=response_trade_number,
+        source_server=current_server(),
+        has_idempotency_key=bool(trade_data.idempotency_key),
+        delegated_actor=getattr(actor_user, "id", None) != getattr(owner_user, "id", None),
+        chain_length=len(trade_execution_nodes) - 1,
+    )
     
     # تعیین نوع و ایموجی
     if responder_trade_type == TradeType.BUY:
@@ -1636,89 +2168,6 @@ async def _execute_trade_authoritatively(
         respond_type_fa = "فروش"
         offer_emoji = "🟢"
         offer_type_fa = "خرید"
-
-    def _recipient_is_tier2_customer(audience_user_id: int | None) -> bool:
-        if audience_user_id is None or not participant_customer_relation_map:
-            return False
-        relation = participant_customer_relation_map.get(audience_user_id)
-        return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
-
-    def _build_trade_notification_message(
-        *,
-        trade_emoji: str,
-        trade_type_label: str,
-        trade_price: int,
-        trade_number: int,
-        counterparty_name: str | None,
-        audience_user_id: int | None,
-        trade_path_summary: str | None = None,
-    ) -> str:
-        lines = [
-            f"{trade_emoji} {trade_type_label}",
-            f"💰 فی: {trade_price:,}",
-            f"📦 تعداد: {trade_quantity}",
-            f"🏷️ کالا: {offer.commodity.name}",
-        ]
-        if counterparty_name and not _recipient_is_tier2_customer(audience_user_id):
-            lines.append(f"👤 طرف معامله: {counterparty_name}")
-        lines.append(f"🔢 شماره معامله: {trade_number}")
-        lines.append(f"🕐 زمان معامله: {trade_datetime}")
-        if trade_path_summary:
-            lines.append(f"🧭 مسیر: {trade_path_summary}")
-        return "\n".join(lines)
-
-    def _build_trade_message_bundle(
-        *,
-        trade_price: int,
-        trade_number: int,
-        offer_user_name: str,
-        responder_user_name: str,
-        trade_path_summary: str | None = None,
-    ) -> tuple[str, str, str, str]:
-        trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
-        responder_msg = (
-            f"{respond_emoji} <b>{respond_type_fa}</b>\n\n"
-            f"💰 فی: {trade_price:,}\n"
-            f"📦 تعداد: {trade_quantity}\n"
-            f"🏷️ کالا: {offer.commodity.name}\n"
-            f"👤 طرف معامله: {offer_user_name}\n"
-            f"🔢 شماره معامله: {trade_number}\n"
-            f"🕐 زمان معامله: {trade_datetime}"
-            f"{trade_path_line}"
-        )
-        offer_owner_msg = (
-            f"{offer_emoji} <b>{offer_type_fa}</b>\n\n"
-            f"💰 فی: {trade_price:,}\n"
-            f"📦 تعداد: {trade_quantity}\n"
-            f"🏷️ کالا: {offer.commodity.name}\n"
-            f"👤 طرف معامله: {responder_user_name}\n"
-            f"🔢 شماره معامله: {trade_number}\n"
-            f"🕐 زمان معامله: {trade_datetime}"
-            f"{trade_path_line}"
-        )
-        notif_msg_responder = (
-            _build_trade_notification_message(
-                trade_emoji=respond_emoji,
-                trade_type_label=respond_type_fa,
-                trade_price=trade_price,
-                trade_number=trade_number,
-                counterparty_name=offer_user_name,
-                audience_user_id=None,
-                trade_path_summary=trade_path_summary,
-            )
-        )
-        notif_msg_owner = (
-            _build_trade_notification_message(
-                trade_emoji=offer_emoji,
-                trade_type_label=offer_type_fa,
-                trade_price=trade_price,
-                trade_number=trade_number,
-                counterparty_name=responder_user_name,
-                audience_user_id=None,
-                trade_path_summary=trade_path_summary,
-            )
-        )
-        return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
 
     async def _create_trade_notifications_for_leg(
         *,
@@ -1739,9 +2188,13 @@ async def _execute_trade_authoritatively(
                     trade_emoji=trade_emoji,
                     trade_type_label=trade_type_label,
                     trade_price=trade_price,
+                    trade_quantity=trade_quantity,
+                    commodity_name=offer.commodity.name,
                     trade_number=trade_number,
+                    trade_datetime=trade_datetime,
                     counterparty_name=counterparty_name,
                     audience_user_id=audience_user_id,
+                    customer_relation_map=participant_customer_relation_map,
                     trade_path_summary=trade_path_summary,
                 ),
                 level=NotificationLevel.SUCCESS,
@@ -1800,10 +2253,18 @@ async def _execute_trade_authoritatively(
                 customer_relation_map=participant_customer_relation_map,
             ).get("trade_path_summary")
             leg_responder_msg, leg_offer_owner_msg, leg_notif_responder, leg_notif_owner = _build_trade_message_bundle(
+                responder_trade_emoji=respond_emoji,
+                responder_trade_label=respond_type_fa,
+                offer_trade_emoji=offer_emoji,
+                offer_trade_label=offer_type_fa,
                 trade_price=getattr(leg_trade_obj, "price", offer.price),
+                trade_quantity=trade_quantity,
+                commodity_name=offer.commodity.name,
                 trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                trade_datetime=trade_datetime,
                 offer_user_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
                 responder_user_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
+                customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=leg_trade_path_summary,
             )
 
@@ -1853,14 +2314,33 @@ async def _execute_trade_authoritatively(
                         trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     ),
                 )
-            except:
-                pass
+            except Exception as exc:
+                log_trading_event(
+                    logger,
+                    "trade_notification_create_failed",
+                    level="warning",
+                    action="trading_side_effect",
+                    result="failure",
+                    side_effect="notification",
+                    offer_id=getattr(offer, "id", None),
+                    trade_id=getattr(leg_trade_obj, "id", None),
+                    trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
+                    error_class=type(exc).__name__,
+                )
     else:
         responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner = _build_trade_message_bundle(
+            responder_trade_emoji=respond_emoji,
+            responder_trade_label=respond_type_fa,
+            offer_trade_emoji=offer_emoji,
+            offer_trade_label=offer_type_fa,
             trade_price=executed_trade_price,
+            trade_quantity=trade_quantity,
+            commodity_name=offer.commodity.name,
             trade_number=response_trade_number,
+            trade_datetime=trade_datetime,
             offer_user_name=offer_user_display_name,
             responder_user_name=responder_user_display_name,
+            customer_relation_map=participant_customer_relation_map,
             trade_path_summary=_build_trade_path_payload(
                 offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
                 responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
@@ -1916,8 +2396,19 @@ async def _execute_trade_authoritatively(
                 ).get("trade_path_summary"),
                 extra_payload=offer_owner_notification_payload,
             )
-        except:
-            pass
+        except Exception as exc:
+            log_trading_event(
+                logger,
+                "trade_notification_create_failed",
+                level="warning",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="notification",
+                offer_id=getattr(offer, "id", None),
+                trade_id=getattr(response_trade_record, "id", None),
+                trade_number=response_trade_number,
+                error_class=type(exc).__name__,
+            )
     
     # افزایش شمارنده معامله
     # فقط پاسخ‌دهنده (کسی که روی لفظ دیگران معامله می‌کند) شمارنده‌اش افزایش می‌یابد
@@ -1973,12 +2464,26 @@ async def _execute_trade_authoritatively(
         )
 
     from .realtime import publish_event
-    await publish_event("offer:updated", {
-        "id": offer.id,
-        "remaining_quantity": offer.remaining_quantity,
-        "lot_sizes": offer.lot_sizes,
-        "status": offer.status.value
-    })
+    try:
+        await publish_event("offer:updated", {
+            "id": offer.id,
+            "remaining_quantity": offer.remaining_quantity,
+            "lot_sizes": offer.lot_sizes,
+            "status": offer.status.value
+        })
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "offer_update_realtime_publish_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="realtime_publish",
+            offer_id=getattr(offer, "id", None),
+            trade_id=getattr(response_trade, "id", None) or getattr(response_trade_record, "id", None),
+            trade_number=response_trade_number,
+            error_class=type(exc).__name__,
+        )
     
     return trade_to_response(
         response_trade,
@@ -2020,26 +2525,97 @@ async def execute_trade_internal(
     db: AsyncSession = Depends(get_db),
 ):
     body = await raw_request.body()
+    target_server = current_server()
+    payload_source_server = _normalize_internal_trade_source(internal_data.source_server)
+    header_source_server = _normalize_internal_trade_source(raw_request.headers.get("x-source-server"))
     if not verify_internal_signature(
         body,
         raw_request.headers.get("x-timestamp"),
         raw_request.headers.get("x-signature"),
         raw_request.headers.get("x-api-key"),
     ):
+        log_trading_event(
+            logger,
+            "trade_internal_execute.rejected",
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="bad_signature",
+            source_server=payload_source_server or header_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade signature")
 
+    if (
+        not payload_source_server
+        or not header_source_server
+        or payload_source_server != header_source_server
+        or payload_source_server == target_server
+    ):
+        log_trading_event(
+            logger,
+            "trade_internal_execute.rejected",
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="invalid_source_server",
+            source_server=payload_source_server or header_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade source")
+
     offer = await db.get(Offer, internal_data.offer_id)
-    if offer and normalize_server(offer.home_server) != current_server():
+    if offer and normalize_server(offer.home_server) != target_server:
+        log_trading_event(
+            logger,
+            "trade_internal_execute.rejected",
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="wrong_authoritative_server",
+            source_server=payload_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_409_CONFLICT,
+        )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع آفر نیست.")
 
     responder = await db.get(User, internal_data.responder_user_id)
     if not responder or responder.is_deleted:
+        log_trading_event(
+            logger,
+            "trade_internal_execute.rejected",
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="missing_responder",
+            source_server=payload_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر درخواست‌دهنده یافت نشد")
 
     actor_user = responder
     if internal_data.actor_user_id and internal_data.actor_user_id != responder.id:
         actor_user = await db.get(User, internal_data.actor_user_id)
         if not actor_user or actor_user.is_deleted:
+            log_trading_event(
+                logger,
+                "trade_internal_execute.rejected",
+                level="warning",
+                action="trade_internal_execute",
+                result="denied",
+                reason="missing_actor",
+                source_server=payload_source_server,
+                target_server=target_server,
+                offer_id=internal_data.offer_id,
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر اجراکننده یافت نشد")
 
     return await _execute_trade_authoritatively(

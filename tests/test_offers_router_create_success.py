@@ -15,6 +15,9 @@ class FakeExecuteResult:
     def scalar_one(self):
         return self._value
 
+    def scalar_one_or_none(self):
+        return self._value
+
 
 class FakeDB:
     def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
@@ -22,6 +25,7 @@ class FakeDB:
         self.execute_results = list(execute_results or [])
         self.scalar_results = list(scalar_results or [])
         self.commit = AsyncMock()
+        self.rollback = AsyncMock()
         self.refresh = AsyncMock(side_effect=self._refresh)
         self.added = []
 
@@ -132,21 +136,21 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_offer_stamps_home_server_and_links_republished_offer(self):
         commodity = SimpleNamespace(id=1)
-        old_offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, republished_offer_id=None)
+        old_offer = SimpleNamespace(id=99, user_id=5, status=OfferStatus.ACTIVE, republished_offer_id=None, channel_message_id=None)
         reloaded_offer = make_reloaded_offer(offer_id=77)
         db = FakeDB(
-            get_results=[commodity, old_offer],
-            scalar_results=[0],
+            get_results=[old_offer, commodity],
+            scalar_results=[1],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
         current_user = make_user()
-        settings = SimpleNamespace(max_active_offers=5)
+        settings = SimpleNamespace(max_active_offers=1)
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
         with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "api.routers.offers.get_trading_settings",
             return_value=settings,
-        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=1)), patch(
             "core.services.trade_service.validate_quantity",
             return_value=(True, None),
         ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
@@ -158,7 +162,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.offers.current_server", return_value="iran"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
-        ), patch("core.cache.incr_active_offer_count", new=AsyncMock()) as incr_mock, patch(
+        ), patch("core.cache.set_active_offer_count", new=AsyncMock()) as set_count_mock, patch(
             "api.routers.offers.increment_user_counter",
             new=AsyncMock(),
         ) as counter_mock, patch(
@@ -181,12 +185,48 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(old_offer.status, OfferStatus.EXPIRED)
         self.assertEqual(old_offer.republished_offer_id, 77)
         self.assertEqual(db.commit.await_count, 2)
-        incr_mock.assert_awaited_once_with(5)
+        set_count_mock.assert_awaited_once_with(5, 1)
         counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
-        publish_mock.assert_awaited_once()
+        self.assertEqual(publish_mock.await_count, 2)
+        publish_mock.assert_any_await("offer:expired", {"id": 99})
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 77, "user_id": 5})
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
+
+    async def test_create_offer_idempotent_replay_returns_existing_offer_without_side_effects(self):
+        existing_offer = make_reloaded_offer(offer_id=72)
+        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer)])
+        current_user = make_user()
+        async_settings = SimpleNamespace(offer_expiry_minutes=30)
+
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 72, "replayed": True},
+        ) as response_mock, patch(
+            "api.routers.offers.send_offer_to_channel",
+            new=AsyncMock(),
+        ) as channel_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ) as counter_mock:
+            result = await create_offer(
+                make_offer(idempotency_key="offer-create-1"),
+                db=db,
+                context=make_context(current_user),
+            )
+
+        self.assertEqual(result, {"id": 72, "replayed": True})
+        self.assertEqual(db.added, [])
+        db.commit.assert_not_awaited()
+        db.refresh.assert_not_awaited()
+        channel_mock.assert_not_awaited()
+        publish_mock.assert_not_awaited()
+        counter_mock.assert_not_awaited()
+        self.register_market_offer_created_mock.assert_not_awaited()
+        response_mock.assert_called_once_with(existing_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
 
     async def test_create_offer_persists_channel_message_and_publishes_created_event(self):
         commodity = SimpleNamespace(id=1)
@@ -215,7 +255,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=555),
-        ), patch("core.cache.incr_active_offer_count", new=AsyncMock()), patch(
+        ), patch("core.cache.set_active_offer_count", new=AsyncMock()) as set_count_mock, patch(
             "api.routers.offers.increment_user_counter",
             new=AsyncMock(),
         ), patch(
@@ -231,6 +271,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_offer.home_server, "foreign")
         self.assertEqual(reloaded_offer.channel_message_id, 555)
         self.assertEqual(db.commit.await_count, 2)
+        set_count_mock.assert_awaited_once_with(5, 1)
         publish_mock.assert_awaited_once_with(
             "offer:created",
             {
@@ -255,6 +296,57 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 88, "channel_message_id": 555})
+
+    async def test_create_offer_tolerates_post_commit_cache_and_realtime_failures(self):
+        commodity = SimpleNamespace(id=1)
+        reloaded_offer = make_reloaded_offer(offer_id=89)
+        db = FakeDB(
+            get_results=[commodity],
+            scalar_results=[0],
+            execute_results=[FakeExecuteResult(reloaded_offer)],
+        )
+        current_user = make_user()
+        settings = SimpleNamespace(max_active_offers=5)
+        async_settings = SimpleNamespace(offer_expiry_minutes=15)
+
+        with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
+            "api.routers.offers.get_trading_settings",
+            return_value=settings,
+        ), patch("core.cache.get_active_offer_count", new=AsyncMock(return_value=0)), patch(
+            "core.services.trade_service.validate_quantity",
+            return_value=(True, None),
+        ), patch("core.services.trade_service.validate_price", return_value=(True, None)), patch(
+            "core.services.trade_service.validate_competitive_price",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch(
+            "core.services.trade_service.detect_offer_price_warning",
+            new=AsyncMock(return_value=None),
+        ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "api.routers.offers.send_offer_to_channel",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "core.cache.set_active_offer_count",
+            new=AsyncMock(side_effect=RuntimeError("redis down")),
+        ), patch(
+            "api.routers.offers.increment_user_counter",
+            new=AsyncMock(),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=async_settings),
+        ), patch(
+            "api.routers.realtime.publish_event",
+            new=AsyncMock(side_effect=RuntimeError("pubsub down")),
+        ) as publish_mock, patch(
+            "api.routers.offers.offer_to_response",
+            return_value={"id": 89},
+        ), patch("api.routers.offers.logger") as logger:
+            result = await create_offer(make_offer(), db=db, context=make_context(current_user))
+
+        self.assertEqual(result, {"id": 89})
+        self.assertEqual(db.added[0].status, OfferStatus.ACTIVE)
+        db.commit.assert_awaited_once()
+        publish_mock.assert_awaited_once()
+        self.assertGreaterEqual(logger.warning.call_count, 2)
 
     async def test_create_offer_tolerates_sse_expiry_calculation_failures(self):
         commodity = SimpleNamespace(id=1)
@@ -284,7 +376,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
-        ), patch("core.cache.incr_active_offer_count", new=AsyncMock()), patch(
+        ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
             "api.routers.offers.increment_user_counter",
             new=AsyncMock(),
         ), patch(
@@ -348,7 +440,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
-        ) as send_mock, patch("core.cache.incr_active_offer_count", new=AsyncMock()) as incr_mock, patch(
+        ) as send_mock, patch("core.cache.set_active_offer_count", new=AsyncMock()) as set_count_mock, patch(
             "api.routers.offers.increment_user_counter",
             new=AsyncMock(),
         ) as counter_mock, patch(
@@ -365,7 +457,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_offer.actor_user_id, 5)
         self.assertEqual(new_offer.home_server, "iran")
         send_mock.assert_awaited_once_with(reloaded_offer, current_user)
-        incr_mock.assert_awaited_once_with(5)
+        set_count_mock.assert_awaited_once_with(5, 1)
         counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
         response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
         self.assertEqual(result, {"id": 120, "user_id": 5})
@@ -408,7 +500,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
             "api.routers.offers.send_offer_to_channel",
             new=AsyncMock(return_value=None),
-        ), patch("core.cache.incr_active_offer_count", new=AsyncMock()), patch(
+        ), patch("core.cache.set_active_offer_count", new=AsyncMock()), patch(
             "api.routers.offers.increment_user_counter",
             new=AsyncMock(),
         ), patch(

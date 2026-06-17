@@ -395,6 +395,56 @@ class CustomersRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["commodities"][0]["commodity_name"], "طلا")
         self.assertIn("تومان کامل", result["profit_calculation_note"])
 
+    async def test_get_my_customer_trade_stats_preserves_historical_profit_after_relation_status_and_rate_changes(self):
+        relation = SimpleNamespace(
+            id=11,
+            owner_user_id=7,
+            customer_user_id=18,
+            deleted_at=datetime.utcnow(),
+            status=CustomerRelationStatus.REVOKED,
+            customer_tier=CustomerTier.TIER_2,
+            commission_rate=99.0,
+        )
+        customer_trade = SimpleNamespace(
+            trade_number=10002,
+            offer_id=None,
+            offer_user_id=7,
+            responder_user_id=18,
+            actor_user_id=18,
+            quantity=23,
+            commodity_id=1,
+            commodity=SimpleNamespace(name="طلا"),
+            price=50_800,
+            offer=None,
+        )
+        owner_source_leg = SimpleNamespace(
+            trade_number=10001,
+            offer_id=77,
+            offer_user_id=99,
+            responder_user_id=7,
+            actor_user_id=18,
+            quantity=23,
+            commodity_id=1,
+            price=50_000,
+        )
+        db = ExecuteDB(
+            FakeExecuteResult(relation),
+            FakeExecuteResult(values=[customer_trade]),
+            FakeExecuteResult(values=[owner_source_leg]),
+        )
+        context = SimpleNamespace(
+            is_accountant_context=False,
+            owner_user=SimpleNamespace(id=7),
+            actor_user=SimpleNamespace(id=7),
+        )
+
+        with patch("api.routers.customers.is_user_customer", new=AsyncMock(return_value=False)):
+            result = await get_my_customer_trade_stats(11, days=7, context=context, db=db)
+
+        self.assertEqual(result["trade_count"], 1)
+        self.assertEqual(result["commission_profit_toman"], 18_400_000)
+        self.assertEqual(result["customer_user_id"], 18)
+
     async def test_list_my_customer_sessions_returns_active_customer_sessions(self):
         context = SimpleNamespace(is_accountant_context=False, owner_user=SimpleNamespace(id=7))
         relation = SimpleNamespace(id=9, customer_user_id=12)

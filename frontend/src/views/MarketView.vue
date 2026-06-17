@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
-import { ChevronDown, Loader2, Send } from 'lucide-vue-next'
+import { Bell, BellOff, ChevronDown, Loader2, Send } from 'lucide-vue-next'
 import { useOffers } from '../composables/useOffers'
 import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
@@ -11,6 +11,7 @@ import { apiFetch, apiFetchJson } from '../utils/auth'
 import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy'
 import { buildOfferDraftText } from '../utils/offerDraftText'
+import { fetchNotificationPreferences, updateNotificationPreferences } from '../services/webPush'
 
 interface Commodity {
   id: number
@@ -134,6 +135,7 @@ const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const republishedFromOfferId = ref<number | null>(null)
+const pendingOfferIdempotencyKey = ref<string | null>(null)
 const recentOffers = ref<RecentOfferSummary[]>([])
 const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
@@ -145,6 +147,10 @@ const recentOffersDropdownStyle = ref<Record<string, string>>({})
 const offerInputRef = ref<HTMLTextAreaElement | null>(null)
 const adminMarketMessage = ref<AdminMarketMessage | null>(null)
 const adminMarketMessageExpanded = ref(false)
+const marketOfferPushEnabled = ref(true)
+const marketOfferPushLoading = ref(false)
+const marketOfferPushSaving = ref(false)
+const marketOfferPushError = ref('')
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
 const visibleTabs = computed<MarketFilterType[]>(() => (
   isTier2Customer.value ? ['all', 'buy', 'sell'] : ['all', 'buy', 'sell', 'my']
@@ -163,6 +169,11 @@ const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const showMarketNotice = computed(() => !marketRuntime.value.is_open || marketRuntime.value.active_web_notice_visible)
 const marketNoticeText = computed(() => (marketRuntime.value.is_open ? 'شروع فعالیت بازار' : 'پایان فعالیت بازار'))
 const marketInputPlaceholder = computed(() => (isMarketOpen.value ? randomPlaceholder.value : 'بازار بسته است'))
+const marketOfferPushButtonLabel = computed(() => (
+  marketOfferPushEnabled.value
+    ? 'خاموش کردن اعلان آفرهای بازار'
+    : 'روشن کردن اعلان آفرهای بازار'
+))
 const shouldCollapseAdminMarketMessage = computed(() => (
   !!adminMarketMessage.value
   && isMarketOpen.value
@@ -214,6 +225,38 @@ async function fetchMarketState() {
     } catch (e) {
         console.error('Failed to load market state', e)
     }
+}
+
+async function fetchMarketNotificationPreferences() {
+  marketOfferPushLoading.value = true
+  marketOfferPushError.value = ''
+  try {
+    const preferences = await fetchNotificationPreferences()
+    marketOfferPushEnabled.value = preferences?.market_offer_push_enabled !== false
+  } catch (e) {
+    console.error('Failed to load notification preferences', e)
+    marketOfferPushError.value = 'وضعیت اعلان بازار دریافت نشد.'
+  } finally {
+    marketOfferPushLoading.value = false
+  }
+}
+
+async function toggleMarketOfferPush() {
+  if (marketOfferPushLoading.value || marketOfferPushSaving.value) return
+  marketOfferPushSaving.value = true
+  marketOfferPushError.value = ''
+  const nextEnabled = !marketOfferPushEnabled.value
+  try {
+    const preferences = await updateNotificationPreferences({
+      market_offer_push_enabled: nextEnabled,
+    })
+    marketOfferPushEnabled.value = preferences?.market_offer_push_enabled !== false
+  } catch (e) {
+    console.error('Failed to update notification preferences', e)
+    marketOfferPushError.value = 'تغییر وضعیت اعلان بازار ذخیره نشد.'
+  } finally {
+    marketOfferPushSaving.value = false
+  }
 }
 
   async function fetchAdminMarketMessage() {
@@ -282,6 +325,19 @@ function buildOfferCreatePayload(offer: ParsedOfferPreview) {
     lot_sizes: offer.lot_sizes,
     notes: offer.notes,
   }
+}
+
+function createMutationIdempotencyKey(prefix: string) {
+  const randomPart = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+  return `${prefix}:${randomPart}`.slice(0, 64)
+}
+
+function getPendingOfferIdempotencyKey() {
+  if (!pendingOfferIdempotencyKey.value) {
+    pendingOfferIdempotencyKey.value = createMutationIdempotencyKey('offer')
+  }
+  return pendingOfferIdempotencyKey.value
 }
 
 function getRecentOfferRepublishQuantity(offer: RecentOfferSummary) {
@@ -458,6 +514,7 @@ function toggleRecentOffersMenu() {
 
 function openRecentOfferPreview(offer: RecentOfferSummary) {
   republishedFromOfferId.value = offer.id
+  pendingOfferIdempotencyKey.value = null
   pendingOfferPreview.value = {
     trade_type: offer.offer_type,
     commodity_id: offer.commodity_id,
@@ -479,6 +536,7 @@ function cancelOfferPreview() {
   previewError.value = ''
   previewWarning.value = null
   republishedFromOfferId.value = null
+  pendingOfferIdempotencyKey.value = null
 }
 
 function focusOfferInput() {
@@ -505,6 +563,7 @@ function editPendingOfferPreview() {
 
 async function confirmOfferPreview() {
   if (!pendingOfferPreview.value) return
+  if (isSubmitting.value) return
   if (!isMarketOpen.value) {
     previewError.value = MARKET_CLOSED_DETAIL
     return
@@ -523,7 +582,9 @@ async function confirmOfferPreview() {
         ...buildOfferCreatePayload(pendingOfferPreview.value),
         republished_from_id: republishedFromOfferId.value,
         warning_acknowledged: !!previewWarning.value,
+        idempotency_key: getPendingOfferIdempotencyKey(),
       }),
+      retryNetwork: false,
     })
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}))
@@ -544,6 +605,7 @@ async function confirmOfferPreview() {
     pendingOfferPreview.value = null
     previewWarning.value = null
     republishedFromOfferId.value = null
+    pendingOfferIdempotencyKey.value = null
     fetchOffers()
     void fetchRecentOffers(true)
   } catch (e: any) {
@@ -560,6 +622,7 @@ async function confirmOfferPreview() {
 }
 
 function parseAndSubmitTextOffer() {
+  if (isSubmitting.value) return
   if (isTier2Customer.value) {
     parseError.value = 'مشتری سطح 2 مجاز به ثبت لفظ نیست و فقط می‌تواند روی لفظ‌های دیگر درخواست بزند.'
     return
@@ -574,6 +637,7 @@ function parseAndSubmitTextOffer() {
     return
   }
   republishedFromOfferId.value = null
+  pendingOfferIdempotencyKey.value = null
   isSubmitting.value = true
   parseError.value = ''
   previewError.value = ''
@@ -581,7 +645,8 @@ function parseAndSubmitTextOffer() {
   
   apiFetchJson('/api/offers/parse', {
       method: 'POST',
-      body: JSON.stringify({ text: offerText.value })
+      body: JSON.stringify({ text: offerText.value }),
+      retryNetwork: false,
     }, {
       surface: 'market',
       scope: 'field',
@@ -608,10 +673,11 @@ function parseAndSubmitTextOffer() {
 }
 
 async function cancelAllOffers() {
+  if (isSubmitting.value) return
   isSubmitting.value = true
   parseError.value = ''
   try {
-    const response = await apiFetch('/api/offers/cancel-all', { method: 'POST' })
+    const response = await apiFetch('/api/offers/cancel-all', { method: 'POST', retryNetwork: false })
     if (!response.ok) {
       throw await createHttpErrorFromResponse(response, {
         surface: 'market',
@@ -662,6 +728,7 @@ watch(isTier2Customer, (blocked) => {
   previewWarning.value = null
   previewError.value = ''
   republishedFromOfferId.value = null
+  pendingOfferIdempotencyKey.value = null
   closeRecentOffersMenu()
   recentOffers.value = []
 })
@@ -684,6 +751,7 @@ onMounted(() => {
     fetchCommodities()
     fetchTradingSettings()
   fetchMarketState()
+    fetchMarketNotificationPreferences()
     fetchAdminMarketMessage()
     fetchCurrentUser()
   document.addEventListener('pointerdown', handleRecentOffersPointerDown)
@@ -714,7 +782,23 @@ onUnmounted(() => {
 
     <div class="market-header">
       <div class="header-controls">
+        <AppIconButton
+          class="market-notification-toggle"
+          :class="{ 'market-notification-toggle--muted': !marketOfferPushEnabled }"
+          :label="marketOfferPushButtonLabel"
+          :title="marketOfferPushButtonLabel"
+          :aria-pressed="marketOfferPushEnabled"
+          :disabled="marketOfferPushLoading || marketOfferPushSaving"
+          @click="toggleMarketOfferPush"
+        >
+          <Loader2 v-if="marketOfferPushLoading || marketOfferPushSaving" class="animate-spin" :size="18" />
+          <Bell v-else-if="marketOfferPushEnabled" :size="18" />
+          <BellOff v-else :size="18" />
+        </AppIconButton>
         <AppFilterChips v-model="filterType" class="tabs-container market-filter-chips" label="فیلتر لفظ‌های بازار" :options="visibleFilterOptions" />
+      </div>
+      <div v-if="marketOfferPushError" class="market-notification-error" role="status">
+        {{ marketOfferPushError }}
       </div>
     </div>
 
@@ -897,14 +981,48 @@ onUnmounted(() => {
 
 .header-controls {
   display: flex;
+  align-items: center;
   gap: 0.75rem;
   max-width: var(--ds-page-max-width);
   width: 100%;
   margin: 0 auto;
 }
 
+.market-notification-toggle {
+  flex: 0 0 auto;
+  width: var(--ds-touch-target, 48px);
+  height: var(--ds-touch-target, 48px);
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.18);
+  background: rgba(240, 253, 250, 0.92);
+}
+
+.market-notification-toggle:hover:not(:disabled) {
+  color: #115e59;
+  border-color: rgba(15, 118, 110, 0.28);
+  background: rgba(204, 251, 241, 0.96);
+}
+
+.market-notification-toggle--muted {
+  color: var(--ds-text-tertiary, #64748b);
+  border-color: var(--ds-border-light);
+  background: var(--ds-bg-inset);
+}
+
+.market-notification-error {
+  max-width: var(--ds-page-max-width);
+  width: 100%;
+  margin: -0.25rem auto 0;
+  padding: 0 0.1rem;
+  color: var(--ds-danger-600);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .tabs-container {
   flex: 1;
+  min-width: 0;
 }
 
 .market-filter-chips :deep(.ui-filter-chips) {
@@ -916,6 +1034,7 @@ onUnmounted(() => {
 }
 
 .market-filter-chips :deep(.ui-filter-chip:focus-visible),
+.market-notification-toggle:focus-visible,
 .recent-offers-toggle:focus-visible,
 .text-offer-input:focus-visible,
 .send-btn:focus-visible,

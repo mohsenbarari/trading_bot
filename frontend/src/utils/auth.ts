@@ -223,7 +223,7 @@ export function forceLogout() {
     window.location.href = '/login';
 }
 
-type ApiFetchOptions = RequestInit & {
+export type ApiFetchOptions = RequestInit & {
     retryNetwork?: boolean;
 };
 
@@ -357,7 +357,7 @@ export async function apiFetch(url: string, options: ApiFetchOptions = {}) {
 
 import { cleanDeletedSuffixes } from './formatters';
 
-export async function apiFetchJson(url: string, options: RequestInit = {}, errorContext: ErrorPolicyContext = {}) {
+export async function apiFetchJson(url: string, options: ApiFetchOptions = {}, errorContext: ErrorPolicyContext = {}) {
     const response = await apiFetch(url, options);
     if (!response.ok) {
         throw await createHttpErrorFromResponse(response, errorContext);

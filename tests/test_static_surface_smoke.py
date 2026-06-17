@@ -25,7 +25,11 @@ class StaticSurfaceSmokeTests(unittest.TestCase):
         self.assertEqual(manifest['name'], 'Gold')
         self.assertEqual(manifest['share_target']['action'], '/share-receive')
         self.assertGreaterEqual(len(manifest['icons']), 2)
-        icon_purposes = {icon.get('purpose') for icon in manifest['icons']}
+        icon_purposes = {
+            purpose
+            for icon in manifest['icons']
+            for purpose in (icon.get('purpose') or '').split()
+        }
         self.assertIn('any', icon_purposes)
         self.assertIn('maskable', icon_purposes)
 

@@ -105,6 +105,14 @@ describe('useWebSocket', () => {
     MockWebSocket.instances[0]!.emitOpen()
     expect(ws.isConnected.value).toBe(true)
     expect(reconnectListener).toHaveBeenCalledTimes(1)
+    expect(ws.sendPresenceUpdate('/market', true)).toBe(true)
+    expect(MockWebSocket.instances[0]?.send).toHaveBeenCalledWith(JSON.stringify({
+      type: 'presence:update',
+      data: {
+        path: '/market',
+        visible: true,
+      },
+    }))
 
     socketMocks.cleanDeletedSuffixes.mockImplementationOnce(() => ({
       type: 'chat:message',
@@ -137,6 +145,7 @@ describe('useWebSocket', () => {
 
     ws.disconnect()
     expect(MockWebSocket.instances[1]?.close).toHaveBeenCalled()
+    expect(ws.sendJson({ type: 'presence:update' })).toBe(false)
     parseErrorSpy.mockRestore()
   })
 

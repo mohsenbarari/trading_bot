@@ -222,8 +222,8 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         reloaded_offer = make_reloaded_offer(offer_id=701)
         db = ApiSuccessDB(get_results=[commodity], execute_results=[FakeExecuteResult(reloaded_offer)], scalar_results=[14])
 
-        async def fake_incr_active_offer_count(_user_id):
-            shared_count["value"] += 1
+        async def fake_set_active_offer_count(_user_id, count):
+            shared_count["value"] = count
 
         with patch("api.routers.offers.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "api.routers.offers.evaluate_current_market_schedule",
@@ -238,8 +238,8 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             "core.cache.get_active_offer_count",
             new=AsyncMock(return_value=shared_count["value"]),
         ), patch(
-            "core.cache.incr_active_offer_count",
-            new=AsyncMock(side_effect=fake_incr_active_offer_count),
+            "core.cache.set_active_offer_count",
+            new=AsyncMock(side_effect=fake_set_active_offer_count),
         ), patch(
             "core.services.trade_service.validate_quantity",
             return_value=(True, None),

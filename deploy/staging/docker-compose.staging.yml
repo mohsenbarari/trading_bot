@@ -2,6 +2,8 @@ x-app-image: &app_image trading_bot_staging_app:${STAGING_IMAGE_TAG:-latest}
 x-app-build: &app_build
   context: ../..
   dockerfile: Dockerfile
+  args:
+    FRONTEND_DIST_DIR: ${STAGING_FRONTEND_DOCKER_DIST_DIR:-mini_app_dist_staging}
 
 services:
   app:

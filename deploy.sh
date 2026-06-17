@@ -391,7 +391,7 @@ prepare_pip_packages() {
     if [ "$DEPLOY_FORCE_REBUILD" = "1" ] || [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
         echo "🔄 requirements.txt changed or packages missing. Downloading..."
         mkdir -p "$PROJECT_DIR/pip_packages"
-        rm -f "$PROJECT_DIR"/pip_packages/*.whl "$PROJECT_DIR/pip_packages/.requirements_hash" 2>/dev/null || true
+        rm -f "$PROJECT_DIR"/pip_packages/*.whl "$PROJECT_DIR"/pip_packages/*.tar.gz "$PROJECT_DIR"/pip_packages/*.zip "$PROJECT_DIR/pip_packages/.requirements_hash" 2>/dev/null || true
         mapfile -t PIP_PLATFORM_ARGS < <(append_pip_platform_args "$LOCAL_ARCH")
 
         if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
@@ -411,7 +411,8 @@ prepare_pip_packages() {
             --implementation cp \
             --abi cp311 \
             "${PIP_PLATFORM_ARGS[@]}" \
-            --only-binary=:all:
+            --only-binary=:all: \
+            --no-binary=http-ece
             
         echo "$CURRENT_HASH" > "$HASH_FILE"
         echo "✅ Pip packages updated successfully!"

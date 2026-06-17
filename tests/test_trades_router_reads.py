@@ -1,5 +1,5 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -157,7 +157,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         foreign_trade = SimpleNamespace(offer_user_id=9, responder_user_id=10, actor_user_id=None)
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
@@ -206,7 +206,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         trades = [SimpleNamespace(id=11, offer_user_id=5, responder_user_id=7, actor_user_id=None)]
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(return_value=None),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -266,7 +266,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         trade = SimpleNamespace(id=18, offer_user_id=7, responder_user_id=99, actor_user_id=50)
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as exc_info:
@@ -290,7 +290,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(side_effect=relation_lookup),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -315,6 +315,39 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("trades.actor_user_id = 50", sql)
         self.assertNotIn("trades.offer_user_id = 7 AND trades.responder_user_id = 50", sql)
 
+    async def test_get_trades_with_user_preserves_target_customer_history_after_relation_status_change(self):
+        context = self.make_context(owner_id=7, actor_id=17)
+        trades = [SimpleNamespace(id=25, offer_user_id=50, responder_user_id=99, actor_user_id=17)]
+        db = FakeDB([FakeExecuteResult(values=trades)])
+
+        with patch(
+            "api.routers.trades._get_customer_history_relation_for_customer",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    owner_user_id=7,
+                    status="revoked",
+                    activated_at=datetime(2026, 1, 1, 12, 0),
+                    deleted_at=datetime(2026, 1, 2, 12, 0),
+                )
+            ),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades._load_trade_customer_relation_map_for_user_ids",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.trade_to_response", return_value={"id": 25}):
+            result = await get_trades_with_user(other_user_id=50, skip=0, limit=20, db=db, context=context)
+
+        self.assertEqual(result, [{"id": 25}])
+        sql = compile_sql(db.statements[0])
+        self.assertIn("trades.offer_user_id = 50", sql)
+        self.assertIn("trades.responder_user_id = 50", sql)
+        self.assertIn("trades.created_at >= '2026-01-01 12:00:00'", sql)
+        self.assertIn("trades.created_at <= '2026-01-02 12:00:00'", sql)
+        self.assertNotIn("trades.actor_user_id = 50", sql)
+        self.assertNotIn("trades.offer_user_id = 7 AND trades.responder_user_id = 50", sql)
+
     async def test_get_trades_with_user_switches_to_target_customer_history_for_super_admin(self):
         context = self.make_context(owner_id=900, owner_role=UserRole.SUPER_ADMIN)
         trades = [SimpleNamespace(id=22, offer_user_id=101, responder_user_id=50, actor_user_id=7)]
@@ -322,11 +355,16 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         async def relation_lookup(_db, user_id):
             if user_id == 50:
-                return SimpleNamespace(owner_user_id=7)
+                return SimpleNamespace(
+                    owner_user_id=7,
+                    status="revoked",
+                    activated_at=datetime(2026, 1, 1, 12, 0),
+                    deleted_at=datetime(2026, 1, 2, 12, 0),
+                )
             return None
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(side_effect=relation_lookup),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -342,6 +380,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trades.offer_user_id = 50", sql)
         self.assertIn("trades.responder_user_id = 50", sql)
         self.assertNotIn("trades.actor_user_id = 50", sql)
+        self.assertNotIn("trades.created_at <=", sql)
 
     async def test_get_trades_with_user_switches_to_target_history_for_super_admin_non_customer_target(self):
         context = self.make_context(owner_id=902, owner_role=UserRole.SUPER_ADMIN)
@@ -349,7 +388,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeExecuteResult(values=trades)])
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(return_value=None),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -379,7 +418,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeExecuteResult(values=[])])
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(return_value=None),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -417,7 +456,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(side_effect=relation_lookup),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -443,7 +482,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(side_effect=relation_lookup),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -474,7 +513,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(side_effect=relation_lookup),
         ), patch(
             "api.routers.trades.load_accountant_chat_identity_map",
@@ -497,7 +536,7 @@ class TradesRouterReadTests(unittest.IsolatedAsyncioTestCase):
             return None
 
         with patch(
-            "api.routers.trades.get_active_customer_relation_for_customer",
+            "api.routers.trades._get_customer_history_relation_for_customer",
             new=AsyncMock(side_effect=relation_lookup),
         ):
             with self.assertRaises(HTTPException) as exc_info:

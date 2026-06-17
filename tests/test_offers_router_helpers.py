@@ -297,7 +297,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeAsyncClient(response=FakeHttpResponse(status_code=500, text="bad gateway")),
         ), patch.object(offers_module, "logger") as logger:
             self.assertIsNone(await offers_module.send_offer_to_channel(wholesale_offer, SimpleNamespace(id=5)))
-        logger.error.assert_called_once()
+        logger.warning.assert_called_once()
+        logger.error.assert_not_called()
 
         with patch("api.routers.offers.os.getenv", return_value="bot-token"), patch.object(
             offers_module.settings, "channel_id", "@offers"

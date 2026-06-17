@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const frontendBuildOutDir = process.env.FRONTEND_BUILD_OUT_DIR?.trim() || '../mini_app_dist'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -12,7 +14,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
-        importScripts: ['share-target-sw.js', 'upload-background-sw.js'],
+        importScripts: ['share-target-sw.js', 'upload-background-sw.js', 'push-notifications-sw.js'],
         // Don't intercept POST navigations — let our share-target handler
         // (above) own POST /share-receive, and let normal API POSTs hit the
         // network without going through the navigation fallback.
@@ -26,6 +28,7 @@ export default defineConfig({
         'pwa-maskable-512x512.png',
         'share-target-sw.js',
         'upload-background-sw.js',
+        'push-notifications-sw.js',
       ],
       manifest: {
         id: '/?source=pwa',
@@ -87,7 +90,7 @@ export default defineConfig({
     })
   ],
   build: {
-    outDir: '../mini_app_dist',
+    outDir: frontendBuildOutDir,
     emptyOutDir: true,
     target: 'es2018',
   },

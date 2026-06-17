@@ -32,13 +32,16 @@ def make_context(owner_user=None, actor_user=None):
 
 
 class FakeDB:
-    def __init__(self, *, scalar_result=None, get_result=None, execute_results=None):
+    def __init__(self, *, scalar_result=None, scalar_results=None, get_result=None, execute_results=None):
         self.scalar_result = scalar_result
+        self.scalar_results = list(scalar_results or [])
         self.get_result = get_result
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
 
     async def scalar(self, _stmt):
+        if self.scalar_results:
+            return self.scalar_results.pop(0)
         return self.scalar_result
 
     async def get(self, _model, _id):
@@ -142,7 +145,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             offer_expire_daily_limit_after_threshold=10,
         )
         offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=None)
-        db = FakeDB(scalar_result=1, get_result=offer)
+        db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
 
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
@@ -155,16 +158,16 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.realtime.publish_event",
             new=AsyncMock(),
         ) as publish_mock, patch(
-            "core.cache.decr_active_offer_count",
+            "core.cache.set_active_offer_count",
             new=AsyncMock(),
-        ) as decr_mock:
+        ) as set_count_mock:
             result = await expire_offer(offer_id=7, db=db, context=make_context(current_user))
 
         self.assertIsNone(result)
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
         db.commit.assert_awaited_once()
         publish_mock.assert_awaited_once_with("offer:expired", {"id": 7})
-        decr_mock.assert_awaited_once_with(5)
+        set_count_mock.assert_awaited_once_with(5, 0)
 
     async def test_expire_offer_removes_channel_buttons_when_message_exists(self):
         settings = SimpleNamespace(
@@ -172,7 +175,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             offer_expire_daily_limit_after_threshold=10,
         )
         offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=333)
-        db = FakeDB(scalar_result=1, get_result=offer)
+        db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
         fake_client = FakeAsyncClient()
 
@@ -190,7 +193,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.httpx.AsyncClient",
             return_value=fake_client,
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
-            "core.cache.decr_active_offer_count",
+            "core.cache.set_active_offer_count",
             new=AsyncMock(),
         ):
             await expire_offer(offer_id=9, db=db, context=make_context(current_user))
@@ -207,7 +210,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             offer_expire_daily_limit_after_threshold=10,
         )
         offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=444)
-        db = FakeDB(scalar_result=1, get_result=offer)
+        db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
         failing_client = FakeAsyncClient()
         failing_client.post = AsyncMock(side_effect=RuntimeError("telegram down"))
@@ -226,7 +229,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.httpx.AsyncClient",
             return_value=failing_client,
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
-            "core.cache.decr_active_offer_count",
+            "core.cache.set_active_offer_count",
             new=AsyncMock(),
         ), patch("api.routers.offers.logger") as logger:
             await expire_offer(offer_id=10, db=db, context=make_context(current_user))
@@ -250,9 +253,9 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.redis_helpers.track_daily_expire",
             new=AsyncMock(return_value={"count": 0}),
         ) as daily_mock, patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
-            "core.cache.decr_active_offer_count",
+            "core.cache.set_active_offer_count",
             new=AsyncMock(),
-        ) as decr_mock:
+        ) as set_count_mock:
             with self.assertRaises(HTTPException) as exc_info:
                 await expire_offer(offer_id=11, db=db, context=make_context(owner_user, actor_user))
 
@@ -260,7 +263,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
         rate_mock.assert_not_awaited()
         daily_mock.assert_not_awaited()
-        decr_mock.assert_not_awaited()
+        set_count_mock.assert_not_awaited()
 
     async def test_cancel_all_active_offers_returns_zero_when_no_offer_exists(self):
         db = FakeDB(execute_results=[FakeExecuteResult([])])
@@ -287,15 +290,15 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.offers.httpx.AsyncClient",
             return_value=failing_client,
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
-            "core.cache.decr_active_offer_count",
+            "core.cache.set_active_offer_count",
             new=AsyncMock(),
-        ) as decr_mock, patch("api.routers.offers.logger") as logger:
+        ) as set_count_mock, patch("api.routers.offers.logger") as logger:
             result = await cancel_all_active_offers(db=db, context=make_context(SimpleNamespace(id=5)))
 
         self.assertEqual(result, {"cancelled_count": 2})
         self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
         self.assertEqual(publish_mock.await_count, 2)
-        self.assertEqual(decr_mock.await_count, 2)
+        set_count_mock.assert_awaited_once_with(5, 0)
         db.commit.assert_awaited_once()
         logger.warning.assert_called_once()
 
