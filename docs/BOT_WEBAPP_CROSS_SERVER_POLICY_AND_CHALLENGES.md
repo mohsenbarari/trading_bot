@@ -21,6 +21,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 12. `Offer.home_server` is determined only by the source surface where that offer is published.
     `user.home_server`, active session state, or the user's previous platform must never decide
     offer authority.
+13. Offer creation must carry an explicit `source_surface`. Confirmed values are `telegram_bot`,
+    `webapp`, and `internal_sync`. `telegram_bot` maps to `offer_home_server=foreign`, `webapp`
+    maps to `offer_home_server=iran`, and `internal_sync` must preserve the incoming
+    `Offer.home_server` without recomputing it.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The exact messenger-owned table list must be made
@@ -152,8 +156,9 @@ accepted as accurate and should influence the Bot roadmap.
 
 #### Review Recommendations Accepted As Direction
 
-- Add an explicit source-surface concept, for example `telegram_bot`, `webapp`, and `internal_sync`,
-  and use it to choose offer authority and side effects.
+- Add the confirmed source-surface concept with `telegram_bot`, `webapp`, and `internal_sync`,
+  and use it to choose offer authority and side effects. `internal_sync` preserves the source
+  server's incoming `Offer.home_server` and must not reclassify synced offers.
 - Extract shared offer creation and trade execution commands/services so Bot handlers become thin
   UX adapters and do not own market authority, trade-number allocation, customer-chain rules, or
   offer mutation logic.
@@ -244,7 +249,7 @@ This ordering is about implementation difficulty and blast radius, not business 
 2. Set WebApp/API-created offer home from the write surface/server, not from `owner_user.home_server`.
 3. Add a regression test proving the same user can create a Bot offer with `home_server=foreign`
    and then create a WebApp offer with `home_server=iran`, regardless of `user.home_server`.
-4. Add a small source-surface enum/constant and use it in offer creation tests.
+4. Implement the confirmed source-surface enum/constant and use it in offer creation tests.
 5. Add the user-switching scenario matrix as executable or at least reviewable acceptance cases:
    Bot create -> WebApp view/cancel, WebApp create -> Telegram publish, Bot trade -> WebApp update,
    WebApp trade -> Telegram/channel update, and simultaneous Bot/WebApp activity for the same user.
@@ -502,7 +507,6 @@ The implementation should fail CI when a new model or migration introduces a tab
 1. Should `user_sessions` and login-request tables sync, or are they an explicit exception?
 2. Are `chats` and `chat_members` messenger-only, or do they also carry non-messenger mandatory-channel state?
 3. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
-4. Should offer creation from WebApp use `current_server()` unconditionally for `offer_home_server`?
-5. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
-6. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
-7. During a cross-server outage, should users still be allowed to create offers on the available local surface?
+4. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
+5. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
+6. During a cross-server outage, should users still be allowed to create offers on the available local surface?
