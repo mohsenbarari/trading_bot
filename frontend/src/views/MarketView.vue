@@ -1194,6 +1194,7 @@ onUnmounted(() => {
 }
 
 .recent-offers-dropdown {
+  z-index: 90;
   padding: 0.45rem;
   display: grid;
   gap: 0.3rem;

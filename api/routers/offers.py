@@ -874,6 +874,19 @@ async def get_my_offers(
     
     result = await db.execute(query)
     offers = result.scalars().all()
+    if applied_status_enum == OfferStatus.EXPIRED and since_hours:
+        logger.info(
+            "market.recent_expired_offers.loaded",
+            extra={
+                "event": "market.recent_expired_offers.loaded",
+                "owner_user_id": owner_user.id,
+                "actor_user_id": getattr(context.actor_user, "id", None),
+                "since_hours": since_hours,
+                "limit": limit,
+                "result_count": len(offers),
+                "offer_ids": [offer.id for offer in offers],
+            },
+        )
     if not offers:
         return []
     
