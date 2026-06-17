@@ -1161,14 +1161,19 @@ onUnmounted(() => {
 
 .input-wrapper {
   position: relative;
+  min-height: 3.25rem;
+  --market-chatbox-button-size: 3rem;
+  --market-chatbox-edge-gap: 0.125rem;
+  --market-chatbox-history-left: 0.94rem;
+  --market-chatbox-left-reserve: calc(var(--market-chatbox-history-left) + var(--market-chatbox-button-size));
 }
 
 .recent-offers-toggle {
   position: absolute;
-  left: 0.94rem;
-  bottom: 0.58rem;
-  width: 2.1rem;
-  height: 2.1rem;
+  left: var(--market-chatbox-history-left);
+  bottom: var(--market-chatbox-edge-gap);
+  width: var(--market-chatbox-button-size);
+  height: var(--market-chatbox-button-size);
   min-width: var(--ds-touch-target, 48px);
   min-height: var(--ds-touch-target, 48px);
   display: inline-flex;
@@ -1277,13 +1282,15 @@ onUnmounted(() => {
 }
 
 .text-offer-input {
-  width: 100%;
+  display: block;
+  width: calc(100% - var(--market-chatbox-left-reserve));
   min-height: 3.25rem;
   max-height: 10rem;
-  padding: 0.82rem 3.7rem 0.82rem 3.9rem;
+  margin-left: var(--market-chatbox-left-reserve);
+  padding: 0.82rem 3.55rem 0.82rem 1rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
+  border-radius: 1.625rem;
   font-size: 0.9rem;
   line-height: 1.75;
   outline: none;
@@ -1317,12 +1324,14 @@ onUnmounted(() => {
 
 .send-btn {
   position: absolute;
-  right: 0.5rem;
-  bottom: 0.5rem;
+  right: var(--market-chatbox-edge-gap);
+  bottom: var(--market-chatbox-edge-gap);
+  width: var(--market-chatbox-button-size);
+  height: var(--market-chatbox-button-size);
   min-width: var(--ds-touch-target, 48px);
   min-height: var(--ds-touch-target, 48px);
   padding: 0;
-  border-radius: var(--ds-radius-md);
+  border-radius: 1.45rem;
   box-shadow: var(--ds-shadow-sm);
   transition: all 0.2s;
 }
