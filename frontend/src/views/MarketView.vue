@@ -142,6 +142,7 @@ const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
 const recentOffersError = ref('')
 const recentOffersRef = ref<HTMLElement | null>(null)
+const recentOffersDropdownRef = ref<HTMLElement | null>(null)
 const recentOffersToggleRef = ref<any>(null)
 const recentOffersOpenDirection = ref<'above' | 'below'>('above')
 const recentOffersDropdownStyle = ref<Record<string, string>>({})
@@ -445,21 +446,43 @@ function closeRecentOffersMenu() {
 function updateRecentOffersMenuPosition() {
   if (!recentOffersOpen.value) return
 
-  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 360
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 640
-  const wrapperWidth = recentOffersRef.value?.getBoundingClientRect().width || viewportWidth - 32
+  const visualViewport = window.visualViewport
+  const viewportLeft = visualViewport?.offsetLeft ?? 0
+  const viewportTop = visualViewport?.offsetTop ?? 0
+  const viewportWidth = visualViewport?.width ?? window.innerWidth ?? document.documentElement.clientWidth ?? 360
+  const viewportHeight = visualViewport?.height ?? window.innerHeight ?? document.documentElement.clientHeight ?? 640
+  const wrapperRect = recentOffersRef.value?.getBoundingClientRect()
+  const wrapperWidth = wrapperRect?.width ?? viewportWidth - 32
   const dropdownWidth = Math.min(304, Math.max(220, wrapperWidth - 8), viewportWidth - 16)
-  const availableHeight = Math.max(160, Math.min(320, viewportHeight - 160))
+  const viewportPadding = 8
+  const anchorTop = wrapperRect?.top ?? viewportTop + viewportHeight - 96
+  const anchorLeft = wrapperRect?.left ?? viewportLeft + 16
+  const availableAbove = Math.max(132, anchorTop - viewportTop - 12)
+  const maxHeight = Math.max(132, Math.min(320, availableAbove, viewportHeight - 24))
+  const measuredHeight = recentOffersDropdownRef.value?.offsetHeight || 0
+  const estimatedHeight = recentOffersLoading.value
+    ? 64
+    : recentOffersError.value || !recentOffers.value.length
+      ? 96
+      : Math.min(maxHeight, 16 + recentOffers.value.length * 58)
+  const dropdownHeight = Math.min(maxHeight, measuredHeight || estimatedHeight)
+  const minLeft = viewportLeft + viewportPadding
+  const maxLeft = viewportLeft + viewportWidth - dropdownWidth - viewportPadding
+  const left = Math.min(Math.max(anchorLeft + 4, minLeft), Math.max(minLeft, maxLeft))
+  const top = Math.min(
+    Math.max(anchorTop - dropdownHeight - 12, viewportTop + viewportPadding),
+    viewportTop + viewportHeight - dropdownHeight - viewportPadding,
+  )
 
   recentOffersOpenDirection.value = 'above'
   recentOffersDropdownStyle.value = {
-    position: 'absolute',
-    left: '0.25rem',
+    position: 'fixed',
+    left: `${left}px`,
     right: 'auto',
-    top: 'auto',
-    bottom: 'calc(100% + 0.75rem)',
+    top: `${top}px`,
+    bottom: 'auto',
     width: `${dropdownWidth}px`,
-    maxHeight: `${availableHeight}px`,
+    maxHeight: `${maxHeight}px`,
     transformOrigin: 'bottom left',
     '--recent-offers-enter-offset': '0.35rem',
   }
@@ -470,7 +493,11 @@ function handleRecentOffersPointerDown(event: PointerEvent) {
     return
   }
   const target = event.target as Node | null
-  if (!target || !recentOffersRef.value || recentOffersRef.value.contains(target)) {
+  if (
+    !target
+    || recentOffersRef.value?.contains(target)
+    || recentOffersDropdownRef.value?.contains(target)
+  ) {
     return
   }
   closeRecentOffersMenu()
@@ -847,59 +874,6 @@ onUnmounted(() => {
             <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
             <ChevronDown v-else :size="17" />
           </AppIconButton>
-          <transition name="recent-offers-dropdown">
-            <div
-              v-if="recentOffersOpen"
-              id="recent-offers-dropdown"
-              class="recent-offers-dropdown"
-              :class="recentOffersOpenDirection === 'above' ? 'recent-offers-dropdown--above' : 'recent-offers-dropdown--below'"
-              :style="recentOffersDropdownStyle"
-            >
-              <AppLoadingState
-                v-if="recentOffersLoading"
-                class="recent-offers-state"
-                label="در حال دریافت لفظ‌های اخیر"
-              />
-              <AppEmptyState
-                v-else-if="recentOffersError"
-                class="recent-offers-state recent-offers-state--error"
-                title="لفظ‌های اخیر دریافت نشد"
-                :message="recentOffersError"
-                tone="danger"
-              />
-              <AppEmptyState
-                v-else-if="!recentOffers.length"
-                class="recent-offers-state"
-                title="لفظ اخیری وجود ندارد"
-                message="در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است."
-                tone="neutral"
-              />
-              <button
-                v-for="offer in recentOffers"
-                :key="offer.id"
-                type="button"
-                class="recent-offer-item"
-                @click="openRecentOfferPreview(offer)"
-              >
-                <div class="recent-offer-item-main">
-                  <AppStatusBadge
-                    class="recent-offer-item-badge"
-                    :tone="offer.offer_type === 'buy' ? 'success' : 'danger'"
-                  >
-                    {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
-                  </AppStatusBadge>
-                  <span class="recent-offer-item-copy">
-                    <span class="recent-offer-item-summary">
-                      {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
-                    </span>
-                    <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
-                      {{ formatRecentOfferDetails(offer) }}
-                    </span>
-                  </span>
-                </div>
-              </button>
-            </div>
-          </transition>
           <textarea
             ref="offerInputRef"
             v-model="offerText"
@@ -925,6 +899,63 @@ onUnmounted(() => {
         <div v-if="parseError" class="parse-error">{{ parseError }}</div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <transition name="recent-offers-dropdown">
+        <div
+          v-if="recentOffersOpen"
+          id="recent-offers-dropdown"
+          ref="recentOffersDropdownRef"
+          class="recent-offers-dropdown"
+          :class="recentOffersOpenDirection === 'above' ? 'recent-offers-dropdown--above' : 'recent-offers-dropdown--below'"
+          :style="recentOffersDropdownStyle"
+        >
+          <AppLoadingState
+            v-if="recentOffersLoading"
+            class="recent-offers-state"
+            label="در حال دریافت لفظ‌های اخیر"
+          />
+          <AppEmptyState
+            v-else-if="recentOffersError"
+            class="recent-offers-state recent-offers-state--error"
+            title="لفظ‌های اخیر دریافت نشد"
+            :message="recentOffersError"
+            tone="danger"
+          />
+          <AppEmptyState
+            v-else-if="!recentOffers.length"
+            class="recent-offers-state"
+            title="لفظ اخیری وجود ندارد"
+            message="در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است."
+            tone="neutral"
+          />
+          <button
+            v-for="offer in recentOffers"
+            :key="offer.id"
+            type="button"
+            class="recent-offer-item"
+            @click="openRecentOfferPreview(offer)"
+          >
+            <div class="recent-offer-item-main">
+              <AppStatusBadge
+                class="recent-offer-item-badge"
+                :tone="offer.offer_type === 'buy' ? 'success' : 'danger'"
+              >
+                {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
+              </AppStatusBadge>
+              <span class="recent-offer-item-copy">
+                <span class="recent-offer-item-summary">
+                  {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
+                </span>
+                <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
+                  {{ formatRecentOfferDetails(offer) }}
+                </span>
+              </span>
+            </div>
+          </button>
+        </div>
+      </transition>
+    </Teleport>
   </div>
 </template>
 
@@ -1167,7 +1198,7 @@ onUnmounted(() => {
 }
 
 .recent-offers-dropdown {
-  z-index: 90;
+  z-index: 1200;
   padding: 0.45rem;
   display: grid;
   gap: 0.3rem;

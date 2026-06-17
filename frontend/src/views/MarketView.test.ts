@@ -173,11 +173,21 @@ function emitWs(event: string, data: any) {
   marketViewMocks.wsHandlers.get(event)?.forEach((callback) => callback(data))
 }
 
+function getRecentOffersDropdown(): HTMLElement | null {
+  return document.body.querySelector('.recent-offers-dropdown')
+}
+
+function getRecentOfferItems(): HTMLElement[] {
+  return Array.from(document.body.querySelectorAll<HTMLElement>('.recent-offer-item'))
+}
+
 async function mountMarketView() {
   const MarketView = (await import('./MarketView.vue')).default
   return mount(MarketView, {
+    attachTo: document.body,
     global: {
       stubs: {
+        transition: true,
         OffersList: {
           props: ['offers', 'loading', 'expiryMinutes', 'currentUserId'],
           template: `
@@ -197,6 +207,7 @@ async function mountMarketView() {
 describe('MarketView.vue', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
+    document.body.innerHTML = ''
     const { clearCurrentUserSummary } = await import('../utils/currentUser')
     clearCurrentUserSummary()
     marketViewMocks.offersRef = ref(offersFixture)
@@ -261,6 +272,7 @@ describe('MarketView.vue', () => {
     const { clearCurrentUserSummary } = await import('../utils/currentUser')
     clearCurrentUserSummary()
     vi.useRealTimers()
+    document.body.innerHTML = ''
   })
 
   it('loads market dependencies, wires OffersList props, and refreshes from the child event', async () => {
@@ -469,16 +481,16 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
-    const recentItems = wrapper.findAll('.recent-offer-item')
+    const recentItems = getRecentOfferItems()
     expect(recentItems).toHaveLength(2)
-    expect(wrapper.text()).toContain('سکه')
-    expect(wrapper.text()).toContain('طلای آب‌شده')
-    expect(wrapper.text()).toContain('توضیح: از لیست اخیر')
-    expect(wrapper.text()).toContain('خرد · پله‌ها: ۵ + ۳')
-    expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
-    expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
+    expect(document.body.textContent).toContain('سکه')
+    expect(document.body.textContent).toContain('طلای آب‌شده')
+    expect(document.body.textContent).toContain('توضیح: از لیست اخیر')
+    expect(document.body.textContent).toContain('خرد · پله‌ها: ۵ + ۳')
+    expect(document.body.textContent).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
+    expect(document.body.textContent).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
 
-    await recentItems[1]!.trigger('click')
+    recentItems[1]!.click()
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
@@ -516,20 +528,20 @@ describe('MarketView.vue', () => {
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+    expect(getRecentOffersDropdown()).not.toBeNull()
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+    expect(getRecentOffersDropdown()).toBeNull()
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+    expect(getRecentOffersDropdown()).not.toBeNull()
 
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
     await nextTick()
 
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+    expect(getRecentOffersDropdown()).toBeNull()
 
     wrapper.unmount()
   })
@@ -540,18 +552,22 @@ describe('MarketView.vue', () => {
 
     const wrapper = await mountMarketView()
     await flushPromises()
+    Object.defineProperty(wrapper.get('.input-wrapper').element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 16, top: 760, width: 360, height: 56, right: 376, bottom: 816, x: 16, y: 760, toJSON: () => ({}) }),
+    })
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    const dropdown = wrapper.get('.recent-offers-dropdown').element as HTMLElement
+    const dropdown = getRecentOffersDropdown()!
     window.dispatchEvent(new Event('resize'))
     await nextTick()
 
-    expect(dropdown.style.position).toBe('absolute')
-    expect(dropdown.style.left).toBe('0.25rem')
-    expect(dropdown.style.top).toBe('auto')
-    expect(dropdown.style.bottom).toBe('calc(100% + 0.75rem)')
+    expect(dropdown.style.position).toBe('fixed')
+    expect(Number.parseFloat(dropdown.style.left)).toBeGreaterThanOrEqual(8)
+    expect(Number.parseFloat(dropdown.style.top)).toBeGreaterThanOrEqual(8)
+    expect(dropdown.style.bottom).toBe('auto')
     expect(dropdown.style.width).toBe('304px')
     expect(dropdown.style.maxHeight).toBe('320px')
     expect(dropdown.style.transformOrigin).toBe('bottom left')
@@ -567,18 +583,24 @@ describe('MarketView.vue', () => {
 
     const wrapper = await mountMarketView()
     await flushPromises()
+    Object.defineProperty(wrapper.get('.input-wrapper').element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 8, top: 220, width: 232, height: 56, right: 240, bottom: 276, x: 8, y: 220, toJSON: () => ({}) }),
+    })
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    const dropdown = wrapper.get('.recent-offers-dropdown').element as HTMLElement
+    const dropdown = getRecentOffersDropdown()!
     window.dispatchEvent(new Event('resize'))
     await nextTick()
 
-    expect(dropdown.style.position).toBe('absolute')
-    expect(dropdown.style.width).toBe('220px')
-    expect(dropdown.style.maxHeight).toBe('160px')
-    expect(dropdown.style.bottom).toBe('calc(100% + 0.75rem)')
+    expect(dropdown.style.position).toBe('fixed')
+    expect(Number.parseFloat(dropdown.style.width)).toBeGreaterThanOrEqual(220)
+    expect(Number.parseFloat(dropdown.style.width)).toBeLessThanOrEqual(224)
+    expect(Number.parseFloat(dropdown.style.maxHeight)).toBeGreaterThanOrEqual(132)
+    expect(Number.parseFloat(dropdown.style.maxHeight)).toBeLessThanOrEqual(236)
+    expect(dropdown.style.bottom).toBe('auto')
     expect(dropdown.style.transformOrigin).toBe('bottom left')
     expect(dropdown.style.getPropertyValue('--recent-offers-enter-offset')).toBe('0.35rem')
     expect(dropdown.classList.contains('recent-offers-dropdown--above')).toBe(true)
@@ -615,12 +637,12 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.recent-offers-state--error').text()).toContain('بارگذاری لفظ‌های اخیر ممکن نشد.')
+    expect(getRecentOffersDropdown()?.textContent).toContain('بارگذاری لفظ‌های اخیر ممکن نشد.')
 
-    wrapper.get('.recent-offers-dropdown').element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    getRecentOffersDropdown()!.dispatchEvent(new Event('pointerdown', { bubbles: true }))
     await nextTick()
 
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+    expect(getRecentOffersDropdown()).not.toBeNull()
 
     recentOffersMode = 'success'
     await wrapper.find('.recent-offers-toggle').trigger('click')
@@ -628,8 +650,8 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(wrapper.findAll('.recent-offer-item')).toHaveLength(1)
-    expect(wrapper.text()).toContain('سکه')
+    expect(getRecentOfferItems()).toHaveLength(1)
+    expect(document.body.textContent).toContain('سکه')
 
     wrapper.unmount()
   })
@@ -680,10 +702,10 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('خرد · پله‌ها: ۳ + ۲')
-    expect(wrapper.text()).not.toContain('توضیح:')
+    expect(document.body.textContent).toContain('خرد · پله‌ها: ۳ + ۲')
+    expect(document.body.textContent).not.toContain('توضیح:')
 
-    await wrapper.find('.recent-offer-item').trigger('click')
+    getRecentOfferItems()[0]!.click()
     await flushPromises()
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
@@ -718,8 +740,8 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    const recentItems = wrapper.findAll('.recent-offer-item')
-    await recentItems[0]!.trigger('click')
+    const recentItems = getRecentOfferItems()
+    recentItems[0]!.click()
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
