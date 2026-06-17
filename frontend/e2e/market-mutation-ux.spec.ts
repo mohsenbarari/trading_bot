@@ -34,6 +34,90 @@ async function fulfillJson(route: Route, status: number, body: unknown) {
 }
 
 test.describe('Market mutation UX', () => {
+  test('recent expired offers toggle stays clickable above the market FAB on mobile', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await primeMockAuth(page)
+
+    await page.route('**/api/**', async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+
+      if (url.pathname === '/api/auth/me') {
+        return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
+      }
+      if (url.pathname === '/api/notifications/preferences') {
+        return fulfillJson(route, 200, { market_offer_push_enabled: true })
+      }
+      if (url.pathname === '/api/commodities/') {
+        return fulfillJson(route, 200, [{ id: 1, name: 'سکه' }])
+      }
+      if (url.pathname === '/api/trading-settings/') {
+        return fulfillJson(route, 200, {
+          offer_min_quantity: 1,
+          offer_max_quantity: 1000,
+          lot_min_size: 1,
+          lot_max_count: 5,
+          offer_expiry_minutes: 60,
+        })
+      }
+      if (url.pathname === '/api/trading-settings/market-state') {
+        return fulfillJson(route, 200, {
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (url.pathname === '/api/admin-messages/market/current') {
+        return fulfillJson(route, 200, null)
+      }
+      if (url.pathname === '/api/offers/' && request.method() === 'GET') {
+        return fulfillJson(route, 200, [])
+      }
+      if (url.pathname === '/api/offers/my' && url.searchParams.get('status_filter') === 'expired') {
+        return fulfillJson(route, 200, [
+          {
+            id: 8001,
+            user_id: 77,
+            user_account_name: 'pw_market_mutation_viewer',
+            is_own_offer: true,
+            offer_type: 'buy',
+            commodity_id: 1,
+            commodity_name: 'سکه',
+            quantity: 4,
+            remaining_quantity: 4,
+            price: 50000,
+            raw_price: 50000,
+            market_published_price: 50000,
+            viewer_effective_price: 50000,
+            is_wholesale: true,
+            lot_sizes: null,
+            original_lot_sizes: null,
+            notes: 'recent expired',
+            status: 'expired',
+            expire_reason: 'time_limit',
+            expired_at: 'امروز',
+            created_at: 'امروز',
+            expires_at_ts: null,
+            channel_message_id: null,
+            customer_badge_visible: false,
+            customer_management_name: null,
+            customer_tier: null,
+          },
+        ])
+      }
+
+      return fulfillJson(route, 200, null)
+    })
+
+    await page.goto('/market', { waitUntil: 'domcontentloaded' })
+
+    await expect(page.locator('.recent-offers-toggle')).toBeVisible()
+    await page.locator('.recent-offers-toggle').click()
+    await expect(page.locator('.recent-offer-item')).toContainText('سکه')
+  })
+
   test('publish and execute conflict states are bounded, visible, and duplicate-safe', async ({ page }) => {
     await primeMockAuth(page)
 
