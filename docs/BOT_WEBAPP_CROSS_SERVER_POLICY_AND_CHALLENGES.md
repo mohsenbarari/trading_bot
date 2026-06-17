@@ -23,6 +23,32 @@ Policy note: item 5 and item 6 create an explicit exception. "All tables" means 
 tables except the messenger-owned data set. The exact messenger-owned table list must be made
 explicit before implementation.
 
+## Branch And Environment Enforcement
+
+This section is mandatory for all work derived from this document.
+
+1. Bot/WebApp integration work belongs only on `candidate/bot-webapp-integration`.
+2. `main` remains the protected baseline branch. It must not receive Bot/WebApp integration work
+   unless the owner explicitly asks for a merge or direct commit.
+3. WebApp-only bug fixes must use their own WebApp fix branch or branches. They must not be mixed
+   into `candidate/bot-webapp-integration` unless the owner explicitly asks to combine the work.
+4. Before every code change, documentation change, commit, push, staging deploy, or validation run
+   that could affect this roadmap, the current branch must be checked with `git branch --show-current`.
+5. If the current branch is not exactly `candidate/bot-webapp-integration`, work for this roadmap
+   must stop until the branch is corrected.
+6. All commits for this roadmap must be made on `candidate/bot-webapp-integration`.
+7. Staging is the only allowed runtime validation environment for this roadmap unless the owner
+   explicitly approves another target.
+8. Staging validation must use isolated staging configuration, staging artifacts, staging data, and
+   no production sync peer.
+9. No change from this roadmap may be merged into `main`, any WebApp fix branch, any other candidate
+   branch, or any release branch unless the owner explicitly says to merge it.
+10. No change from this roadmap may be deployed to production, benchmarked against production,
+    run against production data, or used to change production sync/Telegram/WebApp behavior unless
+    the owner explicitly requests that production action.
+11. Pushing `candidate/bot-webapp-integration` to remote is allowed for backup/review, but that push
+    does not imply approval to merge, release, or deploy.
+
 ## Current Code Facts
 
 - `docker-compose.yml` runs `app`, `bot`, `sync_worker`, DB, and Redis on the foreign stack.
