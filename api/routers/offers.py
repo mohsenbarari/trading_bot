@@ -4,14 +4,14 @@ API Router for Offer Management - Web App Integration
 """
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -849,19 +849,37 @@ async def get_my_offers(
     query = query.where(Offer.republished_offer_id.is_(None))
     
     applied_status_enum = None
+    start_settings = None
 
     if status_filter:
         applied_status_enum = OFFER_STATUS_FILTERS.get(status_filter)
         if applied_status_enum:
-            query = query.where(Offer.status == applied_status_enum)
+            if not (applied_status_enum == OfferStatus.EXPIRED and since_hours):
+                query = query.where(Offer.status == applied_status_enum)
 
     if since_hours:
-        from datetime import timedelta
         cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
 
         if applied_status_enum == OfferStatus.EXPIRED:
+            from core.trading_settings import get_trading_settings_async
+
+            start_settings = await get_trading_settings_async()
             recent_expired_at = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
-            query = query.where(recent_expired_at >= cutoff_time)
+            expired_conditions = [
+                and_(Offer.status == OfferStatus.EXPIRED, recent_expired_at >= cutoff_time)
+            ]
+            expiry_minutes = int(getattr(start_settings, "offer_expiry_minutes", 0) or 0)
+            if expiry_minutes > 0:
+                stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
+                recent_active_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+                expired_conditions.append(
+                    and_(
+                        Offer.status == OfferStatus.ACTIVE,
+                        Offer.created_at < stale_cutoff_time,
+                        Offer.created_at >= recent_active_created_after,
+                    )
+                )
+            query = query.where(or_(*expired_conditions))
         else:
             query = query.where(Offer.created_at >= cutoff_time)
     
@@ -891,13 +909,15 @@ async def get_my_offers(
         return []
     
     # دریافت تنظیمات برای محاسبه انقضا
-    from core.trading_settings import get_trading_settings_async
-    ts = await get_trading_settings_async()
+    if start_settings is None:
+        from core.trading_settings import get_trading_settings_async
+
+        start_settings = await get_trading_settings_async()
     
     return await _serialize_offer_responses(
         offers,
         db=db,
-        start_settings=ts,
+        start_settings=start_settings,
         viewer_user_id=owner_user.id,
         include_owner_identity=True,
     )

@@ -925,8 +925,7 @@ onUnmounted(() => {
           <AppEmptyState
             v-else-if="!recentOffers.length"
             class="recent-offers-state"
-            title="لفظ اخیری وجود ندارد"
-            message="در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است."
+            title="بدون فعالیت"
             tone="neutral"
           />
           <button

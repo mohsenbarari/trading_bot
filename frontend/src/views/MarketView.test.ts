@@ -522,6 +522,41 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('shows a compact empty state when there are no recent expired offers', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf([])
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    expect(getRecentOffersDropdown()?.textContent).toContain('بدون فعالیت')
+    expect(getRecentOffersDropdown()?.textContent).not.toContain('لفظ اخیری وجود ندارد')
+    expect(getRecentOffersDropdown()?.textContent).not.toContain('در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است.')
+
+    wrapper.unmount()
+  })
+
   it('closes the recent offers menu when toggled again or when clicking outside it', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()
