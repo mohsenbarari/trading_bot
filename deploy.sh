@@ -403,16 +403,22 @@ prepare_pip_packages() {
                 "${PIP_PLATFORM_ARGS[@]}" \
                 --only-binary=:all:
         fi
+
+        # http-ece does not publish wheels, but the built wheel is pure Python.
+        # Build it locally first so the platform-restricted binary download can
+        # resolve pywebpush without using the pip-conflicting --no-binary flag.
+        python3 -m pip wheel --no-deps "http-ece==1.2.1" \
+            -w "$PROJECT_DIR/pip_packages/"
         
         # Download for Python 3.11 (Docker image version)
         python3 -m pip download -r "$PROJECT_DIR/requirements.txt" \
             -d "$PROJECT_DIR/pip_packages/" \
+            --find-links "$PROJECT_DIR/pip_packages/" \
             --python-version 311 \
             --implementation cp \
             --abi cp311 \
             "${PIP_PLATFORM_ARGS[@]}" \
-            --only-binary=:all: \
-            --no-binary=http-ece
+            --only-binary=:all:
             
         echo "$CURRENT_HASH" > "$HASH_FILE"
         echo "✅ Pip packages updated successfully!"

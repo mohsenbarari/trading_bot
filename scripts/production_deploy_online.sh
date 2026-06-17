@@ -1162,14 +1162,19 @@ prepare_pip_packages() {
             --abi cp311 \
             "${pip_platform_args[@]}" \
             --only-binary=:all:
+        # http-ece does not publish wheels, but the built wheel is pure Python.
+        # Build it locally first so the platform-restricted binary download can
+        # resolve pywebpush without using the pip-conflicting --no-binary flag.
+        python3 -m pip wheel --no-deps "http-ece==1.2.1" \
+            -w "$output_dir/"
         python3 -m pip download -r "$LOCAL_PROJECT_DIR/requirements.txt" \
             -d "$output_dir/" \
+            --find-links "$output_dir/" \
             --python-version 311 \
             --implementation cp \
             --abi cp311 \
             "${pip_platform_args[@]}" \
-            --only-binary=:all: \
-            --no-binary=http-ece
+            --only-binary=:all:
         printf '%s' "$current_hash" > "$hash_file"
     else
         log "Wheel cache already matches requirements for arch=$target_arch; skipping rebuild."
