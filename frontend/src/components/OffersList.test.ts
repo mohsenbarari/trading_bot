@@ -119,6 +119,42 @@ describe('OffersList.vue', () => {
     expect(wrapper.text()).toContain('سطح نامشخص')
   })
 
+  it('renders time-limit expired offers as read-only history cards', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 4,
+          user_id: 12,
+          status: 'expired',
+          expire_reason: 'time_limit',
+          offer_type: 'sell',
+          commodity_name: 'ربع سکه',
+          quantity: 20,
+          remaining_quantity: 20,
+          price: 51000,
+          viewer_effective_price: 51000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+        },
+      ],
+      hasMoreExpired: true,
+      canLoadExpired: true,
+    })
+
+    expect(wrapper.find('.expired-ribbon').text()).toBe('منقضی')
+    expect(wrapper.find('.offer-card-wrap').classes()).toContain('is-expired')
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+    expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
+
+    await wrapper.find('.expired-load-more-btn').trigger('click')
+    expect(wrapper.emitted('load-more-expired')).toHaveLength(1)
+  })
+
   it('uses the two-tap confirm flow for retail lots, clears stale pending state, and executes the confirmed trade', async () => {
     vi.useFakeTimers()
     apiFetchMock.mockResolvedValue({

@@ -12,9 +12,9 @@ import asyncio
 import logging
 import os
 import time
-from datetime import timedelta
+from datetime import timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 
 from core.db import AsyncSessionLocal
@@ -26,8 +26,9 @@ from models.offer import Offer, OfferStatus
 
 logger = logging.getLogger(__name__)
 
-# How often to check for expired offers (seconds)
-CHECK_INTERVAL = 15
+# Maximum idle sleep when there is no near expiry deadline.
+CHECK_INTERVAL = 2.0
+MIN_DEADLINE_SLEEP_SECONDS = 0.1
 _loop_errors = RepeatedErrorLogger(every=10)
 
 
@@ -76,7 +77,7 @@ async def expire_stale_offers() -> int:
             .where(
                 Offer.status == OfferStatus.ACTIVE,
                 Offer.home_server == current_server(),
-                Offer.created_at < cutoff_time
+                Offer.created_at <= cutoff_time
             )
         )
         result = await session.execute(stmt)
@@ -125,13 +126,51 @@ async def expire_stale_offers() -> int:
     return count
 
 
+def _as_naive_utc(value):
+    if value is None:
+        return None
+    if getattr(value, "tzinfo", None) is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+async def get_next_expiry_delay_seconds() -> float:
+    """Return a low-cost deadline-aware sleep interval for the expiry loop."""
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    expiry_minutes = ts.offer_expiry_minutes
+    if expiry_minutes <= 0:
+        return CHECK_INTERVAL
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(func.min(Offer.created_at)).where(
+                Offer.status == OfferStatus.ACTIVE,
+                Offer.home_server == current_server(),
+            )
+        )
+        next_created_at = result.scalar_one_or_none()
+
+    if next_created_at is None:
+        return CHECK_INTERVAL
+
+    now = utc_now_naive()
+    next_created_at = _as_naive_utc(next_created_at)
+    next_expiry_at = next_created_at + timedelta(minutes=expiry_minutes)
+    delay = (next_expiry_at - now).total_seconds()
+    if delay <= MIN_DEADLINE_SLEEP_SECONDS:
+        return MIN_DEADLINE_SLEEP_SECONDS
+    return min(delay, CHECK_INTERVAL)
+
+
 async def offer_expiry_loop() -> None:
     """
     Background loop that periodically checks and expires stale offers.
     
     Should be started as an asyncio task in the app lifespan.
     """
-    logger.info(f"⏰ Offer expiry loop started (check every {CHECK_INTERVAL}s)")
+    logger.info(f"⏰ Offer expiry loop started (deadline-aware, max sleep {CHECK_INTERVAL}s)")
     iteration = 0
     
     while True:
@@ -156,5 +195,11 @@ async def offer_expiry_loop() -> None:
                     )
             except Exception as e:
                 _loop_errors.log(logger, "❌ Error in offer expiry loop: %s", e, job_name="offer_expiry", run_id=run_id)
-        
-        await asyncio.sleep(CHECK_INTERVAL)
+
+        try:
+            sleep_seconds = await get_next_expiry_delay_seconds()
+        except Exception as e:
+            _loop_errors.log(logger, "❌ Error computing offer expiry deadline: %s", e, job_name="offer_expiry", run_id=run_id)
+            sleep_seconds = CHECK_INTERVAL
+
+        await asyncio.sleep(sleep_seconds)

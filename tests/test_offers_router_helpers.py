@@ -412,6 +412,44 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("OFFSET 1", status_only_sql)
         self.assertIn("LIMIT 5", status_only_sql)
 
+    async def test_market_expired_offers_query_is_time_limit_only_and_customer_hidden(self):
+        current_user = SimpleNamespace(id=8)
+
+        expired_db = CapturingDB(FakeExecuteResult([]))
+        with patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await offers_module.get_market_expired_offers(
+                skip=25,
+                limit=25,
+                since_hours=48,
+                db=expired_db,
+                current_user=current_user,
+            )
+
+        self.assertEqual(result, [])
+        expired_sql = compile_sql(expired_db.statements[0])
+        self.assertIn("offers.status = 'EXPIRED'", expired_sql)
+        self.assertIn("offers.expire_reason = 'time_limit'", expired_sql)
+        self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", expired_sql)
+        self.assertIn("ORDER BY coalesce(offers.expired_at, offers.updated_at, offers.created_at) DESC", expired_sql)
+        self.assertIn("OFFSET 25", expired_sql)
+        self.assertIn("LIMIT 25", expired_sql)
+
+        hidden_db = CapturingDB(FakeExecuteResult([]))
+        with patch(
+            "api.routers.offers.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=SimpleNamespace(customer_tier="tier1")),
+        ):
+            result = await offers_module.get_market_expired_offers(
+                db=hidden_db,
+                current_user=current_user,
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(hidden_db.statements, [])
+
 
 if __name__ == "__main__":
     unittest.main()

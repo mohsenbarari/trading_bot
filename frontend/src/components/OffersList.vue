@@ -28,10 +28,14 @@ const props = defineProps<{
   limit?: number;
   expiryMinutes?: number;
   currentUserId?: number;
+  expiredLoading?: boolean;
+  hasMoreExpired?: boolean;
+  canLoadExpired?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'trade-completed'): void;
+  (e: 'load-more-expired'): void;
 }>();
 
 // Trade execution state
@@ -92,12 +96,16 @@ function hasTimer(offer: any): boolean {
   return !!offer.expires_at_ts
 }
 
-// --- Filter out expired offers ---
+function isExpiredOffer(offer: any): boolean {
+  return offer?.status === 'expired'
+}
+
+// --- Keep active offers live-filtered, but allow read-only expired history ---
 const filteredOffers = computed(() => {
   const nowSec = now.value
   const source = Array.isArray(props.offers) ? props.offers : []
-  const alive = source.filter(o => !o.expires_at_ts || o.expires_at_ts > nowSec)
-  return props.limit ? alive.slice(0, props.limit) : alive
+  const visible = source.filter(o => isExpiredOffer(o) || !o.expires_at_ts || o.expires_at_ts > nowSec)
+  return props.limit ? visible.slice(0, props.limit) : visible
 })
 
 function timeAgo(dateString: string) {
@@ -445,10 +453,15 @@ async function cancelOwnOffer(offerId: number) {
         v-for="offer in filteredOffers" 
         :key="offer.id"
         class="offer-card-wrap"
-        :class="{ 'timer-critical': isCritical(offer), 'has-timer': hasTimer(offer) }"
+        :class="{
+          'timer-critical': !isExpiredOffer(offer) && isCritical(offer),
+          'has-timer': !isExpiredOffer(offer) && hasTimer(offer),
+          'is-expired': isExpiredOffer(offer),
+        }"
         :style="cardTimerStyle(offer)"
       >
         <div class="offer-card-inner" :class="[offer.offer_type]">
+          <span v-if="isExpiredOffer(offer)" class="expired-ribbon">منقضی</span>
 
           <!-- Header: role badge + time -->
           <div class="offer-header">
@@ -483,7 +496,7 @@ async function cancelOwnOffer(offerId: number) {
           </div>
 
           <!-- Footer: lot buttons or own offer -->
-          <div class="offer-footer">
+          <div v-if="!isExpiredOffer(offer)" class="offer-footer">
             <div v-if="!isOwnOffer(offer) && (offer.remaining_quantity ?? offer.quantity) > 0" class="trade-buttons">
               <button
                 v-for="amount in getLotButtons(offer)"
@@ -516,6 +529,17 @@ async function cancelOwnOffer(offerId: number) {
           </div>
 
         </div><!-- /offer-card-inner -->
+      </div>
+      <div v-if="canLoadExpired && (hasMoreExpired || expiredLoading)" class="expired-load-more-row">
+        <button
+          type="button"
+          class="expired-load-more-btn"
+          :disabled="expiredLoading"
+          @click="emit('load-more-expired')"
+        >
+          <Loader2 v-if="expiredLoading" class="inline animate-spin" :size="14" />
+          <span>{{ expiredLoading ? 'در حال دریافت' : 'نمایش بیشتر' }}</span>
+        </button>
       </div>
     </div>
 </template>
@@ -583,6 +607,10 @@ async function cancelOwnOffer(offerId: number) {
   border-color: transparent;
 }
 
+.offer-card-wrap.is-expired {
+  border-color: var(--ds-border-subtle);
+}
+
 .offer-card-wrap.has-timer::before {
   content: '';
   position: absolute;
@@ -624,6 +652,35 @@ async function cancelOwnOffer(offerId: number) {
   padding: 14px;
   z-index: 0;
   overflow: hidden;
+}
+
+.offer-card-wrap.is-expired .offer-card-inner {
+  background: var(--ds-bg-surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.offer-card-wrap.is-expired .price,
+.offer-card-wrap.is-expired .commodity {
+  color: var(--ds-text-secondary);
+}
+
+.expired-ribbon {
+  position: absolute;
+  top: 9px;
+  left: -24px;
+  z-index: 2;
+  width: 92px;
+  transform: rotate(-38deg);
+  transform-origin: center;
+  background: var(--ds-bg-muted);
+  color: var(--ds-text-muted);
+  border: 1px solid var(--ds-border-subtle);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  padding: 4px 0;
+  pointer-events: none;
 }
 
 /* Subtle outer shadow for depth */
@@ -847,6 +904,34 @@ async function cancelOwnOffer(offerId: number) {
 
 .cancel-own-offer-btn:disabled {
   opacity: 0.6;
+  cursor: wait;
+}
+
+.expired-load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 6px;
+}
+
+.expired-load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ds-border-subtle);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.expired-load-more-btn:disabled {
+  opacity: 0.68;
   cursor: wait;
 }
 

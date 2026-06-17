@@ -97,3 +97,11 @@ class Offer(Base):
     __mapper_args__ = {
         "version_id_col": version_id
     }
+
+
+Index(
+    'ix_offers_time_limit_expired_history',
+    func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at).desc(),
+    Offer.created_at.desc(),
+    postgresql_where=(Offer.status == OfferStatus.EXPIRED) & (Offer.expire_reason == "time_limit"),
+)

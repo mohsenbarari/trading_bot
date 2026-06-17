@@ -91,11 +91,18 @@ function normalizeCustomerTier(raw: unknown): CustomerTierValue {
 
 const MARKET_CLOSED_DETAIL = 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.'
 const initialCurrentUserSummary = currentUserSummary.value
+const EXPIRED_MARKET_OFFERS_PAGE_SIZE = 25
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
 const { on: wsOn, off: wsOff } = useWebSocket()
 const currentUserId = ref<number | undefined>(initialCurrentUserSummary?.id)
 const currentUserCustomerTier = ref<CustomerTierValue>(normalizeCustomerTier(initialCurrentUserSummary?.customer_tier))
+const currentUserIsAccountant = ref(initialCurrentUserSummary?.is_accountant === true)
+const currentUserLoaded = ref(Boolean(initialCurrentUserSummary))
+const expiredMarketOffers = ref<any[]>([])
+const expiredMarketOffersLoading = ref(false)
+const expiredMarketOffersSkip = ref(0)
+const hasMoreExpiredMarketOffers = ref(false)
 const marketRuntime = ref<MarketRuntimeState>({
   is_open: true,
   active_web_notice_visible: false,
@@ -117,6 +124,10 @@ const filteredOffers = computed(() => {
   }
   return list
 })
+const visibleMarketOffers = computed(() => [
+  ...filteredOffers.value,
+  ...expiredMarketOffers.value,
+])
 
 const commodities = ref<Commodity[]>([])
 const commoditiesLoading = ref(false)
@@ -154,6 +165,11 @@ const marketOfferPushLoading = ref(false)
 const marketOfferPushSaving = ref(false)
 const marketOfferPushError = ref('')
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
+const canViewExpiredMarketOffers = computed(() => (
+  currentUserLoaded.value
+  && currentUserCustomerTier.value === null
+  && !currentUserIsAccountant.value
+))
 const visibleTabs = computed<MarketFilterType[]>(() => (
   isTier2Customer.value ? ['all', 'buy', 'sell'] : ['all', 'buy', 'sell', 'my']
 ))
@@ -261,6 +277,58 @@ async function toggleMarketOfferPush() {
   }
 }
 
+function clearExpiredMarketOffers() {
+  expiredMarketOffers.value = []
+  expiredMarketOffersSkip.value = 0
+  hasMoreExpiredMarketOffers.value = false
+  expiredMarketOffersLoading.value = false
+}
+
+async function fetchExpiredMarketOffers(options: { reset?: boolean; silent?: boolean } = {}) {
+  if (!canViewExpiredMarketOffers.value) {
+    clearExpiredMarketOffers()
+    return
+  }
+  if (expiredMarketOffersLoading.value) return
+
+  const reset = options.reset !== false
+  const skip = reset ? 0 : expiredMarketOffersSkip.value
+  expiredMarketOffersLoading.value = true
+  try {
+    const response = await apiFetch(`/api/offers/expired?skip=${skip}&limit=${EXPIRED_MARKET_OFFERS_PAGE_SIZE}`)
+    if (!response.ok) {
+      throw await createHttpErrorFromResponse(response, {
+        surface: 'market',
+        scope: 'list',
+        operation: reset ? 'load-list' : 'background-refresh',
+        preserveExistingData: true,
+        resourceLabel: 'لفظ‌های منقضی',
+        fallbackMessage: 'دریافت لفظ‌های منقضی ممکن نشد.',
+      })
+    }
+    const payload = await response.json()
+    const rows = Array.isArray(payload) ? payload : []
+    if (reset) {
+      expiredMarketOffers.value = rows
+      expiredMarketOffersSkip.value = rows.length
+    } else {
+      const existingIds = new Set(expiredMarketOffers.value.map((offer) => Number(offer.id)))
+      const nextRows = rows.filter((offer) => !existingIds.has(Number(offer.id)))
+      expiredMarketOffers.value = [...expiredMarketOffers.value, ...nextRows]
+      expiredMarketOffersSkip.value += rows.length
+    }
+    hasMoreExpiredMarketOffers.value = rows.length === EXPIRED_MARKET_OFFERS_PAGE_SIZE
+  } catch (e) {
+    console.error('Failed to load expired market offers', e)
+  } finally {
+    expiredMarketOffersLoading.value = false
+  }
+}
+
+async function loadMoreExpiredMarketOffers() {
+  await fetchExpiredMarketOffers({ reset: false })
+}
+
   async function fetchAdminMarketMessage() {
     try {
       const res = await apiFetch('/api/admin-messages/market/current')
@@ -310,6 +378,11 @@ function handleMarketNoticeHidden(data: Partial<MarketRuntimeState> | undefined)
 function handleAdminMarketMessagePublished(data: AdminMarketMessage | undefined) {
   adminMarketMessage.value = data && typeof data.content === 'string' ? data : null
   adminMarketMessageExpanded.value = false
+}
+
+function handleOfferExpiredForArchive() {
+  if (!canViewExpiredMarketOffers.value) return
+  void fetchExpiredMarketOffers({ reset: true, silent: true })
 }
 
 function toggleAdminMarketMessage() {
@@ -607,7 +680,7 @@ async function confirmOfferPreview() {
     previewWarning.value = null
     republishedFromOfferId.value = null
     pendingOfferIdempotencyKey.value = null
-    fetchOffers()
+    refreshMarketOffers()
     void fetchRecentOffers(true)
   } catch (e: any) {
     previewError.value = getUserFacingErrorMessage(e, {
@@ -689,7 +762,7 @@ async function cancelAllOffers() {
       })
     }
     offerText.value = ''
-    fetchOffers()
+    refreshMarketOffers()
     void fetchRecentOffers(true)
   } catch (e: any) {
     parseError.value = getUserFacingErrorMessage(e, {
@@ -704,6 +777,13 @@ async function cancelAllOffers() {
   }
 }
 
+function refreshMarketOffers() {
+  fetchOffers()
+  if (canViewExpiredMarketOffers.value) {
+    void fetchExpiredMarketOffers({ reset: true, silent: true })
+  }
+}
+
 async function fetchCurrentUser() {
     try {
         const res = await apiFetch('/api/auth/me')
@@ -713,9 +793,12 @@ async function fetchCurrentUser() {
       currentUserId.value = cachedSummary?.id
         ?? (typeof data.id === 'number' ? data.id : Number.isFinite(Number(data.id)) ? Number(data.id) : undefined)
       currentUserCustomerTier.value = cachedSummary?.customer_tier ?? normalizeCustomerTier(data.customer_tier)
+      currentUserIsAccountant.value = cachedSummary?.is_accountant ?? data.is_accountant === true
         }
     } catch (e) {
         console.error('Failed to load current user', e)
+    } finally {
+        currentUserLoaded.value = true
     }
 }
 
@@ -733,6 +816,14 @@ watch(isTier2Customer, (blocked) => {
   closeRecentOffersMenu()
   recentOffers.value = []
 })
+
+watch(canViewExpiredMarketOffers, (allowed) => {
+  if (!allowed) {
+    clearExpiredMarketOffers()
+    return
+  }
+  void fetchExpiredMarketOffers({ reset: true, silent: true })
+}, { immediate: true })
 
 watch(offerText, () => {
   syncOfferInputHeight()
@@ -754,14 +845,15 @@ onMounted(() => {
   fetchMarketState()
     fetchMarketNotificationPreferences()
     fetchAdminMarketMessage()
-    fetchCurrentUser()
+    void fetchCurrentUser()
   document.addEventListener('pointerdown', handleRecentOffersPointerDown)
   window.addEventListener('resize', handleRecentOffersViewportChange)
   document.addEventListener('scroll', handleRecentOffersViewportChange, true)
   wsOn('market:opened', handleMarketOpened)
   wsOn('market:closed', handleMarketClosed)
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
-    wsOn('market:admin_message_published', handleAdminMarketMessagePublished)
+  wsOn('market:admin_message_published', handleAdminMarketMessagePublished)
+  wsOn('offer:expired', handleOfferExpiredForArchive)
   syncOfferInputHeight()
 })
 
@@ -775,6 +867,7 @@ onUnmounted(() => {
   wsOff('market:closed', handleMarketClosed)
   wsOff('market:notice_hidden', handleMarketNoticeHidden)
   wsOff('market:admin_message_published', handleAdminMarketMessagePublished)
+  wsOff('offer:expired', handleOfferExpiredForArchive)
 })
 </script>
 
@@ -835,12 +928,16 @@ onUnmounted(() => {
     <!-- Offers List -->
     <div class="market-content">
       <div class="content-inner">
-        <OffersList 
-          :offers="filteredOffers" 
+        <OffersList
+          :offers="visibleMarketOffers"
           :loading="isLoading" 
           :expiry-minutes="tradingSettings.offer_expiry_minutes" 
           :current-user-id="currentUserId" 
-          @trade-completed="fetchOffers()" 
+          :expired-loading="expiredMarketOffersLoading"
+          :has-more-expired="hasMoreExpiredMarketOffers"
+          :can-load-expired="canViewExpiredMarketOffers"
+          @trade-completed="refreshMarketOffers()"
+          @load-more-expired="loadMoreExpiredMarketOffers"
         />
       </div>
     </div>

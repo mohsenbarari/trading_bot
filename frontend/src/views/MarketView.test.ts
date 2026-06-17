@@ -189,12 +189,13 @@ async function mountMarketView() {
       stubs: {
         transition: true,
         OffersList: {
-          props: ['offers', 'loading', 'expiryMinutes', 'currentUserId'],
+          props: ['offers', 'loading', 'expiryMinutes', 'currentUserId', 'expiredLoading', 'hasMoreExpired', 'canLoadExpired'],
           template: `
             <div class="offers-list-stub">
               <div class="offers-count">{{ offers.length }}</div>
               <div class="offers-expiry">{{ expiryMinutes }}</div>
               <div class="offers-user-id">{{ currentUserId }}</div>
+              <button class="emit-load-more-expired" @click="$emit('load-more-expired')">more</button>
               <button class="emit-trade-completed" @click="$emit('trade-completed')">emit</button>
             </div>
           `,
@@ -233,6 +234,7 @@ describe('MarketView.vue', () => {
       }
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/offers/expired?skip=0&limit=25') return responseOf([])
       if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
@@ -309,6 +311,118 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.stopPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.clearBackStackMock).toHaveBeenCalled()
   }, 15000)
+
+  it('appends read-only expired market offers for non-customer users only', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      if (path === '/api/offers/expired?skip=0&limit=25') {
+        return responseOf([
+          {
+            id: 201,
+            status: 'expired',
+            expire_reason: 'time_limit',
+            offer_type: 'buy',
+            commodity_name: 'سکه',
+            quantity: 10,
+            remaining_quantity: 10,
+            price: 1000,
+            viewer_effective_price: 1000,
+            is_wholesale: true,
+            lot_sizes: null,
+            notes: null,
+            created_at: 'امروز',
+          },
+        ])
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+    expect(wrapper.find('.offers-count').text()).toBe('2')
+
+    wrapper.unmount()
+  })
+
+  it('does not load expired market offers for tier customers', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: 'tier1' })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+
+    wrapper.unmount()
+  })
+
+  it('does not load expired market offers for accountant users', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 77, role: 'عادی', customer_tier: null, is_accountant: true })
+      }
+      if (path === '/api/offers/expired?skip=0&limit=25') {
+        throw new Error('accountants should not request expired market history')
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+
+    wrapper.unmount()
+  })
 
   it('toggles market offer notification preference from the header icon', async () => {
     const wrapper = await mountMarketView()

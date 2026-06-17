@@ -824,6 +824,61 @@ async def get_active_offers(
     )
 
 
+@router.get("/expired", response_model=List[OfferResponse])
+async def get_market_expired_offers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(25, ge=1, le=100),
+    since_hours: int = Query(48, ge=1, le=48),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
+):
+    """
+    Read-only market history for offers that died naturally by time limit.
+
+    This endpoint intentionally does not change the active market feed contract,
+    price-warning comparisons, Web Push targeting, or trade execution guards.
+    """
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+
+    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
+    if actor_relation is not None:
+        return []
+
+    cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
+    expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+
+    query = (
+        select(Offer)
+        .options(*build_offer_read_options(include_owner_identity=False))
+        .where(
+            Offer.status == OfferStatus.EXPIRED,
+            Offer.expire_reason == "time_limit",
+            expired_at_expr >= cutoff_time,
+        )
+        .order_by(expired_at_expr.desc(), Offer.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    offers = result.scalars().all()
+    if not offers:
+        return []
+
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    return await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=context.owner_user.id,
+        include_owner_identity=False,
+    )
+
+
 @router.get("/my", response_model=List[OfferResponse])
 async def get_my_offers(
     status_filter: Optional[str] = Query(None, pattern="^(active|completed|cancelled|expired)$"),
