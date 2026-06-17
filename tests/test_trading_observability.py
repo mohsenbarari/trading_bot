@@ -10,6 +10,9 @@ from core.trading_observability import (
 
 
 class TradingObservabilityTests(unittest.TestCase):
+    def setUp(self):
+        registry.reset()
+
     def tearDown(self):
         registry.reset()
 

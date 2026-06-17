@@ -1,8 +1,8 @@
 # Trading Production-Grade Roadmap
 
-Status: `TG10` complete on `candidate/trading-production-grade`; `TG11` is next.
+Status: `TG11` pre-merge review complete on `candidate/trading-production-grade`; explicit owner approval is required before merge or production deploy.
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 This roadmap covers the production-grade hardening pass for the trading money
 path: offers, trade execution, trade history, customer/accountant-mediated
@@ -96,7 +96,7 @@ targets:
 | `TG8` | Complete | Add trading observability/audit signals and redacted structured logs. |
 | `TG9` | Complete | Run staging validation with isolated synthetic fixtures and no production sync. |
 | `TG10` | Complete | Run targeted benchmark/load proof only after TG1-TG9 pass; production run requires explicit user approval. |
-| `TG11` | Pending | Final production-readiness review, rollback notes, accepted-risk table, and promotion decision. |
+| `TG11` | Pre-merge review complete | Final production-readiness review, rollback notes, accepted-risk table, and promotion decision. |
 
 ## Stage TG0 - Audit And Roadmap
 
@@ -611,3 +611,29 @@ Acceptance:
 - No unreviewed staging-only helpers.
 - No production deploy hidden inside the refactor.
 - User explicitly approves promotion.
+
+Pre-merge review completed on 2026-06-17:
+
+- Added `docs/TRADING_PRODUCTION_GRADE_PROMOTION_REVIEW.md` with scope,
+  validation evidence, staging benchmark evidence, rollback plan, accepted
+  risks, and promotion recommendation.
+- Confirmed the branch is not trading-only: it also carries Web Push
+  notification code, migrations, frontend service-worker wiring, and staging
+  deployment guardrails from the candidate branch history. Merge approval must
+  explicitly accept that combined scope.
+- Ran the final focused backend gate: `140 tests OK`.
+- Ran syntax validation for the trading, notification, Web Push, and benchmark
+  probe modules.
+- Ran the focused frontend market/notification unit gate: `48 tests passed`.
+- Ran the Chromium market mutation e2e: `1 passed`.
+- Ran the frontend production build successfully; existing large-chunk warnings
+  remain non-blocking technical debt.
+- Confirmed staging health through `scripts/deploy_staging.sh health`.
+- Scanned recent staging app logs for traceback/cancelled/error/pool/timeout
+  patterns after the accepted TG10 run; no matches were found.
+- Fixed a TG11-only test isolation issue in
+  `tests/test_trading_observability.py` by resetting the metrics registry before
+  each test as well as after each test. This prevents unrelated prior metrics
+  from contaminating redaction assertions in large unittest matrices.
+- Merge was not performed. Production deploy, production benchmark, production
+  sync, and production data mutation were not performed.
