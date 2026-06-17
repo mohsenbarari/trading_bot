@@ -94,6 +94,7 @@ Rules:
 |---|---|---|
 | `candidate/trading-production-grade` | Production-grade trade/offer hardening and market notification work validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
 | `candidate/web-push-notifications` | Web Push notification work that should be merged to `main` only at the correct release point after staging validation and explicit approval. | Allowed after approval |
+| `candidate/market-recent-offers-chatbox` | Fixes the market chatbox recent-offer repeat list and validates read-only 48-hour market history for time-limit expired offers while keeping customers/accountants excluded and active-offer trading paths unchanged. | Allowed after focused staging validation and explicit approval |
 | `staging/user-switcher` | Staging-only user-switcher/reference branch. | Not allowed |
 | `staging/web-push-user-switcher` | Active staging branch for Web Push/user-switcher validation and staging guardrail work. | Not allowed as-is; promote through `candidate/*` only if explicitly approved |
 
@@ -132,3 +133,5 @@ For production-grade application changes:
 | 2026-06-16 | Codex | Added the staging frontend artifact guardrail: staging builds into `mini_app_dist_staging`, staging Nginx serves that isolated directory, the staging Docker build copies that same artifact, and regression coverage rejects sharing production `mini_app_dist`. |
 | 2026-06-16 | Codex | Updated the `candidate/trading-production-grade` registry entry to include market notification work after Web Push and market-offer push changes moved onto that production-candidate branch for staging validation. |
 | 2026-06-16 | Codex | Added the staging guardrail document to `candidate/trading-production-grade` so the production-grade trading roadmap can proceed from a compliant candidate branch instead of a staging-only branch. |
+| 2026-06-17 | Codex | Added `candidate/market-recent-offers-chatbox` for the market chatbox recent-offer repeat-list fix, branched from current `main` after the trading candidate merge; updated its contract to expired-only recent offers after owner clarification. |
+| 2026-06-17 | Codex | Expanded `candidate/market-recent-offers-chatbox` intent to cover read-only 48-hour market history for `expire_reason=time_limit` expired offers, with staging validation required before any main promotion. |

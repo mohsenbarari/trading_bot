@@ -173,18 +173,29 @@ function emitWs(event: string, data: any) {
   marketViewMocks.wsHandlers.get(event)?.forEach((callback) => callback(data))
 }
 
+function getRecentOffersDropdown(): HTMLElement | null {
+  return document.body.querySelector('.recent-offers-dropdown')
+}
+
+function getRecentOfferItems(): HTMLElement[] {
+  return Array.from(document.body.querySelectorAll<HTMLElement>('.recent-offer-item'))
+}
+
 async function mountMarketView() {
   const MarketView = (await import('./MarketView.vue')).default
   return mount(MarketView, {
+    attachTo: document.body,
     global: {
       stubs: {
+        transition: true,
         OffersList: {
-          props: ['offers', 'loading', 'expiryMinutes', 'currentUserId'],
+          props: ['offers', 'loading', 'expiryMinutes', 'currentUserId', 'expiredLoading', 'hasMoreExpired', 'canLoadExpired'],
           template: `
             <div class="offers-list-stub">
               <div class="offers-count">{{ offers.length }}</div>
               <div class="offers-expiry">{{ expiryMinutes }}</div>
               <div class="offers-user-id">{{ currentUserId }}</div>
+              <button class="emit-load-more-expired" @click="$emit('load-more-expired')">more</button>
               <button class="emit-trade-completed" @click="$emit('trade-completed')">emit</button>
             </div>
           `,
@@ -197,6 +208,7 @@ async function mountMarketView() {
 describe('MarketView.vue', () => {
   beforeEach(async () => {
     vi.useFakeTimers()
+    document.body.innerHTML = ''
     const { clearCurrentUserSummary } = await import('../utils/currentUser')
     clearCurrentUserSummary()
     marketViewMocks.offersRef = ref(offersFixture)
@@ -222,6 +234,7 @@ describe('MarketView.vue', () => {
       }
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/offers/expired?skip=0&limit=25') return responseOf([])
       if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
@@ -261,6 +274,7 @@ describe('MarketView.vue', () => {
     const { clearCurrentUserSummary } = await import('../utils/currentUser')
     clearCurrentUserSummary()
     vi.useRealTimers()
+    document.body.innerHTML = ''
   })
 
   it('loads market dependencies, wires OffersList props, and refreshes from the child event', async () => {
@@ -297,6 +311,118 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.stopPollingMock).toHaveBeenCalled()
     expect(marketViewMocks.clearBackStackMock).toHaveBeenCalled()
   }, 15000)
+
+  it('appends read-only expired market offers for non-customer users only', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      if (path === '/api/offers/expired?skip=0&limit=25') {
+        return responseOf([
+          {
+            id: 201,
+            status: 'expired',
+            expire_reason: 'time_limit',
+            offer_type: 'buy',
+            commodity_name: 'سکه',
+            quantity: 10,
+            remaining_quantity: 10,
+            price: 1000,
+            viewer_effective_price: 1000,
+            is_wholesale: true,
+            lot_sizes: null,
+            notes: null,
+            created_at: 'امروز',
+          },
+        ])
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+    expect(wrapper.find('.offers-count').text()).toBe('2')
+
+    wrapper.unmount()
+  })
+
+  it('does not load expired market offers for tier customers', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: 'tier1' })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+
+    wrapper.unmount()
+  })
+
+  it('does not load expired market offers for accountant users', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') {
+        return responseOf({ id: 77, role: 'عادی', customer_tier: null, is_accountant: true })
+      }
+      if (path === '/api/offers/expired?skip=0&limit=25') {
+        throw new Error('accountants should not request expired market history')
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+
+    wrapper.unmount()
+  })
 
   it('toggles market offer notification preference from the header icon', async () => {
     const wrapper = await mountMarketView()
@@ -469,16 +595,16 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
-    const recentItems = wrapper.findAll('.recent-offer-item')
+    const recentItems = getRecentOfferItems()
     expect(recentItems).toHaveLength(2)
-    expect(wrapper.text()).toContain('سکه')
-    expect(wrapper.text()).toContain('طلای آب‌شده')
-    expect(wrapper.text()).toContain('توضیح: از لیست اخیر')
-    expect(wrapper.text()).toContain('خرد · پله‌ها: ۵ + ۳')
-    expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
-    expect(wrapper.text()).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
+    expect(document.body.textContent).toContain('سکه')
+    expect(document.body.textContent).toContain('طلای آب‌شده')
+    expect(document.body.textContent).toContain('توضیح: از لیست اخیر')
+    expect(document.body.textContent).toContain('خرد · پله‌ها: ۵ + ۳')
+    expect(document.body.textContent).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۳۰')
+    expect(document.body.textContent).not.toContain('۱۴۰۵/۰۳/۰۱ ۱۲:۱۰')
 
-    await recentItems[1]!.trigger('click')
+    recentItems[1]!.click()
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)
@@ -510,99 +636,120 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('shows a compact empty state when there are no recent expired offers', async () => {
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf([])
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    await wrapper.find('.recent-offers-toggle').trigger('click')
+    await flushPromises()
+
+    expect(getRecentOffersDropdown()?.textContent).toContain('بدون فعالیت')
+    expect(getRecentOffersDropdown()?.textContent).not.toContain('لفظ اخیری وجود ندارد')
+    expect(getRecentOffersDropdown()?.textContent).not.toContain('در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است.')
+
+    wrapper.unmount()
+  })
+
   it('closes the recent offers menu when toggled again or when clicking outside it', async () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+    expect(getRecentOffersDropdown()).not.toBeNull()
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+    expect(getRecentOffersDropdown()).toBeNull()
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+    expect(getRecentOffersDropdown()).not.toBeNull()
 
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
     await nextTick()
 
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(false)
+    expect(getRecentOffersDropdown()).toBeNull()
 
     wrapper.unmount()
   })
 
-  it('anchors the recent offers menu to the toggle and opens downward when the toggle is near the top', async () => {
+  it('anchors the recent offers menu above the market input without fixed-position drift', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
 
     const wrapper = await mountMarketView()
     await flushPromises()
-
-    const toggle = wrapper.get('.recent-offers-toggle').element as HTMLElement
-    toggle.getBoundingClientRect = () => ({
-      x: 24,
-      y: 48,
-      top: 48,
-      right: 72,
-      bottom: 96,
-      left: 24,
-      width: 48,
-      height: 48,
-      toJSON: () => ({}),
+    Object.defineProperty(wrapper.get('.input-wrapper').element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 16, top: 760, width: 360, height: 56, right: 376, bottom: 816, x: 16, y: 760, toJSON: () => ({}) }),
     })
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    const dropdown = wrapper.get('.recent-offers-dropdown').element as HTMLElement
-    Object.defineProperty(dropdown, 'offsetHeight', { configurable: true, value: 280 })
+    const dropdown = getRecentOffersDropdown()!
     window.dispatchEvent(new Event('resize'))
     await nextTick()
 
     expect(dropdown.style.position).toBe('fixed')
-    expect(dropdown.style.left).toBe('24px')
-    expect(dropdown.style.top).toBe('108px')
-    expect(dropdown.style.transformOrigin).toBe('top left')
-    expect(dropdown.style.getPropertyValue('--recent-offers-enter-offset')).toBe('-0.35rem')
-    expect(dropdown.classList.contains('recent-offers-dropdown--below')).toBe(true)
+    expect(Number.parseFloat(dropdown.style.left)).toBeGreaterThanOrEqual(8)
+    expect(Number.parseFloat(dropdown.style.top)).toBeGreaterThanOrEqual(8)
+    expect(dropdown.style.bottom).toBe('auto')
+    expect(dropdown.style.width).toBe('304px')
+    expect(dropdown.style.maxHeight).toBe('320px')
+    expect(dropdown.style.transformOrigin).toBe('bottom left')
+    expect(dropdown.style.getPropertyValue('--recent-offers-enter-offset')).toBe('0.35rem')
+    expect(dropdown.classList.contains('recent-offers-dropdown--above')).toBe(true)
 
     wrapper.unmount()
   })
 
-  it('anchors the recent offers menu above the toggle when the toggle is near the bottom', async () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
-    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 })
+  it('keeps the recent offers menu bounded on short mobile viewports', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 240 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 260 })
 
     const wrapper = await mountMarketView()
     await flushPromises()
-
-    const toggle = wrapper.get('.recent-offers-toggle').element as HTMLElement
-    toggle.getBoundingClientRect = () => ({
-      x: 24,
-      y: 720,
-      top: 720,
-      right: 72,
-      bottom: 768,
-      left: 24,
-      width: 48,
-      height: 48,
-      toJSON: () => ({}),
+    Object.defineProperty(wrapper.get('.input-wrapper').element, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 8, top: 220, width: 232, height: 56, right: 240, bottom: 276, x: 8, y: 220, toJSON: () => ({}) }),
     })
 
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    const dropdown = wrapper.get('.recent-offers-dropdown').element as HTMLElement
-    Object.defineProperty(dropdown, 'offsetHeight', { configurable: true, value: 280 })
+    const dropdown = getRecentOffersDropdown()!
     window.dispatchEvent(new Event('resize'))
     await nextTick()
 
     expect(dropdown.style.position).toBe('fixed')
-    expect(dropdown.style.left).toBe('24px')
-    expect(dropdown.style.top).toBe('428px')
+    expect(Number.parseFloat(dropdown.style.width)).toBeGreaterThanOrEqual(220)
+    expect(Number.parseFloat(dropdown.style.width)).toBeLessThanOrEqual(224)
+    expect(Number.parseFloat(dropdown.style.maxHeight)).toBeGreaterThanOrEqual(132)
+    expect(Number.parseFloat(dropdown.style.maxHeight)).toBeLessThanOrEqual(236)
+    expect(dropdown.style.bottom).toBe('auto')
     expect(dropdown.style.transformOrigin).toBe('bottom left')
     expect(dropdown.style.getPropertyValue('--recent-offers-enter-offset')).toBe('0.35rem')
     expect(dropdown.classList.contains('recent-offers-dropdown--above')).toBe(true)
@@ -639,12 +786,12 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.recent-offers-state--error').text()).toContain('بارگذاری لفظ‌های اخیر ممکن نشد.')
+    expect(getRecentOffersDropdown()?.textContent).toContain('بارگذاری لفظ‌های اخیر ممکن نشد.')
 
-    wrapper.get('.recent-offers-dropdown').element.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    getRecentOffersDropdown()!.dispatchEvent(new Event('pointerdown', { bubbles: true }))
     await nextTick()
 
-    expect(wrapper.find('.recent-offers-dropdown').exists()).toBe(true)
+    expect(getRecentOffersDropdown()).not.toBeNull()
 
     recentOffersMode = 'success'
     await wrapper.find('.recent-offers-toggle').trigger('click')
@@ -652,8 +799,8 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(wrapper.findAll('.recent-offer-item')).toHaveLength(1)
-    expect(wrapper.text()).toContain('سکه')
+    expect(getRecentOfferItems()).toHaveLength(1)
+    expect(document.body.textContent).toContain('سکه')
 
     wrapper.unmount()
   })
@@ -704,10 +851,10 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('خرد · پله‌ها: ۳ + ۲')
-    expect(wrapper.text()).not.toContain('توضیح:')
+    expect(document.body.textContent).toContain('خرد · پله‌ها: ۳ + ۲')
+    expect(document.body.textContent).not.toContain('توضیح:')
 
-    await wrapper.find('.recent-offer-item').trigger('click')
+    getRecentOfferItems()[0]!.click()
     await flushPromises()
 
     await wrapper.find('.offer-preview-confirm').trigger('click')
@@ -742,8 +889,8 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    const recentItems = wrapper.findAll('.recent-offer-item')
-    await recentItems[0]!.trigger('click')
+    const recentItems = getRecentOfferItems()
+    recentItems[0]!.click()
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(true)

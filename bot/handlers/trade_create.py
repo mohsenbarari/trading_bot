@@ -20,7 +20,7 @@ from core.services.trade_service import (
     validate_price,
     get_available_trade_amounts,
 )
-from core.utils import to_jalali_str, check_user_limits, increment_user_counter
+from core.utils import to_jalali_str, check_user_limits, increment_user_counter, utc_now_naive
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
     get_lot_type_keyboard,
@@ -737,6 +737,8 @@ async def _handle_trade_confirm_core(
                     offer = await session.get(Offer, offer_id)
                     if offer:
                         offer.status = OfferStatus.EXPIRED
+                        offer.expired_at = utc_now_naive()
+                        offer.expire_reason = "telegram_send_failed"
                         await session.commit()
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after Telegram error: {rollback_error}")
@@ -748,6 +750,8 @@ async def _handle_trade_confirm_core(
                     offer = await session.get(Offer, offer_id)
                     if offer:
                         offer.status = OfferStatus.EXPIRED
+                        offer.expired_at = utc_now_naive()
+                        offer.expire_reason = "telegram_send_failed"
                         await session.commit()
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after unexpected error: {rollback_error}")
@@ -935,9 +939,12 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
         bot_token = os.getenv("BOT_TOKEN")
         channel_id = settings.channel_id
         
+        expired_at = utc_now_naive()
         async with httpx.AsyncClient() as client:
             for offer in offers:
                 offer.status = OfferStatus.EXPIRED
+                offer.expired_at = expired_at
+                offer.expire_reason = "bot_cancel_all"
                 
                 if offer.channel_message_id and bot_token and channel_id:
                     url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"

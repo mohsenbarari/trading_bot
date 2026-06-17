@@ -183,6 +183,8 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_offer.home_server, "iran")
         self.assertEqual(new_offer.offer_type, OfferType.BUY)
         self.assertEqual(old_offer.status, OfferStatus.EXPIRED)
+        self.assertIsNotNone(old_offer.expired_at)
+        self.assertEqual(old_offer.expire_reason, "republished")
         self.assertEqual(old_offer.republished_offer_id, 77)
         self.assertEqual(db.commit.await_count, 2)
         set_count_mock.assert_awaited_once_with(5, 1)

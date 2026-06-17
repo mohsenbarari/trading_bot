@@ -58,6 +58,7 @@ class Offer(Base):
     exclude_from_competitive_price = Column(Boolean, nullable=False, default=False, server_default='false', index=True)
     price_warning_type = Column(String(64), nullable=True)
     expire_reason = Column(String(32), nullable=True)
+    expired_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # تعداد باقیمانده (برای فروش خُرد)
     remaining_quantity = Column(Integer, nullable=True)
@@ -97,3 +98,10 @@ class Offer(Base):
         "version_id_col": version_id
     }
 
+
+Index(
+    'ix_offers_time_limit_expired_history',
+    func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at).desc(),
+    Offer.created_at.desc(),
+    postgresql_where=(Offer.status == OfferStatus.EXPIRED) & (Offer.expire_reason == "time_limit"),
+)

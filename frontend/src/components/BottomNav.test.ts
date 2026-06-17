@@ -6,6 +6,12 @@ import { nextTick, reactive } from 'vue'
 const apiFetchMock = vi.fn()
 const routeState = reactive({ name: 'home' })
 
+function setViewport(width: number, height: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: height })
+  window.dispatchEvent(new Event('resize'))
+}
+
 vi.mock('vue-router', () => ({
   useRoute: () => routeState,
 }))
@@ -21,6 +27,7 @@ describe('BottomNav.vue', () => {
     apiFetchMock.mockReset()
     localStorage.clear()
     routeState.name = 'home'
+    setViewport(1024, 768)
   })
 
   it('shows the operations entry immediately from the cached role on first mount', async () => {
@@ -325,6 +332,64 @@ describe('BottomNav.vue', () => {
     wrapper.unmount()
   })
 
+  it('positions the expanded FAB menu toward visible viewport space near screen edges', async () => {
+    routeState.name = 'market'
+    setViewport(390, 720)
+    localStorage.setItem('fab_position', JSON.stringify({ x: 346, y: 8 }))
+
+    const BottomNav = (await import('./BottomNav.vue')).default
+    const wrapper = mount(BottomNav, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('.fab-btn').trigger('click')
+    await nextTick()
+
+    const topRightMenu = wrapper.get('.fab-nav')
+    expect(topRightMenu.classes()).toEqual(expect.arrayContaining(['fab-nav--down', 'fab-nav--left']))
+    expect(topRightMenu.attributes('style')).toContain('top: 56px;')
+    expect(topRightMenu.attributes('style')).toContain('bottom: auto;')
+    expect(topRightMenu.attributes('style')).toContain('right: 0')
+    expect(topRightMenu.attributes('style')).toContain('left: auto;')
+
+    wrapper.unmount()
+
+    localStorage.setItem('fab_position', JSON.stringify({ x: 346, y: 676 }))
+    const bottomRightWrapper = mount(BottomNav, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          'router-link': {
+            props: ['to'],
+            template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+    await bottomRightWrapper.get('.fab-btn').trigger('click')
+    await nextTick()
+
+    const bottomRightMenu = bottomRightWrapper.get('.fab-nav')
+    expect(bottomRightMenu.classes()).toEqual(expect.arrayContaining(['fab-nav--up', 'fab-nav--left']))
+    expect(bottomRightMenu.attributes('style')).toContain('bottom: 56px;')
+    expect(bottomRightMenu.attributes('style')).toContain('top: auto;')
+    expect(bottomRightMenu.attributes('style')).toContain('right: 0')
+    expect(bottomRightMenu.attributes('style')).toContain('left: auto;')
+
+    bottomRightWrapper.unmount()
+  })
+
   it('drags the FAB with mouse events, persists the bounded position, and ignores toggle clicks while dragging', async () => {
     vi.useFakeTimers()
     routeState.name = 'market'
@@ -359,6 +424,7 @@ describe('BottomNav.vue', () => {
     expect(storedPosition.y).toBe(window.innerHeight - 44)
     expect(wrapper.get('.fab-container').attributes('style')).toContain(`left: ${window.innerWidth - 44}px;`)
     expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${window.innerHeight - 44}px;`)
+    expect(wrapper.get('.fab-container').classes()).toContain('fab-container--market')
 
     await vi.advanceTimersByTimeAsync(60)
     await fabButton.trigger('click')
