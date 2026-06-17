@@ -18,6 +18,9 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 9. Offers created from the Telegram bot have `offer_home_server=foreign`.
 10. Offers created from the WebApp have `offer_home_server=iran`.
 11. Users may be active in the WebApp and Telegram bot at the same time.
+12. `Offer.home_server` is determined only by the source surface where that offer is published.
+    `user.home_server`, active session state, or the user's previous platform must never decide
+    offer authority.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The exact messenger-owned table list must be made
@@ -160,6 +163,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Treat WebApp sessions, Bot FSM state, and Telegram runtime state as surface-scoped auth/runtime
   state unless a later decision explicitly promotes specific metadata into the product sync set.
   User profile/account status remains product data and should sync.
+- Treat `user.home_server` as an overloaded legacy field until redesigned. It currently participates
+  in login/session authority, is rewritten during some auth flows, and must be removed from offer-home
+  decisions immediately.
 
 #### Review Points Not Adopted As Final Design Yet
 
@@ -198,6 +204,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Session/auth state has cross-server logic in places, but the new policy allows simultaneous
   WebApp and bot activity. It is not yet clear whether session tables sync, stay local, or become
   a documented exception to "all non-messenger tables".
+- `user.home_server` is overloaded. Auth code writes it from the login/request server, session
+  authority reads it as the user's session home, and offer creation currently reads it as offer home.
+  These meanings conflict once a user can use WebApp and Bot at the same time.
 - ID collision handling is only partial. The receiver repairs sequences after applying remote
   rows and has natural-key fallbacks for some tables, but independent two-way inserts can still
   create the same integer ID before either side receives the other row.
@@ -233,14 +242,16 @@ This ordering is about implementation difficulty and blast radius, not business 
 1. Set `home_server=foreign` explicitly in Telegram bot offer creation instead of relying on the
    model default.
 2. Set WebApp/API-created offer home from the write surface/server, not from `owner_user.home_server`.
-3. Add a small source-surface enum/constant and use it in offer creation tests.
-4. Add the user-switching scenario matrix as executable or at least reviewable acceptance cases:
+3. Add a regression test proving the same user can create a Bot offer with `home_server=foreign`
+   and then create a WebApp offer with `home_server=iran`, regardless of `user.home_server`.
+4. Add a small source-surface enum/constant and use it in offer creation tests.
+5. Add the user-switching scenario matrix as executable or at least reviewable acceptance cases:
    Bot create -> WebApp view/cancel, WebApp create -> Telegram publish, Bot trade -> WebApp update,
    WebApp trade -> Telegram/channel update, and simultaneous Bot/WebApp activity for the same user.
-5. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
-6. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
+6. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
+7. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
    has the bot service.
-7. Add a branch-policy smoke check or documented pre-commit checklist so roadmap commits cannot be
+8. Add a branch-policy smoke check or documented pre-commit checklist so roadmap commits cannot be
    made accidentally from the wrong branch.
 
 #### Level 2 - Guardrails And Local Side Effects
@@ -257,6 +268,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 6. Define which runtime/session state is surface-local and which user/account state syncs:
    WebApp session, Bot FSM, Telegram binding, login requests, recovery requests, user profile, and
    account status must each have an explicit policy.
+7. Audit all `user.home_server` reads and writes. Classify each use as one of: session authority,
+   active login surface, offer authority bug, or legacy compatibility. Offer authority uses must be
+   removed in this stage.
 
 #### Level 3 - Sync Coverage And Delivery Reliability
 
@@ -295,7 +309,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 2. Define per-table conflict policy for concurrent writes: owner, natural key, merge rule, version
    check, and allowed write surfaces.
 3. Redesign session/auth semantics for simultaneous WebApp and bot activity without letting
-   `user.home_server` control offer authority.
+   `user.home_server` control offer authority. Strong candidate direction: replace or narrow
+   `user.home_server` into explicit session-authority/surface-scoped fields so a WebApp login cannot
+   flip Bot offer authority and a Bot login cannot flip WebApp offer authority.
 4. Define migration and rollout for existing data: current integer IDs, PostgreSQL sequences, old
    offers, existing `channel_message_id` values, user sessions, Telegram bindings, and any partially
    synced rows.
