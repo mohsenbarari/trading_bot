@@ -412,7 +412,7 @@ async function fetchRecentOffers(silent = false) {
   recentOffersError.value = ''
 
   try {
-    const response = await apiFetch('/api/offers/my?since_hours=1&limit=3')
+    const response = await apiFetch('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
     if (!response.ok) {
       throw await createHttpErrorFromResponse(response, {
         surface: 'market',

@@ -359,7 +359,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("offers.created_at >=", since_hours_sql)
         self.assertIn("offers.status =", since_hours_sql)
 
-        recent_without_status_db = CapturingDB(FakeExecuteResult([]))
+        recent_expired_db = CapturingDB(FakeExecuteResult([]))
         with patch(
             "core.trading_settings.get_trading_settings_async",
             new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=20)),
@@ -368,20 +368,20 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=({}, None)),
         ):
             result = await offers_module.get_my_offers(
-                status_filter=None,
+                status_filter="expired",
                 since_hours=1,
                 skip=0,
                 limit=3,
-                db=recent_without_status_db,
+                db=recent_expired_db,
                 current_user=current_user,
             )
 
         self.assertEqual(result, [])
-        recent_without_status_sql = compile_sql(recent_without_status_db.statements[0])
-        self.assertIn("offers.user_id = 8", recent_without_status_sql)
-        self.assertIn("offers.created_at >=", recent_without_status_sql)
-        self.assertNotIn("offers.status =", recent_without_status_sql)
-        self.assertIn("LIMIT 3", recent_without_status_sql)
+        recent_expired_sql = compile_sql(recent_expired_db.statements[0])
+        self.assertIn("offers.user_id = 8", recent_expired_sql)
+        self.assertIn("offers.created_at >=", recent_expired_sql)
+        self.assertIn("offers.status =", recent_expired_sql)
+        self.assertIn("LIMIT 3", recent_expired_sql)
 
         status_only_db = CapturingDB(FakeExecuteResult([]))
         with patch(
