@@ -160,6 +160,19 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         ):
             self.assertIn(expected, deploy_script)
 
+    def test_production_iran_deploy_does_not_recreate_stateful_services(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+        legacy_script = (REPO_ROOT / 'deploy.sh').read_text(encoding='utf-8')
+
+        for source in (production_script, legacy_script):
+            self.assertIn('up -d --no-recreate db redis', source)
+            self.assertIn('run --rm --no-deps migration', source)
+            self.assertIn('up -d --no-deps', source)
+            self.assertIn('app sync_worker', source)
+
+        self.assertNotIn('eval "\\$compose_cmd -f docker-compose.iran.yml up -d \\$wait_args"', production_script)
+        self.assertNotIn('up -d --wait --wait-timeout 180"', legacy_script)
+
     def test_nginx_setup_scripts_keep_api_proxy_off_websocket_upgrade(self):
         for script_name in ("scripts/setup_iran_nginx.sh", "scripts/setup_foreign_nginx.sh"):
             with self.subTest(script=script_name):

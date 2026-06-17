@@ -475,7 +475,28 @@ deploy_iran() {
         if docker compose version >/dev/null 2>&1; then COMPOSE_CMD='docker compose'; \
         elif command -v docker-compose >/dev/null 2>&1; then COMPOSE_CMD='docker-compose'; \
         else echo 'No Docker Compose command is available on Iran host.' >&2; exit 1; fi; \
-        cd $IRAN_PROJECT_DIR && eval \"\$COMPOSE_CMD -f docker-compose.iran.yml up -d --wait --wait-timeout 180\""
+        cd $IRAN_PROJECT_DIR; \
+        for service in app sync_worker migration; do \
+            ids=\$(docker ps -aq --filter label=com.docker.compose.service=\$service --filter label=com.docker.compose.project=current); \
+            if [ -n \"\$ids\" ]; then docker rm -f \$ids >/dev/null 2>&1 || true; fi; \
+        done; \
+        for container_name in trading_bot_app trading_bot_sync_worker trading_bot_migration; do \
+            docker rm -f \"\$container_name\" >/dev/null 2>&1 || true; \
+        done; \
+        wait_args=''; \
+        if [ \"\$COMPOSE_CMD\" = 'docker compose' ]; then wait_args='--wait --wait-timeout 180'; fi; \
+        eval \"\$COMPOSE_CMD -f docker-compose.iran.yml up -d --no-recreate db redis\"; \
+        for attempt in \$(seq 1 60); do \
+            db_id=\$(docker ps -q --filter label=com.docker.compose.service=db --filter label=com.docker.compose.project=current | head -n 1); \
+            db_health=''; \
+            if [ -n \"\$db_id\" ]; then db_health=\$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \"\$db_id\" 2>/dev/null || true); fi; \
+            if [ \"\$db_health\" = 'healthy' ] || [ \"\$db_health\" = 'running' ]; then break; fi; \
+            if [ \"\$attempt\" -eq 60 ]; then echo 'Iran database did not become healthy before migration.' >&2; exit 1; fi; \
+            sleep 2; \
+        done; \
+        eval \"\$COMPOSE_CMD -f docker-compose.iran.yml run --rm --no-deps migration\"; \
+        docker rm -f trading_bot_migration >/dev/null 2>&1 || true; \
+        eval \"\$COMPOSE_CMD -f docker-compose.iran.yml up -d --no-deps \$wait_args app sync_worker\""
 
     echo "✅ Iran deployment complete!"
     ssh_iran "set -e; \
