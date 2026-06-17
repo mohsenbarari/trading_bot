@@ -12,44 +12,11 @@ const notificationStore = useNotificationStore()
 
 type DragPoint = { x: number; y: number }
 
-const FAB_SIZE = 44
-const FAB_DEFAULT_OFFSET = 16
-const FAB_MENU_GAP = 12
-const FAB_MENU_WIDTH = 160
-const FAB_MENU_ITEM_HEIGHT = 43
-const FAB_MENU_VERTICAL_PADDING = 16
-const FAB_MENU_ITEM_GAP = 3
-const VIEWPORT_MARGIN = 8
-
 // Draggable FAB state
 const fabPosition = ref<DragPoint | null>(null)
 const isDragging = ref(false)
 const dragStart = ref<DragPoint>({ x: 0, y: 0 })
 const startPos = ref<DragPoint>({ x: 0, y: 0 })
-const viewportSize = ref({ width: 0, height: 0 })
-
-function updateViewportSize() {
-  if (typeof window === 'undefined') return
-  viewportSize.value = {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }
-  if (fabPosition.value) {
-    fabPosition.value = clampFabPoint(fabPosition.value)
-  }
-}
-
-function clampFabPoint(point: DragPoint) {
-  const viewportWidth = viewportSize.value.width || window.innerWidth
-  const viewportHeight = viewportSize.value.height || window.innerHeight
-  const maxX = Math.max(0, viewportWidth - FAB_SIZE)
-  const maxY = Math.max(0, viewportHeight - FAB_SIZE)
-
-  return {
-    x: Math.max(0, Math.min(point.x, maxX)),
-    y: Math.max(0, Math.min(point.y, maxY)),
-  }
-}
 
 function getDragClientPoint(e: TouchEvent | MouseEvent) {
   if (e instanceof MouseEvent) {
@@ -65,7 +32,7 @@ function loadFabPosition() {
     try {
       const parsed = JSON.parse(saved)
       if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        fabPosition.value = clampFabPoint(parsed)
+        fabPosition.value = parsed
       }
     } catch(e){}
   }
@@ -87,7 +54,6 @@ function onDragStart(e: TouchEvent | MouseEvent) {
   const evt = getDragClientPoint(e)
   if (!evt) return
 
-  updateViewportSize()
   dragStart.value = { x: evt.clientX, y: evt.clientY }
   
   if (!fabPosition.value) {
@@ -96,7 +62,7 @@ function onDragStart(e: TouchEvent | MouseEvent) {
       const rect = el.getBoundingClientRect()
       startPos.value = { x: rect.left, y: rect.top }
     } else {
-      startPos.value = { x: FAB_DEFAULT_OFFSET, y: window.innerHeight - FAB_DEFAULT_OFFSET - FAB_SIZE }
+      startPos.value = { x: 16, y: window.innerHeight - 60 }
     }
   } else {
     startPos.value = { ...fabPosition.value }
@@ -126,10 +92,15 @@ function onDragMove(e: TouchEvent | MouseEvent) {
   
   if (isDragging.value) {
     if (e.cancelable) e.preventDefault()
-    fabPosition.value = clampFabPoint({
-      x: startPos.value.x + dx,
-      y: startPos.value.y + dy,
-    })
+    let newX = startPos.value.x + dx
+    let newY = startPos.value.y + dy
+    
+    const maxX = window.innerWidth - 44
+    const maxY = window.innerHeight - 44
+    newX = Math.max(0, Math.min(newX, maxX))
+    newY = Math.max(0, Math.min(newY, maxY))
+    
+    fabPosition.value = { x: newX, y: newY }
   }
 }
 
@@ -155,9 +126,7 @@ watch(() => route.name, () => {
 })
 
 onMounted(async () => {
-  updateViewportSize()
   loadFabPosition()
-  window.addEventListener('resize', updateViewportSize)
   const token = localStorage.getItem('auth_token')
   if (!token) return
   startMarketRuntimeUpdates()
@@ -165,7 +134,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', updateViewportSize)
   stopMarketRuntimeUpdates()
 })
 
@@ -218,74 +186,6 @@ const baseItems = [
 const navItems = computed(() => {
   return baseItems.filter(item => item.name !== 'market' || !isAccountant.value)
 })
-
-const fabMenuHeight = computed(() => {
-  const itemCount = navItems.value.length
-  const gapCount = Math.max(0, itemCount - 1)
-  return FAB_MENU_VERTICAL_PADDING + (itemCount * FAB_MENU_ITEM_HEIGHT) + (gapCount * FAB_MENU_ITEM_GAP)
-})
-
-const currentFabPoint = computed(() => {
-  if (fabPosition.value) return fabPosition.value
-  const viewportHeight = viewportSize.value.height || (typeof window !== 'undefined' ? window.innerHeight : 0)
-  return {
-    x: FAB_DEFAULT_OFFSET,
-    y: Math.max(0, viewportHeight - FAB_DEFAULT_OFFSET - FAB_SIZE),
-  }
-})
-
-const fabMenuPlacement = computed(() => {
-  const viewportWidth = viewportSize.value.width || (typeof window !== 'undefined' ? window.innerWidth : 0)
-  const viewportHeight = viewportSize.value.height || (typeof window !== 'undefined' ? window.innerHeight : 0)
-  const point = currentFabPoint.value
-  const menuHeight = fabMenuHeight.value
-
-  const availableAbove = point.y - VIEWPORT_MARGIN
-  const availableBelow = viewportHeight - (point.y + FAB_SIZE) - VIEWPORT_MARGIN
-  const opensDown = availableBelow >= menuHeight || availableBelow > availableAbove
-
-  const availableRight = viewportWidth - point.x - VIEWPORT_MARGIN
-  const availableLeft = point.x + FAB_SIZE - VIEWPORT_MARGIN
-  const opensLeft = availableRight < FAB_MENU_WIDTH && availableLeft >= FAB_MENU_WIDTH
-
-  return {
-    vertical: opensDown ? 'down' : 'up',
-    horizontal: opensLeft ? 'left' : 'right',
-  }
-})
-
-const fabMenuStyle = computed(() => {
-  const viewportHeight = viewportSize.value.height || (typeof window !== 'undefined' ? window.innerHeight : 0)
-  const point = currentFabPoint.value
-  const style: Record<string, string> = {}
-
-  if (fabMenuPlacement.value.vertical === 'down') {
-    style.top = `${FAB_SIZE + FAB_MENU_GAP}px`
-    style.bottom = 'auto'
-    style.maxHeight = `${Math.max(72, viewportHeight - point.y - FAB_SIZE - FAB_MENU_GAP - VIEWPORT_MARGIN)}px`
-  } else {
-    style.bottom = `${FAB_SIZE + FAB_MENU_GAP}px`
-    style.top = 'auto'
-    style.maxHeight = `${Math.max(72, point.y - FAB_MENU_GAP - VIEWPORT_MARGIN)}px`
-  }
-
-  if (fabMenuPlacement.value.horizontal === 'left') {
-    style.right = '0'
-    style.left = 'auto'
-  } else {
-    style.left = '0'
-    style.right = 'auto'
-  }
-
-  return style
-})
-
-const fabMenuClasses = computed(() => ({
-  'fab-nav--down': fabMenuPlacement.value.vertical === 'down',
-  'fab-nav--up': fabMenuPlacement.value.vertical === 'up',
-  'fab-nav--left': fabMenuPlacement.value.horizontal === 'left',
-  'fab-nav--right': fabMenuPlacement.value.horizontal === 'right',
-}))
 
 function isActiveNavItem(item: { routeNames?: string[]; name: string }) {
   const currentRouteName = typeof route.name === 'string' ? route.name : ''
@@ -341,7 +241,7 @@ function toggleNav() {
 
     <!-- Expanded nav -->
     <transition name="slide-up">
-      <div v-if="isExpanded" class="fab-nav" :class="fabMenuClasses" :style="fabMenuStyle">
+      <div v-if="isExpanded" class="fab-nav">
         <template v-for="item in navItems" :key="item.name">
           <div v-if="item.disabled" class="fab-item disabled">
             <component :is="item.icon" :size="20" />
@@ -574,8 +474,6 @@ function toggleNav() {
   bottom: 1rem;
   left: 1rem;
   z-index: 50;
-  touch-action: none;
-  user-select: none;
 }
 
 .fab-overlay {
@@ -599,7 +497,6 @@ function toggleNav() {
   box-shadow: 0 2px 12px rgba(0,0,0,0.12);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-tap-highlight-color: transparent;
-  touch-action: none;
 }
 .fab-btn:active {
   transform: scale(0.9);
@@ -612,6 +509,8 @@ function toggleNav() {
 
 .fab-nav {
   position: absolute;
+  bottom: 56px;
+  left: 0;
   background: var(--ds-bg-card);
   border-radius: var(--ds-radius-lg);
   padding: 0.5rem;
@@ -621,25 +520,6 @@ function toggleNav() {
   flex-direction: column;
   gap: 0.15rem;
   min-width: 140px;
-  max-width: calc(100vw - 16px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.fab-nav--up.fab-nav--right {
-  transform-origin: bottom left;
-}
-
-.fab-nav--up.fab-nav--left {
-  transform-origin: bottom right;
-}
-
-.fab-nav--down.fab-nav--right {
-  transform-origin: top left;
-}
-
-.fab-nav--down.fab-nav--left {
-  transform-origin: top right;
 }
 
 .fab-item {
@@ -714,15 +594,9 @@ function toggleNav() {
   opacity: 0;
   transform: translateY(10px) scale(0.95);
 }
-.slide-up-enter-from.fab-nav--down {
-  transform: translateY(-10px) scale(0.95);
-}
 .slide-up-leave-to {
   opacity: 0;
   transform: translateY(10px) scale(0.95);
-}
-.slide-up-leave-to.fab-nav--down {
-  transform: translateY(-10px) scale(0.95);
 }
 
 .spin-enter-active, .spin-leave-active {
