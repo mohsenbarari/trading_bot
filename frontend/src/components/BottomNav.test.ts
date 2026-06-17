@@ -354,11 +354,14 @@ describe('BottomNav.vue', () => {
     document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
     await nextTick()
 
+    const marketActionBarClearance = 112
+    const expectedY = window.innerHeight - 44 - marketActionBarClearance
     const storedPosition = JSON.parse(localStorage.getItem('fab_position') || '{}')
     expect(storedPosition.x).toBe(window.innerWidth - 44)
-    expect(storedPosition.y).toBe(window.innerHeight - 44)
+    expect(storedPosition.y).toBe(expectedY)
     expect(wrapper.get('.fab-container').attributes('style')).toContain(`left: ${window.innerWidth - 44}px;`)
-    expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${window.innerHeight - 44}px;`)
+    expect(wrapper.get('.fab-container').attributes('style')).toContain(`top: ${expectedY}px;`)
+    expect(wrapper.get('.fab-container').classes()).toContain('fab-container--market')
 
     await vi.advanceTimersByTimeAsync(60)
     await fabButton.trigger('click')

@@ -17,6 +17,8 @@ const fabPosition = ref<DragPoint | null>(null)
 const isDragging = ref(false)
 const dragStart = ref<DragPoint>({ x: 0, y: 0 })
 const startPos = ref<DragPoint>({ x: 0, y: 0 })
+const FAB_SIZE = 44
+const MARKET_ACTION_BAR_CLEARANCE = 112
 
 function getDragClientPoint(e: TouchEvent | MouseEvent) {
   if (e instanceof MouseEvent) {
@@ -40,9 +42,14 @@ function loadFabPosition() {
 
 const fabStyle = computed(() => {
   if (fabPosition.value) {
+    const reservedBottom = isMarketPage.value ? MARKET_ACTION_BAR_CLEARANCE : 0
+    const maxX = Math.max(0, window.innerWidth - FAB_SIZE)
+    const maxY = Math.max(0, window.innerHeight - FAB_SIZE - reservedBottom)
+    const x = Math.max(0, Math.min(fabPosition.value.x, maxX))
+    const y = Math.max(0, Math.min(fabPosition.value.y, maxY))
     return {
-      left: `${fabPosition.value.x}px`,
-      top: `${fabPosition.value.y}px`,
+      left: `${x}px`,
+      top: `${y}px`,
       bottom: 'auto',
       right: 'auto'
     }
@@ -95,8 +102,9 @@ function onDragMove(e: TouchEvent | MouseEvent) {
     let newX = startPos.value.x + dx
     let newY = startPos.value.y + dy
     
-    const maxX = window.innerWidth - 44
-    const maxY = window.innerHeight - 44
+    const reservedBottom = isMarketPage.value ? MARKET_ACTION_BAR_CLEARANCE : 0
+    const maxX = window.innerWidth - FAB_SIZE
+    const maxY = Math.max(0, window.innerHeight - FAB_SIZE - reservedBottom)
     newX = Math.max(0, Math.min(newX, maxX))
     newY = Math.max(0, Math.min(newY, maxY))
     
@@ -233,7 +241,7 @@ function toggleNav() {
   </nav>
 
   <!-- ═══ Collapsed FAB on market & messenger ═══ -->
-  <div v-else class="fab-container" :style="fabStyle">
+  <div v-else class="fab-container" :class="{ 'fab-container--market': isMarketPage }" :style="fabStyle">
     <!-- Overlay -->
     <transition name="fade">
       <div v-if="isExpanded" class="fab-overlay" @click="isExpanded = false"></div>
@@ -474,6 +482,10 @@ function toggleNav() {
   bottom: 1rem;
   left: 1rem;
   z-index: 50;
+}
+
+.fab-container--market {
+  bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
 }
 
 .fab-overlay {

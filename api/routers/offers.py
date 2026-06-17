@@ -860,13 +860,15 @@ async def get_my_offers(
         cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
 
         if applied_status_enum == OfferStatus.EXPIRED:
-            query = query.where(Offer.expired_at.is_not(None), Offer.expired_at >= cutoff_time)
+            recent_expired_at = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+            query = query.where(recent_expired_at >= cutoff_time)
         else:
             query = query.where(Offer.created_at >= cutoff_time)
     
     # مرتب‌سازی: جدیدترین‌ها اول
     if applied_status_enum == OfferStatus.EXPIRED:
-        query = query.order_by(Offer.expired_at.desc().nullslast(), Offer.created_at.desc()).offset(skip).limit(limit)
+        recent_expired_at = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+        query = query.order_by(recent_expired_at.desc(), Offer.created_at.desc()).offset(skip).limit(limit)
     else:
         query = query.order_by(Offer.created_at.desc()).offset(skip).limit(limit)
     

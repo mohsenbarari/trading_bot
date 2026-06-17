@@ -379,10 +379,10 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
         recent_expired_sql = compile_sql(recent_expired_db.statements[0])
         self.assertIn("offers.user_id = 8", recent_expired_sql)
-        self.assertIn("offers.expired_at IS NOT NULL", recent_expired_sql)
-        self.assertIn("offers.expired_at >=", recent_expired_sql)
+        self.assertNotIn("offers.expired_at IS NOT NULL", recent_expired_sql)
+        self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", recent_expired_sql)
         self.assertIn("offers.status =", recent_expired_sql)
-        self.assertIn("ORDER BY offers.expired_at DESC NULLS LAST", recent_expired_sql)
+        self.assertIn("ORDER BY coalesce(offers.expired_at, offers.updated_at, offers.created_at) DESC", recent_expired_sql)
         self.assertIn("LIMIT 3", recent_expired_sql)
 
         status_only_db = CapturingDB(FakeExecuteResult([]))

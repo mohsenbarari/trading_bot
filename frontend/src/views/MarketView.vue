@@ -1161,7 +1161,7 @@ onUnmounted(() => {
 
 .recent-offers-toggle {
   position: absolute;
-  right: 3.65rem;
+  left: 0.94rem;
   bottom: 0.58rem;
   width: 2.1rem;
   height: 2.1rem;
@@ -1275,7 +1275,7 @@ onUnmounted(() => {
   width: 100%;
   min-height: 3.25rem;
   max-height: 10rem;
-  padding: 0.82rem 6.85rem 0.82rem 1rem;
+  padding: 0.82rem 3.7rem 0.82rem 3.9rem;
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: var(--ds-radius-lg);
