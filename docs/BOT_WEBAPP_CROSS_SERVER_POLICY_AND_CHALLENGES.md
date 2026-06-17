@@ -42,28 +42,43 @@ This snapshot is based on the current repository state on 2026-06-17. It is not 
 final architecture approval; it only classifies what the code already does, what is
 incomplete, and what is still missing relative to the policy above.
 
-### Policies Already Respected
+### Complete And No-Change Baseline
 
-- Iran compose does not run the Telegram bot service. `docker-compose.iran.yml` documents
-  the bot as disabled and only runs the API, sync worker, DB, Redis, and supporting jobs.
-- The foreign compose runs the Telegram bot service, so the current deployment split already
-  supports "bot on foreign".
-- Both foreign and Iran compose files run `sync_worker`, so both sides already have an
-  outbound delivery process for cross-server DB changes.
+These items already match the target policy or provide a correct baseline behavior. They should
+be kept and regression-tested, but they do not need redesign right now.
+
+- Iran compose does not run the Telegram bot service. `docker-compose.iran.yml` documents the bot
+  as disabled and only runs the API, sync worker, DB, Redis, and supporting jobs.
+- The foreign compose runs the Telegram bot service. This already matches the "bot only on
+  foreign" deployment split.
+- Both foreign and Iran compose files run `sync_worker`. The service presence is correct; later
+  work is about delivery semantics, not whether the worker should exist.
 - The sync receiver uses a signed internal endpoint with API key, timestamp, and HMAC
-  verification instead of accepting anonymous writes.
-- ORM-level listeners already exist for many non-messenger product tables: users, offers,
-  trades, relations, commodities, aliases, trading settings, notifications, user blocks,
-  invitations, market schedule/runtime state, and admin messages.
+  verification. This is the right trust boundary for cross-server writes.
 - Synced writes use `execution_options(is_sync=True)`, and model listeners skip sync-originated
-  changes. That protects against obvious infinite sync echo loops.
-- The sync receiver already avoids blindly overwriting `channel_message_id` from incoming offer
-  sync payloads.
-- Foreign-side publish of synced WebApp offers is partially protected against duplicate sends
-  by checking `channel_message_id IS NULL` and using `SELECT ... FOR UPDATE SKIP LOCKED`.
-- Trade execution has an authority-aware path: when an offer belongs to the other server, the
-  trade command is forwarded to the offer home server instead of being applied independently.
-- Messenger message and conversation tables are not in the sync model map today.
+  changes. This echo-loop guard should stay as the base pattern.
+- The sync receiver intentionally avoids overwriting `channel_message_id` from incoming offer
+  payloads. This is correct because Telegram publication state must stay foreign-owned.
+- Trade execution already has an authority-aware path: when an offer belongs to the other server,
+  the trade command is forwarded to the offer home server instead of being applied independently.
+- Direct messenger tables `messages` and `conversations` are not in the sync model map today.
+  This matches the Iran-only messenger policy for those two tables.
+
+### Working Foundations To Keep But Still Harden
+
+These pieces are useful and should be preserved, but they are not complete enough to be called
+"no-change" items.
+
+- ORM-level listeners already exist for many non-messenger product tables: users, offers, trades,
+  relations, commodities, aliases, trading settings, notifications, user blocks, invitations,
+  market schedule/runtime state, and admin messages.
+- Foreign-side publish of synced WebApp offers is partially protected against duplicate sends by
+  checking `channel_message_id IS NULL` and using `SELECT ... FOR UPDATE SKIP LOCKED`.
+- The sync receiver repairs sequences after applying remote rows. This is a useful safety step
+  after receipt, but it does not solve simultaneous two-server insert collisions.
+- The current direct push plus Redis queue design gives low-latency delivery when everything is
+  healthy. It should be retained as an acceleration path even if committed outbox draining becomes
+  the reliability source.
 
 ### Partially Implemented Or Ambiguous Policies
 
@@ -118,27 +133,49 @@ incomplete, and what is still missing relative to the policy above.
 - Cross-server outage behavior is not defined: the system does not yet declare whether local offer
   creation should continue, queue with pending state, or be blocked when the peer is unavailable.
 
-### Main Challenges Ahead
+### Challenge Roadmap From Easy To Hard
 
-- Define the source of authority per table. Offers and trades are not enough; users, counters,
-  notifications, admin settings, blocks, relations, invitations, commodities, and sessions need
-  explicit write-surface and merge rules.
-- Separate "user/session home" from "offer home". A user can be active in both surfaces, so user
-  routing cannot decide where an offer was authored.
-- Make sync delivery both immediate and reliable. Redis/direct push can provide speed, but a
-  committed DB outbox should provide correctness after crashes, network loss, and restarts.
-- Prevent duplicate side effects. Telegram posts, realtime notifications, unread counters, and
-  active-offer counters must be idempotent under direct push plus worker replay.
-- Remove accidental foreign/Iran capabilities. Iran must not have any Telegram outbound path, and
-  foreign must not expose the WebApp or messenger.
-- Resolve the messenger boundary. If `chats` and `chat_members` are required for mandatory/system
-  channels, they should be split from WebApp messenger state or given a very narrow sync policy.
-- Solve ID and uniqueness conflicts before expanding two-way sync. Sequence repair after receipt
-  is not enough for independent simultaneous writes.
-- Audit all non-ORM and bulk mutation paths. Any path that bypasses ORM listeners can silently
-  break the "all non-messenger data is synced" policy.
-- Define operational degraded modes. The architecture needs a clear answer for peer outage,
-  Telegram outage, DB lag, duplicate delivery, and partial publish success.
+This ordering is about implementation difficulty and blast radius, not business priority.
+
+#### Level 1 - Low-Risk Explicitness
+
+1. Set `home_server=foreign` explicitly in Telegram bot offer creation instead of relying on the
+   model default.
+2. Set WebApp/API-created offer home from the write surface/server, not from `owner_user.home_server`.
+3. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
+4. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
+   has the bot service.
+
+#### Level 2 - Guardrails And Local Side Effects
+
+1. Add a central Telegram side-effect gateway that refuses all Telegram calls when
+   `server_mode=iran`.
+2. Add a server-mode WebApp/static guard so the foreign API cannot accidentally serve the WebApp.
+3. After synced bot-created offers are applied on Iran, publish a local WebApp realtime event without
+   creating a sync echo.
+4. Decide the narrow fate of `/api/chat` on foreign: block the router entirely, block at reverse proxy,
+   or allow only explicitly non-messenger internal operations.
+
+#### Level 3 - Sync Coverage And Delivery Reliability
+
+1. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
+   and side effects.
+2. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
+   sync-aware helpers or explicit outbox logging.
+3. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
+   `change_log WHERE synced=false`, while keeping Redis/direct push as wake-up/acceleration.
+4. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
+   foreign publication result back to Iran.
+
+#### Level 4 - Core Distributed-System Decisions
+
+1. Choose a globally safe ID strategy: UUID/public IDs or server-partitioned integer sequences.
+2. Define per-table conflict policy for concurrent writes: owner, natural key, merge rule, version
+   check, and allowed write surfaces.
+3. Redesign session/auth semantics for simultaneous WebApp and bot activity without letting
+   `user.home_server` control offer authority.
+4. Define degraded-mode behavior for peer outage, Telegram outage, DB lag, duplicate delivery, and
+   partial publish success.
 
 ## Main Architecture Tensions
 
