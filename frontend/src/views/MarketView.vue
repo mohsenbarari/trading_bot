@@ -1165,7 +1165,8 @@ onUnmounted(() => {
   --market-chatbox-button-size: 3rem;
   --market-chatbox-edge-gap: 0.125rem;
   --market-chatbox-history-left: 0.94rem;
-  --market-chatbox-left-reserve: calc(var(--market-chatbox-history-left) + var(--market-chatbox-button-size));
+  --market-chatbox-left-inset: calc(var(--market-chatbox-history-left) - var(--market-chatbox-edge-gap));
+  --market-chatbox-side-padding: calc(var(--market-chatbox-button-size) + 0.65rem);
 }
 
 .recent-offers-toggle {
@@ -1283,11 +1284,11 @@ onUnmounted(() => {
 
 .text-offer-input {
   display: block;
-  width: calc(100% - var(--market-chatbox-left-reserve));
+  width: calc(100% - var(--market-chatbox-left-inset));
   min-height: 3.25rem;
   max-height: 10rem;
-  margin-left: var(--market-chatbox-left-reserve);
-  padding: 0.82rem 3.55rem 0.82rem 1rem;
+  margin-left: var(--market-chatbox-left-inset);
+  padding: 0.82rem var(--market-chatbox-side-padding) 0.82rem var(--market-chatbox-side-padding);
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
   border-radius: 1.625rem;
