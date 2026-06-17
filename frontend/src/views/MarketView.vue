@@ -442,53 +442,26 @@ function closeRecentOffersMenu() {
   recentOffersOpen.value = false
 }
 
-function getRecentOffersToggleElement() {
-  const raw = recentOffersToggleRef.value
-  if (!raw) return null
-  if (raw instanceof HTMLElement) return raw
-  if (raw.$el instanceof HTMLElement) return raw.$el as HTMLElement
-  return null
-}
-
 function updateRecentOffersMenuPosition() {
   if (!recentOffersOpen.value) return
 
-  const toggleEl = getRecentOffersToggleElement()
-  const dropdownEl = recentOffersRef.value?.querySelector('.recent-offers-dropdown') as HTMLElement | null
-  if (!toggleEl) return
-
-  const toggleRect = toggleEl.getBoundingClientRect()
   const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 360
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 640
-  const gap = 12
-  const edgePadding = 8
-  const dropdownWidth = Math.min(304, viewportWidth - (edgePadding * 2))
-  const measuredHeight = dropdownEl?.offsetHeight || 280
-  const spaceAbove = Math.max(0, toggleRect.top - edgePadding)
-  const spaceBelow = Math.max(0, viewportHeight - toggleRect.bottom - edgePadding)
-  const shouldOpenAbove = spaceAbove >= measuredHeight + gap || spaceAbove > spaceBelow
-  recentOffersOpenDirection.value = shouldOpenAbove ? 'above' : 'below'
-  const availableHeight = Math.max(160, (shouldOpenAbove ? spaceAbove : spaceBelow) - gap)
-  const dropdownHeight = Math.min(measuredHeight, availableHeight)
-  const left = Math.min(
-    Math.max(toggleRect.left, edgePadding),
-    Math.max(edgePadding, viewportWidth - dropdownWidth - edgePadding),
-  )
-  const top = shouldOpenAbove
-    ? Math.max(edgePadding, toggleRect.top - dropdownHeight - gap)
-    : Math.min(
-        Math.max(edgePadding, viewportHeight - dropdownHeight - edgePadding),
-        toggleRect.bottom + gap,
-      )
+  const wrapperWidth = recentOffersRef.value?.getBoundingClientRect().width || viewportWidth - 32
+  const dropdownWidth = Math.min(304, Math.max(220, wrapperWidth - 8), viewportWidth - 16)
+  const availableHeight = Math.max(160, Math.min(320, viewportHeight - 160))
 
+  recentOffersOpenDirection.value = 'above'
   recentOffersDropdownStyle.value = {
-    position: 'fixed',
-    left: `${left}px`,
-    top: `${top}px`,
+    position: 'absolute',
+    left: '0.25rem',
+    right: 'auto',
+    top: 'auto',
+    bottom: 'calc(100% + 0.75rem)',
     width: `${dropdownWidth}px`,
     maxHeight: `${availableHeight}px`,
-    transformOrigin: shouldOpenAbove ? 'bottom left' : 'top left',
-    '--recent-offers-enter-offset': shouldOpenAbove ? '0.35rem' : '-0.35rem',
+    transformOrigin: 'bottom left',
+    '--recent-offers-enter-offset': '0.35rem',
   }
 }
 

@@ -116,6 +116,10 @@ test.describe('Market mutation UX', () => {
     await expect(page.locator('.recent-offers-toggle')).toBeVisible()
     await page.locator('.recent-offers-toggle').click()
     await expect(page.locator('.recent-offers-dropdown')).toHaveCSS('z-index', '90')
+    const dropdownBox = await page.locator('.recent-offers-dropdown').boundingBox()
+    expect(dropdownBox).not.toBeNull()
+    expect(dropdownBox!.y).toBeGreaterThanOrEqual(0)
+    expect(dropdownBox!.y + dropdownBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
     await expect(page.locator('.recent-offer-item')).toContainText('سکه')
   })
 
