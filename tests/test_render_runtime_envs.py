@@ -40,6 +40,12 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "GRAFANA_ALERT_WARNING_RECEIVER": "warning",
             "GRAFANA_ALERT_WEBHOOK_URL": "https://alerts.example/api",
             "GRAFANA_ALERT_EMAIL_ADDRESSES": "ops@example.com",
+            "WEB_PUSH_ENABLED": "true",
+            "WEB_PUSH_VAPID_PUBLIC_KEY": "web-push-public",
+            "WEB_PUSH_VAPID_PRIVATE_KEY": "web-push-private",
+            "WEB_PUSH_VAPID_SUBJECT": "mailto:ops@example.com",
+            "WEB_PUSH_TTL_SECONDS": "7200",
+            "WEB_PUSH_TIMEOUT_SECONDS": "7.5",
             "DB_POOL_SIZE": "15",
             "DB_MAX_OVERFLOW": "10",
             "IRAN_DB_POOL_SIZE": "8",
@@ -180,6 +186,13 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertIn("SMSIR_INVITATION_TEMPLATE_PARAMETER=NAME", iran_lines)
             self.assertIn("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID=162103", iran_lines)
             self.assertIn("SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID=903643", iran_lines)
+            self.assertIn("WEB_PUSH_ENABLED=true", foreign_lines)
+            self.assertIn("WEB_PUSH_ENABLED=true", iran_lines)
+            self.assertIn("WEB_PUSH_VAPID_PUBLIC_KEY=web-push-public", iran_lines)
+            self.assertIn("WEB_PUSH_VAPID_PRIVATE_KEY=web-push-private", iran_lines)
+            self.assertIn("WEB_PUSH_VAPID_SUBJECT=mailto:ops@example.com", iran_lines)
+            self.assertIn("WEB_PUSH_TTL_SECONDS=7200", iran_lines)
+            self.assertIn("WEB_PUSH_TIMEOUT_SECONDS=7.5", iran_lines)
 
     def test_collect_runtime_values_reads_non_shell_safe_source_env_and_allows_overrides(self):
         values = self.sample_values()
@@ -191,6 +204,12 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         values.pop("SMSIR_INVITATION_TEMPLATE_PARAMETER")
         values.pop("SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID")
         values.pop("SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID")
+        values.pop("WEB_PUSH_ENABLED")
+        values.pop("WEB_PUSH_VAPID_PUBLIC_KEY")
+        values.pop("WEB_PUSH_VAPID_PRIVATE_KEY")
+        values.pop("WEB_PUSH_VAPID_SUBJECT")
+        values.pop("WEB_PUSH_TTL_SECONDS")
+        values.pop("WEB_PUSH_TIMEOUT_SECONDS")
         values["GRAFANA_ALERT_DEFAULT_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_CRITICAL_RECEIVER"] = "Trading Bot Production Webhook"
         values["GRAFANA_ALERT_WARNING_RECEIVER"] = "Trading Bot Production Email"
@@ -213,6 +232,12 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(collected["SMSIR_INVITATION_TEMPLATE_PARAMETER"], "NAME")
         self.assertEqual(collected["SMSIR_ACCOUNTANT_INVITATION_TEMPLATE_ID"], "162103")
         self.assertEqual(collected["SMSIR_CUSTOMER_INVITATION_TEMPLATE_ID"], "903643")
+        self.assertEqual(collected["WEB_PUSH_ENABLED"], "false")
+        self.assertEqual(collected["WEB_PUSH_VAPID_PUBLIC_KEY"], "")
+        self.assertEqual(collected["WEB_PUSH_VAPID_PRIVATE_KEY"], "")
+        self.assertEqual(collected["WEB_PUSH_VAPID_SUBJECT"], "")
+        self.assertEqual(collected["WEB_PUSH_TTL_SECONDS"], "3600")
+        self.assertEqual(collected["WEB_PUSH_TIMEOUT_SECONDS"], "5.0")
         self.assertEqual(collected["GRAFANA_ALERT_DEFAULT_RECEIVER"], "Trading Bot Production Webhook")
         self.assertEqual(collected["GRAFANA_ALERT_WARNING_RECEIVER"], "Trading Bot Production Email")
         self.assertEqual(collected["GRAFANA_ALERT_WEBHOOK_URL"], "https://override.example/alerts")

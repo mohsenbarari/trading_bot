@@ -242,6 +242,22 @@ Invalid/over-capacity TG10 profiles:
    The build passes. Chunk splitting remains a broader frontend performance
    task, not a blocker for this trading hardening promotion.
 
+## Post-Review Web Push Hardening
+
+After the initial pre-merge review, the Web Push promotion gate was tightened:
+
+- `scripts/render_runtime_envs.py` now carries the production `WEB_PUSH_*`
+  settings into both foreign and Iran runtime env files. The safe default is
+  `WEB_PUSH_ENABLED=false` with blank VAPID keys, so production does not request
+  or deliver Web Push unless the operator deliberately provides VAPID values and
+  enables it.
+- `frontend/src/services/webPush.ts` now fetches
+  `/api/notifications/push/public-key` before requesting browser notification
+  permission in the automatic first-interaction bootstrap path. If the server
+  reports Web Push disabled, the browser permission prompt is skipped.
+- Focused regression coverage was added for both runtime env rendering and the
+  frontend Web Push prompt ordering.
+
 ## Rollback Plan
 
 Before merge:

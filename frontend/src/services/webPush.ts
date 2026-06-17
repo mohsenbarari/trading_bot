@@ -171,17 +171,21 @@ export async function promptAndEnableWebPushNotifications(): Promise<WebPushStat
     return { state: 'permission-blocked' }
   }
 
+  const config = await fetchWebPushPublicConfig()
+  if (!config.enabled || !config.public_key) {
+    return { state: 'server-disabled', config }
+  }
+
   const permission = Notification.permission === 'granted'
     ? 'granted'
     : await Notification.requestPermission()
   if (permission === 'denied') {
-    return { state: 'permission-blocked' }
+    return { state: 'permission-blocked', config }
   }
   if (permission !== 'granted') {
-    return { state: 'permission-default' }
+    return { state: 'permission-default', config }
   }
 
-  const config = await fetchWebPushPublicConfig()
   return subscribeAndRegisterWebPush(config)
 }
 
