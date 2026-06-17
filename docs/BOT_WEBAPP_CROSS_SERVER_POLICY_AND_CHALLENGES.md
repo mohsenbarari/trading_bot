@@ -32,21 +32,25 @@ This section is mandatory for all work derived from this document.
    unless the owner explicitly asks for a merge or direct commit.
 3. WebApp-only bug fixes must use their own WebApp fix branch or branches. They must not be mixed
    into `candidate/bot-webapp-integration` unless the owner explicitly asks to combine the work.
-4. Before every code change, documentation change, commit, push, staging deploy, or validation run
+4. Multiple agents may work in this repository and may switch branches without warning. Never rely
+   on an earlier branch check.
+5. Before every code change, documentation change, commit, push, staging deploy, or validation run
    that could affect this roadmap, the current branch must be checked with `git branch --show-current`.
-5. If the current branch is not exactly `candidate/bot-webapp-integration`, work for this roadmap
+6. Before every commit, the current branch must be checked again, even if it was checked earlier in
+   the same turn.
+7. If the current branch is not exactly `candidate/bot-webapp-integration`, work for this roadmap
    must stop until the branch is corrected.
-6. All commits for this roadmap must be made on `candidate/bot-webapp-integration`.
-7. Staging is the only allowed runtime validation environment for this roadmap unless the owner
+8. All commits for this roadmap must be made on `candidate/bot-webapp-integration`.
+9. Staging is the only allowed runtime validation environment for this roadmap unless the owner
    explicitly approves another target.
-8. Staging validation must use isolated staging configuration, staging artifacts, staging data, and
+10. Staging validation must use isolated staging configuration, staging artifacts, staging data, and
    no production sync peer.
-9. No change from this roadmap may be merged into `main`, any WebApp fix branch, any other candidate
+11. No change from this roadmap may be merged into `main`, any WebApp fix branch, any other candidate
    branch, or any release branch unless the owner explicitly says to merge it.
-10. No change from this roadmap may be deployed to production, benchmarked against production,
+12. No change from this roadmap may be deployed to production, benchmarked against production,
     run against production data, or used to change production sync/Telegram/WebApp behavior unless
     the owner explicitly requests that production action.
-11. Pushing `candidate/bot-webapp-integration` to remote is allowed for backup/review, but that push
+13. Pushing `candidate/bot-webapp-integration` to remote is allowed for backup/review, but that push
     does not imply approval to merge, release, or deploy.
 
 ## Current Code Facts
@@ -230,9 +234,14 @@ This ordering is about implementation difficulty and blast radius, not business 
    model default.
 2. Set WebApp/API-created offer home from the write surface/server, not from `owner_user.home_server`.
 3. Add a small source-surface enum/constant and use it in offer creation tests.
-4. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
-5. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
+4. Add the user-switching scenario matrix as executable or at least reviewable acceptance cases:
+   Bot create -> WebApp view/cancel, WebApp create -> Telegram publish, Bot trade -> WebApp update,
+   WebApp trade -> Telegram/channel update, and simultaneous Bot/WebApp activity for the same user.
+5. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
+6. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
    has the bot service.
+7. Add a branch-policy smoke check or documented pre-commit checklist so roadmap commits cannot be
+   made accidentally from the wrong branch.
 
 #### Level 2 - Guardrails And Local Side Effects
 
@@ -245,6 +254,9 @@ This ordering is about implementation difficulty and blast radius, not business 
    or allow only explicitly non-messenger internal operations.
 5. Move Bot cancel-all side effects after the DB commit, or route it through a shared expire-offers
    command that has explicit post-commit side effects.
+6. Define which runtime/session state is surface-local and which user/account state syncs:
+   WebApp session, Bot FSM, Telegram binding, login requests, recovery requests, user profile, and
+   account status must each have an explicit policy.
 
 #### Level 3 - Sync Coverage And Delivery Reliability
 
@@ -261,16 +273,35 @@ This ordering is about implementation difficulty and blast radius, not business 
    foreign publication result back to Iran.
 7. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
    publication without duplicate channel posts.
+8. Add acceptance gates for every switching scenario: DB state, WebApp realtime state, Telegram
+   channel/user-message state, notification state, and sync backlog must all be asserted.
 
-#### Level 4 - Core Distributed-System Decisions
+#### Level 4 - Recovery, Reconciliation, And Operations
+
+1. Define reconciliation jobs for failed or partial flows: offer synced but Telegram publish failed,
+   Telegram post exists but `channel_message_id` is missing, foreign publish result did not sync back
+   to Iran, duplicate direct-push/worker delivery arrived, or a peer was down during local writes.
+2. Add observability for sync lag, committed outbox backlog, retry backlog, Telegram publish pending
+   and failed counts, orphan Telegram posts, stale WebApp market state, and conflict counts.
+3. Add an operator runbook for staging incidents: how to inspect backlog, replay outbox rows, recover
+   Telegram publication state, verify Iran never called Telegram, and verify foreign never served
+   WebApp/messenger.
+4. Define degraded-mode behavior per surface: whether Bot/WebApp offer creation continues, becomes
+   pending, or is blocked when peer sync, Telegram API, Redis, or DB connectivity is degraded.
+
+#### Level 5 - Core Distributed-System Decisions
 
 1. Choose a globally safe ID strategy: UUID/public IDs or server-partitioned integer sequences.
 2. Define per-table conflict policy for concurrent writes: owner, natural key, merge rule, version
    check, and allowed write surfaces.
 3. Redesign session/auth semantics for simultaneous WebApp and bot activity without letting
    `user.home_server` control offer authority.
-4. Define degraded-mode behavior for peer outage, Telegram outage, DB lag, duplicate delivery, and
-   partial publish success.
+4. Define migration and rollout for existing data: current integer IDs, PostgreSQL sequences, old
+   offers, existing `channel_message_id` values, user sessions, Telegram bindings, and any partially
+   synced rows.
+5. Define rollback criteria and rollback mechanics for staging and later production promotion.
+6. Define final production acceptance gates, but do not run them or promote this work until the owner
+   explicitly requests production action.
 
 ## Main Architecture Tensions
 
