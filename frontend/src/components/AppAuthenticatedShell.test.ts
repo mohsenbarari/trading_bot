@@ -5,6 +5,7 @@ const shellMocks = vi.hoisted(() => ({
   on: vi.fn(),
   off: vi.fn(),
   connect: vi.fn(),
+  sendPresenceUpdate: vi.fn(),
   useNotificationRuntime: vi.fn(),
   initChatUploadBackground: vi.fn(async () => {}),
   hasPendingUploadResumeHint: vi.fn(() => false),
@@ -13,10 +14,20 @@ const shellMocks = vi.hoisted(() => ({
   initChatFileDebugOverlay: vi.fn(),
   setupExpiryTimer: vi.fn(),
   apiFetch: vi.fn(async () => ({})),
+  route: { path: '/' },
 }))
 
 vi.mock('../composables/useWebSocket', () => ({
-  useWebSocket: () => ({ on: shellMocks.on, off: shellMocks.off, connect: shellMocks.connect }),
+  useWebSocket: () => ({
+    on: shellMocks.on,
+    off: shellMocks.off,
+    connect: shellMocks.connect,
+    sendPresenceUpdate: shellMocks.sendPresenceUpdate,
+  }),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => shellMocks.route,
 }))
 
 vi.mock('../composables/useNotificationRuntime', () => ({
@@ -52,6 +63,7 @@ describe('AppAuthenticatedShell.vue', () => {
     shellMocks.on.mockReset()
     shellMocks.off.mockReset()
     shellMocks.connect.mockReset()
+    shellMocks.sendPresenceUpdate.mockReset()
     shellMocks.useNotificationRuntime.mockReset()
     shellMocks.initChatUploadBackground.mockClear()
     shellMocks.hasPendingUploadResumeHint.mockReset()
@@ -63,6 +75,8 @@ describe('AppAuthenticatedShell.vue', () => {
     shellMocks.setupExpiryTimer.mockClear()
     shellMocks.apiFetch.mockReset()
     shellMocks.apiFetch.mockResolvedValue({})
+    shellMocks.route.path = '/'
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
     localStorage.clear()
     installHandler = null
   })
@@ -100,6 +114,8 @@ describe('AppAuthenticatedShell.vue', () => {
     })
     expect(shellMocks.setupExpiryTimer).toHaveBeenCalledTimes(1)
     expect(shellMocks.initChatFileDebugOverlay).toHaveBeenCalledTimes(1)
+    expect(shellMocks.on).toHaveBeenCalledWith('ws:reconnect', expect.any(Function))
+    expect(shellMocks.sendPresenceUpdate).toHaveBeenCalledWith('/', true)
 
     const ensureSessionValidation = (shellMocks.useNotificationRuntime as any).capturedEnsure
     await ensureSessionValidation()
@@ -119,6 +135,9 @@ describe('AppAuthenticatedShell.vue', () => {
     expect(preventDefault).toHaveBeenCalled()
     expect((window as any).deferredPrompt).toBe(event)
     expect(readyListener).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    expect(shellMocks.off).toHaveBeenCalledWith('ws:reconnect', expect.any(Function))
+    expect(shellMocks.sendPresenceUpdate).toHaveBeenLastCalledWith('/', false)
   })
 
   it('starts background recovery immediately when a pending transfer hint exists', async () => {

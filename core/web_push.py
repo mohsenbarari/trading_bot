@@ -9,11 +9,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.enums import NotificationCategory, NotificationLevel
+from core.market_presence import load_market_page_user_ids
 from models.notification import Notification
 from models.push_subscription import PushSubscription
 
@@ -290,7 +291,23 @@ async def load_market_offer_push_target_user_ids(
         query = query.where(~User.id.in_(excluded))
 
     result = await db.execute(query)
-    return [int(user_id) for user_id in result.scalars().all()]
+    target_user_ids = [int(user_id) for user_id in result.scalars().all()]
+    market_page_user_ids = await load_market_page_user_ids(target_user_ids)
+    if market_page_user_ids:
+        target_user_ids = [user_id for user_id in target_user_ids if user_id not in market_page_user_ids]
+    return target_user_ids
+
+
+async def is_first_active_market_offer(db: AsyncSession, offer_id: int) -> bool:
+    from models.offer import Offer, OfferStatus
+
+    other_active_offer_count = await db.scalar(
+        select(func.count(Offer.id)).where(
+            Offer.status == OfferStatus.ACTIVE,
+            Offer.id != int(offer_id),
+        )
+    )
+    return int(other_active_offer_count or 0) == 0
 
 
 async def send_market_offer_web_push(offer_id: int) -> None:
@@ -307,6 +324,12 @@ async def send_market_offer_web_push(offer_id: int) -> None:
         )
         offer = result.scalar_one_or_none()
         if offer is None:
+            return
+        from models.offer import OfferStatus
+
+        if offer.status != OfferStatus.ACTIVE:
+            return
+        if not await is_first_active_market_offer(db, offer.id):
             return
 
         excluded_user_ids = {

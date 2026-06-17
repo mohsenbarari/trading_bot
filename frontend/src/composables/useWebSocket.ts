@@ -118,6 +118,22 @@ export function useWebSocket() {
         }
     };
 
+    const sendJson = (message: Record<string, unknown>) => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+        socket.send(JSON.stringify(message));
+        return true;
+    };
+
+    const sendPresenceUpdate = (path: string, visible: boolean) => {
+        return sendJson({
+            type: 'presence:update',
+            data: {
+                path,
+                visible,
+            },
+        });
+    };
+
     const on = (event: string, callback: (data: any) => void) => {
         if (!eventListeners[event]) {
             eventListeners[event] = [];
@@ -134,6 +150,8 @@ export function useWebSocket() {
         isConnected,
         connect,
         disconnect,
+        sendJson,
+        sendPresenceUpdate,
         on,
         off
     };

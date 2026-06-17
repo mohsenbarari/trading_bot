@@ -1,7 +1,7 @@
 import unittest
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from core import web_push
 
@@ -87,10 +87,11 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
                 return FakeExecuteResult()
 
         db = FakeDB()
-        target_user_ids = await web_push.load_market_offer_push_target_user_ids(
-            db,
-            excluded_user_ids={1, 4},
-        )
+        with patch.object(web_push, "load_market_page_user_ids", new=AsyncMock(return_value=set())):
+            target_user_ids = await web_push.load_market_offer_push_target_user_ids(
+                db,
+                excluded_user_ids={1, 4},
+            )
 
         self.assertEqual(target_user_ids, [2, 3])
         compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
@@ -98,6 +99,40 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("user_notification_preferences", compiled)
         self.assertIn("market_offer_push_enabled", compiled)
         self.assertIn("users.id NOT IN", compiled)
+
+    async def test_market_offer_targets_skip_users_currently_viewing_market(self):
+        class FakeExecuteResult:
+            def scalars(self):
+                return SimpleNamespace(all=lambda: [2, 3, 4])
+
+        class FakeDB:
+            async def execute(self, _stmt):
+                return FakeExecuteResult()
+
+        with patch.object(web_push, "load_market_page_user_ids", new=AsyncMock(return_value={3})):
+            target_user_ids = await web_push.load_market_offer_push_target_user_ids(FakeDB())
+
+        self.assertEqual(target_user_ids, [2, 4])
+
+    async def test_market_offer_push_only_treats_offer_as_first_when_no_other_active_offer_exists(self):
+        class FakeDB:
+            def __init__(self, scalar_result):
+                self.scalar_result = scalar_result
+                self.statement = None
+
+            async def scalar(self, stmt):
+                self.statement = stmt
+                return self.scalar_result
+
+        empty_market_db = FakeDB(0)
+        busy_market_db = FakeDB(2)
+
+        self.assertTrue(await web_push.is_first_active_market_offer(empty_market_db, 42))
+        self.assertFalse(await web_push.is_first_active_market_offer(busy_market_db, 42))
+
+        compiled = str(empty_market_db.statement.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("offers.status = 'ACTIVE'", compiled)
+        self.assertIn("offers.id !=", compiled)
 
     async def test_send_returns_zero_summary_when_unconfigured(self):
         with patch.object(web_push, "is_web_push_configured", return_value=False):

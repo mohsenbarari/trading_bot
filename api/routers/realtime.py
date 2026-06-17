@@ -16,6 +16,12 @@ from jose import jwt, JWTError
 from core.redis import pool
 from core.config import settings
 from core.db import AsyncSessionLocal
+from core.market_presence import (
+    clear_market_page_presence,
+    refresh_market_page_presence,
+    is_market_route,
+    set_market_page_presence,
+)
 from core.metrics import record_websocket_publish_failure, set_active_websocket_connections
 from core.services.session_service import is_session_blacklisted
 from models.session import UserSession
@@ -75,6 +81,43 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+async def _handle_client_message(
+    data: str,
+    *,
+    user_id: int,
+    connection_id: str,
+    market_page_presence_active: bool,
+) -> bool:
+    if data == "ping":
+        await refresh_market_page_presence(
+            user_id,
+            connection_id,
+            active=market_page_presence_active,
+        )
+        return market_page_presence_active
+
+    try:
+        message = json.loads(data)
+    except json.JSONDecodeError:
+        return market_page_presence_active
+
+    if not isinstance(message, dict) or message.get("type") != "presence:update":
+        return market_page_presence_active
+
+    payload = message.get("data")
+    if not isinstance(payload, dict):
+        payload = {}
+    path = payload.get("path") if isinstance(payload.get("path"), str) else None
+    visible = bool(payload.get("visible"))
+    await set_market_page_presence(
+        user_id,
+        connection_id,
+        path=path,
+        visible=visible,
+    )
+    return bool(visible and is_market_route(path))
 
 
 def verify_ws_token(token: str) -> Optional[tuple[int, Optional[str]]]:
@@ -137,6 +180,8 @@ async def websocket_endpoint(
                 await websocket.close(code=4003, reason="Session has been revoked")
                 return
     
+    connection_id = uuid.uuid4().hex
+    market_page_presence_active = False
     logging.info(f"✅ WebSocket authenticated: user_id={user_id}")
     await manager.connect(websocket)
     
@@ -148,7 +193,12 @@ async def websocket_endpoint(
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
-                # پیام ping/pong برای keep alive
+                market_page_presence_active = await _handle_client_message(
+                    data,
+                    user_id=user_id,
+                    connection_id=connection_id,
+                    market_page_presence_active=market_page_presence_active,
+                )
                 if data == "ping":
                     await websocket.send_text("pong")
             except asyncio.TimeoutError:
@@ -163,6 +213,7 @@ async def websocket_endpoint(
         logging.warning(f"WebSocket error for user {user_id}: {e}")
     finally:
         manager.disconnect(websocket)
+        await clear_market_page_presence(user_id, connection_id)
         redis_task.cancel()
 
 

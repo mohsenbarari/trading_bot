@@ -753,21 +753,22 @@ async def create_offer(
         "expires_at_ts": sse_expires_at_ts,
     }, reason="create_offer")
 
-    try:
-        from core.web_push import schedule_market_offer_web_push
+    if not republishing_active_offer:
+        try:
+            from core.web_push import schedule_market_offer_web_push
 
-        schedule_market_offer_web_push(new_offer.id)
-    except Exception as exc:
-        log_trading_event(
-            logger,
-            "market_offer_web_push_schedule_failed",
-            level="warning",
-            action="trading_side_effect",
-            result="failure",
-            side_effect="web_push_schedule",
-            offer_id=getattr(new_offer, "id", None),
-            error_class=type(exc).__name__,
-        )
+            schedule_market_offer_web_push(new_offer.id)
+        except Exception as exc:
+            log_trading_event(
+                logger,
+                "market_offer_web_push_schedule_failed",
+                level="warning",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="web_push_schedule",
+                offer_id=getattr(new_offer, "id", None),
+                error_class=type(exc).__name__,
+            )
     
     return offer_to_response(new_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
 
