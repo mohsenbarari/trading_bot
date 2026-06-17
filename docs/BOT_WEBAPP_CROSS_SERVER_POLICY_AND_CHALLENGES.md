@@ -80,6 +80,67 @@ These pieces are useful and should be preserved, but they are not complete enoug
   healthy. It should be retained as an acceleration path even if committed outbox draining becomes
   the reliability source.
 
+### Bot-Specific Findings From External Review
+
+The review in `tmp/bot.md` was cross-checked against the current code. The following points are
+accepted as accurate and should influence the Bot roadmap.
+
+#### Bot Strengths To Preserve
+
+- `run_bot.py` has a clear Bot startup path: DB init, SQLAlchemy event listener registration,
+  Redis FSM storage, auth/logging middleware, trade/admin routers, and the trade-suggestion event
+  listener.
+- The Persian text-offer UX is valuable. `bot/utils/offer_parser.py` normalizes Persian/Arabic
+  numerals, detects buy/sell intent, parses quantity/price/lot structure, resolves commodities and
+  aliases, and supports a practical market shorthand.
+- Bot text-offer handlers already include useful user-facing guards: market closed, unknown user,
+  watch-only role, account restrictions, active FSM state, price warnings, and active-offer caps.
+- The channel-button and private-suggestion flow is a Bot-specific product strength. The Redis-backed
+  suggestion records and listener that updates private suggestion messages should be preserved.
+- There is focused test coverage around Bot text-offer parsing, warning flow, trade callback guards,
+  remote-home forwarding, local pending state, and invalid lot suggestions.
+
+#### Confirmed Bot Gaps
+
+- Bot-created offers rely on the `Offer.home_server` model default of `foreign` instead of setting
+  `home_server=foreign` explicitly at the Bot write surface.
+- Bot local trade execution is still a separate money path from the API. It allocates trade numbers
+  with `MAX(trade_number)+1`, mutates offer remaining quantity/lot/status directly, creates
+  notifications, updates Telegram channel markup, and publishes realtime events inside the handler.
+  The API path has stronger advisory-lock, idempotency, customer-chain, conflict-handling, and
+  authoritative-forwarding behavior.
+- Bot offer creation commits the offer first, sends the Telegram channel message second, and stores
+  `channel_message_id` in a later commit. If Telegram publish or the second DB commit fails, DB,
+  channel, and sync state can temporarily diverge.
+- Bot cancel-all (`نشد`) performs Telegram HTTP calls, realtime publishes, and cache updates before
+  the final DB commit. If the commit fails, side effects can get ahead of durable DB state.
+- Telegram side effects are scattered across Bot handlers, API routers, and core helpers. A central
+  gateway is needed so "Iran must never call Telegram" is enforced once instead of by convention.
+
+#### Review Recommendations Accepted As Direction
+
+- Add an explicit source-surface concept, for example `telegram_bot`, `webapp`, and `internal_sync`,
+  and use it to choose offer authority and side effects.
+- Extract shared offer creation and trade execution commands/services so Bot handlers become thin
+  UX adapters and do not own market authority, trade-number allocation, customer-chain rules, or
+  offer mutation logic.
+- Move Telegram publication toward an idempotent gateway/outbox model. The exact schema is still a
+  design decision, but the needed behavior is clear: foreign-only execution, dedupe key, retry state,
+  durable status, and sync-back of publication result.
+- Treat WebApp sessions, Bot FSM state, and Telegram runtime state as surface-scoped auth/runtime
+  state unless a later decision explicitly promotes specific metadata into the product sync set.
+  User profile/account status remains product data and should sync.
+
+#### Review Points Not Adopted As Final Design Yet
+
+- Specific folder names and table names proposed in the review, such as `telegram_outbox` or
+  `mandatory_memberships`, are useful options, not final decisions.
+- Blocking WebApp offer creation on foreign is correct for public WebApp/user traffic. Internal
+  sync, health, and signed maintenance endpoints still need explicit allow rules.
+- Excluding all session tables from sync is a strong candidate direction, but it needs a separate
+  auth/session policy decision because existing session authority behavior is already cross-server
+  aware in places.
+
 ### Partially Implemented Or Ambiguous Policies
 
 - "WebApp only on Iran" is operationally intended, but the shared API still contains frontend
@@ -142,8 +203,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 1. Set `home_server=foreign` explicitly in Telegram bot offer creation instead of relying on the
    model default.
 2. Set WebApp/API-created offer home from the write surface/server, not from `owner_user.home_server`.
-3. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
-4. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
+3. Add a small source-surface enum/constant and use it in offer creation tests.
+4. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
+5. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
    has the bot service.
 
 #### Level 2 - Guardrails And Local Side Effects
@@ -155,17 +217,24 @@ This ordering is about implementation difficulty and blast radius, not business 
    creating a sync echo.
 4. Decide the narrow fate of `/api/chat` on foreign: block the router entirely, block at reverse proxy,
    or allow only explicitly non-messenger internal operations.
+5. Move Bot cancel-all side effects after the DB commit, or route it through a shared expire-offers
+   command that has explicit post-commit side effects.
 
 #### Level 3 - Sync Coverage And Delivery Reliability
 
-1. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
+1. Extract shared offer creation command/service and make both WebApp and Bot call it.
+2. Extract shared trade execution command/service and make Bot channel callbacks use the same
+   authoritative/idempotent path as the API.
+3. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
    and side effects.
-2. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
+4. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
    sync-aware helpers or explicit outbox logging.
-3. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
+5. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
    `change_log WHERE synced=false`, while keeping Redis/direct push as wake-up/acceleration.
-4. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
+6. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
    foreign publication result back to Iran.
+7. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
+   publication without duplicate channel posts.
 
 #### Level 4 - Core Distributed-System Decisions
 
