@@ -222,7 +222,7 @@ describe('MarketView.vue', () => {
       }
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
+      if (path === '/api/offers/my?since_hours=1&limit=3') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
           is_open: true,
@@ -468,7 +468,7 @@ describe('MarketView.vue', () => {
     await wrapper.find('.recent-offers-toggle').trigger('click')
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3&status_filter=expired')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/my?since_hours=1&limit=3')
     const recentItems = wrapper.findAll('.recent-offer-item')
     expect(recentItems).toHaveLength(2)
     expect(wrapper.text()).toContain('سکه')
@@ -625,7 +625,7 @@ describe('MarketView.vue', () => {
         })
       }
       if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') {
+      if (path === '/api/offers/my?since_hours=1&limit=3') {
         return recentOffersMode === 'error'
           ? errorResponse(503, { detail: 'بارگذاری لفظ‌های اخیر شکست خورد' })
           : responseOf(recentOffersFixture.slice(0, 1))
@@ -689,7 +689,7 @@ describe('MarketView.vue', () => {
         })
       }
       if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
-      if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') {
+      if (path === '/api/offers/my?since_hours=1&limit=3') {
         return responseOf([activeRecentOffer])
       }
       if (path === '/api/offers/' && options?.method === 'POST') {
