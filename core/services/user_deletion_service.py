@@ -13,7 +13,7 @@ from bot.utils.redis_helpers import mark_deleted_telegram_user
 from core.config import settings
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
-from core.utils import send_telegram_notification
+from core.utils import send_telegram_notification, utc_now_naive
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from models.invitation import Invitation
@@ -237,7 +237,7 @@ async def _delete_user_account_in_transaction(
     await db.execute(
         update(Offer)
         .where(Offer.user_id == user.id, Offer.status == OfferStatus.ACTIVE)
-        .values(status=OfferStatus.EXPIRED)
+        .values(status=OfferStatus.EXPIRED, expire_reason="user_deleted", expired_at=utc_now_naive())
     )
     invitation_result = await db.execute(
         select(Invitation).where(

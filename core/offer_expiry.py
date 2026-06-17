@@ -66,7 +66,8 @@ async def expire_stale_offers() -> int:
     if expiry_minutes <= 0:
         return 0
     
-    cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
+    now = utc_now_naive()
+    cutoff_time = now - timedelta(minutes=expiry_minutes)
     
     async with AsyncSessionLocal() as session:
         # Find active offers older than cutoff
@@ -92,7 +93,7 @@ async def expire_stale_offers() -> int:
         await session.execute(
             update(Offer)
             .where(Offer.id.in_(offer_ids), Offer.home_server == current_server())
-            .values(status=OfferStatus.EXPIRED, expire_reason="time_limit")
+            .values(status=OfferStatus.EXPIRED, expire_reason="time_limit", expired_at=now)
         )
         await session.commit()
         

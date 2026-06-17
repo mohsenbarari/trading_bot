@@ -165,6 +165,8 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result)
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
+        self.assertIsNotNone(offer.expired_at)
+        self.assertEqual(offer.expire_reason, "manual")
         db.commit.assert_awaited_once()
         publish_mock.assert_awaited_once_with("offer:expired", {"id": 7})
         set_count_mock.assert_awaited_once_with(5, 0)

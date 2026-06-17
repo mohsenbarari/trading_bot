@@ -328,6 +328,7 @@ async def _apply_market_closed_transition(
     for offer in active_offers:
         offer.status = OfferStatus.EXPIRED
         offer.expire_reason = "market_closed"
+        offer.expired_at = now
         expired_offer_ids.append(offer.id)
         if offer.channel_message_id:
             channel_message_ids.append(int(offer.channel_message_id))

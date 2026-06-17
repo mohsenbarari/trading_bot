@@ -64,6 +64,7 @@ interface RecentOfferSummary {
   notes: string | null
   status: 'active' | 'completed' | 'cancelled' | 'expired'
   created_at: string
+  expired_at?: string | null
 }
 
 interface MarketRuntimeState {

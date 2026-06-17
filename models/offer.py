@@ -58,6 +58,7 @@ class Offer(Base):
     exclude_from_competitive_price = Column(Boolean, nullable=False, default=False, server_default='false', index=True)
     price_warning_type = Column(String(64), nullable=True)
     expire_reason = Column(String(32), nullable=True)
+    expired_at = Column(DateTime(timezone=True), nullable=True, index=True)
     
     # تعداد باقیمانده (برای فروش خُرد)
     remaining_quantity = Column(Integer, nullable=True)
@@ -96,4 +97,3 @@ class Offer(Base):
     __mapper_args__ = {
         "version_id_col": version_id
     }
-

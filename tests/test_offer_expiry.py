@@ -128,6 +128,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         remove_channel_buttons.assert_any_await(303)
         update_stmt = session.execute.await_args_list[1].args[0]
         self.assertIn("expire_reason", str(update_stmt))
+        self.assertIn("expired_at", str(update_stmt))
         self.assertEqual(publish_event_sync.call_count, 3)
         publish_event_sync.assert_any_call("offer:expired", {"id": 1})
         publish_event_sync.assert_any_call("offer:expired", {"id": 2})

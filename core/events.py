@@ -296,6 +296,7 @@ def setup_offer_events():
                 "republished_offer_id": target.republished_offer_id,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+                "expired_at": target.expired_at.isoformat() if getattr(target, "expired_at", None) else None,
                 "idempotency_key": target.idempotency_key,
                 "archived": target.archived,
             }
@@ -330,6 +331,7 @@ def setup_offer_events():
                 "republished_offer_id": target.republished_offer_id,
                 "created_at": target.created_at.isoformat() if target.created_at else None,
                 "updated_at": target.updated_at.isoformat() if target.updated_at else None,
+                "expired_at": target.expired_at.isoformat() if getattr(target, "expired_at", None) else None,
                 "idempotency_key": target.idempotency_key,
                 "archived": target.archived
             }
