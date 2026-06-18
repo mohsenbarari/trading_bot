@@ -250,9 +250,8 @@ This ordering is about implementation difficulty and blast radius, not business 
 3. Add a regression test proving the same user can create a Bot offer with `home_server=foreign`
    and then create a WebApp offer with `home_server=iran`, regardless of `user.home_server`.
 4. Implement the confirmed source-surface enum/constant and use it in offer creation tests.
-5. Add the user-switching scenario matrix as executable or at least reviewable acceptance cases:
-   Bot create -> WebApp view/cancel, WebApp create -> Telegram publish, Bot trade -> WebApp update,
-   WebApp trade -> Telegram/channel update, and simultaneous Bot/WebApp activity for the same user.
+5. Add the confirmed offer switching acceptance matrix below as executable or at least reviewable
+   test cases.
 6. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
 7. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
    has the bot service.
@@ -323,6 +322,93 @@ This ordering is about implementation difficulty and blast radius, not business 
 5. Define rollback criteria and rollback mechanics for staging and later production promotion.
 6. Define final production acceptance gates, but do not run them or promote this work until the owner
    explicitly requests production action.
+
+## Confirmed Offer Switching Acceptance Matrix
+
+These scenarios are accepted as the first official test-writing target for Bot/WebApp coexistence.
+They intentionally avoid using persistent `User.home_server` as offer authority. In this section,
+`acting_surface` is the product surface where the user action starts, and `request_home_server` is
+the server handling that action. `Offer.home_server` remains the authoritative offer server.
+
+### Scenario 1 - Bot-Authored Offer
+
+Initial action:
+
+- `acting_surface=telegram_bot`
+- `request_home_server=foreign`
+- `offer_home_server=foreign`
+- the offer is created on the foreign server and appears on Telegram/Bot;
+- the offer syncs to Iran and appears on the WebApp as close to real time as possible.
+
+Owner expiry:
+
+- if the owner expires the offer from Bot, foreign applies the mutation, updates Telegram/Bot state,
+  and syncs the result to Iran;
+- if the owner expires the offer from WebApp, Iran forwards the command to foreign; Iran must not
+  perform an independent local-only expiry for a foreign-home offer;
+- after either path, both Bot/Telegram and WebApp show the offer as expired as close to real time as
+  possible.
+
+Requests/trades from other users:
+
+- if another user requests/trades from Bot, foreign is already the authoritative server and applies
+  the command there;
+- if another user requests/trades from WebApp, Iran forwards the command to foreign;
+- remaining quantity, lot state, offer status, trade rows, notifications, WebApp realtime state, and
+  Telegram/Bot state must converge from the foreign authoritative result.
+
+Forbidden outcomes:
+
+- Iran must not call Telegram directly;
+- Iran must not permanently diverge by expiring or trading a foreign-home offer locally only;
+- sync replay must not create duplicate trades, duplicate notifications, or duplicate Telegram posts.
+
+### Scenario 2 - WebApp-Authored Offer
+
+Initial action:
+
+- `acting_surface=webapp`
+- `request_home_server=iran`
+- `offer_home_server=iran`
+- the offer is created on the Iran server and appears on the WebApp;
+- the offer syncs to foreign and only the foreign server publishes it to Telegram/Bot;
+- the foreign Telegram publication result, including `channel_message_id`, syncs back to Iran.
+
+Owner expiry:
+
+- if the owner expires the offer from WebApp, Iran applies the mutation and syncs the result to
+  foreign; foreign updates Telegram/Bot state from that authoritative result;
+- if the owner expires the offer from Bot, foreign forwards the command to Iran; foreign must not
+  perform an independent local-only expiry for an Iran-home offer;
+- after either path, both WebApp and Bot/Telegram show the offer as expired as close to real time as
+  possible.
+
+Requests/trades from other users:
+
+- if another user requests/trades from WebApp, Iran is already the authoritative server and applies
+  the command there;
+- if another user requests/trades from Bot, foreign forwards the command to Iran;
+- remaining quantity, lot state, offer status, trade rows, notifications, WebApp realtime state, and
+  Telegram/Bot state must converge from the Iran authoritative result.
+
+Forbidden outcomes:
+
+- Iran must not call Telegram directly;
+- foreign must not permanently diverge by expiring or trading an Iran-home offer locally only;
+- sync replay must not create duplicate trades, duplicate notifications, or duplicate Telegram posts.
+
+### Matrix Expansion Cases For Tests
+
+- the same owner creates a Bot offer and a WebApp offer minutes apart; each offer keeps the home
+  server of its creation surface regardless of `User.home_server`;
+- the owner sends expiry from Bot and WebApp at nearly the same time; the result is idempotent and
+  both surfaces converge;
+- two different users request/trade the same offer at nearly the same time from different surfaces;
+  only the offer home server decides the accepted order and remaining quantity;
+- partial fill and full fill update both surfaces consistently;
+- direct push plus worker replay of the same sync event does not duplicate side effects;
+- peer outage behavior is still a separate Level 4 decision: either reject, queue/pending, or allow
+  local creation with explicit degraded state, but the final choice must be tested.
 
 ## Main Architecture Tensions
 
