@@ -67,6 +67,11 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     local trade or offer mutation. The authoritative service owns validation, trade-number
     allocation, offer quantity/status mutation, idempotency, sync/outbox recording, and
     post-commit side effects.
+24. Every offer expire/cancel path must route through the shared `expire_offers` command/service:
+    Bot cancel-all, API cancel-all, single-offer expiry, auto-expiry, market-close expiry, and
+    remote-forwarded expiry. If the current server is not the `offer_home_server`, it must forward
+    the command and must not perform local offer mutation. The service must mutate authoritative DB
+    state first, commit, then run explicit post-commit side effects.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -196,8 +201,10 @@ accepted as accurate and should influence the Bot roadmap.
   channel, and sync state can temporarily diverge.
 - Bot cancel-all (`نشد`) performs Telegram HTTP calls, realtime publishes, and cache updates before
   the final DB commit. If the commit fails, side effects can get ahead of durable DB state.
-- The target fix for Bot cancel-all is not a local Bot-only patch. It is a shared `expire_offers`
-  command/service with DB-first mutation, commit, and explicit post-commit side effects.
+- The target fix for Bot cancel-all is not a local Bot-only patch. It is the first rollout target
+  for the confirmed shared `expire_offers` command/service, which must eventually cover every
+  expire/cancel path with DB-first mutation, commit, authority forwarding, and explicit
+  post-commit side effects.
 - Telegram side effects are scattered across Bot handlers, API routers, and core helpers. A central
   gateway is needed so "Iran must never call Telegram" is enforced once instead of by convention.
 
@@ -209,6 +216,10 @@ accepted as accurate and should influence the Bot roadmap.
 - Use the confirmed shared offer creation and shared trade execution command/services for both
   WebApp and Bot writes. Bot handlers become thin UX adapters and do not own market authority,
   trade-number allocation, customer-chain rules, or offer mutation logic.
+- Use the confirmed shared `expire_offers` command/service for all expire/cancel paths: Bot
+  cancel-all, API cancel-all, single-offer expiry, auto-expiry, market-close expiry, and
+  remote-forwarded expiry. Non-authoritative servers forward to `offer_home_server` and do not
+  mutate offers locally.
 - Move Telegram publication toward an idempotent gateway/outbox model. The exact schema is still a
   design decision, but the needed behavior is clear: foreign-only execution, dedupe key, retry state,
   durable status, and sync-back of publication result.
@@ -343,9 +354,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 4. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
    foreign at the API layer, with reverse-proxy blocking as defense in depth. Any internal
    foreign-side chat exception must be explicitly allowlisted by path and purpose.
-5. Build the confirmed shared `expire_offers` command/service and route Bot cancel-all through it.
-   The service must mutate authoritative DB state first, commit, then run explicit post-commit side
-   effects such as Telegram gateway updates, WebApp realtime events, cache updates, and notifications.
+5. Build the confirmed shared `expire_offers` command/service foundation and route Bot cancel-all
+   through it first. The service must mutate authoritative DB state first, commit, then run explicit
+   post-commit side effects such as Telegram gateway updates, WebApp realtime events, cache updates,
+   and notifications.
 6. Implement the confirmed runtime/session state policy. WebApp sessions are Iran-local, Bot FSM is
    foreign-local, and login/recovery requests do not sync. `telegram_id`, user profile, account
    status, role, and limits sync as user/account product data.
@@ -366,9 +378,10 @@ This ordering is about implementation difficulty and blast radius, not business 
    and Bot channel callbacks use the same authoritative/idempotent path. If the current server is
    not the offer home server, the command must be forwarded to `offer_home_server` and no local
    trade or offer mutation may run.
-3. Extend the shared `expire_offers` command/service to cover API cancel-all, single-offer expiry,
-   auto-expiry, market-close expiry, and remote-forwarded expiry. It must enforce offer-home
-   authority and forward commands to `offer_home_server` when the local server is not authoritative.
+3. Complete the confirmed shared `expire_offers` command/service coverage for API cancel-all,
+   single-offer expiry, auto-expiry, market-close expiry, and remote-forwarded expiry. It must
+   enforce offer-home authority and forward commands to `offer_home_server` when the local server
+   is not authoritative, without local offer mutation.
 4. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
    and side effects.
 5. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
