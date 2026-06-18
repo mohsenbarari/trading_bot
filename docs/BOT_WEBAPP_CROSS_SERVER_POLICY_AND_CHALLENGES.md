@@ -53,9 +53,11 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     to Iran, Bot FSM state stays local to foreign, and login/recovery request rows should not sync.
     `telegram_id`, user profile, account status, role, and limits are user/account product data and
     should sync.
-21. Every `user.home_server` read and write must be audited and classified as session/auth
-    authority, active login surface/runtime state, legacy compatibility, or an offer-authority bug.
-    The offer-authority category is not allowed as final behavior and must be removed.
+21. Every `user.home_server` read and write must be audited and classified as transitional
+    session/auth compatibility, legacy/account-origin compatibility, or a bug. The offer-authority
+    category is not allowed as final behavior and must be removed. Active login surface/runtime
+    state must not remain on `user.home_server`; it must move to explicit surface-scoped session
+    state.
 22. Offer creation from both WebApp and Telegram bot must route through one shared
     command/service. API routers and Bot handlers are only surface adapters. The shared service
     must receive `source_surface`, `actor_user`, `request_home_server`, and `offer_home_server`;
@@ -127,6 +129,11 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     publication during a short outage is allowed only after checking the latest authoritative state.
     Medium/long outage recovery still follows the confirmed rule: do not active-publish old
     local-only offers after catch-up; expire them on their home server and sync final state.
+36. `user.home_server` must not represent the user's currently active surface. WebApp login,
+    Telegram bot activity, logout, session reset, and recovery flows must not flip a persistent user
+    field between Iran and foreign. Runtime/session authority must be explicit and surface-scoped:
+    `webapp` sessions live on Iran, Telegram Bot/FSM runtime lives on foreign, and operations such
+    as reset/logout/check must target `webapp`, `telegram_bot`, or `all_surfaces` deliberately.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -284,9 +291,10 @@ accepted as accurate and should influence the Bot roadmap.
 - Treat WebApp sessions, Bot FSM state, Telegram runtime state, login requests, and recovery
   requests as surface-scoped auth/runtime state. Confirmed synced user/account data includes
   `telegram_id`, profile fields, account status, role, and limits.
-- Treat `user.home_server` as an overloaded legacy field until redesigned. Every read/write must be
-  classified as session/auth authority, active login surface/runtime state, legacy compatibility, or
-  an offer-authority bug. The offer-authority category must be removed from final behavior.
+- Treat `user.home_server` as an overloaded legacy/account-origin compatibility field until it is
+  narrowed or removed. It must not represent the currently active surface, and login/auth flows must
+  not flip it between Iran and foreign. Every read/write must be classified as transitional
+  session/auth compatibility, legacy/account-origin compatibility, or a bug.
 
 #### Review Points Not Adopted As Final Design Yet
 
@@ -335,9 +343,10 @@ accepted as accurate and should influence the Bot roadmap.
   and tests so they do not enter general sync by accident.
 - `user.home_server` is overloaded. Auth code writes it from the login/request server, session
   authority reads it as the user's session home, and offer creation currently reads it as offer home.
-  These meanings conflict once a user can use WebApp and Bot at the same time. The audit
-  classification is now confirmed; only session/auth authority, active login surface/runtime state,
-  and legacy compatibility may remain after offer-authority uses are removed.
+  These meanings conflict once a user can use WebApp and Bot at the same time. The confirmed target
+  is stricter than the initial audit: `user.home_server` must not remain as active session surface.
+  Transitional session/auth reads may exist only while migrating to explicit surface-scoped session
+  state; offer-authority uses and login-time flips must be removed.
 - ID collision handling is only partial. The receiver repairs sequences after applying remote
   rows and has natural-key fallbacks for some tables, but independent two-way inserts can still
   create the same integer ID before either side receives the other row. The confirmed target is a
@@ -374,6 +383,10 @@ accepted as accurate and should influence the Bot roadmap.
   transactions are not yet consistently enforced around authoritative multi-row commands, and the
   required per-table owner, allowed write surfaces, merge/version rule, and rejection/forwarding
   behavior are not encoded yet.
+- The confirmed surface-scoped session/auth model is not implemented yet. Current auth/session code
+  still has paths that treat `user.home_server` as session home or mutate it from the login/request
+  server. These must move to explicit `webapp`, `telegram_bot`, or `all_surfaces` session commands
+  and runtime state.
 - The confirmed hybrid identity strategy is not implemented. Synced tables do not yet have
   UUID/public IDs as the canonical cross-server identity, and synced-table integer sequences are not
   yet server-partitioned as a migration guard.
@@ -438,9 +451,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 7. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
    During transition, allow only a narrowly guarded `is_system=true AND is_mandatory=true`
    compatibility path if needed; do not keep wholesale `chats`/`chat_members` sync.
-8. Implement the confirmed `user.home_server` audit. Classify each read/write as session/auth
-   authority, active login surface/runtime state, legacy compatibility, or offer-authority bug.
-   Offer-authority uses must be removed in this stage.
+8. Implement the confirmed `user.home_server` audit. Classify each read/write as transitional
+   session/auth compatibility, legacy/account-origin compatibility, or a bug. Offer-authority uses,
+   active-surface uses, and login-time flips must be removed in this stage or explicitly isolated as
+   short-lived migration compatibility.
 
 #### Level 3 - Sync Coverage And Delivery Reliability
 
@@ -507,10 +521,11 @@ This ordering is about implementation difficulty and blast radius, not business 
    idempotency behavior. Authoritative commands must run in atomic DB transactions on the authority
    server with row/advisory locks where needed; non-authoritative servers must forward commands or
    apply replicated committed results, not perform competing local mutations.
-3. Redesign session/auth semantics for simultaneous WebApp and bot activity without letting
-   `user.home_server` control offer authority. Strong candidate direction: replace or narrow
-   `user.home_server` into explicit session-authority/surface-scoped fields so a WebApp login cannot
-   flip Bot offer authority and a Bot login cannot flip WebApp offer authority.
+3. Implement the confirmed surface-scoped session/auth model for simultaneous WebApp and bot
+   activity. `user.home_server` must be narrowed to legacy/account-origin compatibility or removed
+   from runtime authority. WebApp login, Bot activity, logout, reset, and recovery must not flip a
+   persistent user field between Iran and foreign; each operation must target `webapp`,
+   `telegram_bot`, or `all_surfaces` explicitly.
 4. Define migration and rollout for existing data: current integer IDs, PostgreSQL sequences, old
    offers, existing `channel_message_id` values, user sessions, Telegram bindings, and any partially
    synced rows.
@@ -837,18 +852,27 @@ Confirmed policy:
 - Bot FSM state stays local to foreign.
 - `user_sessions`, `session_login_requests`, and recovery request rows should not be part of general
   cross-server sync.
-- Existing signed session-authority checks may still query the authoritative server when needed.
+- Existing signed session-authority checks may still query the relevant surface while migrating, but
+  the target operation must be explicit rather than inferred from `user.home_server`.
+- `user.home_server` is legacy/account-origin compatibility only. It must not mean "where the user
+  is currently active" and must not be updated by WebApp login or Bot activity.
 - `telegram_id`, user profile fields, account status, role, and limits are user/account data and
   should sync.
 
 Required direction:
 
 - Separate "surface session" from "data authority".
-- Do not let a WebApp login flip the meaning of bot offer authority, or vice versa.
+- Do not let WebApp login, Bot activity, logout, reset, or recovery flip a persistent user field
+  between Iran and foreign.
+- Make session operations target `webapp`, `telegram_bot`, or `all_surfaces` explicitly. For
+  example, WebApp logout closes only the Iran WebApp session unless the command explicitly asks for
+  all surfaces; Bot state remains foreign-local unless explicitly revoked.
+- Account/product locks such as suspend, account status, role, and limits still sync because they
+  are product data and must affect both surfaces.
 - Add tests/registry entries proving runtime/auth tables are excluded unless explicitly promoted
   later.
-- Keep any remaining `user.home_server` use inside the audited session/auth, runtime-surface, or
-  legacy-compatibility categories; do not use it for offer authority.
+- Keep any remaining `user.home_server` use inside audited transitional compatibility only; do not
+  use it for offer authority or active runtime/session authority.
 
 ### 12. Outage behavior must follow offer authority
 
@@ -931,5 +955,6 @@ without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. What is the exact user/session authority model for simultaneous WebApp and Telegram bot activity
-   after `user.home_server` stops controlling offer authority?
+1. What is the migration and rollout policy for existing production/staging data: integer IDs,
+   sequences, old offers, `channel_message_id`, existing sessions, Telegram bindings, and partially
+   synced rows?
