@@ -368,6 +368,8 @@ Implementation notes:
 
 ## Stage TH5 - Realtime And Edge Cases
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Validate realtime behavior:
 
 - Full trade should remove the active offer and make it available in history.
@@ -399,6 +401,24 @@ Exit criteria:
 - No regressions in active offer removal, updated lots, or expiry archive.
 - Both surfaces converge to the same history tag after sync, without making the
   wrong server perform the side effect.
+
+Implementation notes:
+
+- `useOffers` now removes active-feed cards immediately when an
+  `offer:updated` realtime payload becomes terminal (`completed`, `expired`,
+  `cancelled`) or has a valid non-positive `remaining_quantity`, while partial
+  active updates still patch remaining quantity and lots in place.
+- `MarketView` now queues one reset refresh when terminal history events arrive
+  during an in-flight market-history load, so completed/expired sync races do
+  not leave the two-day history stale until another event arrives.
+- `/api/sync/receive` now publishes local realtime terminal-offer events after
+  synced offer terminal updates are committed. This restores WebApp convergence
+  for cross-server Bot/foreign-originated terminal offers without making Iran
+  perform Telegram side effects.
+- Focused coverage verifies active-feed removal on completed updates, queued
+  history refresh during an in-flight load, and synced terminal-offer realtime
+  publication for completed and expired offers. Existing trade/expiry guards and
+  Telegram-side TH4B coverage remained green.
 
 ## Stage TH6 - Sync And Read-Model Validation
 

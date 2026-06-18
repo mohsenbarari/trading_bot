@@ -338,6 +338,75 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   }, 15000)
 
+  it('queues terminal market history refreshes that arrive during an in-flight load', async () => {
+    let resolveInitialHistory!: () => void
+    let marketHistoryCalls = 0
+    marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
+        return responseOf(JSON.parse(String(options.body)))
+      }
+      if (path === '/api/notifications/preferences') return responseOf({ market_offer_push_enabled: true })
+      if (path === '/api/commodities/') return responseOf(commoditiesFixture)
+      if (path === '/api/trading-settings/') return responseOf(settingsFixture)
+      if (path === '/api/trading-settings/market-state') {
+        return responseOf({
+          is_open: true,
+          active_web_notice_visible: false,
+          offers_since_last_open: 0,
+          last_transition_at: null,
+          next_transition_at: null,
+        })
+      }
+      if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
+      if (path === '/api/offers/market-history?skip=0&limit=25') {
+        marketHistoryCalls += 1
+        if (marketHistoryCalls === 1) {
+          return new Promise((resolve) => {
+            resolveInitialHistory = () => resolve(responseOf([]))
+          })
+        }
+        return responseOf([
+          {
+            id: 203,
+            status: 'completed',
+            history_state: 'traded',
+            is_read_only: true,
+            offer_type: 'sell',
+            commodity_name: 'سکه',
+            quantity: 4,
+            remaining_quantity: 0,
+            traded_quantity: 4,
+            price: 5000,
+            viewer_effective_price: 5000,
+            is_wholesale: true,
+            lot_sizes: null,
+            notes: null,
+            created_at: 'امروز',
+          },
+        ])
+      }
+      return responseOf(null)
+    })
+
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    expect(marketHistoryCalls).toBe(1)
+
+    emitWs('offer:updated', { id: 203, status: 'completed', remaining_quantity: 0 })
+    await nextTick()
+    expect(marketHistoryCalls).toBe(1)
+
+    resolveInitialHistory()
+    await flushPromises()
+    await flushPromises()
+
+    expect(marketHistoryCalls).toBe(2)
+    expect(wrapper.find('.offers-statuses').text()).toBe('active,completed')
+
+    wrapper.unmount()
+  }, 15000)
+
   it('appends read-only market history offers for non-customer users only', async () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {

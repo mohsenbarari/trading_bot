@@ -30,6 +30,20 @@ function handleOfferUpdated(data: any) {
     console.log('RT: Offer Updated', data);
     const index = offers.value.findIndex(o => o.id === data.id);
     if (index !== -1) {
+        const status = String(data?.status || '').toLowerCase();
+        const hasRemainingQuantity = data?.remaining_quantity !== undefined
+            && data?.remaining_quantity !== null
+            && data?.remaining_quantity !== '';
+        const remainingQuantity = Number(data?.remaining_quantity);
+        if (
+            status === 'completed'
+            || status === 'expired'
+            || status === 'cancelled'
+            || (hasRemainingQuantity && Number.isFinite(remainingQuantity) && remainingQuantity <= 0)
+        ) {
+            offers.value = offers.value.filter(o => o.id !== data.id);
+            return;
+        }
         // Update fields
         offers.value[index] = { ...offers.value[index], ...data };
     }

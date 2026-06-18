@@ -122,8 +122,11 @@ describe('useOffers', () => {
       viewer_effective_price: 90,
     })
 
-    emitOfferEvent('offer:expired', { id: 8 })
+    emitOfferEvent('offer:updated', { id: 8, status: 'completed', remaining_quantity: 0 })
     expect(offersApi.offers.value.map((offer: { id: number }) => offer.id)).toEqual([7])
+
+    emitOfferEvent('offer:expired', { id: 7 })
+    expect(offersApi.offers.value.map((offer: { id: number }) => offer.id)).toEqual([])
 
     offersApi.stopPolling()
     expect(globalThis.clearInterval).toHaveBeenCalledTimes(1)

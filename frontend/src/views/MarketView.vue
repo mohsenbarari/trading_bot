@@ -101,6 +101,7 @@ const currentUserIsAccountant = ref(initialCurrentUserSummary?.is_accountant ===
 const currentUserLoaded = ref(Boolean(initialCurrentUserSummary))
 const marketHistoryOffers = ref<any[]>([])
 const marketHistoryOffersLoading = ref(false)
+const marketHistoryOffersRefreshQueued = ref(false)
 const marketHistoryOffersSkip = ref(0)
 const hasMoreMarketHistoryOffers = ref(false)
 const marketRuntime = ref<MarketRuntimeState>({
@@ -300,11 +301,19 @@ async function fetchMarketHistoryOffers(options: { reset?: boolean; silent?: boo
     clearMarketHistoryOffers()
     return
   }
-  if (marketHistoryOffersLoading.value) return
+  if (marketHistoryOffersLoading.value) {
+    if (options.reset !== false) {
+      marketHistoryOffersRefreshQueued.value = true
+    }
+    return
+  }
 
   const reset = options.reset !== false
   const skip = reset ? 0 : marketHistoryOffersSkip.value
   marketHistoryOffersLoading.value = true
+  if (reset) {
+    marketHistoryOffersRefreshQueued.value = false
+  }
   try {
     const response = await apiFetch(`/api/offers/market-history?skip=${skip}&limit=${MARKET_HISTORY_OFFERS_PAGE_SIZE}`)
     if (!response.ok) {
@@ -333,6 +342,10 @@ async function fetchMarketHistoryOffers(options: { reset?: boolean; silent?: boo
     console.error('Failed to load market history offers', e)
   } finally {
     marketHistoryOffersLoading.value = false
+    if (marketHistoryOffersRefreshQueued.value && canViewExpiredMarketOffers.value) {
+      marketHistoryOffersRefreshQueued.value = false
+      void fetchMarketHistoryOffers({ reset: true, silent: true })
+    }
   }
 }
 

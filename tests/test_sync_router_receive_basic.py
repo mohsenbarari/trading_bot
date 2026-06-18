@@ -32,6 +32,26 @@ class FakeDB:
         return _Ctx()
 
 
+class FakeTerminalOfferRows:
+    def __init__(self, offers):
+        self._offers = offers
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: list(self._offers))
+
+
+class TerminalOfferRealtimeDB(FakeDB):
+    def __init__(self, offers):
+        super().__init__()
+        self._offers = offers
+
+    async def execute(self, stmt, *args, **kwargs):
+        self.execute_calls.append((stmt, args, kwargs))
+        if "setval(" in str(stmt):
+            return SimpleNamespace()
+        return FakeTerminalOfferRows(self._offers)
+
+
 class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
     async def test_fake_db_helper_paths(self):
         db = FakeDB()
@@ -176,6 +196,39 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen_calls[1][2]["status"], "deleted")
         self.assertEqual(seen_calls[1][2]["management_name"], "مشتری ویژه")
         rollout_mock.assert_awaited_once_with(db)
+
+    async def test_receive_sync_data_publishes_local_realtime_for_synced_terminal_offers(self):
+        completed_offer = SimpleNamespace(id=41, status="completed", remaining_quantity=0, lot_sizes=None)
+        expired_offer = SimpleNamespace(id=42, status="expired", remaining_quantity=6, lot_sizes=[6])
+        db = TerminalOfferRealtimeDB([completed_offer, expired_offer])
+        items = [
+            {"table": "offers", "operation": "UPDATE", "id": 41, "data": {"status": "completed"}},
+            {"table": "offers", "operation": "UPDATE", "id": 42, "data": {"status": "expired", "expire_reason": "time_limit"}},
+        ]
+
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+            terminal_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()), patch(
+            "api.routers.realtime.publish_event", new=AsyncMock()
+        ) as publish_mock:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 2})
+        self.assertEqual(publish_mock.await_count, 2)
+        publish_mock.assert_any_await(
+            "offer:updated",
+            {
+                "id": 41,
+                "status": "completed",
+                "remaining_quantity": 0,
+                "lot_sizes": None,
+            },
+        )
+        publish_mock.assert_any_await("offer:expired", {"id": 42})
 
 
 if __name__ == "__main__":

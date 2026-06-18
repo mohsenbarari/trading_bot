@@ -97,6 +97,46 @@ def _summarize_payload(data) -> dict[str, object]:
         "data_key_count": len(data),
     }
 
+
+def _enum_value(value) -> str:
+    return str(getattr(value, "value", value) or "").lower()
+
+
+async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal_offer_ids: list[int] | tuple[int, ...]) -> None:
+    unique_offer_ids = sorted({int(offer_id) for offer_id in terminal_offer_ids if offer_id})
+    if not unique_offer_ids:
+        return
+
+    from api.routers.realtime import publish_event
+    from models.offer import Offer, OfferStatus
+
+    result = await db.execute(select(Offer).where(Offer.id.in_(unique_offer_ids)))
+    terminal_offer_rows = result.scalars().all()
+    for offer in terminal_offer_rows:
+        status_value = _enum_value(getattr(offer, "status", None))
+        try:
+            if status_value == OfferStatus.EXPIRED.value:
+                await publish_event("offer:expired", {"id": offer.id})
+            elif status_value == OfferStatus.COMPLETED.value:
+                await publish_event(
+                    "offer:updated",
+                    {
+                        "id": offer.id,
+                        "status": status_value,
+                        "remaining_quantity": getattr(offer, "remaining_quantity", None),
+                        "lot_sizes": getattr(offer, "lot_sizes", None),
+                    },
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to publish synced terminal offer realtime event",
+                extra={
+                    "event": "sync.terminal_offer_realtime_publish_failed",
+                    "offer_id": getattr(offer, "id", None),
+                    **_summarize_exception(exc),
+                },
+            )
+
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
@@ -874,6 +914,18 @@ async def receive_sync_data(
                     "Failed to invalidate admin market current cache",
                     extra={
                         "event": "sync.admin_market_current_cache_invalidation_failed",
+                        **_summarize_exception(e),
+                    },
+                )
+
+        if terminal_offers:
+            try:
+                await _publish_terminal_offer_realtime_after_sync(db, terminal_offers)
+            except Exception as e:
+                logger.error(
+                    "Error publishing synced terminal offer realtime events",
+                    extra={
+                        "event": "sync.terminal_offer_realtime_publish_batch_failed",
                         **_summarize_exception(e),
                     },
                 )
