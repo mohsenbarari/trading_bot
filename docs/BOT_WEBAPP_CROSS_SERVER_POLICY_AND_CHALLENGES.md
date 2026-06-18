@@ -72,6 +72,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     remote-forwarded expiry. If the current server is not the `offer_home_server`, it must forward
     the command and must not perform local offer mutation. The service must mutate authoritative DB
     state first, commit, then run explicit post-commit side effects.
+25. A formal sync registry is required before broad sync changes. Every model/table must have an
+    explicit entry that declares `sync` or `no-sync`, write surfaces, authority, conflict rule, and
+    side effects. Tests/CI must fail when a model/table or migration introduces a table without a
+    registry entry.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -287,8 +291,9 @@ accepted as accurate and should influence the Bot roadmap.
 
 ### Not Implemented Or Not Yet Encoded
 
-- A single registry that declares every table's sync policy, write surfaces, authority server,
-  conflict rule, and side effects does not exist.
+- The confirmed sync registry does not exist yet. It must declare every table's `sync` or
+  `no-sync` policy, write surfaces, authority server, conflict rule, and side effects, and it must
+  fail tests/CI when a table is missing from the registry.
 - A durable committed outbox drain is not implemented. `change_log` exists, but the worker consumes
   Redis queues; replaying committed `change_log WHERE synced=false` is a manual/resync path rather
   than the normal delivery loop.
@@ -382,8 +387,9 @@ This ordering is about implementation difficulty and blast radius, not business 
    single-offer expiry, auto-expiry, market-close expiry, and remote-forwarded expiry. It must
    enforce offer-home authority and forward commands to `offer_home_server` when the local server
    is not authoritative, without local offer mutation.
-4. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
-   and side effects.
+4. Implement the confirmed sync registry for every model/table with `sync` or `no-sync`, write
+   surfaces, authority, conflict rule, and side effects. Add a test/CI gate that fails when a new
+   model/table or migration introduces a table without a registry entry.
 5. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
    sync-aware helpers or explicit outbox logging.
 6. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
@@ -705,9 +711,10 @@ Required direction:
 - Keep any remaining `user.home_server` use inside the audited session/auth, runtime-surface, or
   legacy-compatibility categories; do not use it for offer authority.
 
-## Proposed Sync Registry
+## Required Sync Registry
 
-Before changing code, create a registry for every model/table:
+Before broad sync changes, create a registry for every model/table. This registry is now a
+confirmed requirement, not an optional design note:
 
 | Table class | Sync policy | Write surfaces | Authority | Conflict rule | Realtime side effects |
 | --- | --- | --- | --- | --- | --- |
@@ -722,7 +729,8 @@ Before changing code, create a registry for every model/table:
 | `session_login_requests` | no sync | WebApp/auth local runtime | local surface | n/a | local login flow |
 | `single_session_recovery_requests` | no sync | WebApp/auth local runtime | local surface | n/a | local recovery flow |
 
-The implementation should fail CI when a new model or migration introduces a table without a registry entry.
+The implementation must fail tests/CI when a new model/table or migration introduces a table
+without a registry entry.
 
 ## Immediate Questions For Next Round
 
