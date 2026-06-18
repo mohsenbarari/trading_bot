@@ -5,6 +5,8 @@ Date: 2026-06-17
 This document captures the target operating policy for the Telegram bot, Iran WebApp, and
 cross-server sync. It is the working basis for the next design Q&A rounds.
 
+Last updated: 2026-06-18
+
 ## Non-Negotiable Policy
 
 1. Iran server never connects to Telegram.
@@ -158,6 +160,28 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     phrase `production deploy`. Mentioning `production deploy` while defining this policy or before
     the gates pass is not deployment approval; it is only the recorded approval wording for the
     future.
+40. Sync receive must fail closed for unknown, unregistered, or policy-forbidden tables. A peer must
+    never return success for a sync item that it did not apply or explicitly reject as an error. The
+    source server must not mark a `change_log` row synced when the peer skipped the item because the
+    table was unknown, unsupported, or forbidden by the sync registry.
+41. Sync/outbox recording for tables whose policy is `sync` must be mandatory, not best-effort.
+    ORM listener errors, JSON/payload construction errors, outbox insertion failures, and explicit
+    sync-aware helper failures must either fail the authoritative business transaction or leave a
+    clearly operator-visible blocked state. A synced-table business write must not silently commit
+    without a durable sync/outbox record.
+42. Cross-server internal transport must be production-secure. HMAC is required but not sufficient
+    by itself. Production sync, seed, resync, command forwarding, and maintenance calls must use a
+    verified private/TLS path or an explicitly approved secure tunnel, must not use `verify=False`
+    by default, and must have replay/idempotency defenses beyond only a timestamp window where a
+    replay can trigger side effects.
+43. Synced payloads must have a sensitive-field policy. Fields such as mobile numbers, addresses,
+    Telegram IDs, password hashes, tokens, and operational secrets must be classified as `sync`,
+    `no-sync`, `hash-only`, or `encrypted/derived` before broad replication. Logs and observability
+    must never expose sensitive raw payloads.
+44. Runtime entrypoints must enforce the deployment surface, not just compose files. `run_bot.py`
+    must fail closed unless it is running on the foreign bot surface. The API process must fail
+    closed for foreign WebApp/static/chat user surfaces even if frontend files, bot code, or
+    credentials accidentally exist in the image.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -209,6 +233,18 @@ This section is mandatory for all work derived from this document.
 - `api/routers/offers.py` sets Web/API-created offer `home_server` from `owner_user.home_server` when present.
 - `bot/handlers/trade_create.py` creates bot offers directly and currently relies on the model default for `home_server`.
 - `api/routers/trades.py` forwards trade execution to the remote offer home server when needed.
+- `/api/sync/receive` currently logs unknown tables and continues processing; existing tests
+  currently expect a batch containing only an unknown table to return `success`.
+- `core/events.py` and many individual event listeners catch and log sync/logging failures instead
+  of making synced-table writes fail closed.
+- `core/sync_push.py` creates the direct-push HTTP client with `verify=False`; manual seed/resync
+  helpers also contain unverified HTTP client paths, and trade forwarding defaults TLS verification
+  to off unless configured otherwise.
+- The current user sync payload includes sensitive fields such as mobile number, address,
+  `telegram_id`, and `admin_password_hash`.
+- Current SQLAlchemy model inventory includes additional tables that are not in the starter
+  registry table yet, including `push_subscriptions`, `user_notification_preferences`,
+  `sync_blocks`, and `single_session_recovery_admin_targets`.
 
 ## Implementation Status Snapshot
 
@@ -237,6 +273,9 @@ be kept and regression-tested, but they do not need redesign right now.
   the trade command is forwarded to the offer home server instead of being applied independently.
 - Direct messenger tables `messages` and `conversations` are not in the sync model map today.
   This matches the Iran-only messenger policy for those two tables.
+- The existing deployment-surface guard is useful for preventing hardcoded production
+  IP/domain drift. It should be kept, but it is not a complete Bot/WebApp surface-enforcement
+  guard by itself.
 
 ### Working Foundations To Keep But Still Harden
 
@@ -253,6 +292,9 @@ These pieces are useful and should be preserved, but they are not complete enoug
 - The current direct push plus Redis queue design gives low-latency delivery when everything is
   healthy. It should be retained as an acceleration/wake-up path, while committed `change_log`
   draining becomes the reliability source.
+- Existing HMAC signing for sync and internal trade forwarding is a useful baseline. It must be
+  kept, but production security still needs verified transport, replay protection, key scoping, and
+  sensitive-field policy.
 
 ### Bot-Specific Findings From External Review
 
@@ -377,6 +419,19 @@ accepted as accurate and should influence the Bot roadmap.
   create the same integer ID before either side receives the other row. The confirmed target is a
   hybrid identity strategy: UUID/public IDs for cross-server identity and server-partitioned integer
   sequences as a migration guard.
+- Sync failure detection is incomplete. Unknown tables can currently be skipped by the receiver
+  without producing a peer error, and a source worker can then incorrectly treat delivery as
+  successful if the peer returns `success`. This creates the exact risk that a table stops syncing
+  and both servers fail to notice.
+- Sync/outbox recording is not yet a hard invariant. Some listener and `log_change` failures are
+  caught and logged, and some payload construction failures can happen before an outbox row exists.
+  The final design must make synced-table outbox creation transactional and mandatory.
+- Cross-server transport security is partially implemented. HMAC signing exists, but direct push,
+  seed, or resync paths can use unverified TLS, and replay defense is timestamp-window based rather
+  than nonce/dedupe based for every side-effecting path.
+- The starter sync registry table does not yet enumerate every current model/table. Registry
+  implementation must begin from the actual model inventory, not only the tables currently present
+  in `/api/sync/receive`.
 
 ### Not Implemented Or Not Yet Encoded
 
@@ -434,6 +489,17 @@ accepted as accurate and should influence the Bot roadmap.
   Post-reconnect publication must respect the latest authoritative offer state. Medium/long outage
   recovery must also expire active local-only offers instead of publishing them as active on the
   peer after full catch-up.
+- Fail-closed sync receive for unknown, unregistered, or forbidden tables is not implemented. The
+  receiver can currently return `success` after skipping unknown work, which can hide missing sync
+  coverage.
+- Mandatory synced-table outbox creation is not implemented. A business write can still depend on
+  best-effort event listener logging instead of an explicit transactional outbox/write contract.
+- Production-grade internal transport security is not implemented. Verified TLS/private tunnel
+  enforcement, replay nonce/dedupe, key scoping, and sensitive-field policy are not yet encoded as
+  staging/production gates.
+- Runtime entrypoint surface guards are incomplete. Compose disables the Iran bot service, but
+  `run_bot.py` itself does not fail closed by `server_mode`, and the shared image can still contain
+  bot code, frontend assets, and API routes unless guarded at runtime.
 
 ### Challenge Roadmap From Easy To Hard
 
@@ -452,10 +518,16 @@ This ordering is about implementation difficulty and blast radius, not business 
 6. Add tests that assert messenger-owned tables are not accepted by the sync model map. This includes
    `messages`, `conversations`, `chat_files`, `upload_batches`, `upload_sessions`, `chats`, and
    `chat_members`.
-7. Add deployment/config assertions that the Iran compose has no active bot service, the foreign
+7. Make `/api/sync/receive` fail closed for unknown, unregistered, or policy-forbidden tables, and
+   update tests so skipped unknown work returns an error/partial result instead of `success`.
+8. Add a model-inventory test that extracts every SQLAlchemy `__tablename__` and verifies each one
+   is present in the sync registry as `sync`, `no-sync`, or internal bookkeeping.
+9. Add deployment/config assertions that the Iran compose has no active bot service, the foreign
    compose has the bot service, and Iran has no Telegram credentials or outbound Telegram path. Run
    these checks before staging validation.
-8. Keep the documented manual branch-check checklist as the accepted guard so roadmap commits are not
+10. Add a `run_bot.py` runtime guard that refuses to start when `server_mode=iran` or when the
+    process is not explicitly on the foreign bot surface.
+11. Keep the documented manual branch-check checklist as the accepted guard so roadmap commits are not
    made accidentally from the wrong branch. No extra script, hook, or CI rule is required for now.
 
 #### Level 2 - Guardrails And Local Side Effects
@@ -467,23 +539,29 @@ This ordering is about implementation difficulty and blast radius, not business 
    frontend assets, public WebApp routes, or user-facing WebApp entrypoints. Only explicitly allowed
    internal routes such as sync, health, and maintenance may remain reachable, and staging must
    validate the guard.
-3. After synced market changes are applied on Iran, publish a confirmed local post-commit WebApp
+3. Add production transport guardrails for internal cross-server traffic: verified TLS/private
+   tunnel requirement outside isolated test/staging exceptions, no `verify=False` production path,
+   source/target key scoping, replay nonce or delivery-dedupe checks, and safe failure behavior.
+4. Define the sensitive-field policy for synced payloads and logs. Explicitly classify user profile,
+   mobile/address, Telegram IDs, admin password hashes, tokens, Web Push subscriptions, and
+   operational metadata before implementing broad registry-driven sync.
+5. After synced market changes are applied on Iran, publish a confirmed local post-commit WebApp
    realtime event without creating a sync echo. This covers bot-authored offer creation plus
    offer/trade/expiry updates that affect WebApp market state.
-4. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
+6. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
    foreign at the API layer, with reverse-proxy blocking as defense in depth. Any internal
    foreign-side chat exception must be explicitly allowlisted by path and purpose.
-5. Build the confirmed shared `expire_offers` command/service foundation and route Bot cancel-all
+7. Build the confirmed shared `expire_offers` command/service foundation and route Bot cancel-all
    through it first. The service must mutate authoritative DB state first, commit, then run explicit
    post-commit side effects such as Telegram gateway updates, WebApp realtime events, cache updates,
    and notifications.
-6. Implement the confirmed runtime/session state policy. WebApp sessions are Iran-local, Bot FSM is
+8. Implement the confirmed runtime/session state policy. WebApp sessions are Iran-local, Bot FSM is
    foreign-local, and login/recovery requests do not sync. `telegram_id`, user profile, account
    status, role, and limits sync as user/account product data.
-7. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
+9. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
    During transition, allow only a narrowly guarded `is_system=true AND is_mandatory=true`
    compatibility path if needed; do not keep wholesale `chats`/`chat_members` sync.
-8. Implement the confirmed `user.home_server` audit. Classify each read/write as transitional
+10. Implement the confirmed `user.home_server` audit. Classify each read/write as transitional
    session/auth compatibility, legacy/account-origin compatibility, or a bug. Offer-authority uses,
    active-surface uses, and login-time flips must be removed in this stage or explicitly isolated as
    short-lived migration compatibility.
@@ -508,17 +586,20 @@ This ordering is about implementation difficulty and blast radius, not business 
 5. Implement the confirmed audit of all bulk `update()`, bulk `delete()`, raw SQL, and relationship
    side effects. Every bypassing mutation must move to a sync-aware helper or explicitly record the
    required sync/outbox event.
-6. Implement the confirmed committed outbox drain: the sync worker's durable source must be
+6. Make synced-table outbox recording mandatory inside authoritative write paths. Listener-based
+   recording may remain as a transition mechanism, but a synced-table mutation must not silently
+   commit if the durable outbox/change-log record cannot be created.
+7. Implement the confirmed committed outbox drain: the sync worker's durable source must be
    committed `change_log WHERE synced=false`. Keep Redis/direct push only as wake-up/acceleration,
    so missed queue/direct events cannot lose a committed sync change.
-7. Implement the confirmed Telegram publication idempotency/outbox model. It must use a dedupe key
+8. Implement the confirmed Telegram publication idempotency/outbox model. It must use a dedupe key
    independent from only `channel_message_id`, prevent duplicate posts across direct push and worker
    replay, and sync the foreign publication result back to Iran.
-8. Implement complete end-to-end and service tests for the confirmed scenario matrix. Required
+9. Implement complete end-to-end and service tests for the confirmed scenario matrix. Required
    coverage includes Bot offer -> Iran WebApp realtime, WebApp offer -> foreign Telegram publish ->
    result sync back, owner expiry from both surfaces, requests/trades from both surfaces,
    near-simultaneous actions, retry/replay/idempotency, and duplicate-side-effect prevention.
-9. Add acceptance gates for every switching scenario. DB state, WebApp realtime state, Telegram
+10. Add acceptance gates for every switching scenario. DB state, WebApp realtime state, Telegram
    channel/user-message state, notification state, sync backlog, command-forwarding behavior, and
    forbidden outcomes must all be asserted.
 
@@ -1070,6 +1151,166 @@ Only after all gates above pass may the owner use the exact phrase `production d
 the specific production action. The authorization must be interpreted narrowly for that action only;
 it does not authorize unrelated production changes, destructive cleanup, or future deployments.
 
+### 16. Second-pass audit findings before implementation
+
+This section records additional risks found during a deeper pass over the current code on
+2026-06-18. These are not a replacement for the earlier roadmap. They are the extra constraints that
+should be handled before or during the early implementation levels so the later architecture is not
+built on weak assumptions.
+
+#### 16.1 Unknown sync tables can be silently accepted today
+
+Current behavior:
+
+- `_parse_item()` returns `None` for an unknown table.
+- `receive_sync_data()` logs `sync.unknown_table` and continues.
+- Existing tests currently expect a batch containing an unknown table to return
+  `{"status": "success", "processed": 0}`.
+
+Risk:
+
+- If a new model/table starts writing `change_log` entries but the peer's sync receiver does not
+  know the table, the peer can skip the item and still return success.
+- The source sync worker can then mark the local `change_log` row as synced even though the peer did
+  not apply it.
+- This is the exact class of failure where part of the data stops syncing and both servers may not
+  notice quickly enough.
+
+Required direction:
+
+- Unknown, unregistered, or registry-forbidden tables must return an error/partial result.
+- The source must only mark a change as synced after the peer applied it or after an explicit,
+  operator-visible terminal rejection policy.
+- Tests must change from "unknown table is success" to "unknown table fails closed".
+
+#### 16.2 Sync/outbox creation is still partly best-effort
+
+Current behavior:
+
+- `log_change()` catches broad exceptions.
+- Many model event listeners catch their own errors and only log.
+- Redis/direct push failures are intentionally non-fatal, which is acceptable only if the committed
+  outbox row is guaranteed to exist.
+- Some failures can happen before a durable outbox/change-log row is created.
+
+Risk:
+
+- A business write on a synced table can become durable without an equally durable replication
+  record if payload construction or listener logic fails before outbox insertion.
+- Later health checks may show no queue backlog for that missing event because there is no event to
+  replay.
+
+Required direction:
+
+- For tables with sync policy `sync`, authoritative write services must create the durable outbox
+  record transactionally and treat outbox creation failure as a failed business write.
+- Best-effort listener logging can exist only as a transition layer, not as the final reliability
+  contract.
+- Observability must distinguish "peer lag" from "local write blocked because outbox cannot be
+  recorded".
+
+#### 16.3 Internal transport security needs a production-grade policy
+
+Current behavior:
+
+- Sync and internal command forwarding use HMAC signatures and timestamp checks.
+- Direct sync push currently builds an HTTP client with TLS verification disabled.
+- Seed/resync helper paths also contain unverified HTTP client usage.
+- Trade forwarding can verify TLS, but the default setting is currently false unless configured.
+
+Risk:
+
+- HMAC protects integrity if the secret stays private, but it does not replace a verified transport
+  path for sensitive business and user data.
+- A captured signed request may be replayable inside the timestamp window unless every path also has
+  nonce/dedupe/idempotency protection for the specific side effect.
+- Sensitive fields such as mobile numbers, addresses, Telegram IDs, password hashes, and tokens need
+  a conscious sync/logging policy before broad replication.
+
+Required direction:
+
+- Production must use verified TLS, a private network tunnel, mTLS, or another explicitly approved
+  secure transport. `verify=False` must be test/staging-only and must fail production gates.
+- Cross-server signed requests need replay protection tied to outbox id, nonce, sequence, or
+  idempotency marker, not only wall-clock timestamp.
+- Internal keys should be scoped by purpose where practical: sync apply, command forwarding,
+  observability, and maintenance should not all rely on one broad credential forever.
+- Sensitive fields must be classified in the sync registry and excluded, hashed, encrypted, or
+  synced only when there is a clear product need.
+
+#### 16.4 The registry must cover the actual model inventory
+
+Current behavior:
+
+- The starter registry table in this document covers the most important product and runtime tables.
+- The real model inventory also contains tables such as `push_subscriptions`,
+  `user_notification_preferences`, `sync_blocks`, `single_session_recovery_admin_targets`,
+  `change_log`, and other bookkeeping/runtime tables.
+
+Risk:
+
+- A human-written registry can drift from the codebase.
+- A migration can add a table that neither syncs nor explicitly opts out, and nobody notices until
+  runtime.
+
+Required direction:
+
+- The registry implementation must scan or otherwise enumerate all SQLAlchemy model tables and all
+  Alembic-created tables.
+- Every table must be classified as `sync`, `no-sync`, or `internal-bookkeeping`, with write
+  surfaces, authority, conflict rule, and side-effect policy where applicable.
+- CI/tests must fail when the model/migration inventory and registry diverge.
+
+#### 16.5 Surface enforcement must be runtime-enforced, not only deployment-intended
+
+Current behavior:
+
+- Iran compose does not start the bot service.
+- Foreign compose starts the bot service.
+- The shared images contain both API and bot code, and both Dockerfiles copy frontend assets.
+- `run_bot.py` currently returns only when `BOT_TOKEN` is missing, not because `server_mode=iran`.
+- `main.py` serves frontend files when `mini_app_dist` exists.
+
+Risk:
+
+- A misconfigured process, manual command, wrong env file, or future compose edit can violate the
+  non-negotiable split even if the intended compose file is correct.
+- Foreign can accidentally expose WebApp/static behavior if frontend files are present and routing
+  is not guarded.
+- Iran can accidentally start bot code if credentials appear or a command is run manually.
+
+Required direction:
+
+- `run_bot.py` must fail closed outside the foreign bot surface.
+- API startup or route handling must enforce the foreign WebApp/static/chat guard.
+- Deployment checks remain useful, but runtime checks are the final safety net.
+
+#### 16.6 Side-effect durability needs explicit classification
+
+Current behavior:
+
+- Some side effects are safe best-effort UX updates, such as clearing a local private suggestion
+  keyboard.
+- Some side effects are business-visible and must be durable/idempotent, such as Telegram channel
+  offer publication, channel button state, WebApp market realtime, notifications, and sync-back of
+  foreign publication result.
+- Current code mixes these categories inside routers, handlers, background tasks, and event
+  listeners.
+
+Risk:
+
+- Retrying a business-visible side effect can duplicate Telegram posts or notifications.
+- Losing a business-visible side effect can make a correct DB state invisible or misleading on one
+  surface.
+- Treating all side effects as equally best-effort hides which failures require repair.
+
+Required direction:
+
+- Each shared command must declare its post-commit side effects as durable/idempotent or best-effort.
+- Durable/idempotent side effects need their own outbox/dedupe/retry state.
+- Best-effort side effects must be safe to lose and must not be used as proof that the business
+  command succeeded.
+
 ## Required Sync Registry
 
 Before broad sync changes, create a registry for every model/table. This registry is now a
@@ -1084,15 +1325,25 @@ confirmed requirement, not an optional design note:
 | `conversations` | no sync | WebApp only | Iran | n/a | Iran realtime only |
 | `chats` | no sync target; transitional mandatory-only compatibility if needed | WebApp/local system | Iran/local projection | no cross-server merge | Iran realtime only |
 | `chat_members` | no sync target; transitional mandatory-only compatibility if needed | WebApp/local system | Iran/local projection | no cross-server merge | Iran realtime only |
+| `chat_files` | no sync | WebApp/messenger/upload only | Iran | n/a | Iran media/runtime only |
+| `upload_batches` | no sync | WebApp/messenger/upload only | Iran | n/a | Iran upload runtime only |
+| `upload_sessions` | no sync | WebApp/messenger/upload only | Iran | n/a | Iran upload runtime only |
+| `push_subscriptions` | no sync by default | WebApp browser runtime | Iran | n/a | Iran Web Push runtime only |
+| `user_notification_preferences` | sync candidate | WebApp/account settings | user/account authority TBD | updated_at/version merge TBD | notification routing policy |
 | `user_sessions` | no sync | WebApp/auth local runtime | local surface | n/a | local session events |
 | `session_login_requests` | no sync | WebApp/auth local runtime | local surface | n/a | local login flow |
 | `single_session_recovery_requests` | no sync | WebApp/auth local runtime | local surface | n/a | local recovery flow |
+| `single_session_recovery_admin_targets` | no sync | WebApp/auth local runtime | local surface | n/a | local recovery flow |
+| `change_log` | internal bookkeeping; no cross-sync | sync worker/outbox | local server | n/a | sync observability only |
+| `sync_blocks` | internal bookkeeping; no cross-sync | sync/operations | local server | n/a | sync observability only |
 
 The implementation must fail tests/CI when a new model/table or migration introduces a table
-without a registry entry.
+without a registry entry. The table above is still a starter contract, not the final exhaustive
+registry. The implementation must derive the final list from the actual SQLAlchemy model and
+migration inventory.
 
 ## Immediate Questions For Next Round
 
-1. Is this roadmap now accepted as the implementation baseline so work can start from Level 1 on
-   `candidate/bot-webapp-integration` after a fresh branch check, or should another risk be analyzed
-   before coding begins?
+1. Are the second-pass audit additions in section 16 accepted as part of the implementation
+   baseline? If yes, implementation can start from Level 1 on `candidate/bot-webapp-integration`
+   after a fresh branch check.
