@@ -94,6 +94,7 @@ Rules:
 |---|---|---|
 | `candidate/trading-production-grade` | Production-grade trade/offer hardening and market notification work validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
 | `candidate/web-push-notifications` | Web Push notification work that should be merged to `main` only at the correct release point after staging validation and explicit approval. | Allowed after approval |
+| `candidate/market-traded-history` | Release-candidate work for two-day read-only market history that distinguishes pure expired offers from fully or partially traded offers before production promotion. | Allowed after staging validation and explicit approval |
 | `staging/user-switcher` | Staging-only user-switcher/reference branch. | Not allowed |
 | `staging/web-push-user-switcher` | Active staging branch for Web Push/user-switcher validation and staging guardrail work. | Not allowed as-is; promote through `candidate/*` only if explicitly approved |
 
@@ -140,3 +141,4 @@ For production-grade application changes:
 | 2026-06-18 | Codex | Removed `candidate/market-notification-staging-fix` from the active branch registry after it was fast-forward merged into `main`; branch deletion followed only after focused tests and push completed. |
 | 2026-06-18 | Codex | Added `candidate/market-ui-density-polish` for staging-validated market UI density cleanup: compact recent-offers empty state, hide expired history from buyer/seller/my tabs, and reduce offer-card height without production deployment. |
 | 2026-06-18 | Codex | Removed `candidate/market-ui-density-polish` from the active branch registry after it was fast-forward merged into `main`; production deployment was approved explicitly by the owner for this promotion. |
+| 2026-06-18 | Codex | Added `candidate/market-traded-history` for staging-validated market history work that will render completed offers and partially traded expired offers as read-only traded history cards. |
