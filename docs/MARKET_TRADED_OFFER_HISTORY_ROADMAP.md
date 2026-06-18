@@ -48,6 +48,8 @@ Exit criteria:
 
 ## Stage TH1 - Backend Read Model
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Add a dedicated read-only market-history query path, preferably a new endpoint:
 
 ```text
@@ -82,6 +84,17 @@ Exit criteria:
 - Existing `/api/offers/` active feed remains unchanged.
 - Existing `/api/offers/expired` behavior remains backward compatible unless it
   is intentionally replaced after tests.
+
+Implementation notes:
+
+- Added `GET /api/offers/market-history`.
+- The endpoint is read-only and returns terminal market history rows with
+  `history_state`, `history_label`, `traded_quantity`, `is_partially_traded`,
+  `is_read_only`, and `history_event_at`.
+- The active feed `/api/offers/` and the legacy `/api/offers/expired` endpoint
+  remain unchanged.
+- Focused backend tests cover the query shape, customer-hidden guard, completed
+  history metadata, and partially traded expired metadata.
 
 ## Stage TH2 - Backend Guards And Indexing
 

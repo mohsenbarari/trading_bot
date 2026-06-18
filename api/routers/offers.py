@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -35,6 +35,7 @@ from core.trading_observability import log_trading_event, summarize_response_bod
 from models.user import User
 from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
+from models.trade import Trade, TradeStatus
 from models.commodity import Commodity
 from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
 from core.server_routing import current_server
@@ -160,6 +161,16 @@ class OfferResponse(BaseModel):
         from_attributes = True
 
 
+class MarketHistoryOfferResponse(OfferResponse):
+    """Read-only market history row with terminal-state metadata."""
+    history_state: str
+    history_label: str
+    traded_quantity: int = 0
+    is_partially_traded: bool = False
+    is_read_only: bool = True
+    history_event_at: Optional[str] = None
+
+
 class ParseOfferRequest(BaseModel):
     """درخواست پارس متن لفظ"""
     text: str = Field(..., min_length=3, max_length=500)
@@ -270,6 +281,40 @@ async def _serialize_offer_responses(
         )
         for offer in offers
     ]
+
+
+def _offer_response_to_dict(response: OfferResponse) -> dict:
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    return response.dict()
+
+
+def _build_market_history_response(
+    response: OfferResponse,
+    offer: Offer,
+    *,
+    traded_quantity: int,
+    history_event_at: datetime | None,
+) -> MarketHistoryOfferResponse:
+    normalized_traded_quantity = max(0, int(traded_quantity or 0))
+    is_traded_history = offer.status == OfferStatus.COMPLETED or normalized_traded_quantity > 0
+    history_state = "traded" if is_traded_history else "expired"
+    history_label = "معامله‌شده" if is_traded_history else "منقضی"
+    original_quantity = int(getattr(offer, "quantity", 0) or 0)
+    is_partially_traded = (
+        offer.status == OfferStatus.EXPIRED
+        and normalized_traded_quantity > 0
+        and (original_quantity <= 0 or normalized_traded_quantity < original_quantity)
+    )
+    return MarketHistoryOfferResponse(
+        **_offer_response_to_dict(response),
+        history_state=history_state,
+        history_label=history_label,
+        traded_quantity=normalized_traded_quantity,
+        is_partially_traded=is_partially_traded,
+        is_read_only=True,
+        history_event_at=to_jalali_str(history_event_at) if history_event_at else None,
+    )
 
 
 async def _read_active_offer_count(db: AsyncSession, user_id: int) -> int:
@@ -822,6 +867,109 @@ async def get_active_offers(
         viewer_user_id=owner_user.id,
         include_owner_identity=False,
     )
+
+
+@router.get("/market-history", response_model=List[MarketHistoryOfferResponse])
+async def get_market_offer_history(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(25, ge=1, le=100),
+    since_hours: int = Query(48, ge=1, le=48),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
+):
+    """
+    Read-only two-day market history for terminal offers.
+
+    This endpoint intentionally does not alter active-market feed, fair-price
+    validation, Web Push targeting, or trade execution guards.
+    """
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+
+    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
+    if actor_relation is not None:
+        return []
+
+    cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
+    expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+
+    trade_totals = (
+        select(
+            Trade.offer_id.label("offer_id"),
+            func.coalesce(func.sum(Trade.quantity), 0).label("traded_quantity"),
+            func.max(Trade.created_at).label("last_trade_at"),
+        )
+        .where(
+            Trade.offer_id.isnot(None),
+            Trade.status == TradeStatus.COMPLETED,
+        )
+        .group_by(Trade.offer_id)
+        .subquery()
+    )
+
+    traded_quantity_expr = func.coalesce(trade_totals.c.traded_quantity, 0)
+    completed_event_at_expr = func.coalesce(
+        trade_totals.c.last_trade_at,
+        Offer.updated_at,
+        Offer.created_at,
+    )
+    history_event_at_expr = case(
+        (Offer.status == OfferStatus.COMPLETED, completed_event_at_expr),
+        else_=expired_at_expr,
+    )
+
+    query = (
+        select(
+            Offer,
+            traded_quantity_expr.label("traded_quantity"),
+            history_event_at_expr.label("history_event_at"),
+        )
+        .outerjoin(trade_totals, trade_totals.c.offer_id == Offer.id)
+        .options(*build_offer_read_options(include_owner_identity=False))
+        .where(
+            or_(
+                and_(
+                    Offer.status == OfferStatus.COMPLETED,
+                    completed_event_at_expr >= cutoff_time,
+                ),
+                and_(
+                    Offer.status == OfferStatus.EXPIRED,
+                    Offer.expire_reason == "time_limit",
+                    expired_at_expr >= cutoff_time,
+                ),
+            )
+        )
+        .order_by(history_event_at_expr.desc(), Offer.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+    if not rows:
+        return []
+
+    offers = [row[0] for row in rows]
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    serialized = await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=context.owner_user.id,
+        include_owner_identity=False,
+    )
+    return [
+        _build_market_history_response(
+            response,
+            offer,
+            traded_quantity=row[1],
+            history_event_at=row[2],
+        )
+        for response, offer, row in zip(serialized, offers, rows)
+    ]
 
 
 @router.get("/expired", response_model=List[OfferResponse])
