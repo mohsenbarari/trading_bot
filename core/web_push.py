@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -299,13 +299,22 @@ async def load_market_offer_push_target_user_ids(
 
 
 async def is_first_active_market_offer(db: AsyncSession, offer_id: int) -> bool:
+    from core.trading_settings import get_trading_settings_async
+    from core.utils import utc_now_naive
     from models.offer import Offer, OfferStatus
 
+    trading_settings = await get_trading_settings_async()
+    expiry_minutes = int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0)
+    live_offer_filters = [
+        Offer.status == OfferStatus.ACTIVE,
+        Offer.id != int(offer_id),
+    ]
+    if expiry_minutes > 0:
+        cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
+        live_offer_filters.append(Offer.created_at > cutoff_time)
+
     other_active_offer_count = await db.scalar(
-        select(func.count(Offer.id)).where(
-            Offer.status == OfferStatus.ACTIVE,
-            Offer.id != int(offer_id),
-        )
+        select(func.count(Offer.id)).where(*live_offer_filters)
     )
     return int(other_active_offer_count or 0) == 0
 

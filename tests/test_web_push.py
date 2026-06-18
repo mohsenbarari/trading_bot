@@ -1,5 +1,6 @@
 import unittest
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -127,12 +128,37 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         empty_market_db = FakeDB(0)
         busy_market_db = FakeDB(2)
 
-        self.assertTrue(await web_push.is_first_active_market_offer(empty_market_db, 42))
-        self.assertFalse(await web_push.is_first_active_market_offer(busy_market_db, 42))
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=2)),
+        ), patch("core.utils.utc_now_naive", return_value=datetime(2026, 6, 18, 7, 20, 0)):
+            self.assertTrue(await web_push.is_first_active_market_offer(empty_market_db, 42))
+            self.assertFalse(await web_push.is_first_active_market_offer(busy_market_db, 42))
 
         compiled = str(empty_market_db.statement.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("offers.status = 'ACTIVE'", compiled)
         self.assertIn("offers.id !=", compiled)
+        self.assertIn("offers.created_at >", compiled)
+
+    async def test_market_offer_push_ignores_time_expired_active_offers_when_detecting_first_live_offer(self):
+        class FakeDB:
+            statement = None
+
+            async def scalar(self, stmt):
+                self.statement = stmt
+                return 0
+
+        db = FakeDB()
+        with patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=2)),
+        ), patch("core.utils.utc_now_naive", return_value=datetime(2026, 6, 18, 7, 20, 0)):
+            self.assertTrue(await web_push.is_first_active_market_offer(db, 42))
+
+        compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("offers.status = 'ACTIVE'", compiled)
+        self.assertIn("offers.id !=", compiled)
+        self.assertIn("offers.created_at > '2026-06-18 07:18:00'", compiled)
 
     async def test_send_returns_zero_summary_when_unconfigured(self):
         with patch.object(web_push, "is_web_push_configured", return_value=False):
