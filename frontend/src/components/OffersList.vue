@@ -78,6 +78,7 @@ function getTimerPercent(offer: any): number {
 }
 
 function cardTimerStyle(offer: any): Record<string, string> {
+  if (isReadOnlyOffer(offer)) return {}
   if (!offer.expires_at_ts) return {}
   const remainingSec = offer.expires_at_ts - now.value
   if (remainingSec <= 0) return { '--t-pct': '0' }
@@ -97,14 +98,21 @@ function hasTimer(offer: any): boolean {
 }
 
 function isExpiredOffer(offer: any): boolean {
-  return offer?.status === 'expired'
+  return offer?.status === 'expired' || offer?.history_state === 'expired'
 }
 
-// --- Keep active offers live-filtered, but allow read-only expired history ---
+function isReadOnlyOffer(offer: any): boolean {
+  const status = String(offer?.status ?? '').toLowerCase()
+  return offer?.is_read_only === true
+    || typeof offer?.history_state === 'string'
+    || (status !== '' && status !== 'active')
+}
+
+// Keep active offers live-filtered, while read-only history rows remain visible.
 const filteredOffers = computed(() => {
   const nowSec = now.value
   const source = Array.isArray(props.offers) ? props.offers : []
-  const visible = source.filter(o => isExpiredOffer(o) || !o.expires_at_ts || o.expires_at_ts > nowSec)
+  const visible = source.filter(o => isReadOnlyOffer(o) || !o.expires_at_ts || o.expires_at_ts > nowSec)
   return props.limit ? visible.slice(0, props.limit) : visible
 })
 
@@ -450,8 +458,8 @@ async function cancelOwnOffer(offerId: number) {
         :key="offer.id"
         class="offer-card-wrap"
         :class="{
-          'timer-critical': !isExpiredOffer(offer) && isCritical(offer),
-          'has-timer': !isExpiredOffer(offer) && hasTimer(offer),
+          'timer-critical': !isReadOnlyOffer(offer) && isCritical(offer),
+          'has-timer': !isReadOnlyOffer(offer) && hasTimer(offer),
           'is-expired': isExpiredOffer(offer),
         }"
         :style="cardTimerStyle(offer)"
@@ -485,7 +493,7 @@ async function cancelOwnOffer(offerId: number) {
           </div>
 
           <!-- Footer: lot buttons or own offer -->
-          <div v-if="!isExpiredOffer(offer)" class="offer-footer">
+          <div v-if="!isReadOnlyOffer(offer)" class="offer-footer">
             <div v-if="!isOwnOffer(offer) && (offer.remaining_quantity ?? offer.quantity) > 0" class="trade-buttons">
               <button
                 v-for="amount in getLotButtons(offer)"

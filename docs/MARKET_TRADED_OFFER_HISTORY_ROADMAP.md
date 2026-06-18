@@ -32,9 +32,9 @@ making Iran call Telegram or by making foreign serve the WebApp.
   from `offers` and `trades`. The display state is derived from synced offer
   terminal fields plus completed trade aggregate unless a later design explicitly
   adds a reviewed materialized projection.
-- Iran-side code must never update Telegram tags directly. When a WebApp/Iran
-  offer becomes traded or partial-traded-expired, the foreign server must apply
-  the synced state and perform the Telegram side effect there.
+- Iran-side code must never update Telegram traded tags directly. When a
+  WebApp/Iran offer becomes traded or partial-traded-expired, the foreign server
+  must apply the synced state and perform the Telegram side effect there.
 - Foreign-side code must not serve the WebApp history UI. When a Bot/foreign
   offer becomes traded or partial-traded-expired, Iran must apply the synced
   state and render the WebApp tag locally.
@@ -102,7 +102,7 @@ Timing and ordering rules:
   paths or keep `created_at` as the canonical history event time.
 - `channel_message_id` remains foreign-owned. It must not be overwritten by
   offer sync from Iran, but the foreign server must still use the synced terminal
-  state to update Telegram channel buttons/tag.
+  state to update Telegram channel buttons and traded-post tags where required.
 
 Surface tag contract:
 
@@ -114,8 +114,10 @@ Surface tag contract:
   - Active offers keep trade buttons.
   - `completed` and time-limit expired offers with completed quantity must show
     a traded tag and have trade buttons removed.
-  - Pure time-limit expired offers must show an expired tag and have trade
-    buttons removed.
+  - Pure time-limit expired offers only need trade buttons removed. They do not
+    need an expired tag on Telegram.
+  - Editing the Telegram post text is required only for traded states:
+    `completed` and `traded_partial_expired`.
   - This side effect runs only on foreign, even when the terminal mutation
     originated on Iran.
 
@@ -134,7 +136,7 @@ Known current code facts:
 - `OffersList.vue` currently treats only `status === 'expired'` as historical;
   it must use `is_read_only` and `history_state`.
 - Telegram channel publish/update helpers currently remove buttons for inactive
-  offers but do not yet provide a distinct traded/history tag contract.
+  offers but do not yet provide a distinct traded tag/edit contract.
 
 ## Stage TH0 - Branch And Baseline
 
@@ -232,6 +234,8 @@ Implementation notes:
 
 ## Stage TH3 - Frontend History State
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Update `MarketView.vue` to load the new market-history endpoint for the read-only
 two-day history area.
 
@@ -252,6 +256,24 @@ Exit criteria:
 
 - No active-market interaction depends on history rows.
 - Existing active-offer UX is unchanged.
+
+Implementation notes:
+
+- `MarketView.vue` now loads read-only two-day history from
+  `/api/offers/market-history?skip=...&limit=25`.
+- The active list still comes from `/api/offers/`; history rows are appended
+  only while the `all` market filter is selected.
+- Buyer, seller, and my-offers filters continue to render only active feed rows.
+- Market history refreshes after `offer:expired`, `offer:completed`, terminal
+  `offer:updated`, and successful child trade/cancel completion events.
+- Incoming history rows are normalized to `is_read_only = true` unless the
+  backend explicitly says otherwise.
+- `OffersList.vue` received a minimal read-only guard so history rows cannot
+  render trade or cancel controls before the dedicated TH4 visual stamps are
+  implemented.
+- Focused frontend tests cover endpoint usage, filter isolation, terminal
+  realtime refresh behavior, customer/accountant exclusion, and read-only traded
+  history rows.
 
 ## Stage TH4 - Offer Card UI
 
@@ -283,21 +305,24 @@ foreign-only and must not introduce any Iran-to-Telegram path.
 Rules:
 
 - On the foreign server, when a synced or local offer becomes `completed`, remove
-  channel trade buttons and mark the post as `معامله‌شده`.
+  channel trade buttons and edit/mark the post as `معامله‌شده`.
 - When a time-limit expired offer has completed trade quantity greater than zero,
-  remove buttons and mark it as `معامله‌شده · {traded_quantity} عدد`.
+  remove buttons and edit/mark the post as
+  `معامله‌شده · {traded_quantity} عدد`.
 - When a time-limit expired offer has no completed trade quantity, remove buttons
-  and mark it as `منقضی`.
+  only. No Telegram expired tag or post-text edit is required for this state.
 - If editing message text is too risky for the first slice, the roadmap must at
-  minimum define a safe Telegram tag mechanism before promotion. Removing buttons
-  alone is not enough for this branch's Bot/WebApp parity requirement.
+  minimum define a safe traded-tag mechanism before promotion. Removing buttons
+  alone is enough for pure expired offers, but not for traded offers.
 - Telegram update must be idempotent. Direct sync push and worker replay must not
   duplicate edits or create conflicting tag states.
 
 Exit criteria:
 
-- Foreign updates Telegram tags for both local Bot offers and synced WebApp/Iran
-  offers.
+- Foreign updates Telegram traded tags for both local Bot offers and synced
+  WebApp/Iran offers.
+- Foreign removes Telegram trade buttons, without requiring an expired tag, for
+  pure time-limit expired offers.
 - Iran never calls Telegram in tests or staging logs.
 - Replaying the same terminal sync item does not duplicate Telegram side effects.
 
@@ -315,8 +340,12 @@ Validate realtime behavior:
 - Cross-server Bot offer -> WebApp history: a foreign-created offer that becomes
   completed must disappear from Iran active market and reappear in Iran history
   with `معامله‌شده`.
-- Cross-server WebApp offer -> Telegram tag: an Iran-created offer that becomes
-  completed must sync to foreign and update the Telegram tag/buttons there.
+- Cross-server WebApp offer -> Telegram traded tag: an Iran-created offer that
+  becomes completed must sync to foreign and update the Telegram traded
+  tag/buttons there.
+- Cross-server pure expiry: an offer that expires by time limit without completed
+  quantity must remove Telegram buttons on foreign after sync, but must not
+  require a Telegram expired tag/edit.
 - Cross-server partial retail flow: a partial trade on one surface followed by
   time-limit expiry on the offer home server must sync both completed trade
   quantity and expired offer state so both surfaces render
@@ -344,7 +373,8 @@ Backend tests:
 - Offer-first and trade-first sync arrival both converge to the same final
   history result.
 - A synced terminal offer does not overwrite foreign `channel_message_id`.
-- A replayed sync item does not duplicate Telegram tag side effects.
+- A replayed sync item does not duplicate Telegram traded-tag edits or button
+  removal side effects.
 
 Frontend tests:
 
@@ -356,10 +386,11 @@ Frontend tests:
 
 Bot/Telegram tests:
 
-- The Telegram tag formatter produces the same labels as the WebApp contract.
+- The Telegram traded-tag formatter produces the same traded labels as the WebApp
+  contract; pure expired Telegram state only requires button removal.
 - Telegram update execution is blocked on Iran and allowed only on foreign.
 - Local Bot-originated terminal offers and synced WebApp-originated terminal
-  offers both update Telegram tags on foreign.
+  traded offers both update Telegram traded tags on foreign.
 
 Exit criteria:
 
@@ -378,7 +409,8 @@ Suggested checks:
   servers.
 - Frontend tests for `OffersList` stamps and read-only controls.
 - MarketView test for `all` filter history and buyer/seller/my tab exclusion.
-- Bot/Telegram formatter or side-effect tests for traded/expired tags.
+- Bot/Telegram formatter or side-effect tests for traded tags and expired button
+  removal.
 - `git diff --check`.
 - `npm run build` or focused frontend build/test if touched surface requires it.
 - `scripts/deploy_staging.sh deploy`.

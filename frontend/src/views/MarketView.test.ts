@@ -235,7 +235,7 @@ describe('MarketView.vue', () => {
       }
       if (path === '/api/commodities/') return responseOf(commoditiesFixture)
       if (path === '/api/trading-settings/') return responseOf(settingsFixture)
-      if (path === '/api/offers/expired?skip=0&limit=25') return responseOf([])
+      if (path === '/api/offers/market-history?skip=0&limit=25') return responseOf([])
       if (path === '/api/offers/my?since_hours=1&limit=3&status_filter=expired') return responseOf(recentOffersFixture)
       if (path === '/api/trading-settings/market-state') {
         return responseOf({
@@ -313,7 +313,32 @@ describe('MarketView.vue', () => {
     expect(marketViewMocks.clearBackStackMock).toHaveBeenCalled()
   }, 15000)
 
-  it('appends read-only expired market offers for non-customer users only', async () => {
+  it('refreshes market history only for terminal realtime offer events', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+
+    marketViewMocks.apiFetchMock.mockClear()
+
+    emitWs('offer:updated', { id: 1, status: 'active', remaining_quantity: 12 })
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
+
+    emitWs('offer:updated', { id: 1, status: 'completed', remaining_quantity: 0 })
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
+
+    marketViewMocks.apiFetchMock.mockClear()
+    emitWs('offer:expired', { id: 1 })
+    await flushPromises()
+
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
+
+    wrapper.unmount()
+  }, 15000)
+
+  it('appends read-only market history offers for non-customer users only', async () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
         return responseOf(JSON.parse(String(options.body)))
@@ -331,11 +356,13 @@ describe('MarketView.vue', () => {
         })
       }
       if (path === '/api/auth/me') return responseOf({ id: 77, customer_tier: null })
-      if (path === '/api/offers/expired?skip=0&limit=25') {
+      if (path === '/api/offers/market-history?skip=0&limit=25') {
         return responseOf([
           {
             id: 201,
             status: 'expired',
+            history_state: 'expired',
+            is_read_only: true,
             expire_reason: 'time_limit',
             offer_type: 'buy',
             commodity_name: 'سکه',
@@ -343,6 +370,23 @@ describe('MarketView.vue', () => {
             remaining_quantity: 10,
             price: 1000,
             viewer_effective_price: 1000,
+            is_wholesale: true,
+            lot_sizes: null,
+            notes: null,
+            created_at: 'امروز',
+          },
+          {
+            id: 202,
+            status: 'completed',
+            history_state: 'traded',
+            is_read_only: true,
+            offer_type: 'sell',
+            commodity_name: 'طلای آب‌شده',
+            quantity: 8,
+            remaining_quantity: 0,
+            traded_quantity: 8,
+            price: 2000,
+            viewer_effective_price: 2000,
             is_wholesale: true,
             lot_sizes: null,
             notes: null,
@@ -356,9 +400,9 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
-    expect(wrapper.find('.offers-count').text()).toBe('2')
-    expect(wrapper.find('.offers-statuses').text()).toBe('active,expired')
+    expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
+    expect(wrapper.find('.offers-count').text()).toBe('3')
+    expect(wrapper.find('.offers-statuses').text()).toBe('active,expired,completed')
 
     const buyTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('خریدار'))
     expect(buyTab?.exists()).toBe(true)
@@ -381,7 +425,7 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
-  it('does not load expired market offers for tier customers', async () => {
+  it('does not load market history offers for tier customers', async () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
         return responseOf(JSON.parse(String(options.body)))
@@ -405,12 +449,12 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
 
     wrapper.unmount()
   })
 
-  it('does not load expired market offers for accountant users', async () => {
+  it('does not load market history offers for accountant users', async () => {
     marketViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === '/api/notifications/preferences' && options?.method === 'PATCH') {
         return responseOf(JSON.parse(String(options.body)))
@@ -430,8 +474,8 @@ describe('MarketView.vue', () => {
       if (path === '/api/auth/me') {
         return responseOf({ id: 77, role: 'عادی', customer_tier: null, is_accountant: true })
       }
-      if (path === '/api/offers/expired?skip=0&limit=25') {
-        throw new Error('accountants should not request expired market history')
+      if (path === '/api/offers/market-history?skip=0&limit=25') {
+        throw new Error('accountants should not request market history')
       }
       return responseOf(null)
     })
@@ -439,7 +483,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
+    expect(marketViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/offers/market-history?skip=0&limit=25')
 
     wrapper.unmount()
   })

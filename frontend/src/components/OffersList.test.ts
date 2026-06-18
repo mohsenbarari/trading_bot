@@ -156,6 +156,39 @@ describe('OffersList.vue', () => {
     expect(wrapper.emitted('load-more-expired')).toHaveLength(1)
   })
 
+  it('keeps traded history offers read-only until their visual stamp is rendered', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 5,
+          user_id: 77,
+          status: 'completed',
+          history_state: 'traded',
+          is_read_only: true,
+          offer_type: 'buy',
+          commodity_name: 'طلای آب‌شده',
+          quantity: 12,
+          remaining_quantity: 0,
+          traded_quantity: 12,
+          price: 72000,
+          viewer_effective_price: 72000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+        },
+      ],
+    })
+
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+    expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
+    expect(wrapper.find('.expired-ribbon').exists()).toBe(false)
+    expect(wrapper.find('.price').text()).toContain('72,000')
+  })
+
   it('uses the two-tap confirm flow for retail lots, clears stale pending state, and executes the confirmed trade', async () => {
     vi.useFakeTimers()
     apiFetchMock.mockResolvedValue({
