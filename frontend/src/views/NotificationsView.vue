@@ -122,7 +122,7 @@ const parseNotificationLine = (rawLine: string): ParsedNotificationLine | null =
 
   const label = remainder.slice(0, colonIndex).trim()
   const value = remainder.slice(colonIndex + 1).trim()
-  const isWide = label === 'زمان معامله' || label === 'مسیر'
+  const isWide = label === 'زمان معامله' || label === 'مسیر' || label === 'توضیحات'
 
   return {
     icon,
@@ -381,7 +381,11 @@ onMounted(async () => {
               v-for="notif in filteredNotifications"
               :key="notif.id"
               class="notif-item"
-              :class="[`type-${notif.level || 'info'}`, { 'is-unread': !notif.is_read }]"
+              :class="[
+                `type-${notif.level || 'info'}`,
+                `category-${notif.category || 'system'}`,
+                { 'is-unread': !notif.is_read },
+              ]"
               :role="canOpenNotificationRoute(notif) ? 'button' : undefined"
               :tabindex="canOpenNotificationRoute(notif) ? 0 : undefined"
               :aria-label="canOpenNotificationRoute(notif) ? `باز کردن اعلان ${notif.title || 'اعلان جدید'}` : undefined"
@@ -396,7 +400,7 @@ onMounted(async () => {
                 </div>
 
                 <div class="notif-body">
-                  <div class="notif-meta-row">
+                  <div v-if="notif.category !== 'trade'" class="notif-meta-row">
                     <h3 class="notif-title">{{ notif.title || 'اعلان جدید' }}</h3>
                     <div class="notif-badges">
                       <AppStatusBadge :tone="notif.is_read ? 'neutral' : 'warning'">
@@ -575,16 +579,29 @@ onMounted(async () => {
 .notif-item.type-warning { border-right-color: var(--ds-primary-500); }
 .notif-item.type-error { border-right-color: var(--ds-danger-500); }
 
+.notif-item.category-trade {
+  gap: 0.55rem;
+  padding: 0.8rem 0.9rem;
+}
+
 .notif-main {
   display: flex;
   gap: 1rem;
   min-width: 0;
 }
 
+.notif-item.category-trade .notif-main {
+  gap: 0.7rem;
+}
+
 .notif-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.notif-item.category-trade .notif-actions {
+  gap: 0.35rem;
 }
 
 .notification-control {
@@ -638,6 +655,12 @@ onMounted(async () => {
 .type-warning .notif-icon { color: var(--ds-primary-500); background: var(--ds-primary-50); }
 .type-error .notif-icon { color: var(--ds-danger-500); background: var(--ds-danger-50); }
 
+.notif-item.category-trade .notif-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
 .unread-dot {
   position: absolute;
   top: -4px;
@@ -655,6 +678,10 @@ onMounted(async () => {
   flex-direction: column;
   gap: 0.35rem;
   min-width: 0;
+}
+
+.notif-item.category-trade .notif-body {
+  gap: 0.25rem;
 }
 
 .notif-meta-row {
@@ -699,6 +726,10 @@ onMounted(async () => {
   align-items: start;
 }
 
+.notif-item.category-trade .notif-lines.is-trade-lines {
+  gap: 0.28rem 0.35rem;
+}
+
 .notif-line {
   display: flex;
   align-items: flex-start;
@@ -717,6 +748,11 @@ onMounted(async () => {
   border: 1px solid var(--ds-border-light);
 }
 
+.notif-item.category-trade .notif-line-field {
+  padding: 0.24rem 0.42rem;
+  border-radius: 10px;
+}
+
 .notif-line-plain {
   font-size: var(--ds-font-base);
   font-weight: 700;
@@ -733,8 +769,8 @@ onMounted(async () => {
 }
 
 .notif-lines.is-trade-lines .notif-line-plain {
-  padding-bottom: 0.25rem;
-  margin-bottom: 0.1rem;
+  padding-bottom: 0.18rem;
+  margin-bottom: 0.02rem;
   border-bottom: 1px dashed var(--ds-border-light);
 }
 
@@ -770,12 +806,26 @@ onMounted(async () => {
   color: var(--ds-text-primary);
 }
 
+.notif-item.category-trade .notif-line-label,
+.notif-item.category-trade .notif-line-value {
+  font-size: var(--ds-font-xs);
+}
+
+.notif-item.category-trade .notif-line-text {
+  font-size: var(--ds-font-sm);
+}
+
 .notif-time {
   align-self: flex-start;
   margin-top: 0.15rem;
   font-size: var(--ds-font-sm);
   font-weight: 500;
   color: var(--ds-text-placeholder);
+}
+
+.notif-item.category-trade .notif-time {
+  margin-top: 0;
+  font-size: var(--ds-font-xs);
 }
 
 @media (max-width: 640px) {
@@ -790,6 +840,10 @@ onMounted(async () => {
 
   .notif-item {
     padding: 0.95rem;
+  }
+
+  .notif-item.category-trade {
+    padding: 0.72rem 0.78rem;
   }
 
   .notif-main {

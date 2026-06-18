@@ -1173,6 +1173,11 @@ def _recipient_is_tier2_customer(
     return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
 
 
+def _normalize_offer_notes_for_notification(offer_notes: str | None) -> str | None:
+    normalized = " ".join(str(offer_notes or "").split())
+    return normalized or None
+
+
 def _build_trade_notification_message(
     *,
     trade_emoji: str,
@@ -1186,6 +1191,7 @@ def _build_trade_notification_message(
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
+    offer_notes: str | None = None,
 ) -> str:
     lines = [
         f"{trade_emoji} {trade_type_label}",
@@ -1199,6 +1205,9 @@ def _build_trade_notification_message(
     lines.append(f"🕐 زمان معامله: {trade_datetime}")
     if trade_path_summary:
         lines.append(f"🧭 مسیر: {trade_path_summary}")
+    normalized_notes = _normalize_offer_notes_for_notification(offer_notes)
+    if normalized_notes:
+        lines.append(f"📝 توضیحات: {normalized_notes}")
     return "\n".join(lines)
 
 
@@ -1217,6 +1226,7 @@ def _build_trade_message_bundle(
     responder_user_name: str,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
+    offer_notes: str | None = None,
 ) -> tuple[str, str, str, str]:
     trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
     responder_msg = (
@@ -1251,6 +1261,7 @@ def _build_trade_message_bundle(
         audience_user_id=None,
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_summary,
+        offer_notes=offer_notes,
     )
     notif_msg_owner = _build_trade_notification_message(
         trade_emoji=offer_trade_emoji,
@@ -1264,6 +1275,7 @@ def _build_trade_message_bundle(
         audience_user_id=None,
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_summary,
+        offer_notes=offer_notes,
     )
     return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
 
@@ -2178,6 +2190,7 @@ async def _execute_trade_authoritatively(
         trade_number: int,
         counterparty_name: str | None,
         trade_path_summary: str | None,
+        offer_notes: str | None,
         extra_payload: dict[str, object | None],
     ) -> None:
         for audience_user_id in audience_user_ids:
@@ -2196,6 +2209,7 @@ async def _execute_trade_authoritatively(
                     audience_user_id=audience_user_id,
                     customer_relation_map=participant_customer_relation_map,
                     trade_path_summary=trade_path_summary,
+                    offer_notes=offer_notes,
                 ),
                 level=NotificationLevel.SUCCESS,
                 category=NotificationCategory.TRADE,
@@ -2266,6 +2280,7 @@ async def _execute_trade_authoritatively(
                 responder_user_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
                 customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=leg_trade_path_summary,
+                offer_notes=getattr(offer, "notes", None),
             )
 
             responder_telegram_id = getattr(leg_responder_user, "telegram_id", None)
@@ -2294,6 +2309,7 @@ async def _execute_trade_authoritatively(
                     trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     counterparty_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
                     trade_path_summary=leg_trade_path_summary,
+                    offer_notes=getattr(offer, "notes", None),
                     extra_payload=_build_trade_notification_extra_payload(
                         "offer_user",
                         leg_offer_payload,
@@ -2308,6 +2324,7 @@ async def _execute_trade_authoritatively(
                     trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     counterparty_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
                     trade_path_summary=leg_trade_path_summary,
+                    offer_notes=getattr(offer, "notes", None),
                     extra_payload=_build_trade_notification_extra_payload(
                         "responder_user",
                         leg_responder_payload,
@@ -2346,6 +2363,7 @@ async def _execute_trade_authoritatively(
                 responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
                 customer_relation_map=participant_customer_relation_map,
             ).get("trade_path_summary"),
+            offer_notes=getattr(offer, "notes", None),
         )
 
         background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
@@ -2380,6 +2398,7 @@ async def _execute_trade_authoritatively(
                     responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
                     customer_relation_map=participant_customer_relation_map,
                 ).get("trade_path_summary"),
+                offer_notes=getattr(offer, "notes", None),
                 extra_payload=responder_notification_payload,
             )
             await _create_trade_notifications_for_leg(
@@ -2394,6 +2413,7 @@ async def _execute_trade_authoritatively(
                     responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
                     customer_relation_map=participant_customer_relation_map,
                 ).get("trade_path_summary"),
+                offer_notes=getattr(offer, "notes", None),
                 extra_payload=offer_owner_notification_payload,
             )
         except Exception as exc:

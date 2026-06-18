@@ -253,6 +253,7 @@ describe('NotificationsView.vue', () => {
       '🔢 شماره معامله: 10005',
       '🕐 زمان معامله: 1405/03/06 11:20',
       '🧭 مسیر: مالک ↔ مشتری سطح ۱',
+      '📝 توضیحات: تحویل حضوری',
     ].join('\n')
 
     store.appNotifications = [
@@ -274,8 +275,12 @@ describe('NotificationsView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.notif-text').exists()).toBe(false)
+    expect(wrapper.find('.notif-item').classes()).toContain('category-trade')
+    expect(wrapper.find('.notif-title').exists()).toBe(false)
+    expect(wrapper.find('.notif-badges').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('اعلان معامله')
     expect(wrapper.find('.notif-line-plain').text()).toContain('فروش')
-    expect(wrapper.findAll('.notif-line-field')).toHaveLength(7)
+    expect(wrapper.findAll('.notif-line-field')).toHaveLength(8)
     expect(wrapper.findAll('.notif-line-label').map((node) => node.text())).toEqual([
       'فی',
       'تعداد',
@@ -284,8 +289,10 @@ describe('NotificationsView.vue', () => {
       'شماره معامله',
       'زمان معامله',
       'مسیر',
+      'توضیحات',
     ])
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
+    expect(wrapper.text()).toContain('تحویل حضوری')
   })
 
   it('filters blank structured lines and keeps non-trade multiline notifications in structured mode', async () => {
