@@ -150,6 +150,14 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     rollback must fail closed or disable the new behavior/feature flags first while preserving data;
     synced or migrated data must not be deleted unless the owner explicitly approves that exact
     cleanup.
+39. Production action has its own final gate and exact approval phrase. No deploy, benchmark,
+    production sync action, production Telegram action, production WebApp behavior change, or
+    production data operation may run from this roadmap until implementation is complete, automated
+    staging scenario tests pass, owner-led manual staging validation passes, final production
+    acceptance gates are checked, and the owner then explicitly requests the action with the exact
+    phrase `production deploy`. Mentioning `production deploy` while defining this policy or before
+    the gates pass is not deployment approval; it is only the recorded approval wording for the
+    future.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -184,7 +192,8 @@ This section is mandatory for all work derived from this document.
    branch, or any release branch unless the owner explicitly says to merge it.
 13. No change from this roadmap may be deployed to production, benchmarked against production,
     run against production data, or used to change production sync/Telegram/WebApp behavior unless
-    the owner explicitly requests that production action.
+    the owner explicitly requests that production action after all final gates pass with the exact
+    phrase `production deploy`.
 14. Pushing `candidate/bot-webapp-integration` to remote is allowed for backup/review, but that push
     does not imply approval to merge, release, or deploy.
 
@@ -560,8 +569,10 @@ This ordering is about implementation difficulty and blast radius, not business 
    include automated scenario-matrix coverage plus an owner-led manual validation phase where logs,
    sync health, WebApp state, Telegram state, and session-surface behavior are reviewed before
    sign-off.
-6. Define final production acceptance gates, but do not run them or promote this work until the owner
-   explicitly requests production action.
+6. Implement the confirmed final production acceptance gates, but do not run production promotion or
+   touch production until implementation is complete, automated staging scenario tests pass,
+   owner-led manual staging validation passes, the gates below are checked, and the owner then uses
+   the exact approval phrase `production deploy`.
 
 ## Confirmed Offer Switching Acceptance Matrix
 
@@ -1016,6 +1027,49 @@ Confirmed policy:
 - Rollback must leave enough audit/log evidence to diagnose the issue and decide whether to retry
   staging after a fix.
 
+### 15. Production requires final gates and the exact approval phrase
+
+The owner defined `production deploy` as the exact approval wording for a future production action.
+That phrase is a required final approval phrase, not an automatic deployment trigger. If it is used
+while discussing policy, before implementation, before staging validation, or before the final gates
+below pass, it must be recorded as policy only and production must not be touched.
+
+Required final gates before any production action:
+
+- Confirm the current branch and commit source. Production promotion must come only from the intended
+  approved branch/merge state; accidental worktree or branch switches by other agents must be ruled
+  out immediately before the action.
+- Confirm the owner has explicitly approved merge/promotion order. A push to
+  `candidate/bot-webapp-integration` or a staging pass does not imply permission to merge to `main`
+  or deploy.
+- Confirm automated staging scenario-matrix tests pass for all accepted Bot/WebApp coexistence
+  scenarios: offer creation, publication, request/trade execution, expiry/cancel, retries, replay,
+  outage recovery, idempotent Telegram publish, WebApp realtime, side effects, and forbidden
+  outcomes.
+- Confirm the owner-led manual staging validation phase is complete. Logs, sync-health, DB state,
+  Telegram publication state, WebApp realtime state, and session-surface behavior must be reviewed
+  before sign-off.
+- Confirm data-protection preflights pass on both servers. The migration/cutover check must verify
+  there are zero active offers on both servers, no unsafe sync backlog, no unresolved partial sync
+  rows, and no destructive cleanup pending.
+- Confirm deployment/config guards pass. Iran must have no Telegram bot runtime or Telegram outbound
+  behavior. Foreign must not expose or run the WebApp. Messenger data must remain Iran/WebApp local
+  and outside cross-server sync.
+- Confirm sync registry coverage is complete. Every table/model must have a reviewed sync policy,
+  write surfaces, authority, conflict rule, and realtime side-effect policy before production.
+- Confirm the rollback/fail-closed plan is ready. New Bot/WebApp integration behavior must be
+  disableable without deleting synced or migrated data, and rollback audit evidence must remain
+  available.
+- Confirm observability is ready for the production window: outbox/backlog lag, sync health,
+  rejected remote-home mutations, duplicate publication prevention, Telegram publication state,
+  WebApp realtime delivery, and error queues must be visible enough to inspect during rollout.
+- Confirm backups or snapshots are current and restorable for the production data involved in the
+  cutover.
+
+Only after all gates above pass may the owner use the exact phrase `production deploy` to authorize
+the specific production action. The authorization must be interpreted narrowly for that action only;
+it does not authorize unrelated production changes, destructive cleanup, or future deployments.
+
 ## Required Sync Registry
 
 Before broad sync changes, create a registry for every model/table. This registry is now a
@@ -1039,6 +1093,6 @@ without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. What final production acceptance gates should be required after staging automation and owner-led
-   manual validation pass, and what explicit owner approval wording is required before any
-   production action?
+1. Is this roadmap now accepted as the implementation baseline so work can start from Level 1 on
+   `candidate/bot-webapp-integration` after a fresh branch check, or should another risk be analyzed
+   before coding begins?
