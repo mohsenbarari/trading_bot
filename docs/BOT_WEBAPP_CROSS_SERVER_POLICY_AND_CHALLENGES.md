@@ -87,6 +87,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     publish must use a separate dedupe/outbox marker such as offer + target + action, must avoid
     duplicate Telegram posts across direct push and worker replay, and must sync the foreign
     publication result back to Iran without letting Iran call Telegram.
+29. Test coverage for this roadmap must be complete, precise, and scenario-matrix based. The test
+    suite must cover all confirmed Bot/WebApp coexistence scenarios, authority forwarding paths,
+    near-simultaneous actions, retry/replay/idempotency paths, realtime side effects, notification
+    side effects, sync backlog state, and forbidden outcomes. Happy-path-only tests are not enough.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -332,8 +336,10 @@ accepted as accurate and should influence the Bot roadmap.
 - Globally safe IDs or server-partitioned sequences are not implemented.
 - The confirmed bulk/raw/relationship write audit is not implemented yet. Sync-aware helpers or
   explicit sync/outbox logging are not implemented consistently across the codebase.
-- End-to-end tests for bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
-  publish -> result sync back are not implemented.
+- Complete scenario-matrix tests are not implemented. Missing coverage includes bot offer -> Iran
+  WebApp realtime, WebApp offer -> foreign Telegram publish -> result sync back, authority
+  forwarding, replay/idempotency, near-simultaneous actions, forbidden outcomes, and sync backlog
+  assertions.
 - Cross-server outage behavior is not defined: the system does not yet declare whether local offer
   creation should continue, queue with pending state, or be blocked when the peer is unavailable.
 
@@ -415,10 +421,13 @@ This ordering is about implementation difficulty and blast radius, not business 
 7. Implement the confirmed Telegram publication idempotency/outbox model. It must use a dedupe key
    independent from only `channel_message_id`, prevent duplicate posts across direct push and worker
    replay, and sync the foreign publication result back to Iran.
-8. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
-   publication without duplicate channel posts.
-9. Add acceptance gates for every switching scenario: DB state, WebApp realtime state, Telegram
-   channel/user-message state, notification state, and sync backlog must all be asserted.
+8. Implement complete end-to-end and service tests for the confirmed scenario matrix. Required
+   coverage includes Bot offer -> Iran WebApp realtime, WebApp offer -> foreign Telegram publish ->
+   result sync back, owner expiry from both surfaces, requests/trades from both surfaces,
+   near-simultaneous actions, retry/replay/idempotency, and duplicate-side-effect prevention.
+9. Add acceptance gates for every switching scenario. DB state, WebApp realtime state, Telegram
+   channel/user-message state, notification state, sync backlog, command-forwarding behavior, and
+   forbidden outcomes must all be asserted.
 
 #### Level 4 - Recovery, Reconciliation, And Operations
 
@@ -452,7 +461,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 ## Confirmed Offer Switching Acceptance Matrix
 
 These scenarios are accepted as the first official test-writing target for Bot/WebApp coexistence.
-They intentionally avoid using persistent `User.home_server` as offer authority. In this section,
+They are a required scenario matrix, not a small smoke-test list. Tests must cover the happy path,
+near-simultaneous actions, replay/retry behavior, forbidden outcomes, realtime effects, notification
+effects, and sync backlog state with enough precision to catch cross-server divergence. They
+intentionally avoid using persistent `User.home_server` as offer authority. In this section,
 `acting_surface` is the product surface where the user action starts, and `request_home_server` is
 the server handling that action. `Offer.home_server` remains the authoritative offer server.
 
@@ -525,6 +537,8 @@ Forbidden outcomes:
 
 ### Matrix Expansion Cases For Tests
 
+- the core two-way flows must be tested end to end: Bot-authored offer reaches Iran WebApp
+  realtime, and WebApp-authored offer reaches foreign Telegram with publish result synced back;
 - the same owner creates a Bot offer and a WebApp offer minutes apart; each offer keeps the home
   server of its creation surface regardless of `User.home_server`;
 - the owner sends expiry from Bot and WebApp at nearly the same time; the result is idempotent and
@@ -533,6 +547,10 @@ Forbidden outcomes:
   only the offer home server decides the accepted order and remaining quantity;
 - partial fill and full fill update both surfaces consistently;
 - direct push plus worker replay of the same sync event does not duplicate side effects;
+- failed/late Telegram publication must not duplicate posts after retry and must eventually sync the
+  foreign publication result back to Iran;
+- tests must assert DB state, WebApp realtime state, Telegram/channel state, user-visible Bot state,
+  notifications, sync backlog, and absence of forbidden side effects;
 - peer outage behavior is still a separate Level 4 decision: either reject, queue/pending, or allow
   local creation with explicit degraded state, but the final choice must be tested.
 
