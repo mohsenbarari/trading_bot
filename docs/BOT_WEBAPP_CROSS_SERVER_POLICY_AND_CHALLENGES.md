@@ -118,6 +118,15 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     route or forward writes to the authoritative server, execute the command there atomically with
     locks/idempotency/version checks where needed, then replicate the committed result through the
     durable outbox/change-log path.
+35. In healthy connected mode, offer DB commit and durable outbox/change-log recording must happen
+    immediately on the `offer_home_server`; sync delivery must start immediately. User-facing
+    publication on the home surface may be delayed by about 1 second to improve cross-surface
+    simultaneity. The normal healthy target is for the peer surface to receive and publish/apply the
+    offer/update in about 2 seconds. Passing the 2 second target marks the item as lagged or
+    sync-pending for observability; it does not by itself forbid later peer publication. Late peer
+    publication during a short outage is allowed only after checking the latest authoritative state.
+    Medium/long outage recovery still follows the confirmed rule: do not active-publish old
+    local-only offers after catch-up; expire them on their home server and sync final state.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -768,7 +777,30 @@ Confirmed direction:
 - Use a separate idempotency marker for Telegram publication, not only `channel_message_id`.
 - Sync foreign's channel publish result back to Iran without letting Iran call Telegram.
 
-### 9. Concurrent activity needs per-table conflict policy
+### 9. Healthy-mode publication timing must balance simultaneity and safety
+
+The confirmed target is not to delay the authoritative DB write. The authoritative server should
+validate, commit, and record durable outbox/change-log state immediately. The small delay belongs to
+user-facing publication side effects, not to data durability.
+
+Confirmed direction:
+
+- Start sync immediately after the authoritative write path records its outbox/change-log state.
+- Delay home-surface public visibility by about 1 second when that helps Bot/WebApp publication land
+  closer together.
+- Treat 2 seconds as the healthy-mode target for peer receive/apply/publish. If the peer has not
+  applied or published by then, the offer/update becomes lagged or sync-pending for observability.
+- Do not treat the 2 second mark as a hard "never publish on peer" rule. If the peer receives the
+  item after 2 seconds during a short outage or transient lag, it may still publish/apply only after
+  checking the latest authoritative offer state.
+- If the latest authoritative state is no longer active because the offer was traded, expired, or
+  cancelled before peer receipt, the peer must apply that final state and must not active-publish
+  the old create event.
+- For medium/long outage recovery, keep the previously confirmed stricter rule: active local-only
+  offers from before full recovery are expired by their home server and synced as final state rather
+  than newly active-published to the peer.
+
+### 10. Concurrent activity needs per-table conflict policy
 
 Users can act in WebApp and bot at the same time. Simple last-write-wins upsert is not enough for:
 
@@ -793,7 +825,7 @@ Confirmed direction:
   the confirmed outage/degraded-mode behavior.
 - Treat offer/trade mutation as command forwarding to the offer home server, not independent mutation on both servers.
 
-### 10. Session model conflicts with simultaneous WebApp and bot activity
+### 11. Session model conflicts with simultaneous WebApp and bot activity
 
 The current session architecture has a single `user.home_server` concept and previously treated some session
 state as local to the home server. The new policy says users can be active in both WebApp and bot at the same
@@ -818,7 +850,7 @@ Required direction:
 - Keep any remaining `user.home_server` use inside the audited session/auth, runtime-surface, or
   legacy-compatibility categories; do not use it for offer authority.
 
-### 11. Outage behavior must follow offer authority
+### 12. Outage behavior must follow offer authority
 
 When Iran and foreign cannot communicate, each surface may still be up. The confirmed policy is not
 "allow everything locally" and not "block everything". It depends on the offer authority:
@@ -899,4 +931,5 @@ without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
+1. What is the exact user/session authority model for simultaneous WebApp and Telegram bot activity
+   after `user.home_server` stops controlling offer authority?
