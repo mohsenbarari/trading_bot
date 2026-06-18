@@ -1374,11 +1374,13 @@ onMounted(fetchUser)
   }
 
   .dashboard-project-users-search {
+    align-items: flex-start;
     flex-direction: column;
   }
 
   .dashboard-project-users-search-input {
-    width: 100%;
+    flex: 0 0 auto;
+    width: min(100%, 320px);
   }
 }
 
