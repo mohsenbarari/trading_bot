@@ -79,6 +79,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 26. Every bulk `update()`, bulk `delete()`, raw SQL write, and relationship side effect must be
     audited because these paths can bypass ORM listeners and sync/outbox recording. Each case must
     move to a sync-aware helper or explicitly record the required sync/outbox event.
+27. The sync worker's durable source of truth must be committed `change_log` rows where
+    `synced=false`. Redis queue messages and direct HTTP pushes should remain only as low-latency
+    wake-up/acceleration paths; if they are missed or fail, the committed `change_log` row must
+    still be drained and delivered by the worker.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -171,8 +175,8 @@ These pieces are useful and should be preserved, but they are not complete enoug
 - The sync receiver repairs sequences after applying remote rows. This is a useful safety step
   after receipt, but it does not solve simultaneous two-server insert collisions.
 - The current direct push plus Redis queue design gives low-latency delivery when everything is
-  healthy. It should be retained as an acceleration path even if committed outbox draining becomes
-  the reliability source.
+  healthy. It should be retained as an acceleration/wake-up path, while committed `change_log`
+  draining becomes the reliability source.
 
 ### Bot-Specific Findings From External Review
 
@@ -298,9 +302,9 @@ accepted as accurate and should influence the Bot roadmap.
 - The confirmed sync registry does not exist yet. It must declare every table's `sync` or
   `no-sync` policy, write surfaces, authority server, conflict rule, and side effects, and it must
   fail tests/CI when a table is missing from the registry.
-- A durable committed outbox drain is not implemented. `change_log` exists, but the worker consumes
-  Redis queues; replaying committed `change_log WHERE synced=false` is a manual/resync path rather
-  than the normal delivery loop.
+- The confirmed durable committed outbox drain is not implemented. `change_log` exists, but the
+  worker consumes Redis queues; replaying committed `change_log WHERE synced=false` is currently a
+  manual/resync path rather than the normal delivery loop.
 - A server-mode Telegram gateway that hard-fails all Telegram calls on Iran does not exist, and
   Telegram side effects are not yet forced through a single shared gateway.
 - A server-mode WebApp/static gateway that hard-fails frontend service, static asset service, and
@@ -398,8 +402,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 5. Implement the confirmed audit of all bulk `update()`, bulk `delete()`, raw SQL, and relationship
    side effects. Every bypassing mutation must move to a sync-aware helper or explicitly record the
    required sync/outbox event.
-6. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
-   `change_log WHERE synced=false`, while keeping Redis/direct push as wake-up/acceleration.
+6. Implement the confirmed committed outbox drain: the sync worker's durable source must be
+   committed `change_log WHERE synced=false`. Keep Redis/direct push only as wake-up/acceleration,
+   so missed queue/direct events cannot lose a committed sync change.
 7. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
    foreign publication result back to Iran.
 8. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
@@ -572,7 +577,7 @@ Current risks:
 - Redis push failure leaves a `change_log` row that only manual resync/recovery will replay;
 - direct push success does not mark `change_log.synced`; the queued worker still replays later.
 
-Required direction:
+Confirmed direction:
 
 - Make `change_log` the durable outbox.
 - Let worker drain committed `change_log WHERE synced=false`, using Redis only as a wake-up/acceleration path.
