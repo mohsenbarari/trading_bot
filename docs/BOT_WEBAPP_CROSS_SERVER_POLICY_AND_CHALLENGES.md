@@ -134,6 +134,14 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     field between Iran and foreign. Runtime/session authority must be explicit and surface-scoped:
     `webapp` sessions live on Iran, Telegram Bot/FSM runtime lives on foreign, and operations such
     as reset/logout/check must target `webapp`, `telegram_bot`, or `all_surfaces` deliberately.
+37. Migration and cutover to the new Bot/WebApp architecture must be conservative, non-destructive,
+    and data-protective. Historical data must be preserved unless the owner explicitly approves a
+    destructive cleanup. The owner guarantees that no active offers will exist during migration and
+    switch to the new architecture; the rollout must still verify `active offers = 0` on both
+    servers before cutover and abort if any active offer is found. Existing `channel_message_id`
+    values remain foreign-owned, existing sessions remain local runtime state, and partially synced
+    rows or sync backlog must be reconciled to a known safe state before enabling live two-surface
+    behavior.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -390,6 +398,10 @@ accepted as accurate and should influence the Bot roadmap.
 - The confirmed hybrid identity strategy is not implemented. Synced tables do not yet have
   UUID/public IDs as the canonical cross-server identity, and synced-table integer sequences are not
   yet server-partitioned as a migration guard.
+- The confirmed conservative migration/cutover policy is not implemented yet. There is no automated
+  preflight that verifies active offers are zero on both servers, no dry-run report for existing
+  IDs/sequences/old offers/Telegram bindings/sessions/partially synced rows, and no abort gate for
+  unsafe backlog or ambiguous active market state.
 - The confirmed bulk/raw/relationship write audit is not implemented yet. Sync-aware helpers or
   explicit sync/outbox logging are not implemented consistently across the codebase.
 - Complete scenario-matrix tests are not implemented. Missing coverage includes bot offer -> Iran
@@ -526,9 +538,11 @@ This ordering is about implementation difficulty and blast radius, not business 
    from runtime authority. WebApp login, Bot activity, logout, reset, and recovery must not flip a
    persistent user field between Iran and foreign; each operation must target `webapp`,
    `telegram_bot`, or `all_surfaces` explicitly.
-4. Define migration and rollout for existing data: current integer IDs, PostgreSQL sequences, old
-   offers, existing `channel_message_id` values, user sessions, Telegram bindings, and any partially
-   synced rows.
+4. Implement the confirmed conservative migration and rollout policy for existing data. Preserve
+   historical rows, add non-destructive schema/backfill steps first, verify active offers are zero
+   on both servers before cutover, preserve foreign-owned `channel_message_id` values, keep existing
+   sessions as local runtime state, reconcile partially synced rows/backlog to a known safe state,
+   and abort the cutover if any data-protection preflight fails.
 5. Define rollback criteria and rollback mechanics for staging and later production promotion.
 6. Define final production acceptance gates, but do not run them or promote this work until the owner
    explicitly requests production action.
@@ -932,6 +946,33 @@ Required tests:
 - medium/long recovery expires active local-only offers before peer active publication;
 - medium/long recovery syncs only expired/final state for those recovery-expired offers.
 
+### 13. Migration and rollout must be conservative and data-protective
+
+The owner confirmed that data must be handled with maximum caution. The owner also guarantees that
+there will be no active offers during migration and switch to the new architecture. That guarantee
+reduces the hardest market-state ambiguity, but the system must still verify it before cutover.
+
+Confirmed policy:
+
+- Do not rewrite or delete historical data destructively unless the owner explicitly approves that
+  exact cleanup.
+- Run migration as schema-first and compatibility-first: add `public_id`/UUID fields, sequence
+  partitioning, indexes, and compatibility code before changing live authority behavior.
+- Backfill stable identifiers and metadata in a reversible/idempotent way with before/after counts.
+- Verify active offers are zero on both Iran and foreign immediately before cutover. If any active
+  offer exists, abort cutover and do not auto-expire it unless the owner explicitly approves that
+  operational action for that run.
+- Preserve old/closed offers as historical records. If an old offer's authority is ambiguous, mark
+  it for audit/reporting rather than changing historical business meaning.
+- Treat existing `channel_message_id` values as foreign-owned Telegram publication state. Iran must
+  not overwrite them during migration.
+- Keep existing WebApp sessions, Bot FSM state, login requests, and recovery rows local/runtime.
+  Do not try to cross-sync old session rows as product data.
+- Reconcile sync backlog, retry queues, failed direct pushes, and partially synced rows to a known
+  safe state before enabling live two-surface behavior.
+- Produce a migration dry-run report for IDs/sequences, old offers, Telegram bindings, sessions,
+  sync backlog, and ambiguous rows before running a real cutover.
+
 ## Required Sync Registry
 
 Before broad sync changes, create a registry for every model/table. This registry is now a
@@ -939,7 +980,7 @@ confirmed requirement, not an optional design note:
 
 | Table class | Sync policy | Write surfaces | Authority | Conflict rule | Realtime side effects |
 | --- | --- | --- | --- | --- | --- |
-| `offers` | sync | bot, WebApp | `offer_home_server` | command-forward for mutations | WebApp event on Iran, Telegram publish on foreign |
+| `offers` | sync | bot, WebApp | `offer_home_server` | command-forward for mutations; migration cutover requires zero active offers on both servers | WebApp event on Iran, Telegram publish on foreign |
 | `trades` | sync | bot, WebApp | offer home server | shared idempotent command; forward to `offer_home_server` when remote | notifications, offer update event |
 | `users` | sync | admin/auth/bot link/WebApp | TBD | natural key + field-level merge | profile/account events |
 | `messages` | no sync | WebApp only | Iran | n/a | Iran realtime only |
@@ -955,6 +996,5 @@ without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. What is the migration and rollout policy for existing production/staging data: integer IDs,
-   sequences, old offers, `channel_message_id`, existing sessions, Telegram bindings, and partially
-   synced rows?
+1. What rollback criteria and rollback mechanics are required for staging and later production
+   promotion if Bot/WebApp sync, publication, or session-surface behavior misbehaves after cutover?
