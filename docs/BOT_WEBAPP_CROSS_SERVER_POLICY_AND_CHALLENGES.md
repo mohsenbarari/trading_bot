@@ -41,6 +41,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     public WebApp routes, or user-facing WebApp entrypoints. Only explicitly allowed internal
     endpoints such as sync, health, and maintenance may remain reachable there, and this guard must
     be validated in staging.
+18. When Iran applies synced market data that must be visible in the WebApp, it must publish a
+    local post-commit WebApp realtime event without creating a new sync entry or echo. This covers
+    bot-authored offer creation and market-impacting offer/trade/expiry updates received through
+    sync.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -231,8 +235,8 @@ accepted as accurate and should influence the Bot roadmap.
   `owner_user.home_server` first, which conflicts with the surface-based offer-home policy.
 - WebApp-created offers can be published on foreign after sync receive, but the idempotency model
   is still tied mostly to `channel_message_id` and row locking.
-- Bot-created offers can sync to Iran DB, but the Iran-side WebApp realtime publication after
-  applying a synced offer is not explicitly encoded in the sync receive path.
+- Bot-created offers can sync to Iran DB, but the confirmed Iran-side WebApp realtime publication
+  after applying synced market changes is not explicitly encoded in the sync receive path.
 - Session/auth state has cross-server logic in places, but the new policy allows simultaneous
   WebApp and bot activity. It is not yet clear whether session tables sync, stay local, or become
   a documented exception to "all non-messenger tables".
@@ -302,8 +306,9 @@ This ordering is about implementation difficulty and blast radius, not business 
    frontend assets, public WebApp routes, or user-facing WebApp entrypoints. Only explicitly allowed
    internal routes such as sync, health, and maintenance may remain reachable, and staging must
    validate the guard.
-3. After synced bot-created offers are applied on Iran, publish a local WebApp realtime event without
-   creating a sync echo.
+3. After synced market changes are applied on Iran, publish a confirmed local post-commit WebApp
+   realtime event without creating a sync echo. This covers bot-authored offer creation plus
+   offer/trade/expiry updates that affect WebApp market state.
 4. Decide the narrow fate of `/api/chat` on foreign: block the router entirely, block at reverse proxy,
    or allow only explicitly non-messenger internal operations.
 5. Move Bot cancel-all side effects after the DB commit, or route it through a shared expire-offers
@@ -563,7 +568,7 @@ Required direction:
 - For WebApp-created offers, Iran should create the offer and sync it to foreign; foreign publishes to Telegram.
 - For notifications that must reach Telegram users, Iran should relay an internal event/change to foreign, not call Telegram.
 
-### 7. WebApp realtime after bot-created offer needs explicit publish
+### 7. WebApp realtime after synced market changes needs explicit publish
 
 Bot-created offers sync foreign -> Iran. Applying the row on Iran is not enough for "appears immediately"
 unless the Iran WebApp gets a realtime event or the frontend is polling aggressively.
@@ -573,9 +578,12 @@ but it also means synced offers may not publish the same local realtime events a
 
 Required direction:
 
-- After `/api/sync/receive` applies an offer on Iran, publish a local WebApp market event.
-- Ensure this local realtime event does not create a new sync echo.
-- Add e2e or service tests for bot-offer -> Iran DB -> WebApp event.
+- After `/api/sync/receive` applies market-impacting offer/trade/expiry changes on Iran, publish a
+  local WebApp market event after the DB commit.
+- Keep this event local to the Iran WebApp runtime. It must not write `change_log`, enqueue outbound
+  sync, call Telegram, or run on the foreign WebApp surface.
+- Add e2e or service tests for bot-offer -> Iran DB -> WebApp event and for synced trade/expiry
+  updates reaching WebApp without sync echo.
 
 ### 8. Telegram publish after WebApp-created offer needs an idempotent foreign side effect
 
