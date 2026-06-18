@@ -111,6 +111,13 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     may remain as local/internal database keys, but PostgreSQL sequences for synced tables must also
     be server-partitioned during migration to reduce collision risk until all sync/command paths use
     the public identity.
+34. Every synced table must have an explicit conflict policy. Atomic database transactions are
+    required for each authoritative mutation on its home/authority server, but a local PostgreSQL
+    transaction does not solve distributed conflicts between two independent servers. Cross-server
+    two-phase commit or distributed transactions must not be the normal design. The target model is:
+    route or forward writes to the authoritative server, execute the command there atomically with
+    locks/idempotency/version checks where needed, then replicate the committed result through the
+    durable outbox/change-log path.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -354,7 +361,10 @@ accepted as accurate and should influence the Bot roadmap.
 - A complete messenger exclusion contract is not implemented. The excluded table list is now
   conceptually decided, but sync-router/event-listener changes and tests are still missing for
   `chats` and `chat_members`.
-- A complete conflict policy for concurrent two-server writes is not implemented.
+- The confirmed conflict policy for concurrent two-server writes is not implemented. Atomic
+  transactions are not yet consistently enforced around authoritative multi-row commands, and the
+  required per-table owner, allowed write surfaces, merge/version rule, and rejection/forwarding
+  behavior are not encoded yet.
 - The confirmed hybrid identity strategy is not implemented. Synced tables do not yet have
   UUID/public IDs as the canonical cross-server identity, and synced-table integer sequences are not
   yet server-partitioned as a migration guard.
@@ -483,8 +493,11 @@ This ordering is about implementation difficulty and blast radius, not business 
    synced tables and move cross-server sync/commands to that identity, while server-partitioning
    existing integer sequences as a migration guard until integer IDs are no longer used for
    cross-server authority.
-2. Define per-table conflict policy for concurrent writes: owner, natural key, merge rule, version
-   check, and allowed write surfaces.
+2. Implement the confirmed per-table conflict policy for concurrent writes: owner/authority,
+   allowed write surfaces, conflict key, merge or reject/forward rule, version check, and
+   idempotency behavior. Authoritative commands must run in atomic DB transactions on the authority
+   server with row/advisory locks where needed; non-authoritative servers must forward commands or
+   apply replicated committed results, not perform competing local mutations.
 3. Redesign session/auth semantics for simultaneous WebApp and bot activity without letting
    `user.home_server` control offer authority. Strong candidate direction: replace or narrow
    `user.home_server` into explicit session-authority/surface-scoped fields so a WebApp login cannot
@@ -766,10 +779,18 @@ Users can act in WebApp and bot at the same time. Simple last-write-wins upsert 
 - admin settings;
 - trade creation and trade numbers.
 
-Required direction:
+Confirmed direction:
 
 - For each synced table, define owner, conflict key, merge rule, and allowed write surfaces.
-- Use optimistic version checks where a table is updated on both sides.
+- Use atomic DB transactions on the authoritative server for every multi-row command. For example,
+  offer/trade execution must allocate the trade number, create the trade, update offer quantity and
+  status, record outbox/change-log rows, and schedule post-commit side effects as one authoritative
+  transaction.
+- Use row locks, advisory locks, idempotency keys, and optimistic version checks where a table or
+  command can be retried or touched from both surfaces.
+- Do not rely on distributed transactions/two-phase commit between Iran and foreign as the normal
+  architecture; they would make the system dependent on cross-border connectivity and contradict
+  the confirmed outage/degraded-mode behavior.
 - Treat offer/trade mutation as command forwarding to the offer home server, not independent mutation on both servers.
 
 ### 10. Session model conflicts with simultaneous WebApp and bot activity
