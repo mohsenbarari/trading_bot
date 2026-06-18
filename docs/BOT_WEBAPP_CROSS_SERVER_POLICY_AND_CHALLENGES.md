@@ -53,6 +53,9 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     to Iran, Bot FSM state stays local to foreign, and login/recovery request rows should not sync.
     `telegram_id`, user profile, account status, role, and limits are user/account product data and
     should sync.
+21. Every `user.home_server` read and write must be audited and classified as session/auth
+    authority, active login surface/runtime state, legacy compatibility, or an offer-authority bug.
+    The offer-authority category is not allowed as final behavior and must be removed.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -204,9 +207,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Treat WebApp sessions, Bot FSM state, Telegram runtime state, login requests, and recovery
   requests as surface-scoped auth/runtime state. Confirmed synced user/account data includes
   `telegram_id`, profile fields, account status, role, and limits.
-- Treat `user.home_server` as an overloaded legacy field until redesigned. It currently participates
-  in login/session authority, is rewritten during some auth flows, and must be removed from offer-home
-  decisions immediately.
+- Treat `user.home_server` as an overloaded legacy field until redesigned. Every read/write must be
+  classified as session/auth authority, active login surface/runtime state, legacy compatibility, or
+  an offer-authority bug. The offer-authority category must be removed from final behavior.
 
 #### Review Points Not Adopted As Final Design Yet
 
@@ -253,7 +256,9 @@ accepted as accurate and should influence the Bot roadmap.
   and tests so they do not enter general sync by accident.
 - `user.home_server` is overloaded. Auth code writes it from the login/request server, session
   authority reads it as the user's session home, and offer creation currently reads it as offer home.
-  These meanings conflict once a user can use WebApp and Bot at the same time.
+  These meanings conflict once a user can use WebApp and Bot at the same time. The audit
+  classification is now confirmed; only session/auth authority, active login surface/runtime state,
+  and legacy compatibility may remain after offer-authority uses are removed.
 - ID collision handling is only partial. The receiver repairs sequences after applying remote
   rows and has natural-key fallbacks for some tables, but independent two-way inserts can still
   create the same integer ID before either side receives the other row.
@@ -336,9 +341,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 7. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
    During transition, allow only a narrowly guarded `is_system=true AND is_mandatory=true`
    compatibility path if needed; do not keep wholesale `chats`/`chat_members` sync.
-8. Audit all `user.home_server` reads and writes. Classify each use as one of: session authority,
-   active login surface, offer authority bug, or legacy compatibility. Offer authority uses must be
-   removed in this stage.
+8. Implement the confirmed `user.home_server` audit. Classify each read/write as session/auth
+   authority, active login surface/runtime state, legacy compatibility, or offer-authority bug.
+   Offer-authority uses must be removed in this stage.
 
 #### Level 3 - Sync Coverage And Delivery Reliability
 
@@ -495,6 +500,8 @@ Required direction: split the concepts:
 - `user.home_server` or session authority, if still needed, is about authentication/session routing.
 - `offer_home_server` is about where the offer was authored and where authoritative trade mutation occurs.
 - offer creation must set home from the current write surface/server, not from the user's current session home.
+- Every `user.home_server` use must be classified; any use that decides `Offer.home_server` is an
+  offer-authority bug and must be removed.
 
 ### 2. IDs can collide under true two-way writes
 
@@ -664,6 +671,8 @@ Required direction:
 - Do not let a WebApp login flip the meaning of bot offer authority, or vice versa.
 - Add tests/registry entries proving runtime/auth tables are excluded unless explicitly promoted
   later.
+- Keep any remaining `user.home_server` use inside the audited session/auth, runtime-surface, or
+  legacy-compatibility categories; do not use it for offer authority.
 
 ## Proposed Sync Registry
 
