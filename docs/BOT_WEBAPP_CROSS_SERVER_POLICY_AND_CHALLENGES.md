@@ -49,6 +49,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     proxy block is useful but not sufficient by itself; the API must also guard user-facing chat
     requests. Any future foreign-side chat-related internal endpoint must be explicitly allowlisted
     by path and purpose.
+20. Runtime/auth state is surface-local unless explicitly promoted later. WebApp sessions stay local
+    to Iran, Bot FSM state stays local to foreign, and login/recovery request rows should not sync.
+    `telegram_id`, user profile, account status, role, and limits are user/account product data and
+    should sync.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -197,9 +201,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Route every Telegram side effect through a central gateway. Confirmed covered actions include
   offer publication, channel message updates, expire/cancel channel updates, trade button/message
   updates, and Telegram-bound notifications. Iran-side calls must fail closed.
-- Treat WebApp sessions, Bot FSM state, and Telegram runtime state as surface-scoped auth/runtime
-  state unless a later decision explicitly promotes specific metadata into the product sync set.
-  User profile/account status remains product data and should sync.
+- Treat WebApp sessions, Bot FSM state, Telegram runtime state, login requests, and recovery
+  requests as surface-scoped auth/runtime state. Confirmed synced user/account data includes
+  `telegram_id`, profile fields, account status, role, and limits.
 - Treat `user.home_server` as an overloaded legacy field until redesigned. It currently participates
   in login/session authority, is rewritten during some auth flows, and must be removed from offer-home
   decisions immediately.
@@ -210,9 +214,9 @@ accepted as accurate and should influence the Bot roadmap.
   `mandatory_memberships`, are useful options, not final decisions.
 - Blocking WebApp offer creation on foreign is correct for public WebApp/user traffic. Internal
   sync, health, and signed maintenance endpoints still need explicit allow rules.
-- Excluding all session tables from sync is a strong candidate direction, but it needs a separate
-  auth/session policy decision because existing session authority behavior is already cross-server
-  aware in places.
+- Excluding session/login/recovery runtime tables from sync is accepted as direction. Existing
+  session authority behavior may still perform signed cross-server checks, but that does not mean
+  those runtime rows should be general replicated product data.
 - `chats` and `chat_members` are accepted as messenger-owned tables. Any short-term sync support for
   `is_system=true AND is_mandatory=true` rows is transitional only; the target design is a local
   mandatory-channel projection derived from synced `users`.
@@ -244,8 +248,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Bot-created offers can sync to Iran DB, but the confirmed Iran-side WebApp realtime publication
   after applying synced market changes is not explicitly encoded in the sync receive path.
 - Session/auth state has cross-server logic in places, but the new policy allows simultaneous
-  WebApp and bot activity. It is not yet clear whether session tables sync, stay local, or become
-  a documented exception to "all non-messenger tables".
+  WebApp and bot activity. The policy now treats WebApp sessions, Bot FSM, login requests, and
+  recovery requests as surface-local runtime/auth data; implementation still needs explicit guards
+  and tests so they do not enter general sync by accident.
 - `user.home_server` is overloaded. Auth code writes it from the login/request server, session
   authority reads it as the user's session home, and offer creation currently reads it as offer home.
   These meanings conflict once a user can use WebApp and Bot at the same time.
@@ -325,9 +330,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 5. Build the confirmed shared `expire_offers` command/service and route Bot cancel-all through it.
    The service must mutate authoritative DB state first, commit, then run explicit post-commit side
    effects such as Telegram gateway updates, WebApp realtime events, cache updates, and notifications.
-6. Define which runtime/session state is surface-local and which user/account state syncs:
-   WebApp session, Bot FSM, Telegram binding, login requests, recovery requests, user profile, and
-   account status must each have an explicit policy.
+6. Implement the confirmed runtime/session state policy. WebApp sessions are Iran-local, Bot FSM is
+   foreign-local, and login/recovery requests do not sync. `telegram_id`, user profile, account
+   status, role, and limits sync as user/account product data.
 7. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
    During transition, allow only a narrowly guarded `is_system=true AND is_mandatory=true`
    compatibility path if needed; do not keep wholesale `chats`/`chat_members` sync.
@@ -641,18 +646,24 @@ Required direction:
 
 The current session architecture has a single `user.home_server` concept and previously treated some session
 state as local to the home server. The new policy says users can be active in both WebApp and bot at the same
-time and all non-messenger tables should sync.
+time, but runtime/auth state is not the same as product data.
 
-Open questions:
+Confirmed policy:
 
-- Should `user_sessions`, `session_login_requests`, and recovery tables sync?
-- If they sync, how do max-session and active-session checks distinguish WebApp vs bot sessions?
-- If they do not sync, they become an explicit exception to item 5 and must be documented.
+- WebApp sessions stay local to Iran.
+- Bot FSM state stays local to foreign.
+- `user_sessions`, `session_login_requests`, and recovery request rows should not be part of general
+  cross-server sync.
+- Existing signed session-authority checks may still query the authoritative server when needed.
+- `telegram_id`, user profile fields, account status, role, and limits are user/account data and
+  should sync.
 
 Required direction:
 
 - Separate "surface session" from "data authority".
 - Do not let a WebApp login flip the meaning of bot offer authority, or vice versa.
+- Add tests/registry entries proving runtime/auth tables are excluded unless explicitly promoted
+  later.
 
 ## Proposed Sync Registry
 
@@ -662,19 +673,20 @@ Before changing code, create a registry for every model/table:
 | --- | --- | --- | --- | --- | --- |
 | `offers` | sync | bot, WebApp | `offer_home_server` | command-forward for mutations | WebApp event on Iran, Telegram publish on foreign |
 | `trades` | sync | bot, WebApp | offer home server | idempotent command | notifications, offer update event |
-| `users` | sync | admin/auth/bot link/WebApp | TBD | natural key + field-level merge | profile/session events |
+| `users` | sync | admin/auth/bot link/WebApp | TBD | natural key + field-level merge | profile/account events |
 | `messages` | no sync | WebApp only | Iran | n/a | Iran realtime only |
 | `conversations` | no sync | WebApp only | Iran | n/a | Iran realtime only |
 | `chats` | no sync target; transitional mandatory-only compatibility if needed | WebApp/local system | Iran/local projection | no cross-server merge | Iran realtime only |
 | `chat_members` | no sync target; transitional mandatory-only compatibility if needed | WebApp/local system | Iran/local projection | no cross-server merge | Iran realtime only |
-| `user_sessions` | TBD | WebApp/auth | TBD | TBD | session events |
+| `user_sessions` | no sync | WebApp/auth local runtime | local surface | n/a | local session events |
+| `session_login_requests` | no sync | WebApp/auth local runtime | local surface | n/a | local login flow |
+| `single_session_recovery_requests` | no sync | WebApp/auth local runtime | local surface | n/a | local recovery flow |
 
 The implementation should fail CI when a new model or migration introduces a table without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. Should `user_sessions` and login-request tables sync, or are they an explicit exception?
-2. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
-3. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
-4. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
-5. During a cross-server outage, should users still be allowed to create offers on the available local surface?
+1. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
+2. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
+3. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
+4. During a cross-server outage, should users still be allowed to create offers on the available local surface?
