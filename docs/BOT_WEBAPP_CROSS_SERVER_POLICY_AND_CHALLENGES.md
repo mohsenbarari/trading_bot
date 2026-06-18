@@ -37,6 +37,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     `server_mode=iran` because Iran-side Telegram connectivity is both prohibited by policy and
     operationally unavailable due to filtering. The foreign server is the only Telegram execution
     surface.
+17. The foreign server must have a hard WebApp/static guard. It must not serve frontend assets,
+    public WebApp routes, or user-facing WebApp entrypoints. Only explicitly allowed internal
+    endpoints such as sync, health, and maintenance may remain reachable there, and this guard must
+    be validated in staging.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -248,8 +252,8 @@ accepted as accurate and should influence the Bot roadmap.
   than the normal delivery loop.
 - A server-mode Telegram gateway that hard-fails all Telegram calls on Iran does not exist, and
   Telegram side effects are not yet forced through a single shared gateway.
-- A server-mode WebApp gateway that hard-fails frontend service/user WebApp access on foreign does
-  not exist.
+- A server-mode WebApp/static gateway that hard-fails frontend service, static asset service, and
+  public user WebApp access on foreign does not exist.
 - Surface-based offer-home assignment is not implemented for WebApp creation.
 - Explicit bot-side offer-home assignment is not implemented.
 - Automated deployment/config assertions are not implemented yet. The project must verify the Iran
@@ -294,7 +298,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 1. Add the confirmed central Telegram side-effect gateway. Every Telegram call must pass through it,
    foreign is the only allowed execution surface, and `server_mode=iran` must fail closed with an
    operational/security log.
-2. Add a server-mode WebApp/static guard so the foreign API cannot accidentally serve the WebApp.
+2. Add the confirmed server-mode WebApp/static guard so the foreign API cannot accidentally serve
+   frontend assets, public WebApp routes, or user-facing WebApp entrypoints. Only explicitly allowed
+   internal routes such as sync, health, and maintenance may remain reachable, and staging must
+   validate the guard.
 3. After synced bot-created offers are applied on Iran, publish a local WebApp realtime event without
    creating a sync echo.
 4. Decide the narrow fate of `/api/chat` on foreign: block the router entirely, block at reverse proxy,
