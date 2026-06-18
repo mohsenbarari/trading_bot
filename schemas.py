@@ -205,6 +205,7 @@ class ProjectUserDirectoryEntry(BaseModel):
     id: int
     account_name: str
     mobile_number: str
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
