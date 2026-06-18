@@ -91,6 +91,12 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     suite must cover all confirmed Bot/WebApp coexistence scenarios, authority forwarding paths,
     near-simultaneous actions, retry/replay/idempotency paths, realtime side effects, notification
     side effects, sync backlog state, and forbidden outcomes. Happy-path-only tests are not enough.
+30. Cross-server outage behavior is mixed by authority. Local-home offer creation and mutation may
+    proceed on the authoritative local server, while remote sync/publish remains pending. Remote-home
+    mutations must be temporarily rejected by default; any future pending-command path must be
+    explicitly non-final. The non-authoritative server must not mutate locally. After reconnect,
+    remote publication must use the latest authoritative offer state, not just the original create
+    event.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -340,8 +346,10 @@ accepted as accurate and should influence the Bot roadmap.
   WebApp realtime, WebApp offer -> foreign Telegram publish -> result sync back, authority
   forwarding, replay/idempotency, near-simultaneous actions, forbidden outcomes, and sync backlog
   assertions.
-- Cross-server outage behavior is not defined: the system does not yet declare whether local offer
-  creation should continue, queue with pending state, or be blocked when the peer is unavailable.
+- The confirmed cross-server outage policy is not implemented yet. Local-home create/mutate should
+  proceed with remote sync/publish pending, remote-home mutation should be rejected by default
+  without local mutation, and any future pending-command path must be explicitly non-final.
+  Post-reconnect publication must respect the latest authoritative offer state.
 
 ### Challenge Roadmap From Easy To Hard
 
@@ -439,8 +447,11 @@ This ordering is about implementation difficulty and blast radius, not business 
 3. Add an operator runbook for staging incidents: how to inspect backlog, replay outbox rows, recover
    Telegram publication state, verify Iran never called Telegram, and verify foreign never served
    WebApp/messenger.
-4. Define degraded-mode behavior per surface: whether Bot/WebApp offer creation continues, becomes
-   pending, or is blocked when peer sync, Telegram API, Redis, or DB connectivity is degraded.
+4. Implement the confirmed cross-server outage/degraded-mode behavior. Local-home create/mutate is
+   allowed with remote sync/publish pending; remote-home mutate is temporarily rejected by default
+   with no local mutation; any future pending-command path must be explicitly non-final; reads
+   remain allowed with stale/pending state when detectable; post-reconnect publish/update must use
+   the latest authoritative offer state.
 
 #### Level 5 - Core Distributed-System Decisions
 
@@ -551,8 +562,10 @@ Forbidden outcomes:
   foreign publication result back to Iran;
 - tests must assert DB state, WebApp realtime state, Telegram/channel state, user-visible Bot state,
   notifications, sync backlog, and absence of forbidden side effects;
-- peer outage behavior is still a separate Level 4 decision: either reject, queue/pending, or allow
-  local creation with explicit degraded state, but the final choice must be tested.
+- peer outage tests must cover the confirmed mixed policy: local-home create/mutate with remote
+  pending state, remote-home mutation rejection by default, any explicitly non-final pending-command
+  path added later, stale/pending read state, and post-reconnect publish/update based on latest
+  authoritative state.
 
 ## Main Architecture Tensions
 
@@ -750,6 +763,42 @@ Required direction:
 - Keep any remaining `user.home_server` use inside the audited session/auth, runtime-surface, or
   legacy-compatibility categories; do not use it for offer authority.
 
+### 11. Outage behavior must follow offer authority
+
+When Iran and foreign cannot communicate, each surface may still be up. The confirmed policy is not
+"allow everything locally" and not "block everything". It depends on the offer authority:
+
+- If the current server is the `offer_home_server`, local-home create/mutate is allowed. The remote
+  sync, Telegram publish, or WebApp update stays pending until connectivity returns.
+- If the current server is not the `offer_home_server`, remote-home mutate must not run locally.
+  The user-facing action should be temporarily rejected by default. Any future queued/pending
+  command path must be explicit, visible to the user, and non-final until the command reaches the
+  offer home server.
+- Reads/views may remain available, but should show stale or pending state when the system can
+  detect degraded connectivity.
+
+Scenario A details for WebApp-created Iran-home offers during outage:
+
+- If the offer is created on Iran and fully traded before reconnect, foreign syncs the final offer
+  state and trades after reconnect. It must not publish a new active Telegram post for an already
+  closed offer.
+- If the offer is partially traded before reconnect and remains active, foreign may publish/update
+  Telegram after reconnect with the latest authoritative remaining quantity, not the original
+  quantity.
+- If the owner expires the offer before reconnect, or auto-expiry closes it before reconnect,
+  foreign must sync the expired state and must not publish it as an active Telegram opportunity.
+- If a Telegram post somehow already exists, foreign must update/disable that same post instead of
+  creating a duplicate.
+
+Required tests:
+
+- local-home create with remote publish pending;
+- local-home trade/expiry before reconnect;
+- remote-home trade/expiry rejected by default during outage;
+- any later explicit pending-command path remains non-final until accepted by the offer home server;
+- reconnect replay using latest authoritative state;
+- no active Telegram publish for offers already fully traded or expired before reconnect.
+
 ## Required Sync Registry
 
 Before broad sync changes, create a registry for every model/table. This registry is now a
@@ -775,4 +824,3 @@ without a registry entry.
 
 1. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
 2. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
-3. During a cross-server outage, should users still be allowed to create offers on the available local surface?
