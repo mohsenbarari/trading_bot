@@ -57,16 +57,18 @@ This section is mandatory for all work derived from this document.
 7. If the current branch is not exactly `candidate/bot-webapp-integration`, work for this roadmap
    must stop until the branch is corrected.
 8. All commits for this roadmap must be made on `candidate/bot-webapp-integration`.
-9. Staging is the only allowed runtime validation environment for this roadmap unless the owner
+9. A manual branch check is accepted as the required branch-policy guard for this roadmap. A new
+   pre-commit hook, CI rule, or script is not required unless the owner asks for automation later.
+10. Staging is the only allowed runtime validation environment for this roadmap unless the owner
    explicitly approves another target.
-10. Staging validation must use isolated staging configuration, staging artifacts, staging data, and
+11. Staging validation must use isolated staging configuration, staging artifacts, staging data, and
    no production sync peer.
-11. No change from this roadmap may be merged into `main`, any WebApp fix branch, any other candidate
+12. No change from this roadmap may be merged into `main`, any WebApp fix branch, any other candidate
    branch, or any release branch unless the owner explicitly says to merge it.
-12. No change from this roadmap may be deployed to production, benchmarked against production,
+13. No change from this roadmap may be deployed to production, benchmarked against production,
     run against production data, or used to change production sync/Telegram/WebApp behavior unless
     the owner explicitly requests that production action.
-13. Pushing `candidate/bot-webapp-integration` to remote is allowed for backup/review, but that push
+14. Pushing `candidate/bot-webapp-integration` to remote is allowed for backup/review, but that push
     does not imply approval to merge, release, or deploy.
 
 ## Current Code Facts
@@ -276,8 +278,8 @@ This ordering is about implementation difficulty and blast radius, not business 
 7. Add deployment/config assertions that the Iran compose has no active bot service, the foreign
    compose has the bot service, and Iran has no Telegram credentials or outbound Telegram path. Run
    these checks before staging validation.
-8. Add a branch-policy smoke check or documented pre-commit checklist so roadmap commits cannot be
-   made accidentally from the wrong branch.
+8. Keep the documented manual branch-check checklist as the accepted guard so roadmap commits are not
+   made accidentally from the wrong branch. No extra script, hook, or CI rule is required for now.
 
 #### Level 2 - Guardrails And Local Side Effects
 
