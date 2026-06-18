@@ -94,7 +94,6 @@ Rules:
 |---|---|---|
 | `candidate/trading-production-grade` | Production-grade trade/offer hardening and market notification work validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
 | `candidate/web-push-notifications` | Web Push notification work that should be merged to `main` only at the correct release point after staging validation and explicit approval. | Allowed after approval |
-| `candidate/dashboard-collapsible-lists` | Dashboard UI refinement that removes Operations/Account shortcut cards and validates lazy-loaded collapsible project-users and allowed-commodities sections before production promotion. | Allowed after focused staging validation and explicit approval |
 | `staging/user-switcher` | Staging-only user-switcher/reference branch. | Not allowed |
 | `staging/web-push-user-switcher` | Active staging branch for Web Push/user-switcher validation and staging guardrail work. | Not allowed as-is; promote through `candidate/*` only if explicitly approved |
 
@@ -136,3 +135,4 @@ For production-grade application changes:
 | 2026-06-17 | Codex | Added `candidate/market-recent-offers-chatbox` for the market chatbox recent-offer repeat-list fix, branched from current `main` after the trading candidate merge; updated its contract to expired-only recent offers after owner clarification. |
 | 2026-06-17 | Codex | Expanded `candidate/market-recent-offers-chatbox` intent to cover read-only 48-hour market history for `expire_reason=time_limit` expired offers, with staging validation required before any main promotion. |
 | 2026-06-18 | Codex | Added `candidate/dashboard-collapsible-lists` for dashboard-only UI refinement: remove Operations/Account shortcut cards and validate collapsible project-users/allowed-commodities sections before any production promotion. |
+| 2026-06-18 | Codex | Removed `candidate/dashboard-collapsible-lists` from the active branch registry after it was merged into `main`, pushed, and deleted locally/remotely without production deployment. |
