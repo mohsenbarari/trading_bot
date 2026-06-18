@@ -482,6 +482,8 @@ Implementation notes:
 
 ## Stage TH7 - Staging Validation
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Run focused tests and deploy only to staging.
 
 Suggested checks:
@@ -500,7 +502,7 @@ Suggested checks:
 
 Exit criteria:
 
-- Staging confirms three scenarios:
+- Staging validation covers five scenarios:
   1. pure expired offer,
   2. completed wholesale offer,
   3. partial retail offer expired after trade.
@@ -508,6 +510,26 @@ Exit criteria:
      history after sync.
   5. Iran/WebApp-originated completed offer tagged as traded by foreign
      Telegram after sync.
+
+Implementation notes:
+
+- Re-ran the focused backend matrix for market-history read model, sync receive
+  convergence, offer/trade terminal state handling, Telegram channel tag
+  formatting, and bot/API trade execution seams. The matrix passed with
+  `69 tests OK`.
+- Re-ran focused frontend coverage for `MarketView`, `OffersList`, and
+  `useOffers`. The suite passed with `52 tests OK`, covering all-filter
+  history loading, buyer/seller/my tab exclusion, traded/partial/expired stamps,
+  and read-only controls.
+- `git diff --check` passed.
+- `npm run build` in `frontend/` passed; only standard bundle-size warnings were
+  emitted.
+- Deployed the candidate branch to staging with `scripts/deploy_staging.sh
+  deploy`, then confirmed the staging stack with `scripts/deploy_staging.sh ps`
+  and `scripts/deploy_staging.sh health`. The staging app container was healthy
+  and `https://staging.362514.ir/api/config` returned the expected staging
+  config.
+- Production deploy, production sync, and production data mutation were not run.
 
 ## Stage TH8 - Promotion Readiness
 
