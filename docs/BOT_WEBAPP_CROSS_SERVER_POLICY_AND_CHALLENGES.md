@@ -83,6 +83,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     `synced=false`. Redis queue messages and direct HTTP pushes should remain only as low-latency
     wake-up/acceleration paths; if they are missed or fail, the committed `change_log` row must
     still be drained and delivered by the worker.
+28. Telegram publication must be idempotent independently of `channel_message_id`. Foreign-side
+    publish must use a separate dedupe/outbox marker such as offer + target + action, must avoid
+    duplicate Telegram posts across direct push and worker replay, and must sync the foreign
+    publication result back to Iran without letting Iran call Telegram.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -231,9 +235,9 @@ accepted as accurate and should influence the Bot roadmap.
   cancel-all, API cancel-all, single-offer expiry, auto-expiry, market-close expiry, and
   remote-forwarded expiry. Non-authoritative servers forward to `offer_home_server` and do not
   mutate offers locally.
-- Move Telegram publication toward an idempotent gateway/outbox model. The exact schema is still a
-  design decision, but the needed behavior is clear: foreign-only execution, dedupe key, retry state,
-  durable status, and sync-back of publication result.
+- Use the confirmed idempotent Telegram publication gateway/outbox model. The exact schema is still
+  a design decision, but the needed behavior is clear: foreign-only execution, dedupe key independent
+  of `channel_message_id`, retry state, durable status, and sync-back of publication result.
 - Route every Telegram side effect through a central gateway. Confirmed covered actions include
   offer publication, channel message updates, expire/cancel channel updates, trade button/message
   updates, and Telegram-bound notifications. Iran-side calls must fail closed.
@@ -280,8 +284,9 @@ accepted as accurate and should influence the Bot roadmap.
   bot handler does not set that value explicitly from the bot surface.
 - WebApp-created offers are not guaranteed to get `home_server=iran`; current API creation uses
   `owner_user.home_server` first, which conflicts with the surface-based offer-home policy.
-- WebApp-created offers can be published on foreign after sync receive, but the idempotency model
-  is still tied mostly to `channel_message_id` and row locking.
+- WebApp-created offers can be published on foreign after sync receive, but the confirmed
+  independent Telegram publish idempotency/outbox model is not implemented yet; the current model is
+  still tied mostly to `channel_message_id` and row locking.
 - Bot-created offers can sync to Iran DB, but the confirmed Iran-side WebApp realtime publication
   after applying synced market changes is not explicitly encoded in the sync receive path.
 - Session/auth state has cross-server logic in places, but the new policy allows simultaneous
@@ -307,6 +312,8 @@ accepted as accurate and should influence the Bot roadmap.
   manual/resync path rather than the normal delivery loop.
 - A server-mode Telegram gateway that hard-fails all Telegram calls on Iran does not exist, and
   Telegram side effects are not yet forced through a single shared gateway.
+- The confirmed independent Telegram publish idempotency/outbox model is not implemented yet.
+  Current foreign publish behavior still depends mostly on `channel_message_id` and row locking.
 - A server-mode WebApp/static gateway that hard-fails frontend service, static asset service, and
   public user WebApp access on foreign does not exist. `/api/chat` is still mounted with the shared
   API and does not yet have a foreign-side user-facing block.
@@ -405,8 +412,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 6. Implement the confirmed committed outbox drain: the sync worker's durable source must be
    committed `change_log WHERE synced=false`. Keep Redis/direct push only as wake-up/acceleration,
    so missed queue/direct events cannot lose a committed sync change.
-7. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
-   foreign publication result back to Iran.
+7. Implement the confirmed Telegram publication idempotency/outbox model. It must use a dedupe key
+   independent from only `channel_message_id`, prevent duplicate posts across direct push and worker
+   replay, and sync the foreign publication result back to Iran.
 8. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
    publication without duplicate channel posts.
 9. Add acceptance gates for every switching scenario: DB state, WebApp realtime state, Telegram
@@ -670,13 +678,13 @@ WebApp-created offers sync Iran -> foreign, and foreign should publish them to T
 already tries to publish new synced offers on non-Iran servers and skips already-published offers by checking
 `channel_message_id`.
 
-Open concerns:
+Confirmed concerns:
 
 - `channel_message_id` is intentionally not overwritten from sync, so the authoritative channel message id lives on foreign.
 - If the foreign publish succeeds but the subsequent DB update or reverse sync fails, Iran may not learn the channel message id.
 - Duplicate delivery from direct push and worker replay must never duplicate Telegram channel posts.
 
-Required direction:
+Confirmed direction:
 
 - Keep publish side effect only on foreign.
 - Use a separate idempotency marker for Telegram publication, not only `channel_message_id`.
