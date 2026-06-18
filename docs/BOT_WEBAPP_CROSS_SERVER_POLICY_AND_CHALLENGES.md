@@ -97,6 +97,15 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     explicitly non-final. The non-authoritative server must not mutate locally. After reconnect,
     remote publication must use the latest authoritative offer state, not just the original create
     event.
+31. Outage recovery has three modes: short outage up to 2 minutes, medium outage over 2 minutes and
+    up to 1 hour, and long outage over 1 hour. Short outages may use normal pending replay with
+    latest authoritative state. For medium and long outages, cross-surface active publication must
+    stay gated until full recovery/catch-up is proven complete.
+32. For medium and long outage recovery, active offers that were created or remained visible only on
+    their home surface before full recovery must not be published as active offers on the peer
+    surface after recovery. The low-cost default is for the offer home server to expire those
+    still-active local-only offers during recovery finalization, then sync the expired/final state
+    to the peer.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -349,7 +358,9 @@ accepted as accurate and should influence the Bot roadmap.
 - The confirmed cross-server outage policy is not implemented yet. Local-home create/mutate should
   proceed with remote sync/publish pending, remote-home mutation should be rejected by default
   without local mutation, and any future pending-command path must be explicitly non-final.
-  Post-reconnect publication must respect the latest authoritative offer state.
+  Post-reconnect publication must respect the latest authoritative offer state. Medium/long outage
+  recovery must also expire active local-only offers instead of publishing them as active on the
+  peer after full catch-up.
 
 ### Challenge Roadmap From Easy To Hard
 
@@ -451,7 +462,11 @@ This ordering is about implementation difficulty and blast radius, not business 
    allowed with remote sync/publish pending; remote-home mutate is temporarily rejected by default
    with no local mutation; any future pending-command path must be explicitly non-final; reads
    remain allowed with stale/pending state when detectable; post-reconnect publish/update must use
-   the latest authoritative offer state.
+   the latest authoritative offer state. Split behavior into short outage up to 2 minutes, medium
+   outage over 2 minutes and up to 1 hour, and long outage over 1 hour.
+5. Implement the confirmed medium/long outage recovery finalization rule. After full catch-up is
+   proven, active local-only offers created or kept visible before recovery must be expired by their
+   offer home server and synced as expired/final state, not active-published to the peer surface.
 
 #### Level 5 - Core Distributed-System Decisions
 
@@ -566,6 +581,9 @@ Forbidden outcomes:
   pending state, remote-home mutation rejection by default, any explicitly non-final pending-command
   path added later, stale/pending read state, and post-reconnect publish/update based on latest
   authoritative state.
+- medium/long outage tests must prove that after full catch-up, active local-only offers created or
+  kept visible before recovery are expired by the offer home server and sync as expired/final state
+  instead of being active-published to the peer surface.
 
 ## Main Architecture Tensions
 
@@ -777,7 +795,15 @@ When Iran and foreign cannot communicate, each surface may still be up. The conf
 - Reads/views may remain available, but should show stale or pending state when the system can
   detect degraded connectivity.
 
-Scenario A details for WebApp-created Iran-home offers during outage:
+Outage modes:
+
+- Short outage, up to 2 minutes: use normal pending replay with latest authoritative state.
+- Medium outage, over 2 minutes and up to 1 hour: keep cross-surface active publication gated until
+  full catch-up is proven.
+- Long outage, over 1 hour: use the same gate as medium outage, with stronger operator
+  reconciliation and observability before returning to live sync.
+
+Scenario A details for WebApp-created Iran-home offers during short outage:
 
 - If the offer is created on Iran and fully traded before reconnect, foreign syncs the final offer
   state and trades after reconnect. It must not publish a new active Telegram post for an already
@@ -790,6 +816,18 @@ Scenario A details for WebApp-created Iran-home offers during outage:
 - If a Telegram post somehow already exists, foreign must update/disable that same post instead of
   creating a duplicate.
 
+Medium/long outage recovery finalization:
+
+- During the outage, Iran may publish Iran-home offers only on WebApp, and foreign may publish
+  foreign-home offers only on Bot/Telegram.
+- After connectivity returns, both peers continue catch-up until backlog, retries, and failed sync
+  records are resolved enough to declare full recovery.
+- Active local-only offers that were created or kept visible before full recovery must not become
+  active offers on the peer surface.
+- The offer home server expires those still-active local-only offers during recovery finalization and
+  syncs the expired/final state to the peer.
+- Filled, cancelled, or already expired offers only sync their final state.
+
 Required tests:
 
 - local-home create with remote publish pending;
@@ -798,6 +836,8 @@ Required tests:
 - any later explicit pending-command path remains non-final until accepted by the offer home server;
 - reconnect replay using latest authoritative state;
 - no active Telegram publish for offers already fully traded or expired before reconnect.
+- medium/long recovery expires active local-only offers before peer active publication;
+- medium/long recovery syncs only expired/final state for those recovery-expired offers.
 
 ## Required Sync Registry
 
