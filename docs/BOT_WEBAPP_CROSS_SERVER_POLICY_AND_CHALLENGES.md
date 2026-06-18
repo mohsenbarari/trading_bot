@@ -30,6 +30,9 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     and message-linked fields are Iran/WebApp-local. The mandatory system channel is the only
     current non-messenger-like use on these tables and should become a local projection rebuilt from
     synced `users`, not a reason to sync all chat rows.
+15. Deployment/config validation for this roadmap must prove that the Iran stack has no active bot
+    service, has no Telegram credentials or Telegram outbound path, and that the foreign stack has
+    the bot service. These checks must run before staging validation.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -239,6 +242,9 @@ accepted as accurate and should influence the Bot roadmap.
   not exist.
 - Surface-based offer-home assignment is not implemented for WebApp creation.
 - Explicit bot-side offer-home assignment is not implemented.
+- Automated deployment/config assertions are not implemented yet. The project must verify the Iran
+  compose has no active bot service, the foreign compose has the bot service, and Iran has no
+  Telegram credentials/outbound path before staging validation.
 - A complete messenger exclusion contract is not implemented. The excluded table list is now
   conceptually decided, but sync-router/event-listener changes and tests are still missing for
   `chats` and `chat_members`.
@@ -267,8 +273,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 6. Add tests that assert messenger-owned tables are not accepted by the sync model map. This includes
    `messages`, `conversations`, `chat_files`, `upload_batches`, `upload_sessions`, `chats`, and
    `chat_members`.
-7. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
-   has the bot service.
+7. Add deployment/config assertions that the Iran compose has no active bot service, the foreign
+   compose has the bot service, and Iran has no Telegram credentials or outbound Telegram path. Run
+   these checks before staging validation.
 8. Add a branch-policy smoke check or documented pre-commit checklist so roadmap commits cannot be
    made accidentally from the wrong branch.
 
@@ -527,6 +534,8 @@ not encode "Iran must never call Telegram" as a hard invariant.
 Required direction:
 
 - Ensure Iran env has no `BOT_TOKEN` and no Telegram outbound path.
+- Add deployment/config checks that fail before staging validation if Iran has an active bot service
+  or Telegram credentials, or if the foreign stack is missing the bot service.
 - Add a central Telegram side-effect gateway that refuses to call Telegram when `server_mode=iran`.
 - For WebApp-created offers, Iran should create the offer and sync it to foreign; foreign publishes to Telegram.
 - For notifications that must reach Telegram users, Iran should relay an internal event/change to foreign, not call Telegram.
