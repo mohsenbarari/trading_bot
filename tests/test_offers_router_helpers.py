@@ -7,6 +7,7 @@ from sqlalchemy.dialects import postgresql
 
 from api.routers import offers as offers_module
 from models.offer import OfferStatus, OfferType
+from models.trade import Trade
 
 
 def compile_sql(statement):
@@ -125,6 +126,20 @@ def make_offer_response(**overrides):
 
 
 class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
+    def test_trade_model_declares_completed_offer_history_index(self):
+        indexes = {index.name: index for index in Trade.__table__.indexes}
+        self.assertIn("ix_trades_completed_offer_history", indexes)
+        history_index = indexes["ix_trades_completed_offer_history"]
+        self.assertEqual([column.name for column in history_index.columns], ["offer_id", "created_at"])
+        where = str(
+            history_index.dialect_options["postgresql"]["where"].compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        self.assertIn("trades.status = 'COMPLETED'", where)
+        self.assertIn("trades.offer_id IS NOT NULL", where)
+
     async def test_offer_to_response_handles_identity_and_expiry_paths(self):
         offer = make_offer_model()
 
@@ -526,31 +541,53 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_market_offer_history_serializes_traded_and_partial_expired_metadata(self):
         current_user = SimpleNamespace(id=8)
-        completed_event_at = datetime(2026, 1, 2, 9, 0, 0)
+        wholesale_completed_event_at = datetime(2026, 1, 2, 9, 0, 0)
+        retail_completed_event_at = datetime(2026, 1, 2, 8, 45, 0)
         partial_event_at = datetime(2026, 1, 2, 8, 30, 0)
-        completed_offer = make_offer_model(
+        pure_expired_event_at = datetime(2026, 1, 2, 8, 15, 0)
+        wholesale_completed_offer = make_offer_model(
             id=21,
             status=OfferStatus.COMPLETED,
             quantity=10,
             remaining_quantity=0,
+            is_wholesale=True,
+        )
+        retail_completed_offer = make_offer_model(
+            id=22,
+            status=OfferStatus.COMPLETED,
+            quantity=20,
+            remaining_quantity=0,
+            is_wholesale=False,
         )
         partial_expired_offer = make_offer_model(
-            id=22,
+            id=23,
             status=OfferStatus.EXPIRED,
             quantity=20,
             remaining_quantity=8,
+            is_wholesale=False,
+        )
+        pure_expired_offer = make_offer_model(
+            id=24,
+            status=OfferStatus.EXPIRED,
+            quantity=15,
+            remaining_quantity=15,
+            is_wholesale=True,
         )
         history_db = CapturingDB(
             FakeRowExecuteResult(
                 [
-                    (completed_offer, 10, completed_event_at),
+                    (wholesale_completed_offer, 10, wholesale_completed_event_at),
+                    (retail_completed_offer, 20, retail_completed_event_at),
                     (partial_expired_offer, 12, partial_event_at),
+                    (pure_expired_offer, 0, pure_expired_event_at),
                 ]
             )
         )
         serialized_rows = [
             make_offer_response(id=21, status="completed", quantity=10, remaining_quantity=0),
-            make_offer_response(id=22, status="expired", quantity=20, remaining_quantity=8),
+            make_offer_response(id=22, status="completed", quantity=20, remaining_quantity=0, is_wholesale=False),
+            make_offer_response(id=23, status="expired", quantity=20, remaining_quantity=8, is_wholesale=False),
+            make_offer_response(id=24, status="expired", quantity=15, remaining_quantity=15),
         ]
 
         with patch(
@@ -574,7 +611,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                 current_user=current_user,
             )
 
-        self.assertEqual(len(result), 2)
+        self.assertEqual(len(result), 4)
         self.assertEqual(result[0].history_state, "traded")
         self.assertEqual(result[0].history_label, "معامله‌شده")
         self.assertEqual(result[0].traded_quantity, 10)
@@ -583,9 +620,19 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0].history_event_at, "jalali:2026-01-02T09:00:00")
         self.assertEqual(result[1].history_state, "traded")
         self.assertEqual(result[1].history_label, "معامله‌شده")
-        self.assertEqual(result[1].traded_quantity, 12)
-        self.assertTrue(result[1].is_partially_traded)
-        self.assertEqual(result[1].history_event_at, "jalali:2026-01-02T08:30:00")
+        self.assertEqual(result[1].traded_quantity, 20)
+        self.assertFalse(result[1].is_partially_traded)
+        self.assertEqual(result[1].history_event_at, "jalali:2026-01-02T08:45:00")
+        self.assertEqual(result[2].history_state, "traded")
+        self.assertEqual(result[2].history_label, "معامله‌شده")
+        self.assertEqual(result[2].traded_quantity, 12)
+        self.assertTrue(result[2].is_partially_traded)
+        self.assertEqual(result[2].history_event_at, "jalali:2026-01-02T08:30:00")
+        self.assertEqual(result[3].history_state, "expired")
+        self.assertEqual(result[3].history_label, "منقضی")
+        self.assertEqual(result[3].traded_quantity, 0)
+        self.assertFalse(result[3].is_partially_traded)
+        self.assertEqual(result[3].history_event_at, "jalali:2026-01-02T08:15:00")
         serialize_mock.assert_awaited_once()
         self.assertEqual(serialize_mock.call_args.kwargs["viewer_user_id"], 8)
         self.assertFalse(serialize_mock.call_args.kwargs["include_owner_identity"])
