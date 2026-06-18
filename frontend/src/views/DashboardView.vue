@@ -36,9 +36,11 @@ interface DashboardProjectUser {
   id: number
   account_name: string
   mobile_number?: string | null
+  created_at?: string | null
 }
 
 const PROJECT_USERS_PAGE_SIZE = 25
+const PROJECT_USER_NEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -352,11 +354,23 @@ function normalizeProjectUser(raw: unknown): DashboardProjectUser | null {
   const mobileNumber = typeof (raw as { mobile_number?: unknown }).mobile_number === 'string'
     ? (raw as { mobile_number: string }).mobile_number.trim()
     : ''
+  const createdAt = typeof (raw as { created_at?: unknown }).created_at === 'string'
+    ? (raw as { created_at: string }).created_at.trim()
+    : ''
   return {
     id,
     account_name: accountName,
     mobile_number: mobileNumber || null,
+    created_at: createdAt || null,
   }
+}
+
+function isProjectUserNew(projectUser: DashboardProjectUser) {
+  if (!projectUser.created_at) return false
+  const createdAtTime = new Date(projectUser.created_at).getTime()
+  if (!Number.isFinite(createdAtTime)) return false
+  const ageMs = Date.now() - createdAtTime
+  return ageMs >= 0 && ageMs <= PROJECT_USER_NEW_WINDOW_MS
 }
 
 async function loadProjectUsersDirectory(force = false) {
@@ -718,8 +732,13 @@ onMounted(fetchUser)
                 @select="openProjectUserProfile(projectUser)"
               >
                 <template #trailing>
-                  <span v-if="projectUser.mobile_number" class="dashboard-project-user-mobile" dir="ltr">
-                    {{ projectUser.mobile_number }}
+                  <span class="dashboard-project-user-trailing">
+                    <span v-if="isProjectUserNew(projectUser)" class="dashboard-project-user-new-badge">
+                      جدید
+                    </span>
+                    <span v-if="projectUser.mobile_number" class="dashboard-project-user-mobile" dir="ltr">
+                      {{ projectUser.mobile_number }}
+                    </span>
                   </span>
                 </template>
               </AppListItem>
@@ -1193,6 +1212,30 @@ onMounted(fetchUser)
 .dashboard-project-user-card {
   border-radius: var(--ds-radius-md);
   background: rgba(248, 250, 252, 0.82);
+}
+
+.dashboard-project-user-trailing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.dashboard-project-user-new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.35rem;
+  padding: 0.12rem 0.48rem;
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  border-radius: var(--ds-radius-full);
+  background: rgba(220, 252, 231, 0.92);
+  color: var(--ds-success-700);
+  font-size: var(--ds-font-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .dashboard-project-user-mobile {

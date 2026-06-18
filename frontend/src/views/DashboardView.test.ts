@@ -139,8 +139,8 @@ describe('DashboardView.vue', () => {
         },
       ],
       projectUsers: [
-        { id: 31, account_name: 'ali31', mobile_number: '09120000031' },
-        { id: 32, account_name: 'zahra32', mobile_number: '09120000032' },
+        { id: 31, account_name: 'ali31', mobile_number: '09120000031', created_at: '2026-05-12T07:30:00Z' },
+        { id: 32, account_name: 'zahra32', mobile_number: '09120000032', created_at: '2026-04-20T07:30:00Z' },
       ],
     })
 
@@ -178,6 +178,9 @@ describe('DashboardView.vue', () => {
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users-public/12/project-users?limit=25&offset=0')
     expect(wrapper.get('.dashboard-project-users-card').text()).toContain('ali31')
     expect(wrapper.get('.dashboard-project-users-card').text()).toContain('09120000031')
+    const projectUserCards = wrapper.findAll('.dashboard-project-user-card')
+    expect(projectUserCards[0]!.text()).toContain('جدید')
+    expect(projectUserCards[1]!.text()).not.toContain('جدید')
 
     await wrapper.get('.dashboard-accordion-toggle--commodities').trigger('click')
     await flushPromises()
