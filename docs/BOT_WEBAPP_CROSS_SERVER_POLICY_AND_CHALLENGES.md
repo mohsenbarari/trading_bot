@@ -142,6 +142,14 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     values remain foreign-owned, existing sessions remain local runtime state, and partially synced
     rows or sync backlog must be reconciled to a known safe state before enabling live two-surface
     behavior.
+38. Rollback planning is mandatory even though the target is to avoid rollback through complete
+    staging validation. Staging tests must be precise, scenario-matrix based, and broad enough to
+    cover every confirmed Bot/WebApp coexistence path before any production consideration. The
+    second validation stage is owner-led manual testing, with the assistant supporting log reading,
+    sync-health inspection, and correctness checks. If rollback is ever required, the default
+    rollback must fail closed or disable the new behavior/feature flags first while preserving data;
+    synced or migrated data must not be deleted unless the owner explicitly approves that exact
+    cleanup.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -408,6 +416,9 @@ accepted as accurate and should influence the Bot roadmap.
   WebApp realtime, WebApp offer -> foreign Telegram publish -> result sync back, authority
   forwarding, replay/idempotency, near-simultaneous actions, forbidden outcomes, and sync backlog
   assertions.
+- The confirmed owner-led staging validation phase is not implemented yet. There is no formal
+  staging checklist that pairs automated scenario-matrix results with manual owner testing, log
+  review, sync-health review, Telegram/WebApp publication checks, and explicit sign-off.
 - The confirmed cross-server outage policy is not implemented yet. Local-home create/mutate should
   proceed with remote sync/publish pending, remote-home mutation should be rejected by default
   without local mutation, and any future pending-command path must be explicitly non-final.
@@ -543,7 +554,12 @@ This ordering is about implementation difficulty and blast radius, not business 
    on both servers before cutover, preserve foreign-owned `channel_message_id` values, keep existing
    sessions as local runtime state, reconcile partially synced rows/backlog to a known safe state,
    and abort the cutover if any data-protection preflight fails.
-5. Define rollback criteria and rollback mechanics for staging and later production promotion.
+5. Implement the confirmed rollback criteria and rollback mechanics. The default rollback must
+   disable/fail-close new Bot/WebApp integration behavior first, preserve data, keep audit trails,
+   and avoid destructive cleanup unless the owner explicitly approves the exact action. Staging must
+   include automated scenario-matrix coverage plus an owner-led manual validation phase where logs,
+   sync health, WebApp state, Telegram state, and session-surface behavior are reviewed before
+   sign-off.
 6. Define final production acceptance gates, but do not run them or promote this work until the owner
    explicitly requests production action.
 
@@ -973,6 +989,33 @@ Confirmed policy:
 - Produce a migration dry-run report for IDs/sequences, old offers, Telegram bindings, sessions,
   sync backlog, and ambiguous rows before running a real cutover.
 
+### 14. Rollback must preserve data and staging validation must be exhaustive
+
+The owner confirmed the rollback direction but expects the staging test plan to be strong enough
+that rollback should not be needed. This means rollback remains a safety mechanism, not a substitute
+for validation.
+
+Confirmed policy:
+
+- Automated staging tests must cover the full scenario matrix, not just happy paths. Coverage must
+  include offer creation from both surfaces, trade/request execution from both surfaces, expiry from
+  both surfaces, same-user simultaneous WebApp/Bot activity, near-simultaneous commands,
+  retry/replay, outage modes, idempotent Telegram publication, WebApp realtime, notification side
+  effects, sync backlog, forbidden outcomes, and data-protection preflights.
+- Staging validation has a second manual phase led by the owner. During that phase, the assistant's
+  role is to help inspect logs, sync health, DB state, Telegram publication state, WebApp realtime
+  state, session-surface behavior, and any suspicious lag/backlog before owner sign-off.
+- Rollback criteria must be explicit before cutover. Examples include wrong `offer_home_server`,
+  duplicate Telegram posts, Iran-side Telegram attempts, foreign-side WebApp exposure, lost or
+  conflicting offer/trade state, non-zero unrecoverable sync backlog, incorrect session-surface
+  behavior, or failed data-protection gates.
+- Default rollback means disabling or fail-closing the new behavior first: feature flags, new
+  publication paths, command forwarding, or Bot/WebApp integration entrypoints. Do not delete synced
+  rows or migrated fields as the default rollback.
+- Any destructive cleanup after rollback requires an explicit owner request for that exact cleanup.
+- Rollback must leave enough audit/log evidence to diagnose the issue and decide whether to retry
+  staging after a fix.
+
 ## Required Sync Registry
 
 Before broad sync changes, create a registry for every model/table. This registry is now a
@@ -996,5 +1039,6 @@ without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. What rollback criteria and rollback mechanics are required for staging and later production
-   promotion if Bot/WebApp sync, publication, or session-surface behavior misbehaves after cutover?
+1. What final production acceptance gates should be required after staging automation and owner-led
+   manual validation pass, and what explicit owner approval wording is required before any
+   production action?
