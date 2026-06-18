@@ -76,6 +76,9 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     explicit entry that declares `sync` or `no-sync`, write surfaces, authority, conflict rule, and
     side effects. Tests/CI must fail when a model/table or migration introduces a table without a
     registry entry.
+26. Every bulk `update()`, bulk `delete()`, raw SQL write, and relationship side effect must be
+    audited because these paths can bypass ORM listeners and sync/outbox recording. Each case must
+    move to a sync-aware helper or explicitly record the required sync/outbox event.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -263,7 +266,8 @@ accepted as accurate and should influence the Bot roadmap.
   centralized as a hard runtime guard.
 - "All non-messenger tables sync immediately" is only partially true. Many tables have ORM
   listeners, but not every table/model has a declared sync policy, and bulk SQL updates can
-  bypass listeners.
+  bypass listeners. The bulk/raw/relationship audit is now confirmed, and each bypassing mutation
+  must move to a sync-aware helper or write explicit sync/outbox records.
 - Messenger exclusion is incomplete. `messages` and `conversations` are excluded from the sync
   router, but `chats` and `chat_members` are still synced and have event listeners. These two tables
   are now confirmed as messenger-owned and should leave the general sync map after the mandatory
@@ -315,7 +319,8 @@ accepted as accurate and should influence the Bot roadmap.
   `chats` and `chat_members`.
 - A complete conflict policy for concurrent two-server writes is not implemented.
 - Globally safe IDs or server-partitioned sequences are not implemented.
-- Sync-aware helpers for bulk updates/deletes are not implemented consistently across the codebase.
+- The confirmed bulk/raw/relationship write audit is not implemented yet. Sync-aware helpers or
+  explicit sync/outbox logging are not implemented consistently across the codebase.
 - End-to-end tests for bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
   publish -> result sync back are not implemented.
 - Cross-server outage behavior is not defined: the system does not yet declare whether local offer
@@ -390,8 +395,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 4. Implement the confirmed sync registry for every model/table with `sync` or `no-sync`, write
    surfaces, authority, conflict rule, and side effects. Add a test/CI gate that fails when a new
    model/table or migration introduces a table without a registry entry.
-5. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
-   sync-aware helpers or explicit outbox logging.
+5. Implement the confirmed audit of all bulk `update()`, bulk `delete()`, raw SQL, and relationship
+   side effects. Every bypassing mutation must move to a sync-aware helper or explicitly record the
+   required sync/outbox event.
 6. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
    `change_log WHERE synced=false`, while keeping Redis/direct push as wake-up/acceleration.
 7. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
@@ -582,13 +588,15 @@ Several important mutations use SQLAlchemy bulk `update()` and do not fire ORM m
 - selected admin/message service updates.
 
 If all non-messenger tables must sync immediately, these paths need explicit outbox logging or must move
-through sync-aware service helpers.
+through sync-aware service helpers. This audit is now confirmed as required.
 
 Required direction:
 
 - Add a small sync-aware mutation helper for bulk updates.
 - Add tests that each important mutation creates a `change_log` entry.
 - Audit all `update(...)`, `delete(...)`, raw SQL, and direct relationship side effects.
+- For every bypassing mutation, either move it to a sync-aware helper or explicitly record the
+  sync/outbox event.
 
 ### 5. Messenger exclusion is not fully encoded
 
