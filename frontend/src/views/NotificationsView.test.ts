@@ -5,6 +5,10 @@ import NotificationsView from './NotificationsView.vue'
 import { useNotificationStore } from '../stores/notifications'
 
 const routerPushMock = vi.fn()
+const webPushMocks = vi.hoisted(() => ({
+  getWebPushStatus: vi.fn(),
+  enableWebPushNotifications: vi.fn(),
+}))
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -12,10 +16,19 @@ vi.mock('vue-router', () => ({
   }),
 }))
 
+vi.mock('../services/webPush', () => ({
+  getWebPushStatus: webPushMocks.getWebPushStatus,
+  enableWebPushNotifications: webPushMocks.enableWebPushNotifications,
+}))
+
 describe('NotificationsView.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     routerPushMock.mockReset()
+    webPushMocks.getWebPushStatus.mockReset()
+    webPushMocks.enableWebPushNotifications.mockReset()
+    webPushMocks.getWebPushStatus.mockResolvedValue({ state: 'subscribed' })
+    webPushMocks.enableWebPushNotifications.mockResolvedValue({ state: 'subscribed' })
   })
 
   it('renders the loading state while the notification history is still fetching', async () => {
@@ -39,6 +52,27 @@ describe('NotificationsView.vue', () => {
 
     expect(openNotificationCenterSpy).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('هیچ اعلانی یافت نشد')
+  })
+
+  it('shows only the enable action when push notifications are inactive', async () => {
+    webPushMocks.getWebPushStatus.mockResolvedValueOnce({ state: 'unsubscribed' })
+    const store = useNotificationStore()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    expect(wrapper.find('.push-enable-btn').exists()).toBe(true)
+    expect(wrapper.find('.push-test-btn').exists()).toBe(false)
+    expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
+
+    await wrapper.get('.push-enable-btn').trigger('click')
+    await flushPromises()
+
+    expect(webPushMocks.enableWebPushNotifications).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('فعال شد')
+    expect(wrapper.find('.push-test-btn').exists()).toBe(false)
+    expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
   })
 
   it('routes back home and delegates clear/delete actions to the store after confirmation', async () => {
@@ -71,6 +105,7 @@ describe('NotificationsView.vue', () => {
     await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
     expect(clearAllSpy).toHaveBeenCalledTimes(1)
 
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
     await wrapper.get('.delete-btn').trigger('click')
     expect(wrapper.text()).toContain('حذف اعلان')
     await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
@@ -108,17 +143,21 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
+    const categoryTabs = wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
+    expect(categoryTabs).toHaveLength(2)
+    expect(categoryTabs[1]!.attributes('aria-selected')).toBe('true')
+    const filterTabs = wrapper.find('.notification-toolbar').findAll('[role="tab"]')
+    expect(filterTabs).toHaveLength(3)
     expect(wrapper.text()).toContain('خوانده نشده')
     expect(wrapper.text()).toContain('خوانده شده')
 
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
+    await filterTabs[1]!.trigger('click')
     expect(wrapper.text()).toContain('خوانده نشده')
     expect(wrapper.text()).not.toContain('خوانده شده')
-    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('tabindex')).toBe('0')
-    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('.notification-toolbar').findAll('[role="tab"]')[1]!.attributes('tabindex')).toBe('0')
+    expect(wrapper.find('.notification-toolbar').findAll('[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
 
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
+    await wrapper.find('.notification-toolbar').findAll('[role="tab"]')[2]!.trigger('click')
     expect(wrapper.text()).not.toContain('خوانده نشده')
     expect(wrapper.text()).toContain('خوانده شده')
   })
@@ -153,7 +192,7 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    const chips = () => wrapper.findAll('[role="tab"]')
+    const chips = () => wrapper.find('.notification-toolbar').findAll('[role="tab"]')
     expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
 
     await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
@@ -192,6 +231,8 @@ describe('NotificationsView.vue', () => {
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
 
     await wrapper.get('.notif-item').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
@@ -272,6 +313,8 @@ describe('NotificationsView.vue', () => {
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
 
     expect(wrapper.find('.notif-text').exists()).toBe(false)
     expect(wrapper.find('.notif-line-plain').text()).toContain('فروش')

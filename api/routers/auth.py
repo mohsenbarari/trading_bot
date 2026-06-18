@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import logging
 from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import quote
 import random
 import secrets
 import hashlib
@@ -16,6 +17,7 @@ from models.user import User, UserRole, set_legacy_has_bot_access_compatibility
 from models.accountant_relation import AccountantRelationStatus
 from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
+from core.enums import NotificationCategory, NotificationLevel
 from core.security import (
     create_access_token,
     create_refresh_token,
@@ -46,7 +48,7 @@ from core.services.user_account_status_service import get_user_account_status, i
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from models.session import Platform, UserSession
 import uuid
-from core.utils import normalize_persian_numerals, utc_now, utc_now_naive
+from core.utils import create_user_notification, normalize_persian_numerals, utc_now, utc_now_naive
 from core.server_routing import SERVER_FOREIGN, server_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
@@ -64,6 +66,62 @@ from core.services.customer_relation_service import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _should_announce_project_user_registration(accountant_relation, customer_relation) -> bool:
+    return accountant_relation is None and customer_relation is None
+
+
+def _project_user_joined_message(user: User) -> str:
+    display_name = (getattr(user, "full_name", None) or getattr(user, "account_name", "") or "").strip()
+    return f"{display_name} به لیست همکاران اضافه شدند."
+
+
+def _project_user_profile_route(user: User) -> str:
+    account_name = (getattr(user, "account_name", "") or "").strip()
+    suffix = f"?account_name={quote(account_name)}" if account_name else ""
+    return f"/users/{user.id}{suffix}"
+
+
+async def _publish_project_user_joined_notifications(db: AsyncSession, new_user: User) -> None:
+    if not getattr(new_user, "id", None):
+        return
+
+    recipient_stmt = select(User.id).where(
+        User.is_deleted == False,
+        User.id != new_user.id,
+    )
+    try:
+        recipient_ids = list((await db.execute(recipient_stmt)).scalars().all())
+    except Exception as exc:
+        logger.warning("Project user joined notification recipient lookup failed: %s", exc)
+        return
+
+    message = _project_user_joined_message(new_user)
+    route = _project_user_profile_route(new_user)
+    for recipient_id in recipient_ids:
+        try:
+            await create_user_notification(
+                db,
+                int(recipient_id),
+                message,
+                NotificationLevel.INFO,
+                NotificationCategory.SYSTEM,
+                extra_payload={
+                    "title": "پیام مدیریت",
+                    "route": route,
+                },
+            )
+        except Exception as exc:
+            await db.rollback()
+            logger.warning(
+                "Project user joined notification failed",
+                extra={
+                    "recipient_id": recipient_id,
+                    "new_user_id": new_user.id,
+                    "error": str(exc),
+                },
+            )
 
 def _raise_inactive_account_error() -> None:
     raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
@@ -478,6 +536,9 @@ async def register_complete(
         await db.rollback()
         logger.error(f"Registration error: {e}")
         raise HTTPException(status_code=500, detail="خطا در ثبت کاربر")
+
+    if _should_announce_project_user_registration(accountant_relation, customer_relation):
+        await _publish_project_user_joined_notifications(db, new_user)
         
     if invitation_token:
         await redis.delete(f"reg_otp:{invitation_token}")
