@@ -7,6 +7,12 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 
 Last updated: 2026-06-18
 
+Implementation baseline acceptance: on 2026-06-18, the owner accepted section 16
+(`Second-pass audit findings before implementation`) and section 17
+(`Third-pass external review decisions before implementation`) as part of the implementation
+baseline. Implementation must still start with a fresh branch check and the pre-code freshness
+report required by Level 1.
+
 ## Non-Negotiable Policy
 
 1. Iran server never connects to Telegram.
@@ -1490,6 +1496,6 @@ migration inventory.
 
 ## Immediate Questions For Next Round
 
-1. Are the second-pass audit additions in section 16 and the third-pass external-review decisions
-   in section 17 accepted as part of the implementation baseline? If yes, implementation can start
-   from Level 1 on `candidate/bot-webapp-integration` after a fresh branch check.
+1. Accepted on 2026-06-18: the second-pass audit additions in section 16 and the third-pass
+   external-review decisions in section 17 are part of the implementation baseline. The next step is
+   the Level 1 pre-code freshness report and then owner-approved branch refresh if needed.
