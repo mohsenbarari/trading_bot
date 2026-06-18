@@ -8,7 +8,8 @@ set -e
 # Iran Server:              API + Nginx + Frontend
 # ==========================================
 
-PROJECT_DIR="/root/trading-bot/trading_bot"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 DIST_DIR="$PROJECT_DIR/mini_app_dist"
 DEPLOY_STATE_DIR="$PROJECT_DIR/tmp/deploy-state"
