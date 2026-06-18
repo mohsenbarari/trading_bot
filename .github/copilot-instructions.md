@@ -203,11 +203,21 @@ make status      # Container status
   `scripts/deploy_staging.sh`, which builds to `mini_app_dist_staging`, serves
   that path from staging Nginx, and passes the same artifact into the staging
   Docker build. Do not point staging back to production `mini_app_dist`.
+- Production release must normally be executed from `main` matching `origin/main`;
+  `scripts/production_deploy_online.sh` enforces this through
+  `PRODUCTION_RELEASE_BRANCH`, `IRAN_ALLOW_NON_MAIN_RELEASE`, and
+  `IRAN_ALLOW_RELEASE_BRANCH_DRIFT`. Use the overrides only for documented
+  emergencies, because production payload sync deploys local files, not a remote
+  branch checkout.
+- Production frontend release contracts are enforced before and after Iran sync.
+  MarketView production bundles must contain `/api/offers/expired` so the
+  read-only expired-offer history cannot silently disappear during deploy.
 
 ## Major Changes History
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-06-18 15:09 UTC | Codex | **Production Frontend Release Guard Added**: Repaired the live Iran `mini_app_dist` after production was serving a MarketView bundle without `/api/offers/expired`, which prevented read-only expired market offers from loading despite valid backend/data. Hardened `scripts/production_deploy_online.sh` so production releases must normally run from `main` matching upstream, with explicit emergency overrides only, and added local plus remote frontend release-contract checks that fail deploy if the MarketView bundle cannot load expired offers. Updated production deployment docs, manifest example, and static guard coverage. |
 | 2026-06-18 08:02 UTC | Codex | **Market Offer Web Push First-Live Detection Fixed**: Created `candidate/market-notification-staging-fix` from `main` and fixed market-offer Web Push gating so time-expired offers that are still `ACTIVE` for a short worker-delay window no longer block the next live offer from being treated as the first active market offer. Added focused Web Push coverage and revalidated offer-create scheduling tests. Production deploy was not run. |
 | 2026-06-18 07:26 UTC | Codex | **Dashboard Candidate Merged To Main**: Merged `candidate/dashboard-collapsible-lists` into `main` with merge commit `ace324f`, pushed `main`, and deleted the candidate branch locally and remotely after focused backend/frontend tests plus frontend build passed. Production deploy was explicitly not run. |
 | 2026-06-18 07:08 UTC | Codex | **Dashboard Project Users Search Mobile Size Fixed**: Corrected the mobile dashboard project-users search field by resetting its column-layout flex basis so the 320px desktop basis no longer expands the input height on mobile. Focused Dashboard Vitest and frontend production build passed. Deployed the candidate branch to staging only. |
