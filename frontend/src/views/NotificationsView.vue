@@ -198,16 +198,15 @@ onMounted(async () => {
         <AppIconButton type="button" class="notifications-return" label="بازگشت" size="sm" @click="goBack">
           <ChevronRight :size="22" />
         </AppIconButton>
-      </header>
-
-      <main class="content">
         <AppFilterChips
           v-model="activeCategory"
           class="notification-category-tabs"
           label="دسته‌بندی اعلان‌ها"
           :options="categoryOptions"
         />
+      </header>
 
+      <main class="content">
         <AppSectionCard
           v-if="showPushEnablePanel"
           title="اعلان دستگاه"
@@ -374,9 +373,10 @@ onMounted(async () => {
 }
 
 .notifications-topbar {
-  display: flex;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: var(--ds-touch-target) minmax(0, 1fr);
   align-items: center;
+  gap: 0.55rem;
   min-height: 3rem;
 }
 
@@ -391,7 +391,17 @@ onMounted(async () => {
 }
 
 .notification-category-tabs {
-  margin-bottom: 0.1rem;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.notification-category-tabs :deep(.ui-filter-chips) {
+  width: 100%;
+}
+
+.notification-category-tabs :deep(.ui-filter-chip) {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .notifications-section {
