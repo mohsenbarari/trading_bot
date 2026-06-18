@@ -24,7 +24,7 @@ import {
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
-const activeCategory = ref<'trade' | 'management'>('management')
+const activeCategory = ref<'trade' | 'management'>('trade')
 const pushState = ref<WebPushRuntimeState>('checking')
 const isPushBusy = ref(false)
 const pushActionMessage = ref('')

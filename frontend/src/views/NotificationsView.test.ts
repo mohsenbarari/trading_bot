@@ -138,15 +138,15 @@ describe('NotificationsView.vue', () => {
 
     const categoryTabs = wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
     expect(categoryTabs).toHaveLength(2)
-    expect(categoryTabs[1]!.attributes('aria-selected')).toBe('true')
+    expect(categoryTabs[0]!.attributes('aria-selected')).toBe('true')
     expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
-    expect(wrapper.text()).toContain('پیام مدیریتی')
-    expect(wrapper.text()).not.toContain('اعلان معامله')
-
-    await categoryTabs[0]!.trigger('click')
     expect(wrapper.text()).not.toContain('پیام مدیریتی')
     expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
     expect(wrapper.find('.notif-title').exists()).toBe(false)
+
+    await categoryTabs[1]!.trigger('click')
+    expect(wrapper.text()).toContain('پیام مدیریتی')
+    expect(wrapper.text()).not.toContain('اعلان معامله')
   })
 
   it('supports keyboard navigation across notification category tabs', async () => {
@@ -180,13 +180,10 @@ describe('NotificationsView.vue', () => {
     await flushPromises()
 
     const chips = () => wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
-    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['-1', '0'])
-
-    await chips()[1]!.trigger('keydown', { key: 'ArrowLeft' })
+    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1'])
     expect(chips()[0]!.attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).not.toContain('پیام مدیریتی')
     expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
-    expect(wrapper.find('.notif-title').exists()).toBe(false)
 
     await chips()[0]!.trigger('keydown', { key: 'Home' })
     expect(chips()[0]!.attributes('aria-selected')).toBe('true')
@@ -195,6 +192,12 @@ describe('NotificationsView.vue', () => {
     expect(chips()[1]!.attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).toContain('پیام مدیریتی')
     expect(wrapper.text()).not.toContain('اعلان معامله')
+
+    await chips()[1]!.trigger('keydown', { key: 'Home' })
+    expect(chips()[0]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).not.toContain('پیام مدیریتی')
+    expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
+    expect(wrapper.find('.notif-title').exists()).toBe(false)
   })
 
   it('opens a notification route when the item carries one', async () => {
@@ -251,6 +254,7 @@ describe('NotificationsView.vue', () => {
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
 
     expect(wrapper.find('.notif-lines').exists()).toBe(false)
     expect(wrapper.find('.notif-text').text()).toContain('یادآوری ساده')
@@ -342,6 +346,7 @@ describe('NotificationsView.vue', () => {
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
 
     expect(wrapper.find('.notif-text').exists()).toBe(false)
     expect(wrapper.find('.notif-lines.is-trade-lines').exists()).toBe(false)
