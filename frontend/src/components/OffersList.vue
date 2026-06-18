@@ -101,11 +101,45 @@ function isExpiredOffer(offer: any): boolean {
   return offer?.status === 'expired' || offer?.history_state === 'expired'
 }
 
+function isTradedHistoryOffer(offer: any): boolean {
+  return offer?.history_state === 'traded'
+}
+
 function isReadOnlyOffer(offer: any): boolean {
   const status = String(offer?.status ?? '').toLowerCase()
   return offer?.is_read_only === true
     || typeof offer?.history_state === 'string'
     || (status !== '' && status !== 'active')
+}
+
+function getFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) ? numericValue : null
+}
+
+function getHistoryStampLabel(offer: any): string {
+  if (isTradedHistoryOffer(offer)) {
+    const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
+    if (offer?.is_partially_traded === true && tradedQuantity !== null && tradedQuantity > 0) {
+      return `معامله‌شده · ${tradedQuantity.toLocaleString()} عدد`
+    }
+    return 'معامله‌شده'
+  }
+  if (isExpiredOffer(offer)) return 'منقضی'
+  return ''
+}
+
+function getOfferQuantityLabel(offer: any): string {
+  const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
+  const remainingQuantity = getFiniteNumber(offer?.remaining_quantity)
+  const totalQuantity = getFiniteNumber(offer?.quantity)
+  if (isTradedHistoryOffer(offer) && tradedQuantity !== null && tradedQuantity > 0) {
+    return `${tradedQuantity.toLocaleString()} عدد`
+  }
+  if (remainingQuantity !== null) return `${remainingQuantity.toLocaleString()} عدد`
+  if (totalQuantity !== null) return `${totalQuantity.toLocaleString()} عدد`
+  return '---'
 }
 
 // Keep active offers live-filtered, while read-only history rows remain visible.
@@ -460,12 +494,21 @@ async function cancelOwnOffer(offerId: number) {
         :class="{
           'timer-critical': !isReadOnlyOffer(offer) && isCritical(offer),
           'has-timer': !isReadOnlyOffer(offer) && hasTimer(offer),
+          'is-history': isReadOnlyOffer(offer),
           'is-expired': isExpiredOffer(offer),
+          'is-traded': isTradedHistoryOffer(offer),
         }"
         :style="cardTimerStyle(offer)"
       >
         <div class="offer-card-inner" :class="[offer.offer_type]">
-          <span v-if="isExpiredOffer(offer)" class="expired-ribbon">منقضی</span>
+          <span
+            v-if="getHistoryStampLabel(offer)"
+            class="history-ribbon"
+            :class="isTradedHistoryOffer(offer) ? 'traded-ribbon' : 'expired-ribbon'"
+            data-test="history-stamp"
+          >
+            {{ getHistoryStampLabel(offer) }}
+          </span>
 
           <!-- Header: role badge + time -->
           <div class="offer-header">
@@ -479,7 +522,7 @@ async function cancelOwnOffer(offerId: number) {
           <div class="offer-body">
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
-              <span class="quantity-badge">{{ offer.remaining_quantity }} عدد</span>
+              <span class="quantity-badge">{{ getOfferQuantityLabel(offer) }}</span>
               <span class="price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
             </div>
             <div v-if="offer.customer_badge_visible" class="customer-context-row">
@@ -652,18 +695,18 @@ async function cancelOwnOffer(offerId: number) {
   overflow: hidden;
 }
 
-.offer-card-wrap.is-expired .offer-card-inner {
+.offer-card-wrap.is-history .offer-card-inner {
   background: var(--ds-bg-surface);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
   padding-top: 34px;
 }
 
-.offer-card-wrap.is-expired .price,
-.offer-card-wrap.is-expired .commodity {
+.offer-card-wrap.is-history .price,
+.offer-card-wrap.is-history .commodity {
   color: var(--ds-text-secondary);
 }
 
-.expired-ribbon {
+.history-ribbon {
   position: absolute;
   top: 8px;
   left: 50%;
@@ -671,9 +714,6 @@ async function cancelOwnOffer(offerId: number) {
   min-width: 74px;
   transform: translateX(-50%) rotate(-7deg);
   transform-origin: center;
-  background: rgba(239, 68, 68, 0.06);
-  color: #b91c1c;
-  border: 2px solid rgba(185, 28, 28, 0.72);
   border-radius: 5px;
   font-size: 11px;
   font-weight: 900;
@@ -688,20 +728,50 @@ async function cancelOwnOffer(offerId: number) {
   pointer-events: none;
 }
 
-.expired-ribbon::before,
-.expired-ribbon::after {
+.expired-ribbon {
+  background: rgba(239, 68, 68, 0.06);
+  color: #b91c1c;
+  border: 2px solid rgba(185, 28, 28, 0.72);
+}
+
+.traded-ribbon {
+  min-width: 92px;
+  background: rgba(20, 184, 166, 0.08);
+  color: #0f766e;
+  border: 2px solid rgba(15, 118, 110, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 118, 110, 0.22),
+    0 1px 0 rgba(15, 118, 110, 0.08);
+}
+
+.history-ribbon::before,
+.history-ribbon::after {
   content: '';
   position: absolute;
   inset: 2px;
-  border: 1px solid rgba(185, 28, 28, 0.32);
   border-radius: 3px;
   pointer-events: none;
 }
 
-.expired-ribbon::after {
+.expired-ribbon::before {
+  border: 1px solid rgba(185, 28, 28, 0.32);
+}
+
+.traded-ribbon::before {
+  border: 1px solid rgba(15, 118, 110, 0.32);
+}
+
+.history-ribbon::after {
   inset: -1px 5px;
-  border-color: rgba(185, 28, 28, 0.14);
   transform: rotate(2deg);
+}
+
+.expired-ribbon::after {
+  border-color: rgba(185, 28, 28, 0.14);
+}
+
+.traded-ribbon::after {
+  border-color: rgba(15, 118, 110, 0.14);
 }
 
 /* Subtle outer shadow for depth */

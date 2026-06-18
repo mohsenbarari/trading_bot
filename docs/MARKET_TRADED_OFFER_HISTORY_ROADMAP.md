@@ -277,6 +277,8 @@ Implementation notes:
 
 ## Stage TH4 - Offer Card UI
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Update `OffersList.vue` so read-only history cards are driven by metadata, not
 only by `status === 'expired'`.
 
@@ -296,6 +298,20 @@ Exit criteria:
 - All historical cards are read-only in the DOM and not only visually disabled.
 - The same WebApp tag is rendered for locally originated and peer-synced offers.
 - A terminal offer never exposes trade/cancel controls after sync convergence.
+
+Implementation notes:
+
+- `OffersList.vue` now derives the history stamp from `history_state` and
+  `is_partially_traded`, not only from `status`.
+- `history_state = expired` renders the existing red `منقضی` stamp.
+- `history_state = traded` renders a distinct `معامله‌شده` stamp.
+- Partial traded-expired rows render `معامله‌شده · {traded_quantity} عدد`.
+- Historical traded rows display `traded_quantity` in the quantity chip instead
+  of showing `remaining_quantity = 0`.
+- All read-only history rows keep timer classes/styles and trade/cancel controls
+  out of the DOM.
+- Focused `OffersList` tests cover pure expired, completed traded, and partial
+  traded-expired history cards.
 
 ## Stage TH4B - Telegram Bot/Channel History Tag
 

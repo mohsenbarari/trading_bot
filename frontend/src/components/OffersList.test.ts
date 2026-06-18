@@ -156,7 +156,7 @@ describe('OffersList.vue', () => {
     expect(wrapper.emitted('load-more-expired')).toHaveLength(1)
   })
 
-  it('keeps traded history offers read-only until their visual stamp is rendered', async () => {
+  it('renders traded history stamps and keeps terminal offers read-only', async () => {
     const wrapper = await mountOffersList({
       offers: [
         {
@@ -180,13 +180,40 @@ describe('OffersList.vue', () => {
           customer_management_name: null,
           customer_tier: null,
         },
+        {
+          id: 6,
+          user_id: 88,
+          status: 'expired',
+          history_state: 'traded',
+          is_read_only: true,
+          is_partially_traded: true,
+          offer_type: 'sell',
+          commodity_name: 'ربع سکه',
+          quantity: 30,
+          remaining_quantity: 7,
+          traded_quantity: 23,
+          price: 54000,
+          viewer_effective_price: 54000,
+          is_wholesale: false,
+          lot_sizes: [7],
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+        },
       ],
     })
 
     expect(wrapper.find('.trade-btn').exists()).toBe(false)
     expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="history-stamp"]').map((stamp) => stamp.text())).toEqual([
+      'معامله‌شده',
+      'معامله‌شده · 23 عدد',
+    ])
+    expect(wrapper.findAll('.traded-ribbon')).toHaveLength(2)
     expect(wrapper.find('.expired-ribbon').exists()).toBe(false)
-    expect(wrapper.find('.price').text()).toContain('72,000')
+    expect(wrapper.findAll('.quantity-badge').map((badge) => badge.text())).toEqual(['12 عدد', '23 عدد'])
   })
 
   it('uses the two-tap confirm flow for retail lots, clears stale pending state, and executes the confirmed trade', async () => {
