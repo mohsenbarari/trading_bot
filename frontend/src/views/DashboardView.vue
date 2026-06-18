@@ -1172,14 +1172,21 @@ onMounted(fetchUser)
 .dashboard-project-users-search {
   display: flex;
   gap: 0.65rem;
-  align-items: stretch;
+  align-items: center;
   flex-wrap: wrap;
   padding-top: 1rem;
 }
 
 .dashboard-project-users-search-input {
-  flex: 1 1 220px;
-  min-height: 40px;
+  flex: 0 1 320px;
+  max-width: 100%;
+  min-height: 36px;
+}
+
+.dashboard-project-users-search :deep(.ui-input) {
+  min-height: 36px;
+  padding-block: 0.35rem;
+  font-size: var(--ds-font-sm);
 }
 
 .dashboard-directory-state {
@@ -1368,6 +1375,10 @@ onMounted(fetchUser)
 
   .dashboard-project-users-search {
     flex-direction: column;
+  }
+
+  .dashboard-project-users-search-input {
+    width: 100%;
   }
 }
 
