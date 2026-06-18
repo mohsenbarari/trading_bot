@@ -193,6 +193,7 @@ async function mountMarketView() {
           template: `
             <div class="offers-list-stub">
               <div class="offers-count">{{ offers.length }}</div>
+              <div class="offers-statuses">{{ offers.map((offer) => offer.status || 'active').join(',') }}</div>
               <div class="offers-expiry">{{ expiryMinutes }}</div>
               <div class="offers-user-id">{{ currentUserId }}</div>
               <button class="emit-load-more-expired" @click="$emit('load-more-expired')">more</button>
@@ -357,6 +358,25 @@ describe('MarketView.vue', () => {
 
     expect(marketViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/offers/expired?skip=0&limit=25')
     expect(wrapper.find('.offers-count').text()).toBe('2')
+    expect(wrapper.find('.offers-statuses').text()).toBe('active,expired')
+
+    const buyTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('خریدار'))
+    expect(buyTab?.exists()).toBe(true)
+    await buyTab!.trigger('click')
+    expect(wrapper.find('.offers-count').text()).toBe('0')
+    expect(wrapper.find('.offers-statuses').text()).toBe('')
+
+    const sellTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('فروشنده'))
+    expect(sellTab?.exists()).toBe(true)
+    await sellTab!.trigger('click')
+    expect(wrapper.find('.offers-count').text()).toBe('1')
+    expect(wrapper.find('.offers-statuses').text()).toBe('active')
+
+    const myTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('لفظ‌های شما'))
+    expect(myTab?.exists()).toBe(true)
+    await myTab!.trigger('click')
+    expect(wrapper.find('.offers-count').text()).toBe('0')
+    expect(wrapper.find('.offers-statuses').text()).toBe('')
 
     wrapper.unmount()
   })

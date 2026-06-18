@@ -124,10 +124,13 @@ const filteredOffers = computed(() => {
   }
   return list
 })
-const visibleMarketOffers = computed(() => [
-  ...filteredOffers.value,
-  ...expiredMarketOffers.value,
-])
+const visibleMarketOffers = computed(() => {
+  if (filterType.value !== 'all') return filteredOffers.value
+  return [
+    ...filteredOffers.value,
+    ...expiredMarketOffers.value,
+  ]
+})
 
 const commodities = ref<Commodity[]>([])
 const commoditiesLoading = ref(false)
@@ -534,10 +537,12 @@ function updateRecentOffersMenuPosition() {
   const maxHeight = Math.max(132, Math.min(320, availableAbove, viewportHeight - 24))
   const measuredHeight = recentOffersDropdownRef.value?.offsetHeight || 0
   const estimatedHeight = recentOffersLoading.value
-    ? 64
-    : recentOffersError.value || !recentOffers.value.length
-      ? 96
-      : Math.min(maxHeight, 16 + recentOffers.value.length * 58)
+    ? 58
+    : recentOffersError.value
+      ? 86
+      : !recentOffers.value.length
+        ? 44
+        : Math.min(maxHeight, 16 + recentOffers.value.length * 58)
   const dropdownHeight = Math.min(maxHeight, measuredHeight || estimatedHeight)
   const minLeft = viewportLeft + viewportPadding
   const maxLeft = viewportLeft + viewportWidth - dropdownWidth - viewportPadding
@@ -1019,12 +1024,13 @@ onUnmounted(() => {
             :message="recentOffersError"
             tone="danger"
           />
-          <AppEmptyState
+          <div
             v-else-if="!recentOffers.length"
-            class="recent-offers-state"
-            title="بدون فعالیت"
-            tone="neutral"
-          />
+            class="recent-offers-empty"
+            role="status"
+          >
+            بدون فعالیت
+          </div>
           <button
             v-for="offer in recentOffers"
             :key="offer.id"
@@ -1301,10 +1307,10 @@ onUnmounted(() => {
 
 .recent-offers-dropdown {
   z-index: 1200;
-  padding: 0.45rem;
+  padding: 0.35rem;
   display: grid;
-  gap: 0.3rem;
-  border-radius: 1rem;
+  gap: 0.25rem;
+  border-radius: 0.85rem;
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid var(--ds-border-light);
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
@@ -1315,6 +1321,20 @@ onUnmounted(() => {
 
 .recent-offers-state {
   margin: 0;
+}
+
+.recent-offers-empty {
+  min-height: 2.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.55rem;
+  border-radius: 0.7rem;
+  background: var(--ds-bg-subtle);
+  color: var(--ds-text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .recent-offers-state--error {
