@@ -245,6 +245,24 @@ This section is mandatory for all work derived from this document.
 - Current SQLAlchemy model inventory includes additional tables that are not in the starter
   registry table yet, including `push_subscriptions`, `user_notification_preferences`,
   `sync_blocks`, and `single_session_recovery_admin_targets`.
+- `main.py` starts a background leader that can run `offer_expiry`, `market_schedule`,
+  `session_expiry`, and `user_account_status` jobs on the API process; only
+  `connectivity_monitor` is currently gated to `server_mode=iran`.
+- Web Push runtime exists in the shared API/backend code. `/api/notifications/push/*` stores
+  browser subscriptions, `core/web_push.py` sends market-offer and notification pushes, and these
+  paths do not yet have a documented Iran-only execution gateway.
+- Bot account-linking and channel-join approval currently depend on the foreign Bot DB seeing the
+  relevant `users.telegram_id` row. A sync-lagged WebApp-created user can therefore be invisible to
+  the Bot until user/account sync catches up.
+- Telegram channel callback payloads currently embed integer offer IDs, for example
+  `channel_trade:{offer_id}:{amount}`. This is a compatibility concern for the confirmed future
+  `public_id`/UUID identity strategy.
+- Bot admin surfaces can still mutate shared product data such as trading settings, commodities,
+  commodity aliases, user status, and user limits. These admin writes need the same authority and
+  conflict-policy treatment as WebApp admin writes.
+- `users.avatar_file_id` references `chat_files.id`; `users` is a sync candidate while `chat_files`
+  is messenger/media no-sync. Fields that reference no-sync tables need individual sync/projection
+  policy.
 
 ## Implementation Status Snapshot
 
@@ -522,12 +540,16 @@ This ordering is about implementation difficulty and blast radius, not business 
    update tests so skipped unknown work returns an error/partial result instead of `success`.
 8. Add a model-inventory test that extracts every SQLAlchemy `__tablename__` and verifies each one
    is present in the sync registry as `sync`, `no-sync`, or internal bookkeeping.
-9. Add deployment/config assertions that the Iran compose has no active bot service, the foreign
+9. Add a pre-implementation freshness report before code work starts: compare
+   `candidate/bot-webapp-integration` with current `main`, record both commit SHAs, and decide
+   whether to merge/rebase before implementation. This report is a planning gate, not permission to
+   merge without owner approval.
+10. Add deployment/config assertions that the Iran compose has no active bot service, the foreign
    compose has the bot service, and Iran has no Telegram credentials or outbound Telegram path. Run
    these checks before staging validation.
-10. Add a `run_bot.py` runtime guard that refuses to start when `server_mode=iran` or when the
+11. Add a `run_bot.py` runtime guard that refuses to start when `server_mode=iran` or when the
     process is not explicitly on the foreign bot surface.
-11. Keep the documented manual branch-check checklist as the accepted guard so roadmap commits are not
+12. Keep the documented manual branch-check checklist as the accepted guard so roadmap commits are not
    made accidentally from the wrong branch. No extra script, hook, or CI rule is required for now.
 
 #### Level 2 - Guardrails And Local Side Effects
@@ -545,23 +567,33 @@ This ordering is about implementation difficulty and blast radius, not business 
 4. Define the sensitive-field policy for synced payloads and logs. Explicitly classify user profile,
    mobile/address, Telegram IDs, admin password hashes, tokens, Web Push subscriptions, and
    operational metadata before implementing broad registry-driven sync.
-5. After synced market changes are applied on Iran, publish a confirmed local post-commit WebApp
+5. Add a Web Push side-effect gateway and policy. Web Push subscription storage and browser push
+   execution are WebApp runtime behavior and must be Iran-only unless explicitly promoted later.
+   Foreign-side business events must sync or forward durable notification intent to Iran instead of
+   using Web Push directly.
+6. Define a central notification side-effect policy: Telegram channel/private messages are
+   foreign-only, Web Push and WebApp realtime are Iran-only, notification rows have their own sync
+   policy, and preference fields must be classified before broad sync.
+7. After synced market changes are applied on Iran, publish a confirmed local post-commit WebApp
    realtime event without creating a sync echo. This covers bot-authored offer creation plus
    offer/trade/expiry updates that affect WebApp market state.
-6. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
+8. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
    foreign at the API layer, with reverse-proxy blocking as defense in depth. Any internal
    foreign-side chat exception must be explicitly allowlisted by path and purpose.
-7. Build the confirmed shared `expire_offers` command/service foundation and route Bot cancel-all
+9. Define Bot account-linking and channel-join freshness behavior under sync lag. The Bot must have
+   an explicit pending/retry/fail-visible policy when `telegram_id` or account status has not
+   reached foreign yet, and join approval must fail closed for blocked/inactive users.
+10. Build the confirmed shared `expire_offers` command/service foundation and route Bot cancel-all
    through it first. The service must mutate authoritative DB state first, commit, then run explicit
    post-commit side effects such as Telegram gateway updates, WebApp realtime events, cache updates,
    and notifications.
-8. Implement the confirmed runtime/session state policy. WebApp sessions are Iran-local, Bot FSM is
+11. Implement the confirmed runtime/session state policy. WebApp sessions are Iran-local, Bot FSM is
    foreign-local, and login/recovery requests do not sync. `telegram_id`, user profile, account
    status, role, and limits sync as user/account product data.
-9. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
+12. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
    During transition, allow only a narrowly guarded `is_system=true AND is_mandatory=true`
    compatibility path if needed; do not keep wholesale `chats`/`chat_members` sync.
-10. Implement the confirmed `user.home_server` audit. Classify each read/write as transitional
+13. Implement the confirmed `user.home_server` audit. Classify each read/write as transitional
    session/auth compatibility, legacy/account-origin compatibility, or a bug. Offer-authority uses,
    active-surface uses, and login-time flips must be removed in this stage or explicitly isolated as
    short-lived migration compatibility.
@@ -583,23 +615,41 @@ This ordering is about implementation difficulty and blast radius, not business 
 4. Implement the confirmed sync registry for every model/table with `sync` or `no-sync`, write
    surfaces, authority, conflict rule, and side effects. Add a test/CI gate that fails when a new
    model/table or migration introduces a table without a registry entry.
-5. Implement the confirmed audit of all bulk `update()`, bulk `delete()`, raw SQL, and relationship
+5. Add a field-level policy for synced rows that reference no-sync tables. Raw FKs such as
+   `users.avatar_file_id -> chat_files.id` must not cross servers unless a derived/public
+   projection or explicit null/no-sync behavior exists.
+6. Define admin surface authority and parity for Bot admin and WebApp admin writes. Trading
+   settings, commodities, commodity aliases, user account status, user limits, and similar shared
+   product/admin data must have one authority and conflict rule before both surfaces can mutate
+   them freely.
+7. Add a background job authority matrix for every recurring job. Each job must declare mutated
+   tables, allowed server(s), authority rule, outage behavior, and sync/outbox behavior. At minimum
+   cover `offer_expiry`, `market_schedule`, `session_expiry`, `user_account_status`, and
+   `connectivity_monitor`.
+8. Implement the confirmed audit of all bulk `update()`, bulk `delete()`, raw SQL, and relationship
    side effects. Every bypassing mutation must move to a sync-aware helper or explicitly record the
    required sync/outbox event.
-6. Make synced-table outbox recording mandatory inside authoritative write paths. Listener-based
+9. Make synced-table outbox recording mandatory inside authoritative write paths. Listener-based
    recording may remain as a transition mechanism, but a synced-table mutation must not silently
    commit if the durable outbox/change-log record cannot be created.
-7. Implement the confirmed committed outbox drain: the sync worker's durable source must be
+10. Implement the confirmed committed outbox drain: the sync worker's durable source must be
    committed `change_log WHERE synced=false`. Keep Redis/direct push only as wake-up/acceleration,
    so missed queue/direct events cannot lose a committed sync change.
-8. Implement the confirmed Telegram publication idempotency/outbox model. It must use a dedupe key
+11. Implement aggregate-aware outbox ordering and stale-event rejection. Sync payloads or outbox
+   rows must carry enough metadata, such as aggregate identity, authority server, event sequence or
+   authoritative version, outbox id, and command/idempotency id, so old create/update events cannot
+   overwrite newer authoritative terminal state.
+12. Implement the confirmed Telegram publication idempotency/outbox model. It must use a dedupe key
    independent from only `channel_message_id`, prevent duplicate posts across direct push and worker
    replay, and sync the foreign publication result back to Iran.
-9. Implement complete end-to-end and service tests for the confirmed scenario matrix. Required
+13. Define explicit surface publication state for business-visible publication side effects. Business
+   state such as `offer.status` must be separate from Telegram/WebApp publication state such as
+   pending, visible/sent, failed, disabled, lagged, last attempt, and error code.
+14. Implement complete end-to-end and service tests for the confirmed scenario matrix. Required
    coverage includes Bot offer -> Iran WebApp realtime, WebApp offer -> foreign Telegram publish ->
    result sync back, owner expiry from both surfaces, requests/trades from both surfaces,
    near-simultaneous actions, retry/replay/idempotency, and duplicate-side-effect prevention.
-10. Add acceptance gates for every switching scenario. DB state, WebApp realtime state, Telegram
+15. Add acceptance gates for every switching scenario. DB state, WebApp realtime state, Telegram
    channel/user-message state, notification state, sync backlog, command-forwarding behavior, and
    forbidden outcomes must all be asserted.
 
@@ -629,28 +679,37 @@ This ordering is about implementation difficulty and blast radius, not business 
    synced tables and move cross-server sync/commands to that identity, while server-partitioning
    existing integer sequences as a migration guard until integer IDs are no longer used for
    cross-server authority.
-2. Implement the confirmed per-table conflict policy for concurrent writes: owner/authority,
+2. Define Telegram callback identity compatibility before switching command/sync identity to
+   `public_id`/UUID. Current channel callbacks contain integer offer IDs, so the migration must
+   decide between versioned callback payloads, short public tokens, callback mapping rows, or
+   foreign-local integer resolution to canonical public IDs. Old channel messages must have an
+   explicit compatibility behavior.
+3. Add rolling-deployment and registry/protocol version compatibility. Sync payloads should carry
+   enough version metadata, such as schema or registry version and producer identity, for peers to
+   reject unsupported changes visibly instead of silently accepting partial work during staggered
+   deploys.
+4. Implement the confirmed per-table conflict policy for concurrent writes: owner/authority,
    allowed write surfaces, conflict key, merge or reject/forward rule, version check, and
    idempotency behavior. Authoritative commands must run in atomic DB transactions on the authority
    server with row/advisory locks where needed; non-authoritative servers must forward commands or
    apply replicated committed results, not perform competing local mutations.
-3. Implement the confirmed surface-scoped session/auth model for simultaneous WebApp and bot
+5. Implement the confirmed surface-scoped session/auth model for simultaneous WebApp and bot
    activity. `user.home_server` must be narrowed to legacy/account-origin compatibility or removed
    from runtime authority. WebApp login, Bot activity, logout, reset, and recovery must not flip a
    persistent user field between Iran and foreign; each operation must target `webapp`,
    `telegram_bot`, or `all_surfaces` explicitly.
-4. Implement the confirmed conservative migration and rollout policy for existing data. Preserve
+6. Implement the confirmed conservative migration and rollout policy for existing data. Preserve
    historical rows, add non-destructive schema/backfill steps first, verify active offers are zero
    on both servers before cutover, preserve foreign-owned `channel_message_id` values, keep existing
    sessions as local runtime state, reconcile partially synced rows/backlog to a known safe state,
    and abort the cutover if any data-protection preflight fails.
-5. Implement the confirmed rollback criteria and rollback mechanics. The default rollback must
+7. Implement the confirmed rollback criteria and rollback mechanics. The default rollback must
    disable/fail-close new Bot/WebApp integration behavior first, preserve data, keep audit trails,
    and avoid destructive cleanup unless the owner explicitly approves the exact action. Staging must
    include automated scenario-matrix coverage plus an owner-led manual validation phase where logs,
    sync health, WebApp state, Telegram state, and session-surface behavior are reviewed before
    sign-off.
-6. Implement the confirmed final production acceptance gates, but do not run production promotion or
+8. Implement the confirmed final production acceptance gates, but do not run production promotion or
    touch production until implementation is complete, automated staging scenario tests pass,
    owner-led manual staging validation passes, the gates below are checked, and the owner then uses
    the exact approval phrase `production deploy`.
@@ -1311,6 +1370,93 @@ Required direction:
 - Best-effort side effects must be safe to lose and must not be used as proof that the business
   command succeeded.
 
+### 17. Third-pass external review decisions before implementation
+
+This section records the decisions from the review in `tmp/bot-webapp-integration.md`, checked
+against the current code and the already-updated roadmap on 2026-06-18. The review was useful, but
+not every recommendation needed to become a new requirement because several points were already
+covered in sections 10-16 and in the Level roadmap above.
+
+#### 17.1 Accepted as already covered
+
+The following review points are accepted as correct, but they do not need a new standalone roadmap
+section because they are already encoded:
+
+- Offer authority must come from `source_surface`, not `user.home_server`. This is covered by
+  Non-Negotiable Policy items 12-13 and Level 1.
+- Bot and WebApp must become surface adapters over shared offer/trade/expire commands. This is
+  covered by Policy items 22-24 and Levels 2-3.
+- Messenger-owned data, including `chats` and `chat_members`, must not remain in wholesale sync.
+  This is covered by Policy item 14, Level 1 messenger sync tests, Level 2 mandatory-channel
+  projection work, and the registry table.
+- Durable committed outbox, fail-closed unknown-table sync, internal transport hardening,
+  sensitive-field policy, migration/cutover, rollback, and production gates are already covered by
+  Policy items 27, 37-43 and section 16.
+- The current sync worker/receiver still need idempotency, publication dedupe, and result sync-back
+  hardening. This remains covered by Level 3 and Level 4.
+
+#### 17.2 Accepted as new or under-specified work
+
+The following review points are accepted and have been added to the roadmap levels above:
+
+- Background Job Authority Matrix: `main.py` can run `offer_expiry`, `market_schedule`,
+  `session_expiry`, and `user_account_status` on the API background leader. Each job must declare
+  authority, allowed server(s), outage behavior, and sync/outbox behavior so background mutations do
+  not bypass shared commands.
+- Web Push side-effect gateway: Web Push is WebApp/browser runtime behavior. Subscription storage,
+  preference reads/writes, market-offer Web Push, and notification Web Push should be Iran-only
+  unless explicitly promoted later. Foreign should sync durable notification intent or product data,
+  not execute browser Web Push directly.
+- Central Notification Side-Effect Policy: Telegram channel/private messages, Web Push, WebApp
+  realtime, notification rows, and notification preferences must be classified together. This
+  prevents Telegram from being over-specified while Web Push and notification duplicates remain
+  ambiguous.
+- Bot account-linking and channel-join freshness: the Bot currently decides join approval from the
+  local foreign `users.telegram_id` row. A WebApp-created or recently linked user can be invisible
+  during sync lag, so the Bot needs explicit pending/retry/fail-visible behavior and fail-closed
+  handling for inactive or blocked accounts.
+- Telegram callback identity compatibility: current callback data carries integer offer IDs. Before
+  cross-server commands move to `public_id`/UUID authority, callback payload versioning, short public
+  tokens, mapping rows, or foreign-local integer resolution must be chosen, including old message
+  compatibility.
+- Surface publication state: business state such as `offer.status` is not enough to audit
+  publication. Telegram/WebApp publication needs explicit pending/sent or visible/failed/disabled
+  state, lag markers, last attempt, and error code where the side effect is business-visible.
+- Outbox causal ordering and stale-event rejection: the roadmap already requires latest
+  authoritative state, but implementation also needs aggregate-aware metadata so older create/update
+  deliveries cannot overwrite a newer completed/expired state.
+- Admin surface authority and parity: Bot admin and WebApp admin can both mutate shared product
+  configuration such as settings, commodities, user status, and user limits. These writes need
+  authority and conflict rules before both surfaces remain enabled.
+- Synced rows referencing no-sync tables: fields such as `users.avatar_file_id`, which references
+  `chat_files`, must be classified separately because `users` syncs while `chat_files` is no-sync.
+- Field-level sensitive-data policy: the broad sensitive-field policy is accepted, but `users` and
+  notification-related tables need field-by-field decisions before registry-driven sync.
+- Rolling deployment and registry/protocol compatibility: peers need enough version metadata to
+  reject unsupported registry/schema changes visibly during staggered deploys.
+
+#### 17.3 Accepted with product or operational constraints
+
+- Branch freshness: the review correctly noted that this branch had diverged from `main` at review
+  time. Before code implementation starts, produce a freshness report and decide whether to merge or
+  rebase. This does not authorize a merge/rebase by itself; owner approval is still required.
+- Medium/long outage local-only active offer expiry: the safety policy remains accepted. The review
+  is correct that recovery-expired offers need an explicit `expire_reason`, owner notification, and
+  admin/operator report. Operator approval for large batches is a separate product/operations
+  decision and is not automatically required by this roadmap yet.
+- Manual branch checks: the review is correct that automated branch/scope guards would be stronger.
+  For now, the owner-approved policy remains manual branch checks before edits and commits. No hook
+  or CI branch gate is added unless the owner explicitly asks for that automation later.
+
+#### 17.4 Not adopted as standalone requirements right now
+
+- Reordering Level 1 so registry skeleton must precede every offer-home fix is not adopted. The
+  explicit Bot/WebApp `home_server` assignments remain low-risk and can be tested early, while the
+  registry skeleton and inventory test also stay in Level 1.
+- Duplicating every feature-specific detail from other roadmap branches into this document is not
+  required. Feature branches may carry their own concrete contracts, while this document keeps the
+  cross-server baseline and references the generic side-effect/sync rules.
+
 ## Required Sync Registry
 
 Before broad sync changes, create a registry for every model/table. This registry is now a
@@ -1344,6 +1490,6 @@ migration inventory.
 
 ## Immediate Questions For Next Round
 
-1. Are the second-pass audit additions in section 16 accepted as part of the implementation
-   baseline? If yes, implementation can start from Level 1 on `candidate/bot-webapp-integration`
-   after a fresh branch check.
+1. Are the second-pass audit additions in section 16 and the third-pass external-review decisions
+   in section 17 accepted as part of the implementation baseline? If yes, implementation can start
+   from Level 1 on `candidate/bot-webapp-integration` after a fresh branch check.
