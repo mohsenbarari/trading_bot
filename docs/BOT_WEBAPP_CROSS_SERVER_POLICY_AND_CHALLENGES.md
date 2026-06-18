@@ -178,6 +178,8 @@ accepted as accurate and should influence the Bot roadmap.
   channel, and sync state can temporarily diverge.
 - Bot cancel-all (`نشد`) performs Telegram HTTP calls, realtime publishes, and cache updates before
   the final DB commit. If the commit fails, side effects can get ahead of durable DB state.
+- The target fix for Bot cancel-all is not a local Bot-only patch. It is a shared `expire_offers`
+  command/service with DB-first mutation, commit, and explicit post-commit side effects.
 - Telegram side effects are scattered across Bot handlers, API routers, and core helpers. A central
   gateway is needed so "Iran must never call Telegram" is enforced once instead of by convention.
 
@@ -265,6 +267,9 @@ accepted as accurate and should influence the Bot roadmap.
   API and does not yet have a foreign-side user-facing block.
 - Surface-based offer-home assignment is not implemented for WebApp creation.
 - Explicit bot-side offer-home assignment is not implemented.
+- A shared `expire_offers` command/service is not implemented. Bot cancel-all, API cancel-all,
+  single-offer expiry, auto-expiry, market-close expiry, and remote-forwarded expiry still use
+  separate paths with inconsistent side-effect timing and ownership behavior.
 - Automated deployment/config assertions are not implemented yet. The project must verify the Iran
   compose has no active bot service, the foreign compose has the bot service, and Iran has no
   Telegram credentials/outbound path before staging validation.
@@ -317,8 +322,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 4. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
    foreign at the API layer, with reverse-proxy blocking as defense in depth. Any internal
    foreign-side chat exception must be explicitly allowlisted by path and purpose.
-5. Move Bot cancel-all side effects after the DB commit, or route it through a shared expire-offers
-   command that has explicit post-commit side effects.
+5. Build the confirmed shared `expire_offers` command/service and route Bot cancel-all through it.
+   The service must mutate authoritative DB state first, commit, then run explicit post-commit side
+   effects such as Telegram gateway updates, WebApp realtime events, cache updates, and notifications.
 6. Define which runtime/session state is surface-local and which user/account state syncs:
    WebApp session, Bot FSM, Telegram binding, login requests, recovery requests, user profile, and
    account status must each have an explicit policy.
@@ -334,17 +340,20 @@ This ordering is about implementation difficulty and blast radius, not business 
 1. Extract shared offer creation command/service and make both WebApp and Bot call it.
 2. Extract shared trade execution command/service and make Bot channel callbacks use the same
    authoritative/idempotent path as the API.
-3. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
+3. Extend the shared `expire_offers` command/service to cover API cancel-all, single-offer expiry,
+   auto-expiry, market-close expiry, and remote-forwarded expiry. It must enforce offer-home
+   authority and forward commands to `offer_home_server` when the local server is not authoritative.
+4. Create a sync registry for every table with sync policy, write surfaces, authority, conflict rule,
    and side effects.
-4. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
+5. Audit all bulk `update()`, bulk `delete()`, raw SQL, and relationship side effects; move them to
    sync-aware helpers or explicit outbox logging.
-5. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
+6. Replace the current "Redis queue as worker source" behavior with a committed outbox drain from
    `change_log WHERE synced=false`, while keeping Redis/direct push as wake-up/acceleration.
-6. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
+7. Make Telegram publication idempotency independent from only `channel_message_id`, then sync the
    foreign publication result back to Iran.
-7. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
+8. Add end-to-end tests for Bot offer -> Iran WebApp realtime and WebApp offer -> foreign Telegram
    publication without duplicate channel posts.
-8. Add acceptance gates for every switching scenario: DB state, WebApp realtime state, Telegram
+9. Add acceptance gates for every switching scenario: DB state, WebApp realtime state, Telegram
    channel/user-message state, notification state, and sync backlog must all be asserted.
 
 #### Level 4 - Recovery, Reconciliation, And Operations
