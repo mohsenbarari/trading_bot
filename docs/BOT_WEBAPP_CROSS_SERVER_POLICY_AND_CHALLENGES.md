@@ -45,6 +45,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     local post-commit WebApp realtime event without creating a new sync entry or echo. This covers
     bot-authored offer creation and market-impacting offer/trade/expiry updates received through
     sync.
+19. `/api/chat` is user-facing messenger API and must fail closed on the foreign server. A reverse
+    proxy block is useful but not sufficient by itself; the API must also guard user-facing chat
+    requests. Any future foreign-side chat-related internal endpoint must be explicitly allowlisted
+    by path and purpose.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -257,7 +261,8 @@ accepted as accurate and should influence the Bot roadmap.
 - A server-mode Telegram gateway that hard-fails all Telegram calls on Iran does not exist, and
   Telegram side effects are not yet forced through a single shared gateway.
 - A server-mode WebApp/static gateway that hard-fails frontend service, static asset service, and
-  public user WebApp access on foreign does not exist.
+  public user WebApp access on foreign does not exist. `/api/chat` is still mounted with the shared
+  API and does not yet have a foreign-side user-facing block.
 - Surface-based offer-home assignment is not implemented for WebApp creation.
 - Explicit bot-side offer-home assignment is not implemented.
 - Automated deployment/config assertions are not implemented yet. The project must verify the Iran
@@ -309,8 +314,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 3. After synced market changes are applied on Iran, publish a confirmed local post-commit WebApp
    realtime event without creating a sync echo. This covers bot-authored offer creation plus
    offer/trade/expiry updates that affect WebApp market state.
-4. Decide the narrow fate of `/api/chat` on foreign: block the router entirely, block at reverse proxy,
-   or allow only explicitly non-messenger internal operations.
+4. Add the confirmed `/api/chat` foreign guard. User-facing chat requests must fail closed on
+   foreign at the API layer, with reverse-proxy blocking as defense in depth. Any internal
+   foreign-side chat exception must be explicitly allowlisted by path and purpose.
 5. Move Bot cancel-all side effects after the DB commit, or route it through a shared expire-offers
    command that has explicit post-commit side effects.
 6. Define which runtime/session state is surface-local and which user/account state syncs:
@@ -545,7 +551,9 @@ Required direction:
   and `chat_members` from general cross-server sync.
 - Make mandatory system-channel rows a local projection derived from synced `users`, or move any
   truly non-messenger membership metadata to a separate non-messenger table.
-- Block `/api/chat` on foreign at the API/reverse-proxy level so accidental foreign writes cannot happen.
+- Block user-facing `/api/chat` on foreign at the API layer and at the reverse-proxy layer so
+  accidental foreign writes cannot happen. Do not leave the whole router open; allowlist only a
+  future explicitly documented internal endpoint if one becomes necessary.
 - Add sync tests proving messenger tables never enter `change_log` or `/api/sync/receive`.
 
 ### 6. Iran must have hard Telegram side-effect guards
