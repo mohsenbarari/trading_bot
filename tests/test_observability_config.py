@@ -107,6 +107,13 @@ class ObservabilityConfigTests(unittest.TestCase):
 
         for expected in (
             "validate_observability_env_file",
+            "validate_runtime_env_source_policy",
+            "validate_web_push_env_file",
+            "summarize_web_push_env_file",
+            "backup_runtime_env_file",
+            "REQUIRE_WEB_PUSH",
+            "ALLOW_PROJECT_ENV_SOURCE",
+            "WEB_PUSH_VAPID_PRIVATE_KEY",
             "TRUSTED_PROXY_CIDRS",
             "OBSERVABILITY_TELEGRAM_USER_HASH_SALT",
             "GRAFANA_ALERT_DEFAULT_RECEIVER",
@@ -217,6 +224,9 @@ class ObservabilityConfigTests(unittest.TestCase):
         self.assertIn("audit_durable", hardening)
         self.assertIn("TRUSTED_PROXY_CIDRS", manifest_example)
         self.assertIn("OBSERVABILITY_TELEGRAM_USER_HASH_SALT", manifest_example)
+        self.assertIn("LOCAL_ENV_SOURCE_PATH=/root/secure-envs/trading-bot/.env.foreign.production", manifest_example)
+        self.assertIn("REQUIRE_WEB_PUSH=1", manifest_example)
+        self.assertIn("ALLOW_PROJECT_ENV_SOURCE=0", manifest_example)
 
     def test_settings_accept_compose_observability_runtime_keys(self):
         config = (ROOT / "core/config.py").read_text(encoding="utf-8")

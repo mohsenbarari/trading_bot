@@ -64,6 +64,19 @@ die() {
     exit 1
 }
 
+is_truthy() {
+    local value="${1:-}"
+    value="${value,,}"
+    case "$value" in
+        1|true|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+canonical_path() {
+    python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$1"
+}
+
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
 }
@@ -324,8 +337,8 @@ ensure_manifest_file() {
     local iran_server_url=""
     local iran_server_domain=""
     local iran_certbot_email=""
-    local iran_env_source_path="$PROJECT_DIR/deploy/production/iran.runtime.env"
-    local local_env_path="$PROJECT_DIR/.env"
+    local iran_env_source_path="/root/secure-envs/trading-bot/.env.iran.production"
+    local local_env_path="/root/secure-envs/trading-bot/.env.foreign.production"
     local foreign_frontend_url=""
     local iran_frontend_url=""
 
@@ -397,6 +410,9 @@ LOCAL_ENV_SOURCE_PATH=$local_env_path
 IRAN_ENV_SOURCE_PATH=$iran_env_source_path
 FOREIGN_FRONTEND_URL=$foreign_frontend_url
 IRAN_FRONTEND_URL=$iran_frontend_url
+REQUIRE_WEB_PUSH=1
+ENV_BACKUP_DIR=/root/secure-envs/trading-bot/backups
+ALLOW_PROJECT_ENV_SOURCE=0
 
 # --- Optional runtime toggles ---
 IRAN_SKIP_CERTBOT=0
@@ -498,6 +514,9 @@ load_manifest() {
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
     IRAN_FORCE_RELEASE_REFRESH="${IRAN_FORCE_RELEASE_REFRESH:-0}"
     IRAN_ALLOW_DIRTY_RELEASE="${IRAN_ALLOW_DIRTY_RELEASE:-0}"
+    ALLOW_PROJECT_ENV_SOURCE="${ALLOW_PROJECT_ENV_SOURCE:-0}"
+    REQUIRE_WEB_PUSH="${REQUIRE_WEB_PUSH:-0}"
+    ENV_BACKUP_DIR="${ENV_BACKUP_DIR:-/root/secure-envs/trading-bot/backups}"
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
@@ -572,6 +591,85 @@ require_env_value() {
     local value
     value="$(read_env_value "$env_path" "$key")"
     [[ -n "$value" ]] || die "Missing required env value '$key' in $env_path"
+}
+
+env_value_state() {
+    local value="${1:-}"
+    if [[ -z "$value" ]]; then
+        printf 'EMPTY'
+    else
+        printf 'SET(len=%s)' "${#value}"
+    fi
+}
+
+backup_runtime_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    [[ -f "$env_path" ]] || return 0
+
+    local timestamp safe_name backup_path
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    safe_name="$(printf '%s' "$env_path" | sed 's#^/##; s#[^A-Za-z0-9._-]#_#g')"
+    mkdir -p "$ENV_BACKUP_DIR"
+    backup_path="$ENV_BACKUP_DIR/${safe_name}.${timestamp}.bak"
+    cp -p "$env_path" "$backup_path"
+    chmod 600 "$backup_path" || true
+    log "Backed up $role_label runtime env to $backup_path"
+}
+
+validate_runtime_env_source_policy() {
+    local project_env_path="$LOCAL_PROJECT_DIR/.env"
+    local local_source project_env iran_output
+    local_source="$(canonical_path "$LOCAL_ENV_SOURCE_PATH")"
+    project_env="$(canonical_path "$project_env_path")"
+    iran_output="$(canonical_path "$IRAN_ENV_SOURCE_PATH")"
+
+    if [[ "$local_source" == "$project_env" && "$ALLOW_PROJECT_ENV_SOURCE" != "1" ]]; then
+        die "LOCAL_ENV_SOURCE_PATH points at the project .env ($project_env_path). Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
+    fi
+
+    if [[ "$local_source" == "$iran_output" ]]; then
+        die "LOCAL_ENV_SOURCE_PATH and IRAN_ENV_SOURCE_PATH must be different files so foreign and Iran runtime envs can be rendered independently."
+    fi
+}
+
+summarize_web_push_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    local enabled public_key private_key subject ttl timeout
+
+    enabled="$(read_env_value "$env_path" "WEB_PUSH_ENABLED")"
+    public_key="$(read_env_value "$env_path" "WEB_PUSH_VAPID_PUBLIC_KEY")"
+    private_key="$(read_env_value "$env_path" "WEB_PUSH_VAPID_PRIVATE_KEY")"
+    subject="$(read_env_value "$env_path" "WEB_PUSH_VAPID_SUBJECT")"
+    ttl="$(read_env_value "$env_path" "WEB_PUSH_TTL_SECONDS")"
+    timeout="$(read_env_value "$env_path" "WEB_PUSH_TIMEOUT_SECONDS")"
+
+    log "$role_label Web Push env: WEB_PUSH_ENABLED=${enabled:-EMPTY} VAPID_PUBLIC_KEY=$(env_value_state "$public_key") VAPID_PRIVATE_KEY=$(env_value_state "$private_key") VAPID_SUBJECT=$(env_value_state "$subject") TTL=${ttl:-EMPTY} TIMEOUT=${timeout:-EMPTY}"
+}
+
+validate_web_push_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    [[ -f "$env_path" ]] || die "Missing runtime env for $role_label: $env_path"
+
+    local enabled subject
+    enabled="$(read_env_value "$env_path" "WEB_PUSH_ENABLED")"
+    if is_truthy "$enabled"; then
+        require_env_value "$env_path" "WEB_PUSH_VAPID_PUBLIC_KEY"
+        require_env_value "$env_path" "WEB_PUSH_VAPID_PRIVATE_KEY"
+        require_env_value "$env_path" "WEB_PUSH_VAPID_SUBJECT"
+        subject="$(read_env_value "$env_path" "WEB_PUSH_VAPID_SUBJECT")"
+        case "$subject" in
+            mailto:*|http://*|https://*) ;;
+            *) die "$role_label WEB_PUSH_VAPID_SUBJECT must start with mailto:, http://, or https:// in $env_path" ;;
+        esac
+        return 0
+    fi
+
+    if is_truthy "$REQUIRE_WEB_PUSH"; then
+        die "$role_label env has REQUIRE_WEB_PUSH=1 but WEB_PUSH_ENABLED is not true in $env_path"
+    fi
 }
 
 export_runtime_renderer_overrides() {
@@ -660,6 +758,10 @@ validate_observability_env_file() {
 validate_observability_release_inputs() {
     validate_observability_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
     validate_observability_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+    summarize_web_push_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
+    validate_web_push_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
+    summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+    validate_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
 }
 
 install_sync_sampler_local() {
@@ -838,6 +940,7 @@ check_local() {
     [[ -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" ]] || die "Dockerfile.iran missing"
     [[ -f "$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template" ]] || die "Nginx template missing"
     [[ -f "$RELEASE_ARTIFACT_RENDERER" ]] || die "Release artifact renderer missing: $RELEASE_ARTIFACT_RENDERER"
+    validate_runtime_env_source_policy
     ensure_runtime_env_file
     render_release_artifacts
     validate_observability_release_inputs
@@ -1339,6 +1442,8 @@ ensure_runtime_env_file() {
 
     if [[ -n "$source_env_path" ]]; then
         mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
+        backup_runtime_env_file "$local_env_path" "foreign"
+        backup_runtime_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
         export_runtime_renderer_overrides
         python3 "$RUNTIME_ENV_RENDERER" \
             --source-env-file "$source_env_path" \
@@ -1355,6 +1460,8 @@ ensure_runtime_env_file() {
         chmod 600 "$local_env_path" || true
         chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
         log "Rendered runtime env files from source env: $source_env_path"
+        summarize_web_push_env_file "$local_env_path" "Foreign"
+        summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
         return 0
     fi
 
@@ -1388,6 +1495,16 @@ ensure_runtime_env_file() {
     local grafana_alert_warning_receiver="Trading Bot Production Email"
     local grafana_alert_webhook_url=""
     local grafana_alert_email_addresses=""
+    local web_push_enabled="false"
+    local web_push_vapid_public_key=""
+    local web_push_vapid_private_key=""
+    local web_push_vapid_subject=""
+    local web_push_ttl_seconds="3600"
+    local web_push_timeout_seconds="5.0"
+
+    if is_truthy "$REQUIRE_WEB_PUSH"; then
+        web_push_enabled="true"
+    fi
 
     mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
 
@@ -1421,6 +1538,14 @@ ensure_runtime_env_file() {
     prompt_value grafana_alert_warning_receiver "GRAFANA_ALERT_WARNING_RECEIVER" "$grafana_alert_warning_receiver"
     prompt_value grafana_alert_webhook_url "GRAFANA_ALERT_WEBHOOK_URL"
     prompt_value grafana_alert_email_addresses "GRAFANA_ALERT_EMAIL_ADDRESSES"
+    prompt_value web_push_enabled "WEB_PUSH_ENABLED" "$web_push_enabled"
+    if is_truthy "$web_push_enabled"; then
+        prompt_value web_push_vapid_public_key "WEB_PUSH_VAPID_PUBLIC_KEY"
+        prompt_value web_push_vapid_private_key "WEB_PUSH_VAPID_PRIVATE_KEY" "" 1
+        prompt_value web_push_vapid_subject "WEB_PUSH_VAPID_SUBJECT"
+        prompt_value web_push_ttl_seconds "WEB_PUSH_TTL_SECONDS" "$web_push_ttl_seconds"
+        prompt_value web_push_timeout_seconds "WEB_PUSH_TIMEOUT_SECONDS" "$web_push_timeout_seconds"
+    fi
 
     BOT_TOKEN="$bot_token" \
     BOT_USERNAME="$bot_username" \
@@ -1452,6 +1577,12 @@ ensure_runtime_env_file() {
     GRAFANA_ALERT_WARNING_RECEIVER="$grafana_alert_warning_receiver" \
     GRAFANA_ALERT_WEBHOOK_URL="$grafana_alert_webhook_url" \
     GRAFANA_ALERT_EMAIL_ADDRESSES="$grafana_alert_email_addresses" \
+    WEB_PUSH_ENABLED="$web_push_enabled" \
+    WEB_PUSH_VAPID_PUBLIC_KEY="$web_push_vapid_public_key" \
+    WEB_PUSH_VAPID_PRIVATE_KEY="$web_push_vapid_private_key" \
+    WEB_PUSH_VAPID_SUBJECT="$web_push_vapid_subject" \
+    WEB_PUSH_TTL_SECONDS="$web_push_ttl_seconds" \
+    WEB_PUSH_TIMEOUT_SECONDS="$web_push_timeout_seconds" \
     python3 "$RUNTIME_ENV_RENDERER" \
         --local-output "$local_env_path" \
         --iran-output "$IRAN_ENV_SOURCE_PATH" \
