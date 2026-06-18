@@ -85,7 +85,7 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         ]
         deferred_tables = set()
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers):
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
             if table == "commodities" and table not in deferred_tables:
                 deferred_tables.add(table)
                 return "deferred"
@@ -123,7 +123,7 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         ]
         seen_calls = []
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers):
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
             seen_calls.append((table, record_id, dict(data)))
             return "ok"
 
@@ -160,7 +160,7 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         ]
         seen_calls = []
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers):
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
             seen_calls.append((table, record_id, dict(data)))
             return "ok"
 

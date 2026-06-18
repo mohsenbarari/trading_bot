@@ -141,7 +141,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=settings_obj)), \
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
-             patch("core.offer_expiry.remove_channel_buttons", AsyncMock()) as remove_channel_buttons, \
+             patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync") as publish_event_sync, \
              patch("core.cache.decr_active_offer_count", AsyncMock()) as decr_active_offer_count:
             count = await offer_expiry.expire_stale_offers()
@@ -149,9 +149,10 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 3)
         self.assertEqual(session.execute.await_count, 2)
         session.commit.assert_awaited_once()
-        self.assertEqual(remove_channel_buttons.await_count, 2)
-        remove_channel_buttons.assert_any_await(101)
-        remove_channel_buttons.assert_any_await(303)
+        self.assertEqual(apply_offer_channel_state.await_count, 3)
+        applied_offer_ids = [call.args[0].id for call in apply_offer_channel_state.await_args_list]
+        self.assertEqual(applied_offer_ids, [1, 2, 3])
+        self.assertTrue(all(call.kwargs["reason"] == "auto_expire_time_limit" for call in apply_offer_channel_state.await_args_list))
         update_stmt = session.execute.await_args_list[1].args[0]
         self.assertIn("expire_reason", str(update_stmt))
         self.assertIn("expired_at", str(update_stmt))
@@ -178,14 +179,15 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=settings_obj)), \
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
-             patch("core.offer_expiry.remove_channel_buttons", AsyncMock()) as remove_channel_buttons, \
+             patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync", side_effect=RuntimeError("pubsub down")), \
              patch("core.cache.decr_active_offer_count", AsyncMock(side_effect=RuntimeError("redis down"))):
             count = await offer_expiry.expire_stale_offers()
 
         self.assertEqual(count, 1)
         session.commit.assert_awaited_once()
-        remove_channel_buttons.assert_awaited_once_with(505)
+        apply_offer_channel_state.assert_awaited_once()
+        self.assertEqual(apply_offer_channel_state.await_args.args[0].id, 5)
 
     async def test_offer_expiry_loop_logs_start_success_and_failure_cycles(self):
         sleep_calls = []

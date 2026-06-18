@@ -45,6 +45,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
 from models.user import User, UserRole
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
@@ -1480,6 +1481,9 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
 
 async def update_channel_buttons(offer: Offer) -> bool:
     """آپدیت دکمه‌های پست کانال"""
+    if current_server() != "foreign":
+        return False
+
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
@@ -1489,11 +1493,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
     url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
     
     if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
-        # حذف دکمه‌ها
-        payload = {
-            "chat_id": channel_id,
-            "message_id": offer.channel_message_id
-        }
+        return await apply_offer_channel_state(offer, reason="trade_channel_buttons")
     else:
         # ساخت دکمه‌های جدید
         if offer.is_wholesale or not offer.lot_sizes:
@@ -1616,30 +1616,32 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
         offer = await session.get(Offer, offer_id)
         if not offer or not offer.channel_message_id:
             return False
+        offer.remaining_quantity = remaining_quantity
+        offer.status = offer_status
+        offer.lot_sizes = lot_sizes
+        if remaining_quantity <= 0 or offer_status != OfferStatus.ACTIVE:
+            return await apply_offer_channel_state(offer, reason="trade_channel_buttons_sync")
         
         url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
         
-        if remaining_quantity <= 0 or offer_status != OfferStatus.ACTIVE:
-            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+        if offer.is_wholesale or not lot_sizes:
+            buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
         else:
-            if offer.is_wholesale or not lot_sizes:
-                buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
+            valid_lots = get_available_trade_amounts(
+                quantity=offer.quantity,
+                remaining_quantity=remaining_quantity,
+                is_wholesale=False,
+                lot_sizes=lot_sizes,
+            )
+            if not valid_lots:
+                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+                buttons = None
             else:
-                valid_lots = get_available_trade_amounts(
-                    quantity=offer.quantity,
-                    remaining_quantity=remaining_quantity,
-                    is_wholesale=False,
-                    lot_sizes=lot_sizes,
-                )
-                if not valid_lots:
-                    payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
-                    buttons = None
-                else:
-                    buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
-            
-            if buttons is not None:
-                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
-    
+                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
+
+        if buttons is not None:
+            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
+
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=payload, timeout=10)
         return response.status_code == 200

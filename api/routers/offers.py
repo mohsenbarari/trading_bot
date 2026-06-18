@@ -24,7 +24,10 @@ from core.services.market_transition_service import (
     evaluate_current_market_schedule,
     register_market_offer_created,
 )
-from core.services.trade_service import get_available_trade_amounts
+from core.services.telegram_offer_channel_service import (
+    build_offer_channel_message,
+    build_offer_channel_reply_markup,
+)
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
     get_active_customer_relation_for_customer,
@@ -384,6 +387,9 @@ async def _publish_offer_event_safely(event_type: str, payload: dict, *, reason:
 
 
 async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, timeout: float = 10) -> None:
+    if current_server() != "foreign":
+        return
+
     channel_message_id = getattr(offer, "channel_message_id", None)
     if not channel_message_id:
         return
@@ -414,47 +420,20 @@ async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, tim
 
 async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
+    if current_server() != "foreign":
+        return None
+
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
     if not bot_token or not channel_id:
         return None
     
-    # ساخت متن پیام
-    trade_emoji = "🟢" if offer.offer_type == OfferType.BUY else "🔴"
-    trade_label = "خرید" if offer.offer_type == OfferType.BUY else "فروش"
-    invisible_padding = "\u2800" * 35
-    
-    channel_message = f"{trade_emoji}{trade_label} {offer.commodity.name} {offer.quantity} عدد {offer.price:,}"
-    if offer.notes:
-        channel_message += f"\nتوضیحات: {offer.notes}"
-    channel_message += f"\n{invisible_padding}"
-    
-    # ساخت دکمه‌ها
-    if offer.is_wholesale or not offer.lot_sizes:
-        buttons = [[{"text": f"{offer.quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.quantity}"}]]
-    else:
-        all_amounts = get_available_trade_amounts(
-            quantity=offer.quantity,
-            remaining_quantity=offer.remaining_quantity or offer.quantity,
-            is_wholesale=False,
-            lot_sizes=sorted(offer.lot_sizes, reverse=True),
-        )
-        seen = set()
-        unique_amounts = []
-        for a in all_amounts:
-            if a not in seen:
-                seen.add(a)
-                unique_amounts.append(a)
-        buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in unique_amounts]]
-    
-    reply_markup = {"inline_keyboard": buttons}
-    
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": channel_id,
-        "text": channel_message,
-        "reply_markup": reply_markup
+        "text": build_offer_channel_message(offer),
+        "reply_markup": build_offer_channel_reply_markup(offer),
     }
     
     try:

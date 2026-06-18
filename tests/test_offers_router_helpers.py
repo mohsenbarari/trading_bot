@@ -328,7 +328,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.offers.os.getenv", return_value="bot-token"), patch.object(
             offers_module.settings, "channel_id", "@offers"
         ), patch(
-            "api.routers.offers.get_available_trade_amounts",
+            "core.services.telegram_offer_channel_service.get_available_trade_amounts",
             return_value=[10, 8, 10],
         ), patch("api.routers.offers.httpx.AsyncClient", return_value=retail_client):
             message_id = await offers_module.send_offer_to_channel(retail_offer, SimpleNamespace(id=5))

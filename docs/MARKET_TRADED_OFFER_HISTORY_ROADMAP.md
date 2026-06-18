@@ -315,6 +315,8 @@ Implementation notes:
 
 ## Stage TH4B - Telegram Bot/Channel History Tag
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Add the matching Telegram-side visual state for terminal offers. This stage is
 foreign-only and must not introduce any Iran-to-Telegram path.
 
@@ -341,6 +343,28 @@ Exit criteria:
   pure time-limit expired offers.
 - Iran never calls Telegram in tests or staging logs.
 - Replaying the same terminal sync item does not duplicate Telegram side effects.
+
+Implementation notes:
+
+- Added `core/services/telegram_offer_channel_service.py` as the shared Telegram
+  channel-offer renderer and side-effect gateway.
+- The shared helper builds active channel text/keyboards and terminal history
+  text from the same formatter used by channel publishing.
+- Completed offers edit the Telegram channel post text with `معامله‌شده` and
+  remove trade buttons.
+- Time-limit expired offers with inferred completed quantity edit the channel
+  post text with `معامله‌شده · {traded_quantity} عدد` and remove trade buttons.
+- Pure time-limit expired offers only remove trade buttons; no Telegram expired
+  text edit is performed.
+- Terminal Telegram mutations are foreign-only. Helper calls return without
+  Telegram I/O when `current_server() != foreign`.
+- Replays are idempotent because Telegram `message is not modified` responses
+  are treated as successful terminal convergence.
+- `trade_execute`, API trade execution, auto-expiry, and sync terminal-offer
+  convergence now use the shared helper.
+- Focused backend tests cover formatter/tag contract, foreign-only guard,
+  idempotent replay, pure-expired button removal, completed text edit, expiry
+  side effects, sync terminal collection, and existing trade/offer helper paths.
 
 ## Stage TH5 - Realtime And Edge Cases
 

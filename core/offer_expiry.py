@@ -21,6 +21,7 @@ from core.db import AsyncSessionLocal
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.utils import utc_now_naive
 from models.offer import Offer, OfferStatus
 
@@ -34,6 +35,9 @@ _loop_errors = RepeatedErrorLogger(every=10)
 
 async def remove_channel_buttons(channel_message_id: int) -> None:
     """Remove inline keyboard from a channel message via Telegram API."""
+    if current_server() != "foreign":
+        return
+
     bot_token = settings.bot_token or os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
@@ -88,7 +92,10 @@ async def expire_stale_offers() -> int:
         
         count = len(expired_offers)
         offer_ids = [o.id for o in expired_offers]
-        channel_msg_ids = [o.channel_message_id for o in expired_offers if o.channel_message_id]
+        for offer in expired_offers:
+            offer.status = OfferStatus.EXPIRED
+            offer.expire_reason = "time_limit"
+            offer.expired_at = now
         
         # Bulk update status to EXPIRED
         await session.execute(
@@ -100,9 +107,10 @@ async def expire_stale_offers() -> int:
         
         logger.info(f"⏰ Auto-expired {count} offers: {offer_ids}")
         
-        # Remove channel buttons for expired offers
-        for msg_id in channel_msg_ids:
-            await remove_channel_buttons(msg_id)
+        # Apply terminal channel state on foreign. Pure expired offers only lose
+        # buttons; partially traded expired offers receive the traded tag.
+        for offer in expired_offers:
+            await apply_offer_channel_state(offer, reason="auto_expire_time_limit")
         
         # Publish realtime events for each expired offer
         try:
