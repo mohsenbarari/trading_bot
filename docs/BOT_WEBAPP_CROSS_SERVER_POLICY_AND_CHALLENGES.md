@@ -33,6 +33,10 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 15. Deployment/config validation for this roadmap must prove that the Iran stack has no active bot
     service, has no Telegram credentials or Telegram outbound path, and that the foreign stack has
     the bot service. These checks must run before staging validation.
+16. All Telegram side effects must go through one central gateway. The gateway must hard-fail on
+    `server_mode=iran` because Iran-side Telegram connectivity is both prohibited by policy and
+    operationally unavailable due to filtering. The foreign server is the only Telegram execution
+    surface.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -176,6 +180,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Move Telegram publication toward an idempotent gateway/outbox model. The exact schema is still a
   design decision, but the needed behavior is clear: foreign-only execution, dedupe key, retry state,
   durable status, and sync-back of publication result.
+- Route every Telegram side effect through a central gateway. Confirmed covered actions include
+  offer publication, channel message updates, expire/cancel channel updates, trade button/message
+  updates, and Telegram-bound notifications. Iran-side calls must fail closed.
 - Treat WebApp sessions, Bot FSM state, and Telegram runtime state as surface-scoped auth/runtime
   state unless a later decision explicitly promotes specific metadata into the product sync set.
   User profile/account status remains product data and should sync.
@@ -239,7 +246,8 @@ accepted as accurate and should influence the Bot roadmap.
 - A durable committed outbox drain is not implemented. `change_log` exists, but the worker consumes
   Redis queues; replaying committed `change_log WHERE synced=false` is a manual/resync path rather
   than the normal delivery loop.
-- A server-mode Telegram gateway that hard-fails all Telegram calls on Iran does not exist.
+- A server-mode Telegram gateway that hard-fails all Telegram calls on Iran does not exist, and
+  Telegram side effects are not yet forced through a single shared gateway.
 - A server-mode WebApp gateway that hard-fails frontend service/user WebApp access on foreign does
   not exist.
 - Surface-based offer-home assignment is not implemented for WebApp creation.
@@ -283,8 +291,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 
 #### Level 2 - Guardrails And Local Side Effects
 
-1. Add a central Telegram side-effect gateway that refuses all Telegram calls when
-   `server_mode=iran`.
+1. Add the confirmed central Telegram side-effect gateway. Every Telegram call must pass through it,
+   foreign is the only allowed execution surface, and `server_mode=iran` must fail closed with an
+   operational/security log.
 2. Add a server-mode WebApp/static guard so the foreign API cannot accidentally serve the WebApp.
 3. After synced bot-created offers are applied on Iran, publish a local WebApp realtime event without
    creating a sync echo.
@@ -529,16 +538,21 @@ Required direction:
 
 ### 6. Iran must have hard Telegram side-effect guards
 
-Policy says Iran never connects to Telegram. Current shared API code has Telegram side-effect helpers such as
-offer channel publishing and trade message/button updates. These helpers check for token/channel, but they do
-not encode "Iran must never call Telegram" as a hard invariant.
+Policy says Iran never connects to Telegram. This is also an operational constraint because Telegram
+is filtered in Iran, so an Iran-side Telegram path is not dependable even if credentials accidentally
+exist. Current shared API code has Telegram side-effect helpers such as offer channel publishing and
+trade message/button updates. These helpers check for token/channel, but they do not encode "Iran
+must never call Telegram" as a hard invariant.
 
 Required direction:
 
 - Ensure Iran env has no `BOT_TOKEN` and no Telegram outbound path.
 - Add deployment/config checks that fail before staging validation if Iran has an active bot service
   or Telegram credentials, or if the foreign stack is missing the bot service.
-- Add a central Telegram side-effect gateway that refuses to call Telegram when `server_mode=iran`.
+- Add the confirmed central Telegram side-effect gateway that refuses to call Telegram when
+  `server_mode=iran` and logs the blocked attempt for operations/security review.
+- Route offer publication, channel message updates, expire/cancel channel updates, trade
+  button/message updates, and Telegram-bound notifications through that gateway only.
 - For WebApp-created offers, Iran should create the offer and sync it to foreign; foreign publishes to Telegram.
 - For notifications that must reach Telegram users, Iran should relay an internal event/change to foreign, not call Telegram.
 
