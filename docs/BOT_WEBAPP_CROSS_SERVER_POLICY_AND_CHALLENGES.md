@@ -61,6 +61,12 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     must receive `source_surface`, `actor_user`, `request_home_server`, and `offer_home_server`;
     run market/domain validation; create the offer; record sync/outbox state; and define
     post-commit side effects for Iran and foreign surfaces.
+23. Trade/request execution from both WebApp and Telegram bot callbacks must route through one
+    shared authoritative and idempotent command/service. If the current server is not the
+    `offer_home_server`, it must forward the command to the offer home server and must not perform
+    local trade or offer mutation. The authoritative service owns validation, trade-number
+    allocation, offer quantity/status mutation, idempotency, sync/outbox recording, and
+    post-commit side effects.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -200,10 +206,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Add the confirmed source-surface concept with `telegram_bot`, `webapp`, and `internal_sync`,
   and use it to choose offer authority and side effects. `internal_sync` preserves the source
   server's incoming `Offer.home_server` and must not reclassify synced offers.
-- Use the confirmed shared offer creation command/service for both WebApp and Bot writes. Extract
-  trade execution commands/services as the next related direction so Bot handlers become thin UX
-  adapters and do not own market authority, trade-number allocation, customer-chain rules, or offer
-  mutation logic.
+- Use the confirmed shared offer creation and shared trade execution command/services for both
+  WebApp and Bot writes. Bot handlers become thin UX adapters and do not own market authority,
+  trade-number allocation, customer-chain rules, or offer mutation logic.
 - Move Telegram publication toward an idempotent gateway/outbox model. The exact schema is still a
   design decision, but the needed behavior is clear: foreign-only execution, dedupe key, retry state,
   durable status, and sync-back of publication result.
@@ -357,8 +362,10 @@ This ordering is about implementation difficulty and blast radius, not business 
    it. The service owns `source_surface`, `actor_user`, `request_home_server`,
    `offer_home_server`, market validation, offer row creation, sync/outbox recording, and
    post-commit side-effect selection.
-2. Extract shared trade execution command/service and make Bot channel callbacks use the same
-   authoritative/idempotent path as the API.
+2. Implement the confirmed shared trade/request execution command/service and make WebApp requests
+   and Bot channel callbacks use the same authoritative/idempotent path. If the current server is
+   not the offer home server, the command must be forwarded to `offer_home_server` and no local
+   trade or offer mutation may run.
 3. Extend the shared `expire_offers` command/service to cover API cancel-all, single-offer expiry,
    auto-expiry, market-close expiry, and remote-forwarded expiry. It must enforce offer-home
    authority and forward commands to `offer_home_server` when the local server is not authoritative.
@@ -692,7 +699,7 @@ Before changing code, create a registry for every model/table:
 | Table class | Sync policy | Write surfaces | Authority | Conflict rule | Realtime side effects |
 | --- | --- | --- | --- | --- | --- |
 | `offers` | sync | bot, WebApp | `offer_home_server` | command-forward for mutations | WebApp event on Iran, Telegram publish on foreign |
-| `trades` | sync | bot, WebApp | offer home server | idempotent command | notifications, offer update event |
+| `trades` | sync | bot, WebApp | offer home server | shared idempotent command; forward to `offer_home_server` when remote | notifications, offer update event |
 | `users` | sync | admin/auth/bot link/WebApp | TBD | natural key + field-level merge | profile/account events |
 | `messages` | no sync | WebApp only | Iran | n/a | Iran realtime only |
 | `conversations` | no sync | WebApp only | Iran | n/a | Iran realtime only |
