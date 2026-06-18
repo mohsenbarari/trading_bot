@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BellRing, ChevronRight, Mail, MailOpen, Trash2 } from 'lucide-vue-next'
+import { Bell, BellRing, ChevronRight } from 'lucide-vue-next'
 import {
   AppButton,
-  AppConfirmDialog,
   AppEmptyState,
   AppFilterChips,
   AppIconButton,
@@ -26,7 +25,6 @@ import {
 const router = useRouter()
 const notificationStore = useNotificationStore()
 const activeCategory = ref<'trade' | 'management'>('management')
-const pendingDeleteNotification = ref<NormalizedAppNotification | null>(null)
 const pushState = ref<WebPushRuntimeState>('checking')
 const isPushBusy = ref(false)
 const pushActionMessage = ref('')
@@ -168,21 +166,6 @@ const openNotificationRoute = (notification: NormalizedAppNotification) => {
 
 function canOpenNotificationRoute(notification: NormalizedAppNotification): boolean {
   return typeof notification.route === 'string' && notification.route.trim().length > 0
-}
-
-function requestDelete(notification: NormalizedAppNotification) {
-  pendingDeleteNotification.value = notification
-}
-
-function closeDeleteConfirm() {
-  pendingDeleteNotification.value = null
-}
-
-async function confirmDeleteNotification() {
-  const notification = pendingDeleteNotification.value
-  if (!notification) return
-  await notificationStore.deleteNotification(notification.id)
-  pendingDeleteNotification.value = null
 }
 
 onMounted(async () => {
@@ -331,41 +314,12 @@ onMounted(async () => {
                 </div>
               </div>
 
-              <div class="notif-actions">
-                <button
-                  type="button"
-                  class="notification-control toggle-read-btn"
-                  :aria-label="notif.is_read ? `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌نشده` : `علامت‌گذاری ${notif.title || 'اعلان جدید'} به عنوان خوانده‌شده`"
-                  @click.stop="notificationStore.toggleReadStatus(notif.id, !notif.is_read)"
-                >
-                  <component :is="notif.is_read ? Mail : MailOpen" :size="16" />
-                </button>
-                <button
-                  type="button"
-                  class="notification-control delete-btn"
-                  :aria-label="`حذف اعلان ${notif.title || 'اعلان جدید'}`"
-                  @click.stop="requestDelete(notif)"
-                >
-                  <Trash2 :size="16" />
-                </button>
-              </div>
             </div>
           </div>
         </section>
       </main>
     </div>
   </AppPage>
-
-  <AppConfirmDialog
-    :open="Boolean(pendingDeleteNotification)"
-    title="حذف اعلان"
-    :message="`اعلان «${pendingDeleteNotification?.title || 'اعلان جدید'}» از inbox شما حذف می‌شود.`"
-    confirm-label="حذف اعلان"
-    cancel-label="انصراف"
-    tone="danger"
-    @cancel="closeDeleteConfirm"
-    @confirm="confirmDeleteNotification"
-  />
 </template>
 
 <style scoped>
@@ -438,8 +392,7 @@ onMounted(async () => {
   font-size: var(--ds-font-sm);
 }
 
-.notif-item:focus-visible,
-.notification-control:focus-visible {
+.notif-item:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
 }
@@ -493,49 +446,6 @@ onMounted(async () => {
 
 .notif-item.category-trade .notif-main {
   gap: 0.7rem;
-}
-
-.notif-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.notif-item.category-trade .notif-actions {
-  gap: 0.35rem;
-}
-
-.notification-control {
-  min-width: var(--ds-touch-target);
-  min-height: var(--ds-touch-target);
-  border-radius: 10px;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: var(--ds-shadow-sm);
-}
-
-.delete-btn {
-  background: var(--ds-danger-50);
-  color: var(--ds-danger-500);
-}
-
-.delete-btn:hover {
-  background: var(--ds-danger-100);
-  transform: scale(1.04);
-}
-
-.toggle-read-btn {
-  background: var(--ds-bg-page);
-  color: var(--ds-text-muted);
-}
-
-.toggle-read-btn:hover {
-  background: var(--ds-bg-hover);
-  color: var(--ds-text-primary);
 }
 
 .notif-icon {

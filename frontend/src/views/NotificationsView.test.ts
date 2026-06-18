@@ -75,7 +75,7 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
   })
 
-  it('routes back home and delegates delete actions to the store after confirmation', async () => {
+  it('routes back home and does not render per-notification action buttons', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
@@ -91,7 +91,6 @@ describe('NotificationsView.vue', () => {
     ]
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
-    const deleteSpy = vi.spyOn(store, 'deleteNotification').mockResolvedValue()
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -102,13 +101,9 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('صندوق ورودی')
     expect(wrapper.find('.notifications-topbar h1').exists()).toBe(false)
-
-    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
-    await wrapper.get('.delete-btn').trigger('click')
-    expect(wrapper.text()).toContain('حذف اعلان')
-    await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
-    expect(deleteSpy).toHaveBeenCalledWith(11)
-    expect(wrapper.text()).toContain('اعلان')
+    expect(wrapper.find('.delete-btn').exists()).toBe(false)
+    expect(wrapper.find('.toggle-read-btn').exists()).toBe(false)
+    expect(wrapper.find('.notif-actions').exists()).toBe(false)
   })
 
   it('switches notification visibility by category without rendering read-count filters', async () => {
@@ -253,7 +248,6 @@ describe('NotificationsView.vue', () => {
     ] as any
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
-    const toggleReadSpy = vi.spyOn(store, 'toggleReadStatus').mockResolvedValue()
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
@@ -264,10 +258,8 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.unread-dot').exists()).toBe(true)
     expect(wrapper.find('.notif-time').exists()).toBe(true)
     expect(wrapper.text()).toContain('جدید')
-
-    await wrapper.get('.toggle-read-btn').trigger('click')
-    expect(toggleReadSpy).toHaveBeenCalledWith(14, true)
-    expect(wrapper.get('.toggle-read-btn').attributes('aria-label')).toContain('خوانده‌شده')
+    expect(wrapper.find('.toggle-read-btn').exists()).toBe(false)
+    expect(wrapper.find('.delete-btn').exists()).toBe(false)
     expect(routerPushMock).not.toHaveBeenCalled()
 
     await wrapper.get('.notif-item').trigger('click')
