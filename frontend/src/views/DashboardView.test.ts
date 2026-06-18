@@ -39,6 +39,7 @@ function mockDashboardApi(options: {
   user: Record<string, unknown>
   trades?: unknown[]
   commodities?: unknown[]
+  projectUsers?: unknown[]
   activeSessions?: unknown[]
   failSessionLookup?: boolean
 }) {
@@ -51,6 +52,9 @@ function mockDashboardApi(options: {
     }
     if (url === '/api/commodities/') {
       return makeJsonResponse(options.commodities || [])
+    }
+    if (url.startsWith('/api/users-public/') && url.includes('/project-users?')) {
+      return makeJsonResponse(options.projectUsers || [])
     }
     if (url === '/api/sessions/active') {
       if (options.failSessionLookup) {
@@ -134,13 +138,17 @@ describe('DashboardView.vue', () => {
           aliases: [],
         },
       ],
+      projectUsers: [
+        { id: 31, account_name: 'ali31', mobile_number: '09120000031' },
+        { id: 32, account_name: 'zahra32', mobile_number: '09120000032' },
+      ],
     })
 
     const wrapper = await mountView()
 
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/auth/me')
     expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/trades/my?from_date=2026-05-14&to_date=2026-05-14&limit=20')
-    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/')
+    expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
     expect(wrapper.text()).toContain('صبح بخیر')
     expect(wrapper.text()).toContain('رضا محمدی')
     expect(wrapper.get('.avatar').text()).toContain('ر')
@@ -152,14 +160,28 @@ describe('DashboardView.vue', () => {
     expect(wrapper.get('.today-trades-card').text()).toContain('خرید')
     expect(wrapper.get('.today-trades-card').text()).toContain('سکه')
     expect(wrapper.get('.today-trades-card').text()).not.toContain('نباید دیده شود')
-    expect(wrapper.get('.dashboard-shortcuts').text()).toContain('عملیات')
-    expect(wrapper.get('.dashboard-shortcuts').text()).toContain('حساب')
+    expect(wrapper.find('.dashboard-shortcuts').exists()).toBe(false)
+    expect(wrapper.findAll('.dashboard-action-card')).toHaveLength(0)
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('حساب فعال')
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('آماده انجام عملیات روزانه')
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('بازار باز')
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('کار امروز ۱ معامله')
     expect(wrapper.get('.dashboard-header-summary').text()).toContain('۱ اعلان')
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('لیست همکاران')
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('باز کنید')
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('کالاهای مجاز برای معامله')
+    expect(wrapper.get('.dashboard-commodities-card').text()).toContain('باز کنید')
+    expect(wrapper.get('.dashboard-commodities-card').text()).not.toContain('امامی')
+
+    await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
+    await flushPromises()
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users-public/12/project-users?limit=25&offset=0')
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('ali31')
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('09120000031')
+
+    await wrapper.get('.dashboard-accordion-toggle--commodities').trigger('click')
+    await flushPromises()
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/commodities/')
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('سکه')
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('امامی')
     expect(wrapper.get('.dashboard-commodities-card').text()).toContain('طرح جدید')
@@ -169,14 +191,16 @@ describe('DashboardView.vue', () => {
     await wrapper.get('.notif-btn').trigger('click')
     await wrapper.get('.user-info-center').trigger('click')
     await wrapper.get('.hero-btn').trigger('click')
-    await wrapper.findAll('.dashboard-action-card')[0]!.trigger('click')
-    await wrapper.findAll('.dashboard-action-card')[1]!.trigger('click')
+    await wrapper.findAll('.dashboard-project-user-card')[0]!.trigger('click')
 
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(1, '/notifications')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(2, '/profile')
     expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(3, '/market')
-    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(4, '/operations')
-    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(5, '/account')
+    expect(dashboardViewMocks.routerPushMock).toHaveBeenNthCalledWith(4, {
+      name: 'public-profile',
+      params: { id: 31 },
+      query: { account_name: 'ali31' },
+    })
   })
 
   it('shows the inactive warning and blocks market navigation for inactive accounts', async () => {
@@ -258,6 +282,9 @@ describe('DashboardView.vue', () => {
           price: 456000,
         },
       ],
+      projectUsers: [
+        { id: 20, account_name: 'owner-peer', mobile_number: '09120000020' },
+      ],
     })
 
     const wrapper = await mountView()
@@ -265,8 +292,15 @@ describe('DashboardView.vue', () => {
     expect(wrapper.find('.hero-btn').exists()).toBe(false)
     expect(wrapper.find('.logout-btn').exists()).toBe(false)
     expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
+    expect(wrapper.find('.dashboard-project-users-card').exists()).toBe(true)
     expect(wrapper.get('.today-trades-card').text()).toContain('طرف مالک')
     expect(wrapper.get('.today-trades-card').text()).toContain('فروش')
+
+    await wrapper.get('.dashboard-accordion-toggle--project-users').trigger('click')
+    await flushPromises()
+
+    expect(dashboardViewMocks.apiFetchMock).toHaveBeenCalledWith('/api/users-public/44/project-users?limit=25&offset=0')
+    expect(wrapper.get('.dashboard-project-users-card').text()).toContain('owner-peer')
     expect(dashboardViewMocks.routerPushMock).not.toHaveBeenCalledWith('/market')
   })
 
@@ -291,6 +325,7 @@ describe('DashboardView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
+    expect(wrapper.find('.dashboard-project-users-card').exists()).toBe(false)
     expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
   })
 

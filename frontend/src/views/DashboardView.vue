@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BriefcaseBusiness, Store, LogOut, AlertTriangle, Ban, UserRound } from 'lucide-vue-next'
+import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, UsersRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
-import { AppActionCard, AppEmptyState, AppIconButton, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
+import { AppButton, AppEmptyState, AppIconButton, AppInput, AppListItem, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
 
 interface DashboardTrade {
   id: number
@@ -32,6 +32,14 @@ interface DashboardCommodity {
   aliases: DashboardCommodityAlias[]
 }
 
+interface DashboardProjectUser {
+  id: number
+  account_name: string
+  mobile_number?: string | null
+}
+
+const PROJECT_USERS_PAGE_SIZE = 25
+
 const router = useRouter()
 const notificationStore = useNotificationStore()
 const user = ref<any>(null)
@@ -42,6 +50,18 @@ const todayTradesError = ref('')
 const allowedCommodities = ref<DashboardCommodity[]>([])
 const allowedCommoditiesLoading = ref(false)
 const allowedCommoditiesError = ref('')
+const allowedCommoditiesExpanded = ref(false)
+const allowedCommoditiesLoaded = ref(false)
+const projectUsersExpanded = ref(false)
+const projectUsers = ref<DashboardProjectUser[]>([])
+const projectUsersLoading = ref(false)
+const projectUsersLoadingMore = ref(false)
+const projectUsersError = ref('')
+const projectUsersQuery = ref('')
+const projectUsersLoaded = ref(false)
+const lastLoadedProjectUsersQuery = ref('')
+const projectUsersOffset = ref(0)
+const projectUsersHasMore = ref(false)
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -51,6 +71,7 @@ const isRestricted = computed(() => {
 
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
 const isAccountant = computed(() => user.value?.is_accountant === true)
+const isCustomer = computed(() => user.value?.is_customer === true || Boolean(user.value?.customer_tier))
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const isMarketClosed = computed(() => !isMarketOpen.value)
 const marketEntryStatusLabel = computed(() => (isMarketOpen.value ? 'بازار باز' : 'بازار بسته'))
@@ -66,6 +87,18 @@ const showAllowedCommoditiesSection = computed(() => {
   if (isAccountant.value) return false
   return user.value.customer_tier !== 'tier2'
 })
+
+const projectUsersDirectoryTargetId = computed(() => {
+  if (!user.value || isCustomer.value) return null
+  const accountantOwnerUserId = Number(user.value.accountant_owner_user_id)
+  if (isAccountant.value && Number.isInteger(accountantOwnerUserId) && accountantOwnerUserId > 0) {
+    return accountantOwnerUserId
+  }
+  const currentUserId = Number(user.value.id)
+  return Number.isInteger(currentUserId) && currentUserId > 0 ? currentUserId : null
+})
+
+const showProjectUsersSection = computed(() => projectUsersDirectoryTargetId.value !== null)
 
 const globalLockGraceExpiresAtText = computed(() => {
   if (!user.value?.global_lock_grace_expires_at) return ''
@@ -139,6 +172,18 @@ const userInitial = computed(() => {
 })
 
 const allowedCommodityCountLabel = computed(() => `${formatDashboardNumber(allowedCommodities.value.length)} کالا`)
+const allowedCommoditySummaryLabel = computed(() => {
+  if (!allowedCommoditiesLoaded.value && !allowedCommoditiesLoading.value) return 'باز کنید'
+  if (allowedCommoditiesLoading.value) return 'در حال دریافت'
+  if (allowedCommoditiesError.value) return 'خطا'
+  return allowedCommodityCountLabel.value
+})
+const projectUsersCountLabel = computed(() => `${formatDashboardNumber(projectUsers.value.length)} همکار`)
+const projectUsersSummaryLabel = computed(() => {
+  if (!projectUsersLoaded.value && !projectUsersLoading.value) return 'باز کنید'
+  if (projectUsersLoading.value) return 'در حال دریافت'
+  return projectUsersCountLabel.value
+})
 
 const tradeHistoryPerspectiveUserId = computed(() => {
   if (!user.value) return null
@@ -243,11 +288,21 @@ function getCommodityAliasLabels(commodity: DashboardCommodity) {
   return Array.from(new Set(aliases.filter((alias) => alias !== commodity.name)))
 }
 
+function parseDashboardApiError(payload: unknown, fallback: string) {
+  if (payload && typeof payload === 'object' && 'detail' in payload) {
+    const detail = (payload as { detail?: unknown }).detail
+    if (typeof detail === 'string' && detail.trim()) return detail
+    if (Array.isArray(detail) && detail.length > 0) return fallback
+  }
+  return fallback
+}
+
 async function loadAllowedCommodities() {
   if (!showAllowedCommoditiesSection.value) {
     allowedCommodities.value = []
     allowedCommoditiesError.value = ''
     allowedCommoditiesLoading.value = false
+    allowedCommoditiesLoaded.value = false
     return
   }
   allowedCommoditiesLoading.value = true
@@ -277,12 +332,130 @@ async function loadAllowedCommodities() {
           })
           .filter((commodity): commodity is DashboardCommodity => commodity !== null)
       : []
+    allowedCommoditiesLoaded.value = true
   } catch (error: any) {
     allowedCommodities.value = []
     allowedCommoditiesError.value = error?.message || 'دریافت فهرست کالاها ناموفق بود'
+    allowedCommoditiesLoaded.value = true
   } finally {
     allowedCommoditiesLoading.value = false
   }
+}
+
+function normalizeProjectUser(raw: unknown): DashboardProjectUser | null {
+  if (!raw || typeof raw !== 'object') return null
+  const id = Number((raw as { id?: unknown }).id)
+  const accountName = typeof (raw as { account_name?: unknown }).account_name === 'string'
+    ? (raw as { account_name: string }).account_name.trim()
+    : ''
+  if (!Number.isInteger(id) || id <= 0 || !accountName) return null
+  const mobileNumber = typeof (raw as { mobile_number?: unknown }).mobile_number === 'string'
+    ? (raw as { mobile_number: string }).mobile_number.trim()
+    : ''
+  return {
+    id,
+    account_name: accountName,
+    mobile_number: mobileNumber || null,
+  }
+}
+
+async function loadProjectUsersDirectory(force = false) {
+  const targetId = projectUsersDirectoryTargetId.value
+  const normalizedQuery = projectUsersQuery.value.trim()
+  const isLoadMore = !force && projectUsersOffset.value > 0
+  if (
+    targetId === null
+    || projectUsersLoading.value
+    || projectUsersLoadingMore.value
+    || (!force && !isLoadMore && projectUsersLoaded.value && lastLoadedProjectUsersQuery.value === normalizedQuery)
+  ) {
+    return
+  }
+
+  if (isLoadMore) {
+    projectUsersLoadingMore.value = true
+  } else {
+    projectUsersLoading.value = true
+  }
+  projectUsersError.value = ''
+
+  try {
+    const params = new URLSearchParams()
+    params.set('limit', String(PROJECT_USERS_PAGE_SIZE))
+    params.set('offset', String(isLoadMore ? projectUsersOffset.value : 0))
+    if (normalizedQuery) params.set('q', normalizedQuery)
+    const response = await apiFetch(`/api/users-public/${targetId}/project-users?${params.toString()}`)
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      throw new Error(parseDashboardApiError(payload, 'خطا در دریافت لیست همکاران'))
+    }
+
+    const rawRows = Array.isArray(payload) ? payload : []
+    const nextRows = rawRows
+      .map((entry) => normalizeProjectUser(entry))
+      .filter((entry): entry is DashboardProjectUser => entry !== null && entry.id !== targetId)
+    if (isLoadMore) {
+      const existingIds = new Set(projectUsers.value.map((entry) => entry.id))
+      projectUsers.value = [
+        ...projectUsers.value,
+        ...nextRows.filter((entry) => !existingIds.has(entry.id)),
+      ]
+    } else {
+      projectUsers.value = nextRows
+    }
+    projectUsersLoaded.value = true
+    lastLoadedProjectUsersQuery.value = normalizedQuery
+    projectUsersHasMore.value = rawRows.length === PROJECT_USERS_PAGE_SIZE
+    projectUsersOffset.value += rawRows.length
+  } catch (error: any) {
+    projectUsersError.value = error?.message || 'خطا در دریافت لیست همکاران'
+  } finally {
+    projectUsersLoading.value = false
+    projectUsersLoadingMore.value = false
+  }
+}
+
+function resetProjectUsersDirectoryState() {
+  projectUsers.value = []
+  projectUsersLoading.value = false
+  projectUsersLoadingMore.value = false
+  projectUsersError.value = ''
+  projectUsersLoaded.value = false
+  lastLoadedProjectUsersQuery.value = ''
+  projectUsersOffset.value = 0
+  projectUsersHasMore.value = false
+}
+
+async function submitProjectUsersSearch() {
+  resetProjectUsersDirectoryState()
+  await loadProjectUsersDirectory(true)
+}
+
+async function loadMoreProjectUsers() {
+  if (projectUsersLoading.value || projectUsersLoadingMore.value || !projectUsersHasMore.value) return
+  await loadProjectUsersDirectory()
+}
+
+async function toggleProjectUsersDirectory() {
+  projectUsersExpanded.value = !projectUsersExpanded.value
+  if (projectUsersExpanded.value && !projectUsersLoaded.value && !projectUsersLoading.value) {
+    await loadProjectUsersDirectory(true)
+  }
+}
+
+async function toggleAllowedCommodities() {
+  allowedCommoditiesExpanded.value = !allowedCommoditiesExpanded.value
+  if (allowedCommoditiesExpanded.value && !allowedCommoditiesLoaded.value && !allowedCommoditiesLoading.value) {
+    await loadAllowedCommodities()
+  }
+}
+
+function openProjectUserProfile(projectUser: DashboardProjectUser) {
+  router.push({
+    name: 'public-profile',
+    params: { id: projectUser.id },
+    query: projectUser.account_name ? { account_name: projectUser.account_name } : undefined,
+  })
 }
 
 async function fetchUser() {
@@ -291,7 +464,6 @@ async function fetchUser() {
     if (res.ok) {
       user.value = await res.json()
       void loadTodayTrades()
-      void loadAllowedCommodities()
     }
     // 401 handling is automatic via apiFetch → forceLogout
   } catch (e) {
@@ -318,14 +490,6 @@ async function logout() {
 function openMarket() {
   if (isInactiveAccount.value || isAccountant.value) return
   router.push('/market')
-}
-
-function openOperations() {
-  router.push('/operations')
-}
-
-function openAccountHub() {
-  router.push('/account')
 }
 
 onMounted(fetchUser)
@@ -491,67 +655,159 @@ onMounted(fetchUser)
           </div>
         </AppSectionCard>
 
-        <section class="dashboard-shortcuts" aria-label="میانبرهای اصلی">
-          <AppActionCard class="dashboard-action-card" title="عملیات" description="مشتریان، حسابداران و مدیریت" @select="openOperations">
-            <template #icon>
-              <BriefcaseBusiness :size="20" />
-            </template>
-          </AppActionCard>
+        <section
+          v-if="showProjectUsersSection"
+          class="dashboard-accordion-card dashboard-project-users-card"
+          :class="{ 'is-open': projectUsersExpanded }"
+          aria-labelledby="dashboard-project-users-title"
+        >
+          <button
+            type="button"
+            class="dashboard-accordion-toggle dashboard-accordion-toggle--project-users"
+            :aria-expanded="projectUsersExpanded"
+            aria-controls="dashboard-project-users-panel"
+            @click="toggleProjectUsersDirectory"
+          >
+            <span class="dashboard-accordion-icon dashboard-accordion-icon--users" aria-hidden="true">
+              <UsersRound :size="20" />
+            </span>
+            <span class="dashboard-accordion-copy">
+              <strong id="dashboard-project-users-title">لیست همکاران</strong>
+              <span>اعضای قابل مشاهده پروژه را جستجو و از همین بخش باز کنید.</span>
+            </span>
+            <span class="dashboard-accordion-meta">
+              <AppStatusBadge tone="info">{{ projectUsersSummaryLabel }}</AppStatusBadge>
+              <ChevronDown class="dashboard-accordion-chevron" :size="18" />
+            </span>
+          </button>
 
-          <AppActionCard class="dashboard-action-card" title="حساب" description="پروفایل، تنظیمات و اعلان‌ها" @select="openAccountHub">
-            <template #icon>
-              <UserRound :size="20" />
-            </template>
-          </AppActionCard>
+          <div
+            v-if="projectUsersExpanded"
+            id="dashboard-project-users-panel"
+            class="dashboard-accordion-panel"
+          >
+            <form class="dashboard-project-users-search" @submit.prevent="submitProjectUsersSearch">
+              <AppInput
+                v-model="projectUsersQuery"
+                class="dashboard-project-users-search-input"
+                type="search"
+                placeholder="جستجو با نام کاربری یا شماره تماس"
+              />
+              <AppButton type="submit" size="sm" :loading="projectUsersLoading">جستجو</AppButton>
+            </form>
+
+            <div v-if="projectUsersLoading" class="dashboard-directory-state">
+              در حال دریافت لیست همکاران...
+            </div>
+            <div v-else-if="projectUsersError" class="dashboard-directory-state dashboard-directory-state--error">
+              {{ projectUsersError }}
+            </div>
+            <AppEmptyState
+              v-else-if="projectUsersLoaded && projectUsers.length === 0"
+              title="همکاری برای نمایش پیدا نشد"
+              :message="projectUsersQuery.trim() ? 'همکاری با این جستجو پیدا نشد.' : 'همکاری برای نمایش وجود ندارد.'"
+            />
+            <div v-else-if="projectUsers.length > 0" class="dashboard-project-users-list">
+              <AppListItem
+                v-for="projectUser in projectUsers"
+                :key="projectUser.id"
+                :title="projectUser.account_name"
+                :description="projectUser.mobile_number || 'شماره تماس ثبت نشده'"
+                interactive
+                class="dashboard-project-user-card"
+                @select="openProjectUserProfile(projectUser)"
+              >
+                <template #trailing>
+                  <span v-if="projectUser.mobile_number" class="dashboard-project-user-mobile" dir="ltr">
+                    {{ projectUser.mobile_number }}
+                  </span>
+                </template>
+              </AppListItem>
+              <div v-if="projectUsersHasMore" class="dashboard-directory-footer">
+                <AppButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  class="dashboard-directory-load-more"
+                  :loading="projectUsersLoadingMore"
+                  @click="loadMoreProjectUsers"
+                >
+                  نمایش بیشتر
+                </AppButton>
+              </div>
+            </div>
+          </div>
         </section>
 
-        <AppSectionCard
+        <section
           v-if="showAllowedCommoditiesSection"
-          class="dashboard-commodities-card"
-          title="کالاهای مجاز برای معامله"
-          description="کالاهای فعال بازار را به همراه نام‌های مستعار ثبت‌شده در همین بخش ببینید."
+          class="dashboard-accordion-card dashboard-commodities-card"
+          :class="{ 'is-open': allowedCommoditiesExpanded }"
+          aria-labelledby="dashboard-commodities-title"
         >
-          <template #actions>
-            <AppStatusBadge tone="info">{{ allowedCommodityCountLabel }}</AppStatusBadge>
-          </template>
+          <button
+            type="button"
+            class="dashboard-accordion-toggle dashboard-accordion-toggle--commodities"
+            :aria-expanded="allowedCommoditiesExpanded"
+            aria-controls="dashboard-commodities-panel"
+            @click="toggleAllowedCommodities"
+          >
+            <span class="dashboard-accordion-icon dashboard-accordion-icon--commodities" aria-hidden="true">
+              <PackageCheck :size="20" />
+            </span>
+            <span class="dashboard-accordion-copy">
+              <strong id="dashboard-commodities-title">کالاهای مجاز برای معامله</strong>
+              <span>کالاهای فعال بازار و نام‌های مستعار ثبت‌شده را ببینید.</span>
+            </span>
+            <span class="dashboard-accordion-meta">
+              <AppStatusBadge tone="info">{{ allowedCommoditySummaryLabel }}</AppStatusBadge>
+              <ChevronDown class="dashboard-accordion-chevron" :size="18" />
+            </span>
+          </button>
 
-          <div v-if="allowedCommoditiesLoading" class="dashboard-commodities-state">
-            در حال دریافت فهرست کالاها...
+          <div
+            v-if="allowedCommoditiesExpanded"
+            id="dashboard-commodities-panel"
+            class="dashboard-accordion-panel"
+          >
+            <div v-if="allowedCommoditiesLoading" class="dashboard-commodities-state">
+              در حال دریافت فهرست کالاها...
+            </div>
+            <div v-else-if="allowedCommoditiesError" class="dashboard-commodities-state dashboard-commodities-state--error">
+              {{ allowedCommoditiesError }}
+            </div>
+            <AppEmptyState
+              v-else-if="allowedCommodities.length === 0"
+              title="هنوز کالایی برای معامله ثبت نشده است"
+              message="پس از تعریف کالاها در مدیریت سیستم، فهرست کامل همین‌جا نمایش داده می‌شود."
+            />
+            <div v-else class="dashboard-commodities-grid">
+              <article
+                v-for="commodity in allowedCommodities"
+                :key="commodity.id"
+                class="dashboard-commodity-card"
+              >
+                <div class="dashboard-commodity-head">
+                  <strong class="dashboard-commodity-title">{{ commodity.name }}</strong>
+                  <AppStatusBadge tone="neutral">
+                    {{ formatDashboardNumber(getCommodityAliasLabels(commodity).length) }} نام مستعار
+                  </AppStatusBadge>
+                </div>
+                <p class="dashboard-commodity-caption">نام‌های قابل استفاده برای جستجو و ثبت سریع این کالا</p>
+                <div v-if="getCommodityAliasLabels(commodity).length > 0" class="dashboard-commodity-aliases">
+                  <span
+                    v-for="alias in getCommodityAliasLabels(commodity)"
+                    :key="`${commodity.id}-${alias}`"
+                    class="dashboard-commodity-alias-chip"
+                  >
+                    {{ alias }}
+                  </span>
+                </div>
+                <p v-else class="dashboard-commodity-empty">برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است.</p>
+              </article>
+            </div>
           </div>
-          <div v-else-if="allowedCommoditiesError" class="dashboard-commodities-state dashboard-commodities-state--error">
-            {{ allowedCommoditiesError }}
-          </div>
-          <AppEmptyState
-            v-else-if="allowedCommodities.length === 0"
-            title="هنوز کالایی برای معامله ثبت نشده است"
-            message="پس از تعریف کالاها در مدیریت سیستم، فهرست کامل همین‌جا نمایش داده می‌شود."
-          />
-          <div v-else class="dashboard-commodities-grid">
-            <article
-              v-for="commodity in allowedCommodities"
-              :key="commodity.id"
-              class="dashboard-commodity-card"
-            >
-              <div class="dashboard-commodity-head">
-                <strong class="dashboard-commodity-title">{{ commodity.name }}</strong>
-                <AppStatusBadge tone="neutral">
-                  {{ formatDashboardNumber(getCommodityAliasLabels(commodity).length) }} نام مستعار
-                </AppStatusBadge>
-              </div>
-              <p class="dashboard-commodity-caption">نام‌های قابل استفاده برای جستجو و ثبت سریع این کالا</p>
-              <div v-if="getCommodityAliasLabels(commodity).length > 0" class="dashboard-commodity-aliases">
-                <span
-                  v-for="alias in getCommodityAliasLabels(commodity)"
-                  :key="`${commodity.id}-${alias}`"
-                  class="dashboard-commodity-alias-chip"
-                >
-                  {{ alias }}
-                </span>
-              </div>
-              <p v-else class="dashboard-commodity-empty">برای این کالا هنوز نام مستعار جداگانه‌ای ثبت نشده است.</p>
-            </article>
-          </div>
-        </AppSectionCard>
+        </section>
 
       </main>
 
@@ -641,7 +897,7 @@ onMounted(fetchUser)
 .notif-btn:focus-visible,
 .logout-btn:focus-visible,
 .hero-btn:focus-visible,
-.dashboard-action-card:focus-visible,
+.dashboard-accordion-toggle:focus-visible,
 .today-trades-refresh:focus-visible {
   outline: 3px solid rgba(245, 158, 11, 0.34);
   outline-offset: 3px;
@@ -802,21 +1058,159 @@ onMounted(fetchUser)
   gap: 0.45rem;
 }
 
-.dashboard-shortcuts {
+.dashboard-accordion-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: var(--ds-radius-lg);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--ds-shadow-xs);
+  overflow: hidden;
+}
+
+.dashboard-accordion-toggle {
+  width: 100%;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.9rem 1rem;
+  border: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.dashboard-action-card {
+.dashboard-accordion-icon {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ds-radius-md);
+  flex-shrink: 0;
+}
+
+.dashboard-accordion-icon--users {
+  color: var(--ds-info-500);
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.dashboard-accordion-icon--commodities {
+  color: var(--ds-primary-700);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.dashboard-accordion-copy {
   min-width: 0;
-  min-height: 96px;
+  display: grid;
+  gap: 0.2rem;
 }
 
-.dashboard-commodities-card :deep(.ui-section-card__body) {
+.dashboard-accordion-copy strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 850;
+  line-height: 1.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-accordion-copy span {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.75;
+}
+
+.dashboard-accordion-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.dashboard-accordion-chevron {
+  color: var(--ds-text-secondary);
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+
+.dashboard-accordion-card.is-open .dashboard-accordion-chevron {
+  transform: rotate(180deg);
+}
+
+.dashboard-accordion-panel {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+  padding: 0 1rem 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.dashboard-project-users-search {
+  display: flex;
+  gap: 0.65rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+  padding-top: 1rem;
+}
+
+.dashboard-project-users-search-input {
+  flex: 1 1 220px;
+  min-height: 40px;
+}
+
+.dashboard-directory-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 5.5rem;
+  border: 1px dashed var(--ds-border-subtle);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-soft);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-sm);
+  line-height: 1.8;
+  text-align: center;
+  padding: 1rem;
+}
+
+.dashboard-directory-state--error {
+  color: var(--ds-danger-700);
+  border-color: rgba(220, 38, 38, 0.18);
+  background: rgba(254, 242, 242, 0.92);
+}
+
+.dashboard-project-users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.dashboard-project-user-card {
+  border-radius: var(--ds-radius-md);
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.dashboard-project-user-mobile {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  direction: ltr;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.dashboard-directory-footer {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.25rem;
+}
+
+.dashboard-directory-load-more {
+  min-width: 150px;
 }
 
 .dashboard-commodities-state {
@@ -906,12 +1300,6 @@ onMounted(fetchUser)
   line-height: 1.4;
 }
 
-@media (max-width: 380px) {
-  .dashboard-shortcuts {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (min-width: 381px) and (max-width: 680px) {
   .dashboard-header-summary {
     flex-direction: column;
@@ -920,6 +1308,23 @@ onMounted(fetchUser)
 
   .dashboard-header-badges {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 430px) {
+  .dashboard-accordion-toggle {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: flex-start;
+  }
+
+  .dashboard-accordion-meta {
+    grid-column: 2;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .dashboard-project-users-search {
+    flex-direction: column;
   }
 }
 
