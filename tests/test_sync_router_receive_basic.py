@@ -230,6 +230,36 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         )
         publish_mock.assert_any_await("offer:expired", {"id": 42})
 
+    async def test_receive_sync_data_publishes_terminal_realtime_when_completed_trade_sync_arrives_later(self):
+        completed_offer = SimpleNamespace(id=51, status="completed", remaining_quantity=0, lot_sizes=None)
+        db = TerminalOfferRealtimeDB([completed_offer])
+        items = [
+            {
+                "table": "trades",
+                "operation": "INSERT",
+                "id": 701,
+                "data": {"offer_id": 51, "status": "completed", "quantity": 4},
+            },
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()), patch(
+            "api.routers.realtime.publish_event", new=AsyncMock()
+        ) as publish_mock:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        publish_mock.assert_awaited_once_with(
+            "offer:updated",
+            {
+                "id": 51,
+                "status": "completed",
+                "remaining_quantity": 0,
+                "lot_sizes": None,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

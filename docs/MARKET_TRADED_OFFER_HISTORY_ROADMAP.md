@@ -422,6 +422,8 @@ Implementation notes:
 
 ## Stage TH6 - Sync And Read-Model Validation
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Add focused tests for the cross-server contract before staging deployment.
 
 Backend tests:
@@ -457,6 +459,26 @@ Exit criteria:
 - Cross-server history/tag tests pass before any staging deploy.
 - Tests prove the feature is derived from synced offer/trade data, not from a
   separate unsynced UI-only flag.
+
+Implementation notes:
+
+- Preserved the existing `market-history` SQL/read-model contract tests proving
+  history rows derive from terminal `offers` plus completed `trades` aggregate,
+  with the aggregate constrained to `trades.status = completed` and source
+  trade rows where `trades.offer_id` is present.
+- Added sync convergence for completed trade sync rows: when a completed trade
+  arrives after the terminal offer update, `/api/sync/receive` now collects the
+  synced `trade.offer_id` and publishes the same local terminal-offer realtime
+  refresh as terminal offer sync. This closes the offer-first sync race without
+  adding a separate history-state flag.
+- Added focused backend coverage for the trade-after-offer sync race and for
+  replayed duplicate terminal offer sync on foreign. Duplicate replay is
+  de-duplicated before Telegram state application, while Telegram's own
+  `message is not modified` idempotency remains covered by TH4B tests.
+- Re-ran focused frontend coverage for `MarketView`, `OffersList`, and
+  `useOffers`, confirming the WebApp still loads `/api/offers/market-history`,
+  uses `history_state`, `traded_quantity`, and `is_read_only`, and keeps
+  completed/partial-traded-expired cards read-only in the DOM.
 
 ## Stage TH7 - Staging Validation
 

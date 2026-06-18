@@ -10,7 +10,8 @@ class FakeOfferExecuteResult:
         self._offer = offer
 
     def scalars(self):
-        return SimpleNamespace(first=lambda: self._offer)
+        offers = [] if self._offer is None else [self._offer]
+        return SimpleNamespace(first=lambda: self._offer, all=lambda: list(offers))
 
 
 class FakeDB:
@@ -59,6 +60,18 @@ class FakeSelect:
 
 def make_offer():
     return SimpleNamespace(id=7, channel_message_id=None, user=SimpleNamespace(id=1), commodity=SimpleNamespace(id=2))
+
+
+def make_terminal_offer():
+    return SimpleNamespace(
+        id=8,
+        status="completed",
+        remaining_quantity=0,
+        lot_sizes=None,
+        channel_message_id=777,
+        user=SimpleNamespace(id=1),
+        commodity=SimpleNamespace(id=2),
+    )
 
 
 class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
@@ -112,6 +125,31 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         send_mock.assert_awaited_once_with(offer, offer.user)
         self.assertIsNone(offer.channel_message_id)
         self.assertEqual(result, {"status": "success", "processed": 1})
+
+    async def test_receive_sync_data_replays_terminal_foreign_offer_once(self):
+        terminal_offer = make_terminal_offer()
+        db = FakeDB([FakeOfferExecuteResult(terminal_offer), FakeOfferExecuteResult(terminal_offer)])
+        items = [
+            {"table": "offers", "operation": "UPDATE", "id": 8, "data": {"status": "completed"}},
+            {"table": "offers", "operation": "UPDATE", "id": 8, "data": {"status": "completed"}},
+        ]
+
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+            terminal_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "core.services.telegram_offer_channel_service.apply_offer_channel_state", new=AsyncMock(return_value=True)
+        ) as apply_state_mock:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 2})
+        publish_mock.assert_awaited_once()
+        apply_state_mock.assert_awaited_once_with(terminal_offer, reason="sync_terminal_offer")
 
 
 if __name__ == "__main__":

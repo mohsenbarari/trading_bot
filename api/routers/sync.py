@@ -102,6 +102,21 @@ def _enum_value(value) -> str:
     return str(getattr(value, "value", value) or "").lower()
 
 
+def _completed_trade_offer_id_from_sync(table: str, data: dict) -> int | None:
+    if table != "trades":
+        return None
+    if _enum_value(data.get("status")) != "completed":
+        return None
+    raw_offer_id = data.get("offer_id")
+    if raw_offer_id is None or raw_offer_id == "":
+        return None
+    try:
+        offer_id = int(raw_offer_id)
+    except (TypeError, ValueError):
+        return None
+    return offer_id if offer_id > 0 else None
+
+
 async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal_offer_ids: list[int] | tuple[int, ...]) -> None:
     unique_offer_ids = sorted({int(offer_id) for offer_id in terminal_offer_ids if offer_id})
     if not unique_offer_ids:
@@ -731,6 +746,7 @@ async def receive_sync_data(
     deferred_items = []
     new_offers = []
     terminal_offers = []
+    completed_trade_offer_ids = []
     user_changes_applied = False
     notification_user_ids = _notification_user_ids_from_items(sorted_items)
 
@@ -777,6 +793,9 @@ async def receive_sync_data(
                     processed_count += 1
                     if table == "users":
                         user_changes_applied = True
+                    completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
+                    if completed_trade_offer_id:
+                        completed_trade_offer_ids.append(completed_trade_offer_id)
                     logger.info(f"✅ Sync Item Applied: {table}:{record_id} ({operation})")
                 elif result == 'deferred':
                     deferred_items.append((table, operation, model, data, record_id))
@@ -804,6 +823,9 @@ async def receive_sync_data(
                         processed_count += 1
                         if table == "users":
                             user_changes_applied = True
+                        completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
+                        if completed_trade_offer_id:
+                            completed_trade_offer_ids.append(completed_trade_offer_id)
                         logger.info(f"✅ Deferred item applied: {table}:{record_id}")
                     else:
                         errors.append(f"{table}:{record_id} (deferred)")
@@ -918,9 +940,10 @@ async def receive_sync_data(
                     },
                 )
 
-        if terminal_offers:
+        terminal_realtime_offer_ids = [*terminal_offers, *completed_trade_offer_ids]
+        if terminal_realtime_offer_ids:
             try:
-                await _publish_terminal_offer_realtime_after_sync(db, terminal_offers)
+                await _publish_terminal_offer_realtime_after_sync(db, terminal_realtime_offer_ids)
             except Exception as e:
                 logger.error(
                     "Error publishing synced terminal offer realtime events",
