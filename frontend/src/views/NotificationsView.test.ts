@@ -75,7 +75,7 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
   })
 
-  it('routes back home and delegates clear/delete actions to the store after confirmation', async () => {
+  it('routes back home and delegates delete actions to the store after confirmation', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
@@ -91,7 +91,6 @@ describe('NotificationsView.vue', () => {
     ]
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
-    const clearAllSpy = vi.spyOn(store, 'clearAllNotifications').mockResolvedValue()
     const deleteSpy = vi.spyOn(store, 'deleteNotification').mockResolvedValue()
 
     const wrapper = mount(NotificationsView)
@@ -99,11 +98,10 @@ describe('NotificationsView.vue', () => {
 
     await wrapper.get('.notifications-return').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/')
-
-    await wrapper.get('.clear-btn').trigger('click')
-    expect(wrapper.text()).toContain('پاک‌سازی همه اعلان‌ها')
-    await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
-    expect(clearAllSpy).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.clear-btn').exists()).toBe(false)
+    expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('صندوق ورودی')
+    expect(wrapper.find('.notifications-topbar h1').exists()).toBe(false)
 
     await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
     await wrapper.get('.delete-btn').trigger('click')
@@ -113,12 +111,12 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.text()).toContain('اعلان')
   })
 
-  it('filters notification visibility by read state without changing store actions', async () => {
+  it('switches notification visibility by category without rendering read-count filters', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
         id: 21,
-        title: 'خوانده نشده',
+        title: 'پیام مدیریتی',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
@@ -128,12 +126,12 @@ describe('NotificationsView.vue', () => {
       },
       {
         id: 22,
-        title: 'خوانده شده',
+        title: 'اعلان معامله',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
         level: 'info',
-        category: 'system',
+        category: 'trade',
         is_read: true,
       },
     ]
@@ -146,28 +144,21 @@ describe('NotificationsView.vue', () => {
     const categoryTabs = wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
     expect(categoryTabs).toHaveLength(2)
     expect(categoryTabs[1]!.attributes('aria-selected')).toBe('true')
-    const filterTabs = wrapper.find('.notification-toolbar').findAll('[role="tab"]')
-    expect(filterTabs).toHaveLength(3)
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
+    expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
+    expect(wrapper.text()).toContain('پیام مدیریتی')
+    expect(wrapper.text()).not.toContain('اعلان معامله')
 
-    await filterTabs[1]!.trigger('click')
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).not.toContain('خوانده شده')
-    expect(wrapper.find('.notification-toolbar').findAll('[role="tab"]')[1]!.attributes('tabindex')).toBe('0')
-    expect(wrapper.find('.notification-toolbar').findAll('[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
-
-    await wrapper.find('.notification-toolbar').findAll('[role="tab"]')[2]!.trigger('click')
-    expect(wrapper.text()).not.toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
+    await categoryTabs[0]!.trigger('click')
+    expect(wrapper.text()).not.toContain('پیام مدیریتی')
+    expect(wrapper.text()).toContain('اعلان معامله')
   })
 
-  it('supports keyboard navigation across notification filter tabs', async () => {
+  it('supports keyboard navigation across notification category tabs', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
         id: 31,
-        title: 'خوانده نشده',
+        title: 'پیام مدیریتی',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
@@ -177,12 +168,12 @@ describe('NotificationsView.vue', () => {
       },
       {
         id: 32,
-        title: 'خوانده شده',
+        title: 'اعلان معامله',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
         level: 'info',
-        category: 'system',
+        category: 'trade',
         is_read: true,
       },
     ]
@@ -192,23 +183,21 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    const chips = () => wrapper.find('.notification-toolbar').findAll('[role="tab"]')
-    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
+    const chips = () => wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
+    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['-1', '0'])
 
-    await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
-    expect(chips()[1]!.attributes('aria-selected')).toBe('true')
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).not.toContain('خوانده شده')
-
-    await chips()[1]!.trigger('keydown', { key: 'End' })
-    expect(chips()[2]!.attributes('aria-selected')).toBe('true')
-    expect(wrapper.text()).not.toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
-
-    await chips()[2]!.trigger('keydown', { key: 'Home' })
+    await chips()[1]!.trigger('keydown', { key: 'ArrowLeft' })
     expect(chips()[0]!.attributes('aria-selected')).toBe('true')
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
+    expect(wrapper.text()).not.toContain('پیام مدیریتی')
+    expect(wrapper.text()).toContain('اعلان معامله')
+
+    await chips()[0]!.trigger('keydown', { key: 'Home' })
+    expect(chips()[0]!.attributes('aria-selected')).toBe('true')
+
+    await chips()[0]!.trigger('keydown', { key: 'End' })
+    expect(chips()[1]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('پیام مدیریتی')
+    expect(wrapper.text()).not.toContain('اعلان معامله')
   })
 
   it('opens a notification route when the item carries one', async () => {
