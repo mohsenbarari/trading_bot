@@ -106,6 +106,11 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     surface after recovery. The low-cost default is for the offer home server to expire those
     still-active local-only offers during recovery finalization, then sync the expired/final state
     to the peer.
+33. Synced tables must move to a hybrid identity strategy. A stable `public_id`/UUID is the
+    canonical cross-server identity for synced records and command forwarding. Existing integer IDs
+    may remain as local/internal database keys, but PostgreSQL sequences for synced tables must also
+    be server-partitioned during migration to reduce collision risk until all sync/command paths use
+    the public identity.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -319,7 +324,9 @@ accepted as accurate and should influence the Bot roadmap.
   and legacy compatibility may remain after offer-authority uses are removed.
 - ID collision handling is only partial. The receiver repairs sequences after applying remote
   rows and has natural-key fallbacks for some tables, but independent two-way inserts can still
-  create the same integer ID before either side receives the other row.
+  create the same integer ID before either side receives the other row. The confirmed target is a
+  hybrid identity strategy: UUID/public IDs for cross-server identity and server-partitioned integer
+  sequences as a migration guard.
 
 ### Not Implemented Or Not Yet Encoded
 
@@ -348,7 +355,9 @@ accepted as accurate and should influence the Bot roadmap.
   conceptually decided, but sync-router/event-listener changes and tests are still missing for
   `chats` and `chat_members`.
 - A complete conflict policy for concurrent two-server writes is not implemented.
-- Globally safe IDs or server-partitioned sequences are not implemented.
+- The confirmed hybrid identity strategy is not implemented. Synced tables do not yet have
+  UUID/public IDs as the canonical cross-server identity, and synced-table integer sequences are not
+  yet server-partitioned as a migration guard.
 - The confirmed bulk/raw/relationship write audit is not implemented yet. Sync-aware helpers or
   explicit sync/outbox logging are not implemented consistently across the codebase.
 - Complete scenario-matrix tests are not implemented. Missing coverage includes bot offer -> Iran
@@ -470,7 +479,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 
 #### Level 5 - Core Distributed-System Decisions
 
-1. Choose a globally safe ID strategy: UUID/public IDs or server-partitioned integer sequences.
+1. Implement the confirmed hybrid identity strategy. Add stable `public_id`/UUID identifiers for
+   synced tables and move cross-server sync/commands to that identity, while server-partitioning
+   existing integer sequences as a migration guard until integer IDs are no longer used for
+   cross-server authority.
 2. Define per-table conflict policy for concurrent writes: owner, natural key, merge rule, version
    check, and allowed write surfaces.
 3. Redesign session/auth semantics for simultaneous WebApp and bot activity without letting
@@ -617,9 +629,13 @@ creating row `id=123` independently before either syncs.
 This is critical if "all tables sync in the moment" includes two-way writes for users, offers, trades,
 notifications, settings, invitations, and admin data.
 
-Required direction:
+Confirmed direction:
 
-- Use globally safe IDs, or partition integer sequences by server, or introduce stable UUID/public IDs.
+- Use stable `public_id`/UUID values as the canonical identity for synced records and command
+  forwarding between Iran and foreign.
+- Keep integer IDs as local/internal database keys where needed.
+- Server-partition integer sequences for synced tables during migration to reduce collision risk
+  while legacy integer-ID paths still exist.
 - Define natural-key merge only as a fallback, not as the main collision strategy.
 - Treat trade numbers separately because they are user-facing and must remain globally unique.
 
@@ -862,5 +878,4 @@ without a registry entry.
 
 ## Immediate Questions For Next Round
 
-1. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
-2. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
+1. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
