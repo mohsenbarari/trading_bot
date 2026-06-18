@@ -94,7 +94,6 @@ Rules:
 |---|---|---|
 | `candidate/trading-production-grade` | Production-grade trade/offer hardening and market notification work validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
 | `candidate/web-push-notifications` | Web Push notification work that should be merged to `main` only at the correct release point after staging validation and explicit approval. | Allowed after approval |
-| `candidate/market-notification-staging-fix` | Staging-validated fix for market-offer Web Push notification gating after expired-offer history changes. | Allowed after focused staging validation and explicit approval |
 | `staging/user-switcher` | Staging-only user-switcher/reference branch. | Not allowed |
 | `staging/web-push-user-switcher` | Active staging branch for Web Push/user-switcher validation and staging guardrail work. | Not allowed as-is; promote through `candidate/*` only if explicitly approved |
 
@@ -138,3 +137,4 @@ For production-grade application changes:
 | 2026-06-18 | Codex | Added `candidate/dashboard-collapsible-lists` for dashboard-only UI refinement: remove Operations/Account shortcut cards and validate collapsible project-users/allowed-commodities sections before any production promotion. |
 | 2026-06-18 | Codex | Removed `candidate/dashboard-collapsible-lists` from the active branch registry after it was merged into `main`, pushed, and deleted locally/remotely without production deployment. |
 | 2026-06-18 | Codex | Added `candidate/market-notification-staging-fix` for a staging-only investigation/fix of market-offer Web Push notifications after time-expired active offers started blocking first-live-offer detection. |
+| 2026-06-18 | Codex | Removed `candidate/market-notification-staging-fix` from the active branch registry after it was fast-forward merged into `main`; branch deletion followed only after focused tests and push completed. |
