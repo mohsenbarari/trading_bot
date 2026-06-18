@@ -533,9 +533,26 @@ Implementation notes:
 
 ## Stage TH8 - Promotion Readiness
 
+Status: Completed on 2026-06-18 in `candidate/market-traded-history`.
+
 Before merging to `main`:
 
 - Confirm no production deploy command was run from the candidate branch.
 - Summarize staging validation and rollback path.
 - Request explicit user approval for merge.
 - Request explicit user approval for production deployment if needed.
+
+Implementation notes:
+
+- Added `docs/MARKET_TRADED_OFFER_HISTORY_PROMOTION_REVIEW.md` with the
+  candidate scope, main touched files, focused validation evidence, staging
+  result, promotion safety checks, rollback path, accepted risks, and promotion
+  recommendation.
+- Confirmed this branch is ahead of `origin/main` by the market-history
+  candidate commits and that `origin/main` is an ancestor of `HEAD`, so the
+  branch is structurally ready for owner-reviewed promotion if `main` has not
+  moved before merge.
+- Confirmed no production deploy, production sync, or production data mutation
+  was run during TH7/TH8 candidate validation.
+- Merge to `main` and any production deployment remain blocked until explicit
+  owner approval.
