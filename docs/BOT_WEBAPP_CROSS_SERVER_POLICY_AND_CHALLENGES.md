@@ -25,10 +25,16 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
     `webapp`, and `internal_sync`. `telegram_bot` maps to `offer_home_server=foreign`, `webapp`
     maps to `offer_home_server=iran`, and `internal_sync` must preserve the incoming
     `Offer.home_server` without recomputing it.
+14. `chats` and `chat_members` are messenger-owned tables for cross-server policy purposes and
+    must not be wholesale-synced. Direct chats, groups, optional channels, read/mute/pin/hide state,
+    and message-linked fields are Iran/WebApp-local. The mandatory system channel is the only
+    current non-messenger-like use on these tables and should become a local projection rebuilt from
+    synced `users`, not a reason to sync all chat rows.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
-tables except the messenger-owned data set. The exact messenger-owned table list must be made
-explicit before implementation.
+tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
+`messages`, `conversations`, `chat_files`, `upload_batches`, `upload_sessions`, `chats`, and
+`chat_members`.
 
 ## Branch And Environment Enforcement
 
@@ -181,6 +187,9 @@ accepted as accurate and should influence the Bot roadmap.
 - Excluding all session tables from sync is a strong candidate direction, but it needs a separate
   auth/session policy decision because existing session authority behavior is already cross-server
   aware in places.
+- `chats` and `chat_members` are accepted as messenger-owned tables. Any short-term sync support for
+  `is_system=true AND is_mandatory=true` rows is transitional only; the target design is a local
+  mandatory-channel projection derived from synced `users`.
 
 ### Partially Implemented Or Ambiguous Policies
 
@@ -197,7 +206,9 @@ accepted as accurate and should influence the Bot roadmap.
   listeners, but not every table/model has a declared sync policy, and bulk SQL updates can
   bypass listeners.
 - Messenger exclusion is incomplete. `messages` and `conversations` are excluded from the sync
-  router, but `chats` and `chat_members` are still synced and have event listeners.
+  router, but `chats` and `chat_members` are still synced and have event listeners. These two tables
+  are now confirmed as messenger-owned and should leave the general sync map after the mandatory
+  system-channel projection is made local/rebuildable.
 - Bot-created offers will usually get `home_server=foreign` through the model default, but the
   bot handler does not set that value explicitly from the bot surface.
 - WebApp-created offers are not guaranteed to get `home_server=iran`; current API creation uses
@@ -228,8 +239,9 @@ accepted as accurate and should influence the Bot roadmap.
   not exist.
 - Surface-based offer-home assignment is not implemented for WebApp creation.
 - Explicit bot-side offer-home assignment is not implemented.
-- A complete messenger exclusion contract is not implemented. The exact excluded table list and
-  tests are missing, especially around `chats` and `chat_members`.
+- A complete messenger exclusion contract is not implemented. The excluded table list is now
+  conceptually decided, but sync-router/event-listener changes and tests are still missing for
+  `chats` and `chat_members`.
 - A complete conflict policy for concurrent two-server writes is not implemented.
 - Globally safe IDs or server-partitioned sequences are not implemented.
 - Sync-aware helpers for bulk updates/deletes are not implemented consistently across the codebase.
@@ -252,7 +264,9 @@ This ordering is about implementation difficulty and blast radius, not business 
 4. Implement the confirmed source-surface enum/constant and use it in offer creation tests.
 5. Add the confirmed offer switching acceptance matrix below as executable or at least reviewable
    test cases.
-6. Add tests that assert `messages` and `conversations` are not accepted by the sync model map.
+6. Add tests that assert messenger-owned tables are not accepted by the sync model map. This includes
+   `messages`, `conversations`, `chat_files`, `upload_batches`, `upload_sessions`, `chats`, and
+   `chat_members`.
 7. Add deployment/config assertions that the Iran compose has no bot service and the foreign compose
    has the bot service.
 8. Add a branch-policy smoke check or documented pre-commit checklist so roadmap commits cannot be
@@ -272,7 +286,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 6. Define which runtime/session state is surface-local and which user/account state syncs:
    WebApp session, Bot FSM, Telegram binding, login requests, recovery requests, user profile, and
    account status must each have an explicit policy.
-7. Audit all `user.home_server` reads and writes. Classify each use as one of: session authority,
+7. Convert mandatory system-channel behavior into a local projection rebuilt from synced `users`.
+   During transition, allow only a narrowly guarded `is_system=true AND is_mandatory=true`
+   compatibility path if needed; do not keep wholesale `chats`/`chat_members` sync.
+8. Audit all `user.home_server` reads and writes. Classify each use as one of: session authority,
    active login surface, offer authority bug, or legacy compatibility. Offer authority uses must be
    removed in this stage.
 
@@ -482,13 +499,22 @@ Required direction:
 ### 5. Messenger exclusion is not fully encoded
 
 The target says messenger is Iran-only and not synced. Current code already excludes `messages` and
-`conversations` from the sync router, but it still syncs `chats` and `chat_members`. Those tables are
-used by the generic messenger foundation and by mandatory/system channel rollout behavior.
+`conversations` from the sync router, but it still syncs `chats` and `chat_members`. Code review
+confirmed that `chats` and `chat_members` primarily represent messenger rooms and membership state:
+direct chats, groups, optional channels, last/pinned message links, read state, mute state, pin state,
+and hide state. They are therefore messenger-owned.
+
+There is one mixed use today: the mandatory system channel is stored in `chats` and `chat_members`.
+That should not make the whole chat model a synced product surface. The mandatory channel can be
+rebuilt locally from synced `users`, and the current sync special-cases for mandatory channel rows
+should be treated as transitional compatibility, not target architecture.
 
 Required direction:
 
-- Define the exact messenger exclusion set.
-- Decide whether `chats`/`chat_members` are fully Iran-only or whether mandatory/system membership must move to separate non-messenger tables.
+- Exclude `messages`, `conversations`, `chat_files`, `upload_batches`, `upload_sessions`, `chats`,
+  and `chat_members` from general cross-server sync.
+- Make mandatory system-channel rows a local projection derived from synced `users`, or move any
+  truly non-messenger membership metadata to a separate non-messenger table.
 - Block `/api/chat` on foreign at the API/reverse-proxy level so accidental foreign writes cannot happen.
 - Add sync tests proving messenger tables never enter `change_log` or `/api/sync/receive`.
 
@@ -582,8 +608,8 @@ Before changing code, create a registry for every model/table:
 | `users` | sync | admin/auth/bot link/WebApp | TBD | natural key + field-level merge | profile/session events |
 | `messages` | no sync | WebApp only | Iran | n/a | Iran realtime only |
 | `conversations` | no sync | WebApp only | Iran | n/a | Iran realtime only |
-| `chats` | TBD | WebApp/system | TBD | TBD | TBD |
-| `chat_members` | TBD | WebApp/system | TBD | TBD | TBD |
+| `chats` | no sync target; transitional mandatory-only compatibility if needed | WebApp/local system | Iran/local projection | no cross-server merge | Iran realtime only |
+| `chat_members` | no sync target; transitional mandatory-only compatibility if needed | WebApp/local system | Iran/local projection | no cross-server merge | Iran realtime only |
 | `user_sessions` | TBD | WebApp/auth | TBD | TBD | session events |
 
 The implementation should fail CI when a new model or migration introduces a table without a registry entry.
@@ -591,8 +617,7 @@ The implementation should fail CI when a new model or migration introduces a tab
 ## Immediate Questions For Next Round
 
 1. Should `user_sessions` and login-request tables sync, or are they an explicit exception?
-2. Are `chats` and `chat_members` messenger-only, or do they also carry non-messenger mandatory-channel state?
-3. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
-4. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
-5. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
-6. During a cross-server outage, should users still be allowed to create offers on the available local surface?
+2. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
+3. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
+4. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
+5. During a cross-server outage, should users still be allowed to create offers on the available local surface?
