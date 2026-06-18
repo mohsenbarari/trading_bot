@@ -142,10 +142,6 @@ function formatLotSummary(amounts: number[]): string {
   return [...amounts].sort((a, b) => b - a).join(' + ');
 }
 
-function getLotSummary(offer: any): string {
-  return formatLotSummary(getLotButtons(offer));
-}
-
 function getDisplayedOfferPrice(offer: any): number {
   const numeric = Number(offer?.viewer_effective_price ?? offer?.price ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -483,13 +479,6 @@ async function cancelOwnOffer(offerId: number) {
               <span v-if="offer.customer_management_name" class="customer-context-name">{{ offer.customer_management_name }}</span>
               <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
-            <!-- Lot info indicator -->
-            <div v-if="!offer.is_wholesale && offer.lot_sizes && offer.lot_sizes.length > 0" class="lot-info">
-              🔢 خُرد: {{ getLotSummary(offer) }}
-            </div>
-            <div v-else-if="offer.is_wholesale" class="lot-info wholesale">
-              📦 یکجا
-            </div>
             <p v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
             </p>
@@ -567,7 +556,7 @@ async function cancelOwnOffer(offerId: number) {
 
 /* ── Loading skeleton ── */
 .skeleton-card {
-  height: 90px;
+  height: 78px;
   background: rgba(255,255,255,0.5);
   border-radius: var(--ds-radius-md);
   border: 1px solid var(--ds-border-accent);
@@ -581,18 +570,19 @@ async function cancelOwnOffer(offerId: number) {
 /* ── Empty state ── */
 .empty-state {
   text-align: center;
-  padding: 40px 20px;
+  padding: 24px 16px;
   color: var(--ds-text-placeholder);
+  font-size: 0.76rem;
 }
 .empty-icon {
-  width: 56px;
-  height: 56px;
+  width: 42px;
+  height: 42px;
   background: var(--ds-primary-50);
-  border-radius: 14px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 12px;
+  margin: 0 auto 8px;
   color: var(--ds-primary-500);
 }
 
@@ -649,7 +639,7 @@ async function cancelOwnOffer(offerId: number) {
   position: relative;
   background: var(--ds-bg-card);
   border-radius: calc(var(--ds-radius-md) - 3px);
-  padding: 14px;
+  padding: 10px 11px 9px;
   z-index: 0;
   overflow: hidden;
 }
@@ -657,7 +647,7 @@ async function cancelOwnOffer(offerId: number) {
 .offer-card-wrap.is-expired .offer-card-inner {
   background: var(--ds-bg-surface);
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-  padding-top: 38px;
+  padding-top: 34px;
 }
 
 .offer-card-wrap.is-expired .price,
@@ -720,14 +710,14 @@ async function cancelOwnOffer(offerId: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .role-badge {
   display: inline-block;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -742,13 +732,13 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-time {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ds-text-placeholder);
 }
 
 /* ── Body ── */
 .offer-body {
-  margin-bottom: 10px;
+  margin-bottom: 7px;
 }
 
 .offer-main {
@@ -760,8 +750,8 @@ async function cancelOwnOffer(offerId: number) {
 .customer-context-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-top: 5px;
   flex-wrap: wrap;
 }
 
@@ -771,8 +761,8 @@ async function cancelOwnOffer(offerId: number) {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 2px 7px;
+  font-size: 10.5px;
   font-weight: 800;
   line-height: 1;
 }
@@ -784,7 +774,7 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .customer-context-name {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--ds-text-primary);
 }
@@ -797,44 +787,33 @@ async function cancelOwnOffer(offerId: number) {
 
 .commodity {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ds-text-primary);
 }
 
 .quantity-badge {
   background: var(--ds-bg-hover);
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--ds-text-secondary);
 }
 
 .price {
   font-weight: 800;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ds-primary-500);
 }
 
 .offer-notes {
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
   color: var(--ds-text-muted);
   background: var(--ds-bg-inset);
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 6px;
-}
-
-/* ── Lot info ── */
-.lot-info {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--ds-primary-600);
-  font-weight: 600;
-  direction: rtl;
-}
-.lot-info.wholesale {
-  color: var(--ds-text-muted);
 }
 
 /* ── Footer ── */
@@ -848,7 +827,7 @@ async function cancelOwnOffer(offerId: number) {
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
 }
 
@@ -857,11 +836,11 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .trade-btn {
-  padding: 8px 12px;
+  padding: 6px 10px;
   color: white;
   border: none;
   border-radius: var(--ds-radius-sm);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   flex: 1 1 auto;
@@ -907,12 +886,12 @@ async function cancelOwnOffer(offerId: number) {
 
 .cancel-own-offer-btn {
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: var(--ds-danger-50);
   color: var(--ds-danger-600);
   border: 1px solid var(--ds-danger-200);
   border-radius: var(--ds-radius-sm);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   display: flex;

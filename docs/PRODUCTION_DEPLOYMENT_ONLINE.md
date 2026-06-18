@@ -82,6 +82,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - non-local Grafana alert receivers / webhook / email targets
 - blocks the release on a dirty git working tree because the payload sync uses local rsync, not only committed Git state
 - use `IRAN_ALLOW_DIRTY_RELEASE=1` only for an intentional emergency deploy from uncommitted local files
+- blocks the release unless it runs from `PRODUCTION_RELEASE_BRANCH=main` and the local branch matches its upstream exactly; `IRAN_ALLOW_NON_MAIN_RELEASE=1` and `IRAN_ALLOW_RELEASE_BRANCH_DRIFT=1` are emergency-only overrides
 - the same validation now runs before standalone deploy subcommands too, because `check-local` is shared by `deploy-foreign`, `bootstrap-iran`, `build-release`, `sync-project`, `deploy-iran`, and `healthcheck`
 
 ### 2. Local build + local foreign deploy
@@ -92,6 +93,7 @@ make production-release MANIFEST=/root/secure-envs/trading-bot/online.env
   - host-native foreign image path via `deploy.sh foreign`
   - `trading_bot_base_iran` for the detected Iran target architecture
 - skips the frontend `npm ci` / `npm run build` step when the frontend source/config/env signature matches and `mini_app_dist/index.html` already exists
+- verifies frontend release contracts before and after Iran sync; the MarketView bundle must include `/api/offers/expired` so read-only expired market offers cannot silently disappear from production
 - skips the Iran Docker image build/save step when the Iran base-image signature matches the existing local image bundle; this signature tracks Dockerfile/dependency/wheelhouse and non-mounted image assets instead of volatile runtime files such as `.env`, `.deploy_count`, docs, or logs
 - use `IRAN_FORCE_RELEASE_REFRESH=1` when the cached frontend, wheel, or image artifacts must be rebuilt deliberately
 - `deploy.sh foreign` uses the same frontend and wheelhouse signatures so the foreign deploy step no longer rewrites the production wheelhouse hash on every run

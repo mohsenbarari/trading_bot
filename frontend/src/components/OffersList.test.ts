@@ -115,7 +115,8 @@ describe('OffersList.vue', () => {
 
     expect(wrapper.findAll('.trade-btn').map((button) => button.text())).toEqual(['5 عدد', '10 عدد', '20 عدد'])
     expect(wrapper.find('.price').text()).toBe('---')
-    expect(wrapper.text()).toContain('خُرد: 20 + 10 + 5')
+    expect(wrapper.text()).not.toContain('خُرد')
+    expect(wrapper.text()).not.toContain('یکجا')
     expect(wrapper.text()).toContain('سطح نامشخص')
   })
 

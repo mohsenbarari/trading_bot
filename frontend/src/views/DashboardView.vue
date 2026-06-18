@@ -726,18 +726,24 @@ onMounted(fetchUser)
                 v-for="projectUser in projectUsers"
                 :key="projectUser.id"
                 :title="projectUser.account_name"
-                :description="projectUser.mobile_number || 'شماره تماس ثبت نشده'"
                 interactive
                 class="dashboard-project-user-card"
                 @select="openProjectUserProfile(projectUser)"
               >
                 <template #trailing>
                   <span class="dashboard-project-user-trailing">
-                    <span v-if="isProjectUserNew(projectUser)" class="dashboard-project-user-new-badge">
+                    <span
+                      v-if="isProjectUserNew(projectUser)"
+                      class="dashboard-project-user-new-badge"
+                    >
                       جدید
                     </span>
+                    <span v-else class="dashboard-project-user-new-badge dashboard-project-user-new-badge--hidden" aria-hidden="true"></span>
                     <span v-if="projectUser.mobile_number" class="dashboard-project-user-mobile" dir="ltr">
                       {{ projectUser.mobile_number }}
+                    </span>
+                    <span v-else class="dashboard-project-user-mobile dashboard-project-user-mobile--empty">
+                      بدون شماره
                     </span>
                   </span>
                 </template>
@@ -1221,11 +1227,20 @@ onMounted(fetchUser)
   background: rgba(248, 250, 252, 0.82);
 }
 
+.dashboard-project-user-card :deep(.ui-list-item__copy span) {
+  display: none;
+}
+
+.dashboard-project-user-card :deep(.ui-list-item__trailing) {
+  padding-left: 0.35rem;
+}
+
 .dashboard-project-user-trailing {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 3.25rem minmax(6.8rem, auto);
   align-items: center;
-  justify-content: flex-end;
-  gap: 0.45rem;
+  justify-content: end;
+  column-gap: 0.6rem;
   min-width: 0;
 }
 
@@ -1245,12 +1260,20 @@ onMounted(fetchUser)
   white-space: nowrap;
 }
 
+.dashboard-project-user-new-badge--hidden {
+  visibility: hidden;
+}
+
 .dashboard-project-user-mobile {
   color: var(--ds-text-secondary);
   font-size: var(--ds-font-xs);
   direction: ltr;
   text-align: left;
   white-space: nowrap;
+}
+
+.dashboard-project-user-mobile--empty {
+  color: var(--ds-text-placeholder);
 }
 
 .dashboard-directory-footer {

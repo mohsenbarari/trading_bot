@@ -21,6 +21,8 @@ IRAN_IMAGE_PLATFORM=""
 LOCAL_COMPOSE_CMD=""
 IRAN_COMPOSE_CMD=""
 IRAN_APT_BUNDLE_MODE="same-arch"
+FOREIGN_COMPOSE_PROJECT_NAME="${FOREIGN_COMPOSE_PROJECT_NAME:-trading_bot}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$FOREIGN_COMPOSE_PROJECT_NAME}"
 
 usage() {
     cat <<'EOF'
@@ -425,6 +427,9 @@ IRAN_SKIP_FOREIGN_DEPLOY=0
 IRAN_HOSTS_SYNC_ENABLED=1
 IRAN_FORCE_RELEASE_REFRESH=0
 IRAN_ALLOW_DIRTY_RELEASE=0
+PRODUCTION_RELEASE_BRANCH=main
+IRAN_ALLOW_NON_MAIN_RELEASE=0
+IRAN_ALLOW_RELEASE_BRANCH_DRIFT=0
 IRAN_SHARED_DATA_MODE=auto
 IRAN_SHARED_SEED_BATCH_SIZE=50
 IRAN_SHARED_RESET_CONFIRM=
@@ -514,6 +519,9 @@ load_manifest() {
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
     IRAN_FORCE_RELEASE_REFRESH="${IRAN_FORCE_RELEASE_REFRESH:-0}"
     IRAN_ALLOW_DIRTY_RELEASE="${IRAN_ALLOW_DIRTY_RELEASE:-0}"
+    PRODUCTION_RELEASE_BRANCH="${PRODUCTION_RELEASE_BRANCH:-main}"
+    IRAN_ALLOW_NON_MAIN_RELEASE="${IRAN_ALLOW_NON_MAIN_RELEASE:-0}"
+    IRAN_ALLOW_RELEASE_BRANCH_DRIFT="${IRAN_ALLOW_RELEASE_BRANCH_DRIFT:-0}"
     ALLOW_PROJECT_ENV_SOURCE="${ALLOW_PROJECT_ENV_SOURCE:-0}"
     REQUIRE_WEB_PUSH="${REQUIRE_WEB_PUSH:-0}"
     ENV_BACKUP_DIR="${ENV_BACKUP_DIR:-/root/secure-envs/trading-bot/backups}"
@@ -820,6 +828,42 @@ ensure_clean_release_tree() {
     fi
 }
 
+ensure_production_release_git_ref() {
+    if ! git -C "$LOCAL_PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        die "Production release must run from a Git checkout so branch identity can be verified."
+    fi
+
+    local branch head_sha upstream upstream_sha
+    branch="$(git -C "$LOCAL_PROJECT_DIR" symbolic-ref --short HEAD 2>/dev/null || true)"
+    head_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short HEAD)"
+
+    if [[ "$IRAN_ALLOW_NON_MAIN_RELEASE" == "1" ]]; then
+        log "IRAN_ALLOW_NON_MAIN_RELEASE=1; allowing production release from branch ${branch:-detached} at $head_sha."
+    elif [[ "$branch" != "$PRODUCTION_RELEASE_BRANCH" ]]; then
+        die "Production release must run from '$PRODUCTION_RELEASE_BRANCH' (current: ${branch:-detached}, sha: $head_sha). Merge the intended candidate/hotfix to $PRODUCTION_RELEASE_BRANCH first, or set IRAN_ALLOW_NON_MAIN_RELEASE=1 for an explicit emergency override."
+    fi
+
+    upstream="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    if [[ -z "$upstream" ]]; then
+        log "No upstream configured for branch ${branch:-detached}; skipping upstream equality check."
+        return 0
+    fi
+
+    upstream_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short "$upstream" 2>/dev/null || true)"
+    if [[ -z "$upstream_sha" ]]; then
+        die "Unable to resolve upstream '$upstream' for production release branch verification."
+    fi
+
+    if [[ "$IRAN_ALLOW_RELEASE_BRANCH_DRIFT" == "1" ]]; then
+        log "IRAN_ALLOW_RELEASE_BRANCH_DRIFT=1; allowing local HEAD $head_sha to differ from $upstream $upstream_sha."
+        return 0
+    fi
+
+    if [[ "$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)" != "$(git -C "$LOCAL_PROJECT_DIR" rev-parse "$upstream")" ]]; then
+        die "Production release branch '$branch' must match upstream '$upstream' exactly (local: $head_sha, upstream: $upstream_sha). Push/pull first, or set IRAN_ALLOW_RELEASE_BRANCH_DRIFT=1 for an explicit emergency override."
+    fi
+}
+
 local_node_version_ok() {
     local version major minor
     command -v node >/dev/null 2>&1 || return 1
@@ -933,6 +977,7 @@ check_local() {
     ensure_local_tools
     [[ "$(id -u)" -eq 0 ]] || die "This release script must be run as root so it can update /etc/hosts and manage Docker."
     ensure_clean_release_tree
+    ensure_production_release_git_ref
     ssh_iran "echo connected-to-\$(hostname)"
     detect_runtime_metadata
     [[ -f "$LOCAL_PROJECT_DIR/requirements.txt" ]] || die "requirements.txt missing"
@@ -1369,8 +1414,27 @@ ensure_frontend_dist() {
     fi
 }
 
+verify_frontend_release_contracts() {
+    local dist_dir="$1"
+    local contract_name="market-expired-offer-history"
+    local endpoint_marker="api/offers/expired"
+    local assets_dir="$dist_dir/assets"
+    local market_chunks
+
+    [[ -d "$assets_dir" ]] || die "Frontend release contract failed: assets directory missing in $dist_dir"
+    mapfile -t market_chunks < <(find "$assets_dir" -maxdepth 1 -type f -name 'MarketView-*.js' | LC_ALL=C sort)
+    if [[ "${#market_chunks[@]}" -eq 0 ]]; then
+        die "Frontend release contract failed [$contract_name]: MarketView chunk missing in $dist_dir"
+    fi
+    if ! grep -h -q "$endpoint_marker" "${market_chunks[@]}"; then
+        die "Frontend release contract failed [$contract_name]: $endpoint_marker missing from MarketView bundle. Refusing to deploy a frontend that cannot load read-only expired market offers."
+    fi
+    log "Frontend release contract passed [$contract_name]"
+}
+
 build_release() {
     ensure_frontend_dist
+    verify_frontend_release_contracts "$LOCAL_DIST_DIR"
     prepare_pip_packages "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages" "$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
@@ -1657,6 +1721,11 @@ sync_project() {
     fi
     rsync -avz --delete -e "$RSYNC_SSH" \
         "$LOCAL_DIST_DIR/" "$IRAN_SSH_TARGET:$staging_dir/mini_app_dist/"
+    ssh_iran "set -euo pipefail
+assets_dir='$staging_dir/mini_app_dist/assets'
+find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . || exit 21
+grep -h -q 'api/offers/expired' \"\$assets_dir\"/MarketView-*.js || exit 22" \
+        || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only expired market offers."
     scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
     log "Production payload sync complete"
 }

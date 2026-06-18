@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, BellOff, BellRing, ChevronLeft, Mail, MailOpen, Send, Trash2 } from 'lucide-vue-next'
+import { Bell, BellRing, ChevronRight, Mail, MailOpen, Trash2 } from 'lucide-vue-next'
 import {
   AppButton,
   AppConfirmDialog,
@@ -10,7 +10,6 @@ import {
   AppIconButton,
   AppLoadingState,
   AppPage,
-  AppPageHeader,
   AppSectionCard,
   AppStatusBadge,
 } from '../components/ui'
@@ -19,45 +18,29 @@ import type { NormalizedAppNotification } from '../types/notifications'
 import { formatIranTime } from '../utils/iranTime'
 import { getNotificationIconComponent } from '../utils/notificationUi'
 import {
-  disableWebPushNotifications,
   enableWebPushNotifications,
   getWebPushStatus,
-  sendWebPushTestNotification,
   type WebPushRuntimeState,
 } from '../services/webPush'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
-const isClearingAll = ref(false)
-const activeFilter = ref<'all' | 'unread' | 'read'>('all')
-const confirmClearAllOpen = ref(false)
+const activeCategory = ref<'trade' | 'management'>('management')
 const pendingDeleteNotification = ref<NormalizedAppNotification | null>(null)
 const pushState = ref<WebPushRuntimeState>('checking')
 const isPushBusy = ref(false)
 const pushActionMessage = ref('')
 
-const unreadCount = computed(() => notificationStore.appNotifications.filter((notification) => !notification.is_read).length)
-const readCount = computed(() => notificationStore.appNotifications.length - unreadCount.value)
-const totalCount = computed(() => notificationStore.appNotifications.length)
-const filterOptions = computed(() => [
-  { key: 'all' as const, label: `همه ${totalCount.value.toLocaleString('fa-IR')}` },
-  { key: 'unread' as const, label: `خوانده‌نشده ${unreadCount.value.toLocaleString('fa-IR')}` },
-  { key: 'read' as const, label: `خوانده‌شده ${readCount.value.toLocaleString('fa-IR')}` },
+const tradeNotifications = computed(() => notificationStore.appNotifications.filter((notification) => notification.category === 'trade'))
+const managementNotifications = computed(() => notificationStore.appNotifications.filter((notification) => notification.category !== 'trade'))
+const activeCategoryNotifications = computed(() => (
+  activeCategory.value === 'trade' ? tradeNotifications.value : managementNotifications.value
+))
+const categoryOptions = computed(() => [
+  { key: 'trade' as const, label: `معاملات ${tradeNotifications.value.length.toLocaleString('fa-IR')}` },
+  { key: 'management' as const, label: `پیام مدیریت ${managementNotifications.value.length.toLocaleString('fa-IR')}` },
 ])
-const filteredNotifications = computed(() => {
-  if (activeFilter.value === 'unread') {
-    return notificationStore.appNotifications.filter((notification) => !notification.is_read)
-  }
-  if (activeFilter.value === 'read') {
-    return notificationStore.appNotifications.filter((notification) => notification.is_read)
-  }
-  return notificationStore.appNotifications
-})
-const activeFilterLabel = computed(() => {
-  if (activeFilter.value === 'unread') return 'خوانده‌نشده'
-  if (activeFilter.value === 'read') return 'خوانده‌شده'
-  return 'همه اعلان‌ها'
-})
+const filteredNotifications = computed(() => activeCategoryNotifications.value)
 const pushStatusLabel = computed(() => {
   if (pushState.value === 'checking') return 'در حال بررسی'
   if (pushState.value === 'unsupported') return 'پشتیبانی نمی‌شود'
@@ -80,8 +63,11 @@ const canEnablePush = computed(() => (
   || pushState.value === 'unsubscribed'
   || pushState.value === 'error'
 ))
-const canDisablePush = computed(() => pushState.value === 'subscribed')
-const canTestPush = computed(() => pushState.value === 'subscribed')
+const showPushEnablePanel = computed(() => (
+  pushState.value === 'checking'
+  || canEnablePush.value
+  || Boolean(pushActionMessage.value)
+))
 
 const goBack = () => {
   router.push('/')
@@ -147,17 +133,6 @@ const shouldUseStructuredLines = (notification: NormalizedAppNotification): bool
   return body.includes('\n') || notification.category === 'trade'
 }
 
-const clearAll = async () => {
-  if (isClearingAll.value || notificationStore.appNotifications.length === 0) return
-  isClearingAll.value = true
-  try {
-    await notificationStore.clearAllNotifications()
-    confirmClearAllOpen.value = false
-  } finally {
-    isClearingAll.value = false
-  }
-}
-
 async function refreshPushState() {
   pushActionMessage.value = ''
   pushState.value = 'checking'
@@ -180,36 +155,6 @@ async function enablePush() {
   } catch (error) {
     pushState.value = 'error'
     pushActionMessage.value = 'فعال‌سازی ناموفق بود'
-  } finally {
-    isPushBusy.value = false
-  }
-}
-
-async function disablePush() {
-  if (isPushBusy.value) return
-  isPushBusy.value = true
-  pushActionMessage.value = ''
-  try {
-    const status = await disableWebPushNotifications()
-    pushState.value = status.state
-    pushActionMessage.value = 'غیرفعال شد'
-  } catch (error) {
-    pushState.value = 'error'
-    pushActionMessage.value = 'غیرفعال‌سازی ناموفق بود'
-  } finally {
-    isPushBusy.value = false
-  }
-}
-
-async function sendPushTest() {
-  if (isPushBusy.value) return
-  isPushBusy.value = true
-  pushActionMessage.value = ''
-  try {
-    const result = await sendWebPushTestNotification()
-    pushActionMessage.value = result.sent > 0 ? 'تست ارسال شد' : 'دستگاهی ثبت نشده است'
-  } catch (error) {
-    pushActionMessage.value = 'ارسال تست ناموفق بود'
   } finally {
     isPushBusy.value = false
   }
@@ -249,19 +194,21 @@ onMounted(async () => {
 <template>
   <AppPage narrow>
     <div class="notifications-view">
-      <AppPageHeader
-        eyebrow="حساب کاربری"
-        title="مرکز اعلان‌ها"
-      >
-        <template #actions>
-          <AppIconButton type="button" class="notifications-return" label="بازگشت" size="sm" @click="goBack">
-            <ChevronLeft :size="24" />
-          </AppIconButton>
-        </template>
-      </AppPageHeader>
+      <header class="notifications-topbar" aria-label="مرکز اعلانات">
+        <AppIconButton type="button" class="notifications-return" label="بازگشت" size="sm" @click="goBack">
+          <ChevronRight :size="22" />
+        </AppIconButton>
+        <AppFilterChips
+          v-model="activeCategory"
+          class="notification-category-tabs"
+          label="دسته‌بندی اعلان‌ها"
+          :options="categoryOptions"
+        />
+      </header>
 
       <main class="content">
         <AppSectionCard
+          v-if="showPushEnablePanel"
           title="اعلان دستگاه"
           :description="pushStatusLabel"
           class="push-section"
@@ -283,32 +230,6 @@ onMounted(async () => {
               </template>
               فعال‌سازی
             </AppButton>
-            <AppButton
-              v-if="canTestPush"
-              class="push-test-btn"
-              variant="secondary"
-              size="sm"
-              :loading="isPushBusy"
-              @click="sendPushTest"
-            >
-              <template #icon>
-                <Send :size="16" />
-              </template>
-              تست
-            </AppButton>
-            <AppButton
-              v-if="canDisablePush"
-              class="push-disable-btn"
-              variant="ghost"
-              size="sm"
-              :loading="isPushBusy"
-              @click="disablePush"
-            >
-              <template #icon>
-                <BellOff :size="16" />
-              </template>
-              غیرفعال
-            </AppButton>
           </div>
           <p v-if="pushActionMessage" class="push-action-message">{{ pushActionMessage }}</p>
         </AppSectionCard>
@@ -326,43 +247,15 @@ onMounted(async () => {
           </template>
         </AppEmptyState>
 
-        <AppSectionCard
+        <section
           v-else
-          title="صندوق ورودی"
-          :description="`فیلتر فعال: ${activeFilterLabel}`"
           class="notifications-section"
         >
-          <template #actions>
-            <div class="notifications-summary">
-              <AppStatusBadge tone="warning">خوانده‌نشده {{ unreadCount.toLocaleString('fa-IR') }}</AppStatusBadge>
-              <AppStatusBadge tone="neutral">کل {{ totalCount.toLocaleString('fa-IR') }}</AppStatusBadge>
-              <AppButton
-                class="clear-btn"
-                variant="danger"
-                size="sm"
-                :loading="isClearingAll"
-                @click="confirmClearAllOpen = true"
-              >
-                <template #icon>
-                  <Trash2 :size="16" />
-                </template>
-                پاک‌سازی همه
-              </AppButton>
-            </div>
-          </template>
-
-          <AppFilterChips
-            v-model="activeFilter"
-            class="notification-toolbar"
-            label="فیلتر اعلان‌ها"
-            :options="filterOptions"
-          />
-
           <AppEmptyState
             v-if="filteredNotifications.length === 0"
             class="notification-filter-empty"
             title="اعلانی در این فیلتر وجود ندارد"
-            message="فیلتر دیگری را انتخاب کنید یا بعداً دوباره بررسی کنید."
+            :message="activeCategory === 'trade' ? 'اعلان معاملاتی برای نمایش وجود ندارد.' : 'پیام مدیریتی برای نمایش وجود ندارد.'"
             tone="neutral"
           >
             <template #icon>
@@ -372,10 +265,10 @@ onMounted(async () => {
 
           <div
             v-else
-            :id="`notifications-${activeFilter}-panel`"
+            :id="`notifications-${activeCategory}-panel`"
             class="notifications-list"
             role="tabpanel"
-            :aria-label="`اعلان‌های ${filterOptions.find((option) => option.key === activeFilter)?.label || ''}`"
+            :aria-label="`اعلان‌های ${categoryOptions.find((option) => option.key === activeCategory)?.label || ''}`"
           >
             <div
               v-for="notif in filteredNotifications"
@@ -458,21 +351,10 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-        </AppSectionCard>
+        </section>
       </main>
     </div>
   </AppPage>
-
-  <AppConfirmDialog
-    :open="confirmClearAllOpen"
-    title="پاک‌سازی همه اعلان‌ها"
-    message="همه اعلان‌های فعلی از این مرکز حذف می‌شوند. این عمل فقط روی inbox فعلی شما اثر می‌گذارد."
-    confirm-label="پاک‌سازی"
-    cancel-label="انصراف"
-    tone="danger"
-    @cancel="confirmClearAllOpen = false"
-    @confirm="clearAll"
-  />
 
   <AppConfirmDialog
     :open="Boolean(pendingDeleteNotification)"
@@ -490,32 +372,46 @@ onMounted(async () => {
 .notifications-view {
   display: flex;
   flex-direction: column;
-  gap: var(--ds-section-gap);
+  gap: 0.85rem;
   min-height: 100%;
+}
+
+.notifications-topbar {
+  display: grid;
+  grid-template-columns: var(--ds-touch-target) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 3rem;
+}
+
+.notifications-return {
+  justify-self: start;
 }
 
 .content {
   display: flex;
   flex-direction: column;
-  gap: var(--ds-section-gap);
+  gap: 0.85rem;
 }
 
-.notifications-summary {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.5rem;
+.notification-category-tabs {
+  min-width: 0;
+  margin-bottom: 0;
 }
 
-.notification-toolbar {
-  margin-bottom: 1rem;
+.notification-category-tabs :deep(.ui-filter-chips) {
+  width: 100%;
 }
 
-.notifications-section :deep(.ui-section-card__body) {
+.notification-category-tabs :deep(.ui-filter-chip) {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.notifications-section {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .push-section :deep(.ui-section-card__body) {
@@ -529,6 +425,11 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+  justify-content: flex-start;
+}
+
+.push-enable-btn {
+  min-width: 7.5rem;
 }
 
 .push-action-message {
@@ -546,7 +447,7 @@ onMounted(async () => {
 .notifications-list {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.7rem;
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
@@ -554,12 +455,12 @@ onMounted(async () => {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
-  padding: 1.25rem;
+  gap: 0.65rem;
+  padding: 0.9rem;
   background: var(--ds-bg-card);
-  border-radius: var(--ds-radius-xl);
+  border-radius: var(--ds-radius-lg);
   border: 1px solid var(--ds-border-light);
-  border-right: 5px solid var(--ds-border-strong);
+  border-right: 4px solid var(--ds-border-strong);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: var(--ds-shadow-xs);
 }
@@ -586,7 +487,7 @@ onMounted(async () => {
 
 .notif-main {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   min-width: 0;
 }
 
@@ -639,10 +540,10 @@ onMounted(async () => {
 
 .notif-icon {
   position: relative;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   background: var(--ds-bg-page);
-  border-radius: 14px;
+  border-radius: var(--ds-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -699,14 +600,14 @@ onMounted(async () => {
 
 .notif-title {
   margin: 0;
-  font-size: var(--ds-font-lg);
+  font-size: var(--ds-font-md);
   font-weight: 700;
   color: var(--ds-text-primary);
 }
 
 .notif-text {
   margin: 0;
-  font-size: var(--ds-font-base);
+  font-size: var(--ds-font-sm);
   color: var(--ds-text-secondary);
   line-height: 1.5;
   white-space: pre-line;
@@ -754,7 +655,7 @@ onMounted(async () => {
 }
 
 .notif-line-plain {
-  font-size: var(--ds-font-base);
+  font-size: var(--ds-font-sm);
   font-weight: 700;
   color: var(--ds-text-primary);
 }
@@ -780,7 +681,7 @@ onMounted(async () => {
 }
 
 .notif-line-label {
-  font-size: var(--ds-font-sm);
+  font-size: var(--ds-font-xs);
   font-weight: 700;
   color: var(--ds-text-primary);
 }
@@ -798,11 +699,11 @@ onMounted(async () => {
 }
 
 .notif-line-value {
-  font-size: 0.84rem;
+  font-size: var(--ds-font-xs);
 }
 
 .notif-line-text {
-  font-size: var(--ds-font-base);
+  font-size: var(--ds-font-sm);
   color: var(--ds-text-primary);
 }
 
@@ -818,7 +719,7 @@ onMounted(async () => {
 .notif-time {
   align-self: flex-start;
   margin-top: 0.15rem;
-  font-size: var(--ds-font-sm);
+  font-size: var(--ds-font-xs);
   font-weight: 500;
   color: var(--ds-text-placeholder);
 }
@@ -829,17 +730,8 @@ onMounted(async () => {
 }
 
 @media (max-width: 640px) {
-  .notifications-summary {
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .notifications-summary :deep(.ui-button) {
-    width: 100%;
-  }
-
   .notif-item {
-    padding: 0.95rem;
+    padding: 0.8rem;
   }
 
   .notif-item.category-trade {
