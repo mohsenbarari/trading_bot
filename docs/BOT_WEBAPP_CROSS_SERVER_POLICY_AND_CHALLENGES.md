@@ -56,6 +56,11 @@ cross-server sync. It is the working basis for the next design Q&A rounds.
 21. Every `user.home_server` read and write must be audited and classified as session/auth
     authority, active login surface/runtime state, legacy compatibility, or an offer-authority bug.
     The offer-authority category is not allowed as final behavior and must be removed.
+22. Offer creation from both WebApp and Telegram bot must route through one shared
+    command/service. API routers and Bot handlers are only surface adapters. The shared service
+    must receive `source_surface`, `actor_user`, `request_home_server`, and `offer_home_server`;
+    run market/domain validation; create the offer; record sync/outbox state; and define
+    post-commit side effects for Iran and foreign surfaces.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -195,9 +200,10 @@ accepted as accurate and should influence the Bot roadmap.
 - Add the confirmed source-surface concept with `telegram_bot`, `webapp`, and `internal_sync`,
   and use it to choose offer authority and side effects. `internal_sync` preserves the source
   server's incoming `Offer.home_server` and must not reclassify synced offers.
-- Extract shared offer creation and trade execution commands/services so Bot handlers become thin
-  UX adapters and do not own market authority, trade-number allocation, customer-chain rules, or
-  offer mutation logic.
+- Use the confirmed shared offer creation command/service for both WebApp and Bot writes. Extract
+  trade execution commands/services as the next related direction so Bot handlers become thin UX
+  adapters and do not own market authority, trade-number allocation, customer-chain rules, or offer
+  mutation logic.
 - Move Telegram publication toward an idempotent gateway/outbox model. The exact schema is still a
   design decision, but the needed behavior is clear: foreign-only execution, dedupe key, retry state,
   durable status, and sync-back of publication result.
@@ -347,7 +353,10 @@ This ordering is about implementation difficulty and blast radius, not business 
 
 #### Level 3 - Sync Coverage And Delivery Reliability
 
-1. Extract shared offer creation command/service and make both WebApp and Bot call it.
+1. Implement the confirmed shared offer creation command/service and make both WebApp and Bot call
+   it. The service owns `source_surface`, `actor_user`, `request_home_server`,
+   `offer_home_server`, market validation, offer row creation, sync/outbox recording, and
+   post-commit side-effect selection.
 2. Extract shared trade execution command/service and make Bot channel callbacks use the same
    authoritative/idempotent path as the API.
 3. Extend the shared `expire_offers` command/service to cover API cancel-all, single-offer expiry,
@@ -502,6 +511,8 @@ Required direction: split the concepts:
 - offer creation must set home from the current write surface/server, not from the user's current session home.
 - Every `user.home_server` use must be classified; any use that decides `Offer.home_server` is an
   offer-authority bug and must be removed.
+- WebApp and Bot offer creation must call the same shared command/service instead of duplicating
+  domain writes inside routers or handlers.
 
 ### 2. IDs can collide under true two-way writes
 
@@ -696,6 +707,5 @@ The implementation should fail CI when a new model or migration introduces a tab
 ## Immediate Questions For Next Round
 
 1. Do we keep integer IDs with server-partitioned ranges, or move synced tables to UUID/public IDs?
-2. Should bot offer creation move through a shared service/API command instead of directly creating `Offer`?
-3. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
-4. During a cross-server outage, should users still be allowed to create offers on the available local surface?
+2. What is the acceptable latency target for "in the moment": under 1s, under 3s, or eventual with visible pending state?
+3. During a cross-server outage, should users still be allowed to create offers on the available local surface?
