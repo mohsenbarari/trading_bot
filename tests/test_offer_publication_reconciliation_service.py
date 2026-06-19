@@ -114,6 +114,37 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         publish_mock.assert_awaited_once()
         db.commit.assert_awaited_once()
 
+    async def test_repair_respects_active_publication_gate(self):
+        db = FakeDB()
+        offer = make_offer()
+        candidate = service.PublicationReconciliationCandidate(
+            issue="failed_telegram_publication",
+            offer=offer,
+            state=make_state(),
+            surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
+        )
+
+        with patch(
+            "core.services.offer_publication_reconciliation_service.load_foreign_telegram_reconciliation_candidates",
+            new=AsyncMock(return_value=[candidate]),
+        ), patch(
+            "core.services.offer_publication_reconciliation_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as publish_mock:
+            report = await service.reconcile_offer_publications(
+                db,
+                server_mode="foreign",
+                dry_run=False,
+                send_offer_to_channel=AsyncMock(return_value=555),
+                allow_active_publication=False,
+            )
+
+        self.assertEqual(report["status"], "gated")
+        self.assertEqual(report["gated"], 1)
+        self.assertEqual(report["findings"][0]["reason"], "active_publication_gate_enabled")
+        publish_mock.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
     async def test_foreign_repair_backfills_offer_message_id_from_publication_state(self):
         db = FakeDB()
         offer = make_offer(channel_message_id=None)

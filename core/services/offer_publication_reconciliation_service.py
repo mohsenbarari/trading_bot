@@ -43,6 +43,12 @@ IRAN_WEBAPP_REPAIR_ISSUES = {
     "active_offer_without_webapp_state",
     "stale_terminal_webapp_state",
 }
+ACTIVE_PUBLICATION_REPAIR_ISSUES = {
+    "active_offer_without_telegram_state",
+    "failed_telegram_publication",
+    "lagged_telegram_publication",
+    "active_offer_without_webapp_state",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,6 +369,7 @@ async def reconcile_offer_publications(
     dry_run: bool = True,
     limit: int = 50,
     send_offer_to_channel: SendOfferToChannel | None = None,
+    allow_active_publication: bool = True,
 ) -> dict[str, Any]:
     """Report or repair local publication drift for the current server role."""
     mode = (server_mode or settings.server_mode or "").strip().lower()
@@ -385,6 +392,7 @@ async def reconcile_offer_publications(
     findings: list[dict[str, Any]] = []
     repaired = 0
     failed = 0
+    gated = 0
     for candidate in candidates:
         if dry_run:
             findings.append(_candidate_payload(candidate, result="reported"))
@@ -396,6 +404,7 @@ async def reconcile_offer_publications(
                 candidate,
                 server_mode=mode,
                 send_offer_to_channel=send_offer_to_channel,
+                allow_active_publication=allow_active_publication,
             )
         except Exception as exc:
             result = {
@@ -406,6 +415,8 @@ async def reconcile_offer_publications(
             repaired += 1
         elif result.get("result") == "failed":
             failed += 1
+        elif result.get("result") == "gated":
+            gated += 1
         findings.append({**_candidate_payload(candidate, result=result.get("result", "unknown")), **result})
 
     if not dry_run and (repaired or failed):
@@ -415,6 +426,8 @@ async def reconcile_offer_publications(
 
     if failed:
         status = "partial"
+    elif gated:
+        status = "gated"
     elif repaired:
         status = "repaired"
     elif candidates:
@@ -428,6 +441,7 @@ async def reconcile_offer_publications(
         "processed": len(candidates),
         "repaired": repaired,
         "failed": failed,
+        "gated": gated,
         "findings": findings,
     }
 
@@ -457,7 +471,10 @@ async def _repair_candidate(
     *,
     server_mode: str,
     send_offer_to_channel: SendOfferToChannel | None,
+    allow_active_publication: bool,
 ) -> dict[str, Any]:
+    if not allow_active_publication and candidate.issue in ACTIVE_PUBLICATION_REPAIR_ISSUES:
+        return {"result": "gated", "reason": "active_publication_gate_enabled"}
     if server_mode == "foreign":
         return await _repair_foreign_telegram_candidate(
             db,

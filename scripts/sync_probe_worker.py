@@ -8,7 +8,7 @@ import asyncio
 import hashlib
 import json
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,12 @@ from core.events import setup_event_listeners
 from core.utils import utc_now
 from models.change_log import ChangeLog
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
+from core.services.cross_server_recovery_service import (
+    clear_active_publication_gate,
+    enable_active_publication_gate,
+    finalize_outage_recovery,
+    load_active_publication_gate,
+)
 from core.services.offer_publication_reconciliation_service import (
     publication_observability_summary,
     reconcile_offer_publications,
@@ -44,6 +50,13 @@ def print_json(payload: dict[str, Any]) -> None:
 
 def parse_probe_date(value: str) -> date:
     return date.fromisoformat(value)
+
+
+def parse_probe_datetime(value: str) -> datetime:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    return datetime.fromisoformat(normalized)
 
 
 async def health(args: argparse.Namespace) -> int:
@@ -71,10 +84,12 @@ async def health(args: argparse.Namespace) -> int:
     try:
         outbound = int(await redis_client.llen("sync:outbound") or 0)
         retry = int(await redis_client.llen("sync:retry") or 0)
+        active_publication_gate = await load_active_publication_gate(redis_client)
         redis_ok = True
     except Exception:
         outbound = 0
         retry = 0
+        active_publication_gate = {"enabled": False, "status": "redis_error"}
         redis_ok = False
     finally:
         await redis_client.aclose()
@@ -87,6 +102,7 @@ async def health(args: argparse.Namespace) -> int:
             "unsynced_by_table": unsynced_by_table,
             "redis_ok": redis_ok,
             "redis_queues": {"sync:outbound": outbound, "sync:retry": retry},
+            "active_publication_gate": active_publication_gate,
             "publication_reconciliation": publication_reconciliation,
         }
     )
@@ -109,6 +125,12 @@ async def reconcile_publications(args: argparse.Namespace) -> int:
             )
             return 2
 
+    redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, db=0, decode_responses=True)
+    try:
+        gate = await load_active_publication_gate(redis_client)
+    finally:
+        await redis_client.aclose()
+
     async with AsyncSessionLocal() as db:
         report = await reconcile_offer_publications(
             db,
@@ -116,9 +138,70 @@ async def reconcile_publications(args: argparse.Namespace) -> int:
             dry_run=not args.repair,
             limit=args.limit,
             send_offer_to_channel=send_offer_to_channel,
+            allow_active_publication=not bool(gate.get("enabled")),
         )
+        report["active_publication_gate"] = gate
     print_json(report)
-    return 1 if report.get("status") == "partial" else 0
+    return 1 if report.get("status") in {"partial", "gated"} else 0
+
+
+async def publication_gate_status(args: argparse.Namespace) -> int:
+    redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, db=0, decode_responses=True)
+    try:
+        gate = await load_active_publication_gate(redis_client)
+    finally:
+        await redis_client.aclose()
+    print_json({"status": "ok", "active_publication_gate": gate})
+    return 0
+
+
+async def enable_publication_gate(args: argparse.Namespace) -> int:
+    cutoff = parse_probe_datetime(args.cutoff) if args.cutoff else None
+    redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, db=0, decode_responses=True)
+    try:
+        gate = await enable_active_publication_gate(
+            outage_class=args.outage_class,
+            server_mode=settings.server_mode,
+            note=args.note,
+            cutoff=cutoff,
+            redis_client=redis_client,
+        )
+    finally:
+        await redis_client.aclose()
+    print_json({"status": "ok", "active_publication_gate": gate})
+    return 0
+
+
+async def clear_publication_gate(args: argparse.Namespace) -> int:
+    redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, db=0, decode_responses=True)
+    try:
+        gate_cleared = await clear_active_publication_gate(redis_client)
+    finally:
+        await redis_client.aclose()
+    print_json({"status": "ok", "gate_cleared": gate_cleared})
+    return 0
+
+
+async def finalize_outage_recovery_command(args: argparse.Namespace) -> int:
+    cutoff = parse_probe_datetime(args.cutoff)
+    redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, db=0, decode_responses=True)
+    if args.repair:
+        setup_event_listeners()
+    try:
+        async with AsyncSessionLocal() as db:
+            report = await finalize_outage_recovery(
+                db,
+                outage_class=args.outage_class,
+                cutoff=cutoff,
+                server_mode=settings.server_mode,
+                dry_run=not args.repair,
+                limit=args.limit,
+                redis_client=redis_client,
+            )
+    finally:
+        await redis_client.aclose()
+    print_json(report)
+    return 1 if report.get("status") in {"gated", "partial_finalized_pending_sync"} else 0
 
 
 async def insert_probe(args: argparse.Namespace) -> int:
@@ -310,6 +393,21 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_parser = subparsers.add_parser("reconcile-publications")
     reconcile_parser.add_argument("--limit", type=int, default=50)
     reconcile_parser.add_argument("--repair", action="store_true")
+
+    subparsers.add_parser("publication-gate-status")
+
+    enable_gate_parser = subparsers.add_parser("enable-publication-gate")
+    enable_gate_parser.add_argument("--outage-class", choices=("medium", "long"), required=True)
+    enable_gate_parser.add_argument("--cutoff", help="ISO timestamp for the recovery cutoff.")
+    enable_gate_parser.add_argument("--note")
+
+    subparsers.add_parser("clear-publication-gate")
+
+    finalize_parser = subparsers.add_parser("finalize-outage-recovery")
+    finalize_parser.add_argument("--outage-class", choices=("medium", "long"), required=True)
+    finalize_parser.add_argument("--cutoff", required=True, help="ISO timestamp; active home offers created before this are finalized.")
+    finalize_parser.add_argument("--limit", type=int, default=100)
+    finalize_parser.add_argument("--repair", action="store_true")
     return parser
 
 
@@ -326,6 +424,10 @@ async def main_async() -> int:
         "delete-change-log": delete_change_log,
         "resync-table": resync_table,
         "reconcile-publications": reconcile_publications,
+        "publication-gate-status": publication_gate_status,
+        "enable-publication-gate": enable_publication_gate,
+        "clear-publication-gate": clear_publication_gate,
+        "finalize-outage-recovery": finalize_outage_recovery_command,
     }
     return await handlers[args.command](args)
 

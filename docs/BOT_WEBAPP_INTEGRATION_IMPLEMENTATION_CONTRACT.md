@@ -1547,6 +1547,20 @@ Required behavior:
 - Active local-only offers created or kept visible before full recovery are expired by their home
   server and synced as final expired state.
 - Expiry includes `expire_reason`, owner notification, and admin/operator report.
+- Medium/long recovery uses a runtime active-publication gate stored in Redis. While enabled, sync
+  receive and publication reconciliation skip active cross-surface publication for new synced active
+  offers; terminal offer updates still run.
+- Operators must enable the gate before medium/long recovery using `scripts/sync_probe_worker.py
+  enable-publication-gate --outage-class medium|long`. The gate state is visible in
+  `/api/sync/health` and `scripts/sync_probe_worker.py health`.
+- Recovery finalization requires an explicit ISO `--cutoff`. The finalizer targets active offers
+  whose `home_server` is the current server and whose `created_at` is at or before the cutoff; these
+  are the operational "pre full-recovery local active" candidates.
+- `scripts/sync_probe_worker.py finalize-outage-recovery --repair` is fail-closed: if local sync
+  health is dirty, it returns `gated` and mutates nothing. Once health is clean, it expires candidate
+  offers with `expire_reason=recovery_finalization`, creates owner notifications, commits the final
+  state into the durable outbox, and keeps the publication gate enabled until those expiry sync rows
+  drain. A later clean run with zero candidates clears the gate.
 
 Required tests:
 
@@ -1554,6 +1568,8 @@ Required tests:
 - Long outage recovery gates active publication until catch-up complete.
 - Local-only active offers are expired, not active-published to the peer.
 - Owner notification and operator report are generated.
+- Dirty health finalization does not mutate offers or notifications.
+- Receiver and reconciliation skip active publication while the recovery gate is enabled.
 
 Exit criteria:
 

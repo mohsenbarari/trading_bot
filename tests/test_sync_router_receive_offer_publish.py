@@ -95,7 +95,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
             new=AsyncMock(side_effect=fake_publish),
-        ) as publish_mock:
+        ) as publish_mock, patch("api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=False)):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         publish_mock.assert_awaited_once_with(
@@ -122,7 +122,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
             new=AsyncMock(),
-        ) as publish_mock:
+        ) as publish_mock, patch("api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=False)):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         publish_mock.assert_not_awaited()
@@ -137,7 +137,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
             new=AsyncMock(return_value=SimpleNamespace(message_id=None, status="failed", error_code="telegram_send_empty_result")),
-        ) as publish_mock:
+        ) as publish_mock, patch("api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=False)):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         publish_mock.assert_awaited_once_with(
@@ -147,6 +147,48 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             send_offer_to_channel=ANY,
         )
         self.assertIsNone(offer.channel_message_id)
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
+    async def test_receive_sync_data_skips_foreign_active_publish_when_recovery_gate_enabled(self):
+        offer = make_offer()
+        db = FakeDB([FakeOfferExecuteResult(offer)])
+        items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
+
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+            new_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
+            "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as publish_mock, patch("api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=True)):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        publish_mock.assert_not_awaited()
+        self.assertIsNone(offer.channel_message_id)
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
+    async def test_receive_sync_data_skips_iran_realtime_created_publish_when_recovery_gate_enabled(self):
+        db = FakeDB()
+        items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
+
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+            new_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch(
+            "api.routers.sync._publish_synced_offer_created_realtime_after_sync",
+            new=AsyncMock(),
+        ) as realtime_publish_mock, patch("api.routers.sync.active_publication_is_gated", new=AsyncMock(return_value=True)):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        realtime_publish_mock.assert_not_awaited()
         self.assertEqual(result, {"status": "success", "processed": 1})
 
     async def test_receive_sync_data_replays_terminal_foreign_offer_once(self):

@@ -105,7 +105,10 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             FakeSummaryResult((3, oldest)),
             FakeTableRows([("offers", 2), ("trades", 1)]),
         )
-        redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[4, 1]))
+        redis_client = SimpleNamespace(
+            llen=AsyncMock(side_effect=[4, 1]),
+            get=AsyncMock(return_value='{"enabled": true, "outage_class": "long"}'),
+        )
         request = SimpleNamespace(
             headers={"X-Observability-Api-Key": "obs-key"},
             url=SimpleNamespace(path="/api/sync/health"),
@@ -133,6 +136,8 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["unsynced_change_log_count"], 3)
         self.assertEqual(payload["redis_queues"], {"sync:outbound": 4, "sync:retry": 1})
         self.assertEqual(payload["unsynced_by_table"], {"offers": 2, "trades": 1})
+        self.assertEqual(payload["active_publication_gate"]["enabled"], True)
+        self.assertEqual(payload["active_publication_gate"]["outage_class"], "long")
         self.assertEqual(payload["publication_reconciliation"]["status"], "action_required")
         record_sync_health.assert_called_once()
         record_publication_health.assert_called_once()

@@ -11,6 +11,7 @@ from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
+from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
 import hmac
 import hashlib
@@ -92,6 +93,31 @@ def _summarize_exception(exc: Exception) -> dict[str, object]:
         "error_type": type(exc).__name__,
         "error_digest": hashlib.sha256(exc_bytes).hexdigest()[:16] if exc_bytes else None,
     }
+
+
+async def _active_publication_gated_for_sync_receive(surface: str) -> bool:
+    try:
+        gated = await active_publication_is_gated()
+    except Exception as exc:
+        logger.warning(
+            "Could not evaluate active publication gate during sync receive",
+            extra={
+                "event": "sync.active_publication_gate_check_failed",
+                "surface": surface,
+                **_summarize_exception(exc),
+            },
+        )
+        return False
+    if gated:
+        logger.warning(
+            "Skipping active synced-offer publication while cross-server recovery gate is enabled",
+            extra={
+                "event": "sync.active_publication_gated",
+                "surface": surface,
+                "server_mode": settings.server_mode,
+            },
+        )
+    return gated
 
 
 def _summarize_payload(data) -> dict[str, object]:
@@ -1459,7 +1485,16 @@ async def receive_sync_data(
 
         if settings.server_mode == "iran" and new_offers:
             try:
-                await _publish_synced_offer_created_realtime_after_sync(db, new_offers)
+                if await _active_publication_gated_for_sync_receive("webapp_market"):
+                    logger.info(
+                        "Synced active offer realtime publication is gated",
+                        extra={
+                            "event": "sync.created_offer_realtime_gated",
+                            "offer_count": len(set(new_offers)),
+                        },
+                    )
+                else:
+                    await _publish_synced_offer_created_realtime_after_sync(db, new_offers)
             except Exception as e:
                 logger.error(
                     "Error publishing synced created offer realtime events",
@@ -1487,64 +1522,73 @@ async def receive_sync_data(
         # (same sync item may arrive via both direct-push and sync_worker)
         if settings.server_mode != "iran" and new_offers:
             try:
-                from sqlalchemy.orm import selectinload
-                from models.offer import OfferStatus
-                from api.routers.offers import send_offer_to_channel
-                from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
+                telegram_publication_gated = await _active_publication_gated_for_sync_receive("telegram_channel")
+                if telegram_publication_gated:
+                    logger.info(
+                        "Synced active offer Telegram publication is gated",
+                        extra={
+                            "event": "sync.synced_offer_telegram_publication_gated",
+                            "offer_count": len(set(new_offers)),
+                        },
+                    )
+                else:
+                    from sqlalchemy.orm import selectinload
+                    from models.offer import OfferStatus
+                    from api.routers.offers import send_offer_to_channel
+                    from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
 
-                unique_offer_ids = list(set(new_offers))
-                logger.info(f"📋 Channel publish candidates: {unique_offer_ids}")
+                    unique_offer_ids = list(set(new_offers))
+                    logger.info(f"📋 Channel publish candidates: {unique_offer_ids}")
 
-                for oid in unique_offer_ids:
-                    try:
-                        async with db.begin_nested():
-                            stmt = select(Offer).options(
-                                selectinload(Offer.user),
-                                selectinload(Offer.commodity),
-                            ).where(
-                                Offer.id == oid,
-                                Offer.status == OfferStatus.ACTIVE,
-                            ).with_for_update(skip_locked=True)
-                            result = await db.execute(stmt)
-                            offer = result.scalars().first()
+                    for oid in unique_offer_ids:
+                        try:
+                            async with db.begin_nested():
+                                stmt = select(Offer).options(
+                                    selectinload(Offer.user),
+                                    selectinload(Offer.commodity),
+                                ).where(
+                                    Offer.id == oid,
+                                    Offer.status == OfferStatus.ACTIVE,
+                                ).with_for_update(skip_locked=True)
+                                result = await db.execute(stmt)
+                                offer = result.scalars().first()
 
-                            if offer:
-                                publication_result = await publish_offer_to_telegram_channel_once(
-                                    db,
-                                    offer,
-                                    offer.user,
-                                    send_offer_to_channel=send_offer_to_channel,
-                                )
-                                if publication_result.message_id:
-                                    logger.info(
-                                        "📣 Published synced offer %s to Telegram. MsgID: %s",
-                                        offer.id,
-                                        publication_result.message_id,
+                                if offer:
+                                    publication_result = await publish_offer_to_telegram_channel_once(
+                                        db,
+                                        offer,
+                                        offer.user,
+                                        send_offer_to_channel=send_offer_to_channel,
                                     )
+                                    if publication_result.message_id:
+                                        logger.info(
+                                            "📣 Published synced offer %s to Telegram. MsgID: %s",
+                                            offer.id,
+                                            publication_result.message_id,
+                                        )
+                                    else:
+                                        logger.warning(
+                                            "offer Telegram publication returned no message id",
+                                            extra={
+                                                "event": "sync.synced_offer_publish_empty_result",
+                                                "offer_id": oid,
+                                                "publication_error_code": publication_result.error_code,
+                                                "publication_status": getattr(publication_result.status, "value", publication_result.status),
+                                            },
+                                        )
                                 else:
-                                    logger.warning(
-                                        "offer Telegram publication returned no message id",
-                                        extra={
-                                            "event": "sync.synced_offer_publish_empty_result",
-                                            "offer_id": oid,
-                                            "publication_error_code": publication_result.error_code,
-                                            "publication_status": getattr(publication_result.status, "value", publication_result.status),
-                                        },
-                                    )
-                            else:
-                                logger.info(f"⏭️ Offer {oid} already published or locked by another request")
-                    except Exception as e:
-                        logger.error(
-                            "Failed to publish synced offer",
-                            extra={
-                                "event": "sync.synced_offer_publish_failed",
-                                "offer_id": oid,
-                                **_summarize_exception(e),
-                            },
-                        )
+                                    logger.info(f"⏭️ Offer {oid} already published or locked by another request")
+                        except Exception as e:
+                            logger.error(
+                                "Failed to publish synced offer",
+                                extra={
+                                    "event": "sync.synced_offer_publish_failed",
+                                    "offer_id": oid,
+                                    **_summarize_exception(e),
+                                },
+                            )
 
-                await db.commit()
-
+                    await db.commit()
             except ImportError:
                 logger.error("Could not import send_offer_to_channel")
             except Exception as e:
@@ -1792,6 +1836,7 @@ async def get_sync_health(
     outbound_queue = 0
     retry_queue = 0
     redis_ok = True
+    redis_client = None
     try:
         redis_client = get_redis_client()
         outbound_queue = int(await redis_client.llen("sync:outbound") or 0)
@@ -1807,6 +1852,27 @@ async def get_sync_health(
                 "error_type": type(exc).__name__,
             },
         )
+
+    if not redis_ok:
+        active_publication_gate = {"enabled": False, "status": "redis_unavailable"}
+    else:
+        try:
+            active_publication_gate = await load_active_publication_gate(redis_client)
+        except Exception as exc:
+            active_publication_gate = {
+                "enabled": False,
+                "status": "error",
+                "error_type": type(exc).__name__,
+            }
+            logger.warning(
+                "Could not read active publication gate for sync health",
+                extra={
+                    "event": "sync.health.active_publication_gate_error",
+                    "log_class": "integration",
+                    "server_mode": settings.server_mode,
+                    **_summarize_exception(exc),
+                },
+            )
 
     oldest_age = _age_seconds(oldest_unsynced_at)
     record_sync_health(
@@ -1853,6 +1919,7 @@ async def get_sync_health(
             "sync:outbound": outbound_queue,
             "sync:retry": retry_queue,
         },
+        "active_publication_gate": active_publication_gate,
         "publication_reconciliation": publication_reconciliation,
     }
     logger.info(
@@ -1866,6 +1933,7 @@ async def get_sync_health(
             "oldest_unsynced_age_seconds": payload["oldest_unsynced_age_seconds"],
             "sync_outbound_queue_length": outbound_queue,
             "sync_retry_queue_length": retry_queue,
+            "active_publication_gate_enabled": active_publication_gate.get("enabled"),
             "publication_reconciliation_status": publication_reconciliation.get("status"),
             "publication_reconciliation_findings": publication_reconciliation.get("finding_counts"),
         },
