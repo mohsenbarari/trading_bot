@@ -3,6 +3,7 @@ import logging
 import time
 
 from core.db import AsyncSessionLocal
+from core.background_job_authority import JOB_MARKET_SCHEDULE, assert_background_job_authority
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.market_schedule_service import evaluate_market_schedule, get_market_timezone_name
 from core.services.market_transition_service import (
@@ -19,6 +20,7 @@ _loop_errors = RepeatedErrorLogger(every=10)
 
 
 async def reconcile_market_schedule_runtime(*, current_time=None):
+    assert_background_job_authority(JOB_MARKET_SCHEDULE)
     async with AsyncSessionLocal() as db:
         trading_settings = await get_trading_settings_async()
         timezone_name = get_market_timezone_name(trading_settings)

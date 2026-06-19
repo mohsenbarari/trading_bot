@@ -9,6 +9,7 @@ Stores status in Redis key 'connectivity:global'.
 import asyncio
 import logging
 import httpx
+from core.background_job_authority import JOB_CONNECTIVITY_MONITOR, check_background_job_authority
 from core.config import settings
 from bot.utils.redis_helpers import get_redis
 
@@ -50,8 +51,13 @@ async def check_connectivity():
 
 async def connectivity_monitor_loop():
     """Background task to update connectivity status."""
-    if settings.server_mode != "iran":
+    decision = check_background_job_authority(JOB_CONNECTIVITY_MONITOR)
+    if not decision.ok:
         # Foreign server is assumed to be always connected
+        logger.info(
+            "Connectivity monitor skipped by background job authority policy",
+            extra=decision.as_log_extra(),
+        )
         return
 
     logger.info("🌐 Connectivity monitor started")

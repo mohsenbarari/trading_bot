@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import httpx
 import redis.asyncio as redis
+from core.background_job_authority import JOB_SYNC_WORKER, assert_background_job_authority
 from sqlalchemy import select, update
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
@@ -222,6 +223,7 @@ async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str,
     return response
 
 async def main():
+    assert_background_job_authority(JOB_SYNC_WORKER)
     logger.info("🚀 Starting Sync Worker...")
     
     # Redis connection

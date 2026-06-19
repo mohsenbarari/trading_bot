@@ -1429,6 +1429,10 @@ The following review points are accepted and have been added to the roadmap leve
   `session_expiry`, and `user_account_status` on the API background leader. Each job must declare
   authority, allowed server(s), outage behavior, and sync/outbox behavior so background mutations do
   not bypass shared commands.
+  - Step 9B implementation status: the code-owned matrix is `core/background_job_authority.py`.
+    `user_account_status` and `connectivity_monitor` are Iran-only; `offer_expiry`,
+    `market_schedule`, `session_expiry`, and `sync_worker` are allowed on both servers under their
+    declared authority and sync/no-sync rules.
 - Web Push side-effect gateway: Web Push is WebApp/browser runtime behavior. Subscription storage,
   preference reads/writes, market-offer Web Push, and notification Web Push should be Iran-only
   unless explicitly promoted later. Foreign should sync durable notification intent or product data,

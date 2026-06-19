@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from core.db import AsyncSessionLocal
 from core.config import settings
+from core.background_job_authority import JOB_OFFER_EXPIRY, assert_background_job_authority
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from core import telegram_gateway
@@ -71,6 +72,7 @@ async def expire_stale_offers() -> int:
     
     Returns the number of offers expired.
     """
+    assert_background_job_authority(JOB_OFFER_EXPIRY)
     from core.trading_settings import get_trading_settings_async
     
     ts = await get_trading_settings_async()

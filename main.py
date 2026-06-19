@@ -21,6 +21,10 @@ from core.redis import init_redis, close_redis
 from core.db import AsyncSessionLocal, init_db
 from core.events import setup_event_listeners
 from core.server_routing import SERVER_FOREIGN, normalize_server
+from core.background_job_authority import (
+    BackgroundJobAuthorityDecision,
+    filter_allowed_background_job_factories,
+)
 from core.connectivity import connectivity_monitor_loop
 from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
@@ -110,14 +114,23 @@ def _foreign_surface_blocked_response() -> JSONResponse:
 
 def _background_job_factories():
     jobs = [
+        ("connectivity_monitor", connectivity_monitor_loop),
         ("offer_expiry", offer_expiry_loop),
         ("market_schedule", market_schedule_loop),
         ("session_expiry", session_expiry_loop),
         ("user_account_status", user_account_status_loop),
     ]
-    if settings.server_mode == "iran":
-        jobs.insert(0, ("connectivity_monitor", connectivity_monitor_loop))
-    return jobs
+    return filter_allowed_background_job_factories(
+        jobs,
+        on_rejected=_log_background_job_authority_rejection,
+    )
+
+
+def _log_background_job_authority_rejection(decision: BackgroundJobAuthorityDecision) -> None:
+    logger.info(
+        "Skipping background job on this server by authority policy",
+        extra=decision.as_log_extra(),
+    )
 
 
 async def _cancel_background_jobs(tasks: list[asyncio.Task]) -> None:

@@ -53,6 +53,7 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
             iran_jobs = [name for name, _ in main._background_job_factories()]
 
         self.assertNotIn("connectivity_monitor", foreign_jobs)
+        self.assertNotIn("user_account_status", foreign_jobs)
         self.assertIn("connectivity_monitor", iran_jobs)
         self.assertIn("market_schedule", foreign_jobs)
         self.assertIn("user_account_status", iran_jobs)

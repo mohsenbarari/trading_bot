@@ -3,6 +3,7 @@ import logging
 import time
 
 from core.db import AsyncSessionLocal
+from core.background_job_authority import JOB_USER_ACCOUNT_STATUS, assert_background_job_authority
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.user_account_status_service import (
     GLOBAL_LOCK_LOOP_INTERVAL_SECONDS,
@@ -15,6 +16,7 @@ _loop_errors = RepeatedErrorLogger(every=10)
 
 
 async def finalize_due_user_global_locks() -> int:
+    assert_background_job_authority(JOB_USER_ACCOUNT_STATUS)
     async with AsyncSessionLocal() as db:
         blocked_count = await mark_due_users_globally_locked(db)
         if blocked_count > 0:
@@ -28,6 +30,7 @@ async def finalize_due_user_messenger_blocks() -> int:
 
 
 async def user_account_status_loop() -> None:
+    assert_background_job_authority(JOB_USER_ACCOUNT_STATUS)
     logger.info(
         "⏰ User account-status loop started (check every %ss)",
         GLOBAL_LOCK_LOOP_INTERVAL_SECONDS,

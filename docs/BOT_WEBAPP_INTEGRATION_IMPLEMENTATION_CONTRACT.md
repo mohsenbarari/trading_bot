@@ -1405,6 +1405,24 @@ Exit criteria:
 
 - Background jobs cannot bypass command authority or sync/outbox policy.
 
+Implementation decisions for Step 9B:
+
+- The code-owned matrix lives in `core/background_job_authority.py`; documentation alone is not
+  sufficient for this step.
+- API background scheduling must pass through `filter_allowed_background_job_factories()`.
+- `offer_expiry` is allowed on both servers, but it may only mutate local-home offers and must use
+  `expire_offers_authoritatively`.
+- `market_schedule` is allowed on both servers because each side must close its own local-home
+  offers when the market closes; offer mutations from this job must still use
+  `expire_offers_authoritatively`.
+- `session_expiry` is a local runtime/no-sync cleanup for `user_sessions` and is allowed on both
+  servers.
+- `user_account_status` is Iran-only because it mutates shared account-status fields and produces
+  synced notification/account effects.
+- `connectivity_monitor` is Iran-only and writes only local Redis runtime state.
+- `sync_worker` is also declared in the matrix as a recurring committed-outbox delivery worker; it
+  may run on both servers and only mutates local internal `change_log` delivery state.
+
 ### Step 9C - Field-Level Sensitive And No-Sync Reference Policy
 
 Required behavior:
