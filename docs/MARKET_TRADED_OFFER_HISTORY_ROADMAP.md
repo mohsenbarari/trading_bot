@@ -66,8 +66,9 @@ Required synced inputs:
   with completed/partial state.
 - `offers.lot_sizes`: required so peer surfaces remove stale trade buttons after
   partial trades.
-- `offers.expire_reason`: only `time_limit` expired offers are included in
-  two-day market history.
+- `offers.expire_reason`: pure expired history rows must be `time_limit`; an
+  expired offer with completed trade quantity is included as traded history even
+  if the remaining quantity was manually expired.
 - `offers.expired_at`, `offers.updated_at`, and `offers.created_at`: required
   for the history window and stable sorting.
 - `trades.offer_id`, `trades.status`, `trades.quantity`, `trades.created_at`,
@@ -78,9 +79,10 @@ Canonical derivation:
 
 - `traded`: `offers.status = completed`, or a terminal expired offer with
   completed trade quantity greater than zero.
-- `traded_partial_expired`: `offers.status = expired`,
-  `expire_reason = time_limit`, completed trade quantity greater than zero, and
-  completed trade quantity less than original offer quantity.
+- `traded_partial_expired`: `offers.status = expired`, completed trade quantity
+  greater than zero, and completed trade quantity less than original offer
+  quantity. This includes the product case where the owner manually expires the
+  remaining quantity after a partial trade.
 - `expired`: `offers.status = expired`, `expire_reason = time_limit`, and no
   completed trade quantity.
 - API representation may keep `history_state = traded` for
@@ -177,8 +179,12 @@ Query rules:
 - Include only the last 48 hours.
 - Include `offers.status = completed`.
 - Include `offers.status = expired` with `expire_reason = time_limit`.
+- Also include `offers.status = expired` with completed trade quantity greater
+  than zero, even when `expire_reason` is `manual` or another non-time-limit
+  terminal reason.
 - For expired offers, include completed trade aggregate so partially traded
-  retail offers can render as traded history.
+  retail offers can render as traded history while pure manual-expired rows with
+  no completed trade stay hidden from market history.
 - Sort by `history_event_at DESC`, where completed offers use latest completed
   trade time and expired offers use `expired_at`.
 - Keep pagination with `skip` and `limit`.
@@ -556,3 +562,24 @@ Implementation notes:
   was run during TH7/TH8 candidate validation.
 - Merge to `main` and any production deployment remain blocked until explicit
   owner approval.
+
+## Post-TH8 Product Contract Correction - Partial Manual Expiry
+
+Status: Completed on 2026-06-19 in `candidate/market-traded-history`.
+
+Owner-confirmed product rule:
+
+- If a retail offer is partially traded and the owner manually expires the
+  remaining quantity, the offer must still appear in two-day market history as
+  traded partial history.
+- Pure manual-expired offers with no completed trade quantity must remain hidden
+  from market history.
+
+Implementation notes:
+
+- Updated `/api/offers/market-history` so expired rows are included when either
+  `expire_reason = time_limit` or completed source-offer trade quantity is
+  greater than zero.
+- Frontend did not require a change because `OffersList.vue` already renders
+  expired rows with `history_state = traded`, `is_partially_traded = true`, and
+  `traded_quantity > 0` as `معامله‌شده · {traded_quantity} عدد`.

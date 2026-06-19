@@ -26,7 +26,9 @@ Recommended promotion condition:
 Backend market read model:
 
 - Adds `GET /api/offers/market-history` for terminal market history rows.
-- Includes only completed offers and `expire_reason=time_limit` expired offers.
+- Includes completed offers, pure `expire_reason=time_limit` expired offers, and
+  expired offers with completed trade quantity even when the remaining quantity
+  was manually expired.
 - Aggregates completed trade quantity from source-offer `trades.offer_id` rows.
 - Returns explicit read-only history metadata:
   `history_state`, `history_label`, `traded_quantity`,
@@ -93,6 +95,17 @@ Tests and docs:
 - `docs/MARKET_TRADED_OFFER_HISTORY_ROADMAP.md`
 
 ## Validation Evidence
+
+Post-review product correction:
+
+- On 2026-06-19, the history query was corrected so partially traded expired
+  offers are included even when the remaining quantity was manually expired.
+  Pure manual-expired offers with no completed trade quantity remain hidden.
+- Focused validation: `python3 -m unittest tests.test_offers_router_helpers`
+  passed with `8 tests OK`.
+- The broader market-history backend matrix was re-run and passed with
+  `69 tests OK`; `python3 -m py_compile api/routers/offers.py` and
+  `git diff --check` also passed.
 
 Backend focused gate:
 

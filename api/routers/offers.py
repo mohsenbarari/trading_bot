@@ -914,7 +914,10 @@ async def get_market_offer_history(
                 ),
                 and_(
                     Offer.status == OfferStatus.EXPIRED,
-                    Offer.expire_reason == "time_limit",
+                    or_(
+                        Offer.expire_reason == "time_limit",
+                        traded_quantity_expr > 0,
+                    ),
                     expired_at_expr >= cutoff_time,
                 ),
             )

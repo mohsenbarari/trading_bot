@@ -497,7 +497,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
         self.assertEqual(hidden_db.statements, [])
 
-    async def test_market_offer_history_query_covers_completed_and_time_limit_expired(self):
+    async def test_market_offer_history_query_covers_completed_time_limit_and_traded_expired(self):
         current_user = SimpleNamespace(id=8)
         history_db = CapturingDB(FakeRowExecuteResult([]))
 
@@ -521,6 +521,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("offers.status = 'COMPLETED'", history_sql)
         self.assertIn("offers.status = 'EXPIRED'", history_sql)
         self.assertIn("offers.expire_reason = 'time_limit'", history_sql)
+        self.assertIn("coalesce(anon_1.traded_quantity, 0) > 0", history_sql)
         self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", history_sql)
         self.assertIn("ORDER BY CASE", history_sql)
         self.assertIn("OFFSET 25", history_sql)
@@ -562,6 +563,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         partial_expired_offer = make_offer_model(
             id=23,
             status=OfferStatus.EXPIRED,
+            expire_reason="manual",
             quantity=20,
             remaining_quantity=8,
             is_wholesale=False,
