@@ -88,6 +88,7 @@ class TradeExecutionSeamTests(unittest.TestCase):
             audience_user_id=52,
             customer_relation_map={52: tier2_relation},
             trade_path_summary="مالک ↔ مشتری سطح ۲",
+            offer_notes="تحویل امروز  ",
         )
 
         self.assertIn("🟢 خرید", message)
@@ -96,6 +97,7 @@ class TradeExecutionSeamTests(unittest.TestCase):
         self.assertIn("🏷️ کالا: ربع", message)
         self.assertIn("🔢 شماره معامله: 10012", message)
         self.assertIn("🧭 مسیر: مالک ↔ مشتری سطح ۲", message)
+        self.assertIn("📝 توضیحات: تحویل امروز", message)
         self.assertNotIn("👤 طرف معامله", message)
 
     def test_message_bundle_preserves_telegram_and_notification_text_contract(self):
@@ -113,6 +115,7 @@ class TradeExecutionSeamTests(unittest.TestCase):
             responder_user_name="شاهین",
             customer_relation_map={},
             trade_path_summary="مالک ↔ مشتری سطح ۲",
+            offer_notes="تسویه فوری",
         )
 
         self.assertIn("🟢 <b>خرید</b>", responder_msg)
@@ -123,6 +126,9 @@ class TradeExecutionSeamTests(unittest.TestCase):
         self.assertIn("👤 طرف معامله: شاهین", owner_notif)
         self.assertIn("🧭 مسیر: مالک ↔ مشتری سطح ۲", responder_msg)
         self.assertIn("🧭 مسیر: مالک ↔ مشتری سطح ۲", responder_notif)
+        self.assertIn("📝 توضیحات: تسویه فوری", responder_notif)
+        self.assertIn("📝 توضیحات: تسویه فوری", owner_notif)
+        self.assertNotIn("📝 توضیحات", responder_msg)
 
 
 if __name__ == "__main__":

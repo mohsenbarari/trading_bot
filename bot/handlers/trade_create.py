@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from typing import Optional
 from datetime import datetime
 
@@ -20,7 +21,8 @@ from core.services.trade_service import (
     validate_price,
     get_available_trade_amounts,
 )
-from core.utils import to_jalali_str, check_user_limits, increment_user_counter
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.utils import to_jalali_str, check_user_limits, increment_user_counter, utc_now_naive
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
     get_lot_type_keyboard,
@@ -737,6 +739,8 @@ async def _handle_trade_confirm_core(
                     offer = await session.get(Offer, offer_id)
                     if offer:
                         offer.status = OfferStatus.EXPIRED
+                        offer.expired_at = utc_now_naive()
+                        offer.expire_reason = "telegram_send_failed"
                         await session.commit()
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after Telegram error: {rollback_error}")
@@ -748,6 +752,8 @@ async def _handle_trade_confirm_core(
                     offer = await session.get(Offer, offer_id)
                     if offer:
                         offer.status = OfferStatus.EXPIRED
+                        offer.expired_at = utc_now_naive()
+                        offer.expire_reason = "telegram_send_failed"
                         await session.commit()
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after unexpected error: {rollback_error}")
@@ -919,7 +925,7 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
         query = select(Offer).where(
             Offer.user_id == user.id,
             Offer.status == OfferStatus.ACTIVE
-        )
+        ).options(selectinload(Offer.commodity))
         result = await session.execute(query)
         offers = result.scalars().all()
         
@@ -927,31 +933,18 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
             await message.answer("شما هیچ لفظ فعالی ندارید.")
             return
             
-        import os
-        import httpx
         from api.routers.realtime import publish_event
         from core.cache import decr_active_offer_count
-        
-        bot_token = os.getenv("BOT_TOKEN")
-        channel_id = settings.channel_id
-        
-        async with httpx.AsyncClient() as client:
-            for offer in offers:
-                offer.status = OfferStatus.EXPIRED
-                
-                if offer.channel_message_id and bot_token and channel_id:
-                    url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-                    payload = {
-                        "chat_id": channel_id,
-                        "message_id": offer.channel_message_id
-                    }
-                    try:
-                        await client.post(url, json=payload, timeout=5)
-                    except Exception:
-                        pass
-                
-                await publish_event("offer:expired", {"id": offer.id})
-                await decr_active_offer_count(user.id)
+
+        expired_at = utc_now_naive()
+        for offer in offers:
+            offer.status = OfferStatus.EXPIRED
+            offer.expired_at = expired_at
+            offer.expire_reason = "bot_cancel_all"
+
+            await apply_offer_channel_state(offer, reason="bot_cancel_all", timeout=5)
+            await publish_event("offer:expired", {"id": offer.id})
+            await decr_active_offer_count(user.id)
                 
         await session.commit()
         

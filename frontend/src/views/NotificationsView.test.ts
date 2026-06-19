@@ -5,6 +5,10 @@ import NotificationsView from './NotificationsView.vue'
 import { useNotificationStore } from '../stores/notifications'
 
 const routerPushMock = vi.fn()
+const webPushMocks = vi.hoisted(() => ({
+  getWebPushStatus: vi.fn(),
+  enableWebPushNotifications: vi.fn(),
+}))
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -12,10 +16,19 @@ vi.mock('vue-router', () => ({
   }),
 }))
 
+vi.mock('../services/webPush', () => ({
+  getWebPushStatus: webPushMocks.getWebPushStatus,
+  enableWebPushNotifications: webPushMocks.enableWebPushNotifications,
+}))
+
 describe('NotificationsView.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     routerPushMock.mockReset()
+    webPushMocks.getWebPushStatus.mockReset()
+    webPushMocks.enableWebPushNotifications.mockReset()
+    webPushMocks.getWebPushStatus.mockResolvedValue({ state: 'subscribed' })
+    webPushMocks.enableWebPushNotifications.mockResolvedValue({ state: 'subscribed' })
   })
 
   it('renders the loading state while the notification history is still fetching', async () => {
@@ -41,7 +54,28 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.text()).toContain('هیچ اعلانی یافت نشد')
   })
 
-  it('routes back home and delegates clear/delete actions to the store after confirmation', async () => {
+  it('shows only the enable action when push notifications are inactive', async () => {
+    webPushMocks.getWebPushStatus.mockResolvedValueOnce({ state: 'unsubscribed' })
+    const store = useNotificationStore()
+    vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
+
+    const wrapper = mount(NotificationsView)
+    await flushPromises()
+
+    expect(wrapper.find('.push-enable-btn').exists()).toBe(true)
+    expect(wrapper.find('.push-test-btn').exists()).toBe(false)
+    expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
+
+    await wrapper.get('.push-enable-btn').trigger('click')
+    await flushPromises()
+
+    expect(webPushMocks.enableWebPushNotifications).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('فعال شد')
+    expect(wrapper.find('.push-test-btn').exists()).toBe(false)
+    expect(wrapper.find('.push-disable-btn').exists()).toBe(false)
+  })
+
+  it('routes back home and does not render per-notification action buttons', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
@@ -57,33 +91,27 @@ describe('NotificationsView.vue', () => {
     ]
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
-    const clearAllSpy = vi.spyOn(store, 'clearAllNotifications').mockResolvedValue()
-    const deleteSpy = vi.spyOn(store, 'deleteNotification').mockResolvedValue()
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
     await wrapper.get('.notifications-return').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/')
-
-    await wrapper.get('.clear-btn').trigger('click')
-    expect(wrapper.text()).toContain('پاک‌سازی همه اعلان‌ها')
-    await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
-    expect(clearAllSpy).toHaveBeenCalledTimes(1)
-
-    await wrapper.get('.delete-btn').trigger('click')
-    expect(wrapper.text()).toContain('حذف اعلان')
-    await wrapper.get('.ui-confirm-dialog .ui-button--danger').trigger('click')
-    expect(deleteSpy).toHaveBeenCalledWith(11)
-    expect(wrapper.text()).toContain('اعلان')
+    expect(wrapper.find('.clear-btn').exists()).toBe(false)
+    expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('صندوق ورودی')
+    expect(wrapper.find('.notifications-topbar h1').exists()).toBe(false)
+    expect(wrapper.find('.delete-btn').exists()).toBe(false)
+    expect(wrapper.find('.toggle-read-btn').exists()).toBe(false)
+    expect(wrapper.find('.notif-actions').exists()).toBe(false)
   })
 
-  it('filters notification visibility by read state without changing store actions', async () => {
+  it('switches notification visibility by category without rendering read-count filters', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
         id: 21,
-        title: 'خوانده نشده',
+        title: 'پیام مدیریتی',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
@@ -93,12 +121,12 @@ describe('NotificationsView.vue', () => {
       },
       {
         id: 22,
-        title: 'خوانده شده',
+        title: 'اعلان معامله',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
         level: 'info',
-        category: 'system',
+        category: 'trade',
         is_read: true,
       },
     ]
@@ -108,27 +136,25 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(3)
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
+    const categoryTabs = wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
+    expect(categoryTabs).toHaveLength(2)
+    expect(categoryTabs[0]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('.notification-toolbar').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('پیام مدیریتی')
+    expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
+    expect(wrapper.find('.notif-title').exists()).toBe(false)
 
-    await wrapper.findAll('[role="tab"]')[1]!.trigger('click')
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).not.toContain('خوانده شده')
-    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('tabindex')).toBe('0')
-    expect(wrapper.findAll('[role="tab"]')[1]!.attributes('aria-selected')).toBe('true')
-
-    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
-    expect(wrapper.text()).not.toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
+    await categoryTabs[1]!.trigger('click')
+    expect(wrapper.text()).toContain('پیام مدیریتی')
+    expect(wrapper.text()).not.toContain('اعلان معامله')
   })
 
-  it('supports keyboard navigation across notification filter tabs', async () => {
+  it('supports keyboard navigation across notification category tabs', async () => {
     const store = useNotificationStore()
     store.appNotifications = [
       {
         id: 31,
-        title: 'خوانده نشده',
+        title: 'پیام مدیریتی',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
@@ -138,12 +164,12 @@ describe('NotificationsView.vue', () => {
       },
       {
         id: 32,
-        title: 'خوانده شده',
+        title: 'اعلان معامله',
         body: 'بدنه',
         content: 'بدنه',
         message: 'بدنه',
         level: 'info',
-        category: 'system',
+        category: 'trade',
         is_read: true,
       },
     ]
@@ -153,23 +179,25 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
-    const chips = () => wrapper.findAll('[role="tab"]')
-    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
-
-    await chips()[0]!.trigger('keydown', { key: 'ArrowLeft' })
-    expect(chips()[1]!.attributes('aria-selected')).toBe('true')
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).not.toContain('خوانده شده')
-
-    await chips()[1]!.trigger('keydown', { key: 'End' })
-    expect(chips()[2]!.attributes('aria-selected')).toBe('true')
-    expect(wrapper.text()).not.toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
-
-    await chips()[2]!.trigger('keydown', { key: 'Home' })
+    const chips = () => wrapper.find('.notification-category-tabs').findAll('[role="tab"]')
+    expect(chips().map((chip) => chip.attributes('tabindex'))).toEqual(['0', '-1'])
     expect(chips()[0]!.attributes('aria-selected')).toBe('true')
-    expect(wrapper.text()).toContain('خوانده نشده')
-    expect(wrapper.text()).toContain('خوانده شده')
+    expect(wrapper.text()).not.toContain('پیام مدیریتی')
+    expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
+
+    await chips()[0]!.trigger('keydown', { key: 'Home' })
+    expect(chips()[0]!.attributes('aria-selected')).toBe('true')
+
+    await chips()[0]!.trigger('keydown', { key: 'End' })
+    expect(chips()[1]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('پیام مدیریتی')
+    expect(wrapper.text()).not.toContain('اعلان معامله')
+
+    await chips()[1]!.trigger('keydown', { key: 'Home' })
+    expect(chips()[0]!.attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).not.toContain('پیام مدیریتی')
+    expect(wrapper.find('.notif-item.category-trade').exists()).toBe(true)
+    expect(wrapper.find('.notif-title').exists()).toBe(false)
   })
 
   it('opens a notification route when the item carries one', async () => {
@@ -192,6 +220,8 @@ describe('NotificationsView.vue', () => {
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
 
     await wrapper.get('.notif-item').trigger('click')
     expect(routerPushMock).toHaveBeenCalledWith('/users/19?account_name=owner-19')
@@ -221,10 +251,10 @@ describe('NotificationsView.vue', () => {
     ] as any
 
     vi.spyOn(store, 'openNotificationCenter').mockResolvedValue()
-    const toggleReadSpy = vi.spyOn(store, 'toggleReadStatus').mockResolvedValue()
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
 
     expect(wrapper.find('.notif-lines').exists()).toBe(false)
     expect(wrapper.find('.notif-text').text()).toContain('یادآوری ساده')
@@ -232,10 +262,8 @@ describe('NotificationsView.vue', () => {
     expect(wrapper.find('.unread-dot').exists()).toBe(true)
     expect(wrapper.find('.notif-time').exists()).toBe(true)
     expect(wrapper.text()).toContain('جدید')
-
-    await wrapper.get('.toggle-read-btn').trigger('click')
-    expect(toggleReadSpy).toHaveBeenCalledWith(14, true)
-    expect(wrapper.get('.toggle-read-btn').attributes('aria-label')).toContain('خوانده‌شده')
+    expect(wrapper.find('.toggle-read-btn').exists()).toBe(false)
+    expect(wrapper.find('.delete-btn').exists()).toBe(false)
     expect(routerPushMock).not.toHaveBeenCalled()
 
     await wrapper.get('.notif-item').trigger('click')
@@ -253,6 +281,7 @@ describe('NotificationsView.vue', () => {
       '🔢 شماره معامله: 10005',
       '🕐 زمان معامله: 1405/03/06 11:20',
       '🧭 مسیر: مالک ↔ مشتری سطح ۱',
+      '📝 توضیحات: تحویل حضوری',
     ].join('\n')
 
     store.appNotifications = [
@@ -273,9 +302,15 @@ describe('NotificationsView.vue', () => {
     const wrapper = mount(NotificationsView)
     await flushPromises()
 
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[0]!.trigger('click')
+
     expect(wrapper.find('.notif-text').exists()).toBe(false)
+    expect(wrapper.find('.notif-item').classes()).toContain('category-trade')
+    expect(wrapper.find('.notif-title').exists()).toBe(false)
+    expect(wrapper.find('.notif-badges').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('اعلان معامله')
     expect(wrapper.find('.notif-line-plain').text()).toContain('فروش')
-    expect(wrapper.findAll('.notif-line-field')).toHaveLength(7)
+    expect(wrapper.findAll('.notif-line-field')).toHaveLength(8)
     expect(wrapper.findAll('.notif-line-label').map((node) => node.text())).toEqual([
       'فی',
       'تعداد',
@@ -284,8 +319,10 @@ describe('NotificationsView.vue', () => {
       'شماره معامله',
       'زمان معامله',
       'مسیر',
+      'توضیحات',
     ])
     expect(wrapper.text()).toContain('مالک ↔ مشتری سطح ۱')
+    expect(wrapper.text()).toContain('تحویل حضوری')
   })
 
   it('filters blank structured lines and keeps non-trade multiline notifications in structured mode', async () => {
@@ -309,6 +346,7 @@ describe('NotificationsView.vue', () => {
 
     const wrapper = mount(NotificationsView)
     await flushPromises()
+    await wrapper.find('.notification-category-tabs').findAll('[role="tab"]')[1]!.trigger('click')
 
     expect(wrapper.find('.notif-text').exists()).toBe(false)
     expect(wrapper.find('.notif-lines.is-trade-lines').exists()).toBe(false)

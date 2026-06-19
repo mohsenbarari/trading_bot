@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -68,6 +69,7 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
             "id": 8,
             "account_name": "acct8",
             "mobile_number": "09120000008",
+            "created_at": None,
         })
 
         stmt_text = str(db.stmts[0]).lower()
@@ -76,13 +78,21 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("customer_relations", stmt_text)
         self.assertIn("not (exists", stmt_text)
         self.assertIn("users.id !=", stmt_text)
+        self.assertIn("users.created_at desc", stmt_text)
+        self.assertIn("nulls last", stmt_text)
+        self.assertIn("users.id desc", stmt_text)
         self.assertIn("lower(users.account_name) like lower", stmt_text)
         self.assertIn("lower(users.mobile_number) like lower", stmt_text)
 
     async def test_list_project_users_directory_allows_active_accountant_for_owner_profile(self):
         db = FakeDB([
             FakeExecuteResult([
-                make_user(id=20, account_name="owner20", mobile_number="09120000020"),
+                make_user(
+                    id=20,
+                    account_name="owner20",
+                    mobile_number="09120000020",
+                    created_at=datetime(2026, 5, 14, 8, 0, tzinfo=timezone.utc),
+                ),
                 make_user(id=9, account_name="manager9", role=UserRole.MIDDLE_MANAGER, mobile_number="09120000009"),
             ])
         ])
@@ -103,6 +113,7 @@ class UsersPublicProjectUsersTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual([row.id for row in result], [20, 9])
+        self.assertEqual(result[0].created_at, datetime(2026, 5, 14, 8, 0, tzinfo=timezone.utc))
 
     async def test_list_project_users_directory_denies_unrelated_requests(self):
         db = FakeDB([])

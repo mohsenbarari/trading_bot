@@ -61,6 +61,31 @@ class ServerRoutingTests(unittest.TestCase):
             self.assertEqual(server_routing.server_from_request(request_builtin_foreign), server_routing.SERVER_FOREIGN)
             self.assertEqual(server_routing.server_from_request(request_unknown), server_routing.SERVER_IRAN)
 
+    def test_server_from_request_uses_current_server_for_ambiguous_shared_host(self):
+        request = SimpleNamespace(headers={"host": "staging.362514.ir"})
+
+        with patch.object(server_routing.settings, "iran_server_domain", None), \
+             patch.object(server_routing.settings, "iran_server_url", None), \
+             patch.object(server_routing.settings, "frontend_url", None), \
+             patch.object(server_routing.settings, "foreign_server_domain", None), \
+             patch.object(server_routing.settings, "foreign_server_url", None), \
+             patch.object(server_routing.settings, "germany_server_url", None), \
+             patch.object(server_routing.settings, "iran_server_aliases", "staging.362514.ir"), \
+             patch.object(server_routing.settings, "foreign_server_aliases", "staging.362514.ir"), \
+             patch.object(server_routing.settings, "server_mode", "foreign"):
+            self.assertEqual(server_routing.server_from_request(request), server_routing.SERVER_FOREIGN)
+
+        with patch.object(server_routing.settings, "iran_server_domain", None), \
+             patch.object(server_routing.settings, "iran_server_url", None), \
+             patch.object(server_routing.settings, "frontend_url", None), \
+             patch.object(server_routing.settings, "foreign_server_domain", None), \
+             patch.object(server_routing.settings, "foreign_server_url", None), \
+             patch.object(server_routing.settings, "germany_server_url", None), \
+             patch.object(server_routing.settings, "iran_server_aliases", "staging.362514.ir"), \
+             patch.object(server_routing.settings, "foreign_server_aliases", "staging.362514.ir"), \
+             patch.object(server_routing.settings, "server_mode", "iran"):
+            self.assertEqual(server_routing.server_from_request(request), server_routing.SERVER_IRAN)
+
     def test_peer_server_url_for_uses_specific_urls_and_legacy_fallback(self):
         with patch.object(server_routing.settings, "server_mode", "foreign"), \
              patch.object(server_routing.settings, "iran_server_url", "https://iran.example/"), \

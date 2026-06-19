@@ -2,7 +2,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import bot.handlers.trade_create as trade_create
 from bot.handlers.trade_create import (
     _bot_market_is_open,
     _handoff_stale_wizard_state_to_text_offer,
@@ -37,22 +36,6 @@ class FakeSessionContext:
 
     async def __aenter__(self):
         return self._session
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
-class FakeHttpClient:
-    def __init__(self):
-        self.post = AsyncMock()
-
-
-class FakeHttpClientContext:
-    def __init__(self, client):
-        self._client = client
-
-    async def __aenter__(self):
-        return self._client
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
@@ -139,22 +122,14 @@ class BotTradeCreateHelperAndCancelTests(unittest.IsolatedAsyncioTestCase):
         ]
         session = FakeSession(offers)
         message = SimpleNamespace(answer=AsyncMock())
-        http_client = FakeHttpClient()
 
         with patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
             return_value=FakeSessionContext(session),
         ), patch(
-            "os.getenv",
-            side_effect=lambda key, default=None: "bot-token" if key == "BOT_TOKEN" else default,
-        ), patch.object(
-            trade_create.settings,
-            "channel_id",
-            1000,
-        ), patch(
-            "httpx.AsyncClient",
-            return_value=FakeHttpClientContext(http_client),
-        ), patch(
+            "bot.handlers.trade_create.apply_offer_channel_state",
+            new=AsyncMock(),
+        ) as apply_offer_channel_state, patch(
             "api.routers.realtime.publish_event",
             new=AsyncMock(),
         ) as publish_event_mock, patch(
@@ -165,11 +140,9 @@ class BotTradeCreateHelperAndCancelTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(offers[0].status, OfferStatus.EXPIRED)
         self.assertEqual(offers[1].status, OfferStatus.EXPIRED)
-        http_client.post.assert_awaited_once_with(
-            "https://api.telegram.org/botbot-token/editMessageReplyMarkup",
-            json={"chat_id": 1000, "message_id": 222},
-            timeout=5,
-        )
+        apply_offer_channel_state.assert_any_await(offers[0], reason="bot_cancel_all", timeout=5)
+        apply_offer_channel_state.assert_any_await(offers[1], reason="bot_cancel_all", timeout=5)
+        self.assertEqual(apply_offer_channel_state.await_count, 2)
         self.assertEqual(publish_event_mock.await_count, 2)
         publish_event_mock.assert_any_await("offer:expired", {"id": 10})
         publish_event_mock.assert_any_await("offer:expired", {"id": 11})

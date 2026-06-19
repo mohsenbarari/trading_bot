@@ -115,8 +115,108 @@ describe('OffersList.vue', () => {
 
     expect(wrapper.findAll('.trade-btn').map((button) => button.text())).toEqual(['5 عدد', '10 عدد', '20 عدد'])
     expect(wrapper.find('.price').text()).toBe('---')
-    expect(wrapper.text()).toContain('خُرد: 20 + 10 + 5')
+    expect(wrapper.text()).not.toContain('خُرد')
+    expect(wrapper.text()).not.toContain('یکجا')
     expect(wrapper.text()).toContain('سطح نامشخص')
+  })
+
+  it('renders time-limit expired offers as read-only history cards', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 4,
+          user_id: 12,
+          status: 'expired',
+          expire_reason: 'time_limit',
+          offer_type: 'sell',
+          commodity_name: 'ربع سکه',
+          quantity: 20,
+          remaining_quantity: 20,
+          price: 51000,
+          viewer_effective_price: 51000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+        },
+      ],
+      hasMoreExpired: true,
+      canLoadExpired: true,
+    })
+
+    expect(wrapper.find('.expired-ribbon').text()).toBe('منقضی')
+    expect(wrapper.find('.offer-card-wrap').classes()).toContain('is-expired')
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+    expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
+
+    await wrapper.find('.expired-load-more-btn').trigger('click')
+    expect(wrapper.emitted('load-more-expired')).toHaveLength(1)
+  })
+
+  it('renders traded history stamps and keeps terminal offers read-only', async () => {
+    const wrapper = await mountOffersList({
+      offers: [
+        {
+          id: 5,
+          user_id: 77,
+          status: 'completed',
+          history_state: 'traded',
+          is_read_only: true,
+          offer_type: 'buy',
+          commodity_name: 'طلای آب‌شده',
+          quantity: 12,
+          remaining_quantity: 0,
+          traded_quantity: 12,
+          price: 72000,
+          viewer_effective_price: 72000,
+          is_wholesale: true,
+          lot_sizes: null,
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+        },
+        {
+          id: 6,
+          user_id: 88,
+          status: 'expired',
+          history_state: 'traded',
+          is_read_only: true,
+          is_partially_traded: true,
+          offer_type: 'sell',
+          commodity_name: 'ربع سکه',
+          quantity: 40,
+          remaining_quantity: 20,
+          traded_quantity: 20,
+          price: 54000,
+          viewer_effective_price: 54000,
+          is_wholesale: false,
+          lot_sizes: [7],
+          notes: null,
+          created_at: 'امروز',
+          customer_badge_visible: false,
+          customer_management_name: null,
+          customer_tier: null,
+        },
+      ],
+    })
+
+    expect(wrapper.find('.trade-btn').exists()).toBe(false)
+    expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="history-stamp"]').map((stamp) => stamp.text())).toEqual([
+      'معامله‌شده',
+      'معامله‌شده 20 عدد',
+    ])
+    expect(wrapper.findAll('.traded-ribbon')).toHaveLength(2)
+    expect(wrapper.find('.expired-ribbon').exists()).toBe(false)
+    expect(wrapper.findAll('.offer-card-wrap')[0]!.classes()).toContain('is-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).toContain('is-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).not.toContain('is-expired')
+    expect(wrapper.findAll('.quantity-badge').map((badge) => badge.text())).toEqual(['12 عدد', '40 عدد'])
   })
 
   it('uses the two-tap confirm flow for retail lots, clears stale pending state, and executes the confirmed trade', async () => {

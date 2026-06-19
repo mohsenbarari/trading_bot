@@ -363,7 +363,7 @@ def _build_project_user_directory_stmt(
             )
         )
 
-    return stmt.order_by(User.account_name.asc(), User.id.asc()).offset(offset).limit(limit)
+    return stmt.order_by(User.created_at.desc().nulls_last(), User.id.desc()).offset(offset).limit(limit)
 
 
 async def _load_public_accountant_relation_summaries(

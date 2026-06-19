@@ -14,9 +14,10 @@ class BotTradeExecuteUpdateMarkupTests(unittest.IsolatedAsyncioTestCase):
         bot.edit_message_reply_markup.assert_not_awaited()
 
         offer = SimpleNamespace(channel_message_id=10, remaining_quantity=0, status=OfferStatus.ACTIVE)
-        with patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)):
+        with patch("bot.handlers.trade_execute.apply_offer_channel_state", new=AsyncMock()) as apply_offer_channel_state:
             await update_offer_channel_markup(bot, offer)
-        bot.edit_message_reply_markup.assert_awaited_once_with(chat_id=-100, message_id=10, reply_markup=None)
+        apply_offer_channel_state.assert_awaited_once_with(offer, reason="bot_channel_trade")
+        bot.edit_message_reply_markup.assert_not_awaited()
 
         bot = SimpleNamespace(edit_message_reply_markup=AsyncMock())
         offer = SimpleNamespace(

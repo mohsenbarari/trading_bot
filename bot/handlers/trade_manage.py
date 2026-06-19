@@ -10,6 +10,7 @@ from models.offer import Offer, OfferStatus
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.trading_settings import get_trading_settings
+from core.utils import utc_now_naive
 from bot.utils.redis_helpers import track_expire_rate, track_daily_expire
 from bot.callbacks import ExpireOfferCallback
 
@@ -77,6 +78,8 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
         
         # منقضی کردن لفظ
         offer.status = OfferStatus.EXPIRED
+        offer.expired_at = utc_now_naive()
+        offer.expire_reason = "manual"
         await session.commit()
         
         # حذف دکمه از پست کانال

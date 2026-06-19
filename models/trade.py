@@ -91,3 +91,11 @@ class Trade(Base):
     __mapper_args__ = {
         "version_id_col": version_id
     }
+
+
+Index(
+    'ix_trades_completed_offer_history',
+    Trade.offer_id,
+    Trade.created_at.desc(),
+    postgresql_where=(Trade.status == TradeStatus.COMPLETED) & Trade.offer_id.isnot(None),
+)

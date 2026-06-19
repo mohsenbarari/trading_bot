@@ -28,10 +28,14 @@ const props = defineProps<{
   limit?: number;
   expiryMinutes?: number;
   currentUserId?: number;
+  expiredLoading?: boolean;
+  hasMoreExpired?: boolean;
+  canLoadExpired?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'trade-completed'): void;
+  (e: 'load-more-expired'): void;
 }>();
 
 // Trade execution state
@@ -74,6 +78,7 @@ function getTimerPercent(offer: any): number {
 }
 
 function cardTimerStyle(offer: any): Record<string, string> {
+  if (isReadOnlyOffer(offer)) return {}
   if (!offer.expires_at_ts) return {}
   const remainingSec = offer.expires_at_ts - now.value
   if (remainingSec <= 0) return { '--t-pct': '0' }
@@ -92,12 +97,57 @@ function hasTimer(offer: any): boolean {
   return !!offer.expires_at_ts
 }
 
-// --- Filter out expired offers ---
+function isExpiredOffer(offer: any): boolean {
+  if (isTradedHistoryOffer(offer)) return false
+  return offer?.status === 'expired' || offer?.history_state === 'expired'
+}
+
+function isTradedHistoryOffer(offer: any): boolean {
+  return offer?.history_state === 'traded'
+}
+
+function isReadOnlyOffer(offer: any): boolean {
+  const status = String(offer?.status ?? '').toLowerCase()
+  return offer?.is_read_only === true
+    || typeof offer?.history_state === 'string'
+    || (status !== '' && status !== 'active')
+}
+
+function getFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numericValue = Number(value)
+  return Number.isFinite(numericValue) ? numericValue : null
+}
+
+function getHistoryStampLabel(offer: any): string {
+  if (isTradedHistoryOffer(offer)) {
+    const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
+    if (offer?.is_partially_traded === true && tradedQuantity !== null && tradedQuantity > 0) {
+      return `معامله‌شده ${tradedQuantity.toLocaleString()} عدد`
+    }
+    return 'معامله‌شده'
+  }
+  if (isExpiredOffer(offer)) return 'منقضی'
+  return ''
+}
+
+function getOfferQuantityLabel(offer: any): string {
+  const remainingQuantity = getFiniteNumber(offer?.remaining_quantity)
+  const totalQuantity = getFiniteNumber(offer?.quantity)
+  if (isTradedHistoryOffer(offer) && totalQuantity !== null) {
+    return `${totalQuantity.toLocaleString()} عدد`
+  }
+  if (remainingQuantity !== null) return `${remainingQuantity.toLocaleString()} عدد`
+  if (totalQuantity !== null) return `${totalQuantity.toLocaleString()} عدد`
+  return '---'
+}
+
+// Keep active offers live-filtered, while read-only history rows remain visible.
 const filteredOffers = computed(() => {
   const nowSec = now.value
   const source = Array.isArray(props.offers) ? props.offers : []
-  const alive = source.filter(o => !o.expires_at_ts || o.expires_at_ts > nowSec)
-  return props.limit ? alive.slice(0, props.limit) : alive
+  const visible = source.filter(o => isReadOnlyOffer(o) || !o.expires_at_ts || o.expires_at_ts > nowSec)
+  return props.limit ? visible.slice(0, props.limit) : visible
 })
 
 function timeAgo(dateString: string) {
@@ -132,10 +182,6 @@ function getLotButtons(offer: any): number[] {
 
 function formatLotSummary(amounts: number[]): string {
   return [...amounts].sort((a, b) => b - a).join(' + ');
-}
-
-function getLotSummary(offer: any): string {
-  return formatLotSummary(getLotButtons(offer));
 }
 
 function getDisplayedOfferPrice(offer: any): number {
@@ -445,10 +491,24 @@ async function cancelOwnOffer(offerId: number) {
         v-for="offer in filteredOffers" 
         :key="offer.id"
         class="offer-card-wrap"
-        :class="{ 'timer-critical': isCritical(offer), 'has-timer': hasTimer(offer) }"
+        :class="{
+          'timer-critical': !isReadOnlyOffer(offer) && isCritical(offer),
+          'has-timer': !isReadOnlyOffer(offer) && hasTimer(offer),
+          'is-history': isReadOnlyOffer(offer),
+          'is-expired': isExpiredOffer(offer),
+          'is-traded': isTradedHistoryOffer(offer),
+        }"
         :style="cardTimerStyle(offer)"
       >
         <div class="offer-card-inner" :class="[offer.offer_type]">
+          <span
+            v-if="getHistoryStampLabel(offer)"
+            class="history-ribbon"
+            :class="isTradedHistoryOffer(offer) ? 'traded-ribbon' : 'expired-ribbon'"
+            data-test="history-stamp"
+          >
+            {{ getHistoryStampLabel(offer) }}
+          </span>
 
           <!-- Header: role badge + time -->
           <div class="offer-header">
@@ -462,7 +522,7 @@ async function cancelOwnOffer(offerId: number) {
           <div class="offer-body">
             <div class="offer-main">
               <span class="commodity">{{ offer.commodity_name }}</span>
-              <span class="quantity-badge">{{ offer.remaining_quantity }} عدد</span>
+              <span class="quantity-badge">{{ getOfferQuantityLabel(offer) }}</span>
               <span class="price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
             </div>
             <div v-if="offer.customer_badge_visible" class="customer-context-row">
@@ -470,20 +530,13 @@ async function cancelOwnOffer(offerId: number) {
               <span v-if="offer.customer_management_name" class="customer-context-name">{{ offer.customer_management_name }}</span>
               <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
-            <!-- Lot info indicator -->
-            <div v-if="!offer.is_wholesale && offer.lot_sizes && offer.lot_sizes.length > 0" class="lot-info">
-              🔢 خُرد: {{ getLotSummary(offer) }}
-            </div>
-            <div v-else-if="offer.is_wholesale" class="lot-info wholesale">
-              📦 یکجا
-            </div>
             <p v-if="offer.notes" class="offer-notes">
               توضیحات: {{ offer.notes }}
             </p>
           </div>
 
           <!-- Footer: lot buttons or own offer -->
-          <div class="offer-footer">
+          <div v-if="!isReadOnlyOffer(offer)" class="offer-footer">
             <div v-if="!isOwnOffer(offer) && (offer.remaining_quantity ?? offer.quantity) > 0" class="trade-buttons">
               <button
                 v-for="amount in getLotButtons(offer)"
@@ -517,6 +570,17 @@ async function cancelOwnOffer(offerId: number) {
 
         </div><!-- /offer-card-inner -->
       </div>
+      <div v-if="canLoadExpired && (hasMoreExpired || expiredLoading)" class="expired-load-more-row">
+        <button
+          type="button"
+          class="expired-load-more-btn"
+          :disabled="expiredLoading"
+          @click="emit('load-more-expired')"
+        >
+          <Loader2 v-if="expiredLoading" class="inline animate-spin" :size="14" />
+          <span>{{ expiredLoading ? 'در حال دریافت' : 'نمایش بیشتر' }}</span>
+        </button>
+      </div>
     </div>
 </template>
 
@@ -543,7 +607,7 @@ async function cancelOwnOffer(offerId: number) {
 
 /* ── Loading skeleton ── */
 .skeleton-card {
-  height: 90px;
+  height: 78px;
   background: rgba(255,255,255,0.5);
   border-radius: var(--ds-radius-md);
   border: 1px solid var(--ds-border-accent);
@@ -557,18 +621,19 @@ async function cancelOwnOffer(offerId: number) {
 /* ── Empty state ── */
 .empty-state {
   text-align: center;
-  padding: 40px 20px;
+  padding: 24px 16px;
   color: var(--ds-text-placeholder);
+  font-size: 0.76rem;
 }
 .empty-icon {
-  width: 56px;
-  height: 56px;
+  width: 42px;
+  height: 42px;
   background: var(--ds-primary-50);
-  border-radius: 14px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 12px;
+  margin: 0 auto 8px;
   color: var(--ds-primary-500);
 }
 
@@ -580,6 +645,10 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-card-wrap.has-timer {
+  border-color: transparent;
+}
+
+.offer-card-wrap.is-history {
   border-color: transparent;
 }
 
@@ -621,9 +690,131 @@ async function cancelOwnOffer(offerId: number) {
   position: relative;
   background: var(--ds-bg-card);
   border-radius: calc(var(--ds-radius-md) - 3px);
-  padding: 14px;
+  padding: 10px 11px 9px;
   z-index: 0;
   overflow: hidden;
+}
+
+.offer-card-wrap.is-history .offer-card-inner {
+  background: var(--ds-bg-surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  padding-top: 34px;
+}
+
+.offer-card-wrap.is-expired .offer-card-inner {
+  background:
+    linear-gradient(90deg, rgba(71, 85, 105, 0.24), rgba(148, 163, 184, 0.15) 42%, rgba(241, 245, 249, 0.92) 100%),
+    var(--ds-bg-surface);
+  box-shadow: 0 1px 3px rgba(71, 85, 105, 0.05);
+}
+
+.offer-card-wrap.is-traded .offer-card-inner {
+  background:
+    linear-gradient(90deg, rgba(13, 148, 136, 0.28), rgba(20, 184, 166, 0.16) 42%, rgba(236, 253, 245, 0.94) 100%),
+    var(--ds-bg-surface);
+  box-shadow: 0 1px 3px rgba(15, 118, 110, 0.07);
+}
+
+.offer-card-wrap.is-expired .offer-card-inner::before,
+.offer-card-wrap.is-traded .offer-card-inner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  pointer-events: none;
+}
+
+.offer-card-wrap.is-expired .offer-card-inner::before {
+  background: rgba(100, 116, 139, 0.52);
+}
+
+.offer-card-wrap.is-traded .offer-card-inner::before {
+  background: rgba(13, 148, 136, 0.62);
+}
+
+.offer-card-wrap.is-expired .offer-header,
+.offer-card-wrap.is-expired .offer-body {
+  opacity: 0.58;
+}
+
+.offer-card-wrap.is-traded .offer-header,
+.offer-card-wrap.is-traded .offer-body {
+  opacity: 0.92;
+}
+
+.offer-card-wrap.is-history .price,
+.offer-card-wrap.is-history .commodity {
+  color: var(--ds-text-secondary);
+}
+
+.history-ribbon {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 2;
+  min-width: 74px;
+  transform: translateX(-50%) rotate(-7deg);
+  transform-origin: center;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.1;
+  text-align: center;
+  letter-spacing: 0;
+  padding: 4px 10px 3px;
+  box-shadow:
+    inset 0 0 0 1px rgba(185, 28, 28, 0.22),
+    0 1px 0 rgba(185, 28, 28, 0.08);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.expired-ribbon {
+  background: rgba(239, 68, 68, 0.06);
+  color: #b91c1c;
+  border: 2px solid rgba(185, 28, 28, 0.72);
+}
+
+.traded-ribbon {
+  min-width: 92px;
+  background: rgba(20, 184, 166, 0.08);
+  color: #0f766e;
+  border: 2px solid rgba(15, 118, 110, 0.72);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 118, 110, 0.22),
+    0 1px 0 rgba(15, 118, 110, 0.08);
+}
+
+.history-ribbon::before,
+.history-ribbon::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.expired-ribbon::before {
+  border: 1px solid rgba(185, 28, 28, 0.32);
+}
+
+.traded-ribbon::before {
+  border: 1px solid rgba(15, 118, 110, 0.32);
+}
+
+.history-ribbon::after {
+  inset: -1px 5px;
+  transform: rotate(2deg);
+}
+
+.expired-ribbon::after {
+  border-color: rgba(185, 28, 28, 0.14);
+}
+
+.traded-ribbon::after {
+  border-color: rgba(15, 118, 110, 0.14);
 }
 
 /* Subtle outer shadow for depth */
@@ -640,14 +831,14 @@ async function cancelOwnOffer(offerId: number) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .role-badge {
   display: inline-block;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -662,13 +853,13 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .offer-time {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--ds-text-placeholder);
 }
 
 /* ── Body ── */
 .offer-body {
-  margin-bottom: 10px;
+  margin-bottom: 7px;
 }
 
 .offer-main {
@@ -680,8 +871,8 @@ async function cancelOwnOffer(offerId: number) {
 .customer-context-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-top: 5px;
   flex-wrap: wrap;
 }
 
@@ -691,8 +882,8 @@ async function cancelOwnOffer(offerId: number) {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 2px 7px;
+  font-size: 10.5px;
   font-weight: 800;
   line-height: 1;
 }
@@ -704,7 +895,7 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .customer-context-name {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--ds-text-primary);
 }
@@ -717,44 +908,33 @@ async function cancelOwnOffer(offerId: number) {
 
 .commodity {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ds-text-primary);
 }
 
 .quantity-badge {
   background: var(--ds-bg-hover);
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--ds-text-secondary);
 }
 
 .price {
   font-weight: 800;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ds-primary-500);
 }
 
 .offer-notes {
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
   color: var(--ds-text-muted);
   background: var(--ds-bg-inset);
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 6px;
-}
-
-/* ── Lot info ── */
-.lot-info {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--ds-primary-600);
-  font-weight: 600;
-  direction: rtl;
-}
-.lot-info.wholesale {
-  color: var(--ds-text-muted);
 }
 
 /* ── Footer ── */
@@ -768,7 +948,7 @@ async function cancelOwnOffer(offerId: number) {
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
 }
 
@@ -777,11 +957,11 @@ async function cancelOwnOffer(offerId: number) {
 }
 
 .trade-btn {
-  padding: 8px 12px;
+  padding: 6px 10px;
   color: white;
   border: none;
   border-radius: var(--ds-radius-sm);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   flex: 1 1 auto;
@@ -827,12 +1007,12 @@ async function cancelOwnOffer(offerId: number) {
 
 .cancel-own-offer-btn {
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: var(--ds-danger-50);
   color: var(--ds-danger-600);
   border: 1px solid var(--ds-danger-200);
   border-radius: var(--ds-radius-sm);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
@@ -847,6 +1027,34 @@ async function cancelOwnOffer(offerId: number) {
 
 .cancel-own-offer-btn:disabled {
   opacity: 0.6;
+  cursor: wait;
+}
+
+.expired-load-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 6px;
+}
+
+.expired-load-more-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ds-border-subtle);
+  background: var(--ds-bg-card);
+  color: var(--ds-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.expired-load-more-btn:disabled {
+  opacity: 0.68;
   cursor: wait;
 }
 

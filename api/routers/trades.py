@@ -45,6 +45,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
 from models.user import User, UserRole
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
@@ -1173,6 +1174,11 @@ def _recipient_is_tier2_customer(
     return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
 
 
+def _normalize_offer_notes_for_notification(offer_notes: str | None) -> str | None:
+    normalized = " ".join(str(offer_notes or "").split())
+    return normalized or None
+
+
 def _build_trade_notification_message(
     *,
     trade_emoji: str,
@@ -1186,6 +1192,7 @@ def _build_trade_notification_message(
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
+    offer_notes: str | None = None,
 ) -> str:
     lines = [
         f"{trade_emoji} {trade_type_label}",
@@ -1199,6 +1206,9 @@ def _build_trade_notification_message(
     lines.append(f"🕐 زمان معامله: {trade_datetime}")
     if trade_path_summary:
         lines.append(f"🧭 مسیر: {trade_path_summary}")
+    normalized_notes = _normalize_offer_notes_for_notification(offer_notes)
+    if normalized_notes:
+        lines.append(f"📝 توضیحات: {normalized_notes}")
     return "\n".join(lines)
 
 
@@ -1217,6 +1227,7 @@ def _build_trade_message_bundle(
     responder_user_name: str,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
     trade_path_summary: str | None = None,
+    offer_notes: str | None = None,
 ) -> tuple[str, str, str, str]:
     trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
     responder_msg = (
@@ -1251,6 +1262,7 @@ def _build_trade_message_bundle(
         audience_user_id=None,
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_summary,
+        offer_notes=offer_notes,
     )
     notif_msg_owner = _build_trade_notification_message(
         trade_emoji=offer_trade_emoji,
@@ -1264,6 +1276,7 @@ def _build_trade_message_bundle(
         audience_user_id=None,
         customer_relation_map=customer_relation_map,
         trade_path_summary=trade_path_summary,
+        offer_notes=offer_notes,
     )
     return responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner
 
@@ -1468,6 +1481,9 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
 
 async def update_channel_buttons(offer: Offer) -> bool:
     """آپدیت دکمه‌های پست کانال"""
+    if current_server() != "foreign":
+        return False
+
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
@@ -1477,11 +1493,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
     url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
     
     if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
-        # حذف دکمه‌ها
-        payload = {
-            "chat_id": channel_id,
-            "message_id": offer.channel_message_id
-        }
+        return await apply_offer_channel_state(offer, reason="trade_channel_buttons")
     else:
         # ساخت دکمه‌های جدید
         if offer.is_wholesale or not offer.lot_sizes:
@@ -1601,33 +1613,35 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
     
     # گرفتن اطلاعات offer از دیتابیس
     async with AsyncSessionLocal() as session:
-        offer = await session.get(Offer, offer_id)
+        offer = await session.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
         if not offer or not offer.channel_message_id:
             return False
+        offer.remaining_quantity = remaining_quantity
+        offer.status = offer_status
+        offer.lot_sizes = lot_sizes
+        if remaining_quantity <= 0 or offer_status != OfferStatus.ACTIVE:
+            return await apply_offer_channel_state(offer, reason="trade_channel_buttons_sync")
         
         url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
         
-        if remaining_quantity <= 0 or offer_status != OfferStatus.ACTIVE:
-            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+        if offer.is_wholesale or not lot_sizes:
+            buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
         else:
-            if offer.is_wholesale or not lot_sizes:
-                buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
+            valid_lots = get_available_trade_amounts(
+                quantity=offer.quantity,
+                remaining_quantity=remaining_quantity,
+                is_wholesale=False,
+                lot_sizes=lot_sizes,
+            )
+            if not valid_lots:
+                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
+                buttons = None
             else:
-                valid_lots = get_available_trade_amounts(
-                    quantity=offer.quantity,
-                    remaining_quantity=remaining_quantity,
-                    is_wholesale=False,
-                    lot_sizes=lot_sizes,
-                )
-                if not valid_lots:
-                    payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
-                    buttons = None
-                else:
-                    buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
-            
-            if buttons is not None:
-                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
-    
+                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
+
+        if buttons is not None:
+            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
+
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=payload, timeout=10)
         return response.status_code == 200
@@ -2178,6 +2192,7 @@ async def _execute_trade_authoritatively(
         trade_number: int,
         counterparty_name: str | None,
         trade_path_summary: str | None,
+        offer_notes: str | None,
         extra_payload: dict[str, object | None],
     ) -> None:
         for audience_user_id in audience_user_ids:
@@ -2196,6 +2211,7 @@ async def _execute_trade_authoritatively(
                     audience_user_id=audience_user_id,
                     customer_relation_map=participant_customer_relation_map,
                     trade_path_summary=trade_path_summary,
+                    offer_notes=offer_notes,
                 ),
                 level=NotificationLevel.SUCCESS,
                 category=NotificationCategory.TRADE,
@@ -2266,6 +2282,7 @@ async def _execute_trade_authoritatively(
                 responder_user_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
                 customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=leg_trade_path_summary,
+                offer_notes=getattr(offer, "notes", None),
             )
 
             responder_telegram_id = getattr(leg_responder_user, "telegram_id", None)
@@ -2294,6 +2311,7 @@ async def _execute_trade_authoritatively(
                     trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     counterparty_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
                     trade_path_summary=leg_trade_path_summary,
+                    offer_notes=getattr(offer, "notes", None),
                     extra_payload=_build_trade_notification_extra_payload(
                         "offer_user",
                         leg_offer_payload,
@@ -2308,6 +2326,7 @@ async def _execute_trade_authoritatively(
                     trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     counterparty_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
                     trade_path_summary=leg_trade_path_summary,
+                    offer_notes=getattr(offer, "notes", None),
                     extra_payload=_build_trade_notification_extra_payload(
                         "responder_user",
                         leg_responder_payload,
@@ -2346,6 +2365,7 @@ async def _execute_trade_authoritatively(
                 responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
                 customer_relation_map=participant_customer_relation_map,
             ).get("trade_path_summary"),
+            offer_notes=getattr(offer, "notes", None),
         )
 
         background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
@@ -2380,6 +2400,7 @@ async def _execute_trade_authoritatively(
                     responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
                     customer_relation_map=participant_customer_relation_map,
                 ).get("trade_path_summary"),
+                offer_notes=getattr(offer, "notes", None),
                 extra_payload=responder_notification_payload,
             )
             await _create_trade_notifications_for_leg(
@@ -2394,6 +2415,7 @@ async def _execute_trade_authoritatively(
                     responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
                     customer_relation_map=participant_customer_relation_map,
                 ).get("trade_path_summary"),
+                offer_notes=getattr(offer, "notes", None),
                 extra_payload=offer_owner_notification_payload,
             )
         except Exception as exc:

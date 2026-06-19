@@ -4,14 +4,14 @@ API Router for Offer Management - Web App Integration
 """
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -24,7 +24,11 @@ from core.services.market_transition_service import (
     evaluate_current_market_schedule,
     register_market_offer_created,
 )
-from core.services.trade_service import get_available_trade_amounts
+from core.services.telegram_offer_channel_service import (
+    apply_offer_channel_state,
+    build_offer_channel_message,
+    build_offer_channel_reply_markup,
+)
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
     get_active_customer_relation_for_customer,
@@ -35,6 +39,7 @@ from core.trading_observability import log_trading_event, summarize_response_bod
 from models.user import User
 from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
+from models.trade import Trade, TradeStatus
 from models.commodity import Commodity
 from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
 from core.server_routing import current_server
@@ -148,6 +153,7 @@ class OfferResponse(BaseModel):
     notes: Optional[str]
     status: str
     expire_reason: Optional[str] = None
+    expired_at: Optional[str] = None
     channel_message_id: Optional[int]
     customer_badge_visible: bool = False
     customer_management_name: Optional[str] = None
@@ -157,6 +163,16 @@ class OfferResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class MarketHistoryOfferResponse(OfferResponse):
+    """Read-only market history row with terminal-state metadata."""
+    history_state: str
+    history_label: str
+    traded_quantity: int = 0
+    is_partially_traded: bool = False
+    is_read_only: bool = True
+    history_event_at: Optional[str] = None
 
 
 class ParseOfferRequest(BaseModel):
@@ -232,6 +248,7 @@ def offer_to_response(
         notes=offer.notes,
         status=offer.status.value,
         expire_reason=getattr(offer, "expire_reason", None),
+        expired_at=to_jalali_str(getattr(offer, "expired_at", None)) if getattr(offer, "expired_at", None) else None,
         channel_message_id=offer.channel_message_id,
         customer_badge_visible=offer_read_model.customer_badge_visible,
         customer_management_name=offer_read_model.customer_management_name,
@@ -268,6 +285,40 @@ async def _serialize_offer_responses(
         )
         for offer in offers
     ]
+
+
+def _offer_response_to_dict(response: OfferResponse) -> dict:
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    return response.dict()
+
+
+def _build_market_history_response(
+    response: OfferResponse,
+    offer: Offer,
+    *,
+    traded_quantity: int,
+    history_event_at: datetime | None,
+) -> MarketHistoryOfferResponse:
+    normalized_traded_quantity = max(0, int(traded_quantity or 0))
+    is_traded_history = offer.status == OfferStatus.COMPLETED or normalized_traded_quantity > 0
+    history_state = "traded" if is_traded_history else "expired"
+    history_label = "معامله‌شده" if is_traded_history else "منقضی"
+    original_quantity = int(getattr(offer, "quantity", 0) or 0)
+    is_partially_traded = (
+        offer.status == OfferStatus.EXPIRED
+        and normalized_traded_quantity > 0
+        and (original_quantity <= 0 or normalized_traded_quantity < original_quantity)
+    )
+    return MarketHistoryOfferResponse(
+        **_offer_response_to_dict(response),
+        history_state=history_state,
+        history_label=history_label,
+        traded_quantity=normalized_traded_quantity,
+        is_partially_traded=is_partially_traded,
+        is_read_only=True,
+        history_event_at=to_jalali_str(history_event_at) if history_event_at else None,
+    )
 
 
 async def _read_active_offer_count(db: AsyncSession, user_id: int) -> int:
@@ -337,28 +388,22 @@ async def _publish_offer_event_safely(event_type: str, payload: dict, *, reason:
 
 
 async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, timeout: float = 10) -> None:
-    channel_message_id = getattr(offer, "channel_message_id", None)
-    if not channel_message_id:
+    if current_server() != "foreign":
         return
 
-    bot_token = os.getenv("BOT_TOKEN") or settings.bot_token
-    channel_id = settings.channel_id
-    if not bot_token or not channel_id:
+    if not getattr(offer, "channel_message_id", None):
         return
 
-    url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-    payload = {"chat_id": channel_id, "message_id": channel_message_id}
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload, timeout=timeout)
+        await apply_offer_channel_state(offer, reason=reason, timeout=timeout)
     except Exception as exc:
         log_trading_event(
             logger,
-            "offer_channel_buttons_remove_failed",
+            "offer_channel_state_apply_failed",
             level="warning",
             action="trading_side_effect",
             result="failure",
-            side_effect="offer_channel_buttons_remove",
+            side_effect="offer_channel_state_apply",
             offer_id=getattr(offer, "id", None),
             reason=reason,
             error_class=type(exc).__name__,
@@ -367,47 +412,20 @@ async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, tim
 
 async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
+    if current_server() != "foreign":
+        return None
+
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
     if not bot_token or not channel_id:
         return None
     
-    # ساخت متن پیام
-    trade_emoji = "🟢" if offer.offer_type == OfferType.BUY else "🔴"
-    trade_label = "خرید" if offer.offer_type == OfferType.BUY else "فروش"
-    invisible_padding = "\u2800" * 35
-    
-    channel_message = f"{trade_emoji}{trade_label} {offer.commodity.name} {offer.quantity} عدد {offer.price:,}"
-    if offer.notes:
-        channel_message += f"\nتوضیحات: {offer.notes}"
-    channel_message += f"\n{invisible_padding}"
-    
-    # ساخت دکمه‌ها
-    if offer.is_wholesale or not offer.lot_sizes:
-        buttons = [[{"text": f"{offer.quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.quantity}"}]]
-    else:
-        all_amounts = get_available_trade_amounts(
-            quantity=offer.quantity,
-            remaining_quantity=offer.remaining_quantity or offer.quantity,
-            is_wholesale=False,
-            lot_sizes=sorted(offer.lot_sizes, reverse=True),
-        )
-        seen = set()
-        unique_amounts = []
-        for a in all_amounts:
-            if a not in seen:
-                seen.add(a)
-                unique_amounts.append(a)
-        buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in unique_amounts]]
-    
-    reply_markup = {"inline_keyboard": buttons}
-    
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": channel_id,
-        "text": channel_message,
-        "reply_markup": reply_markup
+        "text": build_offer_channel_message(offer),
+        "reply_markup": build_offer_channel_reply_markup(offer),
     }
     
     try:
@@ -630,6 +648,8 @@ async def create_offer(
         # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
         if old_offer.status == OfferStatus.ACTIVE:
             old_offer.status = OfferStatus.EXPIRED
+            old_offer.expired_at = utc_now_naive()
+            old_offer.expire_reason = "republished"
 
     # ایجاد لفظ
     new_offer = Offer(
@@ -820,6 +840,167 @@ async def get_active_offers(
     )
 
 
+@router.get("/market-history", response_model=List[MarketHistoryOfferResponse])
+async def get_market_offer_history(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(25, ge=1, le=100),
+    since_hours: int = Query(48, ge=1, le=48),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
+):
+    """
+    Read-only two-day market history for terminal offers.
+
+    This endpoint intentionally does not alter active-market feed, fair-price
+    validation, Web Push targeting, or trade execution guards.
+    """
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+
+    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
+    if actor_relation is not None:
+        return []
+
+    cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
+    expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+
+    trade_totals = (
+        select(
+            Trade.offer_id.label("offer_id"),
+            func.coalesce(func.sum(Trade.quantity), 0).label("traded_quantity"),
+            func.max(Trade.created_at).label("last_trade_at"),
+        )
+        .where(
+            Trade.offer_id.isnot(None),
+            Trade.status == TradeStatus.COMPLETED,
+        )
+        .group_by(Trade.offer_id)
+        .subquery()
+    )
+
+    traded_quantity_expr = func.coalesce(trade_totals.c.traded_quantity, 0)
+    completed_event_at_expr = func.coalesce(
+        trade_totals.c.last_trade_at,
+        Offer.updated_at,
+        Offer.created_at,
+    )
+    history_event_at_expr = case(
+        (Offer.status == OfferStatus.COMPLETED, completed_event_at_expr),
+        else_=expired_at_expr,
+    )
+
+    query = (
+        select(
+            Offer,
+            traded_quantity_expr.label("traded_quantity"),
+            history_event_at_expr.label("history_event_at"),
+        )
+        .outerjoin(trade_totals, trade_totals.c.offer_id == Offer.id)
+        .options(*build_offer_read_options(include_owner_identity=False))
+        .where(
+            or_(
+                and_(
+                    Offer.status == OfferStatus.COMPLETED,
+                    completed_event_at_expr >= cutoff_time,
+                ),
+                and_(
+                    Offer.status == OfferStatus.EXPIRED,
+                    or_(
+                        Offer.expire_reason == "time_limit",
+                        traded_quantity_expr > 0,
+                    ),
+                    expired_at_expr >= cutoff_time,
+                ),
+            )
+        )
+        .order_by(history_event_at_expr.desc(), Offer.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    rows = result.all()
+    if not rows:
+        return []
+
+    offers = [row[0] for row in rows]
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    serialized = await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=context.owner_user.id,
+        include_owner_identity=False,
+    )
+    return [
+        _build_market_history_response(
+            response,
+            offer,
+            traded_quantity=row[1],
+            history_event_at=row[2],
+        )
+        for response, offer, row in zip(serialized, offers, rows)
+    ]
+
+
+@router.get("/expired", response_model=List[OfferResponse])
+async def get_market_expired_offers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(25, ge=1, le=100),
+    since_hours: int = Query(48, ge=1, le=48),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    context: EffectiveOwnerActor | None = Depends(get_effective_owner_actor_context),
+):
+    """
+    Read-only market history for offers that died naturally by time limit.
+
+    This endpoint intentionally does not change the active market feed contract,
+    price-warning comparisons, Web Push targeting, or trade execution guards.
+    """
+    context = _resolve_offer_owner_context(context, current_user)
+    _ensure_accountant_market_access_allowed(context)
+
+    actor_relation = await get_active_customer_relation_for_customer(db, context.actor_user.id)
+    if actor_relation is not None:
+        return []
+
+    cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
+    expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+
+    query = (
+        select(Offer)
+        .options(*build_offer_read_options(include_owner_identity=False))
+        .where(
+            Offer.status == OfferStatus.EXPIRED,
+            Offer.expire_reason == "time_limit",
+            expired_at_expr >= cutoff_time,
+        )
+        .order_by(expired_at_expr.desc(), Offer.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    offers = result.scalars().all()
+    if not offers:
+        return []
+
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    return await _serialize_offer_responses(
+        offers,
+        db=db,
+        start_settings=ts,
+        viewer_user_id=context.owner_user.id,
+        include_owner_identity=False,
+    )
+
+
 @router.get("/my", response_model=List[OfferResponse])
 async def get_my_offers(
     status_filter: Optional[str] = Query(None, pattern="^(active|completed|cancelled|expired)$"),
@@ -844,36 +1025,76 @@ async def get_my_offers(
     # فیلتر کردن لفظ‌هایی که دوباره منتشر شده‌اند
     query = query.where(Offer.republished_offer_id.is_(None))
     
+    applied_status_enum = None
+    start_settings = None
+
+    if status_filter:
+        applied_status_enum = OFFER_STATUS_FILTERS.get(status_filter)
+        if applied_status_enum:
+            if not (applied_status_enum == OfferStatus.EXPIRED and since_hours):
+                query = query.where(Offer.status == applied_status_enum)
+
     if since_hours:
-        from datetime import timedelta
         cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
-        query = query.where(Offer.created_at >= cutoff_time)
-        
-        if status_filter:
-            status_enum = OFFER_STATUS_FILTERS.get(status_filter)
-            if status_enum:
-                query = query.where(Offer.status == status_enum)
-    elif status_filter:
-        status_enum = OFFER_STATUS_FILTERS.get(status_filter)
-        if status_enum:
-            query = query.where(Offer.status == status_enum)
+
+        if applied_status_enum == OfferStatus.EXPIRED:
+            from core.trading_settings import get_trading_settings_async
+
+            start_settings = await get_trading_settings_async()
+            recent_expired_at = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+            expired_conditions = [
+                and_(Offer.status == OfferStatus.EXPIRED, recent_expired_at >= cutoff_time)
+            ]
+            expiry_minutes = int(getattr(start_settings, "offer_expiry_minutes", 0) or 0)
+            if expiry_minutes > 0:
+                stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
+                recent_active_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+                expired_conditions.append(
+                    and_(
+                        Offer.status == OfferStatus.ACTIVE,
+                        Offer.created_at < stale_cutoff_time,
+                        Offer.created_at >= recent_active_created_after,
+                    )
+                )
+            query = query.where(or_(*expired_conditions))
+        else:
+            query = query.where(Offer.created_at >= cutoff_time)
     
     # مرتب‌سازی: جدیدترین‌ها اول
-    query = query.order_by(Offer.created_at.desc()).offset(skip).limit(limit)
+    if applied_status_enum == OfferStatus.EXPIRED:
+        recent_expired_at = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+        query = query.order_by(recent_expired_at.desc(), Offer.created_at.desc()).offset(skip).limit(limit)
+    else:
+        query = query.order_by(Offer.created_at.desc()).offset(skip).limit(limit)
     
     result = await db.execute(query)
     offers = result.scalars().all()
+    if applied_status_enum == OfferStatus.EXPIRED and since_hours:
+        logger.info(
+            "market.recent_expired_offers.loaded",
+            extra={
+                "event": "market.recent_expired_offers.loaded",
+                "owner_user_id": owner_user.id,
+                "actor_user_id": getattr(context.actor_user, "id", None),
+                "since_hours": since_hours,
+                "limit": limit,
+                "result_count": len(offers),
+                "offer_ids": [offer.id for offer in offers],
+            },
+        )
     if not offers:
         return []
     
     # دریافت تنظیمات برای محاسبه انقضا
-    from core.trading_settings import get_trading_settings_async
-    ts = await get_trading_settings_async()
+    if start_settings is None:
+        from core.trading_settings import get_trading_settings_async
+
+        start_settings = await get_trading_settings_async()
     
     return await _serialize_offer_responses(
         offers,
         db=db,
-        start_settings=ts,
+        start_settings=start_settings,
         viewer_user_id=owner_user.id,
         include_owner_identity=True,
     )
@@ -922,7 +1143,7 @@ async def expire_offer(
                 )
             )
 
-    offer = await db.get(Offer, offer_id)
+    offer = await db.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
     
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
@@ -934,6 +1155,8 @@ async def expire_offer(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
     
     offer.status = OfferStatus.EXPIRED
+    offer.expired_at = utc_now_naive()
+    offer.expire_reason = "manual"
     await db.commit()
     
     # حذف دکمه‌ها از کانال
@@ -962,15 +1185,18 @@ async def cancel_all_active_offers(
     query = select(Offer).where(
         Offer.user_id == owner_user.id,
         Offer.status == OfferStatus.ACTIVE
-    )
+    ).options(selectinload(Offer.commodity))
     result = await db.execute(query)
     offers = result.scalars().all()
     
     if not offers:
         return {"cancelled_count": 0}
         
+    expired_at = utc_now_naive()
     for offer in offers:
         offer.status = OfferStatus.EXPIRED
+        offer.expired_at = expired_at
+        offer.expire_reason = "cancel_all"
 
     await db.commit()
 

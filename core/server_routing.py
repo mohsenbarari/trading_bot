@@ -43,9 +43,13 @@ def server_from_request(request, *, force_telegram_foreign: bool = False) -> str
         return SERVER_FOREIGN
 
     host = _host_from_request(request)
-    if host in iran_server_aliases(settings):
+    iran_aliases = iran_server_aliases(settings)
+    foreign_aliases = foreign_server_aliases(settings)
+    if host in iran_aliases and host in foreign_aliases:
+        return current_server()
+    if host in iran_aliases:
         return SERVER_IRAN
-    if host in foreign_server_aliases(settings):
+    if host in foreign_aliases:
         return SERVER_FOREIGN
 
     return current_server()

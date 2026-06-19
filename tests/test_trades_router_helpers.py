@@ -753,7 +753,11 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.COMPLETED, [10, 8]))
-        self.assertEqual(client_ctor.return_value.post.await_args.kwargs["json"], {"chat_id": -100, "message_id": 322})
+        terminal_payload = client_ctor.return_value.post.await_args.kwargs["json"]
+        self.assertEqual(terminal_payload["chat_id"], -100)
+        self.assertEqual(terminal_payload["message_id"], 322)
+        self.assertEqual(terminal_payload["reply_markup"], None)
+        self.assertIn("🤝 ✅", terminal_payload["text"])
 
         aware = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
         naive = datetime(2025, 1, 1, 12, 0)

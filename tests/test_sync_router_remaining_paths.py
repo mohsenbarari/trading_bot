@@ -356,7 +356,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
     async def test_receive_sync_data_covers_offer_publish_import_and_runtime_failures(self):
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
-        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers):
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
             new_offers.append(record_id)
             return "ok"
 

@@ -64,6 +64,7 @@ interface RecentOfferSummary {
   notes: string | null
   status: 'active' | 'completed' | 'cancelled' | 'expired'
   created_at: string
+  expired_at?: string | null
 }
 
 interface MarketRuntimeState {
@@ -90,11 +91,19 @@ function normalizeCustomerTier(raw: unknown): CustomerTierValue {
 
 const MARKET_CLOSED_DETAIL = 'بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید.'
 const initialCurrentUserSummary = currentUserSummary.value
+const MARKET_HISTORY_OFFERS_PAGE_SIZE = 25
 
 const { offers, isLoading, fetchOffers, startPolling, stopPolling } = useOffers()
 const { on: wsOn, off: wsOff } = useWebSocket()
 const currentUserId = ref<number | undefined>(initialCurrentUserSummary?.id)
 const currentUserCustomerTier = ref<CustomerTierValue>(normalizeCustomerTier(initialCurrentUserSummary?.customer_tier))
+const currentUserIsAccountant = ref(initialCurrentUserSummary?.is_accountant === true)
+const currentUserLoaded = ref(Boolean(initialCurrentUserSummary))
+const marketHistoryOffers = ref<any[]>([])
+const marketHistoryOffersLoading = ref(false)
+const marketHistoryOffersRefreshQueued = ref(false)
+const marketHistoryOffersSkip = ref(0)
+const hasMoreMarketHistoryOffers = ref(false)
 const marketRuntime = ref<MarketRuntimeState>({
   is_open: true,
   active_web_notice_visible: false,
@@ -115,6 +124,13 @@ const filteredOffers = computed(() => {
     }
   }
   return list
+})
+const visibleMarketOffers = computed(() => {
+  if (filterType.value !== 'all') return filteredOffers.value
+  return [
+    ...filteredOffers.value,
+    ...marketHistoryOffers.value,
+  ]
 })
 
 const commodities = ref<Commodity[]>([])
@@ -141,6 +157,7 @@ const recentOffersOpen = ref(false)
 const recentOffersLoading = ref(false)
 const recentOffersError = ref('')
 const recentOffersRef = ref<HTMLElement | null>(null)
+const recentOffersDropdownRef = ref<HTMLElement | null>(null)
 const recentOffersToggleRef = ref<any>(null)
 const recentOffersOpenDirection = ref<'above' | 'below'>('above')
 const recentOffersDropdownStyle = ref<Record<string, string>>({})
@@ -152,6 +169,11 @@ const marketOfferPushLoading = ref(false)
 const marketOfferPushSaving = ref(false)
 const marketOfferPushError = ref('')
 const isTier2Customer = computed(() => currentUserCustomerTier.value === 'tier2')
+const canViewExpiredMarketOffers = computed(() => (
+  currentUserLoaded.value
+  && currentUserCustomerTier.value === null
+  && !currentUserIsAccountant.value
+))
 const visibleTabs = computed<MarketFilterType[]>(() => (
   isTier2Customer.value ? ['all', 'buy', 'sell'] : ['all', 'buy', 'sell', 'my']
 ))
@@ -259,6 +281,78 @@ async function toggleMarketOfferPush() {
   }
 }
 
+function normalizeMarketHistoryOffer(offer: any) {
+  if (!offer || typeof offer !== 'object') return offer
+  return {
+    ...offer,
+    is_read_only: offer.is_read_only !== false,
+  }
+}
+
+function clearMarketHistoryOffers() {
+  marketHistoryOffers.value = []
+  marketHistoryOffersSkip.value = 0
+  hasMoreMarketHistoryOffers.value = false
+  marketHistoryOffersLoading.value = false
+}
+
+async function fetchMarketHistoryOffers(options: { reset?: boolean; silent?: boolean } = {}) {
+  if (!canViewExpiredMarketOffers.value) {
+    clearMarketHistoryOffers()
+    return
+  }
+  if (marketHistoryOffersLoading.value) {
+    if (options.reset !== false) {
+      marketHistoryOffersRefreshQueued.value = true
+    }
+    return
+  }
+
+  const reset = options.reset !== false
+  const skip = reset ? 0 : marketHistoryOffersSkip.value
+  marketHistoryOffersLoading.value = true
+  if (reset) {
+    marketHistoryOffersRefreshQueued.value = false
+  }
+  try {
+    const response = await apiFetch(`/api/offers/market-history?skip=${skip}&limit=${MARKET_HISTORY_OFFERS_PAGE_SIZE}`)
+    if (!response.ok) {
+      throw await createHttpErrorFromResponse(response, {
+        surface: 'market',
+        scope: 'list',
+        operation: reset ? 'load-list' : 'background-refresh',
+        preserveExistingData: true,
+        resourceLabel: 'تاریخچه لفظ‌های بازار',
+        fallbackMessage: 'دریافت تاریخچه لفظ‌های بازار ممکن نشد.',
+      })
+    }
+    const payload = await response.json()
+    const rows = Array.isArray(payload) ? payload.map(normalizeMarketHistoryOffer) : []
+    if (reset) {
+      marketHistoryOffers.value = rows
+      marketHistoryOffersSkip.value = rows.length
+    } else {
+      const existingIds = new Set(marketHistoryOffers.value.map((offer) => Number(offer.id)))
+      const nextRows = rows.filter((offer) => !existingIds.has(Number(offer.id)))
+      marketHistoryOffers.value = [...marketHistoryOffers.value, ...nextRows]
+      marketHistoryOffersSkip.value += rows.length
+    }
+    hasMoreMarketHistoryOffers.value = rows.length === MARKET_HISTORY_OFFERS_PAGE_SIZE
+  } catch (e) {
+    console.error('Failed to load market history offers', e)
+  } finally {
+    marketHistoryOffersLoading.value = false
+    if (marketHistoryOffersRefreshQueued.value && canViewExpiredMarketOffers.value) {
+      marketHistoryOffersRefreshQueued.value = false
+      void fetchMarketHistoryOffers({ reset: true, silent: true })
+    }
+  }
+}
+
+async function loadMoreExpiredMarketOffers() {
+  await fetchMarketHistoryOffers({ reset: false })
+}
+
   async function fetchAdminMarketMessage() {
     try {
       const res = await apiFetch('/api/admin-messages/market/current')
@@ -308,6 +402,25 @@ function handleMarketNoticeHidden(data: Partial<MarketRuntimeState> | undefined)
 function handleAdminMarketMessagePublished(data: AdminMarketMessage | undefined) {
   adminMarketMessage.value = data && typeof data.content === 'string' ? data : null
   adminMarketMessageExpanded.value = false
+}
+
+function refreshMarketHistorySilently() {
+  if (!canViewExpiredMarketOffers.value) return
+  void fetchMarketHistoryOffers({ reset: true, silent: true })
+}
+
+function isTerminalOfferUpdate(data: any) {
+  const status = String(data?.status ?? '').toLowerCase()
+  return status === 'expired' || status === 'completed'
+}
+
+function handleOfferTerminalHistoryEvent() {
+  refreshMarketHistorySilently()
+}
+
+function handleOfferUpdatedForHistory(data?: any) {
+  if (!isTerminalOfferUpdate(data)) return
+  refreshMarketHistorySilently()
 }
 
 function toggleAdminMarketMessage() {
@@ -441,53 +554,50 @@ function closeRecentOffersMenu() {
   recentOffersOpen.value = false
 }
 
-function getRecentOffersToggleElement() {
-  const raw = recentOffersToggleRef.value
-  if (!raw) return null
-  if (raw instanceof HTMLElement) return raw
-  if (raw.$el instanceof HTMLElement) return raw.$el as HTMLElement
-  return null
-}
-
 function updateRecentOffersMenuPosition() {
   if (!recentOffersOpen.value) return
 
-  const toggleEl = getRecentOffersToggleElement()
-  const dropdownEl = recentOffersRef.value?.querySelector('.recent-offers-dropdown') as HTMLElement | null
-  if (!toggleEl) return
-
-  const toggleRect = toggleEl.getBoundingClientRect()
-  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 360
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 640
-  const gap = 12
-  const edgePadding = 8
-  const dropdownWidth = Math.min(304, viewportWidth - (edgePadding * 2))
-  const measuredHeight = dropdownEl?.offsetHeight || 280
-  const spaceAbove = Math.max(0, toggleRect.top - edgePadding)
-  const spaceBelow = Math.max(0, viewportHeight - toggleRect.bottom - edgePadding)
-  const shouldOpenAbove = spaceAbove >= measuredHeight + gap || spaceAbove > spaceBelow
-  recentOffersOpenDirection.value = shouldOpenAbove ? 'above' : 'below'
-  const availableHeight = Math.max(160, (shouldOpenAbove ? spaceAbove : spaceBelow) - gap)
-  const dropdownHeight = Math.min(measuredHeight, availableHeight)
-  const left = Math.min(
-    Math.max(toggleRect.left, edgePadding),
-    Math.max(edgePadding, viewportWidth - dropdownWidth - edgePadding),
+  const visualViewport = window.visualViewport
+  const viewportLeft = visualViewport?.offsetLeft ?? 0
+  const viewportTop = visualViewport?.offsetTop ?? 0
+  const viewportWidth = visualViewport?.width ?? window.innerWidth ?? document.documentElement.clientWidth ?? 360
+  const viewportHeight = visualViewport?.height ?? window.innerHeight ?? document.documentElement.clientHeight ?? 640
+  const wrapperRect = recentOffersRef.value?.getBoundingClientRect()
+  const wrapperWidth = wrapperRect?.width ?? viewportWidth - 32
+  const dropdownWidth = Math.min(304, Math.max(220, wrapperWidth - 8), viewportWidth - 16)
+  const viewportPadding = 8
+  const anchorTop = wrapperRect?.top ?? viewportTop + viewportHeight - 96
+  const anchorLeft = wrapperRect?.left ?? viewportLeft + 16
+  const availableAbove = Math.max(132, anchorTop - viewportTop - 12)
+  const maxHeight = Math.max(132, Math.min(320, availableAbove, viewportHeight - 24))
+  const measuredHeight = recentOffersDropdownRef.value?.offsetHeight || 0
+  const estimatedHeight = recentOffersLoading.value
+    ? 58
+    : recentOffersError.value
+      ? 86
+      : !recentOffers.value.length
+        ? 44
+        : Math.min(maxHeight, 16 + recentOffers.value.length * 58)
+  const dropdownHeight = Math.min(maxHeight, measuredHeight || estimatedHeight)
+  const minLeft = viewportLeft + viewportPadding
+  const maxLeft = viewportLeft + viewportWidth - dropdownWidth - viewportPadding
+  const left = Math.min(Math.max(anchorLeft + 4, minLeft), Math.max(minLeft, maxLeft))
+  const top = Math.min(
+    Math.max(anchorTop - dropdownHeight - 12, viewportTop + viewportPadding),
+    viewportTop + viewportHeight - dropdownHeight - viewportPadding,
   )
-  const top = shouldOpenAbove
-    ? Math.max(edgePadding, toggleRect.top - dropdownHeight - gap)
-    : Math.min(
-        Math.max(edgePadding, viewportHeight - dropdownHeight - edgePadding),
-        toggleRect.bottom + gap,
-      )
 
+  recentOffersOpenDirection.value = 'above'
   recentOffersDropdownStyle.value = {
     position: 'fixed',
     left: `${left}px`,
+    right: 'auto',
     top: `${top}px`,
+    bottom: 'auto',
     width: `${dropdownWidth}px`,
-    maxHeight: `${availableHeight}px`,
-    transformOrigin: shouldOpenAbove ? 'bottom left' : 'top left',
-    '--recent-offers-enter-offset': shouldOpenAbove ? '0.35rem' : '-0.35rem',
+    maxHeight: `${maxHeight}px`,
+    transformOrigin: 'bottom left',
+    '--recent-offers-enter-offset': '0.35rem',
   }
 }
 
@@ -496,7 +606,11 @@ function handleRecentOffersPointerDown(event: PointerEvent) {
     return
   }
   const target = event.target as Node | null
-  if (!target || !recentOffersRef.value || recentOffersRef.value.contains(target)) {
+  if (
+    !target
+    || recentOffersRef.value?.contains(target)
+    || recentOffersDropdownRef.value?.contains(target)
+  ) {
     return
   }
   closeRecentOffersMenu()
@@ -606,7 +720,7 @@ async function confirmOfferPreview() {
     previewWarning.value = null
     republishedFromOfferId.value = null
     pendingOfferIdempotencyKey.value = null
-    fetchOffers()
+    refreshMarketOffers()
     void fetchRecentOffers(true)
   } catch (e: any) {
     previewError.value = getUserFacingErrorMessage(e, {
@@ -688,7 +802,7 @@ async function cancelAllOffers() {
       })
     }
     offerText.value = ''
-    fetchOffers()
+    refreshMarketOffers()
     void fetchRecentOffers(true)
   } catch (e: any) {
     parseError.value = getUserFacingErrorMessage(e, {
@@ -703,6 +817,13 @@ async function cancelAllOffers() {
   }
 }
 
+function refreshMarketOffers() {
+  fetchOffers()
+  if (canViewExpiredMarketOffers.value) {
+    void fetchMarketHistoryOffers({ reset: true, silent: true })
+  }
+}
+
 async function fetchCurrentUser() {
     try {
         const res = await apiFetch('/api/auth/me')
@@ -712,9 +833,12 @@ async function fetchCurrentUser() {
       currentUserId.value = cachedSummary?.id
         ?? (typeof data.id === 'number' ? data.id : Number.isFinite(Number(data.id)) ? Number(data.id) : undefined)
       currentUserCustomerTier.value = cachedSummary?.customer_tier ?? normalizeCustomerTier(data.customer_tier)
+      currentUserIsAccountant.value = cachedSummary?.is_accountant ?? data.is_accountant === true
         }
     } catch (e) {
         console.error('Failed to load current user', e)
+    } finally {
+        currentUserLoaded.value = true
     }
 }
 
@@ -732,6 +856,14 @@ watch(isTier2Customer, (blocked) => {
   closeRecentOffersMenu()
   recentOffers.value = []
 })
+
+watch(canViewExpiredMarketOffers, (allowed) => {
+  if (!allowed) {
+    clearMarketHistoryOffers()
+    return
+  }
+  void fetchMarketHistoryOffers({ reset: true, silent: true })
+}, { immediate: true })
 
 watch(offerText, () => {
   syncOfferInputHeight()
@@ -753,14 +885,17 @@ onMounted(() => {
   fetchMarketState()
     fetchMarketNotificationPreferences()
     fetchAdminMarketMessage()
-    fetchCurrentUser()
+    void fetchCurrentUser()
   document.addEventListener('pointerdown', handleRecentOffersPointerDown)
   window.addEventListener('resize', handleRecentOffersViewportChange)
   document.addEventListener('scroll', handleRecentOffersViewportChange, true)
   wsOn('market:opened', handleMarketOpened)
   wsOn('market:closed', handleMarketClosed)
   wsOn('market:notice_hidden', handleMarketNoticeHidden)
-    wsOn('market:admin_message_published', handleAdminMarketMessagePublished)
+  wsOn('market:admin_message_published', handleAdminMarketMessagePublished)
+  wsOn('offer:expired', handleOfferTerminalHistoryEvent)
+  wsOn('offer:completed', handleOfferTerminalHistoryEvent)
+  wsOn('offer:updated', handleOfferUpdatedForHistory)
   syncOfferInputHeight()
 })
 
@@ -774,6 +909,9 @@ onUnmounted(() => {
   wsOff('market:closed', handleMarketClosed)
   wsOff('market:notice_hidden', handleMarketNoticeHidden)
   wsOff('market:admin_message_published', handleAdminMarketMessagePublished)
+  wsOff('offer:expired', handleOfferTerminalHistoryEvent)
+  wsOff('offer:completed', handleOfferTerminalHistoryEvent)
+  wsOff('offer:updated', handleOfferUpdatedForHistory)
 })
 </script>
 
@@ -834,12 +972,16 @@ onUnmounted(() => {
     <!-- Offers List -->
     <div class="market-content">
       <div class="content-inner">
-        <OffersList 
-          :offers="filteredOffers" 
+        <OffersList
+          :offers="visibleMarketOffers"
           :loading="isLoading" 
           :expiry-minutes="tradingSettings.offer_expiry_minutes" 
           :current-user-id="currentUserId" 
-          @trade-completed="fetchOffers()" 
+          :expired-loading="marketHistoryOffersLoading"
+          :has-more-expired="hasMoreMarketHistoryOffers"
+          :can-load-expired="canViewExpiredMarketOffers"
+          @trade-completed="refreshMarketOffers()"
+          @load-more-expired="loadMoreExpiredMarketOffers"
         />
       </div>
     </div>
@@ -873,59 +1015,6 @@ onUnmounted(() => {
             <Loader2 v-if="recentOffersLoading" class="animate-spin" :size="17" />
             <ChevronDown v-else :size="17" />
           </AppIconButton>
-          <transition name="recent-offers-dropdown">
-            <div
-              v-if="recentOffersOpen"
-              id="recent-offers-dropdown"
-              class="recent-offers-dropdown"
-              :class="recentOffersOpenDirection === 'above' ? 'recent-offers-dropdown--above' : 'recent-offers-dropdown--below'"
-              :style="recentOffersDropdownStyle"
-            >
-              <AppLoadingState
-                v-if="recentOffersLoading"
-                class="recent-offers-state"
-                label="در حال دریافت لفظ‌های اخیر"
-              />
-              <AppEmptyState
-                v-else-if="recentOffersError"
-                class="recent-offers-state recent-offers-state--error"
-                title="لفظ‌های اخیر دریافت نشد"
-                :message="recentOffersError"
-                tone="danger"
-              />
-              <AppEmptyState
-                v-else-if="!recentOffers.length"
-                class="recent-offers-state"
-                title="لفظ اخیری وجود ندارد"
-                message="در یک ساعت گذشته لفظی برای بازنشر ثبت نشده است."
-                tone="neutral"
-              />
-              <button
-                v-for="offer in recentOffers"
-                :key="offer.id"
-                type="button"
-                class="recent-offer-item"
-                @click="openRecentOfferPreview(offer)"
-              >
-                <div class="recent-offer-item-main">
-                  <AppStatusBadge
-                    class="recent-offer-item-badge"
-                    :tone="offer.offer_type === 'buy' ? 'success' : 'danger'"
-                  >
-                    {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
-                  </AppStatusBadge>
-                  <span class="recent-offer-item-copy">
-                    <span class="recent-offer-item-summary">
-                      {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
-                    </span>
-                    <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
-                      {{ formatRecentOfferDetails(offer) }}
-                    </span>
-                  </span>
-                </div>
-              </button>
-            </div>
-          </transition>
           <textarea
             ref="offerInputRef"
             v-model="offerText"
@@ -951,6 +1040,63 @@ onUnmounted(() => {
         <div v-if="parseError" class="parse-error">{{ parseError }}</div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <transition name="recent-offers-dropdown">
+        <div
+          v-if="recentOffersOpen"
+          id="recent-offers-dropdown"
+          ref="recentOffersDropdownRef"
+          class="recent-offers-dropdown"
+          :class="recentOffersOpenDirection === 'above' ? 'recent-offers-dropdown--above' : 'recent-offers-dropdown--below'"
+          :style="recentOffersDropdownStyle"
+        >
+          <AppLoadingState
+            v-if="recentOffersLoading"
+            class="recent-offers-state"
+            label="در حال دریافت لفظ‌های اخیر"
+          />
+          <AppEmptyState
+            v-else-if="recentOffersError"
+            class="recent-offers-state recent-offers-state--error"
+            title="لفظ‌های اخیر دریافت نشد"
+            :message="recentOffersError"
+            tone="danger"
+          />
+          <div
+            v-else-if="!recentOffers.length"
+            class="recent-offers-empty"
+            role="status"
+          >
+            بدون فعالیت
+          </div>
+          <button
+            v-for="offer in recentOffers"
+            :key="offer.id"
+            type="button"
+            class="recent-offer-item"
+            @click="openRecentOfferPreview(offer)"
+          >
+            <div class="recent-offer-item-main">
+              <AppStatusBadge
+                class="recent-offer-item-badge"
+                :tone="offer.offer_type === 'buy' ? 'success' : 'danger'"
+              >
+                {{ offer.offer_type === 'buy' ? 'خرید' : 'فروش' }}
+              </AppStatusBadge>
+              <span class="recent-offer-item-copy">
+                <span class="recent-offer-item-summary">
+                  {{ offer.commodity_name }} · {{ formatRecentOfferQuantity(offer) }} · {{ formatRecentOfferPrice(offer) }}
+                </span>
+                <span v-if="formatRecentOfferDetails(offer)" class="recent-offer-item-details">
+                  {{ formatRecentOfferDetails(offer) }}
+                </span>
+              </span>
+            </div>
+          </button>
+        </div>
+      </transition>
+    </Teleport>
   </div>
 </template>
 
@@ -1156,14 +1302,20 @@ onUnmounted(() => {
 
 .input-wrapper {
   position: relative;
+  min-height: 3.25rem;
+  --market-chatbox-button-size: 3rem;
+  --market-chatbox-edge-gap: 0.125rem;
+  --market-chatbox-history-left: 0.94rem;
+  --market-chatbox-left-inset: calc(var(--market-chatbox-history-left) - var(--market-chatbox-edge-gap));
+  --market-chatbox-side-padding: calc(var(--market-chatbox-button-size) + 0.65rem);
 }
 
 .recent-offers-toggle {
   position: absolute;
-  left: 0.94rem;
-  bottom: 0.58rem;
-  width: 2.1rem;
-  height: 2.1rem;
+  left: var(--market-chatbox-history-left);
+  bottom: var(--market-chatbox-edge-gap);
+  width: var(--market-chatbox-button-size);
+  height: var(--market-chatbox-button-size);
   min-width: var(--ds-touch-target, 48px);
   min-height: var(--ds-touch-target, 48px);
   display: inline-flex;
@@ -1193,10 +1345,11 @@ onUnmounted(() => {
 }
 
 .recent-offers-dropdown {
-  padding: 0.45rem;
+  z-index: 1200;
+  padding: 0.35rem;
   display: grid;
-  gap: 0.3rem;
-  border-radius: 1rem;
+  gap: 0.25rem;
+  border-radius: 0.85rem;
   background: rgba(255, 255, 255, 0.98);
   border: 1px solid var(--ds-border-light);
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14);
@@ -1207,6 +1360,20 @@ onUnmounted(() => {
 
 .recent-offers-state {
   margin: 0;
+}
+
+.recent-offers-empty {
+  min-height: 2.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem 0.55rem;
+  border-radius: 0.7rem;
+  background: var(--ds-bg-subtle);
+  color: var(--ds-text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .recent-offers-state--error {
@@ -1271,13 +1438,15 @@ onUnmounted(() => {
 }
 
 .text-offer-input {
-  width: 100%;
+  display: block;
+  width: calc(100% - var(--market-chatbox-left-inset));
   min-height: 3.25rem;
   max-height: 10rem;
-  padding: 0.82rem 3.7rem 0.82rem 3.9rem;
+  margin-left: var(--market-chatbox-left-inset);
+  padding: 0.82rem var(--market-chatbox-side-padding) 0.82rem var(--market-chatbox-side-padding);
   background: var(--ds-bg-inset);
   border: 1px solid var(--ds-border-light);
-  border-radius: var(--ds-radius-lg);
+  border-radius: 1.625rem;
   font-size: 0.9rem;
   line-height: 1.75;
   outline: none;
@@ -1311,12 +1480,14 @@ onUnmounted(() => {
 
 .send-btn {
   position: absolute;
-  right: 0.5rem;
-  bottom: 0.5rem;
+  right: var(--market-chatbox-edge-gap);
+  bottom: var(--market-chatbox-edge-gap);
+  width: var(--market-chatbox-button-size);
+  height: var(--market-chatbox-button-size);
   min-width: var(--ds-touch-target, 48px);
   min-height: var(--ds-touch-target, 48px);
   padding: 0;
-  border-radius: var(--ds-radius-md);
+  border-radius: 1.45rem;
   box-shadow: var(--ds-shadow-sm);
   transition: all 0.2s;
 }

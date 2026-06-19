@@ -21,6 +21,8 @@ IRAN_IMAGE_PLATFORM=""
 LOCAL_COMPOSE_CMD=""
 IRAN_COMPOSE_CMD=""
 IRAN_APT_BUNDLE_MODE="same-arch"
+FOREIGN_COMPOSE_PROJECT_NAME="${FOREIGN_COMPOSE_PROJECT_NAME:-trading_bot}"
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$FOREIGN_COMPOSE_PROJECT_NAME}"
 
 usage() {
     cat <<'EOF'
@@ -62,6 +64,19 @@ log() {
 die() {
     echo "ERROR: $*" >&2
     exit 1
+}
+
+is_truthy() {
+    local value="${1:-}"
+    value="${value,,}"
+    case "$value" in
+        1|true|yes|y|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+canonical_path() {
+    python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$1"
 }
 
 need_cmd() {
@@ -324,8 +339,8 @@ ensure_manifest_file() {
     local iran_server_url=""
     local iran_server_domain=""
     local iran_certbot_email=""
-    local iran_env_source_path="$PROJECT_DIR/deploy/production/iran.runtime.env"
-    local local_env_path="$PROJECT_DIR/.env"
+    local iran_env_source_path="/root/secure-envs/trading-bot/.env.iran.production"
+    local local_env_path="/root/secure-envs/trading-bot/.env.foreign.production"
     local foreign_frontend_url=""
     local iran_frontend_url=""
 
@@ -397,6 +412,9 @@ LOCAL_ENV_SOURCE_PATH=$local_env_path
 IRAN_ENV_SOURCE_PATH=$iran_env_source_path
 FOREIGN_FRONTEND_URL=$foreign_frontend_url
 IRAN_FRONTEND_URL=$iran_frontend_url
+REQUIRE_WEB_PUSH=1
+ENV_BACKUP_DIR=/root/secure-envs/trading-bot/backups
+ALLOW_PROJECT_ENV_SOURCE=0
 
 # --- Optional runtime toggles ---
 IRAN_SKIP_CERTBOT=0
@@ -409,6 +427,9 @@ IRAN_SKIP_FOREIGN_DEPLOY=0
 IRAN_HOSTS_SYNC_ENABLED=1
 IRAN_FORCE_RELEASE_REFRESH=0
 IRAN_ALLOW_DIRTY_RELEASE=0
+PRODUCTION_RELEASE_BRANCH=main
+IRAN_ALLOW_NON_MAIN_RELEASE=0
+IRAN_ALLOW_RELEASE_BRANCH_DRIFT=0
 IRAN_SHARED_DATA_MODE=auto
 IRAN_SHARED_SEED_BATCH_SIZE=50
 IRAN_SHARED_RESET_CONFIRM=
@@ -498,6 +519,12 @@ load_manifest() {
     IRAN_HOSTS_SYNC_ENABLED="${IRAN_HOSTS_SYNC_ENABLED:-1}"
     IRAN_FORCE_RELEASE_REFRESH="${IRAN_FORCE_RELEASE_REFRESH:-0}"
     IRAN_ALLOW_DIRTY_RELEASE="${IRAN_ALLOW_DIRTY_RELEASE:-0}"
+    PRODUCTION_RELEASE_BRANCH="${PRODUCTION_RELEASE_BRANCH:-main}"
+    IRAN_ALLOW_NON_MAIN_RELEASE="${IRAN_ALLOW_NON_MAIN_RELEASE:-0}"
+    IRAN_ALLOW_RELEASE_BRANCH_DRIFT="${IRAN_ALLOW_RELEASE_BRANCH_DRIFT:-0}"
+    ALLOW_PROJECT_ENV_SOURCE="${ALLOW_PROJECT_ENV_SOURCE:-0}"
+    REQUIRE_WEB_PUSH="${REQUIRE_WEB_PUSH:-0}"
+    ENV_BACKUP_DIR="${ENV_BACKUP_DIR:-/root/secure-envs/trading-bot/backups}"
     IRAN_SHARED_DATA_MODE="${IRAN_SHARED_DATA_MODE:-auto}"
     IRAN_SHARED_SEED_BATCH_SIZE="${IRAN_SHARED_SEED_BATCH_SIZE:-50}"
     IRAN_SHARED_RESET_CONFIRM="${IRAN_SHARED_RESET_CONFIRM:-}"
@@ -572,6 +599,85 @@ require_env_value() {
     local value
     value="$(read_env_value "$env_path" "$key")"
     [[ -n "$value" ]] || die "Missing required env value '$key' in $env_path"
+}
+
+env_value_state() {
+    local value="${1:-}"
+    if [[ -z "$value" ]]; then
+        printf 'EMPTY'
+    else
+        printf 'SET(len=%s)' "${#value}"
+    fi
+}
+
+backup_runtime_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    [[ -f "$env_path" ]] || return 0
+
+    local timestamp safe_name backup_path
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    safe_name="$(printf '%s' "$env_path" | sed 's#^/##; s#[^A-Za-z0-9._-]#_#g')"
+    mkdir -p "$ENV_BACKUP_DIR"
+    backup_path="$ENV_BACKUP_DIR/${safe_name}.${timestamp}.bak"
+    cp -p "$env_path" "$backup_path"
+    chmod 600 "$backup_path" || true
+    log "Backed up $role_label runtime env to $backup_path"
+}
+
+validate_runtime_env_source_policy() {
+    local project_env_path="$LOCAL_PROJECT_DIR/.env"
+    local local_source project_env iran_output
+    local_source="$(canonical_path "$LOCAL_ENV_SOURCE_PATH")"
+    project_env="$(canonical_path "$project_env_path")"
+    iran_output="$(canonical_path "$IRAN_ENV_SOURCE_PATH")"
+
+    if [[ "$local_source" == "$project_env" && "$ALLOW_PROJECT_ENV_SOURCE" != "1" ]]; then
+        die "LOCAL_ENV_SOURCE_PATH points at the project .env ($project_env_path). Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
+    fi
+
+    if [[ "$local_source" == "$iran_output" ]]; then
+        die "LOCAL_ENV_SOURCE_PATH and IRAN_ENV_SOURCE_PATH must be different files so foreign and Iran runtime envs can be rendered independently."
+    fi
+}
+
+summarize_web_push_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    local enabled public_key private_key subject ttl timeout
+
+    enabled="$(read_env_value "$env_path" "WEB_PUSH_ENABLED")"
+    public_key="$(read_env_value "$env_path" "WEB_PUSH_VAPID_PUBLIC_KEY")"
+    private_key="$(read_env_value "$env_path" "WEB_PUSH_VAPID_PRIVATE_KEY")"
+    subject="$(read_env_value "$env_path" "WEB_PUSH_VAPID_SUBJECT")"
+    ttl="$(read_env_value "$env_path" "WEB_PUSH_TTL_SECONDS")"
+    timeout="$(read_env_value "$env_path" "WEB_PUSH_TIMEOUT_SECONDS")"
+
+    log "$role_label Web Push env: WEB_PUSH_ENABLED=${enabled:-EMPTY} VAPID_PUBLIC_KEY=$(env_value_state "$public_key") VAPID_PRIVATE_KEY=$(env_value_state "$private_key") VAPID_SUBJECT=$(env_value_state "$subject") TTL=${ttl:-EMPTY} TIMEOUT=${timeout:-EMPTY}"
+}
+
+validate_web_push_env_file() {
+    local env_path="$1"
+    local role_label="$2"
+    [[ -f "$env_path" ]] || die "Missing runtime env for $role_label: $env_path"
+
+    local enabled subject
+    enabled="$(read_env_value "$env_path" "WEB_PUSH_ENABLED")"
+    if is_truthy "$enabled"; then
+        require_env_value "$env_path" "WEB_PUSH_VAPID_PUBLIC_KEY"
+        require_env_value "$env_path" "WEB_PUSH_VAPID_PRIVATE_KEY"
+        require_env_value "$env_path" "WEB_PUSH_VAPID_SUBJECT"
+        subject="$(read_env_value "$env_path" "WEB_PUSH_VAPID_SUBJECT")"
+        case "$subject" in
+            mailto:*|http://*|https://*) ;;
+            *) die "$role_label WEB_PUSH_VAPID_SUBJECT must start with mailto:, http://, or https:// in $env_path" ;;
+        esac
+        return 0
+    fi
+
+    if is_truthy "$REQUIRE_WEB_PUSH"; then
+        die "$role_label env has REQUIRE_WEB_PUSH=1 but WEB_PUSH_ENABLED is not true in $env_path"
+    fi
 }
 
 export_runtime_renderer_overrides() {
@@ -660,6 +766,10 @@ validate_observability_env_file() {
 validate_observability_release_inputs() {
     validate_observability_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
     validate_observability_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+    summarize_web_push_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
+    validate_web_push_env_file "$LOCAL_ENV_SOURCE_PATH" "Foreign"
+    summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
+    validate_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
 }
 
 install_sync_sampler_local() {
@@ -715,6 +825,42 @@ ensure_clean_release_tree() {
     if [[ -n "$status_output" ]]; then
         printf '%s\n' "$status_output" | sed -n '1,40p' >&2
         die "Production release requires a clean git working tree because rsync deploys local files. Commit, stash, or set IRAN_ALLOW_DIRTY_RELEASE=1 explicitly."
+    fi
+}
+
+ensure_production_release_git_ref() {
+    if ! git -C "$LOCAL_PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        die "Production release must run from a Git checkout so branch identity can be verified."
+    fi
+
+    local branch head_sha upstream upstream_sha
+    branch="$(git -C "$LOCAL_PROJECT_DIR" symbolic-ref --short HEAD 2>/dev/null || true)"
+    head_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short HEAD)"
+
+    if [[ "$IRAN_ALLOW_NON_MAIN_RELEASE" == "1" ]]; then
+        log "IRAN_ALLOW_NON_MAIN_RELEASE=1; allowing production release from branch ${branch:-detached} at $head_sha."
+    elif [[ "$branch" != "$PRODUCTION_RELEASE_BRANCH" ]]; then
+        die "Production release must run from '$PRODUCTION_RELEASE_BRANCH' (current: ${branch:-detached}, sha: $head_sha). Merge the intended candidate/hotfix to $PRODUCTION_RELEASE_BRANCH first, or set IRAN_ALLOW_NON_MAIN_RELEASE=1 for an explicit emergency override."
+    fi
+
+    upstream="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+    if [[ -z "$upstream" ]]; then
+        log "No upstream configured for branch ${branch:-detached}; skipping upstream equality check."
+        return 0
+    fi
+
+    upstream_sha="$(git -C "$LOCAL_PROJECT_DIR" rev-parse --short "$upstream" 2>/dev/null || true)"
+    if [[ -z "$upstream_sha" ]]; then
+        die "Unable to resolve upstream '$upstream' for production release branch verification."
+    fi
+
+    if [[ "$IRAN_ALLOW_RELEASE_BRANCH_DRIFT" == "1" ]]; then
+        log "IRAN_ALLOW_RELEASE_BRANCH_DRIFT=1; allowing local HEAD $head_sha to differ from $upstream $upstream_sha."
+        return 0
+    fi
+
+    if [[ "$(git -C "$LOCAL_PROJECT_DIR" rev-parse HEAD)" != "$(git -C "$LOCAL_PROJECT_DIR" rev-parse "$upstream")" ]]; then
+        die "Production release branch '$branch' must match upstream '$upstream' exactly (local: $head_sha, upstream: $upstream_sha). Push/pull first, or set IRAN_ALLOW_RELEASE_BRANCH_DRIFT=1 for an explicit emergency override."
     fi
 }
 
@@ -831,6 +977,7 @@ check_local() {
     ensure_local_tools
     [[ "$(id -u)" -eq 0 ]] || die "This release script must be run as root so it can update /etc/hosts and manage Docker."
     ensure_clean_release_tree
+    ensure_production_release_git_ref
     ssh_iran "echo connected-to-\$(hostname)"
     detect_runtime_metadata
     [[ -f "$LOCAL_PROJECT_DIR/requirements.txt" ]] || die "requirements.txt missing"
@@ -838,6 +985,7 @@ check_local() {
     [[ -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" ]] || die "Dockerfile.iran missing"
     [[ -f "$PROJECT_DIR/deploy/production/nginx-iran-online.conf.template" ]] || die "Nginx template missing"
     [[ -f "$RELEASE_ARTIFACT_RENDERER" ]] || die "Release artifact renderer missing: $RELEASE_ARTIFACT_RENDERER"
+    validate_runtime_env_source_policy
     ensure_runtime_env_file
     render_release_artifacts
     validate_observability_release_inputs
@@ -1266,8 +1414,27 @@ ensure_frontend_dist() {
     fi
 }
 
+verify_frontend_release_contracts() {
+    local dist_dir="$1"
+    local contract_name="market-terminal-offer-history"
+    local endpoint_marker="api/offers/market-history"
+    local assets_dir="$dist_dir/assets"
+    local market_chunks
+
+    [[ -d "$assets_dir" ]] || die "Frontend release contract failed: assets directory missing in $dist_dir"
+    mapfile -t market_chunks < <(find "$assets_dir" -maxdepth 1 -type f -name 'MarketView-*.js' | LC_ALL=C sort)
+    if [[ "${#market_chunks[@]}" -eq 0 ]]; then
+        die "Frontend release contract failed [$contract_name]: MarketView chunk missing in $dist_dir"
+    fi
+    if ! grep -h -q "$endpoint_marker" "${market_chunks[@]}"; then
+        die "Frontend release contract failed [$contract_name]: $endpoint_marker missing from MarketView bundle. Refusing to deploy a frontend that cannot load read-only terminal market offers."
+    fi
+    log "Frontend release contract passed [$contract_name]"
+}
+
 build_release() {
     ensure_frontend_dist
+    verify_frontend_release_contracts "$LOCAL_DIST_DIR"
     prepare_pip_packages "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages" "$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
@@ -1339,6 +1506,8 @@ ensure_runtime_env_file() {
 
     if [[ -n "$source_env_path" ]]; then
         mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
+        backup_runtime_env_file "$local_env_path" "foreign"
+        backup_runtime_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
         export_runtime_renderer_overrides
         python3 "$RUNTIME_ENV_RENDERER" \
             --source-env-file "$source_env_path" \
@@ -1355,6 +1524,8 @@ ensure_runtime_env_file() {
         chmod 600 "$local_env_path" || true
         chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
         log "Rendered runtime env files from source env: $source_env_path"
+        summarize_web_push_env_file "$local_env_path" "Foreign"
+        summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
         return 0
     fi
 
@@ -1388,6 +1559,16 @@ ensure_runtime_env_file() {
     local grafana_alert_warning_receiver="Trading Bot Production Email"
     local grafana_alert_webhook_url=""
     local grafana_alert_email_addresses=""
+    local web_push_enabled="false"
+    local web_push_vapid_public_key=""
+    local web_push_vapid_private_key=""
+    local web_push_vapid_subject=""
+    local web_push_ttl_seconds="3600"
+    local web_push_timeout_seconds="5.0"
+
+    if is_truthy "$REQUIRE_WEB_PUSH"; then
+        web_push_enabled="true"
+    fi
 
     mkdir -p "$(dirname "$IRAN_ENV_SOURCE_PATH")" "$(dirname "$local_env_path")"
 
@@ -1421,6 +1602,14 @@ ensure_runtime_env_file() {
     prompt_value grafana_alert_warning_receiver "GRAFANA_ALERT_WARNING_RECEIVER" "$grafana_alert_warning_receiver"
     prompt_value grafana_alert_webhook_url "GRAFANA_ALERT_WEBHOOK_URL"
     prompt_value grafana_alert_email_addresses "GRAFANA_ALERT_EMAIL_ADDRESSES"
+    prompt_value web_push_enabled "WEB_PUSH_ENABLED" "$web_push_enabled"
+    if is_truthy "$web_push_enabled"; then
+        prompt_value web_push_vapid_public_key "WEB_PUSH_VAPID_PUBLIC_KEY"
+        prompt_value web_push_vapid_private_key "WEB_PUSH_VAPID_PRIVATE_KEY" "" 1
+        prompt_value web_push_vapid_subject "WEB_PUSH_VAPID_SUBJECT"
+        prompt_value web_push_ttl_seconds "WEB_PUSH_TTL_SECONDS" "$web_push_ttl_seconds"
+        prompt_value web_push_timeout_seconds "WEB_PUSH_TIMEOUT_SECONDS" "$web_push_timeout_seconds"
+    fi
 
     BOT_TOKEN="$bot_token" \
     BOT_USERNAME="$bot_username" \
@@ -1452,6 +1641,12 @@ ensure_runtime_env_file() {
     GRAFANA_ALERT_WARNING_RECEIVER="$grafana_alert_warning_receiver" \
     GRAFANA_ALERT_WEBHOOK_URL="$grafana_alert_webhook_url" \
     GRAFANA_ALERT_EMAIL_ADDRESSES="$grafana_alert_email_addresses" \
+    WEB_PUSH_ENABLED="$web_push_enabled" \
+    WEB_PUSH_VAPID_PUBLIC_KEY="$web_push_vapid_public_key" \
+    WEB_PUSH_VAPID_PRIVATE_KEY="$web_push_vapid_private_key" \
+    WEB_PUSH_VAPID_SUBJECT="$web_push_vapid_subject" \
+    WEB_PUSH_TTL_SECONDS="$web_push_ttl_seconds" \
+    WEB_PUSH_TIMEOUT_SECONDS="$web_push_timeout_seconds" \
     python3 "$RUNTIME_ENV_RENDERER" \
         --local-output "$local_env_path" \
         --iran-output "$IRAN_ENV_SOURCE_PATH" \
@@ -1526,6 +1721,11 @@ sync_project() {
     fi
     rsync -avz --delete -e "$RSYNC_SSH" \
         "$LOCAL_DIST_DIR/" "$IRAN_SSH_TARGET:$staging_dir/mini_app_dist/"
+    ssh_iran "set -euo pipefail
+assets_dir='$staging_dir/mini_app_dist/assets'
+find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . || exit 21
+grep -h -q 'api/offers/market-history' \"\$assets_dir\"/MarketView-*.js || exit 22" \
+        || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only terminal market offers."
     scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
     log "Production payload sync complete"
 }

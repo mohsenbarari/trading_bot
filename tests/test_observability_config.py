@@ -107,6 +107,13 @@ class ObservabilityConfigTests(unittest.TestCase):
 
         for expected in (
             "validate_observability_env_file",
+            "validate_runtime_env_source_policy",
+            "validate_web_push_env_file",
+            "summarize_web_push_env_file",
+            "backup_runtime_env_file",
+            "REQUIRE_WEB_PUSH",
+            "ALLOW_PROJECT_ENV_SOURCE",
+            "WEB_PUSH_VAPID_PRIVATE_KEY",
             "TRUSTED_PROXY_CIDRS",
             "OBSERVABILITY_TELEGRAM_USER_HASH_SALT",
             "GRAFANA_ALERT_DEFAULT_RECEIVER",
@@ -152,6 +159,16 @@ class ObservabilityConfigTests(unittest.TestCase):
             "IRAN_ALLOW_DIRTY_RELEASE",
             "ensure_clean_release_tree",
             "Production release requires a clean git working tree",
+            "PRODUCTION_RELEASE_BRANCH",
+            "IRAN_ALLOW_NON_MAIN_RELEASE",
+            "IRAN_ALLOW_RELEASE_BRANCH_DRIFT",
+            "ensure_production_release_git_ref",
+            "Production release must run from",
+            "must match upstream",
+            "verify_frontend_release_contracts",
+            "market-expired-offer-history",
+            "api/offers/expired",
+            "Remote Iran frontend release contract failed",
             "remote_bootstrap_ready_guard",
             "Iran bootstrap prerequisites already satisfied; skipping package upload/install.",
             "Remote pip wheelhouse already matches requirements; skipping pip package sync.",
@@ -217,6 +234,9 @@ class ObservabilityConfigTests(unittest.TestCase):
         self.assertIn("audit_durable", hardening)
         self.assertIn("TRUSTED_PROXY_CIDRS", manifest_example)
         self.assertIn("OBSERVABILITY_TELEGRAM_USER_HASH_SALT", manifest_example)
+        self.assertIn("LOCAL_ENV_SOURCE_PATH=/root/secure-envs/trading-bot/.env.foreign.production", manifest_example)
+        self.assertIn("REQUIRE_WEB_PUSH=1", manifest_example)
+        self.assertIn("ALLOW_PROJECT_ENV_SOURCE=0", manifest_example)
 
     def test_settings_accept_compose_observability_runtime_keys(self):
         config = (ROOT / "core/config.py").read_text(encoding="utf-8")

@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -10,6 +10,12 @@ from core import offer_expiry
 def scalars_result(values):
     result = Mock()
     result.scalars.return_value.all.return_value = values
+    return result
+
+
+def scalar_one_or_none_result(value):
+    result = Mock()
+    result.scalar_one_or_none.return_value = value
     return result
 
 
@@ -96,6 +102,26 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 0)
         session.commit.assert_not_awaited()
 
+    async def test_next_expiry_delay_uses_nearest_active_offer_deadline(self):
+        settings_obj = SimpleNamespace(offer_expiry_minutes=2)
+        created_at = offer_expiry.utc_now_naive() - timedelta(minutes=2) + timedelta(seconds=0.5)
+        session = SimpleNamespace(execute=AsyncMock(return_value=scalar_one_or_none_result(created_at)))
+
+        class SessionManager:
+            async def __aenter__(self):
+                return session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=settings_obj)), \
+             patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
+             patch("core.offer_expiry.current_server", return_value="foreign"):
+            delay = await offer_expiry.get_next_expiry_delay_seconds()
+
+        self.assertGreaterEqual(delay, offer_expiry.MIN_DEADLINE_SLEEP_SECONDS)
+        self.assertLess(delay, offer_expiry.CHECK_INTERVAL)
+
     async def test_expire_stale_offers_expires_offers_and_runs_side_effects(self):
         settings_obj = SimpleNamespace(offer_expiry_minutes=15)
         expired_offers = [
@@ -115,7 +141,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=settings_obj)), \
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
-             patch("core.offer_expiry.remove_channel_buttons", AsyncMock()) as remove_channel_buttons, \
+             patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync") as publish_event_sync, \
              patch("core.cache.decr_active_offer_count", AsyncMock()) as decr_active_offer_count:
             count = await offer_expiry.expire_stale_offers()
@@ -123,11 +149,13 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count, 3)
         self.assertEqual(session.execute.await_count, 2)
         session.commit.assert_awaited_once()
-        self.assertEqual(remove_channel_buttons.await_count, 2)
-        remove_channel_buttons.assert_any_await(101)
-        remove_channel_buttons.assert_any_await(303)
+        self.assertEqual(apply_offer_channel_state.await_count, 3)
+        applied_offer_ids = [call.args[0].id for call in apply_offer_channel_state.await_args_list]
+        self.assertEqual(applied_offer_ids, [1, 2, 3])
+        self.assertTrue(all(call.kwargs["reason"] == "auto_expire_time_limit" for call in apply_offer_channel_state.await_args_list))
         update_stmt = session.execute.await_args_list[1].args[0]
         self.assertIn("expire_reason", str(update_stmt))
+        self.assertIn("expired_at", str(update_stmt))
         self.assertEqual(publish_event_sync.call_count, 3)
         publish_event_sync.assert_any_call("offer:expired", {"id": 1})
         publish_event_sync.assert_any_call("offer:expired", {"id": 2})
@@ -151,14 +179,15 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=settings_obj)), \
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
-             patch("core.offer_expiry.remove_channel_buttons", AsyncMock()) as remove_channel_buttons, \
+             patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync", side_effect=RuntimeError("pubsub down")), \
              patch("core.cache.decr_active_offer_count", AsyncMock(side_effect=RuntimeError("redis down"))):
             count = await offer_expiry.expire_stale_offers()
 
         self.assertEqual(count, 1)
         session.commit.assert_awaited_once()
-        remove_channel_buttons.assert_awaited_once_with(505)
+        apply_offer_channel_state.assert_awaited_once()
+        self.assertEqual(apply_offer_channel_state.await_args.args[0].id, 5)
 
     async def test_offer_expiry_loop_logs_start_success_and_failure_cycles(self):
         sleep_calls = []
@@ -169,12 +198,13 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
                 raise asyncio.CancelledError()
 
         with patch("core.offer_expiry.expire_stale_offers", AsyncMock(side_effect=[2, RuntimeError("boom")])), \
+             patch("core.offer_expiry.get_next_expiry_delay_seconds", AsyncMock(side_effect=[0.1, 0.2])), \
              patch("core.offer_expiry.asyncio.sleep", side_effect=stop_after_second_sleep), \
              patch.object(offer_expiry, "logger") as logger:
             with self.assertRaises(asyncio.CancelledError):
                 await offer_expiry.offer_expiry_loop()
 
-        logger.info.assert_any_call(f"⏰ Offer expiry loop started (check every {offer_expiry.CHECK_INTERVAL}s)")
+        logger.info.assert_any_call(f"⏰ Offer expiry loop started (deadline-aware, max sleep {offer_expiry.CHECK_INTERVAL}s)")
         logger.info.assert_any_call("⏰ Expiry cycle: 2 offers expired")
         logger.error.assert_called_once()
 

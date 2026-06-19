@@ -97,6 +97,61 @@ def _summarize_payload(data) -> dict[str, object]:
         "data_key_count": len(data),
     }
 
+
+def _enum_value(value) -> str:
+    return str(getattr(value, "value", value) or "").lower()
+
+
+def _completed_trade_offer_id_from_sync(table: str, data: dict) -> int | None:
+    if table != "trades":
+        return None
+    if _enum_value(data.get("status")) != "completed":
+        return None
+    raw_offer_id = data.get("offer_id")
+    if raw_offer_id is None or raw_offer_id == "":
+        return None
+    try:
+        offer_id = int(raw_offer_id)
+    except (TypeError, ValueError):
+        return None
+    return offer_id if offer_id > 0 else None
+
+
+async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal_offer_ids: list[int] | tuple[int, ...]) -> None:
+    unique_offer_ids = sorted({int(offer_id) for offer_id in terminal_offer_ids if offer_id})
+    if not unique_offer_ids:
+        return
+
+    from api.routers.realtime import publish_event
+    from models.offer import Offer, OfferStatus
+
+    result = await db.execute(select(Offer).where(Offer.id.in_(unique_offer_ids)))
+    terminal_offer_rows = result.scalars().all()
+    for offer in terminal_offer_rows:
+        status_value = _enum_value(getattr(offer, "status", None))
+        try:
+            if status_value == OfferStatus.EXPIRED.value:
+                await publish_event("offer:expired", {"id": offer.id})
+            elif status_value == OfferStatus.COMPLETED.value:
+                await publish_event(
+                    "offer:updated",
+                    {
+                        "id": offer.id,
+                        "status": status_value,
+                        "remaining_quantity": getattr(offer, "remaining_quantity", None),
+                        "lot_sizes": getattr(offer, "lot_sizes", None),
+                    },
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to publish synced terminal offer realtime event",
+                extra={
+                    "event": "sync.terminal_offer_realtime_publish_failed",
+                    "offer_id": getattr(offer, "id", None),
+                    **_summarize_exception(exc),
+                },
+            )
+
 # Table processing order: dependencies first
 TABLE_ORDER = {
     "users": 0,
@@ -371,7 +426,16 @@ def _filter_model_columns(model, data: dict) -> dict:
     return {key: value for key, value in data.items() if key in column_names}
 
 
-async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, data: dict, model, new_offers: list):
+async def _apply_item(
+    db: AsyncSession,
+    table: str,
+    operation: str,
+    record_id,
+    data: dict,
+    model,
+    new_offers: list,
+    terminal_offers: list | None = None,
+):
     """
     Apply a single sync item using SAVEPOINT so failures don't kill the transaction.
     Handles:
@@ -428,9 +492,14 @@ async def _apply_item(db: AsyncSession, table: str, operation: str, record_id, d
 
         # Never overwrite channel_message_id from sync — it's set locally by channel-send
         if table == "offers":
+            if terminal_offers is None:
+                terminal_offers = []
+            status_value = str(data.get("status") or "").lower()
             data.pop("channel_message_id", None)
             if operation == "INSERT" and settings.server_mode != "iran":
                 new_offers.append(record_id)
+            if operation in ("INSERT", "UPDATE") and settings.server_mode != "iran" and status_value in {"completed", "expired"}:
+                terminal_offers.append(record_id)
 
         data = _filter_model_columns(model, data)
         stmt = _build_upsert_stmt(model, table, data)
@@ -676,6 +745,8 @@ async def receive_sync_data(
     errors = []
     deferred_items = []
     new_offers = []
+    terminal_offers = []
+    completed_trade_offer_ids = []
     user_changes_applied = False
     notification_user_ids = _notification_user_ids_from_items(sorted_items)
 
@@ -717,11 +788,14 @@ async def receive_sync_data(
             table, operation, model, data, record_id = parsed
 
             try:
-                result = await _apply_item(db, table, operation, record_id, data, model, new_offers)
+                result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
                 if result == 'ok':
                     processed_count += 1
                     if table == "users":
                         user_changes_applied = True
+                    completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
+                    if completed_trade_offer_id:
+                        completed_trade_offer_ids.append(completed_trade_offer_id)
                     logger.info(f"✅ Sync Item Applied: {table}:{record_id} ({operation})")
                 elif result == 'deferred':
                     deferred_items.append((table, operation, model, data, record_id))
@@ -744,11 +818,14 @@ async def receive_sync_data(
             logger.info(f"🔄 Retrying {len(deferred_items)} deferred items...")
             for table, operation, model, data, record_id in deferred_items:
                 try:
-                    result = await _apply_item(db, table, operation, record_id, data, model, new_offers)
+                    result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
                     if result == 'ok':
                         processed_count += 1
                         if table == "users":
                             user_changes_applied = True
+                        completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
+                        if completed_trade_offer_id:
+                            completed_trade_offer_ids.append(completed_trade_offer_id)
                         logger.info(f"✅ Deferred item applied: {table}:{record_id}")
                     else:
                         errors.append(f"{table}:{record_id} (deferred)")
@@ -862,6 +939,19 @@ async def receive_sync_data(
                         **_summarize_exception(e),
                     },
                 )
+
+        terminal_realtime_offer_ids = [*terminal_offers, *completed_trade_offer_ids]
+        if terminal_realtime_offer_ids:
+            try:
+                await _publish_terminal_offer_realtime_after_sync(db, terminal_realtime_offer_ids)
+            except Exception as e:
+                logger.error(
+                    "Error publishing synced terminal offer realtime events",
+                    extra={
+                        "event": "sync.terminal_offer_realtime_publish_batch_failed",
+                        **_summarize_exception(e),
+                    },
+                )
         
         # --- Handle Offer Publishing on Foreign Server ---
         # Uses SELECT FOR UPDATE SKIP LOCKED to prevent duplicate sends
@@ -923,6 +1013,44 @@ async def receive_sync_data(
                     "Error publishing synced offers",
                     extra={
                         "event": "sync.synced_offer_publish_batch_failed",
+                        **_summarize_exception(e),
+                    },
+                )
+
+        # --- Handle Terminal Offer Telegram State on Foreign Server ---
+        # Terminal sync can arrive through direct-push and worker replay. The
+        # helper treats Telegram "message is not modified" as success, so replay
+        # is safe and does not create duplicate visible tags.
+        if settings.server_mode != "iran" and terminal_offers:
+            try:
+                from sqlalchemy.orm import selectinload
+                from core.services.telegram_offer_channel_service import apply_offer_channel_state
+
+                unique_offer_ids = list(set(terminal_offers))
+                stmt = (
+                    select(Offer)
+                    .options(selectinload(Offer.commodity))
+                    .where(Offer.id.in_(unique_offer_ids), Offer.channel_message_id.isnot(None))
+                )
+                result = await db.execute(stmt)
+                terminal_offer_rows = result.scalars().all()
+                for offer in terminal_offer_rows:
+                    try:
+                        await apply_offer_channel_state(offer, reason="sync_terminal_offer")
+                    except Exception as e:
+                        logger.error(
+                            "Failed to apply synced terminal offer Telegram state",
+                            extra={
+                                "event": "sync.terminal_offer_telegram_state_failed",
+                                "offer_id": getattr(offer, "id", None),
+                                **_summarize_exception(e),
+                            },
+                        )
+            except Exception as e:
+                logger.error(
+                    "Error applying synced terminal offer Telegram states",
+                    extra={
+                        "event": "sync.terminal_offer_telegram_state_batch_failed",
                         **_summarize_exception(e),
                     },
                 )

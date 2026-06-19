@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -299,19 +299,36 @@ async def load_market_offer_push_target_user_ids(
 
 
 async def is_first_active_market_offer(db: AsyncSession, offer_id: int) -> bool:
+    from core.trading_settings import get_trading_settings_async
+    from core.utils import utc_now_naive
     from models.offer import Offer, OfferStatus
 
+    trading_settings = await get_trading_settings_async()
+    expiry_minutes = int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0)
+    live_offer_filters = [
+        Offer.status == OfferStatus.ACTIVE,
+        Offer.id != int(offer_id),
+    ]
+    if expiry_minutes > 0:
+        cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
+        live_offer_filters.append(Offer.created_at > cutoff_time)
+
     other_active_offer_count = await db.scalar(
-        select(func.count(Offer.id)).where(
-            Offer.status == OfferStatus.ACTIVE,
-            Offer.id != int(offer_id),
-        )
+        select(func.count(Offer.id)).where(*live_offer_filters)
     )
     return int(other_active_offer_count or 0) == 0
 
 
 async def send_market_offer_web_push(offer_id: int) -> None:
     if not is_web_push_configured():
+        logger.info(
+            "Market offer Web Push skipped",
+            extra={
+                "event": "web_push.market_offer.skipped",
+                "offer_id": offer_id,
+                "reason": "not_configured",
+            },
+        )
         return
 
     from core.db import AsyncSessionLocal
@@ -324,12 +341,37 @@ async def send_market_offer_web_push(offer_id: int) -> None:
         )
         offer = result.scalar_one_or_none()
         if offer is None:
+            logger.info(
+                "Market offer Web Push skipped",
+                extra={
+                    "event": "web_push.market_offer.skipped",
+                    "offer_id": offer_id,
+                    "reason": "offer_not_found",
+                },
+            )
             return
         from models.offer import OfferStatus
 
         if offer.status != OfferStatus.ACTIVE:
+            logger.info(
+                "Market offer Web Push skipped",
+                extra={
+                    "event": "web_push.market_offer.skipped",
+                    "offer_id": offer.id,
+                    "reason": "offer_not_active",
+                    "offer_status": _enum_value(getattr(offer, "status", "")),
+                },
+            )
             return
         if not await is_first_active_market_offer(db, offer.id):
+            logger.info(
+                "Market offer Web Push skipped",
+                extra={
+                    "event": "web_push.market_offer.skipped",
+                    "offer_id": offer.id,
+                    "reason": "not_first_live_offer",
+                },
+            )
             return
 
         excluded_user_ids = {
@@ -338,11 +380,35 @@ async def send_market_offer_web_push(offer_id: int) -> None:
         }
         target_user_ids = await load_market_offer_push_target_user_ids(db, excluded_user_ids)
         if not target_user_ids:
+            logger.info(
+                "Market offer Web Push skipped",
+                extra={
+                    "event": "web_push.market_offer.skipped",
+                    "offer_id": offer.id,
+                    "reason": "no_targets",
+                    "excluded_user_count": len(excluded_user_ids),
+                },
+            )
             return
 
         payload = build_market_offer_push_payload(offer)
+        totals = {"total": 0, "sent": 0, "failed": 0, "disabled": 0}
         for user_id in target_user_ids:
-            await send_web_push_to_user(db, user_id, payload)
+            result = await send_web_push_to_user(db, user_id, payload)
+            for key in totals:
+                totals[key] += int(result.get(key, 0) or 0)
+        logger.info(
+            "Market offer Web Push completed",
+            extra={
+                "event": "web_push.market_offer.completed",
+                "offer_id": offer.id,
+                "target_user_count": len(target_user_ids),
+                "subscription_total": totals["total"],
+                "sent": totals["sent"],
+                "failed": totals["failed"],
+                "disabled": totals["disabled"],
+            },
+        )
 
 
 def schedule_market_offer_web_push(offer_id: int) -> None:

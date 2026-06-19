@@ -19,6 +19,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.server_routing import current_server, is_remote_home
 from core.trade_forwarding import forward_trade_to_home_server
 from bot.utils.trade_suggestion_messages import (
@@ -43,11 +44,7 @@ async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
         return
 
     if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
-        await bot.edit_message_reply_markup(
-            chat_id=settings.channel_id,
-            message_id=offer.channel_message_id,
-            reply_markup=None,
-        )
+        await apply_offer_channel_state(offer, reason="bot_channel_trade")
         return
 
     new_keyboard = build_offer_trade_buttons(
