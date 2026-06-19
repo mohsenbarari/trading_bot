@@ -98,6 +98,7 @@ function hasTimer(offer: any): boolean {
 }
 
 function isExpiredOffer(offer: any): boolean {
+  if (isTradedHistoryOffer(offer)) return false
   return offer?.status === 'expired' || offer?.history_state === 'expired'
 }
 
@@ -122,7 +123,7 @@ function getHistoryStampLabel(offer: any): string {
   if (isTradedHistoryOffer(offer)) {
     const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
     if (offer?.is_partially_traded === true && tradedQuantity !== null && tradedQuantity > 0) {
-      return `معامله‌شده · ${tradedQuantity.toLocaleString()} عدد`
+      return `معامله‌شده ${tradedQuantity.toLocaleString()} عدد`
     }
     return 'معامله‌شده'
   }
@@ -131,11 +132,10 @@ function getHistoryStampLabel(offer: any): string {
 }
 
 function getOfferQuantityLabel(offer: any): string {
-  const tradedQuantity = getFiniteNumber(offer?.traded_quantity)
   const remainingQuantity = getFiniteNumber(offer?.remaining_quantity)
   const totalQuantity = getFiniteNumber(offer?.quantity)
-  if (isTradedHistoryOffer(offer) && tradedQuantity !== null && tradedQuantity > 0) {
-    return `${tradedQuantity.toLocaleString()} عدد`
+  if (isTradedHistoryOffer(offer) && totalQuantity !== null) {
+    return `${totalQuantity.toLocaleString()} عدد`
   }
   if (remainingQuantity !== null) return `${remainingQuantity.toLocaleString()} عدد`
   if (totalQuantity !== null) return `${totalQuantity.toLocaleString()} عدد`

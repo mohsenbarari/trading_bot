@@ -189,9 +189,9 @@ describe('OffersList.vue', () => {
           is_partially_traded: true,
           offer_type: 'sell',
           commodity_name: 'ربع سکه',
-          quantity: 30,
-          remaining_quantity: 7,
-          traded_quantity: 23,
+          quantity: 40,
+          remaining_quantity: 20,
+          traded_quantity: 20,
           price: 54000,
           viewer_effective_price: 54000,
           is_wholesale: false,
@@ -209,11 +209,14 @@ describe('OffersList.vue', () => {
     expect(wrapper.find('.cancel-own-offer-btn').exists()).toBe(false)
     expect(wrapper.findAll('[data-test="history-stamp"]').map((stamp) => stamp.text())).toEqual([
       'معامله‌شده',
-      'معامله‌شده · 23 عدد',
+      'معامله‌شده 20 عدد',
     ])
     expect(wrapper.findAll('.traded-ribbon')).toHaveLength(2)
     expect(wrapper.find('.expired-ribbon').exists()).toBe(false)
-    expect(wrapper.findAll('.quantity-badge').map((badge) => badge.text())).toEqual(['12 عدد', '23 عدد'])
+    expect(wrapper.findAll('.offer-card-wrap')[0]!.classes()).toContain('is-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).toContain('is-traded')
+    expect(wrapper.findAll('.offer-card-wrap')[1]!.classes()).not.toContain('is-expired')
+    expect(wrapper.findAll('.quantity-badge').map((badge) => badge.text())).toEqual(['12 عدد', '40 عدد'])
   })
 
   it('uses the two-tap confirm flow for retail lots, clears stale pending state, and executes the confirmed trade', async () => {
