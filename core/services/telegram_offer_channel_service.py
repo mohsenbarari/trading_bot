@@ -9,6 +9,7 @@ from core.config import settings
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.telegram_offer_publication_service import telegram_publication_message_id
 from core.services.trade_service import get_available_trade_amounts
+from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from models.offer import OfferStatus, OfferType
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,11 @@ def build_offer_channel_reply_markup(offer: Any) -> Optional[dict[str, Any]]:
         seen.add(numeric_amount)
         buttons.append({
             "text": f"{numeric_amount} عدد",
-            "callback_data": f"channel_trade:{offer_id}:{numeric_amount}",
+            "callback_data": build_channel_trade_callback_data(
+                offer_id=offer_id,
+                offer_public_id=getattr(offer, "offer_public_id", None),
+                amount=numeric_amount,
+            ),
         })
 
     return {"inline_keyboard": [buttons]} if buttons else None

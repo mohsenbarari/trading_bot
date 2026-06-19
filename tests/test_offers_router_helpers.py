@@ -324,7 +324,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("توضیحات: urgent", send_mock.await_args.args[1])
         self.assertEqual(
             send_mock.await_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
-            "channel_trade:10:12",
+            "ct2:ofr_offer_10:12",
         )
 
         retail_offer = make_offer_model(

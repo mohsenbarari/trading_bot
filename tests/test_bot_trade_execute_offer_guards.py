@@ -53,14 +53,20 @@ class BotTradeExecuteOfferGuardTests(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)),
         ]
 
-        for offer in [None, SimpleNamespace(status=OfferStatus.COMPLETED), SimpleNamespace(status=OfferStatus.ACTIVE, user_id=5)]:
+        cases = [
+            (None, ("این لفظ دیگر در دسترس نیست.",), {"show_alert": True}),
+            (SimpleNamespace(status=OfferStatus.COMPLETED), ("این لفظ دیگر فعال نیست.",), {"show_alert": True}),
+            (SimpleNamespace(status=OfferStatus.ACTIVE, user_id=5), (), {}),
+        ]
+
+        for offer, expected_args, expected_kwargs in cases:
             callback = make_callback()
             with common_patches[0], common_patches[1], patch(
                 "bot.handlers.trade_execute.AsyncSessionLocal",
                 return_value=FakeSessionContext(FakeSession(offer)),
             ):
                 await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=SimpleNamespace())
-            callback.answer.assert_awaited_once_with()
+            callback.answer.assert_awaited_once_with(*expected_args, **expected_kwargs)
 
 
 if __name__ == "__main__":

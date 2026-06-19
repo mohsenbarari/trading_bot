@@ -56,6 +56,7 @@ def make_offer():
         is_wholesale=False,
         lot_sizes=[2, 3],
         home_server="iran",
+        offer_public_id="ofr_remote_7",
     )
 
 
@@ -90,11 +91,14 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         payload = {"error_code": "TRADE_LOT_UNAVAILABLE", "offer_id": 7, "requested_amount": 2, "message": "MSG", "available_lots": [3]}
         with base_patches[0], base_patches[1], base_patches[2], base_patches[3], base_patches[4], patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
-        ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(return_value=(409, payload))), patch(
+        ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(return_value=(409, payload))) as forward_mock, patch(
             "bot.handlers.trade_execute.send_or_update_trade_suggestion_message", new=AsyncMock()
         ) as suggestion_mock, patch("bot.handlers.trade_execute.current_server", return_value="foreign"):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         suggestion_mock.assert_awaited_once()
+        forwarded_payload = forward_mock.await_args.args[1]
+        self.assertEqual(forwarded_payload["offer_public_id"], "ofr_remote_7")
+        self.assertEqual(forwarded_payload["idempotency_key"], "telegram_callback:cb1")
         callback.answer.assert_awaited_with("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
 
         callback = make_callback()

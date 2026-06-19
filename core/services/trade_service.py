@@ -310,6 +310,7 @@ def validate_offer_trade_amount(
 def build_lot_unavailable_suggestion_payload(
     *,
     offer_id: Union[int, float, str],
+    offer_public_id: Optional[str] = None,
     requested_amount: Union[int, float, str],
     offer_type: Optional[Union[str, object]],
     commodity_name: Optional[str],
@@ -363,6 +364,7 @@ def build_lot_unavailable_suggestion_payload(
         "intro_text": intro_text,
         "message": message,
         "offer_id": normalized_offer_id,
+        "offer_public_id": (offer_public_id or "").strip() or None,
         "requested_amount": normalized_requested_amount,
         "offer_type": normalized_offer_type,
         "offer_type_label": offer_type_label,

@@ -2,7 +2,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_execute import _execute_confirmed_channel_trade_via_shared_command, handle_channel_trade
+from bot.handlers.trade_execute import (
+    _execute_confirmed_channel_trade_via_shared_command,
+    handle_channel_trade,
+    handle_channel_trade_public,
+)
 from models.offer_request import OfferRequestSourceSurface
 from models.offer import OfferStatus, OfferType
 
@@ -21,8 +25,10 @@ class FakeSession:
         self.scalar_values = list(scalar_values or [10000])
         self.added = []
         self.commits = 0
+        self.statements = []
 
     async def execute(self, stmt):
+        self.statements.append(str(stmt))
         return FakeExecuteResult(self.offer)
 
     async def refresh(self, offer, attrs):
@@ -110,6 +116,36 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["actual_amount"], 2)
         self.assertEqual(session.commits, 0)
         self.assertEqual(session.added, [])
+        self.assertIn("offers.id", session.statements[0])
+
+    async def test_public_channel_trade_callback_resolves_offer_by_public_identity(self):
+        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        offer = make_offer()
+        session = FakeSession(offer)
+        callback = make_callback(chat_id=200)
+        bot = SimpleNamespace(send_message=AsyncMock())
+
+        with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
+            "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(session)
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "bot.handlers.trade_execute.is_remote_home", return_value=False
+        ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 2, [2, 3])), patch(
+            "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
+        ), patch(
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(),
+        ) as shared_command_mock, patch(
+            "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
+        ):
+            await handle_channel_trade_public(
+                callback,
+                SimpleNamespace(offer_public_id="ofr_bot_local_7", amount=2),
+                user=user,
+                bot=bot,
+            )
+
+        shared_command_mock.assert_awaited_once()
+        self.assertIn("offers.offer_public_id", session.statements[0])
 
     async def test_confirmed_channel_trade_helper_passes_telegram_metadata_to_shared_command(self):
         user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer")
@@ -146,7 +182,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["trade_data"].offer_id, 7)
         self.assertEqual(kwargs["trade_data"].offer_public_id, "ofr_bot_local_7")
         self.assertEqual(kwargs["trade_data"].quantity, 2)
-        self.assertEqual(kwargs["trade_data"].idempotency_key, "bot:5:7:2:cb1")
+        self.assertEqual(kwargs["trade_data"].idempotency_key, "telegram_callback:cb1")
         self.assertEqual(kwargs["request_source_surface"], OfferRequestSourceSurface.TELEGRAM_BOT)
         self.assertEqual(kwargs["request_source_server"], "foreign")
         self.assertEqual(kwargs["context"].owner_user, user)

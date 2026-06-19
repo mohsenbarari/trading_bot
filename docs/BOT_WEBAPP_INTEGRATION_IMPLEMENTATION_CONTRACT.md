@@ -1185,6 +1185,47 @@ Exit criteria:
   compatibility behavior.
 - Callback compatibility does not bypass request metadata recording.
 
+Implemented in Step 8B on 2026-06-19:
+
+- New Telegram trade buttons use the short versioned callback payload `ct2:{offer_public_id}:{amount}`.
+- Legacy Telegram trade callbacks in the old `channel_trade:{local_offer_id}:{amount}` shape remain
+  accepted. The Bot resolves the local foreign offer row first, then uses the row's
+  `offer_public_id` before invoking the shared trade/request command.
+- Telegram channel publish, channel button refresh, Bot-created offer buttons, and private
+  lot-unavailable suggestion buttons all build callback payloads through one shared helper.
+- Callback handling resolves public callbacks by `Offer.offer_public_id`; it resolves legacy
+  callbacks by local `Offer.id` only as a compatibility mapping.
+- Missing or stale callback targets now fail visibly with a safe user message instead of silently
+  acknowledging the callback.
+- Confirmed Telegram callback commands use `telegram_callback:<callback_id>` as the idempotency key,
+  with a deterministic bounded fallback only when the callback id is unavailable.
+- Confirmed callback execution still enters `_execute_trade_authoritatively(...)` with
+  `request_source_surface=telegram_bot`, so request outcomes continue to be recorded in the offer
+  request ledger and synced through the existing ledger path.
+
+Step 8B verification run:
+
+- `tests.test_bot_trade_suggestion_messages`
+- `tests.test_bot_trade_execute_local_success`
+- `tests.test_bot_trade_execute_offer_guards`
+- `tests.test_bot_trade_execute_remote_home`
+- `tests.test_bot_trade_execute_update_markup`
+- `tests.test_bot_trade_create_confirm_success_retail`
+- `tests.test_offers_router_helpers`
+- `tests.test_trade_service_validation_and_payloads`
+- `tests.test_bot_trade_execute_basic_guards`
+- `tests.test_bot_trade_execute_blocked`
+- `tests.test_bot_trade_execute_invalid_amount`
+- `tests.test_bot_trade_execute_local_pending`
+- `tests.test_bot_trade_execute_remaining_paths`
+- `tests.test_bot_trade_execute_suggestion_message`
+- `tests.test_bot_trade_manage_success`
+- `tests.test_trades_router_helpers`
+- `tests.test_trades_router_authoritative_success`
+- `tests.test_trades_router_execution_wrappers`
+- `tests.test_telegram_offer_channel_service`
+- `tests.test_telegram_offer_publication_service`
+
 ### Step 8C - Registry And Protocol Version Compatibility
 
 Required behavior:

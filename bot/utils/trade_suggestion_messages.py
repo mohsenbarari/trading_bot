@@ -8,13 +8,13 @@ import redis.asyncio as redis
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.callbacks import ChannelTradeCallback
 from core.db import AsyncSessionLocal
 from core.redis import pool
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
 )
+from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from models.offer import Offer, OfferStatus
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,8 @@ def build_trade_amount_buttons(
     offer_id: int,
     amounts: list[int],
     pending_amount: Optional[int] = None,
+    *,
+    offer_public_id: Optional[str] = None,
 ) -> Optional[InlineKeyboardMarkup]:
     seen = set()
     unique_amounts = []
@@ -43,7 +45,11 @@ def build_trade_amount_buttons(
         buttons.append(
             InlineKeyboardButton(
                 text=label,
-                callback_data=ChannelTradeCallback(offer_id=offer_id, amount=amount).pack(),
+                callback_data=build_channel_trade_callback_data(
+                    offer_id=offer_id,
+                    offer_public_id=offer_public_id,
+                    amount=amount,
+                ),
             )
         )
 
@@ -57,6 +63,8 @@ def build_offer_trade_buttons(
     is_wholesale: bool,
     lot_sizes: Optional[list[int]],
     pending_amount: Optional[int] = None,
+    *,
+    offer_public_id: Optional[str] = None,
 ) -> Optional[InlineKeyboardMarkup]:
     all_amounts = get_available_trade_amounts(
         quantity=quantity,
@@ -64,7 +72,12 @@ def build_offer_trade_buttons(
         is_wholesale=is_wholesale,
         lot_sizes=sorted(lot_sizes, reverse=True) if lot_sizes else None,
     )
-    return build_trade_amount_buttons(offer_id, all_amounts, pending_amount=pending_amount)
+    return build_trade_amount_buttons(
+        offer_id,
+        all_amounts,
+        pending_amount=pending_amount,
+        offer_public_id=offer_public_id,
+    )
 
 
 def _record_field(chat_id: int, message_id: int) -> str:
@@ -202,6 +215,7 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
 
         payload = build_lot_unavailable_suggestion_payload(
             offer_id=offer.id,
+            offer_public_id=getattr(offer, "offer_public_id", None),
             requested_amount=requested_amount,
             offer_type=offer.offer_type,
             commodity_name=offer.commodity.name if offer.commodity else None,
@@ -209,7 +223,11 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
             remaining_quantity=offer.remaining_quantity or offer.quantity,
             available_amounts=available_amounts,
         )
-        reply_markup = build_trade_amount_buttons(offer.id, available_amounts)
+        reply_markup = build_trade_amount_buttons(
+            offer.id,
+            available_amounts,
+            offer_public_id=getattr(offer, "offer_public_id", None),
+        )
 
         try:
             await bot.edit_message_text(

@@ -796,7 +796,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(get=AsyncMock(return_value=None))
         self.assertIsNone(await trades._forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at))
 
-        remote_offer = SimpleNamespace(home_server="iran")
+        remote_offer = SimpleNamespace(home_server="iran", offer_public_id="ofr_remote_home_7")
         db = SimpleNamespace(get=AsyncMock(return_value=remote_offer))
         with patch("api.routers.trades.is_remote_home", return_value=False):
             self.assertIsNone(await trades._forward_trade_if_remote_home(db, trade_data, current_user, edge_received_at))
@@ -816,9 +816,11 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             "iran",
             {
                 "offer_id": 7,
+                "offer_public_id": "ofr_remote_home_7",
                 "quantity": 4,
                 "responder_user_id": 99,
                 "edge_received_at": edge_received_at.isoformat(),
+                "source_surface": "webapp",
                 "source_server": "foreign",
                 "idempotency_key": "idem-1",
             },

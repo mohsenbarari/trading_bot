@@ -19,6 +19,7 @@ from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
 from core.server_routing import current_server, is_remote_home
+from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
     OfferExpiryReason,
@@ -683,8 +684,9 @@ async def _handle_trade_confirm_core(
                 ),
             )
             offer_id = new_offer.id
+            offer_public_id = getattr(new_offer, "offer_public_id", None)
 
-        from bot.callbacks import ChannelTradeCallback, ExpireOfferCallback
+        from bot.callbacks import ExpireOfferCallback
 
         if is_wholesale or not lot_sizes:
             trade_keyboard = InlineKeyboardMarkup(
@@ -692,7 +694,11 @@ async def _handle_trade_confirm_core(
                     [
                         InlineKeyboardButton(
                             text=f"{quantity} عدد",
-                            callback_data=ChannelTradeCallback(offer_id=offer_id, amount=quantity).pack(),
+                            callback_data=build_channel_trade_callback_data(
+                                offer_id=offer_id,
+                                offer_public_id=offer_public_id,
+                                amount=quantity,
+                            ),
                         )
                     ]
                 ]
@@ -716,7 +722,11 @@ async def _handle_trade_confirm_core(
                     [
                         InlineKeyboardButton(
                             text=f"{amount} عدد",
-                            callback_data=ChannelTradeCallback(offer_id=offer_id, amount=amount).pack(),
+                            callback_data=build_channel_trade_callback_data(
+                                offer_id=offer_id,
+                                offer_public_id=offer_public_id,
+                                amount=amount,
+                            ),
                         )
                         for amount in unique_amounts
                     ]

@@ -61,6 +61,7 @@ from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
 from core.server_routing import KNOWN_SERVERS, current_server, is_remote_home, normalize_server
+from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.trade_forwarding import forward_trade_to_home_server, verify_internal_signature
 from core.trading_observability import log_trading_event
 
@@ -1514,7 +1515,14 @@ async def update_channel_buttons(offer: Offer) -> bool:
     else:
         # ساخت دکمه‌های جدید
         if offer.is_wholesale or not offer.lot_sizes:
-            buttons = [[{"text": f"{offer.remaining_quantity} عدد", "callback_data": f"channel_trade:{offer.id}:{offer.remaining_quantity}"}]]
+            buttons = [[{
+                "text": f"{offer.remaining_quantity} عدد",
+                "callback_data": build_channel_trade_callback_data(
+                    offer_id=offer.id,
+                    offer_public_id=getattr(offer, "offer_public_id", None),
+                    amount=offer.remaining_quantity,
+                ),
+            }]]
         else:
             valid_lots = get_available_trade_amounts(
                 quantity=offer.quantity,
@@ -1525,7 +1533,14 @@ async def update_channel_buttons(offer: Offer) -> bool:
             if not valid_lots:
                 buttons = None
             else:
-                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in valid_lots]]
+                buttons = [[{
+                    "text": f"{a} عدد",
+                    "callback_data": build_channel_trade_callback_data(
+                        offer_id=offer.id,
+                        offer_public_id=getattr(offer, "offer_public_id", None),
+                        amount=a,
+                    ),
+                } for a in valid_lots]]
         
         if buttons is not None:
             reply_markup = {"inline_keyboard": buttons}
@@ -1667,7 +1682,14 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
             return await apply_offer_channel_state(offer, reason="trade_channel_buttons_sync")
 
         if offer.is_wholesale or not lot_sizes:
-            buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
+            buttons = [[{
+                "text": f"{remaining_quantity} عدد",
+                "callback_data": build_channel_trade_callback_data(
+                    offer_id=offer_id,
+                    offer_public_id=getattr(offer, "offer_public_id", None),
+                    amount=remaining_quantity,
+                ),
+            }]]
         else:
             valid_lots = get_available_trade_amounts(
                 quantity=offer.quantity,
@@ -1678,7 +1700,14 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
             if not valid_lots:
                 buttons = None
             else:
-                buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
+                buttons = [[{
+                    "text": f"{a} عدد",
+                    "callback_data": build_channel_trade_callback_data(
+                        offer_id=offer_id,
+                        offer_public_id=getattr(offer, "offer_public_id", None),
+                        amount=a,
+                    ),
+                } for a in valid_lots]]
 
         if buttons is not None:
             reply_markup = {"inline_keyboard": buttons}
@@ -2167,6 +2196,7 @@ async def _execute_trade_authoritatively(
                 status_code=status.HTTP_409_CONFLICT,
                 content=build_lot_unavailable_suggestion_payload(
                     offer_id=offer.id,
+                    offer_public_id=getattr(offer, "offer_public_id", None),
                     requested_amount=trade_data.quantity,
                     offer_type=offer.offer_type,
                     commodity_name=offer.commodity.name if offer.commodity else None,

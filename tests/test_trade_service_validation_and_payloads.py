@@ -99,6 +99,7 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
     def test_build_lot_unavailable_suggestion_payload_formats_sell_payload(self):
         payload = build_lot_unavailable_suggestion_payload(
             offer_id="7",
+            offer_public_id="ofr_trade_service_7",
             requested_amount="10",
             offer_type=SimpleNamespace(value="sell"),
             commodity_name="  طلای آب شده  ",
@@ -108,6 +109,7 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["offer_id"], 7)
+        self.assertEqual(payload["offer_public_id"], "ofr_trade_service_7")
         self.assertEqual(payload["requested_amount"], 10)
         self.assertEqual(payload["offer_type"], "sell")
         self.assertEqual(payload["offer_type_label"], "فروش")

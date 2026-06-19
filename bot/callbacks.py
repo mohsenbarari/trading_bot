@@ -1,5 +1,10 @@
 from aiogram.filters.callback_data import CallbackData
 
+from core.telegram_trade_callbacks import (
+    CHANNEL_TRADE_LEGACY_CALLBACK_PREFIX,
+    CHANNEL_TRADE_PUBLIC_CALLBACK_PREFIX,
+)
+
 # ==========================================
 # Trade Creation Callbacks
 # ==========================================
@@ -68,12 +73,21 @@ class TextOfferActionCallback(CallbackData, prefix="text_offer"):
     """
     action: str
 
-class ChannelTradeCallback(CallbackData, prefix="channel_trade"):
+class ChannelTradeCallback(CallbackData, prefix=CHANNEL_TRADE_LEGACY_CALLBACK_PREFIX):
     """
     Format: channel_trade:{offer_id}:{amount}
     Example: channel_trade:123:50
     """
     offer_id: int
+    amount: int
+
+
+class ChannelTradePublicCallback(CallbackData, prefix=CHANNEL_TRADE_PUBLIC_CALLBACK_PREFIX):
+    """
+    Format: ct2:{offer_public_id}:{amount}
+    Example: ct2:ofr_abc123:50
+    """
+    offer_public_id: str
     amount: int
 
 class ExpireOfferCallback(CallbackData, prefix="expire_offer"):

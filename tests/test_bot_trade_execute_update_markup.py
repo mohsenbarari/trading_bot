@@ -34,7 +34,7 @@ class BotTradeExecuteUpdateMarkupTests(unittest.IsolatedAsyncioTestCase):
         ) as buttons_mock:
             await update_offer_channel_markup(bot, offer)
 
-        buttons_mock.assert_called_once_with(7, 10, 5, False, [3, 2])
+        buttons_mock.assert_called_once_with(7, 10, 5, False, [3, 2], offer_public_id=None)
         bot.edit_message_reply_markup.assert_awaited_once_with(chat_id=-100, message_id=11, reply_markup="KB")
 
 

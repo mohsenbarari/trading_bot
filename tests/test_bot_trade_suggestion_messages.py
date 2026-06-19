@@ -54,6 +54,14 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
     async def test_build_amount_buttons_and_offer_buttons(self):
         markup = suggestion_messages.build_trade_amount_buttons(5, [0, 4, 4, 2], pending_amount=4)
         self.assertEqual([button.text for button in markup.inline_keyboard[0]], ['تایید 4 عدد؟', '2 عدد'])
+        self.assertEqual(markup.inline_keyboard[0][0].callback_data, "channel_trade:5:4")
+
+        public_markup = suggestion_messages.build_trade_amount_buttons(
+            5,
+            [4],
+            offer_public_id="ofr_public_5",
+        )
+        self.assertEqual(public_markup.inline_keyboard[0][0].callback_data, "ct2:ofr_public_5:4")
 
         with patch(
             'bot.utils.trade_suggestion_messages.get_available_trade_amounts', return_value=[9, 3]
@@ -65,6 +73,7 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
                 is_wholesale=False,
                 lot_sizes=[1, 8, 3],
                 pending_amount=3,
+                offer_public_id="ofr_offer_7",
             )
 
         get_available_trade_amounts.assert_called_once_with(
@@ -74,6 +83,7 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
             lot_sizes=[8, 3, 1],
         )
         self.assertEqual(offer_markup.inline_keyboard[0][1].text, 'تایید 3 عدد؟')
+        self.assertEqual(offer_markup.inline_keyboard[0][1].callback_data, "ct2:ofr_offer_7:3")
         self.assertEqual(suggestion_messages._record_field(1, 2), '1:2')
         self.assertEqual(suggestion_messages._record_key(3), 'trade_suggestion:offer:3')
 

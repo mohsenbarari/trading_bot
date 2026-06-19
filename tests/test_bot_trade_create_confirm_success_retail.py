@@ -2,7 +2,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.callbacks import ChannelTradeCallback
 from bot.handlers.trade_create import handle_trade_confirm
 
 
@@ -114,9 +113,9 @@ class BotTradeCreateConfirmSuccessRetailTests(unittest.IsolatedAsyncioTestCase):
         trade_keyboard = bot.send_message.await_args_list[0].kwargs["reply_markup"]
         buttons = trade_keyboard.inline_keyboard[0]
         self.assertEqual([button.text for button in buttons], ["3 عدد", "2 عدد", "1 عدد"])
-        self.assertEqual(buttons[0].callback_data, ChannelTradeCallback(offer_id=88, amount=3).pack())
-        self.assertEqual(buttons[1].callback_data, ChannelTradeCallback(offer_id=88, amount=2).pack())
-        self.assertEqual(buttons[2].callback_data, ChannelTradeCallback(offer_id=88, amount=1).pack())
+        self.assertEqual(buttons[0].callback_data, f"ct2:{create_session.added[0].offer_public_id}:3")
+        self.assertEqual(buttons[1].callback_data, f"ct2:{create_session.added[0].offer_public_id}:2")
+        self.assertEqual(buttons[2].callback_data, f"ct2:{create_session.added[0].offer_public_id}:1")
 
 
 if __name__ == "__main__":

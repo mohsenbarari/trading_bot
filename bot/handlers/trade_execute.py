@@ -1,5 +1,6 @@
 import logging
 import json
+import hashlib
 from aiogram import Router, F, types, Bot
 from typing import Optional
 from sqlalchemy import select
@@ -15,7 +16,7 @@ from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits
 from core.enums import UserRole
-from bot.callbacks import ChannelTradeCallback
+from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
 from core.services.trade_service import (
@@ -41,6 +42,66 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+OFFER_UNAVAILABLE_CALLBACK_MESSAGE = "این لفظ دیگر در دسترس نیست."
+OFFER_INACTIVE_CALLBACK_MESSAGE = "این لفظ دیگر فعال نیست."
+
+
+def _callback_offer_public_id(callback_data) -> str | None:
+    public_id = getattr(callback_data, "offer_public_id", None)
+    if public_id is None:
+        return None
+    public_id = str(public_id).strip()
+    return public_id or None
+
+
+def _callback_offer_id(callback_data) -> int | None:
+    try:
+        offer_id = int(getattr(callback_data, "offer_id", 0))
+    except (TypeError, ValueError):
+        return None
+    return offer_id if offer_id > 0 else None
+
+
+async def _load_callback_offer(session, callback_data) -> Offer | None:
+    public_id = _callback_offer_public_id(callback_data)
+    if public_id:
+        stmt = select(Offer).where(Offer.offer_public_id == public_id).with_for_update()
+    else:
+        offer_id = _callback_offer_id(callback_data)
+        if offer_id is None:
+            return None
+        stmt = select(Offer).where(Offer.id == offer_id).with_for_update()
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+def _compact_idempotency_key(prefix: str, raw_value: object, *, max_length: int = 64) -> str:
+    raw_text = str(raw_value or "").strip()
+    candidate = f"{prefix}:{raw_text}"
+    if len(candidate) <= max_length:
+        return candidate
+    digest = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()[:32]
+    return f"{prefix}:{digest}"[:max_length]
+
+
+def _channel_trade_idempotency_key(
+    *,
+    callback: types.CallbackQuery,
+    user: User,
+    offer: Offer,
+    actual_amount: int,
+) -> str:
+    callback_id = getattr(callback, "id", None)
+    if callback_id:
+        return _compact_idempotency_key("telegram_callback", callback_id)
+
+    callback_message = getattr(callback, "message", None)
+    message_id = getattr(callback_message, "message_id", None)
+    offer_ref = getattr(offer, "offer_public_id", None) or f"legacy_offer:{getattr(offer, 'id', '')}"
+    return _compact_idempotency_key(
+        "telegram_callback_fallback",
+        f"{getattr(user, 'id', '')}:{offer_ref}:{actual_amount}:{message_id or 'no_message'}",
+    )
+
 
 async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
     """همیشه دکمه‌های کانال را با channel_message_id واقعی به‌روزرسانی کن."""
@@ -57,6 +118,7 @@ async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
         offer.remaining_quantity,
         offer.is_wholesale,
         list(offer.lot_sizes) if offer.lot_sizes else None,
+        offer_public_id=getattr(offer, "offer_public_id", None),
     )
     await bot.edit_message_reply_markup(
         chat_id=settings.channel_id,
@@ -72,7 +134,11 @@ async def send_or_update_trade_suggestion_message(
     payload: dict,
 ) -> None:
     """ارسال یا به‌روزرسانی پیام پیشنهاد معامله با دکمه‌های لات باقی‌مانده."""
-    reply_markup = build_trade_amount_buttons(payload["offer_id"], payload["available_lots"])
+    reply_markup = build_trade_amount_buttons(
+        payload["offer_id"],
+        payload["available_lots"],
+        offer_public_id=payload.get("offer_public_id"),
+    )
     callback_message = callback.message
     is_private_suggestion_message = bool(
         callback_message
@@ -137,7 +203,12 @@ async def _execute_confirmed_channel_trade_via_shared_command(
                 offer_id=offer.id,
                 offer_public_id=getattr(offer, "offer_public_id", None),
                 quantity=actual_amount,
-                idempotency_key=f"bot:{user.id}:{offer.id}:{actual_amount}:{callback.id}",
+                idempotency_key=_channel_trade_idempotency_key(
+                    callback=callback,
+                    user=user,
+                    offer=offer,
+                    actual_amount=actual_amount,
+                ),
             ),
             background_tasks=background_tasks,
             db=session,
@@ -188,6 +259,20 @@ async def _execute_confirmed_channel_trade_via_shared_command(
 
 @router.callback_query(ChannelTradeCallback.filter())
 async def handle_channel_trade(callback: types.CallbackQuery, callback_data: ChannelTradeCallback, user: Optional[User], bot: Bot):
+    await _handle_channel_trade(callback, callback_data, user, bot)
+
+
+@router.callback_query(ChannelTradePublicCallback.filter())
+async def handle_channel_trade_public(
+    callback: types.CallbackQuery,
+    callback_data: ChannelTradePublicCallback,
+    user: Optional[User],
+    bot: Bot,
+):
+    await _handle_channel_trade(callback, callback_data, user, bot)
+
+
+async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, user: Optional[User], bot: Bot):
     """کلیک روی دکمه پست کانال - دابل‌کلیک برای تایید"""
     if not user:
         await callback.answer()
@@ -199,7 +284,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
         return
     
     # پارس callback_data
-    offer_id = callback_data.offer_id
+    offer_id = _callback_offer_id(callback_data)
     trade_amount = callback_data.amount
     
     # ===== بررسی محدودیت کاربر =====
@@ -212,19 +297,22 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
     async with AsyncSessionLocal() as session:
         # اول قفل را بگیر، سپس روابط را بارگذاری کن
         # FOR UPDATE با LEFT OUTER JOIN سازگار نیست
-        stmt = select(Offer).where(Offer.id == offer_id).with_for_update()
-        offer = (await session.execute(stmt)).scalar_one_or_none()
+        offer = await _load_callback_offer(session, callback_data)
         
         if offer:
             # بارگذاری روابط بعد از گرفتن قفل
             await session.refresh(offer, ["user", "commodity"])
         
         if not offer:
-            await callback.answer()
+            await callback.answer(OFFER_UNAVAILABLE_CALLBACK_MESSAGE, show_alert=True)
             return
+
+        resolved_offer_id = getattr(offer, "id", None)
+        if resolved_offer_id is not None:
+            offer_id = resolved_offer_id
         
         if offer.status != OfferStatus.ACTIVE:
-            await callback.answer()
+            await callback.answer(OFFER_INACTIVE_CALLBACK_MESSAGE, show_alert=True)
             return
         
         if offer.user_id == user.id:
@@ -258,7 +346,12 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             if not is_confirmed:
                 if callback.message and callback.message.chat.id != settings.channel_id:
                     try:
-                        pending_keyboard = build_trade_amount_buttons(offer.id, local_available_amounts, pending_amount=actual_amount)
+                        pending_keyboard = build_trade_amount_buttons(
+                            offer.id,
+                            local_available_amounts,
+                            pending_amount=actual_amount,
+                            offer_public_id=getattr(offer, "offer_public_id", None),
+                        )
                         await callback.message.edit_reply_markup(reply_markup=pending_keyboard)
                         await upsert_trade_suggestion_record(
                             offer_id=offer.id,
@@ -283,7 +376,12 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
                     "edge_received_at": datetime.utcnow().isoformat(),
                     "source_surface": OfferRequestSourceSurface.TELEGRAM_BOT.value,
                     "source_server": current_server(),
-                    "idempotency_key": f"bot:{user.id}:{offer.id}:{actual_amount}:{callback.id}",
+                    "idempotency_key": _channel_trade_idempotency_key(
+                        callback=callback,
+                        user=user,
+                        offer=offer,
+                        actual_amount=actual_amount,
+                    ),
                 },
             )
 
@@ -325,6 +423,7 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             if not offer.is_wholesale and available_amounts and amount_error == "این لات دیگر موجود نیست.":
                 suggestion_payload = build_lot_unavailable_suggestion_payload(
                     offer_id=offer.id,
+                    offer_public_id=getattr(offer, "offer_public_id", None),
                     requested_amount=actual_amount,
                     offer_type=offer.offer_type,
                     commodity_name=offer.commodity.name if offer.commodity else None,
@@ -362,7 +461,12 @@ async def handle_channel_trade(callback: types.CallbackQuery, callback_data: Cha
             # کلیک اول - Redis ثبت کرده، راهنمایی به کاربر
             if callback.message and callback.message.chat.id != settings.channel_id:
                 try:
-                    pending_keyboard = build_trade_amount_buttons(offer.id, available_amounts, pending_amount=actual_amount)
+                    pending_keyboard = build_trade_amount_buttons(
+                        offer.id,
+                        available_amounts,
+                        pending_amount=actual_amount,
+                        offer_public_id=getattr(offer, "offer_public_id", None),
+                    )
                     await callback.message.edit_reply_markup(reply_markup=pending_keyboard)
                     await upsert_trade_suggestion_record(
                         offer_id=offer.id,
