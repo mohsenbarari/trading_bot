@@ -1510,6 +1510,18 @@ Required behavior:
 - Remote-home mutate is rejected by default or explicitly queued as non-final if a future design
   chooses pending commands.
 - After reconnect, replay uses latest authoritative state.
+- Sync worker replay for `offers` `INSERT`/`UPDATE` refreshes the queued/change-log item from the
+  authoritative local `Offer` row immediately before sending. This applies to committed DB drain,
+  `sync:outbound`, and `sync:retry` payloads, so a stale active create queued during a short outage
+  cannot be sent after the same offer was already locally expired or traded.
+- The refreshed payload preserves the original durable outbox identity (`change_log_id`, `hash`,
+  `outbox_id`) while rebuilding `data`, `sync_meta`, and `public_identity` from the latest offer
+  snapshot. For versioned offers, `event_sequence` remains the authoritative `version_id`.
+- If the authoritative offer snapshot cannot be read, the worker logs
+  `sync_worker.offer_replay_refresh_failed` and keeps normal retry behavior instead of crashing the
+  worker loop.
+- Remote-home expiry/trade during peer outage is fail-closed: the forward error is returned to the
+  caller and the local replica is not mutated.
 
 Required tests:
 
@@ -1517,6 +1529,9 @@ Required tests:
 - Remote-home mutation during outage does not locally mutate.
 - Create followed by local expire before reconnect syncs final expired state, not active state.
 - Create followed by local trade before reconnect syncs final traded state, not active state.
+- Redis queued/retry offer payloads are refreshed before send and requeued as refreshed terminal
+  state if peer delivery still fails.
+- Remote-home expiry forward failure returns an error without local commit.
 
 Exit criteria:
 

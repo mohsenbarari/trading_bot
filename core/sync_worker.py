@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
+from core.offer_sync_payload import build_offer_sync_payload
 from core.server_routing import default_peer_server_url
 from core.sync_metadata import (
     build_sync_metadata,
@@ -120,6 +121,77 @@ def change_log_entry_to_sync_item(entry) -> dict:
     return item
 
 
+def _offer_public_id_from_sync_item(item: dict) -> str | None:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    offer_public_id = str(data.get("offer_public_id") or "").strip()
+    if offer_public_id:
+        return offer_public_id
+    public_identity = item.get("public_identity") if isinstance(item.get("public_identity"), dict) else {}
+    if public_identity.get("kind") == "offer_public_id":
+        value = str(public_identity.get("value") or "").strip()
+        return value or None
+    return None
+
+
+def _rebuild_sync_item_payload(item: dict, data: dict) -> dict:
+    refreshed = dict(item)
+    refreshed["data"] = data
+    if data.get("id") is not None:
+        refreshed["id"] = data.get("id")
+    refreshed["sync_meta"] = build_sync_metadata(
+        str(refreshed.get("table") or ""),
+        refreshed.get("id"),
+        str(refreshed.get("operation") or ""),
+        data,
+        change_log_id=coerce_positive_int(refreshed.get("change_log_id")),
+    )
+    public_identity = build_sync_public_identity(str(refreshed.get("table") or ""), refreshed.get("id"), data)
+    if public_identity is not None:
+        refreshed["public_identity"] = public_identity
+    else:
+        refreshed.pop("public_identity", None)
+    return refreshed
+
+
+async def refresh_offer_sync_item_from_authoritative_state(item: dict) -> dict:
+    """Use the latest local offer state when replaying queued change_log rows."""
+    if item.get("table") != "offers" or item.get("operation") not in {"INSERT", "UPDATE"}:
+        return item
+
+    from core.db import AsyncSessionLocal
+    from models.offer import Offer
+
+    offer_public_id = _offer_public_id_from_sync_item(item)
+    record_id = coerce_positive_int(item.get("id"))
+    if not offer_public_id and record_id is None:
+        return item
+
+    try:
+        async with AsyncSessionLocal() as db:
+            if offer_public_id:
+                result = await db.execute(select(Offer).where(Offer.offer_public_id == offer_public_id))
+            else:
+                result = await db.execute(select(Offer).where(Offer.id == record_id))
+            offer = result.scalars().first()
+    except Exception:
+        logger.warning(
+            "Could not refresh offer sync item from authoritative state",
+            extra={
+                "event": "sync_worker.offer_replay_refresh_failed",
+                "change_log_id": item.get("change_log_id"),
+                "offer_public_id": offer_public_id,
+                "record_id": record_id,
+            },
+        )
+        return item
+
+    if offer is None:
+        return item
+
+    latest_data = sanitize_sync_payload("offers", build_offer_sync_payload(offer))
+    return _rebuild_sync_item_payload(item, latest_data)
+
+
 async def fetch_next_unsynced_change_log_item() -> dict | None:
     """Read the oldest committed unsynced change_log row without relying on Redis wake-up."""
     from core.db import AsyncSessionLocal
@@ -135,7 +207,7 @@ async def fetch_next_unsynced_change_log_item() -> dict | None:
         entry = result.scalars().first()
         if entry is None:
             return None
-        return change_log_entry_to_sync_item(entry)
+        return await refresh_offer_sync_item_from_authoritative_state(change_log_entry_to_sync_item(entry))
 
 
 async def mark_change_log_delivered(item: dict) -> int:
@@ -281,7 +353,9 @@ async def main():
                             },
                         )
                         continue
-                
+
+                data = await refresh_offer_sync_item_from_authoritative_state(data)
+                payload = json.dumps(data, sort_keys=True, default=str)
                 item_hash = data.get('hash', 'unknown')
                 logger.info(
                     "📦 Processing sync item",

@@ -220,6 +220,43 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["source_server"], "iran")
         self.assertEqual(payload["expire_reason"], "manual")
 
+    async def test_expire_offer_remote_home_outage_does_not_mutate_locally(self):
+        settings = SimpleNamespace(
+            offer_expire_rate_per_minute=5,
+            offer_expire_daily_limit_after_threshold=10,
+        )
+        offer = SimpleNamespace(
+            id=13,
+            user_id=5,
+            status=OfferStatus.ACTIVE,
+            home_server="foreign",
+            offer_public_id="ofr_remote_13",
+            channel_message_id=None,
+        )
+        db = FakeDB(scalar_result=0, get_result=offer)
+        current_user = SimpleNamespace(id=5)
+
+        with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
+            "bot.utils.redis_helpers.track_expire_rate",
+            new=AsyncMock(return_value=1),
+        ), patch(
+            "bot.utils.redis_helpers.track_daily_expire",
+            new=AsyncMock(return_value={"count": 0}),
+        ), patch("api.routers.offers.is_remote_home", return_value=True), patch(
+            "api.routers.offers.current_server",
+            return_value="iran",
+        ), patch(
+            "api.routers.offers.forward_offer_expiry_to_home_server",
+            new=AsyncMock(return_value=(503, {"detail": "سرور مرجع لفظ در دسترس نیست."})),
+        ):
+            response = await expire_offer(offer_id=13, db=db, context=make_context(current_user))
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(offer.status, OfferStatus.ACTIVE)
+        self.assertFalse(hasattr(offer, "expired_at"))
+        self.assertFalse(hasattr(offer, "expire_reason"))
+        db.commit.assert_not_awaited()
+
     async def test_internal_expire_records_forwarded_source_metadata(self):
         offer = SimpleNamespace(
             id=21,

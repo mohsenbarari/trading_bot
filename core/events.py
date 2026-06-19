@@ -22,6 +22,7 @@ from core.redis import pool
 from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
+from core.offer_sync_payload import build_offer_sync_payload
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity
@@ -306,36 +307,7 @@ def setup_offer_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {
-                "id": target.id,
-                "offer_public_id": getattr(target, "offer_public_id", None),
-                "version_id": target.version_id or 1,
-                "user_id": target.user_id,
-                "actor_user_id": getattr(target, "actor_user_id", None),
-                "home_server": target.home_server,
-                "offer_type": target.offer_type.value if target.offer_type else None,
-                "commodity_id": target.commodity_id,
-                "quantity": target.quantity,
-                "remaining_quantity": target.remaining_quantity,
-                "price": target.price,
-                "is_wholesale": target.is_wholesale,
-                "lot_sizes": target.lot_sizes,
-                "original_lot_sizes": target.original_lot_sizes,
-                "expire_reason": getattr(target, "expire_reason", None),
-                "expired_by_user_id": getattr(target, "expired_by_user_id", None),
-                "expired_by_actor_user_id": getattr(target, "expired_by_actor_user_id", None),
-                "expire_source_surface": getattr(target, "expire_source_surface", None),
-                "expire_source_server": getattr(target, "expire_source_server", None),
-                "notes": target.notes,
-                "status": target.status.value if target.status else None,
-                "channel_message_id": target.channel_message_id,
-                "republished_offer_id": target.republished_offer_id,
-                "created_at": target.created_at.isoformat() if target.created_at else None,
-                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
-                "expired_at": target.expired_at.isoformat() if getattr(target, "expired_at", None) else None,
-                "idempotency_key": target.idempotency_key,
-                "archived": target.archived,
-            }
+            data = build_offer_sync_payload(target)
             log_change(connection, "offers", target.id, "INSERT", data)
             publish_event_sync("offer:created", data)
         except Exception as e:
@@ -346,36 +318,7 @@ def setup_offer_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {
-                "id": target.id,
-                "offer_public_id": getattr(target, "offer_public_id", None),
-                "version_id": target.version_id or 1,
-                "user_id": target.user_id,
-                "actor_user_id": getattr(target, "actor_user_id", None),
-                "home_server": target.home_server,
-                "offer_type": target.offer_type.value if target.offer_type else None,
-                "commodity_id": target.commodity_id,
-                "quantity": target.quantity,
-                "remaining_quantity": target.remaining_quantity,
-                "price": target.price,
-                "is_wholesale": target.is_wholesale,
-                "lot_sizes": target.lot_sizes,
-                "original_lot_sizes": target.original_lot_sizes,
-                "expire_reason": getattr(target, "expire_reason", None),
-                "expired_by_user_id": getattr(target, "expired_by_user_id", None),
-                "expired_by_actor_user_id": getattr(target, "expired_by_actor_user_id", None),
-                "expire_source_surface": getattr(target, "expire_source_surface", None),
-                "expire_source_server": getattr(target, "expire_source_server", None),
-                "notes": target.notes,
-                "status": target.status.value if target.status else None,
-                "channel_message_id": target.channel_message_id,
-                "republished_offer_id": target.republished_offer_id,
-                "created_at": target.created_at.isoformat() if target.created_at else None,
-                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
-                "expired_at": target.expired_at.isoformat() if getattr(target, "expired_at", None) else None,
-                "idempotency_key": target.idempotency_key,
-                "archived": target.archived
-            }
+            data = build_offer_sync_payload(target)
             log_change(connection, "offers", target.id, "UPDATE", data)
             if target.status.value == "expired":
                 publish_event_sync("offer:expired", {"id": target.id})
