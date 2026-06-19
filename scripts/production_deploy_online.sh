@@ -1416,8 +1416,8 @@ ensure_frontend_dist() {
 
 verify_frontend_release_contracts() {
     local dist_dir="$1"
-    local contract_name="market-expired-offer-history"
-    local endpoint_marker="api/offers/expired"
+    local contract_name="market-terminal-offer-history"
+    local endpoint_marker="api/offers/market-history"
     local assets_dir="$dist_dir/assets"
     local market_chunks
 
@@ -1427,7 +1427,7 @@ verify_frontend_release_contracts() {
         die "Frontend release contract failed [$contract_name]: MarketView chunk missing in $dist_dir"
     fi
     if ! grep -h -q "$endpoint_marker" "${market_chunks[@]}"; then
-        die "Frontend release contract failed [$contract_name]: $endpoint_marker missing from MarketView bundle. Refusing to deploy a frontend that cannot load read-only expired market offers."
+        die "Frontend release contract failed [$contract_name]: $endpoint_marker missing from MarketView bundle. Refusing to deploy a frontend that cannot load read-only terminal market offers."
     fi
     log "Frontend release contract passed [$contract_name]"
 }
@@ -1724,8 +1724,8 @@ sync_project() {
     ssh_iran "set -euo pipefail
 assets_dir='$staging_dir/mini_app_dist/assets'
 find \"\$assets_dir\" -maxdepth 1 -type f -name 'MarketView-*.js' | grep -q . || exit 21
-grep -h -q 'api/offers/expired' \"\$assets_dir\"/MarketView-*.js || exit 22" \
-        || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only expired market offers."
+grep -h -q 'api/offers/market-history' \"\$assets_dir\"/MarketView-*.js || exit 22" \
+        || die "Remote Iran frontend release contract failed: deployed MarketView bundle cannot load read-only terminal market offers."
     scp_iran "$IRAN_ENV_SOURCE_PATH" "$IRAN_SSH_TARGET:$staging_dir/.env"
     log "Production payload sync complete"
 }
