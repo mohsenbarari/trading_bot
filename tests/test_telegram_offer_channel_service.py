@@ -127,6 +127,51 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["reply_markup"], None)
         self.assertIn("❌", payload["text"])
 
+    async def test_apply_partially_traded_expired_edits_text_and_removes_buttons(self):
+        response = SimpleNamespace(status_code=200, text="")
+        client = FakeHttpClientContext(response=response)
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason="time_limit",
+            quantity=40,
+            remaining_quantity=20,
+        )
+
+        with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch.object(channel_service.settings, "bot_token", "bot-token"), \
+             patch.object(channel_service.settings, "channel_id", -100), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
+            result = await channel_service.apply_offer_channel_state(offer, reason="test")
+
+        self.assertTrue(result)
+        url = client.post.await_args.args[0]
+        payload = client.post.await_args.kwargs["json"]
+        self.assertTrue(url.endswith("/editMessageText"))
+        self.assertEqual(payload["reply_markup"], None)
+        self.assertIn("🤝 20 تا ✅", payload["text"])
+        self.assertNotIn("🤝 20تا ✅.", payload["text"])
+
+    async def test_apply_terminal_state_can_use_publication_state_message_id(self):
+        response = SimpleNamespace(status_code=200, text="")
+        client = FakeHttpClientContext(response=response)
+        offer = make_offer(status=OfferStatus.COMPLETED, channel_message_id=None)
+        publication_state = SimpleNamespace(telegram_message_id=901)
+
+        with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch.object(channel_service.settings, "bot_token", "bot-token"), \
+             patch.object(channel_service.settings, "channel_id", -100), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
+            result = await channel_service.apply_offer_channel_state(
+                offer,
+                publication_state=publication_state,
+                reason="test",
+            )
+
+        self.assertTrue(result)
+        payload = client.post.await_args.kwargs["json"]
+        self.assertEqual(payload["message_id"], 901)
+        self.assertEqual(offer.channel_message_id, 901)
+
     async def test_apply_state_is_foreign_only(self):
         client = FakeHttpClientContext(response=SimpleNamespace(status_code=200, text=""))
 

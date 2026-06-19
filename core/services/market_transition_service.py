@@ -9,11 +9,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core import telegram_gateway
 from core.config import settings
 from core.events import publish_event_sync
-from core.offer_expiry import remove_channel_buttons
 from core.server_routing import current_server
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
@@ -21,6 +21,7 @@ from core.services.offer_expiry_service import (
     OfferExpirySourceSurface,
     expire_offers_authoritatively,
 )
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.trading_settings import get_trading_settings_async
 from core.utils import utc_now
 from models.market_runtime_state import MarketRuntimeState
@@ -279,6 +280,7 @@ async def register_market_offer_created(
 async def _load_active_local_offers(db: AsyncSession) -> list[Offer]:
     result = await db.execute(
         select(Offer)
+        .options(selectinload(Offer.commodity))
         .where(
             Offer.status == OfferStatus.ACTIVE,
             Offer.home_server == current_server(),
@@ -325,7 +327,6 @@ async def _apply_market_closed_transition(
     now = _coerce_utc_now(current_time)
     active_offers = await _load_active_local_offers(db)
     expired_offer_ids: list[int] = []
-    channel_message_ids: list[int] = []
     expired_user_ids: list[int] = []
 
     expiry_result = await expire_offers_authoritatively(
@@ -344,8 +345,6 @@ async def _apply_market_closed_transition(
 
     for offer in expiry_result.expired_offers:
         expired_offer_ids.append(offer.id)
-        if offer.channel_message_id:
-            channel_message_ids.append(int(offer.channel_message_id))
         if offer.user_id:
             expired_user_ids.append(int(offer.user_id))
 
@@ -356,11 +355,11 @@ async def _apply_market_closed_transition(
     await db.commit()
     invalidate_market_runtime_view_cache()
 
-    for channel_message_id in channel_message_ids:
+    for offer in expiry_result.expired_offers:
         try:
-            await remove_channel_buttons(channel_message_id)
+            await apply_offer_channel_state(offer, reason="market_close_expire")
         except Exception as exc:
-            logger.warning("Failed to remove channel buttons for market-close expiry %s: %s", channel_message_id, exc)
+            logger.warning("Failed to apply channel state for market-close expiry %s: %s", offer.id, exc)
 
     if expired_user_ids:
         try:

@@ -148,6 +148,7 @@ def make_user(**overrides):
 def make_reloaded_offer(*, offer_id=701):
     return SimpleNamespace(
         id=offer_id,
+        offer_public_id=f"ofr_offer_{offer_id}",
         user_id=5,
         offer_type=OfferType.BUY,
         commodity_id=1,
@@ -250,8 +251,8 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             "core.services.trade_service.detect_offer_price_warning",
             new=AsyncMock(return_value=None),
         ), patch(
-            "api.routers.offers.send_offer_to_channel",
-            new=AsyncMock(return_value=777),
+            "api.routers.offers.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=777)),
         ), patch(
             "api.routers.offers.register_market_offer_created",
             new=AsyncMock(),
@@ -341,6 +342,11 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
             shared_count["value"] += 1
             return shared_count["value"]
 
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            message_id = await send_offer_to_channel(offer, publish_user)
+            offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=message_id, error_code=None)
+
         with patch("core.utils.check_user_limits", side_effect=[(True, None), (True, None)]), patch(
             "bot.handlers.trade_create._bot_market_is_open",
             new=AsyncMock(return_value=True),
@@ -362,6 +368,9 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.cache.incr_active_offer_count",
             new=AsyncMock(side_effect=fake_incr_active_offer_count),
+        ), patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
         ), patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
             side_effect=[

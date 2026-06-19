@@ -113,6 +113,20 @@ class BotTradeCreateTextOfferWarningConfirmTests(unittest.IsolatedAsyncioTestCas
         update_session = FakeSession()
         bot = SimpleNamespace(send_message=AsyncMock(side_effect=[SimpleNamespace(message_id=910), SimpleNamespace(message_id=911)]))
 
+        async def update_get(model, key):
+            if create_session.added and model.__name__ == "Offer":
+                return create_session.added[0]
+            if model.__name__ == "User":
+                return SimpleNamespace(id=key)
+            return None
+
+        update_session.get = update_get
+
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            message_id = await send_offer_to_channel(offer, publish_user)
+            offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=message_id, error_code=None)
+
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
             "core.utils.check_user_limits", side_effect=[(True, None), (True, None)]
         ), patch(
@@ -126,6 +140,9 @@ class BotTradeCreateTextOfferWarningConfirmTests(unittest.IsolatedAsyncioTestCas
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=self.warning_payload())
         ), patch("core.utils.increment_user_counter", new=AsyncMock()), patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
+        ), patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ):
             await handle_text_offer_warning_confirm(

@@ -7,6 +7,7 @@ from typing import Any, Optional
 from core import telegram_gateway
 from core.config import settings
 from core.server_routing import SERVER_FOREIGN, current_server
+from core.services.telegram_offer_publication_service import telegram_publication_message_id
 from core.services.trade_service import get_available_trade_amounts
 from models.offer import OfferStatus, OfferType
 
@@ -124,6 +125,7 @@ def build_offer_channel_reply_markup(offer: Any) -> Optional[dict[str, Any]]:
 async def apply_offer_channel_state(
     offer: Any,
     *,
+    publication_state: Any | None = None,
     traded_quantity: Optional[int] = None,
     reason: str = "",
     timeout: float = 10,
@@ -137,9 +139,11 @@ async def apply_offer_channel_state(
     if current_server() != SERVER_FOREIGN:
         return False
 
-    channel_message_id = _finite_int(getattr(offer, "channel_message_id", None))
+    channel_message_id = telegram_publication_message_id(offer, publication_state)
     if not channel_message_id:
         return False
+    if not _finite_int(getattr(offer, "channel_message_id", None)):
+        setattr(offer, "channel_message_id", channel_message_id)
 
     channel_id = settings.channel_id
     if not channel_id:

@@ -164,6 +164,11 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
         update_session.get = update_get
         self.assertIsNone(await update_session.get(type("Other", (), {}), 5))
 
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            message_id = await send_offer_to_channel(offer, publish_user)
+            offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=message_id, error_code=None)
+
         with patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed_offer, None))), patch(
             "core.trading_settings.get_trading_settings",
             return_value=SimpleNamespace(max_active_offers=3),
@@ -191,6 +196,9 @@ class BotTradeCreateTextOfferWarningFlowIntegrationTests(unittest.IsolatedAsynci
             "core.utils.increment_user_counter",
             new=AsyncMock(),
         ) as increment_mock, patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
+        ), patch(
             "bot.handlers.trade_create.settings",
             SimpleNamespace(channel_id=-100, bot_username="botname"),
         ):

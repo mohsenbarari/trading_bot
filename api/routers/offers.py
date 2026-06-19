@@ -27,6 +27,7 @@ from core.services.telegram_offer_channel_service import (
     build_offer_channel_message,
     build_offer_channel_reply_markup,
 )
+from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
     get_active_customer_relation_for_customer,
@@ -834,10 +835,15 @@ async def create_offer(
     )
     new_offer = result.scalar_one()
     
-    # ارسال به کانال
-    message_id = await send_offer_to_channel(new_offer, owner_user)
-    if message_id:
-        new_offer.channel_message_id = message_id
+    # ارسال idempotent به کانال تلگرام و ثبت نتیجه در publication-state
+    publish_result = await publish_offer_to_telegram_channel_once(
+        db,
+        new_offer,
+        owner_user,
+        send_offer_to_channel=send_offer_to_channel,
+    )
+    if publish_result.message_id:
+        new_offer.channel_message_id = publish_result.message_id
         await db.commit()
 
     log_trading_event(

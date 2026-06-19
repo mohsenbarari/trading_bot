@@ -386,7 +386,10 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
-        ), patch("api.routers.offers.send_offer_to_channel", new=AsyncMock(side_effect=RuntimeError("publish boom"))):
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=RuntimeError("publish boom")),
+        ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
@@ -396,7 +399,10 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
-        ), patch("api.routers.offers.send_offer_to_channel", new=AsyncMock(return_value=555)):
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=555, status="sent", error_code=None)),
+        ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
         self.assertEqual(result, {"status": "success", "processed": 1})
 

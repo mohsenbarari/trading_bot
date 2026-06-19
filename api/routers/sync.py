@@ -1149,6 +1149,7 @@ async def receive_sync_data(
                 from sqlalchemy.orm import selectinload
                 from models.offer import OfferStatus
                 from api.routers.offers import send_offer_to_channel
+                from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
 
                 unique_offer_ids = list(set(new_offers))
                 logger.info(f"📋 Channel publish candidates: {unique_offer_ids}")
@@ -1162,22 +1163,31 @@ async def receive_sync_data(
                             ).where(
                                 Offer.id == oid,
                                 Offer.status == OfferStatus.ACTIVE,
-                                Offer.channel_message_id.is_(None),
                             ).with_for_update(skip_locked=True)
                             result = await db.execute(stmt)
                             offer = result.scalars().first()
 
                             if offer:
-                                msg_id = await send_offer_to_channel(offer, offer.user)
-                                if msg_id:
-                                    offer.channel_message_id = msg_id
-                                    logger.info(f"📣 Published synced offer {offer.id} to Telegram. MsgID: {msg_id}")
+                                publication_result = await publish_offer_to_telegram_channel_once(
+                                    db,
+                                    offer,
+                                    offer.user,
+                                    send_offer_to_channel=send_offer_to_channel,
+                                )
+                                if publication_result.message_id:
+                                    logger.info(
+                                        "📣 Published synced offer %s to Telegram. MsgID: %s",
+                                        offer.id,
+                                        publication_result.message_id,
+                                    )
                                 else:
                                     logger.warning(
-                                        "send_offer_to_channel returned None",
+                                        "offer Telegram publication returned no message id",
                                         extra={
                                             "event": "sync.synced_offer_publish_empty_result",
                                             "offer_id": oid,
+                                            "publication_error_code": publication_result.error_code,
+                                            "publication_status": getattr(publication_result.status, "value", publication_result.status),
                                         },
                                     )
                             else:
@@ -1213,18 +1223,24 @@ async def receive_sync_data(
             try:
                 from sqlalchemy.orm import selectinload
                 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+                from core.services.telegram_offer_publication_service import load_telegram_publication_state_for_update
 
                 unique_offer_ids = list(set(terminal_offers))
                 stmt = (
                     select(Offer)
                     .options(selectinload(Offer.commodity))
-                    .where(Offer.id.in_(unique_offer_ids), Offer.channel_message_id.isnot(None))
+                    .where(Offer.id.in_(unique_offer_ids))
                 )
                 result = await db.execute(stmt)
                 terminal_offer_rows = result.scalars().all()
                 for offer in terminal_offer_rows:
                     try:
-                        await apply_offer_channel_state(offer, reason="sync_terminal_offer")
+                        publication_state = await load_telegram_publication_state_for_update(db, offer)
+                        await apply_offer_channel_state(
+                            offer,
+                            publication_state=publication_state,
+                            reason="sync_terminal_offer",
+                        )
                     except Exception as e:
                         logger.error(
                             "Failed to apply synced terminal offer Telegram state",

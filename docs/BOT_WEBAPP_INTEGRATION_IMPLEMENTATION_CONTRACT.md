@@ -974,6 +974,49 @@ Exit criteria:
 - Telegram channel state can be reconciled with DB and publication state, including the exact
   terminal marker and removal of interactive controls.
 
+Implemented in Step 7B:
+
+- Added `telegram_offer_publication_service` as the idempotent Telegram-channel publication gate.
+  It locks/creates the `offer_publication_states` row by the Telegram surface dedupe key derived
+  from `offer_public_id`, so worker replay and direct-push replay are not protected only by
+  `Offer.channel_message_id`.
+- WebApp/API offer creation, direct Bot offer creation, and synced-offer publication on the foreign
+  server now publish through the same `publish_offer_to_telegram_channel_once(...)` path. Successful
+  publication records the Telegram chat/message id, surface resource id, success timestamp, and
+  local legacy `Offer.channel_message_id`; failed publication records a retryable `failed`
+  publication state.
+- Foreign sync receive no longer skips publication solely because `channel_message_id` is present.
+  If legacy `channel_message_id` already exists, the service backfills a `sent` publication state
+  instead of creating another Telegram post.
+- Terminal Telegram channel state can use either `Offer.channel_message_id` or the synced
+  Telegram publication state's `telegram_message_id`, then applies the existing canonical
+  `editMessageText` path with `reply_markup=None`.
+- Completed offers append `🤝 ✅`, partially traded expired/history offers append
+  `🤝 {traded_quantity} تا ✅`, and purely expired offers append `❌`; replaying unchanged terminal
+  text remains idempotent because Telegram "message is not modified" is treated as success.
+- Manual expiry, auto-expiry, Bot cancel-all, WebApp cancel-all, synced terminal offers, and
+  market-close expiry now route through `apply_offer_channel_state(...)` for terminal Telegram
+  channel state instead of using separate remove-buttons-only paths.
+
+Verification:
+
+- `tests.test_telegram_offer_publication_service`
+- `tests.test_telegram_offer_channel_service`
+- `tests.test_sync_router_receive_offer_publish`
+- `tests.test_sync_router_remaining_paths`
+- `tests.test_market_transition_service`
+- `tests.test_offers_router_create_success`
+- `tests.test_offer_limit_cross_surface_smoke`
+- `tests.test_offer_expiry`
+- `tests.test_offers_router_expire`
+- `tests.test_bot_trade_create_helper_cancel`
+- `python3 -m unittest discover -s tests -p 'test_bot_trade_create*.py'`
+- `tests.test_bot_trade_manage_success`
+- `tests.test_bot_trade_execute_update_markup`
+- Regression coverage from `tests.test_offer_publication_state_service`, `tests.test_sync_metadata`,
+  `tests.test_sync_registry`, `tests.test_core_events`, and
+  `tests.test_sync_router_apply_item_success`.
+
 ### Step 7C - WebApp Realtime Visibility From Synced Market Changes
 
 Required behavior:

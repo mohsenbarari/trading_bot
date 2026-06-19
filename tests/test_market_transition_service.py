@@ -277,9 +277,9 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             "core.services.offer_expiry_service.current_server",
             return_value="foreign",
         ), patch(
-            "core.services.market_transition_service.remove_channel_buttons",
+            "core.services.market_transition_service.apply_offer_channel_state",
             new=AsyncMock(),
-        ) as remove_buttons_mock, patch(
+        ) as apply_channel_state_mock, patch(
             "core.cache.decr_active_offer_count",
             new=AsyncMock(),
         ) as decr_mock, patch(
@@ -306,7 +306,9 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([offer.expired_by_user_id for offer in offers], [None, None])
         self.assertEqual([offer.expired_by_actor_user_id for offer in offers], [None, None])
         db.commit.assert_awaited_once()
-        remove_buttons_mock.assert_awaited_once_with(101)
+        self.assertEqual(apply_channel_state_mock.await_count, 2)
+        apply_channel_state_mock.assert_any_await(offers[0], reason="market_close_expire")
+        apply_channel_state_mock.assert_any_await(offers[1], reason="market_close_expire")
         self.assertEqual(decr_mock.await_count, 2)
         notice_mock.assert_awaited_once_with(market_transition_service.MARKET_CLOSED_CHANNEL_NOTICE)
         publish_mock.assert_called_once()
@@ -630,7 +632,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             "_load_active_local_offers",
             new=AsyncMock(return_value=[offer]),
         ), patch(
-            "core.services.market_transition_service.remove_channel_buttons",
+            "core.services.market_transition_service.apply_offer_channel_state",
             new=AsyncMock(side_effect=RuntimeError("telegram down")),
         ), patch(
             "core.cache.decr_active_offer_count",

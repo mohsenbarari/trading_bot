@@ -101,6 +101,7 @@ class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase
         self.assertIn("کانال تنظیم نشده است", callback.message.edit_text.await_args.args[0])
 
         create_session = FakeSession()
+        publish_session = FakeSession()
         rollback_session = FakeSession()
 
         async def rollback_get(model, key):
@@ -108,10 +109,17 @@ class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase
                 return create_session.added[0]
             return None
 
+        publish_session.get = rollback_get
         rollback_session.get = rollback_get
         self.assertIsNone(await rollback_session.get(type("Other", (), {}), 2))
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), from_user=SimpleNamespace(id=555))
         state = SimpleNamespace(get_data=AsyncMock(return_value=data), clear=AsyncMock())
+
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            message_id = await send_offer_to_channel(offer, publish_user)
+            offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=message_id, error_code=None)
+
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
             "core.utils.check_user_limits", side_effect=[(True, None), (True, None)]
         ), patch(
@@ -120,10 +128,14 @@ class BotTradeCreateTextOfferFailureCancelTests(unittest.IsolatedAsyncioTestCase
                 FakeSessionContext(FakeSession([0])),
                 FakeSessionContext(FakeSession()),
                 FakeSessionContext(create_session),
+                FakeSessionContext(publish_session),
                 FakeSessionContext(rollback_session),
             ],
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
         ), patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ):

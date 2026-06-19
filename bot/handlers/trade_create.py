@@ -33,6 +33,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
 from core.utils import to_jalali_str, check_user_limits, increment_user_counter, utc_now_naive
 from bot.handlers.trade_utils import (
     get_trade_type_keyboard,
@@ -722,17 +723,32 @@ async def _handle_trade_confirm_core(
                 ]
             )
 
-        sent_msg = await bot.send_message(
-            chat_id=settings.channel_id,
-            text=channel_message,
-            reply_markup=trade_keyboard,
-        )
+        async def send_created_offer_to_channel(_offer, _user):
+            sent_msg = await bot.send_message(
+                chat_id=settings.channel_id,
+                text=channel_message,
+                reply_markup=trade_keyboard,
+            )
+            return sent_msg.message_id
 
         async with AsyncSessionLocal() as session:
             offer = await session.get(Offer, offer_id)
-            if offer:
-                offer.channel_message_id = sent_msg.message_id
+            if not offer:
+                raise RuntimeError("offer_not_found_for_channel_publication")
+            try:
+                publish_result = await publish_offer_to_telegram_channel_once(
+                    session,
+                    offer,
+                    user,
+                    send_offer_to_channel=send_created_offer_to_channel,
+                    raise_send_errors=True,
+                )
                 await session.commit()
+            except Exception:
+                await session.commit()
+                raise
+            if not publish_result.message_id:
+                raise RuntimeError(publish_result.error_code or "telegram_channel_publication_failed")
 
             db_user = await session.get(User, user.id)
             if db_user:

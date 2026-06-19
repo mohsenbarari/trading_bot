@@ -90,6 +90,7 @@ class BotTradeCreateConfirmUnexpectedErrorTests(unittest.IsolatedAsyncioTestCase
             clear=AsyncMock(),
         )
         create_session = FakeSession()
+        publish_session = FakeSession()
         rollback_session = FakeSession()
 
         async def rollback_get(model, key):
@@ -97,8 +98,14 @@ class BotTradeCreateConfirmUnexpectedErrorTests(unittest.IsolatedAsyncioTestCase
                 return create_session.added[0]
             return None
 
+        publish_session.get = rollback_get
         rollback_session.get = rollback_get
         bot = SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("boom")))
+
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            message_id = await send_offer_to_channel(offer, publish_user)
+            offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=message_id, error_code=None)
 
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
             "bot.handlers.trade_create.check_user_limits", side_effect=[(True, None), (True, None)]
@@ -108,10 +115,14 @@ class BotTradeCreateConfirmUnexpectedErrorTests(unittest.IsolatedAsyncioTestCase
                 FakeSessionContext(FakeSession([0])),
                 FakeSessionContext(FakeSession()),
                 FakeSessionContext(create_session),
+                FakeSessionContext(publish_session),
                 FakeSessionContext(rollback_session),
             ],
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
         ), patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ):
@@ -144,9 +155,22 @@ class BotTradeCreateConfirmUnexpectedErrorTests(unittest.IsolatedAsyncioTestCase
             clear=AsyncMock(),
         )
         create_session = FakeSession()
+        publish_session = FakeSession()
         rollback_session = FakeSession()
+
+        async def publish_get(model, key):
+            if create_session.added:
+                return create_session.added[0]
+            return None
+
+        publish_session.get = publish_get
         rollback_session.get = AsyncMock(side_effect=RuntimeError("rollback boom"))
         bot = SimpleNamespace(send_message=AsyncMock(side_effect=RuntimeError("boom")))
+
+        async def fake_publish(_session, offer, publish_user, *, send_offer_to_channel, **_kwargs):
+            message_id = await send_offer_to_channel(offer, publish_user)
+            offer.channel_message_id = message_id
+            return SimpleNamespace(message_id=message_id, error_code=None)
 
         with patch("core.trading_settings.get_trading_settings", return_value=SimpleNamespace(max_active_offers=3)), patch(
             "bot.handlers.trade_create.check_user_limits", side_effect=[(True, None), (True, None)]
@@ -156,10 +180,14 @@ class BotTradeCreateConfirmUnexpectedErrorTests(unittest.IsolatedAsyncioTestCase
                 FakeSessionContext(FakeSession([0])),
                 FakeSessionContext(FakeSession()),
                 FakeSessionContext(create_session),
+                FakeSessionContext(publish_session),
                 FakeSessionContext(rollback_session),
             ],
         ), patch("core.services.trade_service.validate_competitive_price", new=AsyncMock(return_value=(True, None))), patch(
             "core.services.trade_service.detect_offer_price_warning", new=AsyncMock(return_value=None)
+        ), patch(
+            "bot.handlers.trade_create.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
         ), patch(
             "bot.handlers.trade_create.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ), patch("bot.handlers.trade_create.logger.debug") as debug_mock:

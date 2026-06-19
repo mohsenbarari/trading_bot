@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from api.routers.sync import receive_sync_data
 
@@ -84,14 +84,26 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             new_offers.append(record_id)
             return "ok"
 
+        async def fake_publish(db_arg, offer_arg, user_arg, **_kwargs):
+            offer_arg.channel_message_id = 555
+            return SimpleNamespace(message_id=555, status="sent", error_code=None)
+
         with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
-        ), patch("api.routers.offers.send_offer_to_channel", new=AsyncMock(return_value=555)) as send_mock:
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(side_effect=fake_publish),
+        ) as publish_mock:
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        send_mock.assert_awaited_once_with(offer, offer.user)
+        publish_mock.assert_awaited_once_with(
+            db,
+            offer,
+            offer.user,
+            send_offer_to_channel=ANY,
+        )
         self.assertEqual(offer.channel_message_id, 555)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
@@ -107,10 +119,13 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
-        ), patch("api.routers.offers.send_offer_to_channel", new=AsyncMock()) as send_mock:
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(),
+        ) as publish_mock:
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        send_mock.assert_not_awaited()
+        publish_mock.assert_not_awaited()
         self.assertEqual(result, {"status": "success", "processed": 1})
 
         offer = make_offer()
@@ -119,10 +134,18 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
-        ), patch("api.routers.offers.send_offer_to_channel", new=AsyncMock(return_value=None)) as send_mock:
+        ), patch(
+            "core.services.telegram_offer_publication_service.publish_offer_to_telegram_channel_once",
+            new=AsyncMock(return_value=SimpleNamespace(message_id=None, status="failed", error_code="telegram_send_empty_result")),
+        ) as publish_mock:
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        send_mock.assert_awaited_once_with(offer, offer.user)
+        publish_mock.assert_awaited_once_with(
+            db,
+            offer,
+            offer.user,
+            send_offer_to_channel=ANY,
+        )
         self.assertIsNone(offer.channel_message_id)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
@@ -143,13 +166,21 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.sync.select", return_value=FakeSelect()), patch(
             "sqlalchemy.orm.selectinload", side_effect=lambda *args, **kwargs: object()
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+            "core.services.telegram_offer_publication_service.load_telegram_publication_state_for_update",
+            new=AsyncMock(return_value=None),
+        ) as load_publication_state_mock, patch(
             "core.services.telegram_offer_channel_service.apply_offer_channel_state", new=AsyncMock(return_value=True)
         ) as apply_state_mock:
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(result, {"status": "success", "processed": 2})
         publish_mock.assert_awaited_once()
-        apply_state_mock.assert_awaited_once_with(terminal_offer, reason="sync_terminal_offer")
+        load_publication_state_mock.assert_awaited_once_with(db, terminal_offer)
+        apply_state_mock.assert_awaited_once_with(
+            terminal_offer,
+            publication_state=None,
+            reason="sync_terminal_offer",
+        )
 
 
 if __name__ == "__main__":
