@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from api.routers.sync import _apply_item
+from models.offer import Offer
 
 
 class AsyncNullContext:
@@ -89,7 +90,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.execute_calls[0], ("TRADING_UPSERT", {"is_sync": True}))
 
         new_offers = []
-        offer_data = {"price": 12, "channel_message_id": 99, "home_server": "iran"}
+        offer_data = {"price": 12, "channel_message_id": 99, "home_server": "iran", "offer_public_id": "ofr_remote_8"}
         db = FakeDB()
         with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT") as builder, patch(
             "api.routers.sync.settings.server_mode", "foreign"
@@ -100,15 +101,16 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "INSERT",
                 8,
                 offer_data,
-                model=object,
+                model=Offer,
                 new_offers=new_offers,
             )
         self.assertEqual(result, "ok")
         self.assertEqual(new_offers, [8])
         self.assertNotIn("channel_message_id", offer_data)
         self.assertEqual(offer_data["home_server"], "iran")
+        self.assertEqual(offer_data["offer_public_id"], "ofr_remote_8")
         self.assertEqual(offer_data["id"], 8)
-        builder.assert_called_once_with(object, "offers", offer_data)
+        builder.assert_called_once_with(Offer, "offers", offer_data)
         self.assertEqual(db.execute_calls[0], ("UPSERT", {"is_sync": True}))
 
         terminal_offers = []

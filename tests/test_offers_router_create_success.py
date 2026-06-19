@@ -95,6 +95,7 @@ def make_context(owner_user=None, actor_user=None):
 def make_reloaded_offer(*, offer_id=77, channel_message_id=None, notes="urgent"):
     return SimpleNamespace(
         id=offer_id,
+        offer_public_id=f"ofr_offer_{offer_id}",
         user_id=5,
         offer_type=OfferType.BUY,
         commodity_id=1,
@@ -181,6 +182,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         new_offer = db.added[0]
         self.assertEqual(new_offer.user_id, 5)
         self.assertEqual(new_offer.home_server, "iran")
+        self.assertTrue(new_offer.offer_public_id.startswith("ofr_"))
         self.assertEqual(new_offer.offer_type, OfferType.BUY)
         self.assertEqual(old_offer.status, OfferStatus.EXPIRED)
         self.assertIsNotNone(old_offer.expired_at)
@@ -271,6 +273,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
 
         new_offer = db.added[0]
         self.assertEqual(new_offer.home_server, "iran")
+        self.assertTrue(new_offer.offer_public_id.startswith("ofr_"))
         self.assertEqual(reloaded_offer.channel_message_id, 555)
         self.assertEqual(db.commit.await_count, 2)
         set_count_mock.assert_awaited_once_with(5, 1)
@@ -278,6 +281,8 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "offer:created",
             {
                 "id": 88,
+                "offer_public_id": "ofr_offer_88",
+                "public_link": "/market?offer=ofr_offer_88",
                 "user_id": None,
                 "offer_type": "buy",
                 "commodity_id": 1,
@@ -394,6 +399,8 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             "offer:created",
             {
                 "id": 99,
+                "offer_public_id": "ofr_offer_99",
+                "public_link": "/market?offer=ofr_offer_99",
                 "user_id": None,
                 "offer_type": "buy",
                 "commodity_id": 1,

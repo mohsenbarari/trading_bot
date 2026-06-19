@@ -4,6 +4,7 @@ from sqlalchemy import Column, Integer, String, BigInteger, Enum, DateTime, Fore
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
+from core.offer_identity import generate_offer_public_id
 import enum
 
 
@@ -33,6 +34,7 @@ class Offer(Base):
     )
     
     id = Column(Integer, primary_key=True, index=True)
+    offer_public_id = Column(String(40), nullable=False, unique=True, index=True, default=generate_offer_public_id)
     
     # ===== Optimistic Locking =====
     # این ستون برای جلوگیری از Lost Update در درخواست‌های همزمان استفاده می‌شود

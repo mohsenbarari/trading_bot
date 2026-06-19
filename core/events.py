@@ -277,6 +277,7 @@ def setup_offer_events():
         try:
             data = {
                 "id": target.id,
+                "offer_public_id": getattr(target, "offer_public_id", None),
                 "version_id": target.version_id or 1,
                 "user_id": target.user_id,
                 "actor_user_id": getattr(target, "actor_user_id", None),
@@ -312,6 +313,7 @@ def setup_offer_events():
         try:
             data = {
                 "id": target.id,
+                "offer_public_id": getattr(target, "offer_public_id", None),
                 "version_id": target.version_id or 1,
                 "user_id": target.user_id,
                 "actor_user_id": getattr(target, "actor_user_id", None),

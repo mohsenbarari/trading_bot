@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.dialects import postgresql
 
 from api.routers import offers as offers_module
+from core.telegram_gateway import TelegramGatewayResult
 from models.offer import OfferStatus, OfferType
 from models.trade import Trade
 
@@ -81,6 +82,7 @@ class BrokenCreatedAt:
 def make_offer_model(**overrides):
     data = {
         "id": 10,
+        "offer_public_id": "ofr_offer_10",
         "user_id": 5,
         "user": SimpleNamespace(account_name="owner"),
         "offer_type": OfferType.BUY,
@@ -104,6 +106,8 @@ def make_offer_model(**overrides):
 def make_offer_response(**overrides):
     data = {
         "id": 10,
+        "offer_public_id": "ofr_offer_10",
+        "public_link": "/market?offer=ofr_offer_10",
         "offer_type": "buy",
         "commodity_id": 2,
         "commodity_name": "Gold",
@@ -151,6 +155,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(response.user_id, 5)
+        self.assertEqual(response.offer_public_id, "ofr_offer_10")
+        self.assertTrue(response.public_link.endswith("/market?offer=ofr_offer_10"))
         self.assertEqual(response.user_account_name, "owner")
         self.assertTrue(response.is_own_offer)
         self.assertEqual(response.remaining_quantity, 12)
@@ -296,21 +302,28 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_offer_to_channel_builds_buttons_and_handles_failures(self):
         wholesale_offer = make_offer_model(price=75000)
 
-        with patch("api.routers.offers.os.getenv", return_value=None):
+        with patch("api.routers.offers.current_server", return_value="iran"):
             self.assertIsNone(await offers_module.send_offer_to_channel(wholesale_offer, SimpleNamespace(id=5)))
 
-        wholesale_client = FakeAsyncClient(response=FakeHttpResponse(message_id=321))
-        with patch("api.routers.offers.os.getenv", return_value="bot-token"), patch.object(
+        with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
-        ), patch("api.routers.offers.httpx.AsyncClient", return_value=wholesale_client):
+        ), patch(
+            "api.routers.offers.telegram_gateway.send_message",
+            new=AsyncMock(
+                return_value=TelegramGatewayResult(
+                    ok=True,
+                    method="sendMessage",
+                    response_json={"result": {"message_id": 321}},
+                )
+            ),
+        ) as send_mock:
             message_id = await offers_module.send_offer_to_channel(wholesale_offer, SimpleNamespace(id=5))
 
         self.assertEqual(message_id, 321)
-        wholesale_payload = wholesale_client.post.await_args.kwargs["json"]
-        self.assertIn("🟢خرید Gold 12 عدد 75,000", wholesale_payload["text"])
-        self.assertIn("توضیحات: urgent", wholesale_payload["text"])
+        self.assertIn("🟢خرید Gold 12 عدد 75,000", send_mock.await_args.args[1])
+        self.assertIn("توضیحات: urgent", send_mock.await_args.args[1])
         self.assertEqual(
-            wholesale_payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+            send_mock.await_args.kwargs["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
             "channel_trade:10:12",
         )
 
@@ -324,37 +337,46 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             original_lot_sizes=[10, 8, 10],
             notes=None,
         )
-        retail_client = FakeAsyncClient(response=FakeHttpResponse(message_id=654))
-        with patch("api.routers.offers.os.getenv", return_value="bot-token"), patch.object(
+        with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
         ), patch(
             "core.services.telegram_offer_channel_service.get_available_trade_amounts",
             return_value=[10, 8, 10],
-        ), patch("api.routers.offers.httpx.AsyncClient", return_value=retail_client):
+        ), patch(
+            "api.routers.offers.telegram_gateway.send_message",
+            new=AsyncMock(
+                return_value=TelegramGatewayResult(
+                    ok=True,
+                    method="sendMessage",
+                    response_json={"result": {"message_id": 654}},
+                )
+            ),
+        ) as send_mock:
             message_id = await offers_module.send_offer_to_channel(retail_offer, SimpleNamespace(id=5))
 
         self.assertEqual(message_id, 654)
-        retail_buttons = retail_client.post.await_args.kwargs["json"]["reply_markup"]["inline_keyboard"][0]
+        retail_buttons = send_mock.await_args.kwargs["reply_markup"]["inline_keyboard"][0]
         self.assertEqual([button["text"] for button in retail_buttons], ["10 عدد", "8 عدد"])
 
-        with patch("api.routers.offers.os.getenv", return_value="bot-token"), patch.object(
+        with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
         ), patch(
-            "api.routers.offers.httpx.AsyncClient",
-            return_value=FakeAsyncClient(response=FakeHttpResponse(status_code=500, text="bad gateway")),
-        ), patch.object(offers_module, "logger") as logger:
+            "api.routers.offers.telegram_gateway.send_message",
+            new=AsyncMock(return_value=TelegramGatewayResult(ok=False, method="sendMessage", status_code=500, error="bad gateway")),
+        ), patch("api.routers.offers.log_trading_event") as log_event:
             self.assertIsNone(await offers_module.send_offer_to_channel(wholesale_offer, SimpleNamespace(id=5)))
-        logger.warning.assert_called_once()
-        logger.error.assert_not_called()
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.kwargs["level"], "warning")
 
-        with patch("api.routers.offers.os.getenv", return_value="bot-token"), patch.object(
+        with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
         ), patch(
-            "api.routers.offers.httpx.AsyncClient",
-            return_value=FakeAsyncClient(error=RuntimeError("telegram down")),
-        ), patch.object(offers_module, "logger") as logger:
+            "api.routers.offers.telegram_gateway.send_message",
+            new=AsyncMock(side_effect=RuntimeError("telegram down")),
+        ), patch("api.routers.offers.log_trading_event") as log_event:
             self.assertIsNone(await offers_module.send_offer_to_channel(wholesale_offer, SimpleNamespace(id=5)))
-        logger.error.assert_called_once()
+        log_event.assert_called_once()
+        self.assertEqual(log_event.call_args.kwargs["level"], "error")
 
     async def test_active_and_my_offer_queries_cover_filter_branches(self):
         current_user = SimpleNamespace(id=8)

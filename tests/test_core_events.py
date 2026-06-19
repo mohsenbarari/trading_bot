@@ -97,6 +97,7 @@ class CoreEventsTests(unittest.TestCase):
         )
         offer = SimpleNamespace(
             id=1,
+            offer_public_id='ofr_event_1',
             version_id=2,
             user_id=9,
             actor_user_id=7,
@@ -368,6 +369,7 @@ class CoreEventsTests(unittest.TestCase):
         with patch('core.events.log_change') as log_change, patch('core.events.publish_event_sync') as publish_event_sync:
             offer = SimpleNamespace(
                 id=1,
+                offer_public_id='ofr_event_1',
                 version_id=2,
                 user_id=9,
                 home_server='foreign',
@@ -465,6 +467,10 @@ class CoreEventsTests(unittest.TestCase):
             self.assertEqual(payload['global_lock_grace_expires_at'], payload['messenger_grace_expires_at'])
             self.assertEqual(payload['global_web_locked_at'], payload['messenger_blocked_at'])
             self.assertEqual(payload['max_customers'], 5)
+        offer_payloads = [call.args[4] for call in log_change.call_args_list if call.args[1] == 'offers' and call.args[3] != 'DELETE']
+        self.assertTrue(offer_payloads)
+        for payload in offer_payloads:
+            self.assertEqual(payload['offer_public_id'], 'ofr_event_1')
         publish_event_sync.assert_any_call('offer:created', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:updated', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:expired', {'id': 1})

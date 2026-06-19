@@ -65,7 +65,7 @@ class BotTradeCreateConfirmSuccessRetailTests(unittest.IsolatedAsyncioTestCase):
                     "price": 123456,
                     "commodity_id": 7,
                     "is_wholesale": False,
-                    "lot_sizes": [3, 2, 1],
+                    "lot_sizes": [6, 6],
                     "notes": None,
                 }
             ),

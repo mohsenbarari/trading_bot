@@ -15,7 +15,8 @@ from bot.states import Trade
 from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
-from core.offer_source import OfferSourceSurface, offer_home_server_for_source
+from core.offer_source import OfferSourceSurface
+from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
 from core.services.trade_service import (
     validate_lot_sizes,
     validate_quantity,
@@ -637,24 +638,25 @@ async def _handle_trade_confirm_core(
 
     try:
         async with AsyncSessionLocal() as session:
-            new_offer = Offer(
-                user_id=user.id,
-                home_server=offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT),
-                offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
-                commodity_id=commodity_id,
-                quantity=quantity,
-                remaining_quantity=quantity,
-                price=price,
-                exclude_from_competitive_price=bool(price_warning),
-                price_warning_type=price_warning["warning_type"] if price_warning else None,
-                is_wholesale=is_wholesale,
-                lot_sizes=lot_sizes,
-                notes=notes,
-                status=OfferStatus.ACTIVE,
+            new_offer = await create_authoritative_offer(
+                session,
+                OfferCreationCommand(
+                    source_surface=OfferSourceSurface.TELEGRAM_BOT,
+                    owner_user_id=user.id,
+                    actor_user_id=user.id,
+                    offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
+                    commodity_id=commodity_id,
+                    quantity=quantity,
+                    price=price,
+                    exclude_from_competitive_price=bool(price_warning),
+                    price_warning_type=price_warning["warning_type"] if price_warning else None,
+                    is_wholesale=is_wholesale,
+                    lot_sizes=lot_sizes,
+                    original_lot_sizes=lot_sizes,
+                    notes=notes,
+                    status=OfferStatus.ACTIVE,
+                ),
             )
-            session.add(new_offer)
-            await session.commit()
-            await session.refresh(new_offer)
             offer_id = new_offer.id
 
         from bot.callbacks import ChannelTradeCallback, ExpireOfferCallback

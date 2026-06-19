@@ -490,6 +490,16 @@ Exit criteria:
 - Every new offer has a stable public link identity available to later request, callback, and WebApp
   detail flows.
 
+Implementation decisions:
+
+- The canonical stored field is `Offer.offer_public_id`; integer `offers.id` remains local/internal.
+- The initial public link shape is a relative WebApp path: `/market?offer={offer_public_id}`. Step 7C
+  may replace this with a richer offer detail route, but it must keep deriving the route from
+  `offer_public_id`.
+- WebApp and Bot creation adapters must call `create_authoritative_offer`; direct runtime
+  `Offer(...)` creation is limited to the shared service and non-runtime fixtures/tests.
+- Offer sync/change-log payloads must include `offer_public_id`, and sync receive must preserve it.
+
 ### Step 5B - Shared Expire/Cancel Command
 
 Required behavior:

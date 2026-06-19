@@ -133,6 +133,7 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(len(create_session.added), 1)
         offer = create_session.added[0]
         self.assertEqual(offer.id, 99)
+        self.assertTrue(offer.offer_public_id.startswith("ofr_"))
         self.assertEqual(offer.notes, "فقط نقدی")
         self.assertEqual(offer.home_server, "foreign")
         self.assertEqual(offer.channel_message_id, 777)

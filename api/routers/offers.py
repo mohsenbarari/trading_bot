@@ -33,7 +33,13 @@ from core.services.customer_relation_service import (
     load_offer_customer_read_context,
 )
 from core.services.user_account_status_service import is_user_market_blocked
-from core.offer_source import OfferSourceSurface, offer_home_server_for_source
+from core.offer_identity import build_offer_public_link, ensure_offer_public_id
+from core.offer_source import OfferSourceSurface
+from core.services.offer_creation_service import (
+    OfferCreationCommand,
+    OfferCreationValidationError,
+    create_authoritative_offer,
+)
 from core import telegram_gateway
 from core.trading_observability import log_trading_event
 from models.user import User
@@ -135,6 +141,8 @@ class OfferCreate(BaseModel):
 class OfferResponse(BaseModel):
     """پاسخ لفظ"""
     id: int
+    offer_public_id: str
+    public_link: str
     user_id: Optional[int] = None
     user_account_name: str = ""
     is_own_offer: bool = False
@@ -210,6 +218,7 @@ def offer_to_response(
         offer_owner_relation=offer_owner_relation,
         viewer_customer_relation=viewer_customer_relation,
     )
+    offer_public_id = ensure_offer_public_id(offer)
     
     # محاسبه زمان انقضا
     expires_at_ts = None
@@ -230,6 +239,8 @@ def offer_to_response(
 
     return OfferResponse(
         id=offer.id,
+        offer_public_id=offer_public_id,
+        public_link=build_offer_public_link(offer_public_id),
         user_id=offer.user_id if include_owner_identity else None,
         user_account_name=(offer.user.account_name if include_owner_identity and offer.user else ""),
         is_own_offer=is_own_offer,
@@ -645,28 +656,29 @@ async def create_offer(
             old_offer.expired_at = utc_now_naive()
             old_offer.expire_reason = "republished"
 
-    # ایجاد لفظ
-    new_offer = Offer(
-        user_id=owner_user.id,
-        actor_user_id=actor_user.id,
-        home_server=offer_home_server_for_source(OfferSourceSurface.WEBAPP),
-        offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
-        commodity_id=offer_data.commodity_id,
-        quantity=offer_data.quantity,
-        remaining_quantity=offer_data.quantity,
-        price=offer_data.price,
-        exclude_from_competitive_price=bool(price_warning),
-        price_warning_type=price_warning["warning_type"] if price_warning else None,
-        is_wholesale=offer_data.is_wholesale,
-        lot_sizes=offer_data.lot_sizes,
-        original_lot_sizes=offer_data.lot_sizes,  # ذخیره ترکیب اولیه برای تکرار
-        notes=offer_data.notes,
-        idempotency_key=idempotency_key,
-        status=OfferStatus.ACTIVE
-    )
-    db.add(new_offer)
     try:
-        await db.commit()
+        new_offer = await create_authoritative_offer(
+            db,
+            OfferCreationCommand(
+                source_surface=OfferSourceSurface.WEBAPP,
+                owner_user_id=owner_user.id,
+                actor_user_id=actor_user.id,
+                offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
+                commodity_id=offer_data.commodity_id,
+                quantity=offer_data.quantity,
+                price=offer_data.price,
+                exclude_from_competitive_price=bool(price_warning),
+                price_warning_type=price_warning["warning_type"] if price_warning else None,
+                is_wholesale=offer_data.is_wholesale,
+                lot_sizes=offer_data.lot_sizes,
+                original_lot_sizes=offer_data.lot_sizes,
+                notes=offer_data.notes,
+                idempotency_key=idempotency_key,
+                status=OfferStatus.ACTIVE,
+            ),
+        )
+    except OfferCreationValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except IntegrityError:
         await db.rollback()
         existing_offer = await _load_offer_idempotency_replay(
@@ -689,8 +701,7 @@ async def create_offer(
             reason="idempotency_integrity_conflict",
         )
         return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
-    await db.refresh(new_offer)
-    
+
     # لینک کردن لفظ قدیمی به جدید
     if offer_data.republished_from_id:
         # دوباره لود می‌کنیم چون ممکن است سشن بسته شده باشد یا نیاز به اتچ مجدد باشد، اما اینجا سشن باز است
@@ -749,6 +760,8 @@ async def create_offer(
 
     await _publish_offer_event_safely("offer:created", {
         "id": new_offer.id,
+        "offer_public_id": new_offer.offer_public_id,
+        "public_link": build_offer_public_link(new_offer.offer_public_id),
         "user_id": None,
         "offer_type": new_offer.offer_type.value,
         "commodity_id": new_offer.commodity_id,
