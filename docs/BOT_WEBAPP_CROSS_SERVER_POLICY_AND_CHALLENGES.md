@@ -5,13 +5,17 @@ Date: 2026-06-17
 This document captures the target operating policy for the Telegram bot, Iran WebApp, and
 cross-server sync. It is the working basis for the next design Q&A rounds.
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 
 Implementation baseline acceptance: on 2026-06-18, the owner accepted section 16
 (`Second-pass audit findings before implementation`) and section 17
 (`Third-pass external review decisions before implementation`) as part of the implementation
 baseline. Implementation must still start with a fresh branch check and the pre-code freshness
 report required by Level 1.
+
+Offer link and request metadata acceptance: on 2026-06-19, the owner accepted that every offer must
+have its own stable link and that request metadata must be incorporated into the same
+`candidate/bot-webapp-integration` execution path, not implemented as a parallel branch.
 
 ## Non-Negotiable Policy
 
@@ -188,6 +192,22 @@ report required by Level 1.
     must fail closed unless it is running on the foreign bot surface. The API process must fail
     closed for foreign WebApp/static/chat user surfaces even if frontend files, bot code, or
     credentials accidentally exist in the image.
+45. Every offer must have a stable, opaque public identity and canonical Iran WebApp link. The
+    public identity is the cross-server offer reference; integer `offers.id` values remain local
+    database keys and must not be required to match between Iran and foreign.
+46. Every confirmed backend request attempt against an offer must create an authoritative request
+    ledger entry, even when the request is rejected, becomes a duplicate replay, races with expiry,
+    or does not create a trade. First-tap UI pending state is not a product request.
+47. Offer expiry/source metadata is product data and must sync according to the accepted field-level
+    policy. Historical backfill must preserve old truth and must not fabricate actor/source values
+    that are not known from current data.
+48. Public offer link access is not authorization by itself. The public response must be
+    safe-by-default and must not expose requester identities, customer relation details, mobile
+    numbers, internal failure reasons, or operational metadata without explicit authorization.
+49. Offer identity metadata, offer link metadata, offer request ledger data, offer expiry metadata,
+    offer publication state, and offer detail visibility policy are separate concepts. They may be
+    implemented together only when their sync, authority, visibility, and retention rules remain
+    explicit.
 
 Policy note: item 5 and item 6 create an explicit exception. "All tables" means all product
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
@@ -1471,7 +1491,10 @@ confirmed requirement, not an optional design note:
 | Table class | Sync policy | Write surfaces | Authority | Conflict rule | Realtime side effects |
 | --- | --- | --- | --- | --- | --- |
 | `offers` | sync | bot, WebApp | `offer_home_server` | command-forward for mutations; migration cutover requires zero active offers on both servers | WebApp event on Iran, Telegram publish on foreign |
+| `offers.public_id` / offer link fields | sync-critical field on `offers` | shared offer creation, migration backfill | `offer_home_server` | immutable canonical cross-server identity; receivers resolve local `offers.id` from it | Iran WebApp public/detail route |
+| `offer_requests` | sync | WebApp, Bot, internal_forward | `offer_home_server` | idempotent authoritative command result; terminal ledger rows immutable except safe finalization fields | authorized offer detail/audit visibility |
 | `trades` | sync | bot, WebApp | offer home server | shared idempotent command; forward to `offer_home_server` when remote | notifications, offer update event |
+| `offer_publication_states` or equivalent | sync/partial-sync TBD | publication workers, reconciliation jobs | surface authority plus product owner authority for terminal state | dedupe key + latest terminal state; must not rewrite business truth | operator visibility; WebApp/Telegram publication reconciliation |
 | `users` | sync | admin/auth/bot link/WebApp | TBD | natural key + field-level merge | profile/account events |
 | `messages` | no sync | WebApp only | Iran | n/a | Iran realtime only |
 | `conversations` | no sync | WebApp only | Iran | n/a | Iran realtime only |
@@ -1493,6 +1516,11 @@ The implementation must fail tests/CI when a new model/table or migration introd
 without a registry entry. The table above is still a starter contract, not the final exhaustive
 registry. The implementation must derive the final list from the actual SQLAlchemy model and
 migration inventory.
+
+If offer public identity is implemented as fields on `offers` rather than a separate table, the
+registry and tests must still treat those fields as sync-critical. If publication state is
+implemented as columns, JSON, or another strongly named projection instead of
+`offer_publication_states`, it must still have an explicit registry entry before migration.
 
 ## Immediate Questions For Next Round
 

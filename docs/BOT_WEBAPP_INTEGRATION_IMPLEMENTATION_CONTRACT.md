@@ -13,11 +13,13 @@ coding, tests, commits, staging validation, and stop/go gates.
 
 - Sections 16 and 17 of `BOT_WEBAPP_CROSS_SERVER_POLICY_AND_CHALLENGES.md` are accepted as part of
   the implementation baseline.
-- `BOT_WEBAPP_INTEGRATION_PREFLIGHT_FRESHNESS_REPORT.md` is complete.
+- The original `BOT_WEBAPP_INTEGRATION_PREFLIGHT_FRESHNESS_REPORT.md` is complete but must be
+  refreshed as Step 0A because `main` has moved since the first report.
 - The candidate branch must be refreshed from current `main` before code implementation starts.
 - Refresh method recommended by the preflight report: merge `main` into
   `candidate/bot-webapp-integration`.
-- Branch refresh still requires explicit owner approval before it is performed.
+- The owner approved starting Step 0 on 2026-06-19. Proceed to the merge only if Step 0A confirms
+  the branch, worktree, and merge safety checks are still acceptable.
 - The owner-approved offer link and request metadata requirement is now part of this same contract,
   not a parallel branch. Implementation must not create a separate offer-link path that bypasses the
   Bot/WebApp authority, sync, outbox, publication, and staging gates in this document.
@@ -64,11 +66,19 @@ every offer has its own stable link and a complete request ledger.
 
 Required product truth:
 
+- Use these names consistently: Offer Identity Metadata, Offer Link Metadata, Offer Request Ledger,
+  Offer Expiry Metadata, Offer Publication State, and Offer Detail Visibility Policy.
 - Every offer must receive a stable, opaque, non-enumerable public identifier at authoritative
   creation time. Integer `offers.id` remains an internal/local implementation detail and must not be
   the public link identity.
+- `offer_public_id` is the canonical cross-server offer reference. Local database rows may keep
+  integer foreign keys, but sync payloads and forwarded commands must carry `offer_public_id`, and a
+  receiving peer must resolve its local `offers.id` from that public identity.
 - The canonical offer link must resolve through the Iran WebApp surface. Foreign/Bot may render or
   send the URL as text, but foreign must not serve WebApp pages and Iran must not call Telegram.
+- The public offer identifier is not an authorization secret. Having the link grants access only to
+  safe public market fields. A future `offer_share_token` may be introduced as a separate
+  rotatable/revokable URL token if link revocation becomes a product requirement.
 - Offer link metadata is synchronized product data. Publication state remains separate and local or
   surface-specific where required.
 - Every confirmed backend request attempt against an offer must be recorded in a durable
@@ -89,17 +99,48 @@ Required product truth:
   sensitive data policy. Public link access does not imply public access to requester identities,
   mobile numbers, customer relation details, or operational failure reasons.
 
-This requirement is a dependency for Step 5C, Step 5D, Step 7C, Step 8B, Step 11, and Step 12.
-Do not implement the shared trade/request command without the ledger contract.
+This requirement is a dependency for Step 5C-0, Step 5C, Step 5D, Step 7C, Step 8B, Step 11, and
+Step 12. Do not implement the shared trade/request command without the ledger contract.
 
 ## Step 0 - Refresh Candidate From Main
 
 Goal: make implementation start from current code instead of the stale roadmap-only branch.
 
+Step 0 is split so the branch refresh is auditable before and after the merge.
+
+### Step 0A - Re-run Freshness Report Against Current Main
+
 Start condition:
 
-- Owner explicitly approves merging or rebasing current `main` into
-  `candidate/bot-webapp-integration`.
+- Current branch is `candidate/bot-webapp-integration`.
+- Worktree is clean before collecting freshness data.
+- Owner has approved starting Step 0.
+
+Required actions:
+
+- Run `git fetch origin`.
+- Record local/remote SHAs for `main` and `candidate/bot-webapp-integration`.
+- Record merge base and `git rev-list --left-right --count main...HEAD`.
+- Run `git merge-tree --write-tree main HEAD` or the current equivalent merge simulation.
+- List changed implementation areas from `HEAD..main`, with special attention to offers, trades,
+  bot handlers, sync receive/worker, expiry, Telegram publication, frontend market history, and
+  deploy/release guards.
+- Update `BOT_WEBAPP_INTEGRATION_PREFLIGHT_FRESHNESS_REPORT.md`.
+
+Exit criteria:
+
+- Freshness report reflects current `main`, not the old 2026-06-18 snapshot.
+- The report states whether Step 0B can proceed or must stop for owner decision.
+
+### Step 0B - Owner-Approved Merge Main Into Candidate
+
+Start condition:
+
+- Step 0A is complete.
+- Current branch is `candidate/bot-webapp-integration`.
+- Worktree is clean.
+- The owner-approved default method remains a normal merge from `main`.
+- Merge simulation did not show textual conflicts. If this condition fails, stop and report.
 
 Default action:
 
@@ -110,11 +151,25 @@ Why merge, not rebase:
 - The candidate branch is already pushed.
 - The roadmap has a visible decision history that should not be rewritten without a specific reason.
 
-Deliverables:
+Exit criteria:
 
 - Merge commit or documented no-op if branch state changes before execution.
-- Updated freshness status after the merge.
-- Conflict notes if any semantic or textual conflict appears.
+- No conflict markers remain.
+- Worktree is clean after any required report commit.
+
+### Step 0C - Post-Merge Semantic Drift Report
+
+Required actions:
+
+- Review the refreshed code for semantic drift in at least:
+  `api/routers/offers.py`, `api/routers/trades.py`, `core/offer_expiry.py`,
+  `core/services/telegram_offer_channel_service.py` or current equivalent,
+  `models/offer.py`, `models/trade.py`, sync receive/worker code, frontend market-history, and
+  deploy/release guards.
+- Treat the current `main` market-history endpoint, Telegram terminal offer markers, and production
+  release guards as baseline behavior after refresh. Do not reimplement them unless tests show they
+  violate the shared gateway, publication-state, metadata, or sync contracts.
+- Record any required contract adjustment before Step 1 starts.
 
 Verification:
 
@@ -125,9 +180,10 @@ Verification:
 - Run the smallest existing backend test subset that exercises offers/trades/sync imports after the
   merge. Exact test names may change after refresh; choose the current equivalent tests.
 
-Exit criteria:
+Step 0 exit criteria:
 
 - Branch is refreshed from current `main`.
+- Freshness and post-merge drift reports are up to date.
 - Worktree is clean.
 - No conflict markers remain.
 - Push completed.
@@ -463,6 +519,66 @@ Exit criteria:
 - Expiry/cancel paths have one authority rule and one side-effect contract.
 - Offer expiry metadata is sufficient for the offer detail link and audit views.
 
+### Step 5C-0 - Minimum Field Policy For Offer Link And Request Ledger
+
+Required behavior:
+
+- Freeze the minimum field-level policy before adding the request ledger schema. Step 9C may broaden
+  the project-wide sensitive-data registry later, but Step 5C cannot create offer-link or
+  request-ledger fields without this minimum policy.
+- `offer_public_id` is sync-critical, visible as the route key, and visible to authorized users. It
+  is not an authorization secret.
+- `requester_user_id` is synced product data but hidden from public link viewers. It is visible only
+  to the requester where allowed, the offer owner where allowed, admin, or audit roles.
+- `actor_user_id` is synced product data but hidden from public link viewers. It is visible only to
+  owner/admin/audit roles where allowed.
+- `request_source_surface` is synced product data. Public views may show only a safe summary if the
+  product needs it; detailed source data is owner/admin/audit visibility.
+- `request_source_server` is synced product data but hidden from public views and limited to
+  admin/operator/audit visibility.
+- `requested_quantity` is synced product data. Public views may show only safe aggregate state;
+  requester/owner/admin views may show detailed rows according to permissions.
+- `result_status` is synced product data. Public views may show only safe status labels; detailed
+  status is permission-gated.
+- Failure data is split into `public_failure_code`/optional safe public message and
+  `internal_failure_code`/`internal_failure_context`. Internal failure context must be hidden from
+  public views, redacted from normal logs, and limited to admin/operator/audit visibility or
+  encrypted/derived storage if the implementation requires it.
+- Customer relation metadata is synced only as explicitly classified audit data:
+  `customer_relation_id`, owner user id, customer tier snapshot, management name snapshot, and
+  commission context are hidden from public views and visible only to owner/admin/audit roles where
+  allowed.
+- `mobile_number` must not be added to `offer_requests` unless explicitly classified first. Existing
+  `trades` mobile snapshots keep their legacy/current policy until Step 9C reviews them; do not
+  silently expand raw mobile sync through the new ledger.
+- Define the legacy/current `Offer.expire_reason` mapping before backfill:
+  `time_limit` -> `lifetime_expiry` with system/automatic source;
+  `manual` -> `owner_action`;
+  `cancel_all` and `bot_cancel_all` -> `owner_bulk_action`;
+  `republished` -> `owner_republish`;
+  `market_closed`/`market_close` -> `market_close`;
+  `telegram_send_failed` -> `publication_failure` or fail-closed publish rollback, not ordinary
+  user expiry;
+  `user_deleted` -> account cleanup;
+  future `recovery_finalization` -> recovery finalization;
+  future `admin`/`admin_action` -> admin action.
+- Historical rows with unknown actor/source must keep the old reason and use `legacy_unknown` for
+  missing metadata. Backfill must not invent user, actor, surface, or server values.
+
+Required tests:
+
+- Field-policy tests prove public offer-link responses cannot expose requester, customer relation,
+  mobile, internal failure, or raw source/server data.
+- Authorized detail tests prove owner/admin/audit viewers can see the fields they are allowed to see.
+- Expiry metadata mapping tests cover current known reason values and `legacy_unknown` backfill.
+- Log/redaction tests cover internal failure context and sensitive request metadata where practical.
+
+Exit criteria:
+
+- Step 5C schema work has an accepted field policy and cannot accidentally turn public links into
+  sensitive audit views.
+- Expiry metadata migration/backfill has a deterministic mapping and a no-fabrication rule.
+
 ### Step 5C - Offer Request Ledger And Metadata Schema
 
 Required behavior:
@@ -471,15 +587,34 @@ Required behavior:
   request attempts against offers.
 - The ledger is authoritative on `offer_home_server`; forwarded requests carry source metadata to
   the authoritative command rather than mutating the peer locally.
-- The ledger records at least: offer id, offer public id, requester user id, actor user id, request
-  source surface, request source server, requested quantity, idempotency key, request received time,
-  authoritative decision time, status/result, failure reason where safe, resulting trade id, and
-  archived/version fields needed for sync.
+- The ledger stores both `local_offer_id` as the local database foreign key and `offer_public_id` as
+  the canonical cross-server offer identity. Sync and forwarded command payloads must not require
+  matching integer offer IDs across servers.
+- The ledger records at least: local offer id, offer public id, requester user id, actor user id,
+  request source surface, request source server, requested quantity, idempotency key, request
+  received time, authoritative decision time, status/result, public failure code/message, internal
+  failure code/context where allowed, resulting trade id, and archived/version fields needed for
+  sync.
 - The ledger snapshots customer relation context at request time when the requester is a customer:
   relation id, owner user id, customer tier, management name, and commission context needed to
   explain price/trade outcomes later.
-- Request statuses distinguish at least: received/pending, completed as trade, rejected by business
-  rule, offer expired, lot unavailable, duplicate/idempotent replay, and conflict/stale state.
+- Request statuses define a lifecycle state machine with at least: `received`, `authorized`,
+  `rejected_business_rule`, `rejected_offer_expired`, `rejected_lot_unavailable`,
+  `rejected_conflict`, `completed_trade`, `duplicate_replay`, and `failed_internal`.
+- Terminal states are immutable except safe annotation/finalization fields. Duplicate replay returns
+  the existing terminal state instead of creating a new request row.
+- Enforce idempotency with an explicit uniqueness rule. The preferred baseline is a unique partial
+  constraint over non-null idempotency keys in the authoritative request namespace, such as
+  `UNIQUE(request_home_server, idempotency_key)` where `idempotency_key IS NOT NULL`. If the
+  implementation chooses a different namespace, document why before migration.
+- Telegram confirmed callbacks should use `telegram_callback:<callback_id>` as the idempotency key
+  where the callback id is reliable. Compatibility fallbacks must be deterministic and avoid broad
+  time buckets unless no safer data exists.
+- Ledger rows are append-only audit records except for safe status finalization fields.
+- Index at minimum by `offer_public_id`, requester user id, actor user id, created/received time,
+  idempotency key, and result status.
+- Define retention/archive behavior before production. Archival may move old rows to cheaper
+  storage, but audit-critical history must not be deleted without explicit owner approval.
 - Ledger entries are synced as product data. They are not messenger data.
 - Public offer link responses must be able to join offer metadata, expiry metadata, request ledger
   rows, and resulting trades without inferring missing request attempts from trades alone.
@@ -488,6 +623,9 @@ Required behavior:
 Required tests:
 
 - Migration/model tests cover the required columns, indexes, foreign keys, and enum/status values.
+- Constraint tests prove duplicate non-null idempotency keys cannot create duplicate ledger rows in
+  the authoritative request namespace.
+- State-machine tests prove terminal rows are not mutated into contradictory outcomes.
 - Registry tests classify `offer_requests` as synced product data.
 - A confirmed WebApp request creates a ledger row with WebApp/Iran source metadata.
 - A confirmed Bot/channel request creates a ledger row with Telegram/foreign source metadata.
@@ -497,6 +635,8 @@ Required tests:
 - A request that does not become a trade still has a durable ledger row and safe result status.
 - Duplicate idempotency key replays return the same ledger/trade outcome without creating duplicate
   request rows.
+- Pagination tests cover offer detail ledger reads so public/detail endpoints do not require
+  unbounded request history loads.
 
 Exit criteria:
 
@@ -509,6 +649,9 @@ Required behavior:
 
 - WebApp requests and Bot channel callbacks use one authoritative/idempotent command/service.
 - Non-authoritative servers forward to `offer_home_server` and do not mutate locally.
+- Forwarded request commands carry `offer_public_id`, original source surface/server, edge receipt
+  time, actor/requester identities, requested quantity, and idempotency key. The receiving home
+  server resolves its local `offers.id` from `offer_public_id`.
 - The service owns validation, trade-number allocation, offer quantity/status mutation,
   offer-request ledger recording, idempotency, sync/outbox recording, and post-commit side effects.
 - The command records the confirmed backend request attempt and its final outcome atomically with the
@@ -522,6 +665,8 @@ Required tests:
 - Request/trade from Bot against foreign-home offer mutates on foreign and links to an offer request
   row.
 - Request/trade from the non-home surface forwards and does not mutate locally.
+- Forwarded command tests prove integer offer IDs are not trusted across servers; the home server
+  resolves by `offer_public_id`.
 - Duplicate request/callback is idempotent across both trade and offer-request records.
 - Near-simultaneous request/expiry resolves by authority and version/lock behavior and leaves a
   truthful request result.
@@ -665,10 +810,20 @@ Required behavior:
 - Realtime emit does not create a new outbound sync echo.
 - Bot-authored offer create/update/expiry/trade becomes visible on WebApp with the expected
   pending/lagged/final states.
-- WebApp exposes the canonical offer detail/link route by offer public identifier.
+- WebApp exposes the canonical offer link route by public identifier. Prefer explicit non-integer
+  paths such as `GET /api/offers/public/{offer_public_id}` for safe public data and
+  `GET /api/offers/public/{offer_public_id}/detail` for authenticated/authorized detail data, so
+  the route cannot be confused with legacy integer offer endpoints.
+- Safe public response fields are limited to market-safe data such as `offer_public_id`, status,
+  offer type, commodity name, public quantity/price fields, creation time, safe public state label,
+  and interaction availability. Do not include requester identity, mobile numbers, customer
+  relation details, raw source server, internal failure context, or operator-only publication data.
 - Public link access shows only safe market information by default; authenticated authorized users
   can see request ledger, expiry actor/source metadata, and customer-relation context according to
   field policy.
+- Authorized detail responses may include request ledger rows, expiry metadata, trade outcomes,
+  customer relation snapshots, and safe publication state. Publication state is operator/admin-only
+  unless Step 7A explicitly marks a subset as safe for owners.
 - Foreign/Bot-generated Telegram text may include the Iran WebApp offer link, but foreign must not
   serve the WebApp page or call Iran WebApp to render it.
 
@@ -677,10 +832,12 @@ Required tests:
 - Bot offer sync apply on Iran emits WebApp market event.
 - Foreign trade/expiry sync apply on Iran updates WebApp state.
 - Offer detail route resolves by public identifier for synced Iran-home and foreign-home offers.
+- Public link route returns only the safe public field set for unauthenticated viewers.
 - Unauthorized link viewer cannot see requester identities, customer relation details, or sensitive
   failure reasons.
 - Authorized owner/admin/detail viewer can see request ledger rows with source platform, request
   time, relation snapshot, and trade outcome.
+- Offer detail ledger responses are paginated and do not load unbounded history.
 - Realtime failure does not corrupt DB state and is either best-effort-safe or durably repairable
   according to the side-effect classification.
 
@@ -704,12 +861,16 @@ Required behavior:
 - Offer public identity is introduced no later than Step 5A because offer links, request ledgers, and
   callback compatibility depend on it. Step 8A generalizes the pattern to other synced records.
 - Integer IDs remain local/internal during migration.
+- Cross-server sync payloads and command-forwarding contracts use public identities as canonical
+  references where available. Local integer foreign keys may remain inside each database after the
+  receiver resolves the public identity.
 - Server-partitioned integer sequences are used as a migration guard until cross-server commands no
   longer rely on integers.
 
 Required tests:
 
 - Synced payloads identify records by public identity.
+- Peer apply tests resolve local rows from public identity and do not assume matching integer IDs.
 - Existing integer-id local reads continue to work.
 - Duplicate/colliding integer IDs across servers do not corrupt cross-server resolution.
 
@@ -726,6 +887,9 @@ Required behavior:
 - Old channel messages have a defined behavior after migration.
 - Callback handling must create or reuse the same authoritative offer request ledger path as WebApp
   requests after the user confirms the action.
+- New callback payloads must not depend on cross-server integer offer IDs. They must resolve to
+  `offer_public_id` directly or through a foreign-local compatibility mapping before invoking the
+  shared request command.
 
 Allowed designs:
 
@@ -738,6 +902,8 @@ Required tests:
 
 - Old callback payload still resolves or fails visibly with a safe user message.
 - New callback payload resolves to the correct canonical offer.
+- Callback compatibility tests cover an old integer callback resolving through the local mapping to
+  the canonical public offer identity.
 - Callback replay remains idempotent.
 - New callback request outcomes are visible in the offer request ledger.
 
@@ -914,9 +1080,13 @@ Required scenario groups:
 - Request/trade from WebApp and Bot against both Iran-home and foreign-home offers.
 - Request ledger rows for successful trade, rejected request, lot unavailable, duplicate replay,
   stale/conflict, and request after expiry.
+- Request ledger state-machine transitions for `received`, authorized/completed, every rejected
+  terminal state, duplicate replay, and failed-internal outcomes.
+- Public failure code/message visibility separated from internal failure code/context visibility.
 - Customer requester ledger rows include relation snapshots and authorized-only visibility.
 - Offer detail link shows safe public fields to unauthenticated/unauthorized viewers and full
   permitted metadata to authorized viewers.
+- Offer detail ledger pagination and retention/archive assumptions.
 - Same user active on both surfaces.
 - Near-simultaneous trade/expiry/update.
 - Duplicate callback, duplicate sync delivery, worker replay, direct push failure.
@@ -965,6 +1135,12 @@ Required checks:
 - Existing offer rows are backfilled or verified to have public identifiers before link/callback
   flows are enabled.
 - Offer request ledger migrations are non-destructive and preserve existing trade history.
+- Historical request ledger backfill is not attempted from old trades unless explicitly approved.
+  Existing trades may be linked to offers where local foreign keys are reliable, but missing request
+  attempts remain `unknown_legacy` rather than being invented.
+- Backfill report includes at least: total offers, offers with public identifiers before and after
+  migration, offers still missing public identity, trades linked to offers, old channel message
+  bindings, and any rows carrying `legacy_unknown` expiry/source metadata.
 - Sync backlog is safe.
 - No unresolved partial publication state blocks cutover.
 - Runtime guards prove Iran cannot call Telegram.
@@ -1017,6 +1193,18 @@ offers: route creation through source surface contract
 docs: record bot webapp implementation contract
 ```
 
+## Milestone Review Groups
+
+These groups are only review boundaries. They do not replace the step-by-step completion rules.
+
+- Milestone A - Safety Foundation: Step 0, Step 1, Step 2A, Step 2B, Step 3A, Step 3B, Step 4A.
+- Milestone B - Offer Metadata Foundation: Step 5A, Step 5B, Step 5C-0, Step 5C.
+- Milestone C - Shared Command Migration: Step 5D, Step 6A, Step 6B, Step 6C.
+- Milestone D - Publication, Detail, Callback: Step 7A, Step 7B, Step 7C, Step 8A, Step 8B,
+  Step 8C.
+- Milestone E - Operations And Cutover: Step 9A, Step 9B, Step 9C, Step 10A, Step 10B, Step 10C,
+  Step 11, Step 12.
+
 ## Execution Order Summary
 
 1. Step 0 - Refresh Candidate From Main
@@ -1030,22 +1218,23 @@ docs: record bot webapp implementation contract
 9. Step 4C - Runtime Session And Bot Account Freshness Policy
 10. Step 5A - Shared Offer Creation Command And Offer Link Identity
 11. Step 5B - Shared Expire/Cancel Command
-12. Step 5C - Offer Request Ledger And Metadata Schema
-13. Step 5D - Shared Trade/Request Command
-14. Step 6A - Mandatory Transactional Outbox For Synced Tables
-15. Step 6B - Committed Outbox Drain And Retry Contract
-16. Step 6C - Aggregate Ordering And Stale-Event Rejection
-17. Step 7A - Surface Publication State Model
-18. Step 7B - Telegram Publication Idempotency And Result Sync-Back
-19. Step 7C - WebApp Realtime Visibility From Synced Market Changes
-20. Step 8A - Public Identity For Synced Records
-21. Step 8B - Telegram Callback Compatibility
-22. Step 8C - Registry And Protocol Version Compatibility
-23. Step 9A - Admin Surface Authority
-24. Step 9B - Background Job Authority Matrix
-25. Step 9C - Field-Level Sensitive And No-Sync Reference Policy
-26. Step 10A - Reconciliation Jobs And Observability
-27. Step 10B - Short Outage Behavior Up To 2 Minutes
-28. Step 10C - Medium And Long Outage Recovery Finalization
-29. Step 11 - Complete Scenario Matrix And Staging Validation
-30. Step 12 - Cutover Readiness And Production Gate Preparation
+12. Step 5C-0 - Minimum Field Policy For Offer Link And Request Ledger
+13. Step 5C - Offer Request Ledger And Metadata Schema
+14. Step 5D - Shared Trade/Request Command
+15. Step 6A - Mandatory Transactional Outbox For Synced Tables
+16. Step 6B - Committed Outbox Drain And Retry Contract
+17. Step 6C - Aggregate Ordering And Stale-Event Rejection
+18. Step 7A - Surface Publication State Model
+19. Step 7B - Telegram Publication Idempotency And Result Sync-Back
+20. Step 7C - WebApp Realtime Visibility From Synced Market Changes
+21. Step 8A - Public Identity For Synced Records
+22. Step 8B - Telegram Callback Compatibility
+23. Step 8C - Registry And Protocol Version Compatibility
+24. Step 9A - Admin Surface Authority
+25. Step 9B - Background Job Authority Matrix
+26. Step 9C - Field-Level Sensitive And No-Sync Reference Policy
+27. Step 10A - Reconciliation Jobs And Observability
+28. Step 10B - Short Outage Behavior Up To 2 Minutes
+29. Step 10C - Medium And Long Outage Recovery Finalization
+30. Step 11 - Complete Scenario Matrix And Staging Validation
+31. Step 12 - Cutover Readiness And Production Gate Preparation
