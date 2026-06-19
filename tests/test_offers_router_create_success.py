@@ -230,7 +230,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.register_market_offer_created_mock.assert_not_awaited()
         response_mock.assert_called_once_with(existing_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
 
-    async def test_create_offer_persists_channel_message_and_publishes_created_event(self):
+    async def test_create_offer_uses_webapp_home_server_even_when_owner_and_runtime_are_foreign(self):
         commodity = SimpleNamespace(id=1)
         reloaded_offer = make_reloaded_offer(offer_id=88)
         db = FakeDB(
@@ -238,7 +238,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             scalar_results=[0],
             execute_results=[FakeExecuteResult(reloaded_offer)],
         )
-        current_user = make_user()
+        current_user = make_user(home_server="foreign")
         settings = SimpleNamespace(max_active_offers=5)
         async_settings = SimpleNamespace(offer_expiry_minutes=15)
 
@@ -270,7 +270,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
             result = await create_offer(make_offer(), db=db, context=make_context(current_user))
 
         new_offer = db.added[0]
-        self.assertEqual(new_offer.home_server, "foreign")
+        self.assertEqual(new_offer.home_server, "iran")
         self.assertEqual(reloaded_offer.channel_message_id, 555)
         self.assertEqual(db.commit.await_count, 2)
         set_count_mock.assert_awaited_once_with(5, 1)

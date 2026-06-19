@@ -35,6 +35,7 @@ from core.services.customer_relation_service import (
     load_offer_customer_read_context,
 )
 from core.services.user_account_status_service import is_user_market_blocked
+from core.offer_source import OfferSourceSurface, offer_home_server_for_source
 from core.trading_observability import log_trading_event, summarize_response_body
 from models.user import User
 from models.customer_relation import CustomerTier
@@ -655,7 +656,7 @@ async def create_offer(
     new_offer = Offer(
         user_id=owner_user.id,
         actor_user_id=actor_user.id,
-        home_server=getattr(owner_user, "home_server", None) or current_server(),
+        home_server=offer_home_server_for_source(OfferSourceSurface.WEBAPP),
         offer_type=OfferType.BUY if offer_data.offer_type == "buy" else OfferType.SELL,
         commodity_id=offer_data.commodity_id,
         quantity=offer_data.quantity,

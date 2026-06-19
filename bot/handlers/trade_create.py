@@ -15,6 +15,7 @@ from bot.states import Trade
 from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
+from core.offer_source import OfferSourceSurface, offer_home_server_for_source
 from core.services.trade_service import (
     validate_lot_sizes,
     validate_quantity,
@@ -638,6 +639,7 @@ async def _handle_trade_confirm_core(
         async with AsyncSessionLocal() as session:
             new_offer = Offer(
                 user_id=user.id,
+                home_server=offer_home_server_for_source(OfferSourceSurface.TELEGRAM_BOT),
                 offer_type=OfferType.BUY if trade_type == "buy" else OfferType.SELL,
                 commodity_id=commodity_id,
                 quantity=quantity,

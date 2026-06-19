@@ -89,7 +89,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.execute_calls[0], ("TRADING_UPSERT", {"is_sync": True}))
 
         new_offers = []
-        offer_data = {"price": 12, "channel_message_id": 99}
+        offer_data = {"price": 12, "channel_message_id": 99, "home_server": "iran"}
         db = FakeDB()
         with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT") as builder, patch(
             "api.routers.sync.settings.server_mode", "foreign"
@@ -106,6 +106,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(new_offers, [8])
         self.assertNotIn("channel_message_id", offer_data)
+        self.assertEqual(offer_data["home_server"], "iran")
         self.assertEqual(offer_data["id"], 8)
         builder.assert_called_once_with(object, "offers", offer_data)
         self.assertEqual(db.execute_calls[0], ("UPSERT", {"is_sync": True}))

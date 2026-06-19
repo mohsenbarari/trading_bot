@@ -97,7 +97,7 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
             ),
             clear=AsyncMock(),
         )
-        user = SimpleNamespace(id=1, limitations_expire_at=None)
+        user = SimpleNamespace(id=1, limitations_expire_at=None, home_server="iran")
         db_user = SimpleNamespace(id=1)
         create_session = FakeSession()
         update_session = FakeSession(get_map={(None, 0): None})
@@ -134,6 +134,7 @@ class BotTradeCreateConfirmSuccessWholesaleTests(unittest.IsolatedAsyncioTestCas
         offer = create_session.added[0]
         self.assertEqual(offer.id, 99)
         self.assertEqual(offer.notes, "فقط نقدی")
+        self.assertEqual(offer.home_server, "foreign")
         self.assertEqual(offer.channel_message_id, 777)
         first_call = bot.send_message.await_args_list[0]
         self.assertEqual(first_call.kwargs["chat_id"], -100)
