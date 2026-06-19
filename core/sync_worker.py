@@ -11,7 +11,12 @@ from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
 from core.server_routing import default_peer_server_url
-from core.sync_metadata import build_sync_metadata, coerce_positive_int, deserialize_sync_data
+from core.sync_metadata import (
+    build_sync_metadata,
+    build_sync_public_identity,
+    coerce_positive_int,
+    deserialize_sync_data,
+)
 
 # Configure logging
 configure_logging("sync-worker")
@@ -88,7 +93,7 @@ def deserialize_change_log_data(raw_data):
 def change_log_entry_to_sync_item(entry) -> dict:
     timestamp = getattr(entry, "timestamp", None)
     data = deserialize_change_log_data(entry.data)
-    return {
+    item = {
         "type": "db_change",
         "operation": entry.operation,
         "table": entry.table_name,
@@ -105,6 +110,10 @@ def change_log_entry_to_sync_item(entry) -> dict:
             change_log_id=entry.id,
         ),
     }
+    public_identity = build_sync_public_identity(entry.table_name, entry.record_id, data)
+    if public_identity is not None:
+        item["public_identity"] = public_identity
+    return item
 
 
 async def fetch_next_unsynced_change_log_item() -> dict | None:

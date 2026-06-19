@@ -1,6 +1,6 @@
 import unittest
 
-from core.sync_metadata import build_sync_metadata, deserialize_sync_data
+from core.sync_metadata import build_sync_metadata, build_sync_public_identity, deserialize_sync_data
 
 
 class SyncMetadataTests(unittest.TestCase):
@@ -65,6 +65,42 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["aggregate_id"], "offer-publication:telegram_channel:ofr_8")
         self.assertEqual(metadata["authority_server"], "foreign")
         self.assertEqual(metadata["authoritative_version"], 3)
+
+    def test_public_identity_payloads_prefer_stable_cross_server_keys(self):
+        self.assertEqual(
+            build_sync_public_identity("offers", 12, {"offer_public_id": "ofr_12"}),
+            {
+                "table": "offers",
+                "kind": "offer_public_id",
+                "value": "ofr_12",
+                "record_id": 12,
+            },
+        )
+        self.assertEqual(
+            build_sync_public_identity(
+                "trades",
+                15,
+                {"trade_number": 10015, "offer_public_id": "ofr_12"},
+            ),
+            {
+                "table": "trades",
+                "kind": "trade_number",
+                "value": "10015",
+                "record_id": 15,
+                "references": {"offer_public_id": "ofr_12"},
+            },
+        )
+        self.assertEqual(
+            build_sync_public_identity(
+                "offer_publication_states",
+                9,
+                {
+                    "dedupe_key": "offer-publication:webapp_market:ofr_12",
+                    "offer_public_id": "ofr_12",
+                },
+            )["value"],
+            "offer-publication:webapp_market:ofr_12",
+        )
 
     def test_deserialize_sync_data_returns_non_json_string_unchanged(self):
         self.assertEqual(deserialize_sync_data('{"id": 1}'), {"id": 1})

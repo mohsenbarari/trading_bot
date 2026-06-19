@@ -23,7 +23,7 @@ from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
-from core.sync_metadata import build_sync_metadata
+from core.sync_metadata import build_sync_metadata, build_sync_public_identity
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,9 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
     }
     if change_log_id is not None:
         payload["change_log_id"] = change_log_id
+    public_identity = build_sync_public_identity(table_name, record_id, data)
+    if public_identity is not None:
+        payload["public_identity"] = public_identity
     payload["sync_meta"] = build_sync_metadata(
         table_name,
         record_id,
@@ -137,6 +140,23 @@ def publish_event_sync(event_type: str, data: Dict[str, Any]) -> None:
 
 def _isoformat_or_none(value):
     return value.isoformat() if value else None
+
+
+def _lookup_offer_public_id(connection, offer_id: int | None) -> str | None:
+    if not offer_id:
+        return None
+    try:
+        result = connection.execute(
+            text("SELECT offer_public_id FROM offers WHERE id = :offer_id"),
+            {"offer_id": offer_id},
+        )
+        row = result.first()
+        if row is None:
+            return None
+        value = row[0]
+        return value if isinstance(value, str) and value.strip() else None
+    except Exception:
+        return None
 
 
 def _chat_sync_payload(target) -> Dict[str, Any]:
@@ -366,6 +386,9 @@ def setup_offer_events():
             return
         try:
             data = {"id": target.id}
+            offer_public_id = getattr(target, "offer_public_id", None)
+            if offer_public_id:
+                data["offer_public_id"] = offer_public_id
             log_change(connection, "offers", target.id, "DELETE", data)
             publish_event_sync("offer:deleted", data)
         except Exception as e:
@@ -537,6 +560,7 @@ def setup_trade_events():
                 "version_id": target.version_id or 1,
                 "trade_number": target.trade_number,
                 "offer_id": target.offer_id,
+                "offer_public_id": _lookup_offer_public_id(connection, target.offer_id),
                 "offer_user_id": target.offer_user_id,
                 "offer_user_mobile": target.offer_user_mobile,
                 "responder_user_id": target.responder_user_id,
@@ -572,6 +596,7 @@ def setup_trade_events():
                 "version_id": target.version_id or 1,
                 "trade_number": target.trade_number,
                 "offer_id": target.offer_id,
+                "offer_public_id": _lookup_offer_public_id(connection, target.offer_id),
                 "offer_user_id": target.offer_user_id,
                 "offer_user_mobile": target.offer_user_mobile,
                 "responder_user_id": target.responder_user_id,

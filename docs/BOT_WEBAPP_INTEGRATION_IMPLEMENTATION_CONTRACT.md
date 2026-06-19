@@ -1115,6 +1115,41 @@ Exit criteria:
 
 - New cross-server command/sync contracts use public identity where implemented.
 
+Implemented in Step 8A on 2026-06-19:
+
+- Sync payloads now include an explicit `public_identity` object when a stable public/natural
+  cross-server key is available.
+- Worker replay, direct event push, and manual resync all build the same public identity metadata.
+- Offer sync apply uses `offer_public_id` as the conflict key and does not depend on the incoming
+  remote integer id for insert/update.
+- Trade sync payloads carry `offer_public_id`; the receiver resolves that to the local `offers.id`
+  before applying the trade and defers trade apply when the referenced offer is not locally present.
+- Offer publication state sync uses `dedupe_key` and localizes `offer_id` from `offer_public_id`.
+- Offer request ledger sync uses `request_home_server + idempotency_key` when available and keeps
+  `offer_public_id` as the canonical offer reference; unresolved local offer FK is nulled instead
+  of trusting the remote integer id.
+- Sequence alignment now partitions generated integer ids by server (`iran` even, `foreign` odd) as
+  a migration guard while public identity rollout continues.
+
+Step 8A verification run:
+
+- `tests.test_sync_metadata`
+- `tests.test_sync_worker`
+- `tests.test_core_events`
+- `tests.test_sync_router_apply_item_success`
+- `tests.test_sync_router_receive_basic`
+- `tests.test_sync_router_receive_offer_publish`
+- `tests.test_offer_creation_service`
+- `tests.test_offer_request_ledger_service`
+- `tests.test_offer_request_ledger_model`
+- `tests.test_trades_router_authoritative_success`
+- `tests.test_trades_router_execution_wrappers`
+- `tests.test_bot_trade_execute_local_success`
+- `tests.test_bot_trade_manage_success`
+- `tests.test_sync_registry`
+- `tests.test_sync_outbox_guard`
+- `tests.test_trading_production_contract_matrix`
+
 ### Step 8B - Telegram Callback Compatibility
 
 Required behavior:

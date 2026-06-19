@@ -411,6 +411,25 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(push_sync_direct.call_args.args[0]["change_log_id"], 42)
         self.assertEqual(push_sync_direct.call_args.args[0]["sync_meta"], queued_payload["sync_meta"])
 
+        sync_redis = _FakeSyncRedis()
+        with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
+            'core.sync_push.push_sync_direct'
+        ) as push_sync_direct:
+            connection.execute.return_value = _FakeInsertResult(43)
+            events.log_change(
+                connection,
+                'offers',
+                5,
+                'UPDATE',
+                {'id': 5, 'offer_public_id': 'ofr_5', 'status': 'active'},
+            )
+
+        queued_payload = json.loads(sync_redis.lpush_calls[0][1])
+        self.assertEqual(queued_payload["public_identity"]["kind"], "offer_public_id")
+        self.assertEqual(queued_payload["public_identity"]["value"], "ofr_5")
+        self.assertEqual(queued_payload["sync_meta"]["aggregate_id"], "ofr_5")
+        self.assertEqual(push_sync_direct.call_args.args[0]["public_identity"], queued_payload["public_identity"])
+
         sync_redis = _FakeSyncRedis(lpush_error=RuntimeError('redis down'))
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
             'core.sync_push.push_sync_direct', side_effect=RuntimeError('push down')
@@ -565,7 +584,7 @@ class CoreEventsTests(unittest.TestCase):
         publish_event_sync.assert_any_call('offer:created', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:updated', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:expired', {'id': 1})
-        publish_event_sync.assert_any_call('offer:deleted', {'id': 1})
+        publish_event_sync.assert_any_call('offer:deleted', {'id': 1, 'offer_public_id': 'ofr_event_1'})
         logger.info.assert_any_call('✅ Offer event listeners registered')
         logger.info.assert_any_call('✅ Trade event listeners registered')
         logger.info.assert_any_call('✅ User event listeners registered')

@@ -21,7 +21,7 @@ class FakeDB:
 
     async def execute(self, stmt, *args, **kwargs):
         text = str(stmt)
-        if "setval(" in text:
+        if "setval(" in text or text.strip().upper().startswith("ALTER SEQUENCE"):
             return SimpleNamespace()
         if self.offer_results:
             return self.offer_results.pop(0)

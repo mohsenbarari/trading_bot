@@ -7,7 +7,7 @@ from core.audit_logger import audit_log
 from core.metrics import record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
-from core.sync_metadata import build_sync_metadata, coerce_positive_int
+from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 import hmac
 import hashlib
@@ -433,6 +433,37 @@ SEQUENCE_MAP = {
     "user_blocks": ("user_blocks_id_seq", "user_blocks"),
 }
 
+
+def _sequence_partition_for_server(server_mode: str | None) -> tuple[int, int]:
+    normalized = str(server_mode or "").strip().lower()
+    if normalized == "iran":
+        return 0, 2
+    return 1, 1
+
+
+def _partitioned_sequence_alignment_sql(seq_name: str, real_table: str, server_mode: str | None) -> tuple[str, str]:
+    parity, minimum_value = _sequence_partition_for_server(server_mode)
+    alter_sql = f"ALTER SEQUENCE {seq_name} INCREMENT BY 2"
+    setval_sql = f"""
+        SELECT setval(
+            '{seq_name}',
+            (
+                WITH current_max AS (
+                    SELECT COALESCE(MAX(id), 0)::bigint AS max_id FROM {real_table}
+                )
+                SELECT CASE
+                    WHEN max_id < {minimum_value} THEN {minimum_value}
+                    WHEN MOD(max_id, 2) = {parity} THEN max_id + 2
+                    ELSE max_id + 1
+                END
+                FROM current_max
+            ),
+            false
+        )
+    """
+    return alter_sql, setval_sql
+
+
 def get_model_class(table_name: str):
     mapping = {
         "users": User,
@@ -565,10 +596,37 @@ def _build_upsert_stmt(model, table, data):
                 set_dict[k] = stmt.excluded[k]
         return stmt.on_conflict_do_update(index_elements=['id'], set_=set_dict)
     elif table == "offers":
+        if data.get("offer_public_id"):
+            set_dict = {key: value for key, value in data.items() if key not in {"id", "offer_public_id"}}
+            where_clause = _offer_upsert_where_clause(model, stmt, data)
+            if where_clause is None:
+                return stmt.on_conflict_do_update(index_elements=['offer_public_id'], set_=set_dict)
+            return stmt.on_conflict_do_update(index_elements=['offer_public_id'], set_=set_dict, where=where_clause)
         where_clause = _offer_upsert_where_clause(model, stmt, data)
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data, where=where_clause)
+    elif table == "trades" and data.get("trade_number") not in (None, ""):
+        set_dict = {key: value for key, value in data.items() if key not in {"id", "trade_number"}}
+        return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict)
+    elif table == "offer_publication_states" and data.get("dedupe_key"):
+        set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
+        return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
+    elif (
+        table == "offer_requests"
+        and data.get("request_home_server")
+        and data.get("idempotency_key")
+    ):
+        set_dict = {
+            key: value
+            for key, value in data.items()
+            if key not in {"id", "request_home_server", "idempotency_key"}
+        }
+        return stmt.on_conflict_do_update(
+            index_elements=['request_home_server', 'idempotency_key'],
+            index_where=model.idempotency_key.isnot(None),
+            set_=set_dict,
+        )
     else:
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
 
@@ -588,6 +646,119 @@ def _result_scalar_first(result):
         return result.scalars().first()
     except AttributeError:
         return None
+
+
+def _result_scalar_one_or_none(result):
+    try:
+        return result.scalar_one_or_none()
+    except AttributeError:
+        pass
+    return _result_scalar_first(result)
+
+
+def _nonempty_text(value) -> str | None:
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    return text_value or None
+
+
+async def _resolve_offer_id_by_public_id(db: AsyncSession, offer_public_id: str | None) -> int | None:
+    public_id = _nonempty_text(offer_public_id)
+    if not public_id:
+        return None
+    result = await db.execute(select(Offer.id).where(Offer.offer_public_id == public_id))
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _resolve_trade_id_by_trade_number(db: AsyncSession, trade_number) -> int | None:
+    if trade_number is None or trade_number == "":
+        return None
+    result = await db.execute(select(Trade.id).where(Trade.trade_number == trade_number))
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _resolve_publication_state_id_by_dedupe_key(db: AsyncSession, dedupe_key: str | None) -> int | None:
+    dedupe = _nonempty_text(dedupe_key)
+    if not dedupe:
+        return None
+    result = await db.execute(select(OfferPublicationState.id).where(OfferPublicationState.dedupe_key == dedupe))
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _resolve_offer_request_id_by_idempotency(db: AsyncSession, data: dict) -> int | None:
+    request_home_server = _nonempty_text(data.get("request_home_server"))
+    idempotency_key = _nonempty_text(data.get("idempotency_key"))
+    if not request_home_server or not idempotency_key:
+        return None
+    result = await db.execute(
+        select(OfferRequest.id).where(
+            OfferRequest.request_home_server == request_home_server,
+            OfferRequest.idempotency_key == idempotency_key,
+        )
+    )
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _resolve_local_record_id_by_public_identity(
+    db: AsyncSession,
+    table: str,
+    data: dict,
+) -> int | None:
+    if table == "offers":
+        return await _resolve_offer_id_by_public_id(db, data.get("offer_public_id"))
+    if table == "trades":
+        return await _resolve_trade_id_by_trade_number(db, data.get("trade_number"))
+    if table == "offer_publication_states":
+        return await _resolve_publication_state_id_by_dedupe_key(db, data.get("dedupe_key"))
+    if table == "offer_requests":
+        return await _resolve_offer_request_id_by_idempotency(db, data)
+    return None
+
+
+def _sync_table_has_public_identity(table: str, data: dict) -> bool:
+    if table == "offers":
+        return bool(_nonempty_text(data.get("offer_public_id")))
+    if table == "trades":
+        return data.get("trade_number") not in (None, "")
+    if table == "offer_publication_states":
+        return bool(_nonempty_text(data.get("dedupe_key")))
+    if table == "offer_requests":
+        return bool(_nonempty_text(data.get("request_home_server")) and _nonempty_text(data.get("idempotency_key")))
+    return False
+
+
+async def _localize_offer_reference_by_public_id(db: AsyncSession, table: str, data: dict) -> bool:
+    offer_public_id = _nonempty_text(data.get("offer_public_id"))
+    if not offer_public_id or table not in {"trades", "offer_publication_states", "offer_requests"}:
+        return True
+    local_offer_id = await _resolve_offer_id_by_public_id(db, offer_public_id)
+    if local_offer_id is None:
+        if table == "offer_requests":
+            data["local_offer_id"] = None
+            return True
+        return False
+    if table == "offer_requests":
+        data["local_offer_id"] = local_offer_id
+    else:
+        data["offer_id"] = local_offer_id
+    return True
 
 
 def _offer_payload_needs_ordering_check(data: dict) -> bool:
@@ -625,7 +796,11 @@ async def _stale_offer_sync_reason(db: AsyncSession, record_id, data: dict) -> s
     if not _offer_payload_needs_ordering_check(data):
         return None
 
-    result = await db.execute(select(Offer).where(Offer.id == record_id))
+    offer_public_id = _nonempty_text(data.get("offer_public_id"))
+    if offer_public_id:
+        result = await db.execute(select(Offer).where(Offer.offer_public_id == offer_public_id))
+    else:
+        result = await db.execute(select(Offer).where(Offer.id == record_id))
     existing = _result_scalar_first(result)
     if existing is None:
         return None
@@ -731,9 +906,25 @@ async def _apply_item(
             data.pop("chat_is_system", None)
             data.pop("chat_is_mandatory", None)
 
-        data['id'] = record_id
+        if not await _localize_offer_reference_by_public_id(db, table, data):
+            logger.warning(
+                "Synced row references offer_public_id that is not available locally; deferring",
+                extra={
+                    "event": "sync.public_identity.offer_reference_deferred",
+                    "table": table,
+                    "record_id": record_id,
+                    "offer_public_id": data.get("offer_public_id"),
+                },
+            )
+            return 'deferred'
+
+        uses_public_identity = _sync_table_has_public_identity(table, data)
+        if not uses_public_identity:
+            data['id'] = record_id
 
         # Never overwrite channel_message_id from sync — it's set locally by channel-send
+        track_new_offer = False
+        track_offer_realtime_or_terminal = False
         if table == "offers":
             if terminal_offers is None:
                 terminal_offers = []
@@ -744,13 +935,13 @@ async def _apply_item(
                 return 'ok'
             data.pop("channel_message_id", None)
             if operation == "INSERT":
-                new_offers.append(record_id)
+                track_new_offer = True
             if operation in ("INSERT", "UPDATE"):
                 if settings.server_mode == "iran":
                     if operation == "UPDATE" or status_value in TERMINAL_OFFER_STATUSES:
-                        terminal_offers.append(record_id)
+                        track_offer_realtime_or_terminal = True
                 elif status_value in TERMINAL_OFFER_STATUSES:
-                    terminal_offers.append(record_id)
+                    track_offer_realtime_or_terminal = True
 
         data = _filter_model_columns(model, data)
         stmt = _build_upsert_stmt(model, table, data)
@@ -764,6 +955,18 @@ async def _apply_item(
                     and getattr(execute_result, "rowcount", None) == 0
                 ):
                     _log_stale_offer_sync_ignored(record_id, operation, data, "atomic_upsert_guard_noop")
+            if table == "offers" and (track_new_offer or track_offer_realtime_or_terminal):
+                applied_offer_id = await _resolve_local_record_id_by_public_identity(db, table, data)
+                if applied_offer_id is None and not uses_public_identity:
+                    try:
+                        applied_offer_id = int(record_id)
+                    except (TypeError, ValueError):
+                        applied_offer_id = None
+                if applied_offer_id is not None:
+                    if track_new_offer:
+                        new_offers.append(applied_offer_id)
+                    if track_offer_realtime_or_terminal:
+                        terminal_offers.append(applied_offer_id)
             return 'ok'
         except IntegrityError as e:
             err_str = str(e).lower()
@@ -865,6 +1068,10 @@ async def _apply_item(
                     )
                     if chat_member_id is not None:
                         record_id = chat_member_id
+
+                local_record_id = await _resolve_local_record_id_by_public_identity(db, table, data)
+                if local_record_id is not None:
+                    record_id = local_record_id
 
                 stmt = delete(model).where(model.id == record_id)
                 await db.execute(stmt, execution_options={"is_sync": True})
@@ -1147,10 +1354,13 @@ async def receive_sync_data(
             if seq_info:
                 seq_name, real_table = seq_info
                 try:
-                    await db.execute(
-                        sa_text(f"SELECT setval('{seq_name}', COALESCE((SELECT MAX(id) FROM {real_table}), 1))")
+                    for sequence_sql in _partitioned_sequence_alignment_sql(seq_name, real_table, settings.server_mode):
+                        await db.execute(sa_text(sequence_sql))
+                    logger.info(
+                        "🔢 Sequence %s aligned to %s partition",
+                        seq_name,
+                        settings.server_mode,
                     )
-                    logger.info(f"🔢 Sequence {seq_name} synced to MAX(id)")
                 except Exception as seq_err:
                     logger.warning(
                         "Failed to fix sequence after sync",
@@ -1427,7 +1637,7 @@ async def resync_from_changelog(
             for entry in batch:
                 try:
                     data = json.loads(entry.data) if isinstance(entry.data, str) else entry.data
-                    items.append({
+                    item_payload = {
                         "type": "db_change",
                         "operation": entry.operation,
                         "table": entry.table_name,
@@ -1443,7 +1653,11 @@ async def resync_from_changelog(
                             data,
                             change_log_id=entry.id,
                         ),
-                    })
+                    }
+                    public_identity = build_sync_public_identity(entry.table_name, entry.record_id, data)
+                    if public_identity is not None:
+                        item_payload["public_identity"] = public_identity
+                    items.append(item_payload)
                 except Exception as e:
                     logger.error(
                         "Resync parse error",

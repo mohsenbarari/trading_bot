@@ -163,6 +163,31 @@ class ChangeLogPayloadTests(unittest.TestCase):
             },
         )
 
+    def test_change_log_entry_to_sync_item_includes_public_identity_when_available(self):
+        timestamp = datetime(2026, 1, 2, 3, 4, 5)
+        entry = SimpleNamespace(
+            id=78,
+            operation="UPDATE",
+            table_name="offers",
+            record_id=12,
+            data={"id": 12, "offer_public_id": "ofr_12", "status": "active"},
+            hash="hash-78",
+            timestamp=timestamp,
+        )
+
+        item = sync_worker.change_log_entry_to_sync_item(entry)
+
+        self.assertEqual(
+            item["public_identity"],
+            {
+                "table": "offers",
+                "kind": "offer_public_id",
+                "value": "ofr_12",
+                "record_id": 12,
+            },
+        )
+        self.assertEqual(item["sync_meta"]["aggregate_id"], "ofr_12")
+
 
 class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_next_unsynced_change_log_item_reads_committed_row(self):

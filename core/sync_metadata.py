@@ -66,6 +66,79 @@ def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -
     return str(record_id)
 
 
+def build_sync_public_identity(table_name: str, record_id: Any, data: Any) -> dict[str, Any] | None:
+    payload_data = data if isinstance(data, dict) else {}
+    references: dict[str, str] = {}
+    offer_public_id = _string_or_none(payload_data.get("offer_public_id"))
+    if offer_public_id:
+        references["offer_public_id"] = offer_public_id
+
+    if table_name == "offers" and offer_public_id:
+        return {
+            "table": table_name,
+            "kind": "offer_public_id",
+            "value": offer_public_id,
+            "record_id": record_id,
+        }
+
+    if table_name == "trades":
+        trade_number = _string_or_none(payload_data.get("trade_number"))
+        if trade_number:
+            identity = {
+                "table": table_name,
+                "kind": "trade_number",
+                "value": trade_number,
+                "record_id": record_id,
+            }
+            if references:
+                identity["references"] = references
+            return identity
+
+    if table_name == "offer_publication_states":
+        dedupe_key = _string_or_none(payload_data.get("dedupe_key"))
+        if dedupe_key:
+            identity = {
+                "table": table_name,
+                "kind": "dedupe_key",
+                "value": dedupe_key,
+                "record_id": record_id,
+            }
+            if references:
+                identity["references"] = references
+            return identity
+
+    if table_name == "offer_requests":
+        request_home_server = _string_or_none(payload_data.get("request_home_server"))
+        idempotency_key = _string_or_none(payload_data.get("idempotency_key"))
+        if request_home_server and idempotency_key:
+            identity = {
+                "table": table_name,
+                "kind": "request_home_server:idempotency_key",
+                "value": f"{request_home_server}:{idempotency_key}",
+                "record_id": record_id,
+            }
+            if references:
+                identity["references"] = references
+            return identity
+        if offer_public_id:
+            return {
+                "table": table_name,
+                "kind": "offer_public_id",
+                "value": offer_public_id,
+                "record_id": record_id,
+            }
+
+    if references:
+        return {
+            "table": table_name,
+            "kind": "referenced_offer_public_id",
+            "value": offer_public_id,
+            "record_id": record_id,
+            "references": references,
+        }
+    return None
+
+
 def build_sync_metadata(
     table_name: str,
     record_id: Any,
