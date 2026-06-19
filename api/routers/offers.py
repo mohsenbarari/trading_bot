@@ -3,11 +3,9 @@
 API Router for Offer Management - Web App Integration
 """
 import logging
-import os
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -36,7 +34,8 @@ from core.services.customer_relation_service import (
 )
 from core.services.user_account_status_service import is_user_market_blocked
 from core.offer_source import OfferSourceSurface, offer_home_server_for_source
-from core.trading_observability import log_trading_event, summarize_response_body
+from core import telegram_gateway
+from core.trading_observability import log_trading_event
 from models.user import User
 from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
@@ -416,37 +415,31 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     if current_server() != "foreign":
         return None
 
-    bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
-    if not bot_token or not channel_id:
+    if not channel_id:
         return None
     
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": channel_id,
-        "text": build_offer_channel_message(offer),
-        "reply_markup": build_offer_channel_reply_markup(offer),
-    }
-    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                result = response.json()
-                return result.get("result", {}).get("message_id")
-            else:
-                log_trading_event(
-                    logger,
-                    "offer_channel_send_failed",
-                    level="warning",
-                    action="trading_side_effect",
-                    result="failure",
-                    side_effect="telegram_message",
-                    offer_id=getattr(offer, "id", None),
-                    status_code=response.status_code,
-                    **summarize_response_body(response.text),
-                )
+        result = await telegram_gateway.send_message(
+            channel_id,
+            build_offer_channel_message(offer),
+            reply_markup=build_offer_channel_reply_markup(offer),
+            idempotency_key=f"offer-channel-send:{getattr(offer, 'id', '')}",
+        )
+        if result.ok:
+            return result.message_id
+        log_trading_event(
+            logger,
+            "offer_channel_send_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            offer_id=getattr(offer, "id", None),
+            status_code=result.status_code,
+            error=result.error,
+        )
     except Exception as exc:
         log_trading_event(
             logger,

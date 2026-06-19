@@ -23,8 +23,8 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
     async def test_remove_channel_buttons_skips_when_token_or_channel_missing(self):
         with patch.object(offer_expiry.settings, "bot_token", None), \
              patch.object(offer_expiry.settings, "channel_id", None), \
-             patch("core.offer_expiry.os.getenv", return_value=None), \
-             patch("httpx.AsyncClient") as async_client:
+             patch("core.telegram_gateway.os.getenv", return_value=None), \
+             patch("core.telegram_gateway.httpx.AsyncClient") as async_client:
             await offer_expiry.remove_channel_buttons(10)
 
         async_client.assert_not_called()
@@ -44,7 +44,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(offer_expiry.settings, "bot_token", "bot-token"), \
              patch.object(offer_expiry.settings, "channel_id", -100123), \
-               patch("httpx.AsyncClient", return_value=ClientSpy()):
+               patch("core.telegram_gateway.httpx.AsyncClient", return_value=ClientSpy()):
             await offer_expiry.remove_channel_buttons(77)
 
         self.assertEqual(
@@ -69,7 +69,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(offer_expiry.settings, "bot_token", "bot-token"), \
              patch.object(offer_expiry.settings, "channel_id", -100123), \
-             patch("httpx.AsyncClient", return_value=FailingClient()), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=FailingClient()), \
              patch.object(offer_expiry, "logger") as logger:
             await offer_expiry.remove_channel_buttons(88)
 

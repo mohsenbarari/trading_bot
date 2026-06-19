@@ -5,11 +5,9 @@ If on Iran server, relays notifications to Foreign server via sync mechanism.
 If on Foreign server, sends directly via Telegram Bot.
 """
 import logging
-import json
-from aiogram import Bot
 from core.config import settings
-from core.events import _get_sync_redis
 from core.sync_push import push_sync_direct
+from core import telegram_gateway
 from core.utils import utc_now_naive
 
 logger = logging.getLogger(__name__)
@@ -41,11 +39,13 @@ async def send_telegram_message(chat_id: int, text: str, parse_mode: str = "Mark
     else:
         # We are on Foreign server (or standalone) - Send directly
         logger.info(f"🌍 Sending Telegram message directly to {chat_id}")
-        try:
-            async with Bot(token=settings.bot_token) as bot:
-                await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
-        except Exception as e:
-            logger.error(f"❌ Failed to send Telegram message: {e}")
-            # If valid token but network error, might raise. 
-            # If invalid token, will raise.
-            raise e
+        result = await telegram_gateway.send_message(
+            chat_id,
+            text,
+            parse_mode=parse_mode,
+            idempotency_key=f"notification:{chat_id}",
+        )
+        if not result.ok:
+            message = f"Telegram gateway failed for sendMessage: {result.error or result.status_code}"
+            logger.error("❌ Failed to send Telegram message: %s", message)
+            raise RuntimeError(message)

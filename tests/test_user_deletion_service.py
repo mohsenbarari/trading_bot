@@ -23,7 +23,7 @@ def scalar_result(rows):
 
 class _HttpClientContext:
     def __init__(self):
-        self.post = AsyncMock()
+        self.post = AsyncMock(return_value=SimpleNamespace(status_code=200, text="", json=lambda: {"ok": True}))
 
     async def __aenter__(self):
         return self
@@ -35,14 +35,14 @@ class _HttpClientContext:
 class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
     async def test_remove_user_from_telegram_channel_respects_config_and_posts_ban_unban(self):
         with patch("core.services.user_deletion_service.settings", SimpleNamespace(channel_id=None, bot_token="bot-token")), patch(
-            "core.services.user_deletion_service.httpx.AsyncClient"
+            "core.telegram_gateway.httpx.AsyncClient"
         ) as client_factory:
             await remove_user_from_telegram_channel(123)
         client_factory.assert_not_called()
 
         client = _HttpClientContext()
         with patch("core.services.user_deletion_service.settings", SimpleNamespace(channel_id=-100123, bot_token="bot-token")), patch(
-            "core.services.user_deletion_service.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=client,
         ):
             await remove_user_from_telegram_channel(123)

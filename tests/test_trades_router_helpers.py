@@ -547,13 +547,13 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await trades.send_telegram_message(1, "hello"))
 
         with patch("api.routers.trades.os.getenv", return_value="token"), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ):
             self.assertTrue(await trades.send_telegram_message(1, "hello"))
 
         with patch("api.routers.trades.os.getenv", return_value="token"), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(error=RuntimeError("telegram down")),
         ), patch.object(trades, "logger") as logger:
             self.assertFalse(await trades.send_telegram_message(1, "hello"))
@@ -563,13 +563,13 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(trades.send_telegram_message_sync(1, "hello"))
 
         with patch("api.routers.trades.os.getenv", return_value="token"), patch(
-            "api.routers.trades.httpx.post",
+            "core.telegram_gateway.httpx.post",
             return_value=SimpleNamespace(status_code=200),
         ):
             self.assertTrue(trades.send_telegram_message_sync(1, "hello"))
 
         with patch("api.routers.trades.os.getenv", return_value="token"), patch(
-            "api.routers.trades.httpx.post",
+            "core.telegram_gateway.httpx.post",
             side_effect=RuntimeError("telegram down"),
         ), patch.object(trades, "logger") as logger:
             self.assertFalse(trades.send_telegram_message_sync(1, "hello"))
@@ -592,7 +592,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades.update_channel_buttons(offer))
@@ -612,7 +612,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades.update_channel_buttons(wholesale_offer))
@@ -634,7 +634,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch("api.routers.trades.get_available_trade_amounts", return_value=[10, 8]), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades.update_channel_buttons(active_offer))
@@ -645,7 +645,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch("api.routers.trades.get_available_trade_amounts", return_value=[]), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades.update_channel_buttons(active_offer))
@@ -655,7 +655,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(error=RuntimeError("telegram down")),
         ), patch.object(trades, "logger") as logger:
             self.assertFalse(await trades.update_channel_buttons(active_offer))
@@ -703,7 +703,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(1, 18, OfferStatus.ACTIVE, None))
@@ -724,7 +724,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
             "api.routers.trades.get_available_trade_amounts", return_value=[]
         ), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.ACTIVE, [10, 8]))
@@ -736,7 +736,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
             "api.routers.trades.get_available_trade_amounts", return_value=[10, 8]
         ), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.ACTIVE, [10, 8]))
@@ -749,7 +749,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.os.getenv", return_value="token"), patch.object(
             trades.settings, "channel_id", -100
         ), patch("core.db.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
-            "api.routers.trades.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.COMPLETED, [10, 8]))

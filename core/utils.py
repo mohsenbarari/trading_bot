@@ -14,7 +14,6 @@ import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple, Any, TYPE_CHECKING
 
-import httpx
 import jdatetime
 import pytz
 import redis.asyncio as redis
@@ -24,6 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import telegram_gateway
 from core.enums import NotificationLevel, NotificationCategory
 from core.redis import pool
 from models.notification import Notification
@@ -262,22 +262,19 @@ async def send_telegram_notification(telegram_id: int, message: str) -> bool:
         logger.warning("BOT_TOKEN not found in environment")
         return False
     
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": telegram_id,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                logger.info(f"Telegram notification sent to {telegram_id}")
-                return True
-            else:
-                logger.warning(f"Telegram API Error: {response.status_code} - {response.text}")
-                return False
+        result = await telegram_gateway.send_message(
+            telegram_id,
+            message,
+            parse_mode="Markdown",
+            bot_token=bot_token,
+            idempotency_key=f"user-notification:{telegram_id}",
+        )
+        if result.ok:
+            logger.info(f"Telegram notification sent to {telegram_id}")
+            return True
+        logger.warning(f"Telegram API Error: {result.status_code} - {result.response_text or result.error}")
+        return False
     except Exception as e:
         logger.error(f"Error sending Telegram notification: {e}")
         return False

@@ -131,15 +131,15 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         logger.warning.assert_called_once()
 
         ok_client = _HttpClientContext(response=_HttpResponse(200, 'ok'))
-        with patch('core.utils.os.getenv', return_value='token'), patch('core.utils.httpx.AsyncClient', return_value=ok_client):
+        with patch('core.utils.os.getenv', return_value='token'), patch('core.telegram_gateway.httpx.AsyncClient', return_value=ok_client):
             self.assertTrue(await utils.send_telegram_notification(9, 'hello'))
 
         bad_client = _HttpClientContext(response=_HttpResponse(500, 'err'))
-        with patch('core.utils.os.getenv', return_value='token'), patch('core.utils.httpx.AsyncClient', return_value=bad_client):
+        with patch('core.utils.os.getenv', return_value='token'), patch('core.telegram_gateway.httpx.AsyncClient', return_value=bad_client):
             self.assertFalse(await utils.send_telegram_notification(9, 'hello'))
 
         err_client = _HttpClientContext(error=RuntimeError('network'))
-        with patch('core.utils.os.getenv', return_value='token'), patch('core.utils.httpx.AsyncClient', return_value=err_client):
+        with patch('core.utils.os.getenv', return_value='token'), patch('core.telegram_gateway.httpx.AsyncClient', return_value=err_client):
             self.assertFalse(await utils.send_telegram_notification(9, 'hello'))
 
     async def test_create_user_notification_and_publish_user_event(self):

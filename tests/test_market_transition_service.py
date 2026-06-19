@@ -31,7 +31,7 @@ class _ExecuteResult:
 
 class _FakeAsyncClient:
     def __init__(self, *, response=None, side_effect=None):
-        self._response = response or SimpleNamespace(raise_for_status=Mock())
+        self._response = response or SimpleNamespace(status_code=200, text="", raise_for_status=Mock())
         self.post = AsyncMock(side_effect=side_effect, return_value=self._response)
 
     async def __aenter__(self):
@@ -95,7 +95,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             "channel_id",
             None,
         ), patch("core.services.market_transition_service.os.getenv", return_value=None), patch(
-            "core.services.market_transition_service.httpx.AsyncClient"
+            "core.telegram_gateway.httpx.AsyncClient"
         ) as client_cls:
             await market_transition_service._send_market_channel_notice("opened")
 
@@ -109,7 +109,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             "channel_id",
             "@market",
         ), patch("core.services.market_transition_service.os.getenv", return_value="token-123"), patch(
-            "core.services.market_transition_service.httpx.AsyncClient",
+            "core.telegram_gateway.httpx.AsyncClient",
             return_value=fake_client,
         ):
             await market_transition_service._send_market_channel_notice("market opened")
@@ -119,7 +119,6 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             json={"chat_id": "@market", "text": "market opened"},
             timeout=10,
         )
-        fake_client._response.raise_for_status.assert_called_once_with()
 
     async def test_get_or_create_market_runtime_state_creates_initial_row(self):
         db = SimpleNamespace(

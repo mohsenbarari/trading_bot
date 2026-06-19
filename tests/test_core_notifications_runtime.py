@@ -1,18 +1,8 @@
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from core import notifications
-
-
-class _BotContext:
-    def __init__(self, bot):
-        self.bot = bot
-
-    async def __aenter__(self):
-        return self.bot
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
 
 
 class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -36,18 +26,22 @@ class CoreNotificationsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         logger.warning.assert_called_once()
 
     async def test_send_telegram_message_sends_directly_and_reraises_errors(self):
-        bot = AsyncMock()
+        gateway_send = AsyncMock(return_value=SimpleNamespace(ok=True))
         with patch.object(notifications.settings, 'server_mode', 'foreign'), patch.object(
             notifications.settings, 'bot_token', 'token'
-        ), patch('core.notifications.Bot', return_value=_BotContext(bot)):
+        ), patch.object(notifications.telegram_gateway, "send_message", gateway_send):
             await notifications.send_telegram_message(2, 'hello')
-        bot.send_message.assert_awaited_once_with(chat_id=2, text='hello', parse_mode='Markdown')
+        gateway_send.assert_awaited_once_with(
+            2,
+            'hello',
+            parse_mode='Markdown',
+            idempotency_key='notification:2',
+        )
 
-        failing_bot = AsyncMock()
-        failing_bot.send_message = AsyncMock(side_effect=RuntimeError('boom'))
+        failing_send = AsyncMock(return_value=SimpleNamespace(ok=False, error="boom", status_code=None))
         with patch.object(notifications.settings, 'server_mode', 'foreign'), patch.object(
             notifications.settings, 'bot_token', 'token'
-        ), patch('core.notifications.Bot', return_value=_BotContext(failing_bot)), patch.object(
+        ), patch.object(notifications.telegram_gateway, "send_message", failing_send), patch.object(
             notifications, 'logger'
         ) as logger:
             with self.assertRaises(RuntimeError):

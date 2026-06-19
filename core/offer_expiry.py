@@ -10,7 +10,6 @@ interact with expired offers and see the right history marker.
 """
 import asyncio
 import logging
-import os
 import time
 from datetime import timedelta, timezone
 
@@ -21,6 +20,7 @@ from core.db import AsyncSessionLocal
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
+from core import telegram_gateway
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.utils import utc_now_naive
 from models.offer import Offer, OfferStatus
@@ -38,21 +38,23 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
     if current_server() != "foreign":
         return
 
-    bot_token = settings.bot_token or os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
     
-    if not bot_token or not channel_id:
+    if not channel_id:
         return
     
     try:
-        import httpx
-        url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-        payload = {
-            "chat_id": channel_id,
-            "message_id": channel_message_id
-        }
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload, timeout=10)
+        result = await telegram_gateway.edit_message_reply_markup(
+            channel_id,
+            channel_message_id,
+            idempotency_key=f"offer-expiry-remove-buttons:{channel_message_id}",
+        )
+        if not result.ok:
+            logger.debug(
+                "Failed to remove channel buttons for msg %s: %s",
+                channel_message_id,
+                result.error or result.status_code,
+            )
     except Exception as e:
         logger.debug(f"Failed to remove channel buttons for msg {channel_message_id}: {e}")
 

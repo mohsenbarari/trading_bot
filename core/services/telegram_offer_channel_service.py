@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
-import httpx
-
+from core import telegram_gateway
 from core.config import settings
 from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.trade_service import get_available_trade_amounts
@@ -123,23 +121,6 @@ def build_offer_channel_reply_markup(offer: Any) -> Optional[dict[str, Any]]:
     return {"inline_keyboard": [buttons]} if buttons else None
 
 
-def _telegram_credentials_available() -> tuple[Optional[str], Any]:
-    bot_token = settings.bot_token or os.getenv("BOT_TOKEN")
-    channel_id = settings.channel_id
-    return bot_token, channel_id
-
-
-def _telegram_status_ok(response: Any) -> bool:
-    if getattr(response, "status_code", None) == 200:
-        return True
-    body = ""
-    try:
-        body = response.text
-    except Exception:
-        body = ""
-    return TELEGRAM_MESSAGE_NOT_MODIFIED in body.lower()
-
-
 async def apply_offer_channel_state(
     offer: Any,
     *,
@@ -160,41 +141,39 @@ async def apply_offer_channel_state(
     if not channel_message_id:
         return False
 
-    bot_token, channel_id = _telegram_credentials_available()
-    if not bot_token or not channel_id:
+    channel_id = settings.channel_id
+    if not channel_id:
         return False
 
     status = _status_value(getattr(offer, "status", None))
     history_tag = get_offer_channel_history_tag(offer, traded_quantity=traded_quantity)
 
-    if history_tag:
-        url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
-        payload = {
-            "chat_id": channel_id,
-            "message_id": channel_message_id,
-            "text": build_offer_channel_message(offer, history_tag=history_tag),
-            "reply_markup": None,
-        }
-    elif status and status != OfferStatus.ACTIVE.value:
-        url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-        payload = {
-            "chat_id": channel_id,
-            "message_id": channel_message_id,
-        }
-    else:
-        url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-        payload = {
-            "chat_id": channel_id,
-            "message_id": channel_message_id,
-        }
-        reply_markup = build_offer_channel_reply_markup(offer)
-        if reply_markup is not None:
-            payload["reply_markup"] = reply_markup
-
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=timeout)
-        return _telegram_status_ok(response)
+        if history_tag:
+            result = await telegram_gateway.edit_message_text(
+                channel_id,
+                channel_message_id,
+                build_offer_channel_message(offer, history_tag=history_tag),
+                reply_markup=None,
+                timeout=timeout,
+                idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
+            )
+        elif status and status != OfferStatus.ACTIVE.value:
+            result = await telegram_gateway.edit_message_reply_markup(
+                channel_id,
+                channel_message_id,
+                timeout=timeout,
+                idempotency_key=f"offer-channel-buttons-remove:{getattr(offer, 'id', '')}:{status}",
+            )
+        else:
+            result = await telegram_gateway.edit_message_reply_markup(
+                channel_id,
+                channel_message_id,
+                reply_markup=build_offer_channel_reply_markup(offer),
+                timeout=timeout,
+                idempotency_key=f"offer-channel-buttons:{getattr(offer, 'id', '')}",
+            )
+        return result.ok
     except Exception as exc:
         logger.debug(
             "Failed to apply Telegram channel offer state",

@@ -92,7 +92,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
-             patch("core.services.telegram_offer_channel_service.httpx.AsyncClient", return_value=client):
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
             result = await channel_service.apply_offer_channel_state(offer, reason="test")
 
         self.assertTrue(result)
@@ -115,7 +115,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
-             patch("core.services.telegram_offer_channel_service.httpx.AsyncClient", return_value=client):
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
             result = await channel_service.apply_offer_channel_state(offer, reason="test")
 
         self.assertTrue(result)
@@ -133,7 +133,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.services.telegram_offer_channel_service.current_server", return_value="iran"), \
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
-             patch("core.services.telegram_offer_channel_service.httpx.AsyncClient", return_value=client) as client_ctor:
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client) as client_ctor:
             result = await channel_service.apply_offer_channel_state(make_offer(), reason="test")
 
         self.assertFalse(result)
@@ -146,7 +146,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
              patch.object(channel_service.settings, "bot_token", "bot-token"), \
              patch.object(channel_service.settings, "channel_id", -100), \
-             patch("core.services.telegram_offer_channel_service.httpx.AsyncClient", return_value=client):
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
             result = await channel_service.apply_offer_channel_state(make_offer(), reason="replay")
 
         self.assertTrue(result)

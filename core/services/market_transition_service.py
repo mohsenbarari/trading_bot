@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import telegram_gateway
 from core.config import settings
 from core.events import publish_event_sync
 from core.offer_expiry import remove_channel_buttons
@@ -130,20 +130,17 @@ async def _acquire_market_runtime_lock(db: AsyncSession) -> None:
 
 
 async def _send_market_channel_notice(text: str) -> None:
-    bot_token = settings.bot_token or os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
-    if not bot_token or not channel_id:
+    if not channel_id:
         return
 
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": channel_id,
-        "text": text,
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, timeout=10)
-        response.raise_for_status()
+    result = await telegram_gateway.send_message(
+        channel_id,
+        text,
+        idempotency_key=f"market-channel-notice:{text}",
+    )
+    if not result.ok:
+        raise RuntimeError(f"Telegram market notice failed: {result.error or result.status_code}")
 
 
 async def get_market_runtime_state(db: AsyncSession) -> MarketRuntimeState | None:

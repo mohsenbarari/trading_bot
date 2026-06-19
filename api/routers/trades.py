@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from typing import List, Optional, Mapping
 from urllib.parse import urlencode
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -47,6 +46,7 @@ from core.services.trade_service import (
 )
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
+from core import telegram_gateway
 from models.user import User, UserRole
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
@@ -1455,17 +1455,26 @@ async def send_telegram_message(chat_id: int, text: str) -> bool:
     if not bot_token or not chat_id:
         return False
     
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=10)
-            return response.status_code == 200
+        result = await telegram_gateway.send_message(
+            chat_id,
+            text,
+            parse_mode="HTML",
+            bot_token=bot_token,
+            idempotency_key=f"trade-message:{chat_id}",
+        )
+        if not result.ok:
+            log_trading_event(
+                logger,
+                "trade_telegram_message_failed",
+                level="error",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="telegram_message",
+                status_code=result.status_code,
+                error_class=result.error,
+            )
+        return result.ok
     except Exception as exc:
         log_trading_event(
             logger,
@@ -1490,8 +1499,6 @@ async def update_channel_buttons(offer: Offer) -> bool:
     if not bot_token or not channel_id or not offer.channel_message_id:
         return False
     
-    url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-    
     if offer.remaining_quantity <= 0 or offer.status != OfferStatus.ACTIVE:
         return await apply_offer_channel_state(offer, reason="trade_channel_buttons")
     else:
@@ -1506,22 +1513,36 @@ async def update_channel_buttons(offer: Offer) -> bool:
                 lot_sizes=offer.lot_sizes,
             )
             if not valid_lots:
-                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
                 buttons = None
             else:
                 buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer.id}:{a}"} for a in valid_lots]]
         
         if buttons is not None:
-            payload = {
-                "chat_id": channel_id,
-                "message_id": offer.channel_message_id,
-                "reply_markup": {"inline_keyboard": buttons}
-            }
+            reply_markup = {"inline_keyboard": buttons}
+        else:
+            reply_markup = None
     
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=10)
-            return response.status_code == 200
+        result = await telegram_gateway.edit_message_reply_markup(
+            channel_id,
+            offer.channel_message_id,
+            reply_markup=reply_markup,
+            bot_token=bot_token,
+            idempotency_key=f"trade-channel-buttons:{getattr(offer, 'id', '')}",
+        )
+        if not result.ok:
+            log_trading_event(
+                logger,
+                "trade_channel_buttons_update_failed",
+                level="error",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="telegram_channel_buttons",
+                offer_id=getattr(offer, "id", None),
+                status_code=result.status_code,
+                error_class=result.error,
+            )
+        return result.ok
     except Exception as exc:
         log_trading_event(
             logger,
@@ -1537,7 +1558,7 @@ async def update_channel_buttons(offer: Offer) -> bool:
 
 
 # ===== Sync Wrappers for BackgroundTasks =====
-# استفاده از httpx sync client به جای asyncio.run برای جلوگیری از مشکلات event loop
+# استفاده از gateway sync client به جای asyncio.run برای جلوگیری از مشکلات event loop
 
 def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
@@ -1545,13 +1566,26 @@ def send_telegram_message_sync(chat_id: int, text: str) -> bool:
     if not bot_token or not chat_id:
         return False
     
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
-    
     try:
-        # استفاده از httpx sync client به جای asyncio.run
-        response = httpx.post(url, json=payload, timeout=10)
-        return response.status_code == 200
+        result = telegram_gateway.send_message_sync(
+            chat_id,
+            text,
+            parse_mode="HTML",
+            bot_token=bot_token,
+            idempotency_key=f"trade-message-sync:{chat_id}",
+        )
+        if not result.ok:
+            log_trading_event(
+                logger,
+                "trade_telegram_message_failed",
+                level="error",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="telegram_message",
+                status_code=result.status_code,
+                error_class=result.error,
+            )
+        return result.ok
     except Exception as exc:
         log_trading_event(
             logger,
@@ -1621,9 +1655,7 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
         offer.lot_sizes = lot_sizes
         if remaining_quantity <= 0 or offer_status != OfferStatus.ACTIVE:
             return await apply_offer_channel_state(offer, reason="trade_channel_buttons_sync")
-        
-        url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-        
+
         if offer.is_wholesale or not lot_sizes:
             buttons = [[{"text": f"{remaining_quantity} عدد", "callback_data": f"channel_trade:{offer_id}:{remaining_quantity}"}]]
         else:
@@ -1634,17 +1666,23 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
                 lot_sizes=lot_sizes,
             )
             if not valid_lots:
-                payload = {"chat_id": channel_id, "message_id": offer.channel_message_id}
                 buttons = None
             else:
                 buttons = [[{"text": f"{a} عدد", "callback_data": f"channel_trade:{offer_id}:{a}"} for a in valid_lots]]
 
         if buttons is not None:
-            payload = {"chat_id": channel_id, "message_id": offer.channel_message_id, "reply_markup": {"inline_keyboard": buttons}}
+            reply_markup = {"inline_keyboard": buttons}
+        else:
+            reply_markup = None
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, timeout=10)
-        return response.status_code == 200
+    result = await telegram_gateway.edit_message_reply_markup(
+        channel_id,
+        offer.channel_message_id,
+        reply_markup=reply_markup,
+        bot_token=bot_token,
+        idempotency_key=f"trade-channel-buttons-sync:{offer_id}",
+    )
+    return result.ok
 
 
 # --- Endpoints ---

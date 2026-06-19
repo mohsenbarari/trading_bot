@@ -4,12 +4,12 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-import httpx
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from bot.utils.redis_helpers import mark_deleted_telegram_user
+from core import telegram_gateway
 from core.config import settings
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
@@ -51,15 +51,20 @@ async def remove_user_from_telegram_channel(telegram_id: int) -> None:
     if not settings.channel_id or not settings.bot_token:
         return
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        await client.post(
-            f"https://api.telegram.org/bot{settings.bot_token}/banChatMember",
-            json={"chat_id": settings.channel_id, "user_id": telegram_id, "revoke_messages": False},
-        )
-        await client.post(
-            f"https://api.telegram.org/bot{settings.bot_token}/unbanChatMember",
-            json={"chat_id": settings.channel_id, "user_id": telegram_id, "only_if_banned": True},
-        )
+    await telegram_gateway.ban_chat_member(
+        settings.channel_id,
+        telegram_id,
+        revoke_messages=False,
+        bot_token=settings.bot_token,
+        idempotency_key=f"user-channel-remove-ban:{telegram_id}",
+    )
+    await telegram_gateway.unban_chat_member(
+        settings.channel_id,
+        telegram_id,
+        only_if_banned=True,
+        bot_token=settings.bot_token,
+        idempotency_key=f"user-channel-remove-unban:{telegram_id}",
+    )
 
 
 def _utcnow_naive():
