@@ -11,11 +11,35 @@ async def _listener_forever(_bot):
 
 
 class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_main_returns_early_without_bot_token(self):
-        with patch.object(run_bot.settings, 'bot_token', None), patch('run_bot.init_db', AsyncMock()) as init_db:
-            await run_bot.main()
+    async def test_main_fails_closed_without_bot_token(self):
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', None), patch('run_bot.init_db', AsyncMock()) as init_db:
+            with self.assertRaises(run_bot.BotRuntimeSurfaceError) as exc_info:
+                await run_bot.main()
 
         init_db.assert_not_awaited()
+        self.assertIn('BOT_TOKEN is required', str(exc_info.exception))
+
+    async def test_main_fails_closed_on_iran_mode_even_with_bot_token(self):
+        with patch.object(run_bot.settings, 'server_mode', 'iran'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch('run_bot.init_db', AsyncMock()) as init_db:
+            with self.assertRaises(run_bot.BotRuntimeSurfaceError) as exc_info:
+                await run_bot.main()
+
+        init_db.assert_not_awaited()
+        self.assertIn('SERVER_MODE must be foreign', str(exc_info.exception))
+
+    async def test_main_fails_closed_without_explicit_bot_service_identity(self):
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'app'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch('run_bot.init_db', AsyncMock()) as init_db:
+            with self.assertRaises(run_bot.BotRuntimeSurfaceError) as exc_info:
+                await run_bot.main()
+
+        init_db.assert_not_awaited()
+        self.assertIn('TRADING_BOT_SERVICE must be bot', str(exc_info.exception))
 
     async def test_main_initializes_and_registers_all_routers(self):
         fake_bot = MagicMock()
@@ -26,7 +50,9 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.update.outer_middleware = MagicMock()
         auth_middleware = object()
 
-        with patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
             run_bot.settings, 'redis_url', 'redis://localhost:6379/0'
         ), patch('run_bot.init_db', AsyncMock()) as init_db, patch(
             'run_bot.setup_event_listeners'
@@ -55,7 +81,9 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling = AsyncMock(side_effect=RuntimeError('boom'))
         fake_dp.update.outer_middleware = MagicMock()
 
-        with patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
+        with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
+            run_bot.settings, 'trading_bot_service', 'bot'
+        ), patch.object(run_bot.settings, 'bot_token', 'token'), patch.object(
             run_bot.settings, 'redis_url', 'redis://localhost:6379/0'
         ), patch('run_bot.init_db', AsyncMock()), patch('run_bot.setup_event_listeners'), patch(
             'run_bot.Bot', return_value=fake_bot

@@ -4,6 +4,7 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from core.config import settings
+from core.server_routing import SERVER_FOREIGN, normalize_server
 from bot.handlers import (
     start, 
     panel, 
@@ -29,10 +30,45 @@ from core.logging_config import configure_logging
 configure_logging("bot")
 logger = logging.getLogger(__name__)
 
-async def main():
+
+class BotRuntimeSurfaceError(RuntimeError):
+    """Raised when the Telegram bot entrypoint is started on a forbidden surface."""
+
+
+def _configured_service_name() -> str:
+    return str(getattr(settings, "trading_bot_service", "") or "").strip().lower()
+
+
+def assert_bot_runtime_surface() -> None:
+    configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
+    configured_service = _configured_service_name()
+    reasons: list[str] = []
+
+    if configured_server_mode != SERVER_FOREIGN:
+        reasons.append("SERVER_MODE must be foreign for Telegram bot runtime")
+    if configured_service != "bot":
+        reasons.append("TRADING_BOT_SERVICE must be bot for Telegram bot runtime")
     if not settings.bot_token:
-        logger.error("BOT_TOKEN is not set!")
+        reasons.append("BOT_TOKEN is required for Telegram bot runtime")
+
+    if not reasons:
         return
+
+    logger.critical(
+        "Bot runtime surface guard refused startup",
+        extra={
+            "event": "bot.runtime_surface_refused",
+            "configured_server_mode": configured_server_mode or None,
+            "configured_service": configured_service or None,
+            "telegram_credential_configured": bool(settings.bot_token),
+            "reasons": reasons,
+        },
+    )
+    raise BotRuntimeSurfaceError("; ".join(reasons))
+
+
+async def main():
+    assert_bot_runtime_surface()
 
     # Initialize Database
     await init_db()
@@ -82,5 +118,7 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
+    except BotRuntimeSurfaceError:
+        raise SystemExit(78)
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot stopped!")
