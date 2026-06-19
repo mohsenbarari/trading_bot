@@ -15,14 +15,28 @@ from api.routers.trades import (
 )
 
 
+class FakeExecuteResult:
+    def __init__(self, *, single_or_none=None):
+        self._single_or_none = single_or_none
+
+    def scalar_one_or_none(self):
+        return self._single_or_none
+
+
 class FakeDB:
-    def __init__(self, *, get_results=None):
+    def __init__(self, *, get_results=None, execute_results=None):
         self.get_results = list(get_results or [])
+        self.execute_results = list(execute_results or [])
 
     async def get(self, _model, _id):
         if not self.get_results:
             raise AssertionError("Unexpected get() call")
         return self.get_results.pop(0)
+
+    async def execute(self, _stmt):
+        if not self.execute_results:
+            raise AssertionError("Unexpected execute() call")
+        return self.execute_results.pop(0)
 
 
 def make_context(owner_user, actor_user=None):
@@ -120,9 +134,11 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_internal_rejects_invalid_signature(self):
         internal_data = InternalTradeExecuteRequest(
             offer_id=7,
+            offer_public_id="ofr_remote_7",
             quantity=3,
             responder_user_id=5,
             edge_received_at=datetime.utcnow(),
+            source_surface="webapp",
             source_server="iran",
             idempotency_key="idem-1",
         )
@@ -141,9 +157,11 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_internal_rejects_wrong_offer_server_or_missing_responder(self):
         internal_data = InternalTradeExecuteRequest(
             offer_id=7,
+            offer_public_id="ofr_remote_7",
             quantity=3,
             responder_user_id=5,
             edge_received_at=datetime.utcnow(),
+            source_surface="webapp",
             source_server="iran",
             idempotency_key="idem-1",
         )
@@ -158,7 +176,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                     internal_data=internal_data,
                     background_tasks=BackgroundTasks(),
                     raw_request=make_request(headers=headers),
-                    db=FakeDB(get_results=[SimpleNamespace(home_server="iran")]),
+                    db=FakeDB(execute_results=[FakeExecuteResult(single_or_none=SimpleNamespace(id=44, home_server="iran"))]),
                 )
         self.assertEqual(exc_info.exception.status_code, 409)
 
@@ -171,7 +189,10 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                     internal_data=internal_data,
                     background_tasks=BackgroundTasks(),
                     raw_request=make_request(headers=headers),
-                    db=FakeDB(get_results=[SimpleNamespace(home_server="foreign"), None]),
+                    db=FakeDB(
+                        execute_results=[FakeExecuteResult(single_or_none=SimpleNamespace(id=44, home_server="foreign"))],
+                        get_results=[None],
+                    ),
                 )
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(exc_info.exception.detail, "کاربر درخواست‌دهنده یافت نشد")
@@ -179,9 +200,11 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_internal_rejects_missing_mismatched_or_local_source_server(self):
         internal_data = InternalTradeExecuteRequest(
             offer_id=7,
+            offer_public_id="ofr_remote_7",
             quantity=3,
             responder_user_id=5,
             edge_received_at=datetime.utcnow(),
+            source_surface="webapp",
             source_server="iran",
             idempotency_key="idem-1",
         )
@@ -211,16 +234,19 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_trade_internal_delegates_to_authoritative_execution(self):
         internal_data = InternalTradeExecuteRequest(
             offer_id=7,
+            offer_public_id="ofr_foreign_999",
             quantity=3,
             responder_user_id=5,
             actor_user_id=44,
             edge_received_at=datetime(2026, 1, 1, 12, 0, 0),
+            source_surface="telegram_bot",
             source_server="iran",
             idempotency_key="idem-1",
         )
         headers = {"x-timestamp": "1", "x-signature": "sig", "x-api-key": "key", "x-source-server": "iran"}
         responder = SimpleNamespace(id=5, is_deleted=False)
         actor = SimpleNamespace(id=44, is_deleted=False)
+        resolved_offer = SimpleNamespace(id=999, home_server="foreign")
 
         with patch("api.routers.trades.verify_internal_signature", return_value=True), patch(
             "api.routers.trades.normalize_server",
@@ -233,13 +259,17 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 internal_data=internal_data,
                 background_tasks=BackgroundTasks(),
                 raw_request=make_request(body=b"payload", headers=headers),
-                db=FakeDB(get_results=[SimpleNamespace(home_server="foreign"), responder, actor]),
+                db=FakeDB(
+                    execute_results=[FakeExecuteResult(single_or_none=resolved_offer)],
+                    get_results=[responder, actor],
+                ),
             )
 
         self.assertEqual(result, {"id": 99})
         execute_mock.assert_awaited_once()
         delegated_trade_data = execute_mock.await_args.kwargs["trade_data"]
-        self.assertEqual(delegated_trade_data.offer_id, 7)
+        self.assertEqual(delegated_trade_data.offer_id, 999)
+        self.assertEqual(delegated_trade_data.offer_public_id, "ofr_foreign_999")
         self.assertEqual(delegated_trade_data.quantity, 3)
         self.assertEqual(delegated_trade_data.idempotency_key, "idem-1")
         delegated_context = execute_mock.await_args.kwargs["context"]
@@ -247,6 +277,8 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delegated_context.actor_user, actor)
         self.assertTrue(delegated_context.is_accountant_context)
         self.assertEqual(execute_mock.await_args.kwargs["edge_received_at"], internal_data.edge_received_at)
+        self.assertEqual(execute_mock.await_args.kwargs["request_source_surface"].value, "telegram_bot")
+        self.assertEqual(execute_mock.await_args.kwargs["request_source_server"], "iran")
 
     async def test_forward_trade_if_remote_home_covers_both_cross_server_directions_and_idempotency(self):
         scenarios = (
@@ -255,7 +287,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         )
         for source_server, target_server in scenarios:
             with self.subTest(source_server=source_server, target_server=target_server):
-                db = FakeDB(get_results=[SimpleNamespace(home_server=target_server)])
+                db = FakeDB(get_results=[SimpleNamespace(home_server=target_server, offer_public_id="ofr_forward_7")])
                 owner_user = SimpleNamespace(id=5)
                 edge_received_at = datetime(2026, 6, 16, 12, 0, 0)
 
@@ -279,6 +311,8 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 target_home_server, payload = forward_mock.await_args.args
                 self.assertEqual(target_home_server, target_server)
                 self.assertEqual(payload["source_server"], source_server)
+                self.assertEqual(payload["source_surface"], "webapp")
+                self.assertEqual(payload["offer_public_id"], "ofr_forward_7")
                 self.assertEqual(payload["idempotency_key"], "idem-retry")
                 self.assertEqual(payload["offer_id"], 7)
                 self.assertEqual(payload["responder_user_id"], 5)

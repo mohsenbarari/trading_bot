@@ -176,32 +176,19 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_execute.is_remote_home", return_value=False
         ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 5, [5])), patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
-        ), patch("core.utils.increment_user_counter", new=AsyncMock()) as increment_mock, patch(
-            "bot.handlers.trade_execute.publish_event", new=AsyncMock()
-        ) as publish_mock, patch(
-            "bot.handlers.trade_execute.create_user_notification",
-            new=AsyncMock(side_effect=[RuntimeError("notif 1"), RuntimeError("notif 2")]),
-        ) as notif_mock, patch(
-            "bot.handlers.trade_execute.update_offer_channel_markup", new=AsyncMock(side_effect=RuntimeError("update fail"))
         ), patch(
-            "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
-        ) as remove_mock, patch(
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(),
+        ) as shared_command_mock, patch(
             "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ), patch.dict(sys.modules, {"jdatetime": jdatetime_mod}):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=5), user=user, bot=bot)
 
-        self.assertEqual(session.rollbacks, 1)
-        self.assertEqual(session.commits, 2)
-        self.assertEqual(session.added[0].trade_number, 10002)
-        self.assertEqual(offer.remaining_quantity, 0)
-        self.assertEqual(offer.status, OfferStatus.COMPLETED)
-        self.assertIsNone(offer.lot_sizes)
-        increment_mock.assert_awaited_once_with(session, user, "trade", 5)
-        publish_mock.assert_awaited_once_with("offer:completed", {"id": 7})
-        self.assertEqual(bot.send_message.await_count, 2)
-        self.assertEqual(notif_mock.await_count, 2)
-        remove_mock.assert_not_awaited()
-        callback.answer.assert_awaited_once_with()
+        shared_command_mock.assert_awaited_once()
+        self.assertEqual(shared_command_mock.await_args.kwargs["actual_amount"], 5)
+        self.assertEqual(session.rollbacks, 0)
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(session.added, [])
 
     async def test_handle_channel_trade_local_pending_tolerates_suggestion_state_failure(self):
         user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
@@ -234,17 +221,15 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_execute.is_remote_home", return_value=False
         ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 5, [5])), patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
-        ), patch("core.utils.increment_user_counter", new=AsyncMock()), patch(
-            "bot.handlers.trade_execute.publish_event", new=AsyncMock()
-        ), patch("bot.handlers.trade_execute.create_user_notification", new=AsyncMock()) as notif_mock, patch(
-            "bot.handlers.trade_execute.update_offer_channel_markup", new=AsyncMock()
         ), patch(
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(),
+        ) as shared_command_mock, patch(
             "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ), patch.dict(sys.modules, {"jdatetime": jdatetime_mod}):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=5), user=user, bot=bot)
 
-        self.assertEqual(notif_mock.await_count, 1)
-        callback.answer.assert_awaited_once_with()
+        shared_command_mock.assert_awaited_once()
 
     async def test_handle_channel_trade_raises_non_retryable_integrity_error(self):
         user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
@@ -260,6 +245,9 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_execute.is_remote_home", return_value=False
         ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 5, [5])), patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
+        ), patch(
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(side_effect=error),
         ), patch(
             "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
         ), patch.dict(sys.modules, {"jdatetime": jdatetime_mod}):

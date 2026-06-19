@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
 from core.enums import UserAccountStatus, UserRole
 from models.offer import OfferStatus, OfferType
+from models.offer_request import OfferRequest, OfferRequestStatus
 
 
 class FakeExecuteResult:
@@ -29,6 +30,11 @@ class FakeDB:
         self.execute_results = list(execute_results or [])
         self.scalar_result = scalar_result
         self.refresh = AsyncMock()
+        self.commit = AsyncMock()
+        self.rollback = AsyncMock()
+        self.flush = AsyncMock()
+        self.added = []
+        self.offer_requests = []
 
     async def get(self, _model, _id, **_kwargs):
         if not self.get_results:
@@ -42,6 +48,12 @@ class FakeDB:
 
     async def scalar(self, _stmt):
         return self.scalar_result
+
+    def add(self, item):
+        if isinstance(item, OfferRequest):
+            self.offer_requests.append(item)
+            return
+        self.added.append(item)
 
 
 def make_user(**overrides):
@@ -69,6 +81,8 @@ def make_offer(**overrides):
         "lot_sizes": [6, 4],
         "offer_type": OfferType.SELL,
         "price": 123456,
+        "offer_public_id": "ofr_guard_7",
+        "home_server": "foreign",
         "commodity_id": 1,
         "commodity": SimpleNamespace(name="Gold"),
         "user": SimpleNamespace(account_name="owner", mobile_number="09125555555", telegram_id=999),
@@ -253,11 +267,16 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_awaited_once_with(offer, ["commodity"])
         self.assertEqual(response.status_code, 409)
         self.assertEqual(json.loads(response.body), {"kind": "lot_suggestion", "available_amounts": [6, 4]})
+        self.assertEqual(len(db.offer_requests), 1)
+        self.assertEqual(db.offer_requests[0].result_status, OfferRequestStatus.REJECTED_LOT_UNAVAILABLE)
+        self.assertEqual(db.offer_requests[0].public_failure_code, "lot_unavailable")
+        db.commit.assert_awaited_once()
 
     async def test_execute_trade_authoritatively_rejects_invalid_amount_and_reuses_idempotent_trade(self):
         locked_user = make_user()
         offer = make_offer(is_wholesale=True, lot_sizes=None)
 
+        invalid_db = FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[offer])
         with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
             "api.routers.trades._is_offer_expired_for_trade",
             new=AsyncMock(return_value=False),
@@ -269,16 +288,21 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 await _execute_trade_authoritatively(
                     TradeCreate(offer_id=7, quantity=5),
                     BackgroundTasks(),
-                    db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[offer]),
+                    db=invalid_db,
                     context=make_context(locked_user),
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "bad amount")
+        self.assertEqual(len(invalid_db.offer_requests), 1)
+        self.assertEqual(invalid_db.offer_requests[0].result_status, OfferRequestStatus.REJECTED_BUSINESS_RULE)
+        self.assertEqual(invalid_db.offer_requests[0].public_failure_code, "invalid_quantity")
+        invalid_db.commit.assert_awaited_once()
 
         existing_trade = SimpleNamespace(id=88, offer_user_id=offer.user_id, responder_user_id=locked_user.id)
         db = FakeDB(
             execute_results=[
                 FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single_or_none=None),
                 FakeExecuteResult(single_or_none=existing_trade),
             ],
             get_results=[offer],
@@ -303,6 +327,38 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(result, {"id": 88})
+
+    async def test_execute_trade_authoritatively_rejects_duplicate_failed_request_without_mutation(self):
+        locked_user = make_user()
+        offer = make_offer(is_wholesale=True, lot_sizes=None)
+        existing_ledger = SimpleNamespace(
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+            public_failure_message="درخواست قبلی رد شده است.",
+        )
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single_or_none=existing_ledger),
+            ],
+            get_results=[offer],
+        )
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=7, quantity=4, idempotency_key="failed-replay"),
+                    BackgroundTasks(),
+                    db=db,
+                    context=make_context(locked_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "درخواست قبلی رد شده است.")
+        self.assertEqual(db.added, [])
+        db.commit.assert_not_awaited()
 
 
 if __name__ == "__main__":

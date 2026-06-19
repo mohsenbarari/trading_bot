@@ -741,6 +741,30 @@ Required tests:
   truthful request result.
 - Lot unavailable and stale-state responses update or create the ledger with a non-trade result.
 
+Implementation decisions captured during Step 5D:
+
+- `TradeCreate` now accepts optional `offer_public_id`, and internal forwarded execution requires
+  `offer_public_id` plus `source_surface`. The home server resolves its own local `offers.id` by
+  `offer_public_id`; the incoming integer `offer_id` is kept only as compatibility/debug context and
+  is not trusted as cross-server identity.
+- WebApp requests enter the shared authoritative path with `request_source_surface=webapp`; Telegram
+  channel callbacks enter the same path with `request_source_surface=telegram_bot`.
+- Bot local-home confirmed callbacks delegate to the shared authoritative command instead of creating
+  `Trade` rows and mutating `Offer` directly in the handler. Bot remote-home callbacks forward the
+  same metadata contract to the home server.
+- The authoritative command creates an `offer_requests` ledger row after the offer is resolved and
+  locked. Successful trades finalize that row as `completed_trade` in the same transaction as the
+  offer/trade mutation. Lot-unavailable and invalid-quantity rejections are finalized as non-trade
+  outcomes before returning the user-visible rejection.
+- Duplicate idempotent trade replay returns the existing trade response and records/finalizes the
+  request ledger without mutating the offer again.
+- ORM sync events already added in Step 5C make `offer_requests` syncable product data. Step 6 still
+  owns the stronger durable outbox guarantee for synced-table writes.
+- Existing integer Telegram callback payloads remain compatible for now because the foreign-local
+  offer row is still used to discover the canonical `offer_public_id`. Step 8B still owns the
+  versioned/new callback payload migration so new callbacks do not depend on cross-server integer
+  offer IDs.
+
 Exit criteria:
 
 - All user-facing trade/request adapters call the shared command.

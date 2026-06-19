@@ -11,6 +11,7 @@ from sqlalchemy import CheckConstraint
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively, _forward_trade_if_remote_home
 from core.enums import UserAccountStatus, UserRole
 from models.offer import Offer, OfferStatus, OfferType
+from models.offer_request import OfferRequest, OfferRequestStatus
 from models.trade import Trade
 
 
@@ -34,7 +35,9 @@ class FakeDB:
         self.refresh = AsyncMock()
         self.commit = AsyncMock()
         self.rollback = AsyncMock()
+        self.flush = AsyncMock()
         self.added = []
+        self.offer_requests = []
 
     async def get(self, _model, _id, **_kwargs):
         if not self.get_results:
@@ -50,6 +53,9 @@ class FakeDB:
         return self.scalar_result
 
     def add(self, item):
+        if isinstance(item, OfferRequest):
+            self.offer_requests.append(item)
+            return
         self.added.append(item)
 
 
@@ -79,6 +85,7 @@ def make_offer(**overrides):
         "offer_type": OfferType.SELL,
         "price": 123456,
         "commodity_id": 1,
+        "offer_public_id": "ofr_contract_7",
         "commodity": SimpleNamespace(name="Gold"),
         "home_server": "foreign",
         "user": SimpleNamespace(
@@ -228,6 +235,7 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
             get_results=[offer],
             execute_results=[
                 FakeExecuteResult(single=owner_user),
+                FakeExecuteResult(single_or_none=None),
                 FakeExecuteResult(single_or_none=existing_trade),
             ],
             scalar_result=10000,
@@ -270,7 +278,10 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"id": 88, "replayed": True})
         self.assertEqual(db.added, [])
-        db.commit.assert_not_awaited()
+        self.assertEqual(len(db.offer_requests), 1)
+        self.assertEqual(db.offer_requests[0].result_status, OfferRequestStatus.COMPLETED_TRADE)
+        self.assertEqual(db.offer_requests[0].resulting_trade_id, 88)
+        db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         self.assertEqual(offer.remaining_quantity, 10)
         self.assertEqual(offer.status, OfferStatus.ACTIVE)
@@ -306,10 +317,12 @@ class TradingProductionContractMatrixTests(unittest.IsolatedAsyncioTestCase):
             payload,
             {
                 "offer_id": 7,
+                "offer_public_id": "ofr_contract_7",
                 "quantity": 4,
                 "responder_user_id": 5,
                 "actor_user_id": 44,
                 "edge_received_at": edge_received_at.isoformat(),
+                "source_surface": "webapp",
                 "source_server": "foreign",
                 "idempotency_key": "idem-remote",
             },

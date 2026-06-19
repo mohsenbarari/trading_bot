@@ -44,12 +44,19 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.offer_request_ledger_service import (
+    OfferRequestLedgerCommand,
+    apply_offer_request_decision,
+    create_offer_request_ledger_entry,
+    customer_relation_snapshot,
+)
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.services.user_account_status_service import is_user_trade_blocked
 from core import telegram_gateway
 from models.user import User, UserRole
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
+from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
 from models.trade import Trade, TradeType, TradeStatus
 from models.commodity import Commodity, CommodityAlias
 from api.deps import EffectiveOwnerActor, get_current_user, get_effective_owner_actor_context
@@ -114,6 +121,7 @@ class TradeExecutionPlan:
 class TradeCreate(BaseModel):
     """ایجاد معامله جدید"""
     offer_id: int = Field(..., gt=0)
+    offer_public_id: Optional[str] = None
     quantity: int = Field(..., gt=0)
     idempotency_key: Optional[str] = None
 
@@ -121,10 +129,12 @@ class TradeCreate(BaseModel):
 class InternalTradeExecuteRequest(BaseModel):
     """درخواست داخلی اجرای معامله روی سرور مرجع آفر"""
     offer_id: int = Field(..., gt=0)
+    offer_public_id: str = Field(..., min_length=1, max_length=40)
     quantity: int = Field(..., gt=0)
     responder_user_id: int = Field(..., gt=0)
     actor_user_id: Optional[int] = Field(None, gt=0)
     edge_received_at: datetime
+    source_surface: str = OfferRequestSourceSurface.WEBAPP.value
     source_server: str
     idempotency_key: Optional[str] = None
 
@@ -1702,6 +1712,202 @@ def _normalize_internal_trade_source(value: Optional[str]) -> Optional[str]:
     return normalized if normalized in KNOWN_SERVERS else None
 
 
+def _normalize_trade_request_surface(value: object | None) -> OfferRequestSourceSurface:
+    raw_value = getattr(value, "value", value)
+    if not raw_value:
+        return OfferRequestSourceSurface.WEBAPP
+    try:
+        return OfferRequestSourceSurface(str(raw_value).strip().lower())
+    except ValueError:
+        return OfferRequestSourceSurface.INTERNAL_FORWARD
+
+
+def _offer_request_public_id(offer: Offer | object, trade_data: TradeCreate) -> str:
+    return (
+        (trade_data.offer_public_id or "").strip()
+        or (getattr(offer, "offer_public_id", None) or "").strip()
+    )
+
+
+async def _resolve_internal_offer_by_public_id(
+    db: AsyncSession,
+    *,
+    offer_public_id: str,
+) -> Offer | None:
+    public_id = (offer_public_id or "").strip()
+    if not public_id:
+        return None
+    result = await db.execute(select(Offer).where(Offer.offer_public_id == public_id))
+    return result.scalar_one_or_none()
+
+
+def _build_offer_request_ledger_command(
+    *,
+    offer: Offer | object,
+    trade_data: TradeCreate,
+    owner_user: User | object,
+    actor_user: User | object,
+    request_source_surface: OfferRequestSourceSurface | str,
+    request_source_server: str | None,
+    edge_received_at: datetime | None,
+    customer_relation: CustomerRelation | object | None = None,
+    result_status: OfferRequestStatus | str = OfferRequestStatus.RECEIVED,
+    public_failure_code: str | None = None,
+    public_failure_message: str | None = None,
+    internal_failure_code: str | None = None,
+    internal_failure_context: Mapping[str, object] | None = None,
+) -> OfferRequestLedgerCommand:
+    snapshot = customer_relation_snapshot(customer_relation)
+    return OfferRequestLedgerCommand(
+        request_home_server=normalize_server(getattr(offer, "home_server", None), current_server()),
+        local_offer_id=getattr(offer, "id", None),
+        offer_public_id=_offer_request_public_id(offer, trade_data),
+        requester_user_id=getattr(owner_user, "id", None),
+        actor_user_id=getattr(actor_user, "id", None),
+        request_source_surface=request_source_surface,
+        request_source_server=normalize_server(request_source_server, current_server()),
+        requested_quantity=trade_data.quantity,
+        idempotency_key=trade_data.idempotency_key,
+        received_at=edge_received_at,
+        result_status=result_status,
+        public_failure_code=public_failure_code,
+        public_failure_message=public_failure_message,
+        internal_failure_code=internal_failure_code,
+        internal_failure_context=internal_failure_context,
+        **snapshot,
+    )
+
+
+async def _create_offer_request_ledger_for_trade(
+    db: AsyncSession,
+    *,
+    offer: Offer | object,
+    trade_data: TradeCreate,
+    owner_user: User | object,
+    actor_user: User | object,
+    request_source_surface: OfferRequestSourceSurface | str,
+    request_source_server: str | None,
+    edge_received_at: datetime | None,
+    customer_relation: CustomerRelation | object | None = None,
+) -> OfferRequest | None:
+    offer_public_id = _offer_request_public_id(offer, trade_data)
+    if not offer_public_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="شناسه عمومی لفظ برای ثبت درخواست موجود نیست.")
+    if trade_data.offer_public_id and getattr(offer, "offer_public_id", None) != trade_data.offer_public_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="شناسه عمومی لفظ با رکورد مرجع همخوانی ندارد.")
+
+    result = await create_offer_request_ledger_entry(
+        db,
+        _build_offer_request_ledger_command(
+            offer=offer,
+            trade_data=trade_data,
+            owner_user=owner_user,
+            actor_user=actor_user,
+            request_source_surface=request_source_surface,
+            request_source_server=request_source_server,
+            edge_received_at=edge_received_at,
+            customer_relation=customer_relation,
+        ),
+    )
+    if result.duplicate_replay:
+        replay_exception = _terminal_duplicate_request_http_exception(result.ledger)
+        if replay_exception is not None:
+            raise replay_exception
+    return result.ledger
+
+
+def _finalize_offer_request_ledger(
+    ledger: OfferRequest | object | None,
+    *,
+    result_status: OfferRequestStatus,
+    public_failure_code: str | None = None,
+    public_failure_message: str | None = None,
+    internal_failure_code: str | None = None,
+    internal_failure_context: Mapping[str, object] | None = None,
+    resulting_trade_id: int | None = None,
+) -> None:
+    if ledger is None:
+        return
+    apply_offer_request_decision(
+        ledger,
+        result_status=result_status,
+        public_failure_code=public_failure_code,
+        public_failure_message=public_failure_message,
+        internal_failure_code=internal_failure_code,
+        internal_failure_context=internal_failure_context,
+        resulting_trade_id=resulting_trade_id,
+    )
+
+
+def _terminal_duplicate_request_http_exception(ledger: OfferRequest | object) -> HTTPException | None:
+    raw_status = getattr(ledger, "result_status", None)
+    status_value = getattr(raw_status, "value", raw_status)
+    if status_value in {
+        OfferRequestStatus.RECEIVED.value,
+        OfferRequestStatus.AUTHORIZED.value,
+        OfferRequestStatus.COMPLETED_TRADE.value,
+    }:
+        return None
+
+    message = getattr(ledger, "public_failure_message", None) or TRADE_UNAVAILABLE_DETAIL
+    if status_value == OfferRequestStatus.REJECTED_BUSINESS_RULE.value:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
+
+
+def _apply_offer_request_customer_snapshot(
+    ledger: OfferRequest | object | None,
+    relation: CustomerRelation | object | None,
+) -> None:
+    if ledger is None:
+        return
+    snapshot = customer_relation_snapshot(relation)
+    for key, value in snapshot.items():
+        setattr(ledger, key, value)
+
+
+async def _commit_rejected_offer_request_ledger(
+    db: AsyncSession,
+    ledger: OfferRequest | object | None,
+    *,
+    result_status: OfferRequestStatus,
+    public_failure_code: str,
+    public_failure_message: str,
+    internal_failure_code: str | None = None,
+    internal_failure_context: Mapping[str, object] | None = None,
+) -> None:
+    if ledger is None or not callable(getattr(db, "commit", None)):
+        return
+    _finalize_offer_request_ledger(
+        ledger,
+        result_status=result_status,
+        public_failure_code=public_failure_code,
+        public_failure_message=public_failure_message,
+        internal_failure_code=internal_failure_code,
+        internal_failure_context=internal_failure_context,
+    )
+    try:
+        await db.commit()
+    except Exception as exc:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            await rollback()
+        log_trading_event(
+            logger,
+            "offer_request_ledger_rejection_commit_failed",
+            level="warning",
+            action="offer_request_ledger",
+            result="failure",
+            error_class=type(exc).__name__,
+        )
+
+
+async def _flush_trade_request_state(db: AsyncSession) -> None:
+    flush = getattr(db, "flush", None)
+    if callable(flush):
+        await flush()
+
+
 async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[datetime]) -> bool:
     from core.trading_settings import get_trading_settings_async
 
@@ -1727,18 +1933,28 @@ async def _forward_trade_if_remote_home(
     trade_data: TradeCreate,
     context: EffectiveOwnerActor,
     edge_received_at: datetime,
+    *,
+    request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
 ) -> Optional[JSONResponse]:
     offer = await db.get(Offer, trade_data.offer_id)
     if not offer or not is_remote_home(offer.home_server):
         return None
+    offer_public_id = (getattr(offer, "offer_public_id", None) or "").strip()
+    if not offer_public_id:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "شناسه عمومی لفظ برای ارسال به سرور مرجع موجود نیست."},
+        )
 
     owner_user = getattr(context, "owner_user", context)
     actor_user = getattr(context, "actor_user", owner_user)
     payload = {
         "offer_id": trade_data.offer_id,
+        "offer_public_id": offer_public_id,
         "quantity": trade_data.quantity,
         "responder_user_id": owner_user.id,
         "edge_received_at": edge_received_at.isoformat(),
+        "source_surface": _normalize_trade_request_surface(request_source_surface).value,
         "source_server": current_server(),
         "idempotency_key": trade_data.idempotency_key,
     }
@@ -1790,6 +2006,8 @@ async def _execute_trade_authoritatively(
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
     edge_received_at: Optional[datetime] = None,
+    request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
+    request_source_server: str | None = None,
 ):
     """
     انجام معامله روی یک لفظ از MiniApp
@@ -1797,6 +2015,9 @@ async def _execute_trade_authoritatively(
     from core.enums import UserRole
     owner_user = context.owner_user
     actor_user = context.actor_user
+    request_source_surface = _normalize_trade_request_surface(request_source_surface)
+    request_source_server = normalize_server(request_source_server, current_server())
+    offer_request_ledger: OfferRequest | None = None
     _ensure_accountant_market_access_allowed(context)
     log_trading_event(
         logger,
@@ -1854,6 +2075,17 @@ async def _execute_trade_authoritatively(
     
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+
+    offer_request_ledger = await _create_offer_request_ledger_for_trade(
+        db,
+        offer=offer,
+        trade_data=trade_data,
+        owner_user=owner_user,
+        actor_user=actor_user,
+        request_source_surface=request_source_surface,
+        request_source_server=request_source_server,
+        edge_received_at=edge_received_at,
+    )
     
     expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
 
@@ -1863,15 +2095,43 @@ async def _execute_trade_authoritatively(
         and not expired_for_trade
     )
     if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_auto_expiry) or expired_for_trade:
+        await _commit_rejected_offer_request_ledger(
+            db,
+            offer_request_ledger,
+            result_status=OfferRequestStatus.REJECTED_OFFER_EXPIRED,
+            public_failure_code="offer_not_active",
+            public_failure_message="این لفظ دیگر فعال نیست.",
+            internal_failure_code="offer_not_active_or_expired",
+            internal_failure_context={
+                "offer_status": getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None)),
+                "expired_for_trade": expired_for_trade,
+            },
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ دیگر فعال نیست.")
     
     if offer.user_id == owner_user.id:
+        await _commit_rejected_offer_request_ledger(
+            db,
+            offer_request_ledger,
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+            public_failure_code="own_offer",
+            public_failure_message="نمی‌توانید روی لفظ خودتان معامله کنید.",
+            internal_failure_code="requester_owns_offer",
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
     
     # بررسی بلاک بین کاربران (پنهان - کاربر نباید متوجه بلاک شدن بشه)
     from core.services.block_service import is_blocked
     blocked, _ = await is_blocked(db, owner_user.id, offer.user_id)
     if blocked:
+        await _commit_rejected_offer_request_ledger(
+            db,
+            offer_request_ledger,
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+            public_failure_code="business_rule",
+            public_failure_message="امکان انجام این معامله وجود ندارد.",
+            internal_failure_code="blocked_user_pair",
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="امکان انجام این معامله وجود ندارد."
@@ -1891,6 +2151,18 @@ async def _execute_trade_authoritatively(
             and amount_error == "این لات دیگر موجود نیست."
         ):
             await db.refresh(offer, ["commodity"])
+            await _commit_rejected_offer_request_ledger(
+                db,
+                offer_request_ledger,
+                result_status=OfferRequestStatus.REJECTED_LOT_UNAVAILABLE,
+                public_failure_code="lot_unavailable",
+                public_failure_message=amount_error,
+                internal_failure_code="lot_unavailable",
+                internal_failure_context={
+                    "requested_amount": trade_data.quantity,
+                    "available_amounts": available_amounts,
+                },
+            )
             return JSONResponse(
                 status_code=status.HTTP_409_CONFLICT,
                 content=build_lot_unavailable_suggestion_payload(
@@ -1903,6 +2175,18 @@ async def _execute_trade_authoritatively(
                     available_amounts=available_amounts,
                 ),
             )
+        await _commit_rejected_offer_request_ledger(
+            db,
+            offer_request_ledger,
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+            public_failure_code="invalid_quantity",
+            public_failure_message=amount_error,
+            internal_failure_code="invalid_trade_amount",
+            internal_failure_context={
+                "requested_amount": trade_data.quantity,
+                "available_amounts": available_amounts,
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=amount_error
@@ -1912,6 +2196,7 @@ async def _execute_trade_authoritatively(
     await db.refresh(offer, ["user", "commodity"])
 
     responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
+    _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)
     responder_customer_tier = getattr(
         getattr(responder_customer_relation, "customer_tier", None),
         "value",
@@ -2038,6 +2323,13 @@ async def _execute_trade_authoritatively(
                 has_idempotency_key=True,
                 chain_length=len(trade_execution_nodes) - 1,
             )
+            _finalize_offer_request_ledger(
+                offer_request_ledger,
+                result_status=OfferRequestStatus.COMPLETED_TRADE,
+                resulting_trade_id=getattr(existing_trade_obj, "id", None),
+            )
+            if callable(getattr(db, "commit", None)):
+                await _commit_trade_execution(db)
             return trade_to_response(
                 existing_trade_obj,
                 identity_map=existing_identity_map,
@@ -2111,6 +2403,13 @@ async def _execute_trade_authoritatively(
     if lot_sizes_modified:
         from sqlalchemy.orm.attributes import flag_modified
         flag_modified(offer, "lot_sizes")  # اجبار SQLAlchemy برای تشخیص تغییر
+
+    await _flush_trade_request_state(db)
+    _finalize_offer_request_ledger(
+        offer_request_ledger,
+        result_status=OfferRequestStatus.COMPLETED_TRADE,
+        resulting_trade_id=getattr(response_trade_record, "id", None),
+    )
     
     # Commit با محافظت Optimistic Locking
     await _commit_trade_execution(db)
@@ -2564,7 +2863,13 @@ async def create_trade(
 ):
     edge_received_at = datetime.utcnow()
     _ensure_accountant_market_access_allowed(context)
-    forwarded_response = await _forward_trade_if_remote_home(db, trade_data, context, edge_received_at)
+    forwarded_response = await _forward_trade_if_remote_home(
+        db,
+        trade_data,
+        context,
+        edge_received_at,
+        request_source_surface=OfferRequestSourceSurface.WEBAPP,
+    )
     if forwarded_response is not None:
         return forwarded_response
 
@@ -2574,6 +2879,8 @@ async def create_trade(
         db=db,
         context=context,
         edge_received_at=edge_received_at,
+        request_source_surface=OfferRequestSourceSurface.WEBAPP,
+        request_source_server=current_server(),
     )
 
 
@@ -2628,7 +2935,22 @@ async def execute_trade_internal(
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal trade source")
 
-    offer = await db.get(Offer, internal_data.offer_id)
+    offer = await _resolve_internal_offer_by_public_id(db, offer_public_id=internal_data.offer_public_id)
+    if not offer:
+        log_trading_event(
+            logger,
+            "trade_internal_execute.rejected",
+            level="warning",
+            action="trade_internal_execute",
+            result="denied",
+            reason="missing_offer_public_id",
+            source_server=payload_source_server,
+            target_server=target_server,
+            offer_id=internal_data.offer_id,
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+
     if offer and normalize_server(offer.home_server) != target_server:
         log_trading_event(
             logger,
@@ -2680,7 +3002,8 @@ async def execute_trade_internal(
 
     return await _execute_trade_authoritatively(
         trade_data=TradeCreate(
-            offer_id=internal_data.offer_id,
+            offer_id=offer.id,
+            offer_public_id=internal_data.offer_public_id,
             quantity=internal_data.quantity,
             idempotency_key=internal_data.idempotency_key,
         ),
@@ -2693,6 +3016,8 @@ async def execute_trade_internal(
             is_accountant_context=actor_user.id != responder.id,
         ),
         edge_received_at=internal_data.edge_received_at,
+        request_source_surface=_normalize_trade_request_surface(internal_data.source_surface),
+        request_source_server=payload_source_server,
     )
 
 

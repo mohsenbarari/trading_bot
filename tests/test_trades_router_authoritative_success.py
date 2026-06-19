@@ -9,6 +9,7 @@ from api.routers.trades import TradeCreate, _execute_trade_authoritatively
 from core.enums import NotificationCategory, NotificationLevel, UserRole
 from models.customer_relation import CustomerTier
 from models.offer import OfferStatus, OfferType
+from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
 from models.trade import TradeStatus, TradeType
 
 
@@ -36,7 +37,9 @@ class FakeDB:
         self.commit = AsyncMock(side_effect=commit_side_effect)
         self.rollback = AsyncMock()
         self.refresh = AsyncMock()
+        self.flush = AsyncMock()
         self.added = []
+        self.offer_requests = []
 
     async def get(self, _model, _id, **_kwargs):
         if not self.get_results:
@@ -52,6 +55,9 @@ class FakeDB:
         return self.scalar_result
 
     def add(self, item):
+        if isinstance(item, OfferRequest):
+            self.offer_requests.append(item)
+            return
         self.added.append(item)
 
 
@@ -79,6 +85,8 @@ def make_offer(**overrides):
         "lot_sizes": None,
         "offer_type": OfferType.SELL,
         "price": 123456,
+        "offer_public_id": "ofr_test_7",
+        "home_server": "foreign",
         "commodity_id": 1,
         "commodity": SimpleNamespace(name="Gold"),
         "user": SimpleNamespace(account_name="seller", mobile_number="09125555555", telegram_id=999),
@@ -203,6 +211,10 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(new_trade.quantity, 4)
         self.assertEqual(new_trade.responder_user_id, locked_user.id)
         self.assertEqual(new_trade.actor_user_id, locked_user.id)
+        self.assertEqual(len(db.offer_requests), 1)
+        self.assertEqual(db.offer_requests[0].result_status, OfferRequestStatus.COMPLETED_TRADE)
+        self.assertEqual(db.offer_requests[0].request_source_surface, OfferRequestSourceSurface.WEBAPP)
+        self.assertEqual(db.offer_requests[0].offer_public_id, "ofr_test_7")
         self.assertEqual(offer.remaining_quantity, 0)
         self.assertEqual(offer.status, OfferStatus.COMPLETED)
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
