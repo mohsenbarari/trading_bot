@@ -156,6 +156,7 @@ class CoreEventsTests(unittest.TestCase):
             mobile_number='0912',
             account_name='acct',
             address='addr',
+            avatar_file_id='chat-file-user',
             role=SimpleNamespace(value='admin'),
             account_status=SimpleNamespace(value='inactive'),
             deactivated_at=now,
@@ -448,6 +449,36 @@ class CoreEventsTests(unittest.TestCase):
                 events.log_change(connection, 'offers', 7, 'DELETE', {'id': 7})
         logger.error.assert_not_called()
 
+    def test_log_change_applies_field_policy_before_outbox_queue_and_direct_push(self):
+        connection = _FakeConnection()
+        sync_redis = _FakeSyncRedis()
+        dirty_payload = {
+            'id': 3,
+            'mobile_number': '09120000000',
+            'full_name': 'User Name',
+            'admin_password_hash': 'bcrypt-secret',
+            'must_change_password': True,
+            'avatar_file_id': 'chat-file-user',
+        }
+
+        with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
+            'core.sync_push.push_sync_direct'
+        ) as push_sync_direct:
+            connection.execute.return_value = _FakeInsertResult(44)
+            events.log_change(connection, 'users', 3, 'UPDATE', dirty_payload)
+
+        queued_payload = json.loads(sync_redis.lpush_calls[0][1])
+        inserted_change_log_data = json.loads(connection.execute.call_args.args[1]['data'])
+        pushed_payload = push_sync_direct.call_args.args[0]
+
+        for payload in (queued_payload['data'], inserted_change_log_data, pushed_payload['data']):
+            self.assertEqual(payload['mobile_number'], '09120000000')
+            self.assertNotIn('admin_password_hash', payload)
+            self.assertNotIn('must_change_password', payload)
+            self.assertNotIn('avatar_file_id', payload)
+            self.assertNotIn('bcrypt-secret', json.dumps(payload))
+            self.assertNotIn('chat-file-user', json.dumps(payload))
+
     def test_publish_event_sync_success_and_failure(self):
         sync_redis = _FakeSyncRedis()
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch.object(events, 'logger') as logger:
@@ -539,6 +570,7 @@ class CoreEventsTests(unittest.TestCase):
                 mobile_number='0912',
                 account_name='acct',
                 address='addr',
+                avatar_file_id='chat-file-user',
                 role=SimpleNamespace(value='admin'),
                 account_status=SimpleNamespace(value='inactive'),
                 deactivated_at=now,
@@ -576,6 +608,9 @@ class CoreEventsTests(unittest.TestCase):
             self.assertEqual(payload['global_lock_grace_expires_at'], payload['messenger_grace_expires_at'])
             self.assertEqual(payload['global_web_locked_at'], payload['messenger_blocked_at'])
             self.assertEqual(payload['max_customers'], 5)
+            self.assertNotIn('admin_password_hash', payload)
+            self.assertNotIn('must_change_password', payload)
+            self.assertNotIn('avatar_file_id', payload)
         offer_payloads = [call.args[4] for call in log_change.call_args_list if call.args[1] == 'offers' and call.args[3] != 'DELETE']
         self.assertTrue(offer_payloads)
         for payload in offer_payloads:

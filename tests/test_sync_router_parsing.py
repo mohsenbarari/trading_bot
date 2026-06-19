@@ -4,6 +4,7 @@ from datetime import datetime
 from api.routers.sync import (
     _notification_user_ids_from_items,
     _parse_item,
+    _sync_item_data_for_policy,
     get_model_class,
 )
 from models.chat import Chat
@@ -49,6 +50,45 @@ class SyncRouterParsingTests(unittest.TestCase):
         self.assertEqual(data["read_at"], "invalid")
 
         self.assertIsNone(_parse_item({"table": "missing", "operation": "INSERT", "id": 1, "data": {}}))
+
+    def test_parse_item_and_policy_data_sanitize_sensitive_user_fields(self):
+        item = {
+            "table": "users",
+            "operation": "UPDATE",
+            "id": 7,
+            "data": {
+                "id": 7,
+                "mobile_number": "09120000000",
+                "admin_password_hash": "bcrypt-secret",
+                "must_change_password": True,
+                "avatar_file_id": "chat-file-user",
+            },
+        }
+
+        table, operation, model, data, record_id = _parse_item(item)
+        policy_data = _sync_item_data_for_policy(item)
+
+        self.assertEqual(table, "users")
+        self.assertEqual(operation, "UPDATE")
+        self.assertEqual(record_id, 7)
+        self.assertIs(model, User)
+        for payload in (data, policy_data):
+            self.assertEqual(payload["mobile_number"], "09120000000")
+            self.assertNotIn("admin_password_hash", payload)
+            self.assertNotIn("must_change_password", payload)
+            self.assertNotIn("avatar_file_id", payload)
+
+    def test_parse_item_rejects_non_object_payload(self):
+        self.assertIsNone(
+            _parse_item(
+                {
+                    "table": "users",
+                    "operation": "UPDATE",
+                    "id": 7,
+                    "data": ["not", "an", "object"],
+                }
+            )
+        )
 
 
 if __name__ == "__main__":

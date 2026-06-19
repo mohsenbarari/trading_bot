@@ -1,0 +1,111 @@
+import json
+import unittest
+
+from core.sync_field_policy import (
+    SyncFieldAction,
+    SyncFieldClassification,
+    get_sync_field_policy_entry,
+    sanitize_sync_payload,
+    sync_field_policy_entries,
+    sync_field_policy_fingerprint,
+    sync_log_payload_context,
+)
+
+
+class SyncFieldPolicyTests(unittest.TestCase):
+    def test_user_sensitive_and_no_sync_reference_fields_are_sanitized(self):
+        payload = {
+            "id": 7,
+            "mobile_number": "09120000000",
+            "full_name": "User Seven",
+            "admin_password_hash": "bcrypt-secret",
+            "must_change_password": True,
+            "avatar_file_id": "chat-file-1",
+        }
+
+        sanitized = sanitize_sync_payload("users", payload)
+
+        self.assertEqual(sanitized["mobile_number"], "09120000000")
+        self.assertEqual(sanitized["full_name"], "User Seven")
+        self.assertNotIn("admin_password_hash", sanitized)
+        self.assertNotIn("must_change_password", sanitized)
+        self.assertNotIn("avatar_file_id", sanitized)
+
+    def test_push_subscription_runtime_secrets_never_leave_as_raw_fields(self):
+        payload = {
+            "id": 3,
+            "user_id": 7,
+            "endpoint": "https://push.example/subscription/raw",
+            "p256dh": "raw-p256dh",
+            "auth": "raw-auth",
+            "user_agent": "raw-browser",
+            "platform": "android",
+            "last_error": "raw failure",
+        }
+
+        sanitized = sanitize_sync_payload("push_subscriptions", payload)
+
+        self.assertEqual(sanitized["id"], 3)
+        self.assertEqual(sanitized["user_id"], 7)
+        self.assertEqual(len(sanitized["endpoint_hash"]), 64)
+        self.assertNotIn("endpoint", sanitized)
+        self.assertNotIn("p256dh", sanitized)
+        self.assertNotIn("auth", sanitized)
+        self.assertNotIn("user_agent", sanitized)
+        self.assertNotIn("platform", sanitized)
+        self.assertNotIn("last_error", sanitized)
+        self.assertNotIn("raw", json.dumps(sanitized))
+
+    def test_required_sensitive_fields_have_explicit_classification(self):
+        expectations = {
+            ("users", "admin_password_hash"): SyncFieldClassification.NO_SYNC,
+            ("users", "avatar_file_id"): SyncFieldClassification.NO_SYNC,
+            ("users", "mobile_number"): SyncFieldClassification.SYNC,
+            ("trades", "offer_user_mobile"): SyncFieldClassification.SYNC,
+            ("notifications", "message"): SyncFieldClassification.SYNC,
+            ("push_subscriptions", "endpoint"): SyncFieldClassification.HASH_ONLY,
+            ("push_subscriptions", "auth"): SyncFieldClassification.NO_SYNC,
+        }
+
+        for key, classification in expectations.items():
+            with self.subTest(key=key):
+                entry = get_sync_field_policy_entry(*key)
+                self.assertIsNotNone(entry)
+                self.assertEqual(entry.classification, classification)
+
+    def test_no_sync_reference_fields_drop_raw_foreign_keys(self):
+        for table_name, field_name, reference_table in {
+            ("users", "avatar_file_id", "chat_files"),
+            ("chats", "avatar_file_id", "chat_files"),
+        }:
+            with self.subTest(table_name=table_name, field_name=field_name):
+                entry = get_sync_field_policy_entry(table_name, field_name)
+                self.assertIsNotNone(entry)
+                self.assertEqual(entry.action, SyncFieldAction.DROP)
+                self.assertEqual(entry.references_no_sync_table, reference_table)
+
+    def test_log_payload_context_omits_values_and_reports_policy_shape(self):
+        payload = {
+            "mobile_number": "09120000000",
+            "admin_password_hash": "bcrypt-secret",
+            "avatar_file_id": "chat-file-1",
+        }
+
+        context = sync_log_payload_context("users", payload)
+        rendered = json.dumps(context, ensure_ascii=False)
+
+        self.assertEqual(context["data_kind"], "dict")
+        self.assertEqual(context["sensitive_field_count"], 2)
+        self.assertIn("admin_password_hash", context["dropped_fields"])
+        self.assertIn("avatar_file_id", context["no_sync_reference_fields"])
+        self.assertNotIn("09120000000", rendered)
+        self.assertNotIn("bcrypt-secret", rendered)
+        self.assertNotIn("chat-file-1", rendered)
+
+    def test_field_policy_fingerprint_is_stable_and_policy_backed(self):
+        self.assertTrue(sync_field_policy_entries())
+        self.assertEqual(len(sync_field_policy_fingerprint()), 16)
+
+
+if __name__ == "__main__":
+    unittest.main()

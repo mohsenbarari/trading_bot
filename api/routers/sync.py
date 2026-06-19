@@ -7,6 +7,7 @@ from core.audit_logger import audit_log
 from core.metrics import record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
@@ -513,7 +514,9 @@ def _sync_item_data_for_policy(item: dict) -> dict:
             data = json.loads(data)
         except ValueError:
             return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    return sanitize_sync_payload(str(item.get("table") or ""), data)
 
 
 def _is_transitional_mandatory_messenger_sync(table: str, data: dict) -> bool:
@@ -1169,6 +1172,9 @@ def _parse_item(item: dict):
 
     if isinstance(data, str):
         data = json.loads(data)
+    data = sanitize_sync_payload(str(table or ""), data)
+    if not isinstance(data, dict):
+        return None
 
     # Parse datetime fields
     for key, value in list(data.items()):
@@ -1660,6 +1666,7 @@ async def resync_from_changelog(
             for entry in batch:
                 try:
                     data = json.loads(entry.data) if isinstance(entry.data, str) else entry.data
+                    data = sanitize_sync_payload(entry.table_name, data)
                     item_payload = {
                         "type": "db_change",
                         "operation": entry.operation,

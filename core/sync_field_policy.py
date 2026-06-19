@@ -1,0 +1,281 @@
+"""Field-level sync policy for sensitive and local-only references."""
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
+
+
+SYNC_FIELD_POLICY_VERSION = 1
+
+
+class SyncFieldClassification(str, Enum):
+    SYNC = "sync"
+    NO_SYNC = "no-sync"
+    HASH_ONLY = "hash-only"
+    ENCRYPTED_DERIVED = "encrypted/derived"
+
+
+class SyncFieldAction(str, Enum):
+    KEEP = "keep"
+    DROP = "drop"
+    HASH = "hash"
+
+
+@dataclass(frozen=True)
+class SyncFieldPolicyEntry:
+    table_name: str
+    field_name: str
+    classification: SyncFieldClassification
+    action: SyncFieldAction = SyncFieldAction.KEEP
+    sensitive: bool = False
+    output_field: str | None = None
+    references_no_sync_table: str | None = None
+    reason: str = ""
+
+
+def _entry(
+    table_name: str,
+    field_name: str,
+    classification: SyncFieldClassification,
+    *,
+    action: SyncFieldAction = SyncFieldAction.KEEP,
+    sensitive: bool = False,
+    output_field: str | None = None,
+    references_no_sync_table: str | None = None,
+    reason: str = "",
+) -> SyncFieldPolicyEntry:
+    return SyncFieldPolicyEntry(
+        table_name=table_name,
+        field_name=field_name,
+        classification=classification,
+        action=action,
+        sensitive=sensitive,
+        output_field=output_field,
+        references_no_sync_table=references_no_sync_table,
+        reason=reason,
+    )
+
+
+_FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
+    ("users", "mobile_number"): _entry("users", "mobile_number", SyncFieldClassification.SYNC, sensitive=True),
+    ("users", "address"): _entry("users", "address", SyncFieldClassification.SYNC, sensitive=True),
+    ("users", "admin_password_hash"): _entry(
+        "users",
+        "admin_password_hash",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="local WebApp admin authentication secret",
+    ),
+    ("users", "must_change_password"): _entry(
+        "users",
+        "must_change_password",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="local WebApp password lifecycle state",
+    ),
+    ("users", "avatar_file_id"): _entry(
+        "users",
+        "avatar_file_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        references_no_sync_table="chat_files",
+        reason="raw avatar file FK points to Iran-only messenger/upload storage",
+    ),
+    ("trades", "offer_user_mobile"): _entry("trades", "offer_user_mobile", SyncFieldClassification.SYNC, sensitive=True),
+    ("trades", "responder_user_mobile"): _entry("trades", "responder_user_mobile", SyncFieldClassification.SYNC, sensitive=True),
+    ("invitations", "mobile_number"): _entry("invitations", "mobile_number", SyncFieldClassification.SYNC, sensitive=True),
+    ("invitations", "token"): _entry("invitations", "token", SyncFieldClassification.SYNC, sensitive=True),
+    ("accountant_relations", "mobile_number"): _entry(
+        "accountant_relations",
+        "mobile_number",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+    ),
+    ("accountant_relations", "invitation_token"): _entry(
+        "accountant_relations",
+        "invitation_token",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+    ),
+    ("customer_relations", "invitation_token"): _entry(
+        "customer_relations",
+        "invitation_token",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+    ),
+    ("notifications", "message"): _entry("notifications", "message", SyncFieldClassification.SYNC, sensitive=True),
+    ("push_subscriptions", "endpoint"): _entry(
+        "push_subscriptions",
+        "endpoint",
+        SyncFieldClassification.HASH_ONLY,
+        action=SyncFieldAction.HASH,
+        sensitive=True,
+        output_field="endpoint_hash",
+        reason="browser push endpoints are Iran-local runtime secrets",
+    ),
+    ("push_subscriptions", "p256dh"): _entry(
+        "push_subscriptions",
+        "p256dh",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="browser push key material is Iran-local runtime state",
+    ),
+    ("push_subscriptions", "auth"): _entry(
+        "push_subscriptions",
+        "auth",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="browser push auth secret is Iran-local runtime state",
+    ),
+    ("push_subscriptions", "user_agent"): _entry(
+        "push_subscriptions",
+        "user_agent",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="browser runtime fingerprint is not product sync data",
+    ),
+    ("push_subscriptions", "platform"): _entry(
+        "push_subscriptions",
+        "platform",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="browser runtime metadata is Iran-local",
+    ),
+    ("push_subscriptions", "last_error"): _entry(
+        "push_subscriptions",
+        "last_error",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="local Web Push delivery diagnostics must not cross servers",
+    ),
+    ("upload_sessions", "resume_token"): _entry(
+        "upload_sessions",
+        "resume_token",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        sensitive=True,
+        reason="upload resume token is local runtime auth material",
+    ),
+    ("chats", "avatar_file_id"): _entry(
+        "chats",
+        "avatar_file_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        references_no_sync_table="chat_files",
+        reason="chat avatar file FK points to no-sync media storage",
+    ),
+}
+
+
+def sync_field_policy_entries() -> dict[tuple[str, str], SyncFieldPolicyEntry]:
+    return dict(_FIELD_POLICIES)
+
+
+def get_sync_field_policy_entry(table_name: str, field_name: str) -> SyncFieldPolicyEntry | None:
+    return _FIELD_POLICIES.get((str(table_name), str(field_name)))
+
+
+def _hash_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    encoded = str(value).encode("utf-8", errors="replace")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def sanitize_sync_payload(table_name: str, data: Any) -> Any:
+    """Apply field policy to one sync row payload.
+
+    The function is intentionally tolerant: non-dict payloads are returned
+    unchanged so legacy error paths can continue to report malformed items.
+    """
+    if not isinstance(data, Mapping):
+        return data
+
+    table = str(table_name)
+    sanitized: dict[str, Any] = {}
+    for raw_key, value in data.items():
+        key = str(raw_key)
+        entry = get_sync_field_policy_entry(table, key)
+        if entry is None:
+            sanitized[key] = value
+            continue
+
+        if entry.action == SyncFieldAction.DROP:
+            continue
+        if entry.action == SyncFieldAction.HASH:
+            output_field = entry.output_field or f"{key}_hash"
+            sanitized[output_field] = _hash_value(value)
+            continue
+        sanitized[key] = value
+    return sanitized
+
+
+def sync_log_payload_context(table_name: str, data: Any) -> dict[str, Any]:
+    """Return log-safe field context without raw sensitive values."""
+    if not isinstance(data, Mapping):
+        return {"data_kind": type(data).__name__}
+
+    table = str(table_name)
+    field_names = [str(key) for key in data.keys()]
+    sensitive_fields: list[str] = []
+    dropped_fields: list[str] = []
+    no_sync_reference_fields: list[str] = []
+    hash_only_fields: list[str] = []
+
+    for field_name in field_names:
+        entry = get_sync_field_policy_entry(table, field_name)
+        if entry is None:
+            continue
+        if entry.sensitive:
+            sensitive_fields.append(field_name)
+        if entry.action == SyncFieldAction.DROP:
+            dropped_fields.append(field_name)
+        if entry.references_no_sync_table:
+            no_sync_reference_fields.append(field_name)
+        if entry.classification == SyncFieldClassification.HASH_ONLY:
+            hash_only_fields.append(field_name)
+
+    return {
+        "data_kind": "dict",
+        "data_key_count": len(field_names),
+        "sensitive_field_count": len(sensitive_fields),
+        "sensitive_fields": sorted(sensitive_fields),
+        "dropped_fields": sorted(dropped_fields),
+        "hash_only_fields": sorted(hash_only_fields),
+        "no_sync_reference_fields": sorted(no_sync_reference_fields),
+    }
+
+
+def sync_field_policy_fingerprint_payload() -> list[dict[str, Any]]:
+    entries = sorted(_FIELD_POLICIES.values(), key=lambda entry: (entry.table_name, entry.field_name))
+    return [
+        {
+            "table": entry.table_name,
+            "field": entry.field_name,
+            "classification": entry.classification.value,
+            "action": entry.action.value,
+            "sensitive": entry.sensitive,
+            "output_field": entry.output_field,
+            "references_no_sync_table": entry.references_no_sync_table,
+        }
+        for entry in entries
+    ]
+
+
+def sync_field_policy_fingerprint() -> str:
+    encoded = json.dumps(
+        sync_field_policy_fingerprint_payload(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]

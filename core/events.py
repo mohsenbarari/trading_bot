@@ -23,6 +23,7 @@ from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
+from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity
 from core.sync_protocol import build_sync_protocol_metadata
 
@@ -52,6 +53,7 @@ def _get_sync_redis():
 
 def log_change(connection, table_name: str, record_id: int, operation: str, data: Dict[str, Any]):
     """Log change to change_log + push to Redis + fire direct HTTP push"""
+    data = sanitize_sync_payload(table_name, data)
     json_data = json.dumps(data, default=str)
     data_hash = hashlib.sha256(json_data.encode()).hexdigest()
     now = utc_now_naive()
@@ -628,48 +630,53 @@ def setup_user_events():
     """Setup event listeners for User model"""
     from models.user import User
 
+    def user_payload(target, *, include_created_at: bool) -> Dict[str, Any]:
+        data = {
+            "id": target.id,
+            "telegram_id": target.telegram_id,
+            "username": target.username,
+            "full_name": target.full_name,
+            "mobile_number": target.mobile_number,
+            "account_name": target.account_name,
+            "address": target.address,
+            "role": target.role.value if target.role else None,
+            "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
+            "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
+            "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
+            "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
+            "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
+            "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
+            "has_bot_access": target.has_bot_access,
+            "home_server": target.home_server,
+            "is_deleted": target.is_deleted,
+            "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
+            "can_block_users": target.can_block_users,
+            "max_blocked_users": target.max_blocked_users,
+            "max_daily_trades": target.max_daily_trades,
+            "max_active_commodities": target.max_active_commodities,
+            "max_daily_requests": target.max_daily_requests,
+            "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
+            "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
+            "trades_count": target.trades_count,
+            "commodities_traded_count": target.commodities_traded_count,
+            "channel_messages_count": target.channel_messages_count,
+            "max_sessions": target.max_sessions,
+            "max_accountants": getattr(target, "max_accountants", 3),
+            "max_customers": getattr(target, "max_customers", 5),
+            "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
+        }
+        if include_created_at:
+            data["created_at"] = target.created_at.isoformat() if target.created_at else None
+        else:
+            data["updated_at"] = target.updated_at.isoformat() if target.updated_at else None
+        return data
+
     @event.listens_for(User, 'after_insert')
     def on_user_created(mapper, connection, target):
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {
-                "id": target.id,
-                "telegram_id": target.telegram_id,
-                "username": target.username,
-                "full_name": target.full_name,
-                "mobile_number": target.mobile_number,
-                "account_name": target.account_name,
-                "address": target.address,
-                "role": target.role.value if target.role else None,
-                "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
-                "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
-                "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-                "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-                "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-                "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-                "has_bot_access": target.has_bot_access,
-                "admin_password_hash": target.admin_password_hash,
-                "must_change_password": target.must_change_password,
-                "home_server": target.home_server,
-                "is_deleted": target.is_deleted,
-                "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
-                "can_block_users": target.can_block_users,
-                "max_blocked_users": target.max_blocked_users,
-                "max_daily_trades": target.max_daily_trades,
-                "max_active_commodities": target.max_active_commodities,
-                "max_daily_requests": target.max_daily_requests,
-                "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
-                "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
-                "trades_count": target.trades_count,
-                "commodities_traded_count": target.commodities_traded_count,
-                "channel_messages_count": target.channel_messages_count,
-                "max_sessions": target.max_sessions,
-                "max_accountants": getattr(target, "max_accountants", 3),
-                    "max_customers": getattr(target, "max_customers", 5),
-                "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
-                "created_at": target.created_at.isoformat() if target.created_at else None,
-            }
+            data = user_payload(target, include_created_at=True)
             log_change(connection, "users", target.id, "INSERT", data)
             logger.info(f"📡 Published sync: user:created ID={target.id}")
         except Exception as e:
@@ -680,43 +687,7 @@ def setup_user_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {
-                "id": target.id,
-                "telegram_id": target.telegram_id,
-                "username": target.username,
-                "full_name": target.full_name,
-                "mobile_number": target.mobile_number,
-                "account_name": target.account_name,
-                "address": target.address,
-                "role": target.role.value if target.role else None,
-                "account_status": target.account_status.value if getattr(target, "account_status", None) else None,
-                "deactivated_at": target.deactivated_at.isoformat() if getattr(target, "deactivated_at", None) else None,
-                "messenger_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-                "messenger_blocked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-                "global_lock_grace_expires_at": target.messenger_grace_expires_at.isoformat() if getattr(target, "messenger_grace_expires_at", None) else None,
-                "global_web_locked_at": target.messenger_blocked_at.isoformat() if getattr(target, "messenger_blocked_at", None) else None,
-                "has_bot_access": target.has_bot_access,
-                "admin_password_hash": target.admin_password_hash,
-                "must_change_password": target.must_change_password,
-                "home_server": target.home_server,
-                "is_deleted": target.is_deleted,
-                "deleted_at": target.deleted_at.isoformat() if target.deleted_at else None,
-                "can_block_users": target.can_block_users,
-                "max_blocked_users": target.max_blocked_users,
-                "max_daily_trades": target.max_daily_trades,
-                "max_active_commodities": target.max_active_commodities,
-                "max_daily_requests": target.max_daily_requests,
-                "trading_restricted_until": target.trading_restricted_until.isoformat() if target.trading_restricted_until else None,
-                "limitations_expire_at": target.limitations_expire_at.isoformat() if target.limitations_expire_at else None,
-                "trades_count": target.trades_count,
-                "commodities_traded_count": target.commodities_traded_count,
-                "channel_messages_count": target.channel_messages_count,
-                "max_sessions": target.max_sessions,
-                "max_accountants": getattr(target, "max_accountants", 3),
-                "max_customers": getattr(target, "max_customers", 5),
-                "last_seen_at": target.last_seen_at.isoformat() if target.last_seen_at else None,
-                "updated_at": target.updated_at.isoformat() if target.updated_at else None,
-            }
+            data = user_payload(target, include_created_at=False)
             log_change(connection, "users", target.id, "UPDATE", data)
         except Exception as e:
             logger.error(f"Error in user after_update event: {e}")

@@ -1443,6 +1443,22 @@ Exit criteria:
 
 - Registry-driven sync cannot leak sensitive or locally invalid references by default.
 
+Implementation decisions for Step 9C:
+
+- The code-owned field matrix lives in `core/sync_field_policy.py`; it classifies fields as
+  `sync`, `no-sync`, `hash-only`, or `encrypted/derived`.
+- `users.admin_password_hash` and `users.must_change_password` are local WebApp auth state and must
+  be dropped from sync payloads.
+- `users.avatar_file_id` is a raw FK to no-sync `chat_files`; it is explicitly no-sync and must be
+  dropped rather than sent as a cross-server FK.
+- Web Push subscription material is Iran-local runtime data. Raw `endpoint`, `p256dh`, `auth`,
+  `user_agent`, `platform`, and `last_error` must not cross servers; endpoint may only be represented
+  as a hash if a diagnostic payload ever needs it.
+- Producer paths (`log_change`), committed change-log drain, manual resync, and receiver parsing must
+  all apply the same field policy so legacy dirty rows or malicious peer payloads cannot bypass it.
+- The sync registry fingerprint includes the field policy fingerprint; field-policy drift between
+  servers must fail visibly instead of being accepted silently.
+
 ## Step 10 - Recovery, Reconciliation, And Outage Modes
 
 Goal: make degraded operation safe and recoverable.

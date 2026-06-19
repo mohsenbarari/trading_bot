@@ -1462,6 +1462,11 @@ The following review points are accepted and have been added to the roadmap leve
   `chat_files`, must be classified separately because `users` syncs while `chat_files` is no-sync.
 - Field-level sensitive-data policy: the broad sensitive-field policy is accepted, but `users` and
   notification-related tables need field-by-field decisions before registry-driven sync.
+  - Step 9C implementation status: the code-owned field matrix is `core/sync_field_policy.py`.
+    Producer outbox writes, committed change-log drain, manual resync, and receiver parsing apply the
+    same sanitization. `users.admin_password_hash`, `users.must_change_password`, raw
+    `users.avatar_file_id`, and raw Web Push subscription material are blocked from cross-server
+    payloads.
 - Rolling deployment and registry/protocol compatibility: peers need enough version metadata to
   reject unsupported registry/schema changes visibly during staggered deploys.
 

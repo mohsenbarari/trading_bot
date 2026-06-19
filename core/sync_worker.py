@@ -18,6 +18,7 @@ from core.sync_metadata import (
     coerce_positive_int,
     deserialize_sync_data,
 )
+from core.sync_field_policy import sanitize_sync_payload
 from core.sync_protocol import build_sync_protocol_metadata
 
 # Configure logging
@@ -94,7 +95,7 @@ def deserialize_change_log_data(raw_data):
 
 def change_log_entry_to_sync_item(entry) -> dict:
     timestamp = getattr(entry, "timestamp", None)
-    data = deserialize_change_log_data(entry.data)
+    data = sanitize_sync_payload(entry.table_name, deserialize_change_log_data(entry.data))
     item = {
         "type": "db_change",
         "operation": entry.operation,

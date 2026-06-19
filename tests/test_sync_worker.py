@@ -190,6 +190,31 @@ class ChangeLogPayloadTests(unittest.TestCase):
         )
         self.assertEqual(item["sync_meta"]["aggregate_id"], "ofr_12")
 
+    def test_change_log_entry_to_sync_item_sanitizes_legacy_sensitive_user_payload(self):
+        timestamp = datetime(2026, 1, 2, 3, 4, 5)
+        entry = SimpleNamespace(
+            id=79,
+            operation="UPDATE",
+            table_name="users",
+            record_id=7,
+            data={
+                "id": 7,
+                "mobile_number": "09120000000",
+                "admin_password_hash": "bcrypt-secret",
+                "must_change_password": True,
+                "avatar_file_id": "chat-file-user",
+            },
+            hash="hash-79",
+            timestamp=timestamp,
+        )
+
+        item = sync_worker.change_log_entry_to_sync_item(entry)
+
+        self.assertEqual(item["data"]["mobile_number"], "09120000000")
+        self.assertNotIn("admin_password_hash", item["data"])
+        self.assertNotIn("must_change_password", item["data"])
+        self.assertNotIn("avatar_file_id", item["data"])
+
 
 class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_next_unsynced_change_log_item_reads_committed_row(self):

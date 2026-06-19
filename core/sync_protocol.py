@@ -11,7 +11,7 @@ SYNC_PROTOCOL_VERSION = 2
 SYNC_PROTOCOL_MIN_SUPPORTED_VERSION = 1
 SYNC_PAYLOAD_SCHEMA_VERSION = 2
 SYNC_PAYLOAD_SCHEMA_MIN_SUPPORTED_VERSION = 1
-SYNC_REGISTRY_VERSION = 3
+SYNC_REGISTRY_VERSION = 4
 SYNC_REGISTRY_MIN_SUPPORTED_VERSION = 1
 
 
@@ -32,20 +32,24 @@ def _positive_int(value: Any) -> int | None:
 
 def current_sync_registry_fingerprint() -> str:
     from core.sync_registry import sync_registry_entries
+    from core.sync_field_policy import sync_field_policy_fingerprint_payload
 
     entries = sync_registry_entries(include_planned=False)
-    registry_payload = [
-        {
-            "table": entry.table_name,
-            "policy": entry.policy.value,
-            "write_surfaces": list(entry.write_surfaces),
-            "authority": entry.authority,
-            "conflict_rule": entry.conflict_rule,
-            "side_effect_classification": entry.side_effect_classification,
-            "planned": entry.planned,
-        }
-        for entry in sorted(entries.values(), key=lambda item: item.table_name)
-    ]
+    registry_payload = {
+        "tables": [
+            {
+                "table": entry.table_name,
+                "policy": entry.policy.value,
+                "write_surfaces": list(entry.write_surfaces),
+                "authority": entry.authority,
+                "conflict_rule": entry.conflict_rule,
+                "side_effect_classification": entry.side_effect_classification,
+                "planned": entry.planned,
+            }
+            for entry in sorted(entries.values(), key=lambda item: item.table_name)
+        ],
+        "fields": sync_field_policy_fingerprint_payload(),
+    }
     encoded = json.dumps(registry_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:16]
 

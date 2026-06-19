@@ -285,6 +285,9 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
                 "telegram_id": 7001,
                 "full_name": "Owner User",
                 "max_customers": 9,
+                "admin_password_hash": "bcrypt-secret",
+                "must_change_password": True,
+                "avatar_file_id": "chat-file-user",
             },
         )
         relation_entry = make_entry(
@@ -326,6 +329,9 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(content)
         self.assertEqual(payload[0]["table"], "users")
         self.assertEqual(payload[0]["data"]["max_customers"], 9)
+        self.assertNotIn("admin_password_hash", payload[0]["data"])
+        self.assertNotIn("must_change_password", payload[0]["data"])
+        self.assertNotIn("avatar_file_id", payload[0]["data"])
         self.assertEqual(payload[1]["table"], "customer_relations")
         self.assertEqual(payload[1]["data"]["management_name"], "مشتری ویژه")
         self.assertEqual(payload[1]["data"]["status"], "deleted")
