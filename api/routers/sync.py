@@ -4,13 +4,14 @@ from core.db import get_db
 from models.change_log import ChangeLog
 from core.config import settings
 from core.audit_logger import audit_log
-from core.metrics import record_sync_health
+from core.metrics import record_offer_publication_health, record_sync_conflict, record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
+from core.services.offer_publication_reconciliation_service import publication_observability_summary
 import hmac
 import hashlib
 import ipaddress
@@ -842,6 +843,7 @@ async def _stale_offer_sync_reason(db: AsyncSession, record_id, data: dict) -> s
 
 def _log_stale_offer_sync_ignored(record_id, operation: str, data: dict, reason: str) -> None:
     metadata = build_sync_metadata("offers", record_id, operation, data)
+    record_sync_conflict(server_mode=settings.server_mode, table="offers", reason=reason)
     logger.warning(
         "Ignored stale synced offer event",
         extra={
@@ -1010,6 +1012,7 @@ async def _apply_item(
                                 **_summarize_natural_key_context(table, natural_key, natural_value),
                             },
                         )
+                        record_sync_conflict(server_mode=settings.server_mode, table=table, reason="natural_key_merge")
                         return 'ok'
                     except Exception as merge_err:
                         logger.error(
@@ -1813,6 +1816,31 @@ async def get_sync_health(
         outbound_queue=outbound_queue,
         retry_queue=retry_queue,
     )
+    try:
+        publication_reconciliation = await publication_observability_summary(
+            db,
+            server_mode=settings.server_mode,
+            unsynced_by_table=unsynced_by_table,
+        )
+        record_offer_publication_health(
+            server_mode=settings.server_mode,
+            state_counts=publication_reconciliation.get("state_counts"),
+            finding_counts=publication_reconciliation.get("finding_counts"),
+        )
+    except Exception as exc:
+        publication_reconciliation = {
+            "status": "error",
+            "error_type": type(exc).__name__,
+        }
+        logger.warning(
+            "Could not collect publication reconciliation health",
+            extra={
+                "event": "sync.health.publication_reconciliation_error",
+                "log_class": "integration",
+                "server_mode": settings.server_mode,
+                **_summarize_exception(exc),
+            },
+        )
     payload = {
         "status": "ok",
         "server_mode": settings.server_mode,
@@ -1825,6 +1853,7 @@ async def get_sync_health(
             "sync:outbound": outbound_queue,
             "sync:retry": retry_queue,
         },
+        "publication_reconciliation": publication_reconciliation,
     }
     logger.info(
         "Sync health sampled",
@@ -1837,6 +1866,8 @@ async def get_sync_health(
             "oldest_unsynced_age_seconds": payload["oldest_unsynced_age_seconds"],
             "sync_outbound_queue_length": outbound_queue,
             "sync_retry_queue_length": retry_queue,
+            "publication_reconciliation_status": publication_reconciliation.get("status"),
+            "publication_reconciliation_findings": publication_reconciliation.get("finding_counts"),
         },
     )
     return payload

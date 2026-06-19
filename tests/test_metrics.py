@@ -9,8 +9,10 @@ from core.metrics import (
     MetricsRegistry,
     metrics_response_body,
     normalize_http_route,
+    record_offer_publication_health,
     record_bot_update,
     record_http_request,
+    record_sync_conflict,
     registry,
 )
 
@@ -50,6 +52,24 @@ class MetricsTests(unittest.TestCase):
         self.assertIn('job_name="offer_expiry"', body)
         self.assertIn("trading_bot_business_actions_total", body)
         self.assertIn('action="user.update"', body)
+
+    def test_sync_publication_and_conflict_metrics_are_recorded(self):
+        record_offer_publication_health(
+            server_mode="foreign",
+            state_counts={"telegram_channel": {"failed": 2}},
+            finding_counts={"failed_telegram_publication": 2},
+        )
+        record_sync_conflict(server_mode="foreign", table="offers", reason="same_version_terminal_conflict")
+
+        body = metrics_response_body()
+
+        self.assertIn("trading_bot_offer_publication_states", body)
+        self.assertIn('surface="telegram_channel"', body)
+        self.assertIn('status="failed"', body)
+        self.assertIn("trading_bot_offer_publication_reconciliation_findings", body)
+        self.assertIn('issue="failed_telegram_publication"', body)
+        self.assertIn("trading_bot_sync_conflicts_total", body)
+        self.assertIn('reason="same_version_terminal_conflict"', body)
 
     def test_default_memory_backend_does_not_create_sqlite_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:

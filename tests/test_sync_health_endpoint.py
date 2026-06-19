@@ -8,6 +8,13 @@ from fastapi import HTTPException
 from api.routers.sync import get_sync_health
 
 
+PUBLICATION_SUMMARY = {
+    "status": "ok",
+    "state_counts": {},
+    "finding_counts": {},
+}
+
+
 class FakeSummaryResult:
     def __init__(self, value):
         self._value = value
@@ -70,10 +77,16 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.default_peer_server_url", return_value=None), patch(
             "api.routers.sync.get_redis_client", return_value=redis_client
-        ), patch("api.routers.sync.record_sync_health"):
+        ), patch("api.routers.sync.record_sync_health"), patch(
+            "api.routers.sync.record_offer_publication_health"
+        ), patch(
+            "api.routers.sync.publication_observability_summary",
+            new=AsyncMock(return_value=PUBLICATION_SUMMARY),
+        ):
             payload = await get_sync_health(request=request, db=db)
 
         self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["publication_reconciliation"], PUBLICATION_SUMMARY)
 
     async def test_sync_health_does_not_trust_host_header_for_loopback_bypass(self):
         request = SimpleNamespace(
@@ -103,7 +116,16 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "foreign"
         ), patch("api.routers.sync.default_peer_server_url", return_value="https://iran.example"), patch(
             "api.routers.sync.get_redis_client", return_value=redis_client
-        ), patch("api.routers.sync.record_sync_health") as record_sync_health:
+        ), patch("api.routers.sync.record_sync_health") as record_sync_health, patch(
+            "api.routers.sync.record_offer_publication_health"
+        ) as record_publication_health, patch(
+            "api.routers.sync.publication_observability_summary",
+            new=AsyncMock(return_value={
+                "status": "action_required",
+                "state_counts": {"telegram_channel": {"failed": 1}},
+                "finding_counts": {"failed_telegram_publication": 1},
+            }),
+        ):
             payload = await get_sync_health(request=request, db=db)
 
         self.assertEqual(payload["status"], "ok")
@@ -111,7 +133,9 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["unsynced_change_log_count"], 3)
         self.assertEqual(payload["redis_queues"], {"sync:outbound": 4, "sync:retry": 1})
         self.assertEqual(payload["unsynced_by_table"], {"offers": 2, "trades": 1})
+        self.assertEqual(payload["publication_reconciliation"]["status"], "action_required")
         record_sync_health.assert_called_once()
+        record_publication_health.assert_called_once()
 
 
 if __name__ == "__main__":

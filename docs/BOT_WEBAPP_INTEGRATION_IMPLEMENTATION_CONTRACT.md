@@ -1485,6 +1485,23 @@ Exit criteria:
 
 - Operators have a repeatable repair path for partial cross-surface flows.
 
+Implementation decisions for Step 10A:
+
+- Publication reconciliation lives in `core/services/offer_publication_reconciliation_service.py`.
+- `/api/sync/health` now includes `publication_reconciliation` with state counts and finding counts
+  for Telegram publication drift, WebApp market publication drift, and unsynced offer/publication
+  backlogs.
+- `scripts/sync_probe_worker.py reconcile-publications` is the operator entry point. It is dry-run by
+  default; `--repair` is required before any mutation or Telegram send can occur.
+- On `foreign`, reconciliation can report/repair active offers without Telegram state, failed or
+  lagged Telegram publication states, Telegram posts whose state row is incomplete, and sent
+  publication states whose legacy `Offer.channel_message_id` is missing.
+- On `iran`, reconciliation can report/repair missing or stale WebApp market publication state. It
+  never calls Telegram from Iran.
+- Sync conflict observability is metric-backed through `trading_bot_sync_conflicts_total`; publication
+  state/finding gauges are exposed as `trading_bot_offer_publication_states` and
+  `trading_bot_offer_publication_reconciliation_findings`.
+
 ### Step 10B - Short Outage Behavior Up To 2 Minutes
 
 Required behavior:

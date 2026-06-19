@@ -684,8 +684,15 @@ This ordering is about implementation difficulty and blast radius, not business 
 1. Define reconciliation jobs for failed or partial flows: offer synced but Telegram publish failed,
    Telegram post exists but `channel_message_id` is missing, foreign publish result did not sync back
    to Iran, duplicate direct-push/worker delivery arrived, or a peer was down during local writes.
+   - Step 10A implementation status: `core/services/offer_publication_reconciliation_service.py`
+     provides dry-run report and explicit repair for Telegram/WebApp publication drift. The operator
+     entry point is `scripts/sync_probe_worker.py reconcile-publications`; repair requires `--repair`.
 2. Add observability for sync lag, committed outbox backlog, retry backlog, Telegram publish pending
    and failed counts, orphan Telegram posts, stale WebApp market state, and conflict counts.
+   - Step 10A implementation status: `/api/sync/health` includes publication reconciliation counts,
+     `trading_bot_offer_publication_states` and
+     `trading_bot_offer_publication_reconciliation_findings` expose publication state/finding gauges,
+     and `trading_bot_sync_conflicts_total` records stale/merge conflict counters.
 3. Add an operator runbook for staging incidents: how to inspect backlog, replay outbox rows, recover
    Telegram publication state, verify Iran never called Telegram, and verify foreign never served
    WebApp/messenger.

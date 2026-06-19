@@ -365,6 +365,43 @@ def record_sync_health(*, server_mode: str, unsynced_count: int, oldest_unsynced
     )
 
 
+def record_offer_publication_health(
+    *,
+    server_mode: str,
+    state_counts: Mapping[str, Mapping[str, int]] | None,
+    finding_counts: Mapping[str, int] | None,
+) -> None:
+    labels = {"server_mode": _sanitize_label_value(server_mode, max_length=16)}
+    for surface, statuses in (state_counts or {}).items():
+        for status, count in (statuses or {}).items():
+            registry.gauge(
+                "trading_bot_offer_publication_states",
+                "Offer publication states by surface and status.",
+                max(int(count or 0), 0),
+                surface=_sanitize_label_value(surface, max_length=40),
+                status=_sanitize_label_value(status, max_length=40),
+                **labels,
+            )
+    for issue, count in (finding_counts or {}).items():
+        registry.gauge(
+            "trading_bot_offer_publication_reconciliation_findings",
+            "Current offer publication reconciliation findings by issue.",
+            max(int(count or 0), 0),
+            issue=_sanitize_label_value(issue, max_length=80),
+            **labels,
+        )
+
+
+def record_sync_conflict(*, server_mode: str, table: str, reason: str) -> None:
+    registry.counter(
+        "trading_bot_sync_conflicts_total",
+        "Sync conflict or idempotent merge events by table and reason.",
+        server_mode=_sanitize_label_value(server_mode, max_length=16),
+        table=_sanitize_label_value(table, max_length=64),
+        reason=_sanitize_label_value(reason, max_length=80),
+    )
+
+
 def record_business_action(*, action: str, result: str) -> None:
     registry.counter(
         "trading_bot_business_actions_total",

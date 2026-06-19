@@ -26,6 +26,10 @@ from core.events import setup_event_listeners
 from core.utils import utc_now
 from models.change_log import ChangeLog
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
+from core.services.offer_publication_reconciliation_service import (
+    publication_observability_summary,
+    reconcile_offer_publications,
+)
 
 
 def json_safe(value: Any) -> Any:
@@ -55,6 +59,14 @@ async def health(args: argparse.Namespace) -> int:
             .order_by(ChangeLog.table_name)
         )
         unsynced_by_table = {table: int(count or 0) for table, count in by_table_rows.all()}
+        try:
+            publication_reconciliation = await publication_observability_summary(
+                db,
+                server_mode=settings.server_mode,
+                unsynced_by_table=unsynced_by_table,
+            )
+        except Exception as exc:
+            publication_reconciliation = {"status": "error", "error_type": type(exc).__name__}
     redis_client = redis.Redis(host=settings.redis_host, port=settings.redis_port, db=0, decode_responses=True)
     try:
         outbound = int(await redis_client.llen("sync:outbound") or 0)
@@ -75,9 +87,38 @@ async def health(args: argparse.Namespace) -> int:
             "unsynced_by_table": unsynced_by_table,
             "redis_ok": redis_ok,
             "redis_queues": {"sync:outbound": outbound, "sync:retry": retry},
+            "publication_reconciliation": publication_reconciliation,
         }
     )
     return 0
+
+
+async def reconcile_publications(args: argparse.Namespace) -> int:
+    send_offer_to_channel = None
+    if args.repair and settings.server_mode == "foreign":
+        try:
+            from api.routers.offers import send_offer_to_channel as telegram_send_offer_to_channel
+            send_offer_to_channel = telegram_send_offer_to_channel
+        except Exception as exc:
+            print_json(
+                {
+                    "status": "error",
+                    "error": "telegram_send_callback_unavailable",
+                    "error_type": type(exc).__name__,
+                }
+            )
+            return 2
+
+    async with AsyncSessionLocal() as db:
+        report = await reconcile_offer_publications(
+            db,
+            server_mode=settings.server_mode,
+            dry_run=not args.repair,
+            limit=args.limit,
+            send_offer_to_channel=send_offer_to_channel,
+        )
+    print_json(report)
+    return 1 if report.get("status") == "partial" else 0
 
 
 async def insert_probe(args: argparse.Namespace) -> int:
@@ -265,6 +306,10 @@ def build_parser() -> argparse.ArgumentParser:
     resync_parser = subparsers.add_parser("resync-table")
     resync_parser.add_argument("--table", required=True)
     resync_parser.add_argument("--limit", type=int, default=100)
+
+    reconcile_parser = subparsers.add_parser("reconcile-publications")
+    reconcile_parser.add_argument("--limit", type=int, default=50)
+    reconcile_parser.add_argument("--repair", action="store_true")
     return parser
 
 
@@ -280,6 +325,7 @@ async def main_async() -> int:
         "change-log-status": change_log_status,
         "delete-change-log": delete_change_log,
         "resync-table": resync_table,
+        "reconcile-publications": reconcile_publications,
     }
     return await handlers[args.command](args)
 

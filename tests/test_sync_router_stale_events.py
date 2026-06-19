@@ -40,6 +40,14 @@ class FakeOfferExecuteResult:
         return SimpleNamespace(first=lambda: self._offer)
 
 
+class FakeScalarExecuteResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
 class ExpressionProbe:
     def __init__(self, expression):
         self.expression = expression
@@ -141,7 +149,7 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_terminal_offer_replay_is_idempotent(self):
         existing_offer = make_offer("expired", 3)
-        db = ApplyDB([FakeOfferExecuteResult(existing_offer), SimpleNamespace()])
+        db = ApplyDB([FakeOfferExecuteResult(existing_offer), SimpleNamespace(), FakeScalarExecuteResult(8)])
         data = {
             "offer_public_id": "ofr_8",
             "home_server": "iran",
@@ -230,7 +238,7 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_newer_terminal_offer_update_wins(self):
         existing_offer = make_offer("active", 2)
-        db = ApplyDB([FakeOfferExecuteResult(existing_offer), SimpleNamespace()])
+        db = ApplyDB([FakeOfferExecuteResult(existing_offer), SimpleNamespace(), FakeScalarExecuteResult(8)])
         data = {
             "offer_public_id": "ofr_8",
             "home_server": "iran",
