@@ -3,7 +3,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from api.routers.realtime import publish_event, publish_user_event
+from api.routers.realtime import (
+    REALTIME_SOURCE_SYNC_APPLY,
+    publish_event,
+    publish_user_event,
+    realtime_publish_writes_outbound_sync,
+)
 
 
 class FakeRedisClient:
@@ -43,6 +48,21 @@ class RealtimeRouterPublishEventTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.realtime.manager.broadcast", new=AsyncMock(side_effect=RuntimeError("ws down"))
         ):
             await publish_event("offer:created", {"safe": 1})
+
+    async def test_sync_apply_realtime_source_is_local_fanout_only(self):
+        redis_client = FakeRedisClient()
+
+        with patch("api.routers.realtime.redis.Redis", return_value=redis_client), patch(
+            "api.routers.realtime.manager.broadcast", new=AsyncMock()
+        ) as broadcast_mock:
+            await publish_event("offer:updated", {"id": 5}, source=REALTIME_SOURCE_SYNC_APPLY)
+
+        self.assertFalse(realtime_publish_writes_outbound_sync(REALTIME_SOURCE_SYNC_APPLY))
+        self.assertEqual(
+            redis_client.publish_calls,
+            [("events:offer:updated", json.dumps({"id": 5}, ensure_ascii=False, default=str))],
+        )
+        broadcast_mock.assert_awaited_once_with({"type": "offer:updated", "data": {"id": 5}})
 
     async def test_publish_user_event_publishes_only_to_notification_channel(self):
         redis_client = FakeRedisClient()

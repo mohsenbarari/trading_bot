@@ -82,6 +82,14 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+REALTIME_SOURCE_LOCAL = "local"
+REALTIME_SOURCE_SYNC_APPLY = "sync_apply"
+
+
+def realtime_publish_writes_outbound_sync(_source: str = REALTIME_SOURCE_LOCAL) -> bool:
+    """Realtime fanout is a local delivery side effect, not a sync producer."""
+    return False
+
 
 async def _handle_client_message(
     data: str,
@@ -364,8 +372,8 @@ async def sse_stream(request: Request, current_user: User = Depends(get_current_
 
 
 # --- Helper function برای broadcast رویدادها ---
-async def publish_event(event_type: str, data: dict):
-    """Publish یک رویداد به Redis برای real-time sync"""
+async def publish_event(event_type: str, data: dict, *, source: str = REALTIME_SOURCE_LOCAL):
+    """Publish a local realtime event without writing an outbound sync event."""
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             channel = f"events:{event_type}"

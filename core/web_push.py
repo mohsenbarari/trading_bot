@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.enums import NotificationCategory, NotificationLevel
 from core.market_presence import load_market_page_user_ids
+from core.server_routing import SERVER_IRAN, current_server
 from models.notification import Notification
 from models.push_subscription import PushSubscription
 
@@ -27,6 +28,8 @@ except ImportError:  # pragma: no cover - exercised in environments without opti
 logger = logging.getLogger(__name__)
 
 TERMINAL_PUSH_STATUS_CODES = {404, 410}
+WEB_PUSH_EXECUTION_SERVER = SERVER_IRAN
+WEB_PUSH_DISABLED_RESULT = {"total": 0, "sent": 0, "failed": 0, "disabled": 0}
 
 
 def hash_endpoint(endpoint: str) -> str:
@@ -37,9 +40,24 @@ def is_web_push_dependency_available() -> bool:
     return webpush is not None
 
 
+def is_web_push_execution_allowed() -> bool:
+    return current_server() == WEB_PUSH_EXECUTION_SERVER
+
+
+def web_push_execution_block_reason() -> str | None:
+    if is_web_push_execution_allowed():
+        return None
+    return "server_mode_not_iran"
+
+
+def disabled_web_push_result() -> dict[str, int]:
+    return dict(WEB_PUSH_DISABLED_RESULT)
+
+
 def is_web_push_configured() -> bool:
     return bool(
-        settings.web_push_enabled
+        is_web_push_execution_allowed()
+        and settings.web_push_enabled
         and settings.web_push_vapid_public_key
         and settings.web_push_vapid_private_key
         and settings.web_push_vapid_subject
@@ -49,6 +67,8 @@ def is_web_push_configured() -> bool:
 
 def web_push_config_status() -> dict[str, Any]:
     missing: list[str] = []
+    if not is_web_push_execution_allowed():
+        missing.append("SERVER_MODE_IRAN")
     if not settings.web_push_enabled:
         missing.append("WEB_PUSH_ENABLED")
     if not settings.web_push_vapid_public_key:
@@ -204,7 +224,7 @@ async def send_web_push_to_user(
     payload: dict[str, Any],
 ) -> dict[str, int]:
     if not is_web_push_configured():
-        return {"total": 0, "sent": 0, "failed": 0, "disabled": 0}
+        return disabled_web_push_result()
 
     result = await db.execute(
         select(PushSubscription).where(
@@ -214,7 +234,7 @@ async def send_web_push_to_user(
     )
     subscriptions = list(result.scalars().all())
     if not subscriptions:
-        return {"total": 0, "sent": 0, "failed": 0, "disabled": 0}
+        return disabled_web_push_result()
 
     now = datetime.now(timezone.utc)
     sent = 0
@@ -321,12 +341,13 @@ async def is_first_active_market_offer(db: AsyncSession, offer_id: int) -> bool:
 
 async def send_market_offer_web_push(offer_id: int) -> None:
     if not is_web_push_configured():
+        reason = web_push_execution_block_reason() or "not_configured"
         logger.info(
             "Market offer Web Push skipped",
             extra={
                 "event": "web_push.market_offer.skipped",
                 "offer_id": offer_id,
-                "reason": "not_configured",
+                "reason": reason,
             },
         )
         return

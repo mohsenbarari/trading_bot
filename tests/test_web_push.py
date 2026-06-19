@@ -4,6 +4,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core import web_push
 from models.offer import OfferStatus
 
@@ -34,7 +35,7 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
             web_push.settings, "web_push_vapid_public_key", "public"
         ), patch.object(web_push.settings, "web_push_vapid_private_key", "private"), patch.object(
             web_push.settings, "web_push_vapid_subject", "mailto:test@example.com"
-        ), patch.object(
+        ), patch.object(web_push.settings, "server_mode", "iran"), patch.object(
             web_push, "is_web_push_dependency_available", return_value=True
         ):
             status = web_push.web_push_config_status()
@@ -42,6 +43,77 @@ class WebPushHelpersTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["enabled"])
         self.assertEqual(status["public_key"], "public")
         self.assertNotIn("private", repr(status))
+
+    async def test_foreign_web_push_is_blocked_even_when_vapid_is_configured(self):
+        with patch.object(web_push.settings, "web_push_enabled", True), patch.object(
+            web_push.settings, "web_push_vapid_public_key", "public"
+        ), patch.object(web_push.settings, "web_push_vapid_private_key", "private"), patch.object(
+            web_push.settings, "web_push_vapid_subject", "mailto:test@example.com"
+        ), patch.object(web_push.settings, "server_mode", "foreign"), patch.object(
+            web_push, "webpush", Mock()
+        ), patch.object(web_push.asyncio, "to_thread", new=AsyncMock()) as to_thread_mock:
+            status = web_push.web_push_config_status()
+            result = await web_push.send_web_push_to_user(object(), 7, {"title": "x"})
+
+        self.assertFalse(status["enabled"])
+        self.assertIsNone(status["public_key"])
+        self.assertIn("SERVER_MODE_IRAN", status["missing"])
+        self.assertEqual(result, web_push.WEB_PUSH_DISABLED_RESULT)
+        to_thread_mock.assert_not_awaited()
+
+    async def test_iran_web_push_delivery_remains_available_when_configured(self):
+        subscription = SimpleNamespace(
+            id=11,
+            endpoint="https://push.example.test/subscription/abc",
+            p256dh="p256dh",
+            auth="auth",
+            enabled=True,
+            failure_count=2,
+            last_success_at=None,
+            last_failure_at=None,
+            last_error="old",
+        )
+
+        class FakeExecuteResult:
+            def scalars(self):
+                return SimpleNamespace(all=lambda: [subscription])
+
+        class FakeDB:
+            def __init__(self):
+                self.commit = AsyncMock()
+
+            async def execute(self, _stmt):
+                return FakeExecuteResult()
+
+        db = FakeDB()
+        with patch.object(web_push.settings, "web_push_enabled", True), patch.object(
+            web_push.settings, "web_push_vapid_public_key", "public"
+        ), patch.object(web_push.settings, "web_push_vapid_private_key", "private"), patch.object(
+            web_push.settings, "web_push_vapid_subject", "mailto:test@example.com"
+        ), patch.object(web_push.settings, "server_mode", "iran"), patch.object(
+            web_push.settings, "web_push_ttl_seconds", 60
+        ), patch.object(web_push.settings, "web_push_timeout_seconds", 3.0), patch.object(
+            web_push, "webpush", Mock()
+        ), patch.object(web_push.asyncio, "to_thread", new=AsyncMock()) as to_thread_mock:
+            result = await web_push.send_web_push_to_user(db, 7, {"title": "x"})
+
+        self.assertEqual(result, {"total": 1, "sent": 1, "failed": 0, "disabled": 0})
+        to_thread_mock.assert_awaited_once()
+        db.commit.assert_awaited_once()
+        self.assertEqual(subscription.failure_count, 0)
+        self.assertIsNone(subscription.last_error)
+
+    def test_notification_web_push_sync_policy_is_explicit(self):
+        notifications = get_sync_registry_entry("notifications")
+        preferences = get_sync_registry_entry("user_notification_preferences")
+        subscriptions = get_sync_registry_entry("push_subscriptions")
+
+        self.assertEqual(notifications.policy, SyncPolicy.SYNC)
+        self.assertIn("Web Push routing", notifications.side_effect_classification)
+        self.assertEqual(preferences.policy, SyncPolicy.SYNC)
+        self.assertIn("notification routing policy", preferences.side_effect_classification)
+        self.assertEqual(subscriptions.policy, SyncPolicy.NO_SYNC)
+        self.assertIn("iran Web Push runtime only", subscriptions.side_effect_classification)
 
     def test_notification_payload_defaults_to_notification_center_route(self):
         notification = type(
