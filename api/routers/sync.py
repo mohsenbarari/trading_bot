@@ -7,6 +7,7 @@ from core.audit_logger import audit_log
 from core.metrics import record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.sync_metadata import build_sync_metadata, coerce_positive_int
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 import hmac
 import hashlib
@@ -101,6 +102,9 @@ def _summarize_payload(data) -> dict[str, object]:
 
 def _enum_value(value) -> str:
     return str(getattr(value, "value", value) or "").lower()
+
+
+TERMINAL_OFFER_STATUSES = {"completed", "expired", "cancelled"}
 
 
 def _completed_trade_offer_id_from_sync(table: str, data: dict) -> int | None:
@@ -471,6 +475,11 @@ def _build_upsert_stmt(model, table, data):
             else:
                 set_dict[k] = stmt.excluded[k]
         return stmt.on_conflict_do_update(index_elements=['id'], set_=set_dict)
+    elif table == "offers":
+        where_clause = _offer_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
+        return stmt.on_conflict_do_update(index_elements=['id'], set_=data, where=where_clause)
     else:
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
 
@@ -483,6 +492,92 @@ def _filter_model_columns(model, data: dict) -> dict:
         return data
     column_names = set(columns.keys())
     return {key: value for key, value in data.items() if key in column_names}
+
+
+def _result_scalar_first(result):
+    try:
+        return result.scalars().first()
+    except AttributeError:
+        return None
+
+
+def _offer_payload_needs_ordering_check(data: dict) -> bool:
+    incoming_status = _enum_value(data.get("status"))
+    return bool(incoming_status and coerce_positive_int(data.get("version_id")) is not None)
+
+
+def _offer_upsert_where_clause(model, stmt, data: dict):
+    if not _offer_payload_needs_ordering_check(data):
+        return None
+    current_status = getattr(model, "status", None)
+    current_version = getattr(model, "version_id", None)
+    if current_status is None or current_version is None:
+        return None
+    try:
+        incoming_status = stmt.excluded["status"]
+        incoming_version = stmt.excluded["version_id"]
+    except (AttributeError, KeyError):
+        return None
+
+    current_terminal = current_status.in_(list(TERMINAL_OFFER_STATUSES))
+    incoming_terminal = incoming_status.in_(list(TERMINAL_OFFER_STATUSES))
+    same_version_terminal_conflict = (
+        current_terminal
+        & incoming_terminal
+        & (current_version == incoming_version)
+        & (current_status != incoming_status)
+    )
+    terminal_reactivation = current_terminal & ~incoming_terminal
+
+    return (current_version <= incoming_version) & ~terminal_reactivation & ~same_version_terminal_conflict
+
+
+async def _stale_offer_sync_reason(db: AsyncSession, record_id, data: dict) -> str | None:
+    if not _offer_payload_needs_ordering_check(data):
+        return None
+
+    result = await db.execute(select(Offer).where(Offer.id == record_id))
+    existing = _result_scalar_first(result)
+    if existing is None:
+        return None
+
+    incoming_status = _enum_value(data.get("status"))
+    current_status = _enum_value(getattr(existing, "status", None))
+    incoming_version = coerce_positive_int(data.get("version_id"))
+    current_version = coerce_positive_int(getattr(existing, "version_id", None))
+
+    if current_version is not None and incoming_version is not None and incoming_version < current_version:
+        return "older_authoritative_version"
+
+    if current_status in TERMINAL_OFFER_STATUSES and incoming_status not in TERMINAL_OFFER_STATUSES:
+        return "terminal_state_protected"
+
+    if (
+        current_status in TERMINAL_OFFER_STATUSES
+        and incoming_status in TERMINAL_OFFER_STATUSES
+        and current_version is not None
+        and incoming_version == current_version
+        and incoming_status != current_status
+    ):
+        return "same_version_terminal_conflict"
+
+    return None
+
+
+def _log_stale_offer_sync_ignored(record_id, operation: str, data: dict, reason: str) -> None:
+    metadata = build_sync_metadata("offers", record_id, operation, data)
+    logger.warning(
+        "Ignored stale synced offer event",
+        extra={
+            "event": "sync.stale_offer_ignored",
+            "table": "offers",
+            "record_id": record_id,
+            "reason": reason,
+            "incoming_status": _enum_value(data.get("status")),
+            "incoming_version": coerce_positive_int(data.get("version_id")),
+            "sync_meta": metadata,
+        },
+    )
 
 
 async def _apply_item(
@@ -554,6 +649,10 @@ async def _apply_item(
             if terminal_offers is None:
                 terminal_offers = []
             status_value = str(data.get("status") or "").lower()
+            stale_reason = await _stale_offer_sync_reason(db, record_id, data)
+            if stale_reason:
+                _log_stale_offer_sync_ignored(record_id, operation, data, stale_reason)
+                return 'ok'
             data.pop("channel_message_id", None)
             if operation == "INSERT" and settings.server_mode != "iran":
                 new_offers.append(record_id)
@@ -565,7 +664,13 @@ async def _apply_item(
 
         try:
             async with db.begin_nested():
-                await db.execute(stmt, execution_options={"is_sync": True})
+                execute_result = await db.execute(stmt, execution_options={"is_sync": True})
+                if (
+                    table == "offers"
+                    and _offer_payload_needs_ordering_check(data)
+                    and getattr(execute_result, "rowcount", None) == 0
+                ):
+                    _log_stale_offer_sync_ignored(record_id, operation, data, "atomic_upsert_guard_noop")
             return 'ok'
         except IntegrityError as e:
             err_str = str(e).lower()
@@ -1208,7 +1313,15 @@ async def resync_from_changelog(
                         "id": entry.record_id,
                         "data": data,
                         "hash": entry.hash,
-                        "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time()
+                        "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time(),
+                        "change_log_id": entry.id,
+                        "sync_meta": build_sync_metadata(
+                            entry.table_name,
+                            entry.record_id,
+                            entry.operation,
+                            data,
+                            change_log_id=entry.id,
+                        ),
                     })
                 except Exception as e:
                     logger.error(

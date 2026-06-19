@@ -11,6 +11,7 @@ from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
 from core.server_routing import default_peer_server_url
+from core.sync_metadata import build_sync_metadata, coerce_positive_int, deserialize_sync_data
 
 # Configure logging
 configure_logging("sync-worker")
@@ -80,34 +81,29 @@ def peer_response_is_success(response) -> bool:
     return payload.get("status") in {"success", "ok"} and error_count == 0
 
 
-def _coerce_positive_int(value) -> int | None:
-    try:
-        coerced = int(value)
-    except (TypeError, ValueError):
-        return None
-    return coerced if coerced > 0 else None
-
-
 def deserialize_change_log_data(raw_data):
-    if isinstance(raw_data, str):
-        try:
-            return json.loads(raw_data)
-        except json.JSONDecodeError:
-            return raw_data
-    return raw_data
+    return deserialize_sync_data(raw_data)
 
 
 def change_log_entry_to_sync_item(entry) -> dict:
     timestamp = getattr(entry, "timestamp", None)
+    data = deserialize_change_log_data(entry.data)
     return {
         "type": "db_change",
         "operation": entry.operation,
         "table": entry.table_name,
         "id": entry.record_id,
-        "data": deserialize_change_log_data(entry.data),
+        "data": data,
         "hash": entry.hash,
         "timestamp": timestamp.timestamp() if timestamp else time.time(),
         "change_log_id": entry.id,
+        "sync_meta": build_sync_metadata(
+            entry.table_name,
+            entry.record_id,
+            entry.operation,
+            data,
+            change_log_id=entry.id,
+        ),
     }
 
 
@@ -138,13 +134,13 @@ async def mark_change_log_delivered(item: dict) -> int:
     from core.db import AsyncSessionLocal
     from models.change_log import ChangeLog
 
-    change_log_id = _coerce_positive_int(item.get("change_log_id"))
+    change_log_id = coerce_positive_int(item.get("change_log_id"))
     async with AsyncSessionLocal() as db:
         conditions = [ChangeLog.synced.is_(False)]
         if change_log_id is not None:
             conditions.append(ChangeLog.id == change_log_id)
         else:
-            record_id = _coerce_positive_int(item.get("id"))
+            record_id = coerce_positive_int(item.get("id"))
             table_name = item.get("table")
             operation = item.get("operation")
             item_hash = item.get("hash")

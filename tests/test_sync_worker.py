@@ -149,6 +149,17 @@ class ChangeLogPayloadTests(unittest.TestCase):
                 "hash": "hash-77",
                 "timestamp": timestamp.timestamp(),
                 "change_log_id": 77,
+                "sync_meta": {
+                    "aggregate_table": "offers",
+                    "aggregate_id": "12",
+                    "aggregate_db_id": 12,
+                    "authority_server": None,
+                    "operation": "INSERT",
+                    "authoritative_version": None,
+                    "event_sequence": 77,
+                    "outbox_id": 77,
+                    "command_idempotency_id": None,
+                },
             },
         )
 

@@ -863,6 +863,29 @@ Exit criteria:
 
 - Latest authoritative terminal state wins.
 
+Implemented in Step 6C:
+
+- Sync payloads produced by event listeners, committed outbox worker drains, and manual resync now
+  include `sync_meta` with aggregate table/id, authority server, authoritative version or outbox
+  sequence, outbox id, and command idempotency id where present.
+- The sync receiver compares incoming offer `status`/`version_id` against the existing local offer
+  before upsert. Older versions, non-terminal states over existing terminal offers, and conflicting
+  same-version terminal states are ignored with `sync.stale_offer_ignored` audit metadata.
+- Offer upserts also carry an atomic `ON CONFLICT DO UPDATE WHERE` guard so the same stale-event
+  rules still hold if a newer terminal state commits between the receiver's read and write.
+- Ignored stale offer events return receiver result `ok` so the sender can mark the outbox row
+  delivered instead of retrying an event that must never be applied.
+- Duplicate terminal-state replay with the same version remains idempotent, and a newer terminal
+  version can still win over an older active state.
+
+Verification:
+
+- `tests.test_sync_metadata`
+- `tests.test_core_events`
+- `tests.test_sync_worker`
+- `tests.test_sync_router_stale_events`
+- Existing sync router apply, receive, resync, parsing, and fail-closed policy tests.
+
 ## Step 7 - Publication State And Cross-Surface Visibility
 
 Goal: make business-visible publication explicit, idempotent, and repairable.

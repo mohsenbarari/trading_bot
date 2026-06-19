@@ -373,8 +373,13 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(queued_payload["change_log_id"], 42)
         self.assertEqual(queued_payload["table"], "offers")
         self.assertEqual(queued_payload["id"], 5)
+        self.assertEqual(queued_payload["sync_meta"]["aggregate_table"], "offers")
+        self.assertEqual(queued_payload["sync_meta"]["aggregate_id"], "5")
+        self.assertEqual(queued_payload["sync_meta"]["outbox_id"], 42)
+        self.assertEqual(queued_payload["sync_meta"]["event_sequence"], 42)
         push_sync_direct.assert_called_once()
         self.assertEqual(push_sync_direct.call_args.args[0]["change_log_id"], 42)
+        self.assertEqual(push_sync_direct.call_args.args[0]["sync_meta"], queued_payload["sync_meta"])
 
         sync_redis = _FakeSyncRedis(lpush_error=RuntimeError('redis down'))
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch(

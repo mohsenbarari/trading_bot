@@ -23,6 +23,7 @@ from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
+from core.sync_metadata import build_sync_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,13 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
     }
     if change_log_id is not None:
         payload["change_log_id"] = change_log_id
+    payload["sync_meta"] = build_sync_metadata(
+        table_name,
+        record_id,
+        operation,
+        data,
+        change_log_id=change_log_id,
+    )
     payload_json = json.dumps(payload, default=str)
 
     # 2. Push to Redis queue (persistent connection — backup for sync_worker retry)

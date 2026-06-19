@@ -138,6 +138,18 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
                 "data": {"full_name": "User 1"},
                 "hash": "hash-1",
                 "timestamp": datetime(2026, 1, 1, 12, 0, 0).timestamp(),
+                "change_log_id": 1,
+                "sync_meta": {
+                    "aggregate_table": "users",
+                    "aggregate_id": "1",
+                    "aggregate_db_id": 1,
+                    "authority_server": None,
+                    "operation": "INSERT",
+                    "authoritative_version": None,
+                    "event_sequence": 1,
+                    "outbox_id": 1,
+                    "command_idempotency_id": None,
+                },
             }
         ]
         expected_body = json.dumps(expected_items, sort_keys=True, default=str)
@@ -255,6 +267,8 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload[0]["data"]["relation_display_name"], "دفتر تهران")
         self.assertEqual(payload[1]["table"], "offers")
         self.assertEqual(payload[1]["data"]["actor_user_id"], 11)
+        self.assertEqual(payload[1]["sync_meta"]["aggregate_table"], "offers")
+        self.assertEqual(payload[1]["sync_meta"]["aggregate_id"], "77")
         self.assertEqual(payload[2]["table"], "trades")
         self.assertEqual(payload[2]["data"]["actor_user_id"], 11)
 
