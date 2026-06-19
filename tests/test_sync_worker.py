@@ -238,7 +238,16 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_main_requeues_200_partial_response_without_marking_synced(self):
         payload = json.dumps({"hash": "abc", "change_log_id": 9})
-        response = FakeResponse(200, '{"status":"partial","processed":0,"errors":1}', {"status": "partial", "processed": 0, "errors": 1})
+        response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [{"table": "mystery", "record_id": 8, "reason": "unregistered_table"}],
+            },
+        )
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
             blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
             send_return_value=response,

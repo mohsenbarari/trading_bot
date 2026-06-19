@@ -7,6 +7,7 @@ from core.audit_logger import audit_log
 from core.metrics import record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.sync_registry import SyncPolicy, get_sync_registry_entry
 import hmac
 import hashlib
 import ipaddress
@@ -376,6 +377,60 @@ def _is_mandatory_chat_member_record(data: dict) -> bool:
     )
 
 
+def _sync_item_data_for_policy(item: dict) -> dict:
+    data = item.get("data") or {}
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except ValueError:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _is_transitional_mandatory_messenger_sync(table: str, data: dict) -> bool:
+    """Temporary compatibility path for mandatory-channel system projections only.
+
+    Messenger-owned tables stay no-sync. The only exception is the mandatory
+    system channel projection used during account/channel rollout; arbitrary
+    messenger chats, members, messages, and files must still be rejected.
+    """
+    if table == "chats":
+        return _is_mandatory_channel_record(data)
+    if table == "chat_members":
+        return _is_mandatory_chat_member_record(data)
+    return False
+
+
+def _sync_item_policy_rejection_reason(item: dict) -> str | None:
+    table = item.get("table")
+    if not isinstance(table, str) or not table:
+        return "missing_table"
+
+    try:
+        registry_entry = get_sync_registry_entry(table)
+    except KeyError:
+        return "unregistered_table"
+
+    if registry_entry.planned:
+        return "planned_table_not_enabled"
+
+    if registry_entry.policy == SyncPolicy.SYNC:
+        return None
+
+    if _is_transitional_mandatory_messenger_sync(table, _sync_item_data_for_policy(item)):
+        return None
+
+    return f"policy_forbidden:{registry_entry.policy.value}"
+
+
+def _sync_error_detail(item: dict, reason: str) -> dict[str, object]:
+    return {
+        "table": item.get("table"),
+        "record_id": item.get("id"),
+        "reason": reason,
+    }
+
+
 async def _resolve_existing_mandatory_chat_id(db: AsyncSession) -> int | None:
     stmt = select(Chat.id).where(
         Chat.type == ChatType.CHANNEL,
@@ -743,6 +798,7 @@ async def receive_sync_data(
     
     processed_count = 0
     errors = []
+    error_details = []
     deferred_items = []
     new_offers = []
     terminal_offers = []
@@ -774,13 +830,30 @@ async def receive_sync_data(
                     )
                 continue
 
+            rejection_reason = _sync_item_policy_rejection_reason(item)
+            if rejection_reason:
+                error_detail = _sync_error_detail(item, rejection_reason)
+                errors.append(error_detail)
+                error_details.append(error_detail)
+                logger.warning(
+                    "Rejected sync item by table policy",
+                    extra={
+                        "event": "sync.table_policy_rejected",
+                        **error_detail,
+                    },
+                )
+                continue
+
             parsed = _parse_item(item)
             if not parsed:
+                error_detail = _sync_error_detail(item, "receiver_model_not_registered")
+                errors.append(error_detail)
+                error_details.append(error_detail)
                 logger.warning(
-                    "Unknown table in sync",
+                    "Rejected sync item without receiver model",
                     extra={
-                        "event": "sync.unknown_table",
-                        "table": item.get("table"),
+                        "event": "sync.receiver_model_not_registered",
+                        **error_detail,
                     },
                 )
                 continue
@@ -1056,7 +1129,10 @@ async def receive_sync_data(
                 )
         
         if errors:
-            return {"status": "partial", "processed": processed_count, "errors": len(errors)}
+            response = {"status": "partial", "processed": processed_count, "errors": len(errors)}
+            if error_details:
+                response["error_items"] = error_details
+            return response
         return {"status": "success", "processed": processed_count}
         
     except Exception as e:

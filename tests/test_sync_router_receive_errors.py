@@ -71,7 +71,7 @@ class SyncRouterReceiveErrorTests(unittest.IsolatedAsyncioTestCase):
                 await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(exc_info.exception.status_code, 500)
-        self.assertEqual(exc_info.exception.detail, "commit failed")
+        self.assertEqual(exc_info.exception.detail, "Sync batch processing failed")
         self.assertEqual(db.rollbacks, 1)
 
 

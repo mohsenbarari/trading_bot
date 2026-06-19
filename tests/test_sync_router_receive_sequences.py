@@ -45,8 +45,24 @@ class SyncRouterReceiveSequencesTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB()
         items = [
             {"table": "users", "operation": "INSERT", "id": 1, "data": {"full_name": "U"}},
-            {"table": "chats", "operation": "INSERT", "id": 2, "data": {"title": "اطلاع‌رسانی"}},
-            {"table": "chat_members", "operation": "INSERT", "id": 3, "data": {"chat_id": 2, "user_id": 1}},
+            {
+                "table": "chats",
+                "operation": "INSERT",
+                "id": 2,
+                "data": {"title": "اطلاع‌رسانی", "type": "channel", "is_system": True, "is_mandatory": True},
+            },
+            {
+                "table": "chat_members",
+                "operation": "INSERT",
+                "id": 3,
+                "data": {
+                    "chat_id": 2,
+                    "user_id": 1,
+                    "chat_type": "channel",
+                    "chat_is_system": True,
+                    "chat_is_mandatory": True,
+                },
+            },
             {"table": "offers", "operation": "INSERT", "id": 4, "data": {"price": 100}},
         ]
 

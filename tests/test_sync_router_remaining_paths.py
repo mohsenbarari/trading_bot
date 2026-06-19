@@ -296,7 +296,13 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        self.assertEqual(result, {"status": "success", "processed": 0})
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(
+            result["error_items"],
+            [{"table": "mystery", "record_id": 8, "reason": "unregistered_table"}],
+        )
 
         db = ReceiveDB()
         items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"telegram_id": 10}}]

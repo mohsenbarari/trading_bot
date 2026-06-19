@@ -13,6 +13,7 @@ class FakeRequest:
     def __init__(self, headers=None, body="[]"):
         self.headers = dict(headers or {})
         self._body = body.encode()
+        self.url = SimpleNamespace(path="/api/sync/receive")
 
     async def body(self):
         return self._body
@@ -103,7 +104,7 @@ class SyncRouterSignatureTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
         self.assertEqual(exc_info.exception.status_code, 401)
-        self.assertEqual(exc_info.exception.detail, "Verification failed")
+        self.assertEqual(exc_info.exception.detail, "Invalid signature")
 
 
 if __name__ == "__main__":
