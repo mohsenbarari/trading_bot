@@ -703,26 +703,32 @@ async function cancelOwnOffer(offerId: number) {
 
 .offer-card-wrap.is-expired .offer-card-inner {
   background:
-    linear-gradient(0deg, rgba(148, 163, 184, 0.16), rgba(148, 163, 184, 0.16)),
+    linear-gradient(90deg, rgba(100, 116, 139, 0.16), rgba(148, 163, 184, 0.08) 38%, rgba(248, 250, 252, 0) 78%),
+    linear-gradient(0deg, rgba(100, 116, 139, 0.18), rgba(100, 116, 139, 0.18)),
     var(--ds-bg-surface);
-  box-shadow: 0 1px 3px rgba(71, 85, 105, 0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(100, 116, 139, 0.08),
+    0 1px 3px rgba(71, 85, 105, 0.05);
 }
 
 .offer-card-wrap.is-traded .offer-card-inner {
   background:
-    linear-gradient(0deg, rgba(20, 184, 166, 0.14), rgba(20, 184, 166, 0.14)),
+    linear-gradient(90deg, rgba(20, 184, 166, 0.22), rgba(20, 184, 166, 0.09) 40%, rgba(240, 253, 250, 0) 78%),
+    linear-gradient(0deg, rgba(20, 184, 166, 0.16), rgba(20, 184, 166, 0.16)),
     var(--ds-bg-surface);
-  box-shadow: 0 1px 3px rgba(15, 118, 110, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 118, 110, 0.12),
+    0 1px 3px rgba(15, 118, 110, 0.07);
 }
 
 .offer-card-wrap.is-expired .offer-header,
 .offer-card-wrap.is-expired .offer-body {
-  opacity: 0.68;
+  opacity: 0.62;
 }
 
 .offer-card-wrap.is-traded .offer-header,
 .offer-card-wrap.is-traded .offer-body {
-  opacity: 0.78;
+  opacity: 0.86;
 }
 
 .offer-card-wrap.is-history .price,
