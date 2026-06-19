@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -54,6 +55,38 @@ class FakeResponse:
         return self._json_payload
 
 
+class FakeScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def first(self):
+        return self.value
+
+
+class FakeExecuteResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalars(self):
+        return FakeScalarResult(self.value)
+
+
+class FakeDBSession:
+    def __init__(self, value):
+        self.value = value
+        self.statements = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, statement):
+        self.statements.append(statement)
+        return FakeExecuteResult(self.value)
+
+
 class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_sync_item_posts_expected_signed_payload(self):
         fake_response = object()
@@ -90,6 +123,59 @@ class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class ChangeLogPayloadTests(unittest.TestCase):
+    def test_change_log_entry_to_sync_item_includes_change_log_id_and_decoded_data(self):
+        timestamp = datetime(2026, 1, 2, 3, 4, 5)
+        entry = SimpleNamespace(
+            id=77,
+            operation="INSERT",
+            table_name="offers",
+            record_id=12,
+            data='{"id":12,"status":"active"}',
+            hash="hash-77",
+            timestamp=timestamp,
+        )
+
+        item = sync_worker.change_log_entry_to_sync_item(entry)
+
+        self.assertEqual(
+            item,
+            {
+                "type": "db_change",
+                "operation": "INSERT",
+                "table": "offers",
+                "id": 12,
+                "data": {"id": 12, "status": "active"},
+                "hash": "hash-77",
+                "timestamp": timestamp.timestamp(),
+                "change_log_id": 77,
+            },
+        )
+
+
+class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_next_unsynced_change_log_item_reads_committed_row(self):
+        timestamp = datetime(2026, 1, 2, 3, 4, 5)
+        entry = SimpleNamespace(
+            id=88,
+            operation="UPDATE",
+            table_name="trades",
+            record_id=42,
+            data={"id": 42, "status": "confirmed"},
+            hash="hash-88",
+            timestamp=timestamp,
+        )
+        fake_session = FakeDBSession(entry)
+
+        with patch("core.db.AsyncSessionLocal", return_value=fake_session):
+            item = await sync_worker.fetch_next_unsynced_change_log_item()
+
+        self.assertEqual(item["change_log_id"], 88)
+        self.assertEqual(item["table"], "trades")
+        self.assertEqual(item["data"], {"id": 42, "status": "confirmed"})
+        self.assertEqual(len(fake_session.statements), 1)
+
+
 class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
     async def _run_main_once(
         self,
@@ -101,12 +187,15 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         send_return_value=None,
         marker_side_effect=None,
         marker_return_value=1,
+        fetch_return_value=None,
+        fetch_side_effect=None,
     ):
         fake_redis = FakeRedis(blpop_results)
         fake_settings = SimpleNamespace(redis_host="redis", redis_port=6379, sync_api_key=api_key)
         fake_client = FakeAsyncClient()
         send_mock = AsyncMock(side_effect=send_side_effect, return_value=send_return_value)
         marker_mock = AsyncMock(side_effect=marker_side_effect, return_value=marker_return_value)
+        fetch_mock = AsyncMock(side_effect=fetch_side_effect, return_value=fetch_return_value)
         sleep_mock = AsyncMock()
 
         with patch("core.sync_worker.redis.Redis", return_value=fake_redis), patch(
@@ -116,11 +205,14 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         ), patch("core.sync_worker.send_sync_item", send_mock), patch(
             "core.sync_worker.mark_change_log_delivered", marker_mock
         ), patch(
+            "core.sync_worker.fetch_next_unsynced_change_log_item", fetch_mock
+        ), patch(
             "core.sync_worker.asyncio.sleep", sleep_mock
         ):
             with self.assertRaises(asyncio.CancelledError):
                 await sync_worker.main()
 
+        self.fetch_mock = fetch_mock
         return fake_redis, send_mock, sleep_mock, marker_mock
 
     async def test_main_skips_invalid_json_payload(self):
@@ -221,10 +313,69 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake_redis.blpop_calls), 2)
         send_mock.assert_not_awaited()
         marker_mock.assert_not_awaited()
+        self.fetch_mock.assert_awaited_once()
         sleep_mock.assert_not_awaited()
         self.assertEqual(fake_redis.rpush_calls, [])
         self.assertEqual(fake_redis.blpop_calls[0][0], ("sync:outbound", "sync:retry"))
         self.assertEqual(fake_redis.blpop_calls[1][0], ("sync:retry", "sync:outbound"))
+
+    async def test_main_drains_committed_change_log_when_redis_has_no_wakeup(self):
+        item = {
+            "type": "db_change",
+            "operation": "INSERT",
+            "table": "offers",
+            "id": 5,
+            "data": {"id": 5},
+            "hash": "abc",
+            "timestamp": 1700000000,
+            "change_log_id": 44,
+        }
+        response = FakeResponse(
+            200,
+            '{"status":"success","processed":1,"errors":0}',
+            {"status": "success", "processed": 1, "errors": 0},
+        )
+
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[None, asyncio.CancelledError()],
+            fetch_return_value=item,
+            send_return_value=response,
+        )
+
+        self.fetch_mock.assert_awaited_once()
+        send_mock.assert_awaited_once()
+        self.assertEqual(send_mock.await_args.args[1], item)
+        marker_mock.assert_awaited_once_with(item)
+        self.assertEqual(fake_redis.rpush_calls, [])
+        sleep_mock.assert_not_awaited()
+
+    async def test_main_keeps_db_sourced_change_log_unsynced_on_peer_rejection(self):
+        item = {
+            "type": "db_change",
+            "operation": "UPDATE",
+            "table": "offers",
+            "id": 5,
+            "data": {"id": 5},
+            "hash": "abc",
+            "timestamp": 1700000000,
+            "change_log_id": 44,
+        }
+        response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {"status": "partial", "processed": 0, "errors": 1},
+        )
+
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[None, asyncio.CancelledError()],
+            fetch_return_value=item,
+            send_return_value=response,
+        )
+
+        send_mock.assert_awaited_once()
+        marker_mock.assert_not_awaited()
+        self.assertEqual(fake_redis.rpush_calls, [])
+        sleep_mock.assert_awaited_once_with(1)
 
     async def test_main_logs_and_retries_unexpected_loop_errors(self):
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(

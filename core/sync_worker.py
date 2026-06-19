@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import httpx
 import redis.asyncio as redis
-from sqlalchemy import update
+from sqlalchemy import select, update
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
@@ -88,6 +88,47 @@ def _coerce_positive_int(value) -> int | None:
     return coerced if coerced > 0 else None
 
 
+def deserialize_change_log_data(raw_data):
+    if isinstance(raw_data, str):
+        try:
+            return json.loads(raw_data)
+        except json.JSONDecodeError:
+            return raw_data
+    return raw_data
+
+
+def change_log_entry_to_sync_item(entry) -> dict:
+    timestamp = getattr(entry, "timestamp", None)
+    return {
+        "type": "db_change",
+        "operation": entry.operation,
+        "table": entry.table_name,
+        "id": entry.record_id,
+        "data": deserialize_change_log_data(entry.data),
+        "hash": entry.hash,
+        "timestamp": timestamp.timestamp() if timestamp else time.time(),
+        "change_log_id": entry.id,
+    }
+
+
+async def fetch_next_unsynced_change_log_item() -> dict | None:
+    """Read the oldest committed unsynced change_log row without relying on Redis wake-up."""
+    from core.db import AsyncSessionLocal
+    from models.change_log import ChangeLog
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ChangeLog)
+            .where(ChangeLog.synced.is_(False))
+            .order_by(ChangeLog.id.asc())
+            .limit(1)
+        )
+        entry = result.scalars().first()
+        if entry is None:
+            return None
+        return change_log_entry_to_sync_item(entry)
+
+
 async def mark_change_log_delivered(item: dict) -> int:
     """Mark the local change_log row delivered only after the peer accepts it.
 
@@ -132,6 +173,17 @@ def queue_poll_order(iteration: int) -> list[str]:
     if iteration % 2 == 0:
         return ["sync:retry", "sync:outbound"]
     return ["sync:outbound", "sync:retry"]
+
+
+async def requeue_if_needed(
+    redis_client,
+    retry_queue: str,
+    payload: str,
+    *,
+    should_requeue: bool,
+) -> None:
+    if should_requeue:
+        await redis_client.rpush(retry_queue, payload)
 
 
 async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):
@@ -196,23 +248,29 @@ async def main():
                 # BLPOP blocks until item is available
                 res = await r.blpop(queue_poll_order(iteration), timeout=5)
                 
+                should_requeue = True
                 if not res:
-                    continue
-                    
-                origin_queue, payload = res
-                try:
-                    data = json.loads(payload)
-                except json.JSONDecodeError:
-                    logger.error(
-                        "❌ Invalid JSON in sync queue",
-                        extra={
-                            "event": "job.item.invalid_payload",
-                            "job_name": "sync_worker",
-                            "origin_queue": origin_queue,
-                            **summarize_queue_payload(payload),
-                        },
-                    )
-                    continue
+                    data = await fetch_next_unsynced_change_log_item()
+                    if data is None:
+                        continue
+                    origin_queue = "change_log"
+                    payload = json.dumps(data, sort_keys=True, default=str)
+                    should_requeue = False
+                else:
+                    origin_queue, payload = res
+                    try:
+                        data = json.loads(payload)
+                    except json.JSONDecodeError:
+                        logger.error(
+                            "❌ Invalid JSON in sync queue",
+                            extra={
+                                "event": "job.item.invalid_payload",
+                                "job_name": "sync_worker",
+                                "origin_queue": origin_queue,
+                                **summarize_queue_payload(payload),
+                            },
+                        )
+                        continue
                 
                 item_hash = data.get('hash', 'unknown')
                 logger.info(
@@ -226,8 +284,8 @@ async def main():
                 )
                 
                 if not target_url or not api_key:
-                     logger.warning("Target URL or API Key missing. Re-queueing to retry queue and sleeping.")
-                     await r.rpush(retry_queue, payload)
+                     logger.warning("Target URL or API Key missing. Keeping sync item pending and sleeping.")
+                     await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                      await asyncio.sleep(30)
                      continue
 
@@ -273,7 +331,7 @@ async def main():
                             "error_type": marker_err.error_type,
                         },
                     )
-                    await r.rpush(retry_queue, payload)
+                    await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                     await asyncio.sleep(1)
                 except SyncDeliveryError as delivery_err:
                     logger.error(
@@ -288,7 +346,7 @@ async def main():
                         },
                     )
                     # Push to retry queue (at the end)
-                    await r.rpush(retry_queue, payload)
+                    await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                     await asyncio.sleep(1) # Backoff slightly
                 except httpx.RequestError as req_err:
                     _loop_errors.log(
@@ -299,7 +357,7 @@ async def main():
                         run_id=run_id,
                         metric_recorded=True,
                     )
-                    await r.rpush(retry_queue, payload)
+                    await requeue_if_needed(r, retry_queue, payload, should_requeue=should_requeue)
                     await asyncio.sleep(5) # Network retry backoff
 
             except Exception as e:

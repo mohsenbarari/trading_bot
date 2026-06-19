@@ -1,7 +1,7 @@
 # core/sync_push.py
 """
 Direct HTTP push for sync data — fire-and-forget via thread pool.
-Falls back to Redis queue (sync_worker) on failure.
+Falls back to committed change_log draining by sync_worker on failure.
 """
 import json
 import time
@@ -117,7 +117,7 @@ def _peer_response_is_success(response) -> bool:
 def _do_push(payload: dict, target_url: str, api_key: str):
     """
     Synchronous HTTP push — runs in thread pool.
-    On failure, data stays in Redis queue for sync_worker retry.
+    On failure, data stays unsynced in change_log for sync_worker retry.
     """
     try:
         timestamp = int(time.time())
@@ -159,7 +159,7 @@ def push_sync_direct(payload: dict):
     """
     Submit a sync payload for direct HTTP push (non-blocking).
     This runs in a background thread so it doesn't block the DB transaction.
-    Falls back to sync_worker retry if push fails.
+    Falls back to sync_worker change_log drain if push fails.
     """
     if _direct_push_disabled():
         return
@@ -171,7 +171,7 @@ def push_sync_direct(payload: dict):
     api_key = getattr(settings, "sync_api_key", None)
 
     if not target_url or not api_key:
-        return  # Not configured, sync_worker will handle
+        return  # Not configured; sync_worker will drain committed change_log rows
 
     if target_url.endswith("/"):
         target_url = target_url[:-1]

@@ -9,7 +9,7 @@ Sync flow (optimized):
   1. Event fires → log_change() inserts into change_log (same DB transaction)
   2. log_change() pushes to Redis sync:outbound queue (persistent connection)
   3. log_change() fires direct HTTP push via thread pool (instant delivery)
-  4. sync_worker only handles retries for failed direct pushes
+  4. sync_worker drains committed change_log rows and also consumes Redis wake-ups/retries
 """
 import json
 import logging

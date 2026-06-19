@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from core import notifications, sync_push
+from core import notifications, sync_push, telegram_gateway
 
 
 class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
@@ -23,27 +23,19 @@ class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("timestamp", payload)
 
     async def test_send_telegram_message_sends_directly_on_foreign(self):
-        sent_calls = []
-
-        class BotSpy:
-            def __init__(self, token):
-                self.token = token
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-            async def send_message(self, chat_id, text, parse_mode):
-                sent_calls.append((chat_id, text, parse_mode, self.token))
-
         with patch.object(notifications.settings, "server_mode", "foreign"), \
-             patch.object(notifications.settings, "bot_token", "bot-token"), \
-             patch("core.notifications.Bot", BotSpy):
+             patch("core.telegram_gateway.current_server", return_value="foreign"), \
+             patch("core.telegram_gateway.send_message", new=AsyncMock(
+                 return_value=telegram_gateway.TelegramGatewayResult(ok=True, method="sendMessage")
+             )) as send_message:
             await notifications.send_telegram_message(54321, "ping")
 
-        self.assertEqual(sent_calls, [(54321, "ping", "Markdown", "bot-token")])
+        send_message.assert_awaited_once_with(
+            54321,
+            "ping",
+            parse_mode="Markdown",
+            idempotency_key="notification:54321",
+        )
 
 
 class SyncPushHelperTests(unittest.TestCase):

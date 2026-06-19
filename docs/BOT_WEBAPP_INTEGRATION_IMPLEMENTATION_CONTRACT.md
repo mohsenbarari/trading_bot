@@ -822,12 +822,24 @@ Required behavior:
 - Redis/direct push remains only wake-up/acceleration.
 - Missed Redis/direct events cannot lose a committed sync change.
 - Rejected peer responses do not mark rows synced.
+- Worker must poll Redis first for low-latency wake-ups/retries, but on an empty `BLPOP` timeout it
+  must read the oldest committed unsynced `change_log` row directly from the database and send that
+  row as a standard sync payload with `change_log_id`.
+- Queue-origin failures may be returned to `sync:retry`; database-origin failures must not need a
+  Redis requeue because the original `change_log.synced=false` row remains the durable retry source.
+- A peer response counts as delivered only when HTTP status is 200, response JSON status is
+  `success` or `ok`, and response error count is zero. Partial/rejected peer responses leave the
+  local row unsynced and therefore operator-visible in sync health.
 
 Required tests:
 
 - Worker sends committed unsynced row without Redis wake-up.
 - Direct push failure still leaves row for worker retry.
 - Peer rejection keeps row unsynced or terminally blocked with operator-visible state.
+- ChangeLog-to-sync payload conversion includes decoded data and `change_log_id`.
+- Redis empty timeout with a committed DB row sends and marks the row only after peer acceptance.
+- Redis empty timeout with peer rejection does not call the delivered marker and does not require
+  Redis requeue.
 
 Exit criteria:
 
