@@ -22,6 +22,7 @@ from core.redis import pool
 from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
+from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
 
 logger = logging.getLogger(__name__)
 
@@ -49,60 +50,58 @@ def _get_sync_redis():
 
 def log_change(connection, table_name: str, record_id: int, operation: str, data: Dict[str, Any]):
     """Log change to change_log + push to Redis + fire direct HTTP push"""
+    json_data = json.dumps(data, default=str)
+    data_hash = hashlib.sha256(json_data.encode()).hexdigest()
+    now = utc_now_naive()
+
+    # 1. Insert into change_log (same transaction as the triggering change).
+    # This is the durable sync outbox; failures must abort synced writes.
+    sql = text("""
+        INSERT INTO change_log (operation, table_name, record_id, data, timestamp, hash, synced, verified, created_at)
+        VALUES (:op, :tbl, :rid, :data, :ts, :hash, false, false, NOW())
+        RETURNING id
+    """)
+    result = connection.execute(sql, {
+        "op": operation,
+        "tbl": table_name,
+        "rid": record_id,
+        "data": json_data,
+        "ts": now,
+        "hash": data_hash
+    })
+    change_log_id = _extract_change_log_id(result)
+    mark_sync_outbox_recorded(connection, table_name, operation, record_id, data)
+
+    # Build sync payload
+    payload = {
+        "type": "db_change",
+        "operation": operation,
+        "table": table_name,
+        "id": record_id,
+        "data": data,
+        "hash": data_hash,
+        "timestamp": now.timestamp()
+    }
+    if change_log_id is not None:
+        payload["change_log_id"] = change_log_id
+    payload_json = json.dumps(payload, default=str)
+
+    # 2. Push to Redis queue (persistent connection — backup for sync_worker retry)
     try:
-        json_data = json.dumps(data, default=str)
-        data_hash = hashlib.sha256(json_data.encode()).hexdigest()
-        now = utc_now_naive()
+        r = _get_sync_redis()
+        r.lpush("sync:outbound", payload_json)
+    except Exception as re:
+        logger.error(f"❌ Redis sync push failed: {re}")
+        # Reset connection on error
+        global _sync_redis
+        _sync_redis = None
 
-        # 1. Insert into change_log (same transaction as the triggering change)
-        sql = text("""
-            INSERT INTO change_log (operation, table_name, record_id, data, timestamp, hash, synced, verified, created_at)
-            VALUES (:op, :tbl, :rid, :data, :ts, :hash, false, false, NOW())
-            RETURNING id
-        """)
-        result = connection.execute(sql, {
-            "op": operation,
-            "tbl": table_name,
-            "rid": record_id,
-            "data": json_data,
-            "ts": now,
-            "hash": data_hash
-        })
-        change_log_id = _extract_change_log_id(result)
-
-        # Build sync payload
-        payload = {
-            "type": "db_change",
-            "operation": operation,
-            "table": table_name,
-            "id": record_id,
-            "data": data,
-            "hash": data_hash,
-            "timestamp": now.timestamp()
-        }
-        if change_log_id is not None:
-            payload["change_log_id"] = change_log_id
-        payload_json = json.dumps(payload, default=str)
-
-        # 2. Push to Redis queue (persistent connection — backup for sync_worker retry)
-        try:
-            r = _get_sync_redis()
-            r.lpush("sync:outbound", payload_json)
-        except Exception as re:
-            logger.error(f"❌ Redis sync push failed: {re}")
-            # Reset connection on error
-            global _sync_redis
-            _sync_redis = None
-
-        # 3. Direct HTTP push via thread pool (instant delivery — non-blocking)
-        try:
-            from core.sync_push import push_sync_direct
-            push_sync_direct(payload)
-        except Exception as pe:
-            logger.warning(f"⚡ Direct push submit failed: {pe}")
-
-    except Exception as e:
-        logger.error(f"❌ Error logging change for {table_name}:{record_id}: {e}")
+    # 3. Direct HTTP push via thread pool (instant delivery — non-blocking)
+    try:
+        from core.sync_push import push_sync_direct
+        push_sync_direct(payload)
+    except Exception as pe:
+        logger.warning(f"⚡ Direct push submit failed: {pe}")
 
 
 def _extract_change_log_id(result) -> int | None:
@@ -1079,6 +1078,67 @@ def setup_notification_events():
     logger.info("✅ Notification event listeners registered")
 
 
+def setup_user_notification_preference_events():
+    """Setup event listeners for UserNotificationPreference model."""
+    from models.user_notification_preference import UserNotificationPreference
+
+    def preference_payload(target):
+        return {
+            "id": target.id,
+            "user_id": target.user_id,
+            "market_offer_push_enabled": target.market_offer_push_enabled,
+            "created_at": target.created_at.isoformat() if getattr(target, "created_at", None) else None,
+            "updated_at": target.updated_at.isoformat() if getattr(target, "updated_at", None) else None,
+        }
+
+    @event.listens_for(UserNotificationPreference, 'after_insert')
+    def on_user_notification_preference_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "user_notification_preferences",
+                target.id,
+                "INSERT",
+                preference_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in user_notification_preference after_insert event: {e}")
+
+    @event.listens_for(UserNotificationPreference, 'after_update')
+    def on_user_notification_preference_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "user_notification_preferences",
+                target.id,
+                "UPDATE",
+                preference_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in user_notification_preference after_update event: {e}")
+
+    @event.listens_for(UserNotificationPreference, 'after_delete')
+    def on_user_notification_preference_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "user_notification_preferences",
+                target.id,
+                "DELETE",
+                {"id": target.id, "user_id": target.user_id},
+            )
+        except Exception as e:
+            logger.error(f"Error in user_notification_preference after_delete event: {e}")
+
+    logger.info("✅ UserNotificationPreference event listeners registered")
+
+
 def setup_admin_message_events():
     """Setup event listeners for admin management message history models."""
     from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
@@ -1167,6 +1227,7 @@ def setup_admin_message_events():
 
 def setup_all_events():
     """Setup all event listeners"""
+    register_sync_outbox_guards()
     setup_user_events()
     setup_accountant_relation_events()
     setup_customer_relation_events()
@@ -1183,6 +1244,7 @@ def setup_all_events():
     setup_market_runtime_state_events()
     setup_user_block_events()
     setup_notification_events()
+    setup_user_notification_preference_events()
     setup_admin_message_events()
     logger.info("🎯 All event listeners initialized")
 

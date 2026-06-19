@@ -8,6 +8,7 @@
 - مدیریت محدودیت‌های کاربر
 """
 import asyncio
+import inspect as py_inspect
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ import redis.asyncio as redis
 from aiogram import Bot
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
-from sqlalchemy import update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
@@ -425,10 +426,10 @@ async def increment_user_counter(
     quantity: int = 1
 ) -> None:
     """
-    شمارنده مربوط به عملیات را به صورت اتمیک افزایش می‌دهد.
+    شمارنده مربوط به عملیات را با قفل ردیف افزایش می‌دهد.
     
-    این تابع از UPDATE اتمیک در سطح دیتابیس استفاده می‌کند
-    تا از Race Condition در محیط‌های با همزمانی بالا جلوگیری شود.
+    این تابع از SELECT ... FOR UPDATE و تغییر ORM استفاده می‌کند تا هم
+    Race Condition کنترل شود و هم listenerهای sync ردیف change_log بسازند.
     
     Args:
         session: AsyncSession دیتابیس
@@ -441,40 +442,39 @@ async def increment_user_counter(
     logger.info(f"increment_user_counter called: action_type={action_type}, quantity={quantity}, user_id={user.id if user else 'None'}")
     
     try:
+        result = await session.execute(
+            select(UserModel).where(UserModel.id == user.id).with_for_update()
+        )
+        locked_user = result.scalar_one_or_none()
+        if py_inspect.isawaitable(locked_user):
+            locked_user = await locked_user
+        if locked_user is None:
+            logger.warning("Counter update skipped because user was not found")
+            await session.commit()
+            return
+
         if action_type == 'trade':
-            # آپدیت اتمیک در سطح دیتابیس - جلوگیری از Race Condition
-            stmt = (
-                update(UserModel)
-                .where(UserModel.id == user.id)
-                .values(
-                    trades_count=UserModel.trades_count + 1,
-                    commodities_traded_count=UserModel.commodities_traded_count + quantity
-                )
+            locked_user.trades_count = (locked_user.trades_count or 0) + 1
+            locked_user.commodities_traded_count = (
+                (locked_user.commodities_traded_count or 0) + quantity
             )
-            await session.execute(stmt)
-            logger.info(f"Atomic update: trades_count += 1, commodities_traded_count += {quantity}")
+            logger.info(f"Locked ORM update: trades_count += 1, commodities_traded_count += {quantity}")
             
         elif action_type == 'channel_message':
-            # آپدیت اتمیک برای شمارنده پیام‌ها
-            stmt = (
-                update(UserModel)
-                .where(UserModel.id == user.id)
-                .values(channel_messages_count=UserModel.channel_messages_count + 1)
-            )
-            await session.execute(stmt)
-            logger.info("Atomic update: channel_messages_count += 1")
+            locked_user.channel_messages_count = (locked_user.channel_messages_count or 0) + 1
+            logger.info("Locked ORM update: channel_messages_count += 1")
         
         await session.commit()
         logger.info("Session committed successfully")
     except Exception as e:
-        logger.error(f"Error in atomic update: {e}")
+        logger.error(f"Error in locked counter update: {e}")
         await session.rollback()
         # Don't raise - counter update failure should not break the main flow
 
 
 async def reset_user_counters(session: AsyncSession, user: "User") -> None:
     """
-    شمارنده‌های کاربر را به صورت اتمیک صفر می‌کند.
+    شمارنده‌های کاربر را با قفل ردیف صفر می‌کند.
     
     Args:
         session: AsyncSession دیتابیس
@@ -482,15 +482,15 @@ async def reset_user_counters(session: AsyncSession, user: "User") -> None:
     """
     from models.user import User as UserModel
     
-    stmt = (
-        update(UserModel)
-        .where(UserModel.id == user.id)
-        .values(
-            trades_count=0,
-            commodities_traded_count=0,
-            channel_messages_count=0
-        )
+    result = await session.execute(
+        select(UserModel).where(UserModel.id == user.id).with_for_update()
     )
-    await session.execute(stmt)
+    locked_user = result.scalar_one_or_none()
+    if py_inspect.isawaitable(locked_user):
+        locked_user = await locked_user
+    if locked_user is not None:
+        locked_user.trades_count = 0
+        locked_user.commodities_traded_count = 0
+        locked_user.channel_messages_count = 0
     await session.commit()
     await session.refresh(user)

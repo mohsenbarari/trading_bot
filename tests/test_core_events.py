@@ -10,6 +10,7 @@ from core import events
 class _FakeConnection:
     def __init__(self, is_sync=False):
         self._is_sync = is_sync
+        self.info = {}
         self.execute = MagicMock()
 
     def get_execution_options(self):
@@ -214,6 +215,13 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
         )
         notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
+        notification_preference = SimpleNamespace(
+            id=6,
+            user_id=1,
+            market_offer_push_enabled=True,
+            created_at=now,
+            updated_at=now,
+        )
         admin_market_message = SimpleNamespace(
             id=10,
             content='market notice',
@@ -324,6 +332,9 @@ class CoreEventsTests(unittest.TestCase):
             ('Notification', 'after_insert'): notification,
             ('Notification', 'after_update'): notification,
             ('Notification', 'after_delete'): notification,
+            ('UserNotificationPreference', 'after_insert'): notification_preference,
+            ('UserNotificationPreference', 'after_update'): notification_preference,
+            ('UserNotificationPreference', 'after_delete'): notification_preference,
             ('AdminMarketMessage', 'after_insert'): admin_market_message,
             ('AdminMarketMessage', 'after_update'): admin_market_message,
             ('AdminMarketMessage', 'after_delete'): admin_market_message,
@@ -376,8 +387,9 @@ class CoreEventsTests(unittest.TestCase):
         logger.warning.assert_called_once()
 
         with patch.object(connection, 'execute', side_effect=RuntimeError('sql down')), patch.object(events, 'logger') as logger:
-            events.log_change(connection, 'offers', 7, 'DELETE', {'id': 7})
-        logger.error.assert_called_once()
+            with self.assertRaises(RuntimeError):
+                events.log_change(connection, 'offers', 7, 'DELETE', {'id': 7})
+        logger.error.assert_not_called()
 
     def test_publish_event_sync_success_and_failure(self):
         sync_redis = _FakeSyncRedis()
@@ -606,6 +618,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_invitation_events()
             events.setup_offer_request_events()
             events.setup_notification_events()
+            events.setup_user_notification_preference_events()
             events.setup_admin_message_events()
 
         connection = _FakeConnection()
@@ -694,6 +707,17 @@ class CoreEventsTests(unittest.TestCase):
             registry[('Notification', 'after_update')](None, connection, notification)
             registry[('Notification', 'after_delete')](None, connection, notification)
 
+            notification_preference = SimpleNamespace(
+                id=6,
+                user_id=1,
+                market_offer_push_enabled=True,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('UserNotificationPreference', 'after_insert')](None, connection, notification_preference)
+            registry[('UserNotificationPreference', 'after_update')](None, connection, notification_preference)
+            registry[('UserNotificationPreference', 'after_delete')](None, connection, notification_preference)
+
             accountant_relation = SimpleNamespace(
                 id=8,
                 owner_user_id=3,
@@ -740,7 +764,7 @@ class CoreEventsTests(unittest.TestCase):
             registry[('CustomerRelation', 'after_update')](None, connection, customer_relation)
             registry[('CustomerRelation', 'after_delete')](None, connection, customer_relation)
 
-        self.assertGreaterEqual(log_change.call_count, 28)
+        self.assertGreaterEqual(log_change.call_count, 31)
         logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
         logger.info.assert_any_call('✅ CustomerRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')
@@ -751,6 +775,7 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ TradingSetting event listeners registered')
         logger.info.assert_any_call('✅ Invitation event listeners registered')
         logger.info.assert_any_call('✅ Notification event listeners registered')
+        logger.info.assert_any_call('✅ UserNotificationPreference event listeners registered')
         logger.info.assert_any_call('✅ AdminMessage event listeners registered')
 
         with patch('core.events.setup_user_events') as setup_user_events, patch(
@@ -772,12 +797,17 @@ class CoreEventsTests(unittest.TestCase):
         ) as setup_commodity_alias_events, patch('core.events.setup_trading_settings_events') as setup_trading_settings_events, patch(
             'core.events.setup_user_block_events'
         ) as setup_user_block_events, patch('core.events.setup_notification_events') as setup_notification_events, patch(
+            'core.events.setup_user_notification_preference_events'
+        ) as setup_user_notification_preference_events, patch(
             'core.events.setup_admin_message_events'
-        ) as setup_admin_message_events, patch.object(
+        ) as setup_admin_message_events, patch(
+            'core.events.register_sync_outbox_guards'
+        ) as register_sync_outbox_guards, patch.object(
             events, 'logger'
         ) as logger:
             events.setup_all_events()
 
+        register_sync_outbox_guards.assert_called_once()
         setup_user_events.assert_called_once()
         setup_accountant_relation_events.assert_called_once()
         setup_customer_relation_events.assert_called_once()
@@ -792,6 +822,7 @@ class CoreEventsTests(unittest.TestCase):
         setup_trading_settings_events.assert_called_once()
         setup_user_block_events.assert_called_once()
         setup_notification_events.assert_called_once()
+        setup_user_notification_preference_events.assert_called_once()
         setup_admin_message_events.assert_called_once()
         logger.info.assert_called_with('🎯 All event listeners initialized')
         self.assertIs(events.setup_event_listeners, events.setup_all_events)
@@ -814,6 +845,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_invitation_events()
             events.setup_offer_request_events()
             events.setup_notification_events()
+            events.setup_user_notification_preference_events()
             events.setup_admin_message_events()
 
         targets = self._build_listener_targets(now)

@@ -257,11 +257,30 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_increment_and_reset_user_counter(self):
         session = AsyncMock()
         user = SimpleNamespace(id=4)
+        trade_counter = SimpleNamespace(
+            trades_count=1,
+            commodities_traded_count=2,
+            channel_messages_count=0,
+        )
+        channel_counter = SimpleNamespace(
+            trades_count=0,
+            commodities_traded_count=0,
+            channel_messages_count=5,
+        )
+        session.execute = AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: trade_counter),
+                SimpleNamespace(scalar_one_or_none=lambda: channel_counter),
+            ]
+        )
 
         await utils.increment_user_counter(session, user, 'trade', quantity=3)
         await utils.increment_user_counter(session, user, 'channel_message')
         self.assertEqual(session.execute.await_count, 2)
         self.assertEqual(session.commit.await_count, 2)
+        self.assertEqual(trade_counter.trades_count, 2)
+        self.assertEqual(trade_counter.commodities_traded_count, 5)
+        self.assertEqual(channel_counter.channel_messages_count, 6)
 
         failing_session = AsyncMock()
         failing_session.execute = AsyncMock(side_effect=RuntimeError('db'))
@@ -270,10 +289,21 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         reset_session = AsyncMock()
         user_with_counts = SimpleNamespace(id=9)
+        reset_counter = SimpleNamespace(
+            trades_count=8,
+            commodities_traded_count=12,
+            channel_messages_count=4,
+        )
+        reset_session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: reset_counter)
+        )
         await utils.reset_user_counters(reset_session, user_with_counts)
         reset_session.execute.assert_awaited_once()
         reset_session.commit.assert_awaited_once()
         reset_session.refresh.assert_awaited_once_with(user_with_counts)
+        self.assertEqual(reset_counter.trades_count, 0)
+        self.assertEqual(reset_counter.commodities_traded_count, 0)
+        self.assertEqual(reset_counter.channel_messages_count, 0)
 
 
 if __name__ == '__main__':

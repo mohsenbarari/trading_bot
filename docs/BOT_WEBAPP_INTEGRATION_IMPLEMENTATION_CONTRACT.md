@@ -784,16 +784,35 @@ Required behavior:
 - Synced-table authoritative writes cannot silently commit without a durable outbox/change-log row.
 - Listener-based logging may remain only as transitional coverage.
 - Business write failure and outbox failure are not reported as success.
+- Durable outbox means the local `change_log` insert inside the same DB transaction. Redis
+  `sync:outbound` push and direct HTTP push are acceleration paths only and remain non-fatal after
+  the durable row exists; Step 6B owns committed-row draining and retry.
+- `Session` flushes that write active `SyncPolicy.SYNC` ORM tables must prove that the matching
+  `change_log` row was recorded during the same flush. Peer apply paths using `is_sync=True` are
+  exempt to avoid sync echo.
+- Bulk ORM writes and raw SQL writes to active synced tables are blocked unless they are a peer
+  apply path with `is_sync=True`; product code must use ORM row changes that trigger listeners or
+  an explicitly designed outbox-aware path in a later step.
+- `user_notification_preferences` is an active synced table and must have mapper listeners before
+  the guard is active.
+- Existing product bulk writes to synced tables must be refactored before enabling the guard:
+  admin market-message deactivation, user deletion trade/offer cleanup, and user counter updates
+  now use ORM writes with row locking where atomicity matters.
 
 Required tests:
 
 - Simulated payload/outbox failure blocks or visibly fails a synced-table write.
 - Non-synced runtime tables do not require product sync outbox.
 - Bulk update/delete/raw SQL paths are audited or blocked from bypassing sync recording.
+- Regression coverage must include SQL insert failure in `log_change`, successful marker
+  verification, missing marker failure, no-sync exemption, `is_sync=True` exemption,
+  `trading_settings` key identity, and raw/ORM bulk bypass blocking.
 
 Exit criteria:
 
 - Missing outbox row for a synced authoritative write is no longer a silent failure.
+- Focused verification passes for sync outbox guard, event listeners, core counter helpers, sync
+  registry/receiver policy, notification preferences, user deletion, and admin message routes.
 
 ### Step 6B - Committed Outbox Drain And Retry Contract
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -188,11 +188,13 @@ async def create_market_management_message(
             raise HTTPException(status_code=404, detail="Source market message not found")
 
     now = _utcnow()
-    await db.execute(
-        update(AdminMarketMessage)
-        .where(AdminMarketMessage.is_active.is_(True))
-        .values(is_active=False, updated_at=now)
+    active_result = await db.execute(
+        select(AdminMarketMessage).where(AdminMarketMessage.is_active.is_(True))
     )
+    for active_message in active_result.scalars().all():
+        active_message.is_active = False
+        active_message.updated_at = now
+
     message = AdminMarketMessage(
         content=cleaned_content,
         created_by_id=actor.id,

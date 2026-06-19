@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -73,6 +73,13 @@ def _utcnow_naive():
     from core.utils import utc_now
 
     return utc_now().replace(tzinfo=None)
+
+
+def _scalars_all(result) -> list:
+    try:
+        return list(result.scalars().all())
+    except (AttributeError, TypeError):
+        return []
 
 
 async def _invalidate_accountant_invitation(db: AsyncSession, invitation_token: str, now) -> None:
@@ -231,29 +238,33 @@ async def _delete_user_account_in_transaction(
     await _close_owned_customer_relations(db, user, processed_user_ids=processed_user_ids, effects=effects)
     await _close_linked_customer_relations(db, user)
 
-    await db.execute(
-        update(Trade)
-        .where(Trade.offer_user_id == user.id)
-        .values(offer_user_mobile=mobile_number)
+    offered_trades = _scalars_all(
+        await db.execute(select(Trade).where(Trade.offer_user_id == user.id))
     )
-    await db.execute(
-        update(Trade)
-        .where(Trade.responder_user_id == user.id)
-        .values(responder_user_mobile=mobile_number)
+    for trade in offered_trades:
+        trade.offer_user_mobile = mobile_number
+
+    responded_trades = _scalars_all(
+        await db.execute(select(Trade).where(Trade.responder_user_id == user.id))
     )
-    await db.execute(
-        update(Offer)
-        .where(Offer.user_id == user.id, Offer.status == OfferStatus.ACTIVE)
-        .values(
-            status=OfferStatus.EXPIRED,
-            expire_reason=OfferExpiryReason.USER_DELETED,
-            expired_at=utc_now_naive(),
-            expired_by_user_id=None,
-            expired_by_actor_user_id=None,
-            expire_source_surface=OfferExpirySourceSurface.SYSTEM.value,
-            expire_source_server=current_server(),
+    for trade in responded_trades:
+        trade.responder_user_mobile = mobile_number
+
+    active_offers = _scalars_all(
+        await db.execute(
+            select(Offer).where(Offer.user_id == user.id, Offer.status == OfferStatus.ACTIVE)
         )
     )
+    expired_at = utc_now_naive()
+    for offer in active_offers:
+        offer.status = OfferStatus.EXPIRED
+        offer.expire_reason = OfferExpiryReason.USER_DELETED
+        offer.expired_at = expired_at
+        offer.expired_by_user_id = None
+        offer.expired_by_actor_user_id = None
+        offer.expire_source_surface = OfferExpirySourceSurface.SYSTEM.value
+        offer.expire_source_server = current_server()
+
     invitation_result = await db.execute(
         select(Invitation).where(
             or_(Invitation.mobile_number == mobile_number, Invitation.account_name == account_name)
