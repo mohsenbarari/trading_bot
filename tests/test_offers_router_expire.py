@@ -44,24 +44,13 @@ class FakeDB:
             return self.scalar_results.pop(0)
         return self.scalar_result
 
-    async def get(self, _model, _id):
+    async def get(self, _model, _id, *args, **kwargs):
         return self.get_result
 
     async def execute(self, _stmt):
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
-
-
-class FakeAsyncClient:
-    def __init__(self):
-        self.post = AsyncMock(return_value=SimpleNamespace(status_code=200, text="ok"))
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
 
 
 class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
@@ -171,7 +160,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_awaited_once_with("offer:expired", {"id": 7})
         set_count_mock.assert_awaited_once_with(5, 0)
 
-    async def test_expire_offer_removes_channel_buttons_when_message_exists(self):
+    async def test_expire_offer_applies_channel_state_when_message_exists(self):
         settings = SimpleNamespace(
             offer_expire_rate_per_minute=5,
             offer_expire_daily_limit_after_threshold=10,
@@ -179,34 +168,24 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=333)
         db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
-        fake_client = FakeAsyncClient()
-
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
             "bot.utils.redis_helpers.track_expire_rate",
             new=AsyncMock(return_value=1),
         ), patch(
             "bot.utils.redis_helpers.track_daily_expire",
             new=AsyncMock(return_value={"count": 0}),
-        ), patch.object(
-            __import__("api.routers.offers", fromlist=["settings"]).settings,
-            "channel_id",
-            "@channel",
-        ), patch("api.routers.offers.os.getenv", return_value="bot-token"), patch(
-            "api.routers.offers.httpx.AsyncClient",
-            return_value=fake_client,
-        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+        ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "api.routers.offers.apply_offer_channel_state",
+            new=AsyncMock(),
+        ) as apply_offer_channel_state, patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
             "core.cache.set_active_offer_count",
             new=AsyncMock(),
         ):
             await expire_offer(offer_id=9, db=db, context=make_context(current_user))
 
-        fake_client.post.assert_awaited_once_with(
-            "https://api.telegram.org/botbot-token/editMessageReplyMarkup",
-            json={"chat_id": "@channel", "message_id": 333},
-            timeout=10,
-        )
+        apply_offer_channel_state.assert_awaited_once_with(offer, reason="manual_expire", timeout=10)
 
-    async def test_expire_offer_logs_channel_button_removal_failures(self):
+    async def test_expire_offer_logs_channel_state_failures(self):
         settings = SimpleNamespace(
             offer_expire_rate_per_minute=5,
             offer_expire_daily_limit_after_threshold=10,
@@ -214,22 +193,15 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=444)
         db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
-        failing_client = FakeAsyncClient()
-        failing_client.post = AsyncMock(side_effect=RuntimeError("telegram down"))
-
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
             "bot.utils.redis_helpers.track_expire_rate",
             new=AsyncMock(return_value=1),
         ), patch(
             "bot.utils.redis_helpers.track_daily_expire",
             new=AsyncMock(return_value={"count": 0}),
-        ), patch.object(
-            __import__("api.routers.offers", fromlist=["settings"]).settings,
-            "channel_id",
-            "@channel",
-        ), patch("api.routers.offers.os.getenv", return_value="bot-token"), patch(
-            "api.routers.offers.httpx.AsyncClient",
-            return_value=failing_client,
+        ), patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "api.routers.offers.apply_offer_channel_state",
+            new=AsyncMock(side_effect=RuntimeError("telegram down")),
         ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
             "core.cache.set_active_offer_count",
             new=AsyncMock(),
@@ -275,23 +247,16 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"cancelled_count": 0})
         db.commit.assert_not_awaited()
 
-    async def test_cancel_all_active_offers_expires_offers_and_logs_button_failures(self):
+    async def test_cancel_all_active_offers_expires_offers_and_logs_channel_state_failures(self):
         offers = [
             SimpleNamespace(id=1, status=OfferStatus.ACTIVE, channel_message_id=333, user_id=5),
             SimpleNamespace(id=2, status=OfferStatus.ACTIVE, channel_message_id=None, user_id=5),
         ]
         db = FakeDB(execute_results=[FakeExecuteResult(offers)])
-        failing_client = FakeAsyncClient()
-        failing_client.post = AsyncMock(side_effect=RuntimeError("telegram down"))
-
-        with patch.object(
-            __import__("api.routers.offers", fromlist=["settings"]).settings,
-            "channel_id",
-            "@channel",
-        ), patch("api.routers.offers.os.getenv", return_value="bot-token"), patch(
-            "api.routers.offers.httpx.AsyncClient",
-            return_value=failing_client,
-        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
+        with patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "api.routers.offers.apply_offer_channel_state",
+            new=AsyncMock(side_effect=RuntimeError("telegram down")),
+        ) as apply_offer_channel_state, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "core.cache.set_active_offer_count",
             new=AsyncMock(),
         ) as set_count_mock, patch("api.routers.offers.logger") as logger:
@@ -301,6 +266,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
         self.assertEqual(publish_mock.await_count, 2)
         set_count_mock.assert_awaited_once_with(5, 0)
+        apply_offer_channel_state.assert_awaited_once_with(offers[0], reason="cancel_all_active_offers", timeout=5)
         db.commit.assert_awaited_once()
         logger.warning.assert_called_once()
 

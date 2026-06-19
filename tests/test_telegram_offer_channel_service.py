@@ -47,7 +47,7 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_history_tag_contract(self):
         self.assertEqual(
             channel_service.get_offer_channel_history_tag(make_offer(status=OfferStatus.COMPLETED)),
-            "معامله‌شده",
+            "🤝 ✅",
         )
         self.assertEqual(
             channel_service.get_offer_channel_history_tag(
@@ -58,28 +58,30 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
                     remaining_quantity=7,
                 )
             ),
-            "معامله‌شده · 23 عدد",
+            "🤝 23 تا ✅",
         )
-        self.assertIsNone(
+        self.assertEqual(
             channel_service.get_offer_channel_history_tag(
                 make_offer(status=OfferStatus.EXPIRED, expire_reason="time_limit", quantity=30, remaining_quantity=30)
-            )
+            ),
+            "❌",
         )
-        self.assertIsNone(
+        self.assertEqual(
             channel_service.get_offer_channel_history_tag(
-                make_offer(status=OfferStatus.EXPIRED, expire_reason="manual")
-            )
+                make_offer(status=OfferStatus.EXPIRED, expire_reason="manual", quantity=30, remaining_quantity=30)
+            ),
+            "❌",
         )
 
     def test_channel_message_uses_same_text_for_active_and_terminal(self):
         offer = make_offer(notes="تحویل فوری")
 
         active_message = channel_service.build_offer_channel_message(offer)
-        terminal_message = channel_service.build_offer_channel_message(offer, history_tag="معامله‌شده")
+        terminal_message = channel_service.build_offer_channel_message(offer, history_tag="🤝 ✅")
 
         self.assertIn("🟢خرید سکه 30 عدد 51,000", active_message)
         self.assertIn("توضیحات: تحویل فوری", active_message)
-        self.assertIn("معامله‌شده", terminal_message)
+        self.assertIn("🤝 ✅", terminal_message)
         self.assertTrue(active_message.endswith(channel_service.INVISIBLE_CHANNEL_PADDING))
 
     async def test_apply_terminal_completed_edits_text_and_removes_buttons_on_foreign(self):
@@ -98,9 +100,9 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         payload = client.post.await_args.kwargs["json"]
         self.assertTrue(url.endswith("/editMessageText"))
         self.assertEqual(payload["reply_markup"], None)
-        self.assertIn("معامله‌شده", payload["text"])
+        self.assertIn("🤝 ✅", payload["text"])
 
-    async def test_apply_pure_expired_only_removes_markup(self):
+    async def test_apply_pure_expired_edits_text_and_removes_buttons(self):
         response = SimpleNamespace(status_code=200, text="")
         client = FakeHttpClientContext(response=response)
         offer = make_offer(
@@ -119,8 +121,11 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         url = client.post.await_args.args[0]
         payload = client.post.await_args.kwargs["json"]
-        self.assertTrue(url.endswith("/editMessageReplyMarkup"))
-        self.assertEqual(payload, {"chat_id": -100, "message_id": 123})
+        self.assertTrue(url.endswith("/editMessageText"))
+        self.assertEqual(payload["chat_id"], -100)
+        self.assertEqual(payload["message_id"], 123)
+        self.assertEqual(payload["reply_markup"], None)
+        self.assertIn("❌", payload["text"])
 
     async def test_apply_state_is_foreign_only(self):
         client = FakeHttpClientContext(response=SimpleNamespace(status_code=200, text=""))

@@ -5,8 +5,8 @@ Background task for auto-expiring offers based on trading settings.
 This task runs periodically and expires any ACTIVE offers that have 
 exceeded their time limit (offer_expiry_minutes).
 
-It also removes the inline keyboard from the channel message so 
-users can no longer interact with expired offers.
+It also applies the terminal channel message state so users can no longer
+interact with expired offers and see the right history marker.
 """
 import asyncio
 import logging
@@ -78,6 +78,7 @@ async def expire_stale_offers() -> int:
         # Find active offers older than cutoff
         stmt = (
             select(Offer)
+            .options(selectinload(Offer.commodity))
             .where(
                 Offer.status == OfferStatus.ACTIVE,
                 Offer.home_server == current_server(),
@@ -107,8 +108,7 @@ async def expire_stale_offers() -> int:
         
         logger.info(f"⏰ Auto-expired {count} offers: {offer_ids}")
         
-        # Apply terminal channel state on foreign. Pure expired offers only lose
-        # buttons; partially traded expired offers receive the traded tag.
+        # Apply terminal channel state on foreign and remove interactive buttons.
         for offer in expired_offers:
             await apply_offer_channel_state(offer, reason="auto_expire_time_limit")
         

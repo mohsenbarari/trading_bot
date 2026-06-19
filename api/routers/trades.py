@@ -1613,7 +1613,7 @@ async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, 
     
     # گرفتن اطلاعات offer از دیتابیس
     async with AsyncSessionLocal() as session:
-        offer = await session.get(Offer, offer_id)
+        offer = await session.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
         if not offer or not offer.channel_message_id:
             return False
         offer.remaining_quantity = remaining_quantity

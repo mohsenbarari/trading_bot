@@ -25,6 +25,7 @@ from core.services.market_transition_service import (
     register_market_offer_created,
 )
 from core.services.telegram_offer_channel_service import (
+    apply_offer_channel_state,
     build_offer_channel_message,
     build_offer_channel_reply_markup,
 )
@@ -390,28 +391,19 @@ async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, tim
     if current_server() != "foreign":
         return
 
-    channel_message_id = getattr(offer, "channel_message_id", None)
-    if not channel_message_id:
+    if not getattr(offer, "channel_message_id", None):
         return
 
-    bot_token = os.getenv("BOT_TOKEN") or settings.bot_token
-    channel_id = settings.channel_id
-    if not bot_token or not channel_id:
-        return
-
-    url = f"https://api.telegram.org/bot{bot_token}/editMessageReplyMarkup"
-    payload = {"chat_id": channel_id, "message_id": channel_message_id}
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload, timeout=timeout)
+        await apply_offer_channel_state(offer, reason=reason, timeout=timeout)
     except Exception as exc:
         log_trading_event(
             logger,
-            "offer_channel_buttons_remove_failed",
+            "offer_channel_state_apply_failed",
             level="warning",
             action="trading_side_effect",
             result="failure",
-            side_effect="offer_channel_buttons_remove",
+            side_effect="offer_channel_state_apply",
             offer_id=getattr(offer, "id", None),
             reason=reason,
             error_class=type(exc).__name__,
@@ -1151,7 +1143,7 @@ async def expire_offer(
                 )
             )
 
-    offer = await db.get(Offer, offer_id)
+    offer = await db.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
     
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
@@ -1193,7 +1185,7 @@ async def cancel_all_active_offers(
     query = select(Offer).where(
         Offer.user_id == owner_user.id,
         Offer.status == OfferStatus.ACTIVE
-    )
+    ).options(selectinload(Offer.commodity))
     result = await db.execute(query)
     offers = result.scalars().all()
     

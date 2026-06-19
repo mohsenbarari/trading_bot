@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
 TELEGRAM_MESSAGE_NOT_MODIFIED = "message is not modified"
+TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
+TELEGRAM_OFFER_EXPIRED_TAG = "❌"
 
 
 def _status_value(status: Any) -> str:
@@ -46,21 +48,18 @@ def infer_traded_quantity_from_offer(offer: Any) -> int:
 
 
 def get_offer_channel_history_tag(offer: Any, traded_quantity: Optional[int] = None) -> Optional[str]:
-    """Return the terminal Telegram tag. Pure expired offers intentionally have no tag."""
+    """Return the terminal Telegram emoji tag for channel history posts."""
     status = _status_value(getattr(offer, "status", None))
     if status == OfferStatus.COMPLETED.value:
-        return "معامله‌شده"
+        return TELEGRAM_OFFER_FULLY_TRADED_TAG
 
     if status != OfferStatus.EXPIRED.value:
         return None
 
-    if getattr(offer, "expire_reason", None) != "time_limit":
-        return None
-
     quantity = traded_quantity if traded_quantity is not None else infer_traded_quantity_from_offer(offer)
     if quantity and quantity > 0:
-        return f"معامله‌شده · {quantity:,} عدد"
-    return None
+        return f"🤝 {quantity:,} تا ✅"
+    return TELEGRAM_OFFER_EXPIRED_TAG
 
 
 def build_offer_channel_message(offer: Any, *, history_tag: Optional[str] = None) -> str:

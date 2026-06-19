@@ -35,6 +35,7 @@ _ALLOWED_SIDE_EFFECTS = {
     "active_offer_count_cache",
     "notification",
     "offer_channel_buttons_remove",
+    "offer_channel_state_apply",
     "realtime_publish",
     "telegram_channel_buttons",
     "telegram_message",

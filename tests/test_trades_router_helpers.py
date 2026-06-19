@@ -757,7 +757,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(terminal_payload["chat_id"], -100)
         self.assertEqual(terminal_payload["message_id"], 322)
         self.assertEqual(terminal_payload["reply_markup"], None)
-        self.assertIn("معامله‌شده", terminal_payload["text"])
+        self.assertIn("🤝 ✅", terminal_payload["text"])
 
         aware = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
         naive = datetime(2025, 1, 1, 12, 0)
