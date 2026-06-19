@@ -1061,6 +1061,28 @@ Exit criteria:
 - WebApp market view can reflect foreign-home offer changes without Iran calling Telegram.
 - Offer links and offer detail metadata are consistent with synced DB truth, not publication state.
 
+Implemented in Step 7C on 2026-06-19:
+
+- `GET /api/offers/public/{offer_public_id}` returns only safe public offer fields by stable public
+  identifier.
+- `GET /api/offers/public/{offer_public_id}/detail` returns authenticated detail data with
+  field-level ledger visibility for owner/requester/admin and admin-only publication state.
+- Iran sync receive emits WebApp realtime for synced active offer creation, offer updates, completed
+  trade updates, and expiry events with `source=sync_apply` so realtime fanout does not create an
+  outbound sync echo.
+- Foreign sync receive does not emit WebApp realtime; it remains responsible for Telegram channel
+  publication/state side effects only.
+- Realtime side-effect failures are logged and isolated from committed sync DB state.
+
+Step 7C verification run:
+
+- `tests.test_offers_public_routes`
+- `tests.test_sync_router_receive_basic`
+- `tests.test_sync_router_receive_offer_publish`
+- `tests.test_sync_router_apply_item_success`
+- `tests.test_realtime_router_publish_event`
+- `tests.test_offer_request_policy`
+
 ## Step 8 - Identity, Callback Compatibility, And Protocol Versioning
 
 Goal: move cross-server identity toward stable public identifiers without breaking existing local

@@ -4,7 +4,7 @@ API Router for Offer Management - Web App Integration
 """
 import logging
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -35,7 +35,12 @@ from core.services.customer_relation_service import (
 )
 from core.services.user_account_status_service import is_user_market_blocked
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
-from core.offer_identity import build_offer_public_link, ensure_offer_public_id
+from core.offer_identity import build_offer_public_link, ensure_offer_public_id, is_offer_public_id_shape
+from core.offer_request_policy import (
+    OfferRequestVisibility,
+    map_legacy_expire_reason,
+    sanitize_offer_request_payload,
+)
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import (
     OfferCreationCommand,
@@ -56,8 +61,11 @@ from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
 from models.user import User
+from core.enums import UserRole
 from models.customer_relation import CustomerTier
 from models.offer import Offer, OfferType, OfferStatus
+from models.offer_publication_state import OfferPublicationState
+from models.offer_request import OfferRequest
 from models.trade import Trade, TradeStatus
 from models.commodity import Commodity
 from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
@@ -196,6 +204,55 @@ class MarketHistoryOfferResponse(OfferResponse):
     history_event_at: Optional[str] = None
 
 
+class PublicOfferResponse(BaseModel):
+    """Safe public offer-link payload."""
+    offer_public_id: str
+    public_link: str
+    status: str
+    offer_type: str
+    commodity_name: str
+    quantity: int
+    remaining_quantity: int
+    price: int
+    is_wholesale: bool
+    lot_sizes: Optional[List[int]]
+    notes: Optional[str]
+    created_at: str
+    expires_at_ts: Optional[int] = None
+    safe_public_state_label: str
+    interaction_available: bool
+
+
+class OfferRequestLedgerResponse(BaseModel):
+    """Visibility-filtered request ledger row."""
+    data: dict[str, Any]
+
+
+class OfferPublicationStateDetailResponse(BaseModel):
+    """Admin-only publication state projection."""
+    surface: str
+    publication_owner_server: str
+    status: str
+    surface_resource_id: Optional[str] = None
+    telegram_message_id: Optional[int] = None
+    error_code: Optional[str] = None
+    last_attempt_at: Optional[str] = None
+    last_success_at: Optional[str] = None
+    lagged_at: Optional[str] = None
+    disabled_at: Optional[str] = None
+
+
+class OfferDetailResponse(BaseModel):
+    """Authorized offer detail payload."""
+    offer: PublicOfferResponse
+    viewer_visibility: str
+    request_ledger: List[OfferRequestLedgerResponse]
+    request_ledger_limit: int
+    request_ledger_offset: int
+    expiry_metadata: dict[str, Any]
+    publication_states: Optional[List[OfferPublicationStateDetailResponse]] = None
+
+
 class ParseOfferRequest(BaseModel):
     """درخواست پارس متن لفظ"""
     text: str = Field(..., min_length=3, max_length=500)
@@ -221,8 +278,6 @@ class InternalOfferExpireRequest(BaseModel):
 
 # --- Helper Functions ---
 
-# --- Helper Functions ---
-
 def offer_to_response(
     offer: Offer,
     start_settings: Optional['TradingSettings'] = None,
@@ -243,14 +298,12 @@ def offer_to_response(
         viewer_customer_relation=viewer_customer_relation,
     )
     offer_public_id = ensure_offer_public_id(offer)
-    
-    # محاسبه زمان انقضا
+
     expires_at_ts = None
     logger.debug("offer_expiry_trace id=%s status=%s", offer.id, offer.status)
     if offer.status == OfferStatus.ACTIVE:
         try:
             ts = start_settings or get_trading_settings()
-            # تبدیل created_at به timestamp
             created_ts = offer.created_at.timestamp()
             expiry_seconds = ts.offer_expiry_minutes * 60
             expires_at_ts = int(created_ts + expiry_seconds)
@@ -289,8 +342,182 @@ def offer_to_response(
         customer_management_name=offer_read_model.customer_management_name,
         customer_tier=offer_read_model.customer_tier,
         created_at=to_jalali_str(offer.created_at) or "",
-        expires_at_ts=expires_at_ts
+        expires_at_ts=expires_at_ts,
     )
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").lower()
+
+
+def _safe_public_state_label(offer: Any) -> str:
+    status_value = _enum_value(getattr(offer, "status", None))
+    if status_value == OfferStatus.ACTIVE.value:
+        return "active"
+    if status_value == OfferStatus.COMPLETED.value:
+        return "traded"
+    if status_value == OfferStatus.EXPIRED.value:
+        return "expired"
+    if status_value == OfferStatus.CANCELLED.value:
+        return "cancelled"
+    return status_value or "unknown"
+
+
+def _offer_remaining_quantity(offer: Any) -> int:
+    remaining = getattr(offer, "remaining_quantity", None)
+    if remaining is None:
+        remaining = getattr(offer, "quantity", 0)
+    try:
+        return int(remaining or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _build_public_offer_response(
+    offer: Offer,
+    *,
+    start_settings: Optional['TradingSettings'] = None,
+) -> PublicOfferResponse:
+    offer_public_id = ensure_offer_public_id(offer)
+    status_value = _enum_value(getattr(offer, "status", None))
+    remaining_quantity = _offer_remaining_quantity(offer)
+    expires_at_ts = None
+    if status_value == OfferStatus.ACTIVE.value:
+        try:
+            ts = start_settings or get_trading_settings()
+            expires_at_ts = int(offer.created_at.timestamp() + ts.offer_expiry_minutes * 60)
+        except Exception as exc:
+            logger.error(
+                "public_offer_expiry_projection_failed",
+                extra={"offer_id": getattr(offer, "id", None), "error_class": type(exc).__name__},
+            )
+
+    commodity = getattr(offer, "commodity", None)
+    return PublicOfferResponse(
+        offer_public_id=offer_public_id,
+        public_link=build_offer_public_link(offer_public_id),
+        status=status_value,
+        offer_type=_enum_value(getattr(offer, "offer_type", None)),
+        commodity_name=getattr(commodity, "name", None) or "نامشخص",
+        quantity=int(getattr(offer, "quantity", 0) or 0),
+        remaining_quantity=remaining_quantity,
+        price=int(getattr(offer, "price", 0) or 0),
+        is_wholesale=bool(getattr(offer, "is_wholesale", True)),
+        lot_sizes=getattr(offer, "lot_sizes", None),
+        notes=getattr(offer, "notes", None),
+        created_at=to_jalali_str(getattr(offer, "created_at", None)) or "",
+        expires_at_ts=expires_at_ts,
+        safe_public_state_label=_safe_public_state_label(offer),
+        interaction_available=status_value == OfferStatus.ACTIVE.value and remaining_quantity > 0,
+    )
+
+
+def _offer_request_payload(ledger: OfferRequest) -> dict[str, Any]:
+    commission_rate = getattr(ledger, "customer_commission_rate_snapshot", None)
+    return {
+        "id": getattr(ledger, "id", None),
+        "version_id": getattr(ledger, "version_id", None),
+        "request_home_server": getattr(ledger, "request_home_server", None),
+        "local_offer_id": getattr(ledger, "local_offer_id", None),
+        "offer_public_id": getattr(ledger, "offer_public_id", None),
+        "requester_user_id": getattr(ledger, "requester_user_id", None),
+        "actor_user_id": getattr(ledger, "actor_user_id", None),
+        "request_source_surface": _enum_value(getattr(ledger, "request_source_surface", None)),
+        "request_source_server": getattr(ledger, "request_source_server", None),
+        "requested_quantity": getattr(ledger, "requested_quantity", None),
+        "idempotency_key": getattr(ledger, "idempotency_key", None),
+        "received_at": to_jalali_str(getattr(ledger, "received_at", None)) if getattr(ledger, "received_at", None) else None,
+        "decided_at": to_jalali_str(getattr(ledger, "decided_at", None)) if getattr(ledger, "decided_at", None) else None,
+        "result_status": _enum_value(getattr(ledger, "result_status", None)),
+        "public_failure_code": getattr(ledger, "public_failure_code", None),
+        "public_failure_message": getattr(ledger, "public_failure_message", None),
+        "internal_failure_code": getattr(ledger, "internal_failure_code", None),
+        "internal_failure_context": getattr(ledger, "internal_failure_context", None),
+        "resulting_trade_id": getattr(ledger, "resulting_trade_id", None),
+        "customer_relation_id": getattr(ledger, "customer_relation_id", None),
+        "customer_owner_user_id": getattr(ledger, "customer_owner_user_id", None),
+        "customer_tier_snapshot": getattr(ledger, "customer_tier_snapshot", None),
+        "customer_management_name_snapshot": getattr(ledger, "customer_management_name_snapshot", None),
+        "customer_commission_rate_snapshot": str(commission_rate) if commission_rate is not None else None,
+        "customer_commission_context": getattr(ledger, "customer_commission_context", None),
+        "archived": getattr(ledger, "archived", None),
+        "created_at": to_jalali_str(getattr(ledger, "created_at", None)) if getattr(ledger, "created_at", None) else None,
+        "updated_at": to_jalali_str(getattr(ledger, "updated_at", None)) if getattr(ledger, "updated_at", None) else None,
+    }
+
+
+def _is_offer_detail_admin(user: User) -> bool:
+    role = getattr(user, "role", None)
+    return role in {UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER}
+
+
+async def _resolve_offer_detail_visibility(
+    db: AsyncSession,
+    offer: Offer,
+    current_user: Optional[User],
+) -> tuple[OfferRequestVisibility, bool]:
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if _is_offer_detail_admin(current_user):
+        return OfferRequestVisibility.ADMIN_AUDIT, True
+    if getattr(offer, "user_id", None) == current_user.id:
+        return OfferRequestVisibility.OWNER, True
+
+    result = await db.execute(
+        select(OfferRequest.id)
+        .where(
+            OfferRequest.offer_public_id == offer.offer_public_id,
+            or_(
+                OfferRequest.requester_user_id == current_user.id,
+                OfferRequest.actor_user_id == current_user.id,
+            ),
+        )
+        .limit(1)
+    )
+    if result.scalar_one_or_none() is not None:
+        return OfferRequestVisibility.REQUESTER, False
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to view offer detail")
+
+
+def _build_expiry_metadata(offer: Offer) -> dict[str, Any]:
+    mapping = map_legacy_expire_reason(getattr(offer, "expire_reason", None))
+    return {
+        "status": _enum_value(getattr(offer, "status", None)),
+        "expire_reason": getattr(offer, "expire_reason", None),
+        "normalized_category": mapping.normalized_category,
+        "metadata_known": mapping.metadata_known,
+        "expired_at": to_jalali_str(getattr(offer, "expired_at", None)) if getattr(offer, "expired_at", None) else None,
+        "expired_by_user_id": getattr(offer, "expired_by_user_id", None),
+        "expired_by_actor_user_id": getattr(offer, "expired_by_actor_user_id", None),
+        "expire_source_surface": getattr(offer, "expire_source_surface", None) or mapping.default_source_surface,
+        "expire_source_server": getattr(offer, "expire_source_server", None),
+    }
+
+
+def _publication_state_detail(state: OfferPublicationState) -> OfferPublicationStateDetailResponse:
+    return OfferPublicationStateDetailResponse(
+        surface=_enum_value(getattr(state, "surface", None)),
+        publication_owner_server=getattr(state, "publication_owner_server", None),
+        status=_enum_value(getattr(state, "status", None)),
+        surface_resource_id=getattr(state, "surface_resource_id", None),
+        telegram_message_id=getattr(state, "telegram_message_id", None),
+        error_code=getattr(state, "error_code", None),
+        last_attempt_at=to_jalali_str(getattr(state, "last_attempt_at", None)) if getattr(state, "last_attempt_at", None) else None,
+        last_success_at=to_jalali_str(getattr(state, "last_success_at", None)) if getattr(state, "last_success_at", None) else None,
+        lagged_at=to_jalali_str(getattr(state, "lagged_at", None)) if getattr(state, "lagged_at", None) else None,
+        disabled_at=to_jalali_str(getattr(state, "disabled_at", None)) if getattr(state, "disabled_at", None) else None,
+    )
+
+
+async def _load_offer_by_public_id(db: AsyncSession, offer_public_id: str) -> Offer | None:
+    if not is_offer_public_id_shape(offer_public_id):
+        return None
+    result = await db.execute(
+        select(Offer)
+        .options(selectinload(Offer.commodity))
+        .where(Offer.offer_public_id == offer_public_id)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _serialize_offer_responses(
@@ -920,6 +1147,83 @@ async def create_offer(
             )
     
     return offer_to_response(new_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
+
+
+@router.get("/public/{offer_public_id}", response_model=PublicOfferResponse)
+async def get_public_offer_by_public_id(
+    offer_public_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    offer = await _load_offer_by_public_id(db, offer_public_id)
+    if offer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    return _build_public_offer_response(offer, start_settings=ts)
+
+
+@router.get("/public/{offer_public_id}/detail", response_model=OfferDetailResponse)
+async def get_public_offer_detail(
+    offer_public_id: str,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    offer = await _load_offer_by_public_id(db, offer_public_id)
+    if offer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+
+    visibility, include_all_ledger = await _resolve_offer_detail_visibility(db, offer, current_user)
+    ledger_query = (
+        select(OfferRequest)
+        .where(OfferRequest.offer_public_id == offer.offer_public_id)
+        .order_by(OfferRequest.received_at.desc(), OfferRequest.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    if not include_all_ledger:
+        ledger_query = ledger_query.where(
+            or_(
+                OfferRequest.requester_user_id == current_user.id,
+                OfferRequest.actor_user_id == current_user.id,
+            )
+        )
+
+    ledger_result = await db.execute(ledger_query)
+    request_ledger = [
+        OfferRequestLedgerResponse(
+            data=sanitize_offer_request_payload(_offer_request_payload(ledger), visibility)
+        )
+        for ledger in ledger_result.scalars().all()
+    ]
+
+    publication_states = None
+    if visibility == OfferRequestVisibility.ADMIN_AUDIT:
+        publication_result = await db.execute(
+            select(OfferPublicationState)
+            .where(OfferPublicationState.offer_public_id == offer.offer_public_id)
+            .order_by(OfferPublicationState.surface.asc(), OfferPublicationState.id.asc())
+        )
+        publication_states = [
+            _publication_state_detail(state_row)
+            for state_row in publication_result.scalars().all()
+        ]
+
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    return OfferDetailResponse(
+        offer=_build_public_offer_response(offer, start_settings=ts),
+        viewer_visibility=visibility.value,
+        request_ledger=request_ledger,
+        request_ledger_limit=limit,
+        request_ledger_offset=offset,
+        expiry_metadata=_build_expiry_metadata(offer),
+        publication_states=publication_states,
+    )
 
 
 @router.get("/", response_model=List[OfferResponse])

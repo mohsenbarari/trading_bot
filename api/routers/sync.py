@@ -127,7 +127,7 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
     if not unique_offer_ids:
         return
 
-    from api.routers.realtime import publish_event
+    from api.routers.realtime import REALTIME_SOURCE_SYNC_APPLY, publish_event
     from models.offer import Offer, OfferStatus
 
     result = await db.execute(select(Offer).where(Offer.id.in_(unique_offer_ids)))
@@ -136,8 +136,8 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
         status_value = _enum_value(getattr(offer, "status", None))
         try:
             if status_value == OfferStatus.EXPIRED.value:
-                await publish_event("offer:expired", {"id": offer.id})
-            elif status_value == OfferStatus.COMPLETED.value:
+                await publish_event("offer:expired", {"id": offer.id}, source=REALTIME_SOURCE_SYNC_APPLY)
+            else:
                 await publish_event(
                     "offer:updated",
                     {
@@ -146,12 +146,95 @@ async def _publish_terminal_offer_realtime_after_sync(db: AsyncSession, terminal
                         "remaining_quantity": getattr(offer, "remaining_quantity", None),
                         "lot_sizes": getattr(offer, "lot_sizes", None),
                     },
+                    source=REALTIME_SOURCE_SYNC_APPLY,
                 )
         except Exception as exc:
             logger.warning(
                 "Failed to publish synced terminal offer realtime event",
                 extra={
                     "event": "sync.terminal_offer_realtime_publish_failed",
+                    "offer_id": getattr(offer, "id", None),
+                    **_summarize_exception(exc),
+                },
+            )
+
+
+async def _publish_synced_offer_created_realtime_after_sync(db: AsyncSession, offer_ids: list[int] | tuple[int, ...]) -> None:
+    unique_offer_ids = sorted({int(offer_id) for offer_id in offer_ids if offer_id})
+    if not unique_offer_ids:
+        return
+
+    from api.routers.realtime import REALTIME_SOURCE_SYNC_APPLY, publish_event
+    from core.offer_identity import build_offer_public_link, ensure_offer_public_id
+    from core.trading_settings import get_trading_settings_async
+    from core.utils import to_jalali_str
+    from models.offer import Offer, OfferStatus
+    from sqlalchemy.orm import selectinload
+
+    try:
+        trading_settings = await get_trading_settings_async()
+    except Exception as exc:
+        trading_settings = None
+        logger.warning(
+            "Failed to load trading settings for synced offer realtime create projection",
+            extra={
+                "event": "sync.created_offer_realtime_settings_failed",
+                **_summarize_exception(exc),
+            },
+        )
+
+    result = await db.execute(
+        select(Offer)
+        .options(selectinload(Offer.commodity))
+        .where(Offer.id.in_(unique_offer_ids))
+    )
+    created_offer_rows = result.scalars().all()
+    for offer in created_offer_rows:
+        status_value = _enum_value(getattr(offer, "status", None))
+        if status_value != OfferStatus.ACTIVE.value:
+            continue
+
+        expires_at_ts = None
+        if trading_settings is not None:
+            try:
+                expires_at_ts = int(
+                    offer.created_at.timestamp()
+                    + int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0) * 60
+                )
+            except Exception:
+                expires_at_ts = None
+
+        offer_public_id = ensure_offer_public_id(offer)
+        commodity = getattr(offer, "commodity", None)
+        payload = {
+            "id": offer.id,
+            "offer_public_id": offer_public_id,
+            "public_link": build_offer_public_link(offer_public_id),
+            "user_id": None,
+            "offer_type": _enum_value(getattr(offer, "offer_type", None)),
+            "commodity_id": getattr(offer, "commodity_id", None),
+            "commodity_name": getattr(commodity, "name", None) or "نامشخص",
+            "quantity": getattr(offer, "quantity", None),
+            "remaining_quantity": getattr(offer, "remaining_quantity", None) or getattr(offer, "quantity", None),
+            "price": getattr(offer, "price", None),
+            "status": status_value,
+            "created_at": to_jalali_str(getattr(offer, "created_at", None)) or "",
+            "user_account_name": "",
+            "is_own_offer": False,
+            "notes": getattr(offer, "notes", None),
+            "is_wholesale": getattr(offer, "is_wholesale", True),
+            "lot_sizes": getattr(offer, "lot_sizes", None),
+            "original_lot_sizes": getattr(offer, "original_lot_sizes", None),
+            "expires_at_ts": expires_at_ts,
+        }
+
+        try:
+            await publish_event("offer:created", payload, source=REALTIME_SOURCE_SYNC_APPLY)
+        except Exception as exc:
+            logger.warning(
+                "Failed to publish synced offer created realtime event",
+                extra={
+                    "event": "sync.created_offer_realtime_publish_failed",
                     "offer_id": getattr(offer, "id", None),
                     **_summarize_exception(exc),
                 },
@@ -660,10 +743,14 @@ async def _apply_item(
                 _log_stale_offer_sync_ignored(record_id, operation, data, stale_reason)
                 return 'ok'
             data.pop("channel_message_id", None)
-            if operation == "INSERT" and settings.server_mode != "iran":
+            if operation == "INSERT":
                 new_offers.append(record_id)
-            if operation in ("INSERT", "UPDATE") and settings.server_mode != "iran" and status_value in {"completed", "expired"}:
-                terminal_offers.append(record_id)
+            if operation in ("INSERT", "UPDATE"):
+                if settings.server_mode == "iran":
+                    if operation == "UPDATE" or status_value in TERMINAL_OFFER_STATUSES:
+                        terminal_offers.append(record_id)
+                elif status_value in TERMINAL_OFFER_STATUSES:
+                    terminal_offers.append(record_id)
 
         data = _filter_model_columns(model, data)
         stmt = _build_upsert_stmt(model, table, data)
@@ -1128,8 +1215,20 @@ async def receive_sync_data(
                     },
                 )
 
+        if settings.server_mode == "iran" and new_offers:
+            try:
+                await _publish_synced_offer_created_realtime_after_sync(db, new_offers)
+            except Exception as e:
+                logger.error(
+                    "Error publishing synced created offer realtime events",
+                    extra={
+                        "event": "sync.created_offer_realtime_publish_batch_failed",
+                        **_summarize_exception(e),
+                    },
+                )
+
         terminal_realtime_offer_ids = [*terminal_offers, *completed_trade_offer_ids]
-        if terminal_realtime_offer_ids:
+        if settings.server_mode == "iran" and terminal_realtime_offer_ids:
             try:
                 await _publish_terminal_offer_realtime_after_sync(db, terminal_realtime_offer_ids)
             except Exception as e:

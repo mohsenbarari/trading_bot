@@ -1,7 +1,9 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from api.routers.realtime import REALTIME_SOURCE_SYNC_APPLY
 from api.routers.sync import receive_sync_data
 
 
@@ -227,8 +229,9 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
                 "remaining_quantity": 0,
                 "lot_sizes": None,
             },
+            source=REALTIME_SOURCE_SYNC_APPLY,
         )
-        publish_mock.assert_any_await("offer:expired", {"id": 42})
+        publish_mock.assert_any_await("offer:expired", {"id": 42}, source=REALTIME_SOURCE_SYNC_APPLY)
 
     async def test_receive_sync_data_publishes_terminal_realtime_when_completed_trade_sync_arrives_later(self):
         completed_offer = SimpleNamespace(id=51, status="completed", remaining_quantity=0, lot_sizes=None)
@@ -258,6 +261,87 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
                 "remaining_quantity": 0,
                 "lot_sizes": None,
             },
+            source=REALTIME_SOURCE_SYNC_APPLY,
+        )
+
+    async def test_receive_sync_data_publishes_created_realtime_for_synced_iran_offer(self):
+        created_offer = SimpleNamespace(
+            id=61,
+            offer_public_id="ofr_synced_public_61",
+            status="active",
+            offer_type="sell",
+            commodity_id=3,
+            commodity=SimpleNamespace(name="gold"),
+            quantity=40,
+            remaining_quantity=40,
+            price=125000,
+            created_at=datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc),
+            notes="sync create",
+            is_wholesale=False,
+            lot_sizes=[20, 20],
+            original_lot_sizes=[20, 20],
+        )
+        db = TerminalOfferRealtimeDB([created_offer])
+        items = [
+            {
+                "table": "offers",
+                "operation": "INSERT",
+                "id": 61,
+                "data": {"status": "active", "offer_public_id": "ofr_synced_public_61"},
+            },
+        ]
+
+        async def fake_apply_item(db_arg, table, operation, record_id, data, model, new_offers, terminal_offers=None):
+            new_offers.append(record_id)
+            return "ok"
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=fake_apply_item)), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=20)),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        publish_mock.assert_awaited_once()
+        event_name, payload = publish_mock.await_args.args
+        self.assertEqual(event_name, "offer:created")
+        self.assertEqual(payload["offer_public_id"], "ofr_synced_public_61")
+        self.assertEqual(payload["public_link"], "/market?offer=ofr_synced_public_61")
+        self.assertIsNone(payload["user_id"])
+        self.assertEqual(payload["remaining_quantity"], 40)
+        self.assertEqual(publish_mock.await_args.kwargs["source"], REALTIME_SOURCE_SYNC_APPLY)
+
+    async def test_receive_sync_data_publishes_active_update_when_partial_trade_sync_arrives(self):
+        active_offer = SimpleNamespace(id=52, status="active", remaining_quantity=6, lot_sizes=[6])
+        db = TerminalOfferRealtimeDB([active_offer])
+        items = [
+            {
+                "table": "trades",
+                "operation": "INSERT",
+                "id": 702,
+                "data": {"offer_id": 52, "status": "completed", "quantity": 4},
+            },
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()), patch(
+            "api.routers.realtime.publish_event", new=AsyncMock()
+        ) as publish_mock:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        publish_mock.assert_awaited_once_with(
+            "offer:updated",
+            {
+                "id": 52,
+                "status": "active",
+                "remaining_quantity": 6,
+                "lot_sizes": [6],
+            },
+            source=REALTIME_SOURCE_SYNC_APPLY,
         )
 
 

@@ -208,6 +208,25 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(terminal_offers, [9])
         self.assertNotIn("channel_message_id", terminal_offer_data)
 
+        realtime_offers = []
+        iran_offer_update_data = {"status": "active", "remaining_quantity": 6}
+        db = FakeDB()
+        with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT"), patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ):
+            result = await _apply_item(
+                db,
+                "offers",
+                "UPDATE",
+                10,
+                iran_offer_update_data,
+                model=object,
+                new_offers=[],
+                terminal_offers=realtime_offers,
+            )
+        self.assertEqual(result, "ok")
+        self.assertEqual(realtime_offers, [10])
+
         relation_data = {
             "owner_user_id": 2,
             "accountant_user_id": 5,

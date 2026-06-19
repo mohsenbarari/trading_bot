@@ -174,7 +174,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         self.assertEqual(result, {"status": "success", "processed": 2})
-        publish_mock.assert_awaited_once()
+        publish_mock.assert_not_awaited()
         load_publication_state_mock.assert_awaited_once_with(db, terminal_offer)
         apply_state_mock.assert_awaited_once_with(
             terminal_offer,
