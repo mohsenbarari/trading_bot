@@ -14,6 +14,7 @@ PYTHON_SCRIPTS = (
     'scripts/dev_admin.py',
     'scripts/free_deleted_user.py',
     'scripts/inspect_shared_sync_state.py',
+    'scripts/report_bot_webapp_integration_matrix.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
     'scripts/run_observability_gate.py',
@@ -62,6 +63,16 @@ class ScriptsSurfaceSmokeTests(unittest.TestCase):
         self.assertGreaterEqual(payload['summary']['frontend_unit_files'], 10)
         self.assertGreaterEqual(payload['summary']['frontend_e2e_files'], 7)
         self.assertEqual(payload['summary']['manual_non_regression_tools'], 5)
+
+    def test_bot_webapp_integration_matrix_cli_outputs_parseable_json(self):
+        result = run_checked([PYTHON_BIN, 'scripts/report_bot_webapp_integration_matrix.py', '--json', '--check'])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+        payload = json.loads(result.stdout)
+
+        self.assertTrue(payload['matrix']['passed'])
+        self.assertTrue(payload['matrix']['manual_signoff_required'])
+        self.assertGreaterEqual(payload['matrix']['scenario_count'], 27)
 
     def test_messenger_query_plan_report_help_executes(self):
         result = run_checked([PYTHON_BIN, 'scripts/report_messenger_query_plans.py', '--help'])

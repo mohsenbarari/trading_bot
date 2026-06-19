@@ -1630,6 +1630,19 @@ Exit criteria:
 - Logs, sync-health, DB state, Telegram publication state, WebApp realtime state, and session
   surface behavior are reviewed.
 
+Implementation status:
+
+- Step 11 automated scenario matrix is code-owned by
+  `scripts/report_bot_webapp_integration_matrix.py`.
+- The matrix maps every accepted Step 11 scenario to named automated coverage references and
+  staging evidence checks. `--check` fails if any referenced test file or test snippet is missing.
+- `tests/test_bot_webapp_integration_matrix.py` locks the matrix shape, scenario list, required
+  layers, coverage references, JSON output, markdown output, and explicit manual sign-off flag.
+- Owner-led staging validation is documented in
+  `docs/BOT_WEBAPP_INTEGRATION_STAGING_VALIDATION.md`.
+- The automated gate can pass before owner sign-off, but Step 11 is not production-ready until the
+  manual staging checklist is completed on staging peers with synthetic data and reviewed evidence.
+
 ## Step 12 - Cutover Readiness And Production Gate Preparation
 
 Goal: prepare for a future production decision without performing it.
