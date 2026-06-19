@@ -8,6 +8,7 @@ from core.metrics import record_sync_health
 from core.redis import get_redis_client
 from core.server_routing import default_peer_server_url, peer_server_url_for
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
+from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 import hmac
 import hashlib
@@ -557,6 +558,14 @@ def _sync_error_detail(item: dict, reason: str) -> dict[str, object]:
         "record_id": item.get("id"),
         "reason": reason,
     }
+
+
+def _sync_protocol_error_detail(item: dict, validation) -> dict[str, object]:
+    detail = _sync_error_detail(item, validation.reason or "unsupported_sync_protocol")
+    for key, value in getattr(validation, "details", {}).items():
+        if value is not None:
+            detail[key] = value
+    return detail
 
 
 async def _resolve_existing_mandatory_chat_id(db: AsyncSession) -> int | None:
@@ -1239,6 +1248,20 @@ async def receive_sync_data(
                     )
                 continue
 
+            protocol_validation = validate_sync_protocol_metadata(item.get("sync_protocol"))
+            if not protocol_validation.ok:
+                error_detail = _sync_protocol_error_detail(item, protocol_validation)
+                errors.append(error_detail)
+                error_details.append(error_detail)
+                logger.warning(
+                    "Rejected sync item by protocol compatibility",
+                    extra={
+                        "event": "sync.protocol_rejected",
+                        **error_detail,
+                    },
+                )
+                continue
+
             rejection_reason = _sync_item_policy_rejection_reason(item)
             if rejection_reason:
                 error_detail = _sync_error_detail(item, rejection_reason)
@@ -1646,6 +1669,7 @@ async def resync_from_changelog(
                         "hash": entry.hash,
                         "timestamp": entry.timestamp.timestamp() if entry.timestamp else time.time(),
                         "change_log_id": entry.id,
+                        "sync_protocol": build_sync_protocol_metadata(),
                         "sync_meta": build_sync_metadata(
                             entry.table_name,
                             entry.record_id,

@@ -1244,6 +1244,42 @@ Exit criteria:
 
 - Staggered deploys fail visibly instead of corrupting or silently skipping data.
 
+Implemented in Step 8C on 2026-06-19:
+
+- New DB sync payloads now include a top-level `sync_protocol` object with protocol version,
+  compatible minimum consumer protocol version, payload schema version, registry version,
+  registry fingerprint, and producer server identity.
+- Direct event push, committed change-log worker replay, and manual `/api/sync/resync` all attach
+  the same protocol metadata.
+- The receiver validates protocol metadata before table policy checks and before `_apply_item(...)`.
+  Unsupported future protocol/schema/registry versions, producer-declared minimum consumer versions
+  above local support, missing current-registry fingerprints, and current-version registry
+  fingerprint mismatches are rejected as partial sync failures.
+- Missing `sync_protocol` metadata remains accepted as a legacy-compatible payload so already queued
+  pre-Step-8C change-log rows can still drain during a rolling deploy.
+- Declared legacy-compatible protocol version `1` remains accepted when its minimum consumer version
+  is within the local supported range.
+- Rejected protocol items are returned in `error_items` with version details and are logged with
+  `event=sync.protocol_rejected`; the peer sees a partial response, so the worker/resync path does
+  not mark the source item as synced.
+
+Step 8C verification run:
+
+- `tests.test_sync_metadata`
+- `tests.test_sync_worker`
+- `tests.test_core_events`
+- `tests.test_sync_router_fail_closed_policy`
+- `tests.test_sync_router_resync`
+- `tests.test_sync_router_receive_basic`
+- `tests.test_sync_router_receive_offer_publish`
+- `tests.test_sync_router_receive_sequences`
+- `tests.test_sync_router_receive_settings_cache`
+- `tests.test_sync_router_receive_errors`
+- `tests.test_sync_router_remaining_paths`
+- `tests.test_sync_registry`
+- `tests.test_sync_outbox_guard`
+- `python3 -m py_compile core/sync_protocol.py core/sync_metadata.py core/sync_worker.py core/events.py api/routers/sync.py`
+
 ## Step 9 - Admin, Background Jobs, And Field-Level Policies
 
 Goal: close non-user-surface write paths that can bypass shared command authority.

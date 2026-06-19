@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from api.routers.sync import resync_from_changelog
+from core.sync_protocol import build_sync_protocol_metadata
 
 
 class FakeExecuteResult:
@@ -139,6 +140,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
                 "hash": "hash-1",
                 "timestamp": datetime(2026, 1, 1, 12, 0, 0).timestamp(),
                 "change_log_id": 1,
+                "sync_protocol": build_sync_protocol_metadata(),
                 "sync_meta": {
                     "aggregate_table": "users",
                     "aggregate_id": "1",
@@ -269,6 +271,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload[1]["data"]["actor_user_id"], 11)
         self.assertEqual(payload[1]["sync_meta"]["aggregate_table"], "offers")
         self.assertEqual(payload[1]["sync_meta"]["aggregate_id"], "77")
+        self.assertEqual(payload[1]["sync_protocol"], build_sync_protocol_metadata())
         self.assertEqual(payload[2]["table"], "trades")
         self.assertEqual(payload[2]["data"]["actor_user_id"], 11)
 

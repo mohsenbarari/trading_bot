@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from api.routers.sync import receive_sync_data
+from core.sync_protocol import SYNC_PROTOCOL_VERSION, build_sync_protocol_metadata
 
 
 class FakeDB:
@@ -31,6 +32,61 @@ class FakeDB:
 
 
 class SyncRouterFailClosedPolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unsupported_protocol_version_returns_partial_failure_without_apply(self):
+        db = FakeDB()
+        future_protocol = build_sync_protocol_metadata()
+        future_protocol["protocol_version"] = SYNC_PROTOCOL_VERSION + 1
+        items = [
+            {
+                "table": "users",
+                "operation": "INSERT",
+                "id": 10,
+                "data": {"telegram_id": 10010},
+                "sync_protocol": future_protocol,
+            }
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock()) as apply_mock, patch(
+            "api.routers.sync.settings.server_mode", "iran"
+        ):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_not_awaited()
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["error_items"][0]["reason"], "unsupported_protocol_version")
+        self.assertEqual(result["error_items"][0]["producer_protocol_version"], SYNC_PROTOCOL_VERSION + 1)
+
+    async def test_legacy_compatible_protocol_version_still_applies(self):
+        db = FakeDB()
+        legacy_protocol = {
+            "protocol_version": 1,
+            "min_consumer_protocol_version": 1,
+            "payload_schema_version": 1,
+            "registry_version": 1,
+            "registry_fingerprint": "legacy-registry",
+            "producer": {"server_mode": "foreign"},
+        }
+        items = [
+            {
+                "table": "users",
+                "operation": "INSERT",
+                "id": 10,
+                "data": {"telegram_id": 10010},
+                "sync_protocol": legacy_protocol,
+            }
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch("api.routers.sync.settings.server_mode", "iran"):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_awaited_once()
+        rollout_mock.assert_awaited_once_with(db)
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
     async def test_unknown_table_returns_partial_failure_without_apply(self):
         db = FakeDB()
         items = [{"table": "mystery", "operation": "INSERT", "id": 8, "data": {}}]

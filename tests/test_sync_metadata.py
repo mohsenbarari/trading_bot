@@ -1,6 +1,12 @@
 import unittest
 
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, deserialize_sync_data
+from core.sync_protocol import (
+    SYNC_PROTOCOL_VERSION,
+    build_sync_protocol_metadata,
+    current_sync_registry_fingerprint,
+    validate_sync_protocol_metadata,
+)
 
 
 class SyncMetadataTests(unittest.TestCase):
@@ -101,6 +107,71 @@ class SyncMetadataTests(unittest.TestCase):
             )["value"],
             "offer-publication:webapp_market:ofr_12",
         )
+
+    def test_sync_protocol_metadata_carries_current_registry_contract(self):
+        metadata = build_sync_protocol_metadata(producer_server="foreign")
+
+        self.assertEqual(metadata["protocol_version"], SYNC_PROTOCOL_VERSION)
+        self.assertEqual(metadata["payload_schema_version"], 2)
+        self.assertEqual(metadata["registry_version"], 2)
+        self.assertEqual(metadata["registry_fingerprint"], current_sync_registry_fingerprint())
+        self.assertEqual(metadata["producer"], {"server_mode": "foreign"})
+        self.assertTrue(validate_sync_protocol_metadata(metadata).ok)
+
+    def test_sync_protocol_validation_rejects_unsupported_future_version(self):
+        metadata = build_sync_protocol_metadata(producer_server="foreign")
+        metadata["protocol_version"] = SYNC_PROTOCOL_VERSION + 1
+
+        result = validate_sync_protocol_metadata(metadata)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "unsupported_protocol_version")
+        self.assertEqual(result.details["producer_protocol_version"], SYNC_PROTOCOL_VERSION + 1)
+
+    def test_sync_protocol_validation_rejects_future_payload_schema_version(self):
+        metadata = build_sync_protocol_metadata(producer_server="foreign")
+        metadata["payload_schema_version"] = 99
+
+        result = validate_sync_protocol_metadata(metadata)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "unsupported_payload_schema_version")
+        self.assertEqual(result.details["producer_payload_schema_version"], 99)
+
+    def test_sync_protocol_validation_rejects_current_registry_fingerprint_mismatch(self):
+        metadata = build_sync_protocol_metadata(producer_server="foreign")
+        metadata["registry_fingerprint"] = "different-reg"
+
+        result = validate_sync_protocol_metadata(metadata)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "registry_fingerprint_mismatch")
+        self.assertEqual(result.details["producer_registry_fingerprint"], "different-reg")
+        self.assertEqual(result.details["local_registry_fingerprint"], current_sync_registry_fingerprint())
+
+    def test_sync_protocol_validation_rejects_newer_required_registry_version(self):
+        metadata = build_sync_protocol_metadata(producer_server="foreign")
+        metadata["min_consumer_registry_version"] = 99
+
+        result = validate_sync_protocol_metadata(metadata)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, "producer_requires_newer_registry")
+        self.assertEqual(result.details["required_consumer_registry_version"], 99)
+
+    def test_sync_protocol_validation_accepts_declared_legacy_compatible_payload(self):
+        metadata = {
+            "protocol_version": 1,
+            "min_consumer_protocol_version": 1,
+            "payload_schema_version": 1,
+            "registry_version": 1,
+            "registry_fingerprint": "legacy-registry",
+            "producer": {"server_mode": "iran"},
+        }
+
+        result = validate_sync_protocol_metadata(metadata)
+
+        self.assertTrue(result.ok)
 
     def test_deserialize_sync_data_returns_non_json_string_unchanged(self):
         self.assertEqual(deserialize_sync_data('{"id": 1}'), {"id": 1})

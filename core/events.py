@@ -24,6 +24,7 @@ import hashlib
 from core.utils import utc_now_naive
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity
+from core.sync_protocol import build_sync_protocol_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,8 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
         "id": record_id,
         "data": data,
         "hash": data_hash,
-        "timestamp": now.timestamp()
+        "timestamp": now.timestamp(),
+        "sync_protocol": build_sync_protocol_metadata(),
     }
     if change_log_id is not None:
         payload["change_log_id"] = change_log_id

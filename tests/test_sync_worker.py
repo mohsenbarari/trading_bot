@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from core import sync_worker
+from core.sync_protocol import build_sync_protocol_metadata
 
 
 class FakeRedis:
@@ -149,6 +150,7 @@ class ChangeLogPayloadTests(unittest.TestCase):
                 "hash": "hash-77",
                 "timestamp": timestamp.timestamp(),
                 "change_log_id": 77,
+                "sync_protocol": build_sync_protocol_metadata(),
                 "sync_meta": {
                     "aggregate_table": "offers",
                     "aggregate_id": "12",
@@ -208,6 +210,7 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(item["change_log_id"], 88)
         self.assertEqual(item["table"], "trades")
+        self.assertEqual(item["sync_protocol"], build_sync_protocol_metadata())
         self.assertEqual(item["data"], {"id": 42, "status": "confirmed"})
         self.assertEqual(len(fake_session.statements), 1)
 

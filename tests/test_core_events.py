@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from core import events
+from core.sync_protocol import build_sync_protocol_metadata
 
 
 class _FakeConnection:
@@ -407,9 +408,11 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(queued_payload["sync_meta"]["aggregate_id"], "5")
         self.assertEqual(queued_payload["sync_meta"]["outbox_id"], 42)
         self.assertEqual(queued_payload["sync_meta"]["event_sequence"], 42)
+        self.assertEqual(queued_payload["sync_protocol"], build_sync_protocol_metadata())
         push_sync_direct.assert_called_once()
         self.assertEqual(push_sync_direct.call_args.args[0]["change_log_id"], 42)
         self.assertEqual(push_sync_direct.call_args.args[0]["sync_meta"], queued_payload["sync_meta"])
+        self.assertEqual(push_sync_direct.call_args.args[0]["sync_protocol"], queued_payload["sync_protocol"])
 
         sync_redis = _FakeSyncRedis()
         with patch('core.events._get_sync_redis', return_value=sync_redis), patch(

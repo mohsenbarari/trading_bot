@@ -17,6 +17,7 @@ from core.sync_metadata import (
     coerce_positive_int,
     deserialize_sync_data,
 )
+from core.sync_protocol import build_sync_protocol_metadata
 
 # Configure logging
 configure_logging("sync-worker")
@@ -102,6 +103,7 @@ def change_log_entry_to_sync_item(entry) -> dict:
         "hash": entry.hash,
         "timestamp": timestamp.timestamp() if timestamp else time.time(),
         "change_log_id": entry.id,
+        "sync_protocol": build_sync_protocol_metadata(),
         "sync_meta": build_sync_metadata(
             entry.table_name,
             entry.record_id,
