@@ -78,7 +78,9 @@ class BotAdminUsersBlockActionsTests(unittest.IsolatedAsyncioTestCase):
             )
             session = FakeSession(target_user)
             callback = SimpleNamespace(data=data, message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock())
-            with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+            with patch("core.admin_authority.current_server", return_value="iran"), patch(
+                "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+            ), patch(
                 "bot.handlers.admin_users.to_jalali_str", return_value="jalali"
             ), patch("bot.handlers.admin_users.create_user_notification", new=AsyncMock()) as notify_mock, patch(
                 "bot.handlers.admin_users.send_telegram_notification", new=AsyncMock()

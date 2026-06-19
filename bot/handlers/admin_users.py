@@ -11,6 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 
+from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import get_user_account_status, transition_user_account_status
 from core.services.user_deletion_service import delete_user_account
@@ -38,6 +39,30 @@ router = Router()
 USERS_PER_PAGE = 10
 ADMIN_MANAGEMENT_ROLES = {UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER}
 ADMIN_ROLE_VALUES = {UserRole.SUPER_ADMIN.value, UserRole.MIDDLE_MANAGER.value}
+
+
+def _users_admin_write_decision(operation: str):
+    return check_shared_admin_write_authority(
+        "users",
+        operation=operation,
+        surface="telegram_bot_admin",
+    )
+
+
+async def _reject_users_callback_if_not_authoritative(callback: types.CallbackQuery, operation: str) -> bool:
+    decision = _users_admin_write_decision(operation)
+    if decision.ok:
+        return False
+    await callback.answer(f"❌ {admin_write_rejection_message(decision)}", show_alert=True)
+    return True
+
+
+async def _reject_users_message_if_not_authoritative(message: types.Message, operation: str) -> bool:
+    decision = _users_admin_write_decision(operation)
+    if decision.ok:
+        return False
+    await message.answer(f"❌ {admin_write_rejection_message(decision)}")
+    return True
 
 
 def _can_open_user_management(user: Optional[User]) -> bool:
@@ -565,6 +590,8 @@ async def handle_user_block_actions(callback: types.CallbackQuery, user: Optiona
                 if not _can_manage_target_user(user, target_user):
                     await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
                     return
+                if await _reject_users_callback_if_not_authoritative(callback, "block"):
+                    return
                 if minutes == 0:
                     # نامحدود (100 سال) - استفاده از utcnow (naive)
                     target_user.trading_restricted_until = datetime.utcnow() + timedelta(days=36500)
@@ -637,6 +664,8 @@ async def handle_user_unblock(callback: types.CallbackQuery, user: Optional[User
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
                 return
+            if await _reject_users_callback_if_not_authoritative(callback, "unblock"):
+                return
             telegram_id = target_user.telegram_id  # ذخیره قبل از commit
             target_user.trading_restricted_until = None
             await session.commit()
@@ -678,6 +707,8 @@ async def handle_user_unlimit(callback: types.CallbackQuery, user: Optional[User
         if target_user:
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
+            if await _reject_users_callback_if_not_authoritative(callback, "unlimit"):
                 return
             telegram_id = target_user.telegram_id  # ذخیره قبل از commit
             # حذف تمام محدودیت‌ها
@@ -737,6 +768,8 @@ async def handle_set_user_role(callback: types.CallbackQuery, user: Optional[Use
         target_user = (await session.execute(stmt)).scalar_one_or_none()
         
         if target_user:
+            if await _reject_users_callback_if_not_authoritative(callback, "role_update"):
+                return
             target_user.role = UserRole[role_name]
             await session.commit()
             
@@ -779,6 +812,8 @@ async def handle_user_toggle_account_status(callback: types.CallbackQuery, user:
         if target_user:
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
+            if await _reject_users_callback_if_not_authoritative(callback, "account_status_update"):
                 return
 
             current_status = get_user_account_status(target_user)
@@ -852,6 +887,8 @@ async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Option
         if target_user and not target_user.is_deleted:
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
+            if await _reject_users_callback_if_not_authoritative(callback, "delete"):
                 return
             try:
                 await delete_user_account(session, target_user)
@@ -1087,6 +1124,8 @@ async def handle_limit_confirm(callback: types.CallbackQuery, user: Optional[Use
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
                 return
+            if await _reject_users_callback_if_not_authoritative(callback, "limit_update"):
+                return
             target_user.max_daily_trades = max_trades
             target_user.max_active_commodities = max_commodities
             target_user.max_daily_requests = max_requests
@@ -1243,6 +1282,8 @@ async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optiona
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
                 return
+            if await _reject_users_callback_if_not_authoritative(callback, "block_capability_update"):
+                return
             target_user.can_block_users = not target_user.can_block_users
             await session.commit()
             
@@ -1315,6 +1356,8 @@ async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Option
         if target_user:
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
+                return
+            if await _reject_users_callback_if_not_authoritative(callback, "max_block_update"):
                 return
             target_user.max_blocked_users = new_max
             await session.commit()
@@ -1405,6 +1448,8 @@ async def process_custom_max_block(message: types.Message, user: Optional[User],
             if not _can_manage_target_user(user, target_user):
                 msg = await message.answer("❌ شما مجاز به مدیریت این کاربر نیستید.")
                 await update_anchor(state, msg.message_id, message.bot, message.chat.id)
+                return
+            if await _reject_users_message_if_not_authoritative(message, "max_block_update"):
                 return
             target_user.max_blocked_users = new_max
             await session.commit()

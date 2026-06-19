@@ -84,7 +84,9 @@ class BotAdminUsersDeleteFlowTests(unittest.IsolatedAsyncioTestCase):
             answer=AsyncMock(),
         )
         state = SimpleNamespace()
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)
+        ), patch(
             "bot.handlers.admin_users.delete_user_account", new=AsyncMock()
         ) as delete_account_mock, patch("bot.handlers.admin_users.show_users_list", new=AsyncMock()) as show_mock:
             await handle_user_delete_confirm(callback, user=actor, state=state)
@@ -93,7 +95,9 @@ class BotAdminUsersDeleteFlowTests(unittest.IsolatedAsyncioTestCase):
         show_mock.assert_awaited_once_with(callback.bot, 1, state, page=1, message_id_to_edit=77, actor=actor)
 
         callback = SimpleNamespace(data="user_delete_confirm_9", answer=AsyncMock())
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)
+        ), patch(
             "bot.handlers.admin_users.delete_user_account", new=AsyncMock(side_effect=RuntimeError("boom"))
         ):
             await handle_user_delete_confirm(callback, user=actor, state=state)

@@ -1304,6 +1304,88 @@ Exit criteria:
 
 - Admin surfaces cannot silently fork shared product configuration.
 
+Implemented in Step 9A on 2026-06-19:
+
+- Shared admin/product writes now use a single-writer rule: `iran` is the authoritative admin-write
+  server for `trading_settings`, `market_schedule_overrides`, `commodities`, `commodity_aliases`,
+  admin market/broadcast message rows, and admin-owned `users` fields such as role, account status,
+  trade restrictions, user limits, and block capability settings.
+- The conflict rule is explicit fail-closed rejection on non-authoritative servers. This is deliberate:
+  `commodities` and `commodity_aliases` do not currently carry a reliable row version/timestamp, so
+  accepting writes from both servers would create silent forks that sync cannot deterministically merge.
+- FastAPI write routes for commodities, trading settings, market schedule overrides, users, and admin
+  messages now depend on shared admin-write authority and return HTTP `409` with
+  `admin_write_not_authoritative` metadata when the current server is not authoritative.
+- Telegram bot admin handlers that still mutate shared admin data directly now reject before commit
+  when running on a non-authoritative server. This covers bot system settings, user role/status,
+  trading restrictions, user limits, soft deletion, and block capability settings.
+- Bot commodity management already writes through the commodities API, so the API authority gate is the
+  enforcement point for commodity and alias writes from Telegram admin flows.
+- Sync registry entries for the covered admin-mutated tables now declare write surfaces, `iran` admin
+  authority, and the single-writer conflict rule. The sync registry version is bumped because the active
+  registry fingerprint changed.
+
+Step 9A verification run:
+
+- `tests.test_admin_authority`
+- `tests.test_sync_metadata`
+- `tests.test_sync_worker`
+- `tests.test_core_events`
+- `tests.test_sync_router_fail_closed_policy`
+- `tests.test_sync_router_resync`
+- `tests.test_sync_router_receive_basic`
+- `tests.test_sync_router_receive_offer_publish`
+- `tests.test_sync_router_receive_sequences`
+- `tests.test_sync_router_receive_settings_cache`
+- `tests.test_sync_router_receive_errors`
+- `tests.test_sync_router_remaining_paths`
+- `tests.test_sync_registry`
+- `tests.test_sync_outbox_guard`
+- `tests.test_trading_settings_router_update`
+- `tests.test_trading_settings_router_overrides`
+- `tests.test_admin_messages_router`
+- `tests.test_users_router_update_basic`
+- `tests.test_users_router_delete`
+- `tests.test_users_router_update_limits`
+- `tests.test_users_router_delayed_removal`
+- `tests.test_bot_panel_admin_menu`
+- `tests.test_bot_panel_admin_settings_entry`
+- `tests.test_bot_panel_settings_helpers`
+- `tests.test_bot_panel_settings_new_value`
+- `tests.test_bot_panel_settings_reset`
+- `tests.test_bot_panel_simple_settings`
+- `tests.test_bot_panel_user_settings`
+- `tests.test_bot_admin_users_unblock_unlimit`
+- `tests.test_bot_admin_users_limit_flow`
+- `tests.test_bot_admin_users_limit_start`
+- `tests.test_bot_admin_users_role_actions`
+- `tests.test_bot_admin_users_block_actions`
+- `tests.test_bot_admin_users_block_custom`
+- `tests.test_bot_admin_users_block_settings`
+- `tests.test_bot_admin_users_bot_access`
+- `tests.test_bot_admin_users_delete_flow`
+- `tests.test_bot_admin_users_entry_navigation`
+- `tests.test_bot_admin_users_helpers`
+- `tests.test_bot_admin_users_profile_text`
+- `tests.test_bot_admin_users_search_entry_cancel`
+- `tests.test_bot_admin_users_search_process`
+- `tests.test_bot_admin_users_settings_menu`
+- `tests.test_bot_admin_users_show_list`
+- `tests.test_bot_admin_commodities_add_aliases_create`
+- `tests.test_bot_admin_commodities_add_create`
+- `tests.test_bot_admin_commodities_add_flow`
+- `tests.test_bot_admin_commodities_alias_add`
+- `tests.test_bot_admin_commodities_alias_edit`
+- `tests.test_bot_admin_commodities_alias_delete`
+- `tests.test_bot_admin_commodities_commodity_edit`
+- `tests.test_bot_admin_commodities_delete_cancel`
+- `tests.test_bot_admin_commodities_entry_points`
+- `tests.test_bot_admin_commodities_helpers`
+- `tests.test_bot_admin_commodities_message_helpers`
+- `tests.test_bot_admin_commodities_show_aliases`
+- `tests.test_bot_admin_commodities_show_list`
+- `python3 -m py_compile core/admin_authority.py api/admin_authority.py core/sync_registry.py core/sync_protocol.py api/routers/commodities.py api/routers/trading_settings.py api/routers/users.py api/routers/admin_messages.py bot/handlers/panel.py bot/handlers/admin_users.py`
+
 ### Step 9B - Background Job Authority Matrix
 
 Required behavior:

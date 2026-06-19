@@ -14,6 +14,7 @@ from core.db import get_db
 from core.config import settings
 from models.commodity import Commodity, CommodityAlias
 from models.user import User
+from api.admin_authority import require_shared_admin_write_authority
 from api.deps import verify_super_admin_or_dev_key, oauth2_scheme_optional
 
 import schemas
@@ -138,7 +139,15 @@ async def read_commodity(commodity_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
     return commodity
 
-@router.post("/", response_model=schemas.Commodity, status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.post(
+    "/",
+    response_model=schemas.Commodity,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(verify_super_admin_or_dev_key),
+        Depends(require_shared_admin_write_authority("commodities", operation="create")),
+    ],
+)
 async def create_commodity(
     commodity_data: schemas.CommodityCreate,
     aliases: List[str],
@@ -176,7 +185,14 @@ async def create_commodity(
     
     return db_commodity
 
-@router.put("/{commodity_id}", response_model=schemas.Commodity, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.put(
+    "/{commodity_id}",
+    response_model=schemas.Commodity,
+    dependencies=[
+        Depends(verify_super_admin_or_dev_key),
+        Depends(require_shared_admin_write_authority("commodities", operation="update")),
+    ],
+)
 async def update_commodity_name(
     commodity_id: int,
     commodity_update: schemas.CommodityCreate, 
@@ -223,7 +239,14 @@ async def update_commodity_name(
 
     return db_commodity
 
-@router.delete("/{commodity_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.delete(
+    "/{commodity_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[
+        Depends(verify_super_admin_or_dev_key),
+        Depends(require_shared_admin_write_authority("commodities", operation="delete")),
+    ],
+)
 async def delete_commodity(
     commodity_id: int, 
     db: AsyncSession = Depends(get_db),
@@ -313,7 +336,15 @@ async def delete_commodity(
 
 # --- مدیریت نام‌های مستعار (Aliases) ---
 
-@router.post("/{commodity_id}/aliases", response_model=schemas.CommodityAlias, status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.post(
+    "/{commodity_id}/aliases",
+    response_model=schemas.CommodityAlias,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(verify_super_admin_or_dev_key),
+        Depends(require_shared_admin_write_authority("commodity_aliases", operation="create")),
+    ],
+)
 async def add_alias_to_commodity(
     commodity_id: int,
     alias: schemas.CommodityAliasCreate,
@@ -353,7 +384,14 @@ async def add_alias_to_commodity(
         raise HTTPException(status_code=404, detail="کالایی با این ID برای افزودن نام مستعار یافت نشد")
 
 
-@router.put("/aliases/{alias_id}", response_model=schemas.CommodityAlias, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.put(
+    "/aliases/{alias_id}",
+    response_model=schemas.CommodityAlias,
+    dependencies=[
+        Depends(verify_super_admin_or_dev_key),
+        Depends(require_shared_admin_write_authority("commodity_aliases", operation="update")),
+    ],
+)
 async def update_alias(
     alias_id: int,
     alias_update: schemas.CommodityAliasCreate,
@@ -395,7 +433,14 @@ async def update_alias(
 
     return db_alias
 
-@router.delete("/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_super_admin_or_dev_key)])
+@router.delete(
+    "/aliases/{alias_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[
+        Depends(verify_super_admin_or_dev_key),
+        Depends(require_shared_admin_write_authority("commodity_aliases", operation="delete")),
+    ],
+)
 async def delete_alias(
     alias_id: int, 
     db: AsyncSession = Depends(get_db),

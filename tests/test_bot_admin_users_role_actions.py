@@ -56,7 +56,9 @@ class BotAdminUsersRoleActionsTests(unittest.IsolatedAsyncioTestCase):
             message=SimpleNamespace(edit_text=AsyncMock(side_effect=TelegramBadRequest(method='editMessageText', message='unchanged'))),
             answer=AsyncMock(),
         )
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(target_user)
+        ), patch(
             "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
         ), patch("bot.handlers.admin_users.get_user_profile_return_keyboard", return_value="KB"):
             await handle_set_user_role(failing_callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
@@ -90,7 +92,9 @@ class BotAdminUsersRoleActionsTests(unittest.IsolatedAsyncioTestCase):
             message=SimpleNamespace(edit_text=AsyncMock()),
             answer=AsyncMock(),
         )
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+        ), patch(
             "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
         ), patch("bot.handlers.admin_users.get_user_profile_return_keyboard", return_value="KB") as keyboard_mock:
             await handle_set_user_role(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))

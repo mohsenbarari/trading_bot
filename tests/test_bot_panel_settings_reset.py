@@ -39,11 +39,14 @@ class BotPanelSettingsResetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("دسترسی", callback.answer.await_args.args[0])
 
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
-        await handle_settings_reset(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
+        with patch("core.admin_authority.current_server", return_value="iran"):
+            await handle_settings_reset(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         callback.message.edit_text.assert_awaited_once()
 
         callback = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
-        with patch("core.trading_settings.TradingSettings", FakeTradingSettings), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "core.trading_settings.TradingSettings", FakeTradingSettings
+        ), patch(
             "core.trading_settings.save_trading_settings_async", new=AsyncMock(return_value=True)
         ), patch("core.trading_settings.refresh_settings_cache_async", new=AsyncMock()), patch(
             "bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")
@@ -56,7 +59,9 @@ class BotPanelSettingsResetTests(unittest.IsolatedAsyncioTestCase):
         denied_confirm.answer.assert_awaited_once_with()
 
         failed_confirm = SimpleNamespace(answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
-        with patch("core.trading_settings.TradingSettings", FakeTradingSettings), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "core.trading_settings.TradingSettings", FakeTradingSettings
+        ), patch(
             "core.trading_settings.save_trading_settings_async", new=AsyncMock(return_value=False)
         ), patch("bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")), patch(
             "bot.handlers.panel.get_settings_keyboard", return_value="KB"

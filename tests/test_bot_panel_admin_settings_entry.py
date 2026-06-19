@@ -44,7 +44,9 @@ class BotPanelAdminSettingsEntryTests(unittest.IsolatedAsyncioTestCase):
         callback = SimpleNamespace(data="settings_edit_offer_expiry_minutes", answer=AsyncMock(), message=SimpleNamespace(edit_text=AsyncMock()))
         state = FakeState()
         ts = SimpleNamespace(offer_expiry_minutes=15)
-        with patch("core.trading_settings.get_trading_settings_async", new=AsyncMock(return_value=ts)):
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "core.trading_settings.get_trading_settings_async", new=AsyncMock(return_value=ts)
+        ):
             await handle_settings_edit_click(callback, state, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
         self.assertEqual(state.updated[0], {"editing_setting": "offer_expiry_minutes"})
         self.assertEqual(state.states, [TradingSettingsEdit.awaiting_value])

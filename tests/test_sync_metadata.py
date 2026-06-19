@@ -3,6 +3,7 @@ import unittest
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, deserialize_sync_data
 from core.sync_protocol import (
     SYNC_PROTOCOL_VERSION,
+    SYNC_REGISTRY_VERSION,
     build_sync_protocol_metadata,
     current_sync_registry_fingerprint,
     validate_sync_protocol_metadata,
@@ -113,7 +114,7 @@ class SyncMetadataTests(unittest.TestCase):
 
         self.assertEqual(metadata["protocol_version"], SYNC_PROTOCOL_VERSION)
         self.assertEqual(metadata["payload_schema_version"], 2)
-        self.assertEqual(metadata["registry_version"], 2)
+        self.assertEqual(metadata["registry_version"], SYNC_REGISTRY_VERSION)
         self.assertEqual(metadata["registry_fingerprint"], current_sync_registry_fingerprint())
         self.assertEqual(metadata["producer"], {"server_mode": "foreign"})
         self.assertTrue(validate_sync_protocol_metadata(metadata).ok)

@@ -16,11 +16,36 @@ from bot.message_manager import (
     DeleteDelay
 )
 from typing import Optional
+from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
 from core.enums import UserRole
 from core.config import settings
 from core.services.user_account_status_service import is_user_global_web_locked
 
 router = Router()
+
+
+def _settings_admin_write_decision(operation: str):
+    return check_shared_admin_write_authority(
+        "trading_settings",
+        operation=operation,
+        surface="telegram_bot_admin",
+    )
+
+
+async def _reject_settings_callback_if_not_authoritative(callback: types.CallbackQuery, operation: str) -> bool:
+    decision = _settings_admin_write_decision(operation)
+    if decision.ok:
+        return False
+    await callback.answer(f"❌ {admin_write_rejection_message(decision)}", show_alert=True)
+    return True
+
+
+async def _reject_settings_message_if_not_authoritative(message: types.Message, operation: str) -> bool:
+    decision = _settings_admin_write_decision(operation)
+    if decision.ok:
+        return False
+    await message.answer(f"❌ {admin_write_rejection_message(decision)}")
+    return True
 
 
 async def handoff_navigation_button(message: types.Message, state: FSMContext, user: Optional[User]) -> bool:
@@ -232,6 +257,8 @@ async def handle_settings_edit_click(callback: types.CallbackQuery, state: FSMCo
     if not user or user.role != UserRole.SUPER_ADMIN:
         await callback.answer("دسترسی ندارید")
         return
+    if await _reject_settings_callback_if_not_authoritative(callback, "update"):
+        return
     
     from bot.states import TradingSettingsEdit
     from core.trading_settings import get_trading_settings_async
@@ -288,6 +315,9 @@ async def handle_settings_new_value(message: types.Message, state: FSMContext, u
     except ValueError:
         await message.answer("❌ لطفاً یک عدد صحیح مثبت وارد کنید.")
         return
+
+    if await _reject_settings_message_if_not_authoritative(message, "update"):
+        return
     
     # ذخیره
     ts = await load_trading_settings_async()
@@ -336,6 +366,8 @@ async def handle_settings_reset(callback: types.CallbackQuery, user: Optional[Us
     if not user or user.role != UserRole.SUPER_ADMIN:
         await callback.answer("دسترسی ندارید")
         return
+    if await _reject_settings_callback_if_not_authoritative(callback, "reset"):
+        return
     
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -358,6 +390,8 @@ async def handle_settings_reset(callback: types.CallbackQuery, user: Optional[Us
 async def handle_settings_reset_confirm(callback: types.CallbackQuery, user: Optional[User]):
     if not user or user.role != UserRole.SUPER_ADMIN:
         await callback.answer()
+        return
+    if await _reject_settings_callback_if_not_authoritative(callback, "reset"):
         return
     
     from core.trading_settings import TradingSettings, save_trading_settings_async, refresh_settings_cache_async

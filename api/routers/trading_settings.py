@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
+from api.admin_authority import require_shared_admin_write_authority
 from core.db import get_db
 from core.services.market_transition_service import get_market_runtime_view
 from api.deps import verify_super_admin
@@ -212,7 +213,11 @@ async def list_market_overrides(db: AsyncSession = Depends(get_db)):
     return [_serialize_market_schedule_override(item) for item in result.scalars().all()]
 
 
-@router.post("/market-overrides", response_model=MarketScheduleOverrideResponse)
+@router.post(
+    "/market-overrides",
+    response_model=MarketScheduleOverrideResponse,
+    dependencies=[Depends(require_shared_admin_write_authority("market_schedule_overrides", operation="create"))],
+)
 async def create_market_override(
     payload: MarketScheduleOverrideUpsert,
     db: AsyncSession = Depends(get_db),
@@ -239,7 +244,11 @@ async def create_market_override(
     return _serialize_market_schedule_override(override)
 
 
-@router.put("/market-overrides/{override_id}", response_model=MarketScheduleOverrideResponse)
+@router.put(
+    "/market-overrides/{override_id}",
+    response_model=MarketScheduleOverrideResponse,
+    dependencies=[Depends(require_shared_admin_write_authority("market_schedule_overrides", operation="update"))],
+)
 async def update_market_override(
     override_id: int,
     payload: MarketScheduleOverrideUpsert,
@@ -270,7 +279,10 @@ async def update_market_override(
     return _serialize_market_schedule_override(override)
 
 
-@router.delete("/market-overrides/{override_id}")
+@router.delete(
+    "/market-overrides/{override_id}",
+    dependencies=[Depends(require_shared_admin_write_authority("market_schedule_overrides", operation="delete"))],
+)
 async def delete_market_override(
     override_id: int,
     db: AsyncSession = Depends(get_db),
@@ -285,7 +297,14 @@ async def delete_market_override(
     return {"success": True}
 
 
-@router.put("/", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin)])
+@router.put(
+    "/",
+    response_model=TradingSettingsResponse,
+    dependencies=[
+        Depends(verify_super_admin),
+        Depends(require_shared_admin_write_authority("trading_settings", operation="update")),
+    ],
+)
 async def update_settings(updates: TradingSettingsUpdate):
     """بروزرسانی تنظیمات - فقط ادمین ارشد"""
     current = await load_trading_settings_async()
@@ -325,7 +344,14 @@ async def update_settings(updates: TradingSettingsUpdate):
     return _serialize_trading_settings(updated)
 
 
-@router.post("/reset", response_model=TradingSettingsResponse, dependencies=[Depends(verify_super_admin)])
+@router.post(
+    "/reset",
+    response_model=TradingSettingsResponse,
+    dependencies=[
+        Depends(verify_super_admin),
+        Depends(require_shared_admin_write_authority("trading_settings", operation="reset")),
+    ],
+)
 async def reset_settings():
     """بازنشانی تنظیمات به مقادیر پیش‌فرض - فقط ادمین ارشد"""
     default_settings = TradingSettings()

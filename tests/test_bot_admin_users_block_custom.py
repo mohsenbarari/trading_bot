@@ -108,7 +108,9 @@ class BotAdminUsersBlockCustomTests(unittest.IsolatedAsyncioTestCase):
             chat=SimpleNamespace(id=1),
         )
         state = SimpleNamespace(get_data=AsyncMock(return_value={"custom_max_block_user_id": 9, "anchor_id": 1}))
-        with patch("bot.handlers.admin_users.delete_user_message", new=AsyncMock()), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.delete_user_message", new=AsyncMock()
+        ), patch(
             "bot.handlers.admin_users.clear_state_retain_anchors", new=AsyncMock()
         ) as clear_mock, patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
             "bot.handlers.admin_users.get_block_settings_keyboard", return_value="KB"

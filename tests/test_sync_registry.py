@@ -1,8 +1,10 @@
 import unittest
 
 import models  # noqa: F401 - import all model modules into Base.metadata
+from core.admin_authority import ADMIN_SHARED_TABLES
 from core.sync_registry import (
     SyncPolicy,
+    admin_mutated_shared_registry_entries,
     get_sync_registry_entry,
     missing_registry_tables,
     model_table_names,
@@ -80,6 +82,22 @@ class SyncRegistryTests(unittest.TestCase):
         self.assertFalse(publication_states.planned)
         self.assertEqual(publication_states.policy, SyncPolicy.SYNC)
         self.assertIn("Telegram channel", publication_states.notes)
+
+    def test_admin_mutated_shared_tables_have_single_authority_policy(self):
+        entries = admin_mutated_shared_registry_entries()
+        self.assertEqual(set(entries), set(ADMIN_SHARED_TABLES))
+
+        for table_name, entry in entries.items():
+            with self.subTest(table_name=table_name):
+                self.assertEqual(entry.policy, SyncPolicy.SYNC)
+                self.assertIn("admin", entry.authority)
+                self.assertIn("iran", entry.authority)
+                self.assertIn("single-writer iran", entry.conflict_rule)
+                self.assertIn("webapp_admin", entry.write_surfaces)
+
+        for table_name in {"commodities", "commodity_aliases", "trading_settings", "users"}:
+            with self.subTest(table_name=table_name):
+                self.assertIn("telegram_bot_admin", entries[table_name].write_surfaces)
 
 
 if __name__ == "__main__":

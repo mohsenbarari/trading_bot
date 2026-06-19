@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.admin_authority import require_shared_admin_write_authority
 from api.deps import get_current_user, get_db, verify_super_admin
 from api.routers.chat_schemas import MessageRead
 from core.audit_logger import audit_log
@@ -200,7 +201,11 @@ async def get_market_message_history(
     return [_serialize_market_message(message) for message in await list_market_management_history(db, limit=limit)]
 
 
-@router.post("/market", response_model=AdminMarketMessageRead)
+@router.post(
+    "/market",
+    response_model=AdminMarketMessageRead,
+    dependencies=[Depends(require_shared_admin_write_authority("admin_market_messages", operation="create"))],
+)
 async def create_market_message(
     data: AdminMarketMessageCreate,
     current_user: User = Depends(verify_super_admin),
@@ -227,7 +232,11 @@ async def create_market_message(
     return _serialize_market_message(message)
 
 
-@router.delete("/market/current", response_model=AdminMarketMessageRead | None)
+@router.delete(
+    "/market/current",
+    response_model=AdminMarketMessageRead | None,
+    dependencies=[Depends(require_shared_admin_write_authority("admin_market_messages", operation="deactivate"))],
+)
 async def clear_current_market_message(
     current_user: User = Depends(verify_super_admin),
     db: AsyncSession = Depends(get_db),
@@ -249,7 +258,11 @@ async def get_broadcast_history(
     return [_serialize_broadcast(message) for message in await list_management_broadcast_history(db, limit=limit)]
 
 
-@router.post("/broadcasts", response_model=AdminBroadcastCreateResponse)
+@router.post(
+    "/broadcasts",
+    response_model=AdminBroadcastCreateResponse,
+    dependencies=[Depends(require_shared_admin_write_authority("admin_broadcast_messages", operation="create"))],
+)
 async def create_broadcast(
     data: AdminBroadcastCreate,
     current_user: User = Depends(verify_super_admin),

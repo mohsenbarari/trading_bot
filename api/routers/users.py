@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import asyncio
 import pytz
 
+from api.admin_authority import require_shared_admin_write_authority
 from core.db import get_db
 from core.audit_logger import audit_log
 from core.services.accountant_relation_service import is_user_accountant
@@ -303,6 +304,7 @@ async def update_user(
     user_update: schemas.UserUpdate,
     db: AsyncSession = Depends(get_db),
     actor = Depends(verify_admin_or_dev_key),
+    _admin_authority: None = Depends(require_shared_admin_write_authority("users", operation="update")),
 ):
     """ویرایش اطلاعات کاربر (نقش، وضعیت حساب، مسدودیت و محدودیت‌ها)"""
     user = await db.get(User, user_id)
@@ -420,6 +422,7 @@ async def delete_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
     actor = Depends(verify_admin_or_dev_key),
+    _admin_authority: None = Depends(require_shared_admin_write_authority("users", operation="delete")),
 ):
     """حذف نرم کاربر (Soft Delete) با تراکنش اتمیک"""
     user = await db.get(User, user_id)

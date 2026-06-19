@@ -57,7 +57,9 @@ class BotPanelSettingsNewValueTests(unittest.IsolatedAsyncioTestCase):
 
         message = SimpleNamespace(text="8", answer=AsyncMock())
         state = FakeState({"editing_setting": "offer_expiry_minutes"})
-        with patch("core.trading_settings.load_trading_settings_async", new=AsyncMock(return_value=FakeSettings())), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "core.trading_settings.load_trading_settings_async", new=AsyncMock(return_value=FakeSettings())
+        ), patch(
             "core.trading_settings.save_trading_settings_async", new=AsyncMock(return_value=True)
         ), patch("core.trading_settings.refresh_settings_cache_async", new=AsyncMock()), patch(
             "bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")
@@ -68,7 +70,9 @@ class BotPanelSettingsNewValueTests(unittest.IsolatedAsyncioTestCase):
 
         message = SimpleNamespace(text="8", answer=AsyncMock())
         state = FakeState({"editing_setting": "offer_expiry_minutes"})
-        with patch("core.trading_settings.load_trading_settings_async", new=AsyncMock(return_value=FakeSettings())), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "core.trading_settings.load_trading_settings_async", new=AsyncMock(return_value=FakeSettings())
+        ), patch(
             "core.trading_settings.save_trading_settings_async", new=AsyncMock(return_value=False)
         ), patch("bot.handlers.panel.get_settings_text", new=AsyncMock(return_value="TEXT")), patch(
             "bot.handlers.panel.get_settings_keyboard", return_value="KB"

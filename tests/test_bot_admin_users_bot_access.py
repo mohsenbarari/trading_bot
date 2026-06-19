@@ -77,7 +77,9 @@ class BotAdminUsersAccountStatusTests(unittest.IsolatedAsyncioTestCase):
         async def transition_side_effect(_session, user_obj, target_status):
             user_obj.account_status = target_status
 
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+        ), patch(
             "bot.handlers.admin_users.transition_user_account_status", new=AsyncMock(side_effect=transition_side_effect)
         ), patch("bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")), patch(
             "bot.handlers.admin_users.get_user_settings_keyboard", return_value="KB"
@@ -109,7 +111,9 @@ class BotAdminUsersAccountStatusTests(unittest.IsolatedAsyncioTestCase):
             async def transition_side_effect(_session, user_obj, target_status):
                 user_obj.account_status = target_status
 
-            with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+            with patch("core.admin_authority.current_server", return_value="iran"), patch(
+                "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+            ), patch(
                 "bot.handlers.admin_users.transition_user_account_status", new=AsyncMock(side_effect=transition_side_effect)
             ) as transition_mock, patch(
                 "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")

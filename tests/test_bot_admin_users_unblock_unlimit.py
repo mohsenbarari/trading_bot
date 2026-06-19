@@ -95,7 +95,9 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
             message=SimpleNamespace(edit_text=AsyncMock()),
             answer=AsyncMock(),
         )
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+        ), patch(
             "bot.handlers.admin_users.asyncio.create_task", side_effect=consume_task
         ) as create_task_mock, patch("bot.handlers.admin_users.send_delayed_removal_notification", new=AsyncMock()), patch(
             "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")
@@ -132,7 +134,9 @@ class BotAdminUsersUnblockUnlimitTests(unittest.IsolatedAsyncioTestCase):
             message=SimpleNamespace(edit_text=AsyncMock()),
             answer=AsyncMock(),
         )
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+        ), patch(
             "bot.handlers.admin_users.asyncio.create_task", side_effect=consume_task
         ) as create_task_mock, patch("bot.handlers.admin_users.send_delayed_removal_notification", new=AsyncMock()), patch(
             "bot.handlers.admin_users.get_user_profile_text", new=AsyncMock(return_value="PROFILE")

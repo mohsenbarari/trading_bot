@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Iterable
 
 import models  # noqa: F401 - ensure all model modules register their tables
+from core.admin_authority import ADMIN_SHARED_TABLES
 from models.database import Base
 
 
@@ -63,16 +64,16 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "admin_broadcast_messages",
         SyncPolicy.SYNC,
         ("webapp_admin",),
-        "admin authoring surface",
-        "append-only/admin history; idempotent by record identity",
+        "iran shared admin authority",
+        "single-writer iran admin authority; non-authoritative writes must fail visibly",
         "notification/broadcast audit visibility",
     ),
     "admin_market_messages": _entry(
         "admin_market_messages",
         SyncPolicy.SYNC,
         ("webapp_admin",),
-        "admin authoring surface",
-        "active message chosen by explicit admin state",
+        "iran shared admin authority",
+        "single-writer iran admin authority; non-authoritative writes must fail visibly",
         "market notice visibility and notification fanout",
     ),
     "change_log": _entry(
@@ -110,17 +111,17 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "commodities": _entry(
         "commodities",
         SyncPolicy.SYNC,
-        ("admin", "webapp"),
-        "shared product/admin authority",
-        "natural key merge by commodity name until stronger admin conflict policy lands",
+        ("webapp_admin", "telegram_bot_admin"),
+        "iran shared admin authority",
+        "single-writer iran admin authority; commodity names are natural-idempotency guards only",
         "commodity cache invalidation",
     ),
     "commodity_aliases": _entry(
         "commodity_aliases",
         SyncPolicy.SYNC,
-        ("admin", "webapp"),
-        "shared product/admin authority",
-        "natural key merge by alias until stronger admin conflict policy lands",
+        ("webapp_admin", "telegram_bot_admin"),
+        "iran shared admin authority",
+        "single-writer iran admin authority; aliases are natural-idempotency guards only",
         "commodity cache invalidation",
     ),
     "conversations": _entry(
@@ -158,9 +159,9 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "market_schedule_overrides": _entry(
         "market_schedule_overrides",
         SyncPolicy.SYNC,
-        ("admin",),
-        "admin product configuration authority",
-        "natural key merge by date",
+        ("webapp_admin",),
+        "iran shared admin authority",
+        "single-writer iran admin authority; date uniqueness is an idempotency guard only",
         "market schedule cache and transition recalculation",
     ),
     "messages": _entry(
@@ -256,9 +257,9 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "trading_settings": _entry(
         "trading_settings",
         SyncPolicy.SYNC,
-        ("admin",),
-        "admin product configuration authority",
-        "natural key merge by setting key",
+        ("webapp_admin", "telegram_bot_admin"),
+        "iran shared admin authority",
+        "single-writer iran admin authority; setting key uniqueness is an idempotency guard only",
         "settings cache refresh",
     ),
     "upload_batches": _entry(
@@ -305,9 +306,9 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "users": _entry(
         "users",
         SyncPolicy.SYNC,
-        ("admin", "auth", "bot_link", "webapp"),
-        "user/account authority TBD",
-        "natural key plus field-level merge; counters use greatest-value merge where needed",
+        ("webapp_admin", "telegram_bot_admin", "auth", "bot_link", "webapp"),
+        "field-level account authority; admin product fields use iran shared admin authority",
+        "admin role/status/limit writes are single-writer iran authority; account identity uses field-level merge",
         "profile/account product data: telegram_id, account status, role, limits, and counters",
         notes="user.home_server is legacy/account-origin compatibility only and must not represent current active runtime surface.",
     ),
@@ -322,6 +323,10 @@ def sync_registry_entries(*, include_planned: bool = False) -> dict[str, SyncReg
         for table_name, entry in _SYNC_REGISTRY.items()
         if not entry.planned
     }
+
+
+def admin_mutated_shared_registry_entries() -> dict[str, SyncRegistryEntry]:
+    return {table_name: _SYNC_REGISTRY[table_name] for table_name in sorted(ADMIN_SHARED_TABLES)}
 
 
 def get_sync_registry_entry(table_name: str) -> SyncRegistryEntry:

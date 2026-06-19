@@ -59,7 +59,9 @@ class BotAdminUsersBlockSettingsTests(unittest.IsolatedAsyncioTestCase):
         failing_message = SimpleNamespace(edit_text=AsyncMock(side_effect=TelegramBadRequest(method='editMessageText', message='unchanged')))
         callback = SimpleNamespace(message=failing_message, answer=AsyncMock(), data="admin_toggle_block_9")
         toggle_user = SimpleNamespace(id=9, role=UserRole.STANDARD, account_name="ali", can_block_users=True, max_blocked_users=5)
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(toggle_user)), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(toggle_user)
+        ), patch(
             "bot.handlers.admin_users.get_block_settings_keyboard", return_value="KB"
         ):
             await handle_admin_toggle_block(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
@@ -85,7 +87,9 @@ class BotAdminUsersBlockSettingsTests(unittest.IsolatedAsyncioTestCase):
         failing_message = SimpleNamespace(edit_text=AsyncMock(side_effect=TelegramBadRequest(method='editMessageText', message='unchanged')))
         callback = SimpleNamespace(message=failing_message, answer=AsyncMock(), data="admin_max_block_set_9_12")
         max_user = SimpleNamespace(id=9, role=UserRole.STANDARD, account_name="ali", can_block_users=True, max_blocked_users=5)
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(max_user)), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=FakeSession(max_user)
+        ), patch(
             "bot.handlers.admin_users.get_block_settings_keyboard", return_value="KB"
         ):
             await handle_admin_max_block_set(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
@@ -109,7 +113,9 @@ class BotAdminUsersBlockSettingsTests(unittest.IsolatedAsyncioTestCase):
         target_user = SimpleNamespace(id=9, role=UserRole.STANDARD, account_name="ali", can_block_users=False, max_blocked_users=5)
         session = FakeSession(target_user)
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), data="admin_toggle_block_9")
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+        ), patch(
             "bot.handlers.admin_users.get_block_settings_keyboard", return_value="KB"
         ) as keyboard_mock:
             await handle_admin_toggle_block(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
@@ -139,7 +145,9 @@ class BotAdminUsersBlockSettingsTests(unittest.IsolatedAsyncioTestCase):
         target_user = SimpleNamespace(id=9, role=UserRole.STANDARD, account_name="ali", can_block_users=True, max_blocked_users=5)
         session = FakeSession(target_user)
         callback = SimpleNamespace(message=SimpleNamespace(edit_text=AsyncMock()), answer=AsyncMock(), data="admin_max_block_set_9_12")
-        with patch("bot.handlers.admin_users.AsyncSessionLocal", return_value=session), patch(
+        with patch("core.admin_authority.current_server", return_value="iran"), patch(
+            "bot.handlers.admin_users.AsyncSessionLocal", return_value=session
+        ), patch(
             "bot.handlers.admin_users.get_block_settings_keyboard", return_value="KB"
         ) as keyboard_mock:
             await handle_admin_max_block_set(callback, user=SimpleNamespace(role=UserRole.SUPER_ADMIN))
