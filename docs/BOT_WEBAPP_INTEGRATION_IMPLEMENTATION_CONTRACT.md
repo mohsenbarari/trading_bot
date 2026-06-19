@@ -522,20 +522,34 @@ Required behavior:
 - Foreign-side Telegram publish uses a dedupe key independent of only `channel_message_id`.
 - Worker replay/direct push cannot create duplicate channel posts.
 - Foreign publication result syncs back to Iran.
-- Expired offers do not need a Telegram "expired" tag; interactive buttons are removed.
-- Traded offers require Telegram post edit/tag behavior.
+- Terminal Telegram channel state uses one central edit path that removes interactive controls and
+  rewrites the canonical channel post text.
+- Fully traded offers edit the Telegram post and append `🤝 ✅` on a new line.
+- Partially traded offers edit the Telegram post and append `🤝 {traded_quantity} تا ✅` on a new
+  line.
+- Expired offers edit the Telegram post and append `❌` on a new line; interactive buttons are
+  removed at the same time.
+- Terminal post edits are idempotent: replaying the same final state must not duplicate tags or
+  create extra Telegram posts.
 
 Required tests:
 
 - Duplicate publish attempt creates one Telegram post.
 - Publish success stores/syncs the Telegram publication result.
 - Publish failure is retryable and visible.
-- Expired offer removes/blocks interactive controls without requiring expired tag.
-- Traded offer edits/tags the Telegram post.
+- Fully traded offer uses `editMessageText`, appends `🤝 ✅`, and sends `reply_markup=None`.
+- Partially traded offer uses `editMessageText`, appends `🤝 {traded_quantity} تا ✅`, and sends
+  `reply_markup=None`.
+- Expired offer uses `editMessageText`, appends `❌`, and sends `reply_markup=None`.
+- Manual expiry, auto-expiry, Bot cancel-all, WebApp cancel-all, and recovery-finalization expiry
+  all reach the same terminal Telegram channel-state path.
+- Replaying a terminal channel-state update is treated as success when Telegram returns
+  "message is not modified".
 
 Exit criteria:
 
-- Telegram channel state can be reconciled with DB and publication state.
+- Telegram channel state can be reconciled with DB and publication state, including the exact
+  terminal marker and removal of interactive controls.
 
 ### Step 7C - WebApp Realtime Visibility From Synced Market Changes
 
@@ -767,6 +781,9 @@ Required scenario groups:
 - Bot offer create -> Iran WebApp visibility.
 - WebApp offer create -> foreign Telegram visibility.
 - Owner expiry from WebApp and Bot.
+- Telegram channel terminal markers for fully traded (`🤝 ✅`), partially traded
+  (`🤝 {traded_quantity} تا ✅`), and expired (`❌`) offers.
+- Telegram channel terminal edits remove inline buttons for traded and expired offers.
 - Request/trade from WebApp and Bot against both Iran-home and foreign-home offers.
 - Same user active on both surfaces.
 - Near-simultaneous trade/expiry/update.
@@ -784,6 +801,8 @@ Required test layers:
 - Service tests for shared commands.
 - API tests for WebApp routes and sync receive.
 - Bot handler tests with Telegram mocked.
+- Telegram channel-state tests for full trade, partial trade, manual expiry, auto-expiry,
+  Bot cancel-all, WebApp cancel-all, duplicate replay, and "message is not modified" responses.
 - Worker tests for outbox/retry/replay.
 - Integration or E2E tests for two-surface flows where practical.
 - Staging manual validation with logs and sync-health review.
