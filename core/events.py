@@ -367,6 +367,67 @@ def setup_offer_events():
     logger.info("✅ Offer event listeners registered")
 
 
+def _offer_request_sync_payload(target) -> Dict[str, Any]:
+    source_surface = getattr(target, "request_source_surface", None)
+    result_status = getattr(target, "result_status", None)
+    commission_rate = getattr(target, "customer_commission_rate_snapshot", None)
+    return {
+        "id": target.id,
+        "version_id": getattr(target, "version_id", None) or 1,
+        "request_home_server": target.request_home_server,
+        "local_offer_id": target.local_offer_id,
+        "offer_public_id": target.offer_public_id,
+        "requester_user_id": target.requester_user_id,
+        "actor_user_id": target.actor_user_id,
+        "request_source_surface": source_surface.value if hasattr(source_surface, "value") else source_surface,
+        "request_source_server": target.request_source_server,
+        "requested_quantity": target.requested_quantity,
+        "idempotency_key": target.idempotency_key,
+        "received_at": _isoformat_or_none(getattr(target, "received_at", None)),
+        "decided_at": _isoformat_or_none(getattr(target, "decided_at", None)),
+        "result_status": result_status.value if hasattr(result_status, "value") else result_status,
+        "public_failure_code": target.public_failure_code,
+        "public_failure_message": target.public_failure_message,
+        "internal_failure_code": target.internal_failure_code,
+        "internal_failure_context": target.internal_failure_context,
+        "resulting_trade_id": target.resulting_trade_id,
+        "customer_relation_id": target.customer_relation_id,
+        "customer_owner_user_id": target.customer_owner_user_id,
+        "customer_tier_snapshot": target.customer_tier_snapshot,
+        "customer_management_name_snapshot": target.customer_management_name_snapshot,
+        "customer_commission_rate_snapshot": str(commission_rate) if commission_rate is not None else None,
+        "customer_commission_context": target.customer_commission_context,
+        "archived": target.archived,
+        "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+        "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+    }
+
+
+def setup_offer_request_events():
+    """Setup event listeners for the offer request ledger."""
+    from models.offer_request import OfferRequest
+
+    @event.listens_for(OfferRequest, 'after_insert')
+    def on_offer_request_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "offer_requests", target.id, "INSERT", _offer_request_sync_payload(target))
+        except Exception as e:
+            logger.error(f"Error in offer_request after_insert event: {e}")
+
+    @event.listens_for(OfferRequest, 'after_update')
+    def on_offer_request_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "offer_requests", target.id, "UPDATE", _offer_request_sync_payload(target))
+        except Exception as e:
+            logger.error(f"Error in offer_request after_update event: {e}")
+
+    logger.info("✅ OfferRequest event listeners registered")
+
+
 def setup_trade_events():
     """Setup event listeners for Trade model"""
     from models.trade import Trade
@@ -1113,6 +1174,7 @@ def setup_all_events():
     setup_chat_member_events()
     setup_invitation_events()
     setup_offer_events()
+    setup_offer_request_events()
     setup_trade_events()
     setup_commodity_events()
     setup_commodity_alias_events()

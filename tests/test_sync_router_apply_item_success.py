@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from api.routers.sync import _apply_item
 from models.offer import Offer
+from models.offer_request import OfferRequest
 
 
 class AsyncNullContext:
@@ -125,6 +126,38 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer_data["id"], 8)
         builder.assert_called_once_with(Offer, "offers", offer_data)
         self.assertEqual(db.execute_calls[0], ("UPSERT", {"is_sync": True}))
+
+        offer_request_data = {
+            "request_home_server": "foreign",
+            "local_offer_id": 8,
+            "offer_public_id": "ofr_remote_8",
+            "requester_user_id": 5,
+            "actor_user_id": 5,
+            "request_source_surface": "telegram_bot",
+            "request_source_server": "foreign",
+            "requested_quantity": 12,
+            "idempotency_key": "telegram_callback:abc",
+            "result_status": "received",
+            "internal_failure_context": {"safe_for_admin": True},
+        }
+        db = FakeDB()
+        with patch("api.routers.sync._build_upsert_stmt", return_value="OFFER_REQUEST_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "offer_requests",
+                "INSERT",
+                30,
+                offer_request_data,
+                model=OfferRequest,
+                new_offers=[],
+            )
+        self.assertEqual(result, "ok")
+        self.assertEqual(offer_request_data["id"], 30)
+        self.assertEqual(offer_request_data["offer_public_id"], "ofr_remote_8")
+        self.assertEqual(offer_request_data["request_source_surface"], "telegram_bot")
+        self.assertEqual(offer_request_data["internal_failure_context"], {"safe_for_admin": True})
+        builder.assert_called_once_with(OfferRequest, "offer_requests", offer_request_data)
+        self.assertEqual(db.execute_calls[0], ("OFFER_REQUEST_UPSERT", {"is_sync": True}))
 
         terminal_offers = []
         terminal_offer_data = {"status": "completed", "channel_message_id": 1001}

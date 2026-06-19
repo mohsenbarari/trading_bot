@@ -615,6 +615,20 @@ Exit criteria:
   sensitive audit views.
 - Expiry metadata migration/backfill has a deterministic mapping and a no-fabrication rule.
 
+Implementation decisions:
+
+- The minimum field policy lives in `core.offer_request_policy`. Public link payloads may expose
+  only safe aggregate/request outcome fields and must not expose requester ids, actor ids, customer
+  relation details, raw source/server data, mobile numbers, idempotency keys, or internal failure
+  context.
+- Owner/requester/admin/audit visibility is explicit and role-gated. Internal failure context is
+  admin/audit-only; owner/detail views must not receive it by default.
+- Legacy `Offer.expire_reason` mapping is deterministic and uses `legacy_unknown` when historical
+  actor/source metadata is missing. Backfill or presentation code must not fabricate user, actor,
+  surface, or server values.
+- Step 9C may broaden the global sensitive-field registry, but Step 5C and Step 7C must already use
+  this local field policy for offer-link/request-ledger data.
+
 ### Step 5C - Offer Request Ledger And Metadata Schema
 
 Required behavior:
@@ -678,6 +692,25 @@ Exit criteria:
 
 - Offer request history can be reconstructed from the ledger without relying only on `trades`.
 - The ledger is available to Step 5D shared command work and Step 7C offer detail/link responses.
+
+Implementation decisions:
+
+- The durable table is `offer_requests`; it is synced product data and is no longer a planned-only
+  registry entry.
+- The ledger stores both `local_offer_id` and `offer_public_id`. `offer_public_id` is the canonical
+  cross-server identity; Step 5D forwarded commands must resolve local `offers.id` from it instead
+  of assuming integer ids match across servers.
+- Idempotency is scoped by `(request_home_server, idempotency_key)` with a partial unique index for
+  non-null keys. Duplicate idempotency replays must return the existing ledger outcome rather than
+  creating a second row.
+- Runtime request/trade adapters are not fully migrated in Step 5C. Step 5C provides the model,
+  migration, sync/event plumbing, field policy, append-only ledger service, terminal-state guard,
+  customer-relation snapshot support, and paginated history query helper. Step 5D owns wiring the
+  existing WebApp and Telegram trade execution paths into this ledger-backed shared command.
+- Terminal ledger outcomes are immutable except safe annotation/finalization fields. Service tests
+  must prevent a completed/rejected/failed row from changing into a contradictory terminal outcome.
+- The ledger event listener writes change-log/sync payloads only; it does not publish public
+  realtime payloads directly because display must go through the Step 5C-0 visibility policy.
 
 ### Step 5D - Shared Trade/Request Command
 

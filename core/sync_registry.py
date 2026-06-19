@@ -196,8 +196,7 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "offer_home_server",
         "idempotent authoritative command result; terminal ledger rows immutable except safe finalization",
         "authorized offer detail/audit visibility",
-        planned=True,
-        notes="Planned request ledger required before request-ledger migrations land.",
+        notes="Durable request ledger; public offer-link views must apply field-level visibility policy.",
     ),
     "offers": _entry(
         "offers",

@@ -255,6 +255,36 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
             updated_at=now,
         )
+        offer_request = SimpleNamespace(
+            id=30,
+            version_id=1,
+            request_home_server='foreign',
+            local_offer_id=1,
+            offer_public_id='ofr_event_1',
+            requester_user_id=4,
+            actor_user_id=4,
+            request_source_surface=SimpleNamespace(value='telegram_bot'),
+            request_source_server='foreign',
+            requested_quantity=7,
+            idempotency_key='telegram_callback:sync',
+            received_at=now,
+            decided_at=None,
+            result_status=SimpleNamespace(value='received'),
+            public_failure_code=None,
+            public_failure_message=None,
+            internal_failure_code=None,
+            internal_failure_context=None,
+            resulting_trade_id=None,
+            customer_relation_id=None,
+            customer_owner_user_id=None,
+            customer_tier_snapshot=None,
+            customer_management_name_snapshot=None,
+            customer_commission_rate_snapshot=None,
+            customer_commission_context=None,
+            archived=False,
+            created_at=now,
+            updated_at=now,
+        )
 
         return {
             ('Chat', 'after_insert'): chat,
@@ -266,6 +296,8 @@ class CoreEventsTests(unittest.TestCase):
             ('Offer', 'after_insert'): offer,
             ('Offer', 'after_update'): offer,
             ('Offer', 'after_delete'): offer,
+            ('OfferRequest', 'after_insert'): offer_request,
+            ('OfferRequest', 'after_update'): offer_request,
             ('Trade', 'after_insert'): trade,
             ('Trade', 'after_update'): trade,
             ('User', 'after_insert'): user,
@@ -497,6 +529,66 @@ class CoreEventsTests(unittest.TestCase):
         log_change.assert_not_called()
         publish_event_sync.assert_not_called()
 
+    def test_offer_request_event_listener_syncs_ledger_payload(self):
+        registry = {}
+        now = datetime(2025, 1, 1, 12, 0, 0)
+        with patch('core.events.event.listens_for', side_effect=_capture_listeners(registry)), patch.object(
+            events, 'logger'
+        ) as logger:
+            events.setup_offer_request_events()
+
+        target = SimpleNamespace(
+            id=30,
+            version_id=2,
+            request_home_server='foreign',
+            local_offer_id=7,
+            offer_public_id='ofr_request_30',
+            requester_user_id=5,
+            actor_user_id=6,
+            request_source_surface=SimpleNamespace(value='telegram_bot'),
+            request_source_server='foreign',
+            requested_quantity=12,
+            idempotency_key='telegram_callback:abc',
+            received_at=now,
+            decided_at=now,
+            result_status=SimpleNamespace(value='completed_trade'),
+            public_failure_code=None,
+            public_failure_message=None,
+            internal_failure_code='internal',
+            internal_failure_context={'redacted': True},
+            resulting_trade_id=88,
+            customer_relation_id=17,
+            customer_owner_user_id=4,
+            customer_tier_snapshot='tier2',
+            customer_management_name_snapshot='VIP',
+            customer_commission_rate_snapshot='0.70',
+            customer_commission_context={'commission': 'snapshot'},
+            archived=False,
+            created_at=now,
+            updated_at=now,
+        )
+        connection = _FakeConnection()
+
+        with patch('core.events.log_change') as log_change:
+            registry[('OfferRequest', 'after_insert')](None, connection, target)
+            registry[('OfferRequest', 'after_update')](None, connection, target)
+
+        self.assertEqual(log_change.call_count, 2)
+        for call in log_change.call_args_list:
+            self.assertEqual(call.args[1], 'offer_requests')
+            payload = call.args[4]
+            self.assertEqual(payload['offer_public_id'], 'ofr_request_30')
+            self.assertEqual(payload['request_source_surface'], 'telegram_bot')
+            self.assertEqual(payload['request_source_server'], 'foreign')
+            self.assertEqual(payload['result_status'], 'completed_trade')
+            self.assertEqual(payload['internal_failure_context'], {'redacted': True})
+            self.assertEqual(payload['customer_management_name_snapshot'], 'VIP')
+
+        sync_connection = _FakeConnection(is_sync=True)
+        registry[('OfferRequest', 'after_insert')](None, sync_connection, target)
+        self.assertEqual(log_change.call_count, 2)
+        logger.info.assert_any_call('✅ OfferRequest event listeners registered')
+
     def test_remaining_event_listener_groups_and_setup_all_events(self):
         registry = {}
         now = datetime(2025, 1, 1, 12, 0, 0)
@@ -512,6 +604,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_user_block_events()
             events.setup_trading_settings_events()
             events.setup_invitation_events()
+            events.setup_offer_request_events()
             events.setup_notification_events()
             events.setup_admin_message_events()
 
@@ -671,6 +764,8 @@ class CoreEventsTests(unittest.TestCase):
         ) as setup_chat_member_events, patch(
             'core.events.setup_invitation_events'
         ) as setup_invitation_events, patch('core.events.setup_offer_events') as setup_offer_events, patch(
+            'core.events.setup_offer_request_events'
+        ) as setup_offer_request_events, patch(
             'core.events.setup_trade_events'
         ) as setup_trade_events, patch('core.events.setup_commodity_events') as setup_commodity_events, patch(
             'core.events.setup_commodity_alias_events'
@@ -690,6 +785,7 @@ class CoreEventsTests(unittest.TestCase):
         setup_chat_member_events.assert_called_once()
         setup_invitation_events.assert_called_once()
         setup_offer_events.assert_called_once()
+        setup_offer_request_events.assert_called_once()
         setup_trade_events.assert_called_once()
         setup_commodity_events.assert_called_once()
         setup_commodity_alias_events.assert_called_once()
@@ -716,6 +812,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_user_block_events()
             events.setup_trading_settings_events()
             events.setup_invitation_events()
+            events.setup_offer_request_events()
             events.setup_notification_events()
             events.setup_admin_message_events()
 

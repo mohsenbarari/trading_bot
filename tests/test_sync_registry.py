@@ -70,12 +70,13 @@ class SyncRegistryTests(unittest.TestCase):
             with self.subTest(table_name=table_name):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.INTERNAL_BOOKKEEPING)
 
-    def test_offer_metadata_future_tables_are_classified_before_migrations_land(self):
+    def test_offer_metadata_tables_are_classified_for_sync(self):
         offer_requests = get_sync_registry_entry("offer_requests")
         publication_states = get_sync_registry_entry("offer_publication_states")
 
-        self.assertTrue(offer_requests.planned)
+        self.assertFalse(offer_requests.planned)
         self.assertEqual(offer_requests.policy, SyncPolicy.SYNC)
+        self.assertEqual(offer_requests.authority, "offer_home_server")
         self.assertTrue(publication_states.planned)
         self.assertEqual(publication_states.policy, SyncPolicy.SYNC)
 
