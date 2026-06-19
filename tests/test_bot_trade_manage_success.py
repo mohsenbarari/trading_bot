@@ -44,39 +44,60 @@ def make_callback():
 
 class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_expire_offer_expires_offer_and_removes_buttons(self):
-        offer = SimpleNamespace(user_id=4, status=OfferStatus.ACTIVE, channel_message_id=77)
+        offer = SimpleNamespace(
+            id=5,
+            user_id=4,
+            status=OfferStatus.ACTIVE,
+            home_server="foreign",
+            offer_public_id="ofr_bot_5",
+            channel_message_id=77,
+        )
         final_session = FakeSession(offer)
         factory = FakeSessionFactory(FakeSession(), final_session)
         callback = make_callback()
-        bot = SimpleNamespace(edit_message_reply_markup=AsyncMock())
+        bot = SimpleNamespace()
         settings_obj = SimpleNamespace(channel_id=-100, offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
 
         with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
             "bot.handlers.trade_manage.track_expire_rate", new=AsyncMock(return_value=1)
         ), patch("bot.handlers.trade_manage.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
             "bot.handlers.trade_manage.AsyncSessionLocal", new=factory
-        ), patch("bot.handlers.trade_manage.settings", settings_obj):
+        ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
+        ), patch("bot.handlers.trade_manage.apply_offer_channel_state", new=AsyncMock()) as apply_offer_channel_state:
             await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=SimpleNamespace(id=4), bot=bot)
 
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
+        self.assertEqual(offer.expire_reason, "manual")
+        self.assertEqual(offer.expired_by_user_id, 4)
+        self.assertEqual(offer.expired_by_actor_user_id, 4)
+        self.assertEqual(offer.expire_source_surface, "telegram_bot")
+        self.assertEqual(offer.expire_source_server, "foreign")
         self.assertEqual(final_session.commits, 1)
-        bot.edit_message_reply_markup.assert_awaited_once_with(chat_id=-100, message_id=77, reply_markup=None)
+        apply_offer_channel_state.assert_awaited_once_with(offer, reason="manual_expire", timeout=10)
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         callback.answer.assert_awaited_with("✅ لفظ شما منقضی شد")
 
     async def test_handle_expire_offer_logs_channel_markup_failures_and_keeps_success_flow(self):
-        offer = SimpleNamespace(user_id=4, status=OfferStatus.ACTIVE, channel_message_id=77)
+        offer = SimpleNamespace(id=5, user_id=4, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=77)
         final_session = FakeSession(offer)
         factory = FakeSessionFactory(FakeSession(), final_session)
         callback = make_callback()
-        bot = SimpleNamespace(edit_message_reply_markup=AsyncMock(side_effect=RuntimeError('edit failed')))
+        bot = SimpleNamespace()
         settings_obj = SimpleNamespace(channel_id=-100, offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
 
         with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
             "bot.handlers.trade_manage.track_expire_rate", new=AsyncMock(return_value=1)
         ), patch("bot.handlers.trade_manage.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
             "bot.handlers.trade_manage.AsyncSessionLocal", new=factory
-        ), patch("bot.handlers.trade_manage.settings", settings_obj), patch("bot.handlers.trade_manage.logger") as logger:
+        ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "bot.handlers.trade_manage.apply_offer_channel_state",
+            new=AsyncMock(side_effect=RuntimeError("edit failed")),
+        ), patch("bot.handlers.trade_manage.logger") as logger:
             await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=SimpleNamespace(id=4), bot=bot)
 
         logger.debug.assert_called_once()

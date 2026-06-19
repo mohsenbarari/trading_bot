@@ -13,7 +13,7 @@ import logging
 import time
 from datetime import timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from core.db import AsyncSessionLocal
@@ -21,6 +21,12 @@ from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from core import telegram_gateway
+from core.services.offer_expiry_service import (
+    OfferExpiryCommand,
+    OfferExpiryReason,
+    OfferExpirySourceSurface,
+    expire_offers_authoritatively,
+)
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.utils import utc_now_naive
 from models.offer import Offer, OfferStatus
@@ -93,25 +99,25 @@ async def expire_stale_offers() -> int:
         if not expired_offers:
             return 0
         
-        count = len(expired_offers)
-        offer_ids = [o.id for o in expired_offers]
-        for offer in expired_offers:
-            offer.status = OfferStatus.EXPIRED
-            offer.expire_reason = "time_limit"
-            offer.expired_at = now
-        
-        # Bulk update status to EXPIRED
-        await session.execute(
-            update(Offer)
-            .where(Offer.id.in_(offer_ids), Offer.home_server == current_server())
-            .values(status=OfferStatus.EXPIRED, expire_reason="time_limit", expired_at=now)
+        result = await expire_offers_authoritatively(
+            session,
+            expired_offers,
+            OfferExpiryCommand(
+                reason=OfferExpiryReason.TIME_LIMIT,
+                source_surface=OfferExpirySourceSurface.SYSTEM,
+                source_server=current_server(),
+                expired_by_user_id=None,
+                expired_by_actor_user_id=None,
+            ),
+            now=now,
         )
-        await session.commit()
+        count = result.expired_count
+        offer_ids = [o.id for o in result.expired_offers]
         
         logger.info(f"⏰ Auto-expired {count} offers: {offer_ids}")
         
         # Apply terminal channel state on foreign and remove interactive buttons.
-        for offer in expired_offers:
+        for offer in result.expired_offers:
             await apply_offer_channel_state(offer, reason="auto_expire_time_limit")
         
         # Publish realtime events for each expired offer
@@ -125,9 +131,9 @@ async def expire_stale_offers() -> int:
         # Update Redis cache for affected users
         try:
             from core.cache import decr_active_offer_count
-            user_ids = set(o.user_id for o in expired_offers if o.user_id)
+            user_ids = set(o.user_id for o in result.expired_offers if o.user_id)
             for uid in user_ids:
-                user_expired_count = sum(1 for o in expired_offers if o.user_id == uid)
+                user_expired_count = sum(1 for o in result.expired_offers if o.user_id == uid)
                 for _ in range(user_expired_count):
                     await decr_active_offer_count(uid)
         except Exception as e:

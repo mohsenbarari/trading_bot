@@ -6,8 +6,8 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, or_, case
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +33,7 @@ from core.services.customer_relation_service import (
     load_offer_customer_read_context,
 )
 from core.services.user_account_status_service import is_user_market_blocked
+from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_identity import build_offer_public_link, ensure_offer_public_id
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import (
@@ -40,7 +41,18 @@ from core.services.offer_creation_service import (
     OfferCreationValidationError,
     create_authoritative_offer,
 )
+from core.services.offer_expiry_service import (
+    OfferAlreadyInactiveError,
+    OfferExpiryCommand,
+    OfferExpiryReason,
+    OfferExpirySourceSurface,
+    OfferNotAuthoritativeError,
+    apply_offer_expiry,
+    expire_offer_authoritatively,
+    expire_offers_authoritatively,
+)
 from core import telegram_gateway
+from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
 from models.user import User
 from models.customer_relation import CustomerTier
@@ -48,7 +60,7 @@ from models.offer import Offer, OfferType, OfferStatus
 from models.trade import Trade, TradeStatus
 from models.commodity import Commodity
 from api.deps import EffectiveOwnerActor, get_current_user, get_current_user_optional, get_effective_owner_actor_context
-from core.server_routing import current_server
+from core.server_routing import current_server, is_remote_home, normalize_server
 
 
 logger = logging.getLogger(__name__)
@@ -193,6 +205,17 @@ class ParseOfferResponse(BaseModel):
     success: bool
     error: Optional[str] = None
     data: Optional[dict] = None
+
+
+class InternalOfferExpireRequest(BaseModel):
+    """Internal request to expire an offer on its authoritative home server."""
+    offer_id: int = Field(..., gt=0)
+    offer_public_id: Optional[str] = None
+    owner_user_id: int = Field(..., gt=0)
+    actor_user_id: Optional[int] = Field(None, gt=0)
+    source_surface: str
+    source_server: str
+    expire_reason: str
 
 
 # --- Helper Functions ---
@@ -421,6 +444,22 @@ async def _remove_offer_channel_buttons_safely(offer: Offer, *, reason: str, tim
         )
 
 
+async def _expire_offer_side_effects(
+    db: AsyncSession,
+    offer: Offer,
+    *,
+    realtime_reason: str,
+    channel_reason: str,
+    channel_timeout: float,
+    update_active_count: bool = True,
+) -> None:
+    await _remove_offer_channel_buttons_safely(offer, reason=channel_reason, timeout=channel_timeout)
+    await _publish_offer_event_safely("offer:expired", {"id": offer.id}, reason=realtime_reason)
+    if update_active_count and getattr(offer, "user_id", None):
+        active_count = await _read_active_offer_count(db, offer.user_id)
+        await _set_active_offer_count_safely(offer.user_id, active_count, reason=realtime_reason)
+
+
 async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
     """ارسال لفظ به کانال تلگرام و برگرداندن message_id"""
     if current_server() != "foreign":
@@ -464,6 +503,75 @@ async def send_offer_to_channel(offer: Offer, user: User) -> Optional[int]:
         )
     
     return None
+
+
+def _normalize_internal_offer_source(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    normalized = normalize_server(value, default="")
+    return normalized if normalized in {"iran", "foreign"} else None
+
+
+def _build_offer_expiry_forward_payload(
+    offer: Offer,
+    *,
+    owner_user_id: int,
+    actor_user_id: int | None,
+    source_surface: OfferExpirySourceSurface | str,
+    expire_reason: str,
+) -> dict:
+    return {
+        "offer_id": offer.id,
+        "offer_public_id": getattr(offer, "offer_public_id", None),
+        "owner_user_id": owner_user_id,
+        "actor_user_id": actor_user_id,
+        "source_surface": getattr(source_surface, "value", source_surface),
+        "source_server": current_server(),
+        "expire_reason": expire_reason,
+    }
+
+
+async def _forward_offer_expiry_if_remote_home(
+    offer: Offer,
+    *,
+    owner_user_id: int,
+    actor_user_id: int | None,
+    source_surface: OfferExpirySourceSurface | str,
+    expire_reason: str,
+) -> Response | None:
+    if not is_remote_home(getattr(offer, "home_server", None)):
+        return None
+
+    payload = _build_offer_expiry_forward_payload(
+        offer,
+        owner_user_id=owner_user_id,
+        actor_user_id=actor_user_id,
+        source_surface=source_surface,
+        expire_reason=expire_reason,
+    )
+    status_code, body = await forward_offer_expiry_to_home_server(offer.home_server, payload)
+    if status_code < 400:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return JSONResponse(status_code=status_code, content=body)
+
+
+async def _forward_offer_expiry_for_cancel_all(
+    offer: Offer,
+    *,
+    owner_user_id: int,
+    actor_user_id: int | None,
+    source_surface: OfferExpirySourceSurface | str,
+    expire_reason: str,
+) -> bool:
+    payload = _build_offer_expiry_forward_payload(
+        offer,
+        owner_user_id=owner_user_id,
+        actor_user_id=actor_user_id,
+        source_surface=source_surface,
+        expire_reason=expire_reason,
+    )
+    status_code, _body = await forward_offer_expiry_to_home_server(offer.home_server, payload)
+    return status_code < 400
 
 
 # --- Endpoints ---
@@ -652,9 +760,17 @@ async def create_offer(
     if old_offer and old_offer.user_id == owner_user.id:
         # اگر لفظ قبلی هنوز فعال باشد، آن را منقضی می‌کنیم
         if old_offer.status == OfferStatus.ACTIVE:
-            old_offer.status = OfferStatus.EXPIRED
-            old_offer.expired_at = utc_now_naive()
-            old_offer.expire_reason = "republished"
+            apply_offer_expiry(
+                old_offer,
+                OfferExpiryCommand(
+                    reason=OfferExpiryReason.REPUBLISHED,
+                    source_surface=OfferExpirySourceSurface.WEBAPP,
+                    source_server=current_server(),
+                    expired_by_user_id=owner_user.id,
+                    expired_by_actor_user_id=actor_user.id,
+                ),
+                require_authority=False,
+            )
 
     try:
         new_offer = await create_authoritative_offer(
@@ -1107,6 +1223,77 @@ async def get_my_offers(
     )
 
 
+@router.post("/internal/expire", status_code=status.HTTP_200_OK)
+async def expire_offer_internal(
+    internal_data: InternalOfferExpireRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    body = await raw_request.body()
+    target_server = current_server()
+    payload_source_server = _normalize_internal_offer_source(internal_data.source_server)
+    header_source_server = _normalize_internal_offer_source(raw_request.headers.get("x-source-server"))
+    if not verify_internal_signature(
+        body,
+        raw_request.headers.get("x-timestamp"),
+        raw_request.headers.get("x-signature"),
+        raw_request.headers.get("x-api-key"),
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal offer expiry signature")
+
+    if (
+        not payload_source_server
+        or not header_source_server
+        or payload_source_server != header_source_server
+        or payload_source_server == target_server
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal offer expiry source")
+
+    offer = await db.get(Offer, internal_data.offer_id, options=[selectinload(Offer.commodity)])
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+    if getattr(offer, "id", None) is None:
+        offer.id = internal_data.offer_id
+
+    if normalize_server(getattr(offer, "home_server", None), target_server) != target_server:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع لفظ نیست.")
+
+    if internal_data.offer_public_id and getattr(offer, "offer_public_id", None) != internal_data.offer_public_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="شناسه عمومی لفظ با سرور مرجع همخوانی ندارد.")
+
+    if offer.user_id != internal_data.owner_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
+
+    if offer.status != OfferStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+    try:
+        await expire_offer_authoritatively(
+            db,
+            offer,
+            OfferExpiryCommand(
+                reason=internal_data.expire_reason,
+                source_surface=internal_data.source_surface,
+                source_server=internal_data.source_server,
+                expired_by_user_id=internal_data.owner_user_id,
+                expired_by_actor_user_id=internal_data.actor_user_id or internal_data.owner_user_id,
+            ),
+        )
+    except OfferNotAuthoritativeError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع لفظ نیست.")
+    except OfferAlreadyInactiveError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+    await _expire_offer_side_effects(
+        db,
+        offer,
+        realtime_reason="internal_offer_expire",
+        channel_reason="internal_offer_expire",
+        channel_timeout=10,
+    )
+    return {"expired": True, "offer_id": offer.id}
+
+
 @router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def expire_offer(
     offer_id: int,
@@ -1160,20 +1347,41 @@ async def expire_offer(
     
     if offer.status != OfferStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
-    
-    offer.status = OfferStatus.EXPIRED
-    offer.expired_at = utc_now_naive()
-    offer.expire_reason = "manual"
-    await db.commit()
-    
-    # حذف دکمه‌ها از کانال
-    await _remove_offer_channel_buttons_safely(offer, reason="manual_expire", timeout=10)
-    
-    # ارسال رویداد SSE
-    await _publish_offer_event_safely("offer:expired", {"id": offer_id}, reason="manual_expire")
 
-    active_count = await _read_active_offer_count(db, offer.user_id)
-    await _set_active_offer_count_safely(offer.user_id, active_count, reason="manual_expire")
+    forwarded_response = await _forward_offer_expiry_if_remote_home(
+        offer,
+        owner_user_id=owner_user.id,
+        actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+        source_surface=OfferExpirySourceSurface.WEBAPP,
+        expire_reason=OfferExpiryReason.MANUAL,
+    )
+    if forwarded_response is not None:
+        return forwarded_response
+
+    try:
+        await expire_offer_authoritatively(
+            db,
+            offer,
+            OfferExpiryCommand(
+                reason=OfferExpiryReason.MANUAL,
+                source_surface=OfferExpirySourceSurface.WEBAPP,
+                source_server=current_server(),
+                expired_by_user_id=owner_user.id,
+                expired_by_actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+            ),
+        )
+    except OfferNotAuthoritativeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"این لفظ باید روی سرور {exc.home_server} منقضی شود.")
+    except OfferAlreadyInactiveError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+    await _expire_offer_side_effects(
+        db,
+        offer,
+        realtime_reason="manual_expire",
+        channel_reason="manual_expire",
+        channel_timeout=10,
+    )
     
     return None
 
@@ -1199,21 +1407,41 @@ async def cancel_all_active_offers(
     if not offers:
         return {"cancelled_count": 0}
         
-    expired_at = utc_now_naive()
-    for offer in offers:
-        offer.status = OfferStatus.EXPIRED
-        offer.expired_at = expired_at
-        offer.expire_reason = "cancel_all"
+    local_offers = [offer for offer in offers if not is_remote_home(getattr(offer, "home_server", None))]
+    remote_offers = [offer for offer in offers if is_remote_home(getattr(offer, "home_server", None))]
+    local_result = await expire_offers_authoritatively(
+        db,
+        local_offers,
+        OfferExpiryCommand(
+            reason=OfferExpiryReason.CANCEL_ALL,
+            source_surface=OfferExpirySourceSurface.WEBAPP,
+            source_server=current_server(),
+            expired_by_user_id=owner_user.id,
+            expired_by_actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+        ),
+        commit=bool(local_offers),
+    )
 
-    await db.commit()
+    remote_expired_count = 0
+    for offer in remote_offers:
+        if await _forward_offer_expiry_for_cancel_all(
+            offer,
+            owner_user_id=owner_user.id,
+            actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+            source_surface=OfferExpirySourceSurface.WEBAPP,
+            expire_reason=OfferExpiryReason.CANCEL_ALL,
+        ):
+            remote_expired_count += 1
 
-    for offer in offers:
+    for offer in local_result.expired_offers:
         await _remove_offer_channel_buttons_safely(offer, reason="cancel_all_active_offers", timeout=5)
         await _publish_offer_event_safely("offer:expired", {"id": offer.id}, reason="cancel_all_active_offers")
 
-    await _set_active_offer_count_safely(owner_user.id, 0, reason="cancel_all_active_offers")
+    if local_result.expired_count or remote_expired_count:
+        cache_count = 0 if local_result.expired_count + remote_expired_count == len(offers) else await _read_active_offer_count(db, owner_user.id)
+        await _set_active_offer_count_safely(owner_user.id, cache_count, reason="cancel_all_active_offers")
     
-    return {"cancelled_count": len(offers)}
+    return {"cancelled_count": local_result.expired_count + remote_expired_count}
 
 
 @router.post("/parse", response_model=ParseOfferResponse)

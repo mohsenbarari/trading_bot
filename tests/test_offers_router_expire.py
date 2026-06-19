@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from api.routers.offers import cancel_all_active_offers, expire_offer
+from api.routers.offers import InternalOfferExpireRequest, cancel_all_active_offers, expire_offer, expire_offer_internal
 from models.offer import OfferStatus
 
 
@@ -133,7 +133,14 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             offer_expire_rate_per_minute=5,
             offer_expire_daily_limit_after_threshold=10,
         )
-        offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=None)
+        offer = SimpleNamespace(
+            id=7,
+            user_id=5,
+            status=OfferStatus.ACTIVE,
+            home_server="iran",
+            offer_public_id="ofr_api_7",
+            channel_message_id=None,
+        )
         db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
 
@@ -149,15 +156,120 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         ) as publish_mock, patch(
             "core.cache.set_active_offer_count",
             new=AsyncMock(),
-        ) as set_count_mock:
+        ) as set_count_mock, patch("api.routers.offers.current_server", return_value="iran"), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="iran",
+        ), patch(
+            "api.routers.offers.is_remote_home",
+            return_value=False,
+        ):
             result = await expire_offer(offer_id=7, db=db, context=make_context(current_user))
 
         self.assertIsNone(result)
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
         self.assertIsNotNone(offer.expired_at)
         self.assertEqual(offer.expire_reason, "manual")
+        self.assertEqual(offer.expired_by_user_id, 5)
+        self.assertEqual(offer.expired_by_actor_user_id, 5)
+        self.assertEqual(offer.expire_source_surface, "webapp")
+        self.assertEqual(offer.expire_source_server, "iran")
         db.commit.assert_awaited_once()
         publish_mock.assert_awaited_once_with("offer:expired", {"id": 7})
+        set_count_mock.assert_awaited_once_with(5, 0)
+
+    async def test_expire_offer_forwards_remote_home_without_local_mutation(self):
+        settings = SimpleNamespace(
+            offer_expire_rate_per_minute=5,
+            offer_expire_daily_limit_after_threshold=10,
+        )
+        offer = SimpleNamespace(
+            id=12,
+            user_id=5,
+            status=OfferStatus.ACTIVE,
+            home_server="foreign",
+            offer_public_id="ofr_remote_12",
+            channel_message_id=None,
+        )
+        db = FakeDB(scalar_result=0, get_result=offer)
+        current_user = SimpleNamespace(id=5)
+
+        with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
+            "bot.utils.redis_helpers.track_expire_rate",
+            new=AsyncMock(return_value=1),
+        ), patch(
+            "bot.utils.redis_helpers.track_daily_expire",
+            new=AsyncMock(return_value={"count": 0}),
+        ), patch("api.routers.offers.is_remote_home", return_value=True), patch(
+            "api.routers.offers.current_server",
+            return_value="iran",
+        ), patch(
+            "api.routers.offers.forward_offer_expiry_to_home_server",
+            new=AsyncMock(return_value=(200, {"expired": True})),
+        ) as forward_mock:
+            response = await expire_offer(offer_id=12, db=db, context=make_context(current_user))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(offer.status, OfferStatus.ACTIVE)
+        self.assertFalse(hasattr(offer, "expired_at"))
+        db.commit.assert_not_awaited()
+        forward_mock.assert_awaited_once()
+        payload = forward_mock.await_args.args[1]
+        self.assertEqual(payload["offer_id"], 12)
+        self.assertEqual(payload["offer_public_id"], "ofr_remote_12")
+        self.assertEqual(payload["source_surface"], "webapp")
+        self.assertEqual(payload["source_server"], "iran")
+        self.assertEqual(payload["expire_reason"], "manual")
+
+    async def test_internal_expire_records_forwarded_source_metadata(self):
+        offer = SimpleNamespace(
+            id=21,
+            user_id=5,
+            status=OfferStatus.ACTIVE,
+            home_server="foreign",
+            offer_public_id="ofr_internal_21",
+            channel_message_id=None,
+        )
+        db = FakeDB(scalar_result=0, get_result=offer)
+        request = SimpleNamespace(
+            body=AsyncMock(return_value=b'{"offer_id":21}'),
+            headers={
+                "x-source-server": "iran",
+                "x-timestamp": "123",
+                "x-signature": "sig",
+                "x-api-key": "key",
+            },
+        )
+        payload = InternalOfferExpireRequest(
+            offer_id=21,
+            offer_public_id="ofr_internal_21",
+            owner_user_id=5,
+            actor_user_id=8,
+            source_surface="webapp",
+            source_server="iran",
+            expire_reason="manual",
+        )
+
+        with patch("api.routers.offers.verify_internal_signature", return_value=True), patch(
+            "api.routers.offers.current_server",
+            return_value="foreign",
+        ), patch("core.services.offer_expiry_service.current_server", return_value="foreign"), patch(
+            "api.routers.realtime.publish_event",
+            new=AsyncMock(),
+        ) as publish_mock, patch(
+            "core.cache.set_active_offer_count",
+            new=AsyncMock(),
+        ) as set_count_mock:
+            result = await expire_offer_internal(payload, request, db=db)
+
+        self.assertEqual(result, {"expired": True, "offer_id": 21})
+        self.assertEqual(offer.status, OfferStatus.EXPIRED)
+        self.assertEqual(offer.expire_reason, "manual")
+        self.assertEqual(offer.expired_by_user_id, 5)
+        self.assertEqual(offer.expired_by_actor_user_id, 8)
+        self.assertEqual(offer.expire_source_surface, "webapp")
+        self.assertEqual(offer.expire_source_server, "iran")
+        db.commit.assert_awaited_once()
+        publish_mock.assert_awaited_once_with("offer:expired", {"id": 21})
         set_count_mock.assert_awaited_once_with(5, 0)
 
     async def test_expire_offer_applies_channel_state_when_message_exists(self):
@@ -165,7 +277,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             offer_expire_rate_per_minute=5,
             offer_expire_daily_limit_after_threshold=10,
         )
-        offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=333)
+        offer = SimpleNamespace(id=9, user_id=5, status=OfferStatus.ACTIVE, channel_message_id=333)
         db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
@@ -190,7 +302,7 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
             offer_expire_rate_per_minute=5,
             offer_expire_daily_limit_after_threshold=10,
         )
-        offer = SimpleNamespace(user_id=5, status=OfferStatus.ACTIVE, channel_message_id=444)
+        offer = SimpleNamespace(id=10, user_id=5, status=OfferStatus.ACTIVE, channel_message_id=444)
         db = FakeDB(scalar_results=[1, 0], get_result=offer)
         current_user = SimpleNamespace(id=5)
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
@@ -249,25 +361,41 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_all_active_offers_expires_offers_and_logs_channel_state_failures(self):
         offers = [
-            SimpleNamespace(id=1, status=OfferStatus.ACTIVE, channel_message_id=333, user_id=5),
-            SimpleNamespace(id=2, status=OfferStatus.ACTIVE, channel_message_id=None, user_id=5),
+            SimpleNamespace(id=1, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=333, user_id=5),
+            SimpleNamespace(id=2, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=None, user_id=5),
         ]
         db = FakeDB(execute_results=[FakeExecuteResult(offers)])
+        order = []
+        db.commit.side_effect = lambda: order.append("commit")
+
+        async def fail_channel_state(*_args, **_kwargs):
+            order.append("channel")
+            raise RuntimeError("telegram down")
+
         with patch("api.routers.offers.current_server", return_value="foreign"), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
+        ), patch(
             "api.routers.offers.apply_offer_channel_state",
-            new=AsyncMock(side_effect=RuntimeError("telegram down")),
+            new=AsyncMock(side_effect=fail_channel_state),
         ) as apply_offer_channel_state, patch("api.routers.realtime.publish_event", new=AsyncMock()) as publish_mock, patch(
             "core.cache.set_active_offer_count",
-            new=AsyncMock(),
+            new=AsyncMock(side_effect=lambda *_args, **_kwargs: order.append("cache")),
         ) as set_count_mock, patch("api.routers.offers.logger") as logger:
             result = await cancel_all_active_offers(db=db, context=make_context(SimpleNamespace(id=5)))
 
         self.assertEqual(result, {"cancelled_count": 2})
         self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
+        self.assertEqual([offer.expire_reason for offer in offers], ["cancel_all", "cancel_all"])
+        self.assertEqual([offer.expired_by_user_id for offer in offers], [5, 5])
+        self.assertEqual([offer.expired_by_actor_user_id for offer in offers], [5, 5])
+        self.assertEqual([offer.expire_source_surface for offer in offers], ["webapp", "webapp"])
+        self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
         self.assertEqual(publish_mock.await_count, 2)
         set_count_mock.assert_awaited_once_with(5, 0)
         apply_offer_channel_state.assert_awaited_once_with(offers[0], reason="cancel_all_active_offers", timeout=5)
         db.commit.assert_awaited_once()
+        self.assertEqual(order[0], "commit")
         logger.warning.assert_called_once()
 
 

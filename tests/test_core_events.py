@@ -116,6 +116,10 @@ class CoreEventsTests(unittest.TestCase):
             republished_offer_id=12,
             created_at=now,
             updated_at=now,
+            expired_by_user_id=9,
+            expired_by_actor_user_id=7,
+            expire_source_surface='webapp',
+            expire_source_server='iran',
             idempotency_key='idem',
             archived=False,
         )
@@ -387,6 +391,10 @@ class CoreEventsTests(unittest.TestCase):
                 republished_offer_id=12,
                 created_at=now,
                 updated_at=now,
+                expired_by_user_id=9,
+                expired_by_actor_user_id=7,
+                expire_source_surface='webapp',
+                expire_source_server='iran',
                 idempotency_key='idem',
                 archived=False,
             )
@@ -471,6 +479,10 @@ class CoreEventsTests(unittest.TestCase):
         self.assertTrue(offer_payloads)
         for payload in offer_payloads:
             self.assertEqual(payload['offer_public_id'], 'ofr_event_1')
+            self.assertEqual(payload['expired_by_user_id'], 9)
+            self.assertEqual(payload['expired_by_actor_user_id'], 7)
+            self.assertEqual(payload['expire_source_surface'], 'webapp')
+            self.assertEqual(payload['expire_source_server'], 'iran')
         publish_event_sync.assert_any_call('offer:created', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:updated', unittest.mock.ANY)
         publish_event_sync.assert_any_call('offer:expired', {'id': 1})

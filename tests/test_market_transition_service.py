@@ -247,8 +247,8 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_apply_market_closed_transition_expires_local_offers_and_publishes_notice(self):
         state = MarketRuntimeState(id=1, is_open=True, active_web_notice_visible=False, offers_since_last_open=2)
         offers = [
-            SimpleNamespace(id=11, status=OfferStatus.ACTIVE, channel_message_id=101, user_id=5),
-            SimpleNamespace(id=12, status=OfferStatus.ACTIVE, channel_message_id=None, user_id=8),
+            SimpleNamespace(id=11, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=101, user_id=5),
+            SimpleNamespace(id=12, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=None, user_id=8),
         ]
         db = SimpleNamespace(
             execute=AsyncMock(
@@ -271,6 +271,12 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
             market_transition_service, "_send_market_channel_notice", new=AsyncMock()
         ) as notice_mock, patch(
+            "core.services.market_transition_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
+        ), patch(
             "core.services.market_transition_service.remove_channel_buttons",
             new=AsyncMock(),
         ) as remove_buttons_mock, patch(
@@ -295,6 +301,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.last_transition_at, now)
         self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
         self.assertEqual([offer.expire_reason for offer in offers], ["market_closed", "market_closed"])
+        self.assertEqual([offer.expire_source_surface for offer in offers], ["system", "system"])
+        self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
+        self.assertEqual([offer.expired_by_user_id for offer in offers], [None, None])
+        self.assertEqual([offer.expired_by_actor_user_id for offer in offers], [None, None])
         db.commit.assert_awaited_once()
         remove_buttons_mock.assert_awaited_once_with(101)
         self.assertEqual(decr_mock.await_count, 2)

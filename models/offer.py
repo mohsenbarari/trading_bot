@@ -61,6 +61,10 @@ class Offer(Base):
     price_warning_type = Column(String(64), nullable=True)
     expire_reason = Column(String(32), nullable=True)
     expired_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    expired_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    expired_by_actor_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    expire_source_surface = Column(String(32), nullable=True)
+    expire_source_server = Column(String(16), nullable=True)
     
     # تعداد باقیمانده (برای فروش خُرد)
     remaining_quantity = Column(Integer, nullable=True)

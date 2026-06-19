@@ -15,8 +15,17 @@ from bot.states import Trade
 from core.config import settings
 from core.enums import UserRole
 from core.db import AsyncSessionLocal
+from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
+from core.server_routing import current_server, is_remote_home
+from core.services.offer_expiry_service import (
+    OfferExpiryCommand,
+    OfferExpiryReason,
+    OfferExpirySourceSurface,
+    expire_offer_authoritatively,
+    expire_offers_authoritatively,
+)
 from core.services.trade_service import (
     validate_lot_sizes,
     validate_quantity,
@@ -55,6 +64,21 @@ BOT_MARKET_CLOSED_MESSAGE = (
     "بعلت بسته بودن بازار درخواست شما ثبت نشد\n"
     "لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید."
 )
+
+
+async def _expire_offer_after_publication_failure(session, offer: Offer, user_id: int) -> None:
+    await expire_offer_authoritatively(
+        session,
+        offer,
+        OfferExpiryCommand(
+            reason=OfferExpiryReason.TELEGRAM_SEND_FAILED,
+            source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
+            source_server=current_server(),
+            expired_by_user_id=user_id,
+            expired_by_actor_user_id=user_id,
+        ),
+        require_authority=False,
+    )
 
 
 async def _bot_market_is_open() -> bool:
@@ -742,10 +766,7 @@ async def _handle_trade_confirm_core(
                 async with AsyncSessionLocal() as session:
                     offer = await session.get(Offer, offer_id)
                     if offer:
-                        offer.status = OfferStatus.EXPIRED
-                        offer.expired_at = utc_now_naive()
-                        offer.expire_reason = "telegram_send_failed"
-                        await session.commit()
+                        await _expire_offer_after_publication_failure(session, offer, user.id)
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after Telegram error: {rollback_error}")
         await callback.message.edit_text(f"❌ خطا در ارسال به کانال: {exc}")
@@ -755,10 +776,7 @@ async def _handle_trade_confirm_core(
                 async with AsyncSessionLocal() as session:
                     offer = await session.get(Offer, offer_id)
                     if offer:
-                        offer.status = OfferStatus.EXPIRED
-                        offer.expired_at = utc_now_naive()
-                        offer.expire_reason = "telegram_send_failed"
-                        await session.commit()
+                        await _expire_offer_after_publication_failure(session, offer, user.id)
             except Exception as rollback_error:
                 logger.debug(f"Rollback failed after unexpected error: {rollback_error}")
         await callback.message.edit_text(f"{unexpected_error_prefix}: {exc}")
@@ -940,19 +958,48 @@ async def handle_cancel_all_offers_bot(message: types.Message, state: FSMContext
         from api.routers.realtime import publish_event
         from core.cache import decr_active_offer_count
 
-        expired_at = utc_now_naive()
-        for offer in offers:
-            offer.status = OfferStatus.EXPIRED
-            offer.expired_at = expired_at
-            offer.expire_reason = "bot_cancel_all"
+        local_offers = [offer for offer in offers if not is_remote_home(getattr(offer, "home_server", None))]
+        remote_offers = [offer for offer in offers if is_remote_home(getattr(offer, "home_server", None))]
+        local_result = await expire_offers_authoritatively(
+            session,
+            local_offers,
+            OfferExpiryCommand(
+                reason=OfferExpiryReason.BOT_CANCEL_ALL,
+                source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
+                source_server=current_server(),
+                expired_by_user_id=user.id,
+                expired_by_actor_user_id=user.id,
+            ),
+            commit=bool(local_offers),
+        )
 
+        remote_expired_count = 0
+        for offer in remote_offers:
+            status_code, _body = await forward_offer_expiry_to_home_server(
+                offer.home_server,
+                {
+                    "offer_id": getattr(offer, "id", None),
+                    "offer_public_id": getattr(offer, "offer_public_id", None),
+                    "owner_user_id": user.id,
+                    "actor_user_id": user.id,
+                    "source_surface": OfferExpirySourceSurface.TELEGRAM_BOT.value,
+                    "source_server": current_server(),
+                    "expire_reason": OfferExpiryReason.BOT_CANCEL_ALL,
+                },
+            )
+            if status_code < 400:
+                remote_expired_count += 1
+
+        for offer in local_result.expired_offers:
             await apply_offer_channel_state(offer, reason="bot_cancel_all", timeout=5)
             await publish_event("offer:expired", {"id": offer.id})
             await decr_active_offer_count(user.id)
-                
-        await session.commit()
+
+        for _ in range(remote_expired_count):
+            await decr_active_offer_count(user.id)
         
-    await message.answer(f"✅ تمام لفظ‌های فعال شما ({len(offers)} لفظ) منقضی شدند.")
+    expired_count = local_result.expired_count + remote_expired_count
+    await message.answer(f"✅ تمام لفظ‌های فعال شما ({expired_count} لفظ) منقضی شدند.")
 
 
 @router.message(F.text.func(has_trade_indicator))

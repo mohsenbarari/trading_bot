@@ -12,6 +12,7 @@ TRADING_LOG_CLASS = "trading"
 
 _ALLOWED_ACTIONS = {
     "offer_create",
+    "offer_expiry_forward",
     "offer_idempotent_replay",
     "trade_execute",
     "trade_idempotent_replay",

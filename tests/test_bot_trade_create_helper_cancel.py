@@ -117,29 +117,42 @@ class BotTradeCreateHelperAndCancelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_cancel_all_offers_expires_offers_and_syncs_side_effects(self):
         offers = [
-            SimpleNamespace(id=10, status=OfferStatus.ACTIVE, channel_message_id=222),
-            SimpleNamespace(id=11, status=OfferStatus.ACTIVE, channel_message_id=None),
+            SimpleNamespace(id=10, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=222),
+            SimpleNamespace(id=11, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=None),
         ]
         session = FakeSession(offers)
         message = SimpleNamespace(answer=AsyncMock())
+        order = []
+        session.commit.side_effect = lambda: order.append("commit")
 
         with patch(
             "bot.handlers.trade_create.AsyncSessionLocal",
             return_value=FakeSessionContext(session),
+        ), patch("bot.handlers.trade_create.is_remote_home", return_value=False), patch(
+            "bot.handlers.trade_create.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
         ), patch(
             "bot.handlers.trade_create.apply_offer_channel_state",
-            new=AsyncMock(),
+            new=AsyncMock(side_effect=lambda *_args, **_kwargs: order.append("channel")),
         ) as apply_offer_channel_state, patch(
             "api.routers.realtime.publish_event",
-            new=AsyncMock(),
+            new=AsyncMock(side_effect=lambda *_args, **_kwargs: order.append("publish")),
         ) as publish_event_mock, patch(
             "core.cache.decr_active_offer_count",
-            new=AsyncMock(),
+            new=AsyncMock(side_effect=lambda *_args, **_kwargs: order.append("cache")),
         ) as decr_active_offer_count_mock:
             await handle_cancel_all_offers_bot(message, state=SimpleNamespace(), user=SimpleNamespace(id=15))
 
         self.assertEqual(offers[0].status, OfferStatus.EXPIRED)
         self.assertEqual(offers[1].status, OfferStatus.EXPIRED)
+        self.assertEqual([offer.expire_reason for offer in offers], ["bot_cancel_all", "bot_cancel_all"])
+        self.assertEqual([offer.expired_by_user_id for offer in offers], [15, 15])
+        self.assertEqual([offer.expired_by_actor_user_id for offer in offers], [15, 15])
+        self.assertEqual([offer.expire_source_surface for offer in offers], ["telegram_bot", "telegram_bot"])
+        self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
         apply_offer_channel_state.assert_any_await(offers[0], reason="bot_cancel_all", timeout=5)
         apply_offer_channel_state.assert_any_await(offers[1], reason="bot_cancel_all", timeout=5)
         self.assertEqual(apply_offer_channel_state.await_count, 2)
@@ -149,6 +162,8 @@ class BotTradeCreateHelperAndCancelTests(unittest.IsolatedAsyncioTestCase):
         decr_active_offer_count_mock.assert_any_await(15)
         self.assertEqual(decr_active_offer_count_mock.await_count, 2)
         session.commit.assert_awaited_once()
+        self.assertEqual(order[0], "commit")
+        self.assertNotIn("commit", order[1:])
         message.answer.assert_awaited_once()
         summary_text = message.answer.await_args.args[0]
         self.assertIn("تمام لفظ", summary_text)

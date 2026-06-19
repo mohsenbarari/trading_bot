@@ -529,6 +529,32 @@ Exit criteria:
 - Expiry/cancel paths have one authority rule and one side-effect contract.
 - Offer expiry metadata is sufficient for the offer detail link and audit views.
 
+Implementation decisions:
+
+- The shared command is `OfferExpiryCommand` in `core.services.offer_expiry_service`; WebApp,
+  Telegram Bot, auto-expiry, market-close expiry, remote-forwarded expiry, and cancel-all adapters
+  must use this command/service instead of setting `Offer.status`, `Offer.expired_at`, or
+  `Offer.expire_reason` directly.
+- The canonical audit columns are nullable on `offers`: `expired_by_user_id`,
+  `expired_by_actor_user_id`, `expire_source_surface`, and `expire_source_server`. Existing
+  historical rows are not backfilled in Step 5B; Step 5C-0 owns the public-link/request-ledger field
+  policy and any later historical presentation rules.
+- Non-authoritative owner expiry forwards a signed internal request to
+  `POST /api/offers/internal/expire` on the offer home server. A successful forward returns success
+  to the initiating surface without mutating the local replica; the local replica updates only after
+  normal cross-server sync receives the authoritative row.
+- Authoritative expiry commits before Telegram channel edits, realtime events, and active-offer
+  cache updates. Tests must assert this ordering for cancel-all flows because those flows have the
+  largest side-effect fanout.
+- Automatic/system expiry uses `expire_source_surface=system` and leaves user/actor expiry ids
+  empty. Owner actions use the initiating surface (`webapp` or `telegram_bot`) and record both owner
+  and actor ids.
+- User deletion is the only accepted Step 5B bulk-update exception because it is part of the wider
+  account deletion transaction. It must still write equivalent system expiry metadata and must not
+  invent a user actor.
+- Legacy `expire_reason` string values remain stable for compatibility; new standardized reason
+  mapping can be addressed after Step 5C-0 if the offer detail/audit UI needs a stricter enum.
+
 ### Step 5C-0 - Minimum Field Policy For Offer Link And Request Ledger
 
 Required behavior:

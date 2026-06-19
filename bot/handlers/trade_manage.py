@@ -7,10 +7,19 @@ from sqlalchemy import select, func
 
 from models.user import User
 from models.offer import Offer, OfferStatus
-from core.config import settings
 from core.db import AsyncSessionLocal
 from core.trading_settings import get_trading_settings
-from core.utils import utc_now_naive
+from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
+from core.server_routing import current_server, is_remote_home
+from core.services.offer_expiry_service import (
+    OfferAlreadyInactiveError,
+    OfferExpiryCommand,
+    OfferExpiryReason,
+    OfferExpirySourceSurface,
+    OfferNotAuthoritativeError,
+    expire_offer_authoritatively,
+)
+from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from bot.utils.redis_helpers import track_expire_rate, track_daily_expire
 from bot.callbacks import ExpireOfferCallback
 
@@ -75,24 +84,50 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
         if offer.status != OfferStatus.ACTIVE:
             await callback.answer("❌ این لفظ دیگر فعال نیست")
             return
-        
-        # منقضی کردن لفظ
-        offer.status = OfferStatus.EXPIRED
-        offer.expired_at = utc_now_naive()
-        offer.expire_reason = "manual"
-        await session.commit()
-        
-        # حذف دکمه از پست کانال
-        if offer.channel_message_id and settings.channel_id:
+
+        if is_remote_home(getattr(offer, "home_server", None)):
+            status_code, body = await forward_offer_expiry_to_home_server(
+                offer.home_server,
+                {
+                    "offer_id": getattr(offer, "id", offer_id),
+                    "offer_public_id": getattr(offer, "offer_public_id", None),
+                    "owner_user_id": user.id,
+                    "actor_user_id": user.id,
+                    "source_surface": OfferExpirySourceSurface.TELEGRAM_BOT.value,
+                    "source_server": current_server(),
+                    "expire_reason": OfferExpiryReason.MANUAL,
+                },
+            )
+            if status_code >= 400:
+                detail = body.get("detail") if isinstance(body, dict) else None
+                await callback.answer(f"❌ {detail or 'خطا در منقضی کردن لفظ'}")
+                return
+        else:
             try:
-                await bot.edit_message_reply_markup(
-                    chat_id=settings.channel_id,
-                    message_id=offer.channel_message_id,
-                    reply_markup=None
+                await expire_offer_authoritatively(
+                    session,
+                    offer,
+                    OfferExpiryCommand(
+                        reason=OfferExpiryReason.MANUAL,
+                        source_surface=OfferExpirySourceSurface.TELEGRAM_BOT,
+                        source_server=current_server(),
+                        expired_by_user_id=user.id,
+                        expired_by_actor_user_id=user.id,
+                    ),
                 )
-            except Exception as e:
-                logger.debug(f"Failed to remove channel buttons: {e}")
-        
+            except OfferNotAuthoritativeError:
+                await callback.answer("❌ این لفظ باید روی سرور مرجع منقضی شود")
+                return
+            except OfferAlreadyInactiveError:
+                await callback.answer("❌ این لفظ دیگر فعال نیست")
+                return
+
+            if offer.channel_message_id:
+                try:
+                    await apply_offer_channel_state(offer, reason="manual_expire", timeout=10)
+                except Exception as e:
+                    logger.debug(f"Failed to apply channel offer state: {e}")
+
         # حذف دکمه از پیام کاربر
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.answer("✅ لفظ شما منقضی شد")

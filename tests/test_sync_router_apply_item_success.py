@@ -90,7 +90,16 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.execute_calls[0], ("TRADING_UPSERT", {"is_sync": True}))
 
         new_offers = []
-        offer_data = {"price": 12, "channel_message_id": 99, "home_server": "iran", "offer_public_id": "ofr_remote_8"}
+        offer_data = {
+            "price": 12,
+            "channel_message_id": 99,
+            "home_server": "iran",
+            "offer_public_id": "ofr_remote_8",
+            "expired_by_user_id": 2,
+            "expired_by_actor_user_id": 3,
+            "expire_source_surface": "webapp",
+            "expire_source_server": "iran",
+        }
         db = FakeDB()
         with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT") as builder, patch(
             "api.routers.sync.settings.server_mode", "foreign"
@@ -109,6 +118,10 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("channel_message_id", offer_data)
         self.assertEqual(offer_data["home_server"], "iran")
         self.assertEqual(offer_data["offer_public_id"], "ofr_remote_8")
+        self.assertEqual(offer_data["expired_by_user_id"], 2)
+        self.assertEqual(offer_data["expired_by_actor_user_id"], 3)
+        self.assertEqual(offer_data["expire_source_surface"], "webapp")
+        self.assertEqual(offer_data["expire_source_server"], "iran")
         self.assertEqual(offer_data["id"], 8)
         builder.assert_called_once_with(Offer, "offers", offer_data)
         self.assertEqual(db.execute_calls[0], ("UPSERT", {"is_sync": True}))

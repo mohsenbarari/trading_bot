@@ -11,7 +11,9 @@ from sqlalchemy.orm import joinedload
 from bot.utils.redis_helpers import mark_deleted_telegram_user
 from core import telegram_gateway
 from core.config import settings
+from core.server_routing import current_server
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
+from core.services.offer_expiry_service import OfferExpiryReason, OfferExpirySourceSurface
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
 from core.utils import send_telegram_notification, utc_now_naive
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
@@ -242,7 +244,15 @@ async def _delete_user_account_in_transaction(
     await db.execute(
         update(Offer)
         .where(Offer.user_id == user.id, Offer.status == OfferStatus.ACTIVE)
-        .values(status=OfferStatus.EXPIRED, expire_reason="user_deleted", expired_at=utc_now_naive())
+        .values(
+            status=OfferStatus.EXPIRED,
+            expire_reason=OfferExpiryReason.USER_DELETED,
+            expired_at=utc_now_naive(),
+            expired_by_user_id=None,
+            expired_by_actor_user_id=None,
+            expire_source_surface=OfferExpirySourceSurface.SYSTEM.value,
+            expire_source_server=current_server(),
+        )
     )
     invitation_result = await db.execute(
         select(Invitation).where(

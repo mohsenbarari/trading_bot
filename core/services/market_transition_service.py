@@ -15,6 +15,12 @@ from core.config import settings
 from core.events import publish_event_sync
 from core.offer_expiry import remove_channel_buttons
 from core.server_routing import current_server
+from core.services.offer_expiry_service import (
+    OfferExpiryCommand,
+    OfferExpiryReason,
+    OfferExpirySourceSurface,
+    expire_offers_authoritatively,
+)
 from core.trading_settings import get_trading_settings_async
 from core.utils import utc_now
 from models.market_runtime_state import MarketRuntimeState
@@ -322,10 +328,21 @@ async def _apply_market_closed_transition(
     channel_message_ids: list[int] = []
     expired_user_ids: list[int] = []
 
-    for offer in active_offers:
-        offer.status = OfferStatus.EXPIRED
-        offer.expire_reason = "market_closed"
-        offer.expired_at = now
+    expiry_result = await expire_offers_authoritatively(
+        db,
+        active_offers,
+        OfferExpiryCommand(
+            reason=OfferExpiryReason.MARKET_CLOSED,
+            source_surface=OfferExpirySourceSurface.SYSTEM,
+            source_server=current_server(),
+            expired_by_user_id=None,
+            expired_by_actor_user_id=None,
+        ),
+        commit=False,
+        now=now,
+    )
+
+    for offer in expiry_result.expired_offers:
         expired_offer_ids.append(offer.id)
         if offer.channel_message_id:
             channel_message_ids.append(int(offer.channel_message_id))
