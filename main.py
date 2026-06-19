@@ -20,6 +20,7 @@ from core.deployment_surface import allowed_cors_origins
 from core.redis import init_redis, close_redis
 from core.db import AsyncSessionLocal, init_db
 from core.events import setup_event_listeners
+from core.server_routing import SERVER_FOREIGN, normalize_server
 from core.connectivity import connectivity_monitor_loop
 from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
@@ -40,6 +41,9 @@ configure_logging("api")
 logger = logging.getLogger(__name__)
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
+FOREIGN_INTERNAL_EXACT_PATHS = {"/metrics"}
+FOREIGN_INTERNAL_API_PREFIXES = ("/api/sync", "/api/sessions/internal")
+FOREIGN_LOOPBACK_INTERNAL_PATHS = {"/api/config"}
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -70,6 +74,38 @@ def _is_metrics_request_allowed(request: Request) -> bool:
     if configured_key and supplied_key == configured_key:
         return True
     return _is_loopback_client(request.client.host if request.client else None)
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
+def _is_foreign_internal_path(path: str, request: Request) -> bool:
+    if path in FOREIGN_INTERNAL_EXACT_PATHS:
+        return True
+    if any(_path_matches_prefix(path, prefix) for prefix in FOREIGN_INTERNAL_API_PREFIXES):
+        return True
+    if path in FOREIGN_LOOPBACK_INTERNAL_PATHS:
+        return _is_loopback_client(request.client.host if request.client else None)
+    return False
+
+
+def _foreign_surface_guard_reason(request: Request) -> str | None:
+    if normalize_server(getattr(settings, "server_mode", None)) != SERVER_FOREIGN:
+        return None
+
+    path = request.url.path
+    if _is_foreign_internal_path(path, request):
+        return None
+    if _path_matches_prefix(path, "/api/chat"):
+        return "foreign_chat_surface_blocked"
+    if path.startswith("/api/"):
+        return "foreign_webapp_api_blocked"
+    return "foreign_frontend_surface_blocked"
+
+
+def _foreign_surface_blocked_response() -> JSONResponse:
+    return JSONResponse({"detail": "Not Found"}, status_code=404)
 
 
 def _background_job_factories():
@@ -225,6 +261,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_foreign_surface_guard(request: Request, call_next):
+    reason = _foreign_surface_guard_reason(request)
+    if reason is not None:
+        logger.warning(
+            "Blocked foreign server public surface request",
+            extra={
+                "event": "foreign_surface.blocked",
+                "path": request.url.path,
+                "reason": reason,
+                "client_host": request.client.host if request.client else None,
+            },
+        )
+        return _foreign_surface_blocked_response()
+    return await call_next(request)
 
 # -------------------------------------------------------
 # 🛣️ API Routers
