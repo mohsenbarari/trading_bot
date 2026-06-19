@@ -692,7 +692,6 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
         await db.commit()
         await db.refresh(user)
     else:
-        user.home_server = login_home_server
         await ensure_mandatory_channel_membership(db, user=user)
 
     await _clear_dev_bypass_sessions(
@@ -980,7 +979,6 @@ async def verify_otp(
     
     # Session management
     device_info = _extract_device_info(raw_request)
-    user.home_server = login_home_server
     session_result = await handle_login_session(
         db, user, refresh_token,
         device_name=device_info["device_name"],
@@ -1076,8 +1074,6 @@ async def webapp_login(
         device_info["device_name"] = "Telegram Mini App"
         login_home_server = SERVER_FOREIGN
         await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
-        user.home_server = login_home_server
-        
         session_result = await handle_login_session(
             db, user, refresh_token,
             device_name=device_info["device_name"],

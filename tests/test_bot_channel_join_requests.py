@@ -101,7 +101,8 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
             user_id=9,
         )
         join_request.bot.approve_chat_join_request.assert_not_awaited()
-        self.assertIn("ثبت\u200cنام", join_request.bot.send_message.await_args.kwargs["text"])
+        self.assertIn("همگام\u200cسازی", join_request.bot.send_message.await_args.kwargs["text"])
+        self.assertIn("دوباره تلاش کنید", join_request.bot.send_message.await_args.kwargs["text"])
 
     async def test_handle_channel_join_request_declines_inactive_user(self):
         join_request = make_join_request(user_id=10)

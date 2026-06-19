@@ -13,6 +13,7 @@ from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
 from core.services.chat_room_service import ensure_mandatory_channel_membership
+from core.services.user_account_status_service import is_user_market_blocked
 from bot.keyboards import get_persistent_menu_keyboard
 from bot.utils.channel_invites import build_channel_join_request_line
 
@@ -20,6 +21,15 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 INCOMPLETE_ADDRESS_SENTINELS = {"System Default", "REGISTRATION_PENDING"}
+BOT_ACCOUNT_SYNC_PENDING_REASON = "pending_sync"
+BOT_ACCOUNT_INACTIVE_REASON = "inactive"
+BOT_ACCOUNT_DELETED_REASON = "deleted"
+
+
+class BotAccountLinkDenied(PermissionError):
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
 
 class LinkState(StatesGroup):
     waiting_for_contact = State()
@@ -60,6 +70,34 @@ def build_customer_web_only_message() -> str:
     return "\n\n".join(lines)
 
 
+def bot_account_access_denial_reason(user: User | object | None) -> str | None:
+    if user is None:
+        return BOT_ACCOUNT_SYNC_PENDING_REASON
+    if getattr(user, "is_deleted", False):
+        return BOT_ACCOUNT_DELETED_REASON
+    if is_user_market_blocked(user):
+        return BOT_ACCOUNT_INACTIVE_REASON
+    return None
+
+
+def build_bot_account_access_denial_message(reason: str | None) -> str:
+    if reason == BOT_ACCOUNT_INACTIVE_REASON:
+        return (
+            "❌ حساب شما غیرفعال است.\n\n"
+            "تا زمان فعال‌سازی مجدد حساب، امکان اتصال تلگرام یا عضویت در کانال معاملات وجود ندارد."
+        )
+    if reason == BOT_ACCOUNT_DELETED_REASON:
+        return (
+            "❌ این حساب در دسترس نیست.\n\n"
+            "امکان اتصال تلگرام یا عضویت در کانال معاملات برای این حساب وجود ندارد."
+        )
+    return (
+        "⏳ اطلاعات حساب شما هنوز در ربات قابل تایید نیست.\n\n"
+        "اگر همین الان در وب‌اپ ثبت‌نام کرده‌اید، حساب را فعال کرده‌اید، یا شماره را تغییر داده‌اید، "
+        "احتمالاً همگام‌سازی هنوز کامل نشده است. چند لحظه بعد دوباره تلاش کنید."
+    )
+
+
 def _is_mocked_relation_check(relation_checker) -> bool:
     return callable(getattr(relation_checker, "assert_awaited", None)) or callable(
         getattr(relation_checker, "assert_called", None)
@@ -97,6 +135,10 @@ async def finalize_account_link(
     *,
     address: str | None = None,
 ) -> None:
+    access_denial_reason = bot_account_access_denial_reason(user)
+    if access_denial_reason:
+        raise BotAccountLinkDenied(access_denial_reason)
+
     block_reason = await get_web_only_bot_access_reason(db, user)
     if block_reason == "accountant":
         raise PermissionError("ACCOUNTANT_BOT_ACCESS_FORBIDDEN")
@@ -220,7 +262,19 @@ async def handle_contact(message: types.Message, state: FSMContext):
         user = (await db.execute(stmt)).scalar_one_or_none()
         
         if not user:
-            await message.answer("❌ کاربری با این شماره یافت نشد. لطفاً ابتدا در وب ثبت‌نام کنید یا از لینک دعوت استفاده کنید.", reply_markup=types.ReplyKeyboardRemove())
+            await message.answer(
+                build_bot_account_access_denial_message(BOT_ACCOUNT_SYNC_PENDING_REASON),
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
+            await state.clear()
+            return
+
+        access_denial_reason = bot_account_access_denial_reason(user)
+        if access_denial_reason:
+            await message.answer(
+                build_bot_account_access_denial_message(access_denial_reason),
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
             await state.clear()
             return
 
@@ -253,6 +307,11 @@ async def handle_contact(message: types.Message, state: FSMContext):
         
         try:
             await finalize_account_link(db, user, message)
+        except BotAccountLinkDenied as exc:
+            await message.answer(
+                build_bot_account_access_denial_message(exc.reason),
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
         except PermissionError as exc:
             await message.answer(
                 build_web_only_message_for_reason(str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()),
@@ -290,7 +349,19 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
 
         if not user:
             await state.clear()
-            await message.answer("❌ کاربر یافت نشد. لطفاً دوباره /link را بزنید.")
+            await message.answer(
+                build_bot_account_access_denial_message(BOT_ACCOUNT_SYNC_PENDING_REASON),
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
+            return
+
+        access_denial_reason = bot_account_access_denial_reason(user)
+        if access_denial_reason:
+            await state.clear()
+            await message.answer(
+                build_bot_account_access_denial_message(access_denial_reason),
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
             return
 
         block_reason = await get_web_only_bot_access_reason(db, user)
@@ -310,6 +381,11 @@ async def handle_address_completion(message: types.Message, state: FSMContext):
 
         try:
             await finalize_account_link(db, user, message, address=address)
+        except BotAccountLinkDenied as exc:
+            await message.answer(
+                build_bot_account_access_denial_message(exc.reason),
+                reply_markup=types.ReplyKeyboardRemove(),
+            )
         except PermissionError as exc:
             await message.answer(
                 build_web_only_message_for_reason(str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()),

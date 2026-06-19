@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.link_account import LinkState, handle_address_completion, handle_contact
+from core.enums import UserAccountStatus
 
 
 class FakeState:
@@ -109,6 +110,62 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.rollbacks, 1)
         self.assertEqual(state.cleared, 1)
         self.assertIn("خطا در اتصال حساب", message.answer.await_args.args[0])
+
+    async def test_handle_contact_reports_sync_pending_when_account_row_is_missing(self):
+        db = FakeDB(None)
+        state = FakeState()
+        message = make_message()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+            await handle_contact(message, state)
+
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("همگام‌سازی", message.answer.await_args.args[0])
+        self.assertIn("دوباره تلاش کنید", message.answer.await_args.args[0])
+
+    async def test_handle_contact_denies_inactive_or_deleted_accounts(self):
+        inactive_user = SimpleNamespace(
+            telegram_id=None,
+            username=None,
+            full_name="acc",
+            account_name="acc",
+            has_bot_access=False,
+            address="تهران خیابان آزادی پلاک ۱۰",
+            is_deleted=False,
+            account_status=UserAccountStatus.INACTIVE,
+        )
+        db = FakeDB(inactive_user)
+        state = FakeState()
+        message = make_message()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+            await handle_contact(message, state)
+
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("غیرفعال", message.answer.await_args.args[0])
+
+        deleted_user = SimpleNamespace(
+            telegram_id=None,
+            username=None,
+            full_name="acc",
+            account_name="acc",
+            has_bot_access=False,
+            address="تهران خیابان آزادی پلاک ۱۰",
+            is_deleted=True,
+            account_status=UserAccountStatus.ACTIVE,
+        )
+        db = FakeDB(deleted_user)
+        state = FakeState()
+        message = make_message()
+
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+            await handle_contact(message, state)
+
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(state.cleared, 1)
+        self.assertIn("در دسترس نیست", message.answer.await_args.args[0])
 
     async def test_handle_contact_for_placeholder_address_prompts_for_address_completion(self):
         user = SimpleNamespace(

@@ -177,9 +177,10 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         ), patch("api.routers.auth.create_access_token", return_value="access-token"):
             result = await dev_login(request, db=db)
 
-        self.assertEqual(existing_user.home_server, "foreign")
+        self.assertEqual(existing_user.home_server, "iran")
         mandatory_mock.assert_awaited_once_with(db, user=existing_user)
         self.assertEqual(db.commit.await_count, 1)
+        self.assertEqual(db.added[0].home_server, "foreign")
         self.assertEqual(result["user_id"], 7)
 
     async def test_webapp_login_requires_bot_token_and_invalid_payload_returns_auth_failed(self):
@@ -254,6 +255,7 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             result = await webapp_login(WebAppLogin(init_data=init_data), raw_request=request, db=FakeDB([FakeExecuteResult(user)]))
 
         access_mock.assert_called_once_with(subject=7, session_id="session-1", server_id=auth.SERVER_FOREIGN)
+        self.assertEqual(user.home_server, "iran")
         self.assertEqual(
             result,
             {

@@ -310,7 +310,8 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         ("admin", "auth", "bot_link", "webapp"),
         "user/account authority TBD",
         "natural key plus field-level merge; counters use greatest-value merge where needed",
-        "profile/account events",
+        "profile/account product data: telegram_id, account status, role, limits, and counters",
+        notes="user.home_server is legacy/account-origin compatibility only and must not represent current active runtime surface.",
     ),
 }
 

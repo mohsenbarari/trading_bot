@@ -42,6 +42,29 @@ class SyncRegistryTests(unittest.TestCase):
             with self.subTest(table_name=table_name):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.NO_SYNC)
 
+    def test_runtime_session_tables_are_no_sync(self):
+        for table_name in {
+            "user_sessions",
+            "session_login_requests",
+            "single_session_recovery_requests",
+            "single_session_recovery_admin_targets",
+        }:
+            with self.subTest(table_name=table_name):
+                entry = get_sync_registry_entry(table_name)
+                self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
+                self.assertIn("local", entry.authority)
+
+    def test_user_account_product_fields_are_separate_from_runtime_surface(self):
+        users = get_sync_registry_entry("users")
+
+        self.assertEqual(users.policy, SyncPolicy.SYNC)
+        self.assertIn("telegram_id", users.side_effect_classification)
+        self.assertIn("account status", users.side_effect_classification)
+        self.assertIn("role", users.side_effect_classification)
+        self.assertIn("limits", users.side_effect_classification)
+        self.assertIn("legacy/account-origin compatibility", users.notes)
+        self.assertIn("must not represent current active runtime surface", users.notes)
+
     def test_sync_bookkeeping_tables_are_internal_not_product_sync(self):
         for table_name in {"change_log", "sync_blocks"}:
             with self.subTest(table_name=table_name):

@@ -26,7 +26,12 @@ from models.invitation import Invitation
 from models.user import User, set_legacy_has_bot_access_compatibility
 from bot.states import Registration
 from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
-from bot.handlers.link_account import prompt_contact_for_account_link
+from bot.handlers.link_account import (
+    BOT_ACCOUNT_INACTIVE_REASON,
+    bot_account_access_denial_reason,
+    build_bot_account_access_denial_message,
+    prompt_contact_for_account_link,
+)
 from bot.utils.channel_invites import build_channel_join_request_line
 from bot.message_manager import (
     set_anchor, 
@@ -433,20 +438,16 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         )
         user = (await session.execute(stmt)).scalar_one_or_none()
 
-    if not user or is_user_market_blocked(user):
+    denial_reason = bot_account_access_denial_reason(user)
+    if user and is_user_market_blocked(user):
+        denial_reason = BOT_ACCOUNT_INACTIVE_REASON
+
+    if denial_reason:
         await join_request.bot.decline_chat_join_request(
             chat_id=join_request.chat.id,
             user_id=join_request.from_user.id,
         )
-        decline_text = (
-            "❌ درخواست عضویت شما تایید نشد.\n\n"
-            "ابتدا ثبت‌نام یا لینک‌کردن حساب خود در ربات را کامل کنید و سپس دوباره تلاش کنید."
-        )
-        if user and is_user_market_blocked(user):
-            decline_text = (
-                "❌ درخواست عضویت شما تایید نشد.\n\n"
-                "حساب شما غیرفعال است و تا زمان فعال‌سازی مجدد، امکان عضویت در کانال معاملات را ندارید."
-            )
+        decline_text = build_bot_account_access_denial_message(denial_reason)
         try:
             await join_request.bot.send_message(
                 chat_id=join_request.user_chat_id,
