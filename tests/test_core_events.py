@@ -293,6 +293,33 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
             updated_at=now,
         )
+        offer_publication_state = SimpleNamespace(
+            id=31,
+            version_id=1,
+            offer_id=1,
+            offer_public_id='ofr_event_1',
+            offer_home_server='foreign',
+            surface=SimpleNamespace(value='telegram_channel'),
+            publication_owner_server='foreign',
+            status=SimpleNamespace(value='pending'),
+            dedupe_key='offer-publication:telegram_channel:ofr_event_1',
+            surface_resource_id=None,
+            telegram_chat_id=None,
+            telegram_message_id=None,
+            offer_version_id=2,
+            last_known_offer_status='active',
+            last_attempt_at=now,
+            last_success_at=None,
+            next_retry_at=None,
+            disabled_at=None,
+            lagged_at=None,
+            error_code=None,
+            error_message=None,
+            state_metadata={'safe': True},
+            archived=False,
+            created_at=now,
+            updated_at=now,
+        )
 
         return {
             ('Chat', 'after_insert'): chat,
@@ -306,6 +333,9 @@ class CoreEventsTests(unittest.TestCase):
             ('Offer', 'after_delete'): offer,
             ('OfferRequest', 'after_insert'): offer_request,
             ('OfferRequest', 'after_update'): offer_request,
+            ('OfferPublicationState', 'after_insert'): offer_publication_state,
+            ('OfferPublicationState', 'after_update'): offer_publication_state,
+            ('OfferPublicationState', 'after_delete'): offer_publication_state,
             ('Trade', 'after_insert'): trade,
             ('Trade', 'after_update'): trade,
             ('User', 'after_insert'): user,
@@ -606,6 +636,62 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(log_change.call_count, 2)
         logger.info.assert_any_call('✅ OfferRequest event listeners registered')
 
+    def test_offer_publication_state_event_listener_syncs_surface_payload(self):
+        registry = {}
+        now = datetime(2026, 5, 21, 10, 0, 0)
+        with patch('core.events.event.listens_for', side_effect=_capture_listeners(registry)), patch.object(
+            events, 'logger'
+        ) as logger:
+            events.setup_offer_publication_state_events()
+
+        target = SimpleNamespace(
+            id=31,
+            version_id=2,
+            offer_id=1,
+            offer_public_id='ofr_event_1',
+            offer_home_server='foreign',
+            surface=SimpleNamespace(value='telegram_channel'),
+            publication_owner_server='foreign',
+            status=SimpleNamespace(value='failed'),
+            dedupe_key='offer-publication:telegram_channel:ofr_event_1',
+            surface_resource_id=None,
+            telegram_chat_id=-100123,
+            telegram_message_id=700,
+            offer_version_id=2,
+            last_known_offer_status='active',
+            last_attempt_at=now,
+            last_success_at=None,
+            next_retry_at=None,
+            disabled_at=None,
+            lagged_at=None,
+            error_code='telegram_send_failed',
+            error_message='temporary failure',
+            state_metadata={'retryable': True},
+            archived=False,
+            created_at=now,
+            updated_at=None,
+        )
+        connection = _FakeConnection()
+
+        with patch('core.events.log_change') as log_change:
+            registry[('OfferPublicationState', 'after_insert')](None, connection, target)
+            registry[('OfferPublicationState', 'after_update')](None, connection, target)
+
+        self.assertEqual(log_change.call_count, 2)
+        payload = log_change.call_args_list[0].args[4]
+        self.assertEqual(payload['surface'], 'telegram_channel')
+        self.assertEqual(payload['publication_owner_server'], 'foreign')
+        self.assertEqual(payload['status'], 'failed')
+        self.assertEqual(payload['dedupe_key'], 'offer-publication:telegram_channel:ofr_event_1')
+        self.assertEqual(payload['telegram_message_id'], 700)
+        self.assertEqual(payload['error_code'], 'telegram_send_failed')
+        self.assertEqual(payload['state_metadata'], {'retryable': True})
+
+        sync_connection = _FakeConnection(is_sync=True)
+        registry[('OfferPublicationState', 'after_insert')](None, sync_connection, target)
+        self.assertEqual(log_change.call_count, 2)
+        logger.info.assert_any_call('✅ OfferPublicationState event listeners registered')
+
     def test_remaining_event_listener_groups_and_setup_all_events(self):
         registry = {}
         now = datetime(2025, 1, 1, 12, 0, 0)
@@ -622,6 +708,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_trading_settings_events()
             events.setup_invitation_events()
             events.setup_offer_request_events()
+            events.setup_offer_publication_state_events()
             events.setup_notification_events()
             events.setup_user_notification_preference_events()
             events.setup_admin_message_events()
@@ -707,6 +794,37 @@ class CoreEventsTests(unittest.TestCase):
             registry[('Invitation', 'after_update')](None, connection, invitation)
             registry[('Invitation', 'after_delete')](None, connection, invitation)
 
+            publication_state = SimpleNamespace(
+                id=31,
+                version_id=1,
+                offer_id=1,
+                offer_public_id='ofr_event_1',
+                offer_home_server='foreign',
+                surface=SimpleNamespace(value='telegram_channel'),
+                publication_owner_server='foreign',
+                status=SimpleNamespace(value='pending'),
+                dedupe_key='offer-publication:telegram_channel:ofr_event_1',
+                surface_resource_id=None,
+                telegram_chat_id=None,
+                telegram_message_id=None,
+                offer_version_id=2,
+                last_known_offer_status='active',
+                last_attempt_at=now,
+                last_success_at=None,
+                next_retry_at=None,
+                disabled_at=None,
+                lagged_at=None,
+                error_code=None,
+                error_message=None,
+                state_metadata=None,
+                archived=False,
+                created_at=now,
+                updated_at=None,
+            )
+            registry[('OfferPublicationState', 'after_insert')](None, connection, publication_state)
+            registry[('OfferPublicationState', 'after_update')](None, connection, publication_state)
+            registry[('OfferPublicationState', 'after_delete')](None, connection, publication_state)
+
             notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
             registry[('Notification', 'after_insert')](None, connection, notification)
             registry[('Notification', 'after_update')](None, connection, notification)
@@ -769,7 +887,7 @@ class CoreEventsTests(unittest.TestCase):
             registry[('CustomerRelation', 'after_update')](None, connection, customer_relation)
             registry[('CustomerRelation', 'after_delete')](None, connection, customer_relation)
 
-        self.assertGreaterEqual(log_change.call_count, 31)
+        self.assertGreaterEqual(log_change.call_count, 34)
         logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
         logger.info.assert_any_call('✅ CustomerRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')
@@ -779,6 +897,7 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ UserBlock event listeners registered')
         logger.info.assert_any_call('✅ TradingSetting event listeners registered')
         logger.info.assert_any_call('✅ Invitation event listeners registered')
+        logger.info.assert_any_call('✅ OfferPublicationState event listeners registered')
         logger.info.assert_any_call('✅ Notification event listeners registered')
         logger.info.assert_any_call('✅ UserNotificationPreference event listeners registered')
         logger.info.assert_any_call('✅ AdminMessage event listeners registered')
@@ -796,6 +915,8 @@ class CoreEventsTests(unittest.TestCase):
         ) as setup_invitation_events, patch('core.events.setup_offer_events') as setup_offer_events, patch(
             'core.events.setup_offer_request_events'
         ) as setup_offer_request_events, patch(
+            'core.events.setup_offer_publication_state_events'
+        ) as setup_offer_publication_state_events, patch(
             'core.events.setup_trade_events'
         ) as setup_trade_events, patch('core.events.setup_commodity_events') as setup_commodity_events, patch(
             'core.events.setup_commodity_alias_events'
@@ -821,6 +942,7 @@ class CoreEventsTests(unittest.TestCase):
         setup_invitation_events.assert_called_once()
         setup_offer_events.assert_called_once()
         setup_offer_request_events.assert_called_once()
+        setup_offer_publication_state_events.assert_called_once()
         setup_trade_events.assert_called_once()
         setup_commodity_events.assert_called_once()
         setup_commodity_alias_events.assert_called_once()
@@ -849,6 +971,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_trading_settings_events()
             events.setup_invitation_events()
             events.setup_offer_request_events()
+            events.setup_offer_publication_state_events()
             events.setup_notification_events()
             events.setup_user_notification_preference_events()
             events.setup_admin_message_events()

@@ -182,12 +182,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
     "offer_publication_states": _entry(
         "offer_publication_states",
         SyncPolicy.SYNC,
-        ("publication_worker", "reconciliation_job"),
+        ("publication_worker", "reconciliation_job", "webapp_realtime"),
         "surface publication authority plus product owner authority for terminal state",
         "dedupe key and latest terminal state; must not rewrite offer business truth",
         "operator visibility and publication reconciliation",
-        planned=True,
-        notes="Planned table or equivalent projection required before publication-state migrations land.",
+        notes="Explicit Step 7A surface state for Telegram channel and WebApp market visibility.",
     ),
     "offer_requests": _entry(
         "offer_requests",

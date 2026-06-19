@@ -25,6 +25,11 @@ from .market_schedule_override import MarketScheduleOverride, MarketScheduleOver
 from .market_runtime_state import MarketRuntimeState
 from .offer import Offer, OfferType, OfferStatus
 from .offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
+from .offer_publication_state import (
+    OfferPublicationState,
+    OfferPublicationStatus,
+    OfferPublicationSurface,
+)
 from .trade import Trade, TradeType, TradeStatus
 from .chat import Chat
 from .chat_member import ChatMember
@@ -72,6 +77,9 @@ __all__ = [
     "OfferRequest",
     "OfferRequestSourceSurface",
     "OfferRequestStatus",
+    "OfferPublicationState",
+    "OfferPublicationStatus",
+    "OfferPublicationSurface",
     # Trade
     "Trade",
     "TradeType",

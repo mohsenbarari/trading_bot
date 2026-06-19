@@ -175,8 +175,9 @@ TABLE_ORDER = {
     "market_schedule_overrides": 13,
     "market_runtime_state": 14,
     "offers": 15,
-    "offer_requests": 16,
-    "trades": 17,
+    "offer_publication_states": 16,
+    "offer_requests": 17,
+    "trades": 18,
 }
 
 async def verify_signature(request: Request):
@@ -283,6 +284,7 @@ from models.notification import Notification
 from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
 from models.offer import Offer
 from models.offer_request import OfferRequest
+from models.offer_publication_state import OfferPublicationState
 from models.trade import Trade
 from models.commodity import Commodity, CommodityAlias
 from models.chat import Chat
@@ -304,6 +306,7 @@ NATURAL_KEYS = {
     "invitations": "token",
     "market_schedule_overrides": "date",
     "trades": "trade_number",
+    "offer_publication_states": "dedupe_key",
 }
 
 SAFE_NATURAL_VALUE_LOG_KEYS = {
@@ -311,6 +314,7 @@ SAFE_NATURAL_VALUE_LOG_KEYS = {
     ("commodity_aliases", "alias"),
     ("market_schedule_overrides", "date"),
     ("trades", "trade_number"),
+    ("offer_publication_states", "dedupe_key"),
 }
 
 
@@ -332,6 +336,7 @@ SEQUENCE_MAP = {
     "chats": ("chats_id_seq", "chats"),
     "chat_members": ("chat_members_id_seq", "chat_members"),
     "offers": ("offers_id_seq", "offers"),
+    "offer_publication_states": ("offer_publication_states_id_seq", "offer_publication_states"),
     "offer_requests": ("offer_requests_id_seq", "offer_requests"),
     "trades": ("trades_id_seq", "trades"),
     "invitations": ("invitations_id_seq", "invitations"),
@@ -357,6 +362,7 @@ def get_model_class(table_name: str):
         "admin_broadcast_messages": AdminBroadcastMessage,
         "notifications": Notification,
         "offers": Offer,
+        "offer_publication_states": OfferPublicationState,
         "offer_requests": OfferRequest,
         "trades": Trade,
         "commodities": Commodity,

@@ -12,6 +12,7 @@ import models.invitation
 import models.session
 import models.commodity
 import models.offer  # مدل لفظ
+import models.offer_publication_state
 import models.trade  # مدل معاملات
 import models.message  # مدل پیام چت
 import models.conversation  # مدل مکالمات چت

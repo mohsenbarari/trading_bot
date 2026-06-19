@@ -77,8 +77,9 @@ class SyncRegistryTests(unittest.TestCase):
         self.assertFalse(offer_requests.planned)
         self.assertEqual(offer_requests.policy, SyncPolicy.SYNC)
         self.assertEqual(offer_requests.authority, "offer_home_server")
-        self.assertTrue(publication_states.planned)
+        self.assertFalse(publication_states.planned)
         self.assertEqual(publication_states.policy, SyncPolicy.SYNC)
+        self.assertIn("Telegram channel", publication_states.notes)
 
 
 if __name__ == "__main__":

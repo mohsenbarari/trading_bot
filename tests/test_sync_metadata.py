@@ -47,6 +47,25 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["event_sequence"], 91)
         self.assertEqual(metadata["outbox_id"], 91)
 
+    def test_publication_state_metadata_uses_dedupe_key_and_owner_server(self):
+        metadata = build_sync_metadata(
+            "offer_publication_states",
+            44,
+            "UPDATE",
+            {
+                "dedupe_key": "offer-publication:telegram_channel:ofr_8",
+                "offer_public_id": "ofr_8",
+                "surface": "telegram_channel",
+                "publication_owner_server": "foreign",
+                "version_id": 3,
+            },
+            change_log_id=101,
+        )
+
+        self.assertEqual(metadata["aggregate_id"], "offer-publication:telegram_channel:ofr_8")
+        self.assertEqual(metadata["authority_server"], "foreign")
+        self.assertEqual(metadata["authoritative_version"], 3)
+
     def test_deserialize_sync_data_returns_non_json_string_unchanged(self):
         self.assertEqual(deserialize_sync_data('{"id": 1}'), {"id": 1})
         self.assertEqual(deserialize_sync_data("not-json"), "not-json")

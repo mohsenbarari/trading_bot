@@ -6,6 +6,7 @@ from unittest.mock import patch
 from api.routers.sync import _apply_item
 from models.offer import Offer
 from models.offer_request import OfferRequest
+from models.offer_publication_state import OfferPublicationState
 
 
 class AsyncNullContext:
@@ -158,6 +159,34 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer_request_data["internal_failure_context"], {"safe_for_admin": True})
         builder.assert_called_once_with(OfferRequest, "offer_requests", offer_request_data)
         self.assertEqual(db.execute_calls[0], ("OFFER_REQUEST_UPSERT", {"is_sync": True}))
+
+        publication_data = {
+            "offer_id": 8,
+            "offer_public_id": "ofr_remote_8",
+            "offer_home_server": "iran",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "status": "pending",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_remote_8",
+            "offer_version_id": 1,
+            "last_known_offer_status": "active",
+        }
+        db = FakeDB()
+        with patch("api.routers.sync._build_upsert_stmt", return_value="PUBLICATION_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "offer_publication_states",
+                "INSERT",
+                40,
+                publication_data,
+                model=OfferPublicationState,
+                new_offers=[],
+            )
+        self.assertEqual(result, "ok")
+        self.assertEqual(publication_data["id"], 40)
+        self.assertEqual(publication_data["publication_owner_server"], "foreign")
+        builder.assert_called_once_with(OfferPublicationState, "offer_publication_states", publication_data)
+        self.assertEqual(db.execute_calls[0], ("PUBLICATION_UPSERT", {"is_sync": True}))
 
         terminal_offers = []
         terminal_offer_data = {"status": "completed", "channel_message_id": 1001}

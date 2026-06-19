@@ -435,6 +435,90 @@ def setup_offer_request_events():
     logger.info("✅ OfferRequest event listeners registered")
 
 
+def _offer_publication_state_sync_payload(target) -> Dict[str, Any]:
+    surface = getattr(target, "surface", None)
+    status = getattr(target, "status", None)
+    return {
+        "id": target.id,
+        "version_id": getattr(target, "version_id", None) or 1,
+        "offer_id": target.offer_id,
+        "offer_public_id": target.offer_public_id,
+        "offer_home_server": target.offer_home_server,
+        "surface": surface.value if hasattr(surface, "value") else surface,
+        "publication_owner_server": target.publication_owner_server,
+        "status": status.value if hasattr(status, "value") else status,
+        "dedupe_key": target.dedupe_key,
+        "surface_resource_id": target.surface_resource_id,
+        "telegram_chat_id": target.telegram_chat_id,
+        "telegram_message_id": target.telegram_message_id,
+        "offer_version_id": target.offer_version_id,
+        "last_known_offer_status": target.last_known_offer_status,
+        "last_attempt_at": _isoformat_or_none(getattr(target, "last_attempt_at", None)),
+        "last_success_at": _isoformat_or_none(getattr(target, "last_success_at", None)),
+        "next_retry_at": _isoformat_or_none(getattr(target, "next_retry_at", None)),
+        "disabled_at": _isoformat_or_none(getattr(target, "disabled_at", None)),
+        "lagged_at": _isoformat_or_none(getattr(target, "lagged_at", None)),
+        "error_code": target.error_code,
+        "error_message": target.error_message,
+        "state_metadata": target.state_metadata,
+        "archived": target.archived,
+        "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+        "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+    }
+
+
+def setup_offer_publication_state_events():
+    """Setup event listeners for offer surface publication state."""
+    from models.offer_publication_state import OfferPublicationState
+
+    @event.listens_for(OfferPublicationState, 'after_insert')
+    def on_offer_publication_state_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "offer_publication_states",
+                target.id,
+                "INSERT",
+                _offer_publication_state_sync_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in offer_publication_state after_insert event: {e}")
+
+    @event.listens_for(OfferPublicationState, 'after_update')
+    def on_offer_publication_state_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "offer_publication_states",
+                target.id,
+                "UPDATE",
+                _offer_publication_state_sync_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in offer_publication_state after_update event: {e}")
+
+    @event.listens_for(OfferPublicationState, 'after_delete')
+    def on_offer_publication_state_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(
+                connection,
+                "offer_publication_states",
+                target.id,
+                "DELETE",
+                _offer_publication_state_sync_payload(target),
+            )
+        except Exception as e:
+            logger.error(f"Error in offer_publication_state after_delete event: {e}")
+
+    logger.info("✅ OfferPublicationState event listeners registered")
+
+
 def setup_trade_events():
     """Setup event listeners for Trade model"""
     from models.trade import Trade
@@ -1244,6 +1328,7 @@ def setup_all_events():
     setup_invitation_events()
     setup_offer_events()
     setup_offer_request_events()
+    setup_offer_publication_state_events()
     setup_trade_events()
     setup_commodity_events()
     setup_commodity_alias_events()

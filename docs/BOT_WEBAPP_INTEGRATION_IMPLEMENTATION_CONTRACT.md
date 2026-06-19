@@ -913,6 +913,31 @@ Exit criteria:
 
 - Operators can distinguish DB truth from surface publication state.
 
+Implemented in Step 7A:
+
+- Added `offer_publication_states` as the explicit publication-state table for offer surfaces.
+  It is separate from `offers.status` and records the surface, publication owner server, state,
+  dedupe key, resource/message ids, last attempt/success, retry/lag/disabled timestamps, error
+  code/message, and the offer status/version snapshot used by the publication side effect.
+- The table is active `SyncPolicy.SYNC`, is included in the sync receiver model map, sequence
+  repair, natural-key fallback by `dedupe_key`, sync metadata authority, event listeners, and the
+  durable outbox guard path.
+- Added service helpers for Telegram-channel and WebApp-market publication state creation,
+  terminal-offer conversion to `disabled`, stale offer-version rejection, and pending-to-`lagged`
+  detection when the healthy publication target is exceeded.
+- This step does not yet send Telegram messages, emit WebApp realtime, or reconcile publication
+  workers. Those behaviors remain in Steps 7B and 7C.
+
+Verification:
+
+- `tests.test_offer_publication_state_service`
+- `tests.test_sync_metadata`
+- `tests.test_sync_registry`
+- `tests.test_sync_router_apply_item_success`
+- `tests.test_core_events`
+- Existing sync router/outbox guard tests covering receiver mapping, table policy, and outbox
+  listener registration.
+
 ### Step 7B - Telegram Publication Idempotency And Result Sync-Back
 
 Required behavior:

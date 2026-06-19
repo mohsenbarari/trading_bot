@@ -31,6 +31,8 @@ def _string_or_none(value: Any) -> str | None:
 
 
 def _authority_server(table_name: str, data: dict[str, Any]) -> str | None:
+    if table_name == "offer_publication_states":
+        return _string_or_none(data.get("publication_owner_server"))
     if table_name == "offers":
         return _string_or_none(data.get("home_server"))
     if table_name == "offer_requests":
@@ -45,6 +47,14 @@ def _authority_server(table_name: str, data: dict[str, Any]) -> str | None:
 
 
 def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -> str:
+    if table_name == "offer_publication_states":
+        dedupe_key = _string_or_none(data.get("dedupe_key"))
+        if dedupe_key:
+            return dedupe_key
+        public_id = _string_or_none(data.get("offer_public_id"))
+        surface = _string_or_none(data.get("surface"))
+        if public_id and surface:
+            return f"{surface}:{public_id}"
     if table_name in {"offers", "offer_requests"}:
         public_id = _string_or_none(data.get("offer_public_id"))
         if public_id:
