@@ -703,32 +703,45 @@ async function cancelOwnOffer(offerId: number) {
 
 .offer-card-wrap.is-expired .offer-card-inner {
   background:
-    linear-gradient(90deg, rgba(100, 116, 139, 0.16), rgba(148, 163, 184, 0.08) 38%, rgba(248, 250, 252, 0) 78%),
-    linear-gradient(0deg, rgba(100, 116, 139, 0.18), rgba(100, 116, 139, 0.18)),
+    linear-gradient(90deg, rgba(71, 85, 105, 0.24), rgba(148, 163, 184, 0.15) 42%, rgba(241, 245, 249, 0.92) 100%),
     var(--ds-bg-surface);
-  box-shadow:
-    inset 0 0 0 1px rgba(100, 116, 139, 0.08),
-    0 1px 3px rgba(71, 85, 105, 0.05);
+  box-shadow: 0 1px 3px rgba(71, 85, 105, 0.05);
 }
 
 .offer-card-wrap.is-traded .offer-card-inner {
   background:
-    linear-gradient(90deg, rgba(20, 184, 166, 0.22), rgba(20, 184, 166, 0.09) 40%, rgba(240, 253, 250, 0) 78%),
-    linear-gradient(0deg, rgba(20, 184, 166, 0.16), rgba(20, 184, 166, 0.16)),
+    linear-gradient(90deg, rgba(13, 148, 136, 0.28), rgba(20, 184, 166, 0.16) 42%, rgba(236, 253, 245, 0.94) 100%),
     var(--ds-bg-surface);
-  box-shadow:
-    inset 0 0 0 1px rgba(15, 118, 110, 0.12),
-    0 1px 3px rgba(15, 118, 110, 0.07);
+  box-shadow: 0 1px 3px rgba(15, 118, 110, 0.07);
+}
+
+.offer-card-wrap.is-expired .offer-card-inner::before,
+.offer-card-wrap.is-traded .offer-card-inner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  pointer-events: none;
+}
+
+.offer-card-wrap.is-expired .offer-card-inner::before {
+  background: rgba(100, 116, 139, 0.52);
+}
+
+.offer-card-wrap.is-traded .offer-card-inner::before {
+  background: rgba(13, 148, 136, 0.62);
 }
 
 .offer-card-wrap.is-expired .offer-header,
 .offer-card-wrap.is-expired .offer-body {
-  opacity: 0.62;
+  opacity: 0.58;
 }
 
 .offer-card-wrap.is-traded .offer-header,
 .offer-card-wrap.is-traded .offer-body {
-  opacity: 0.86;
+  opacity: 0.92;
 }
 
 .offer-card-wrap.is-history .price,
