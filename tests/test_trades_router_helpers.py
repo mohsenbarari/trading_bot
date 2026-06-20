@@ -291,6 +291,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             trade_type=SimpleNamespace(value="buy"),
             commodity_id=5,
             commodity=SimpleNamespace(name="Gold"),
+            offer=SimpleNamespace(notes="تحویل فوری"),
             quantity=7,
             price=75000,
             status=SimpleNamespace(value="pending"),
@@ -308,6 +309,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.commodity_name, "Gold")
         self.assertEqual(response.offer_user_name, "seller")
         self.assertEqual(response.responder_user_name, "buyer")
+        self.assertEqual(response.offer_notes, "تحویل فوری")
         self.assertEqual(response.created_at, "1403/10/12")
 
         relation_aware_response = trades.trade_to_response(

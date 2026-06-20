@@ -106,6 +106,7 @@ def _channel_trade_idempotency_key(
 
 
 def _build_remote_trade_success_message(body: object, fallback_offer: Offer, amount: int) -> str:
+    fallback_notes = getattr(fallback_offer, "notes", None)
     if isinstance(body, dict):
         trade_type = str(body.get("trade_type") or "").lower()
         if trade_type == "buy":
@@ -129,10 +130,9 @@ def _build_remote_trade_success_message(body: object, fallback_offer: Offer, amo
         )
         trade_number = body.get("trade_number")
         created_at = body.get("created_at")
+        offer_notes = body.get("offer_notes") or fallback_notes
 
         lines = [
-            "✅ معامله ثبت شد",
-            "",
             f"{trade_emoji} {trade_label}",
             "",
             f"💰 فی: {int(price):,}" if isinstance(price, (int, float)) else f"💰 فی: {price}",
@@ -144,14 +144,38 @@ def _build_remote_trade_success_message(body: object, fallback_offer: Offer, amo
             lines.append(f"🔢 شماره معامله: {trade_number}")
         if created_at:
             lines.append(f"🕐 زمان معامله: {created_at}")
+        normalized_notes = " ".join(str(offer_notes or "").split())
+        if normalized_notes:
+            lines.append(f"📝 توضیحات: {normalized_notes}")
         return "\n".join(lines)
 
-    return (
-        "✅ معامله ثبت شد\n\n"
-        f"💰 فی: {getattr(fallback_offer, 'price', 0):,}\n"
-        f"📦 تعداد: {amount}\n"
-        f"🏷️ کالا: {getattr(getattr(fallback_offer, 'commodity', None), 'name', None) or 'نامشخص'}"
-    )
+    fallback_offer_type = str(
+        getattr(getattr(fallback_offer, "offer_type", None), "value", getattr(fallback_offer, "offer_type", None)) or ""
+    ).lower()
+    if fallback_offer_type == OfferType.SELL.value:
+        fallback_trade_emoji = "🟢"
+        fallback_trade_label = "خرید"
+    elif fallback_offer_type == OfferType.BUY.value:
+        fallback_trade_emoji = "🔴"
+        fallback_trade_label = "فروش"
+    else:
+        fallback_trade_emoji = "✅"
+        fallback_trade_label = "معامله"
+
+    lines = [
+        f"{fallback_trade_emoji} {fallback_trade_label}",
+        "",
+        f"💰 فی: {getattr(fallback_offer, 'price', 0):,}",
+        f"📦 تعداد: {amount}",
+        f"🏷️ کالا: {getattr(getattr(fallback_offer, 'commodity', None), 'name', None) or 'نامشخص'}",
+    ]
+    fallback_counterparty = getattr(getattr(fallback_offer, "user", None), "account_name", None)
+    if fallback_counterparty:
+        lines.append(f"👤 طرف معامله: {fallback_counterparty}")
+    normalized_notes = " ".join(str(fallback_notes or "").split())
+    if normalized_notes:
+        lines.append(f"📝 توضیحات: {normalized_notes}")
+    return "\n".join(lines)
 
 
 async def _notify_remote_trade_success(bot: Bot, user: User, offer: Offer, amount: int, body: object) -> None:
@@ -249,6 +273,7 @@ def _json_response_body(response: JSONResponse) -> dict:
 def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object | None]:
     commodity = getattr(trade, "commodity", None)
     offer_user = getattr(trade, "offer_user", None)
+    offer = getattr(trade, "offer", None)
     return {
         "trade_number": getattr(trade, "trade_number", None),
         "trade_type": getattr(getattr(trade, "trade_type", None), "value", getattr(trade, "trade_type", None)),
@@ -257,6 +282,7 @@ def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object 
         "price": getattr(trade, "price", None),
         "created_at": to_jalali_str(getattr(trade, "created_at", None)) or "",
         "counterparty_name": getattr(offer_user, "full_name", None) or getattr(offer_user, "account_name", None),
+        "offer_notes": getattr(offer, "notes", None),
     }
 
 
@@ -283,6 +309,7 @@ async def _wait_for_forwarded_trade_completion(idempotency_key: str | None) -> d
                         selectinload(Trade.offer_user),
                         selectinload(Trade.responder_user),
                         selectinload(Trade.commodity),
+                        selectinload(Trade.offer),
                     )
                     .where(Trade.id == trade_id)
                 )

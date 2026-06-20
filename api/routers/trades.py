@@ -177,6 +177,7 @@ class TradeResponse(BaseModel):
     customer_context_tier: Optional[str] = None
     trade_path_kind: Optional[str] = None
     trade_path_summary: Optional[str] = None
+    offer_notes: Optional[str] = None
     created_at: str
     
     class Config:
@@ -1241,6 +1242,8 @@ def _build_trade_message_bundle(
     offer_notes: str | None = None,
 ) -> tuple[str, str, str, str]:
     trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
+    normalized_offer_notes = _normalize_offer_notes_for_notification(offer_notes)
+    offer_notes_line = f"\n📝 توضیحات: {normalized_offer_notes}" if normalized_offer_notes else ""
     responder_msg = (
         f"{responder_trade_emoji} <b>{responder_trade_label}</b>\n\n"
         f"💰 فی: {trade_price:,}\n"
@@ -1250,6 +1253,7 @@ def _build_trade_message_bundle(
         f"🔢 شماره معامله: {trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
         f"{trade_path_line}"
+        f"{offer_notes_line}"
     )
     offer_owner_msg = (
         f"{offer_trade_emoji} <b>{offer_trade_label}</b>\n\n"
@@ -1260,6 +1264,7 @@ def _build_trade_message_bundle(
         f"🔢 شماره معامله: {trade_number}\n"
         f"🕐 زمان معامله: {trade_datetime}"
         f"{trade_path_line}"
+        f"{offer_notes_line}"
     )
     notif_msg_responder = _build_trade_notification_message(
         trade_emoji=responder_trade_emoji,
@@ -1409,6 +1414,7 @@ def trade_to_response(
     customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
     viewer_context: EffectiveOwnerActor | None = None,
     history_target_user_id: int | None = None,
+    offer_notes: str | None = None,
 ) -> TradeResponse:
     """تبدیل مدل Trade به پاسخ API"""
     offer_user_payload = _build_trade_participant_payload(
@@ -1456,6 +1462,7 @@ def trade_to_response(
         **counterparty_payload,
         **customer_context_payload,
         **trade_path_payload,
+        offer_notes=offer_notes if offer_notes is not None else getattr(getattr(trade, "offer", None), "notes", None),
         created_at=to_jalali_str(trade.created_at) or ""
     )
 
@@ -2371,6 +2378,7 @@ async def _execute_trade_authoritatively(
                 existing_trade_obj,
                 identity_map=existing_identity_map,
                 customer_relation_map=existing_customer_relation_map,
+                offer_notes=getattr(offer, "notes", None),
             )
     
     # گرفتن شماره معامله جدید
@@ -2885,6 +2893,7 @@ async def _execute_trade_authoritatively(
         customer_relation_map=participant_customer_relation_map,
         viewer_context=context,
         history_target_user_id=owner_user.id,
+        offer_notes=getattr(offer, "notes", None),
     )
 
 

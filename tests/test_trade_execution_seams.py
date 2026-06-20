@@ -126,9 +126,10 @@ class TradeExecutionSeamTests(unittest.TestCase):
         self.assertIn("👤 طرف معامله: شاهین", owner_notif)
         self.assertIn("🧭 مسیر: مالک ↔ مشتری سطح ۲", responder_msg)
         self.assertIn("🧭 مسیر: مالک ↔ مشتری سطح ۲", responder_notif)
+        self.assertIn("📝 توضیحات: تسویه فوری", responder_msg)
+        self.assertIn("📝 توضیحات: تسویه فوری", offer_owner_msg)
         self.assertIn("📝 توضیحات: تسویه فوری", responder_notif)
         self.assertIn("📝 توضیحات: تسویه فوری", owner_notif)
-        self.assertNotIn("📝 توضیحات", responder_msg)
 
 
 if __name__ == "__main__":

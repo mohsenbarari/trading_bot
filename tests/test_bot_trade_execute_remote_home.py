@@ -57,6 +57,7 @@ def make_offer():
         lot_sizes=[2, 3],
         home_server="iran",
         offer_public_id="ofr_remote_7",
+        notes="تحویل فوری",
     )
 
 
@@ -111,6 +112,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             "price": 123000,
             "counterparty_name": "مالک لفظ",
             "created_at": "1404/01/01 12:00",
+            "offer_notes": "تسویه نقدی",
         }
         with base_patches[0], base_patches[1], base_patches[2], base_patches[3], base_patches[4], patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
@@ -121,8 +123,16 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once()
         bot.send_message.assert_awaited_once()
-        self.assertIn("معامله ثبت شد", bot.send_message.await_args.kwargs["text"])
-        self.assertIn("10020", bot.send_message.await_args.kwargs["text"])
+        success_text = bot.send_message.await_args.kwargs["text"]
+        self.assertNotIn("معامله ثبت شد", success_text)
+        self.assertIn("🔴 فروش", success_text)
+        self.assertIn("💰 فی: 123,000", success_text)
+        self.assertIn("📦 تعداد: 2", success_text)
+        self.assertIn("🏷️ کالا: سکه", success_text)
+        self.assertIn("👤 طرف معامله: مالک لفظ", success_text)
+        self.assertIn("🔢 شماره معامله: 10020", success_text)
+        self.assertIn("🕐 زمان معامله: 1404/01/01 12:00", success_text)
+        self.assertIn("📝 توضیحات: تسویه نقدی", success_text)
         callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
 
         bot.send_message.reset_mock()
@@ -134,6 +144,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             "quantity": 2,
             "price": 124000,
             "counterparty_name": "مالک لفظ",
+            "offer_notes": "تحویل امروز",
         }
         with base_patches[0], base_patches[1], base_patches[2], base_patches[3], base_patches[4], patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
@@ -147,7 +158,9 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once()
         bot.send_message.assert_awaited_once()
-        self.assertIn("10021", bot.send_message.await_args.kwargs["text"])
+        recovered_text = bot.send_message.await_args.kwargs["text"]
+        self.assertIn("🔢 شماره معامله: 10021", recovered_text)
+        self.assertIn("📝 توضیحات: تحویل امروز", recovered_text)
         callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
 
         bot.send_message.reset_mock()
