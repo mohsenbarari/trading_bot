@@ -56,7 +56,7 @@ from models.change_log import ChangeLog
 from models.chat_member import ChatMember
 from models.commodity import Commodity
 from models.notification import Notification
-from models.offer_publication_state import OfferPublicationState
+from models.offer_publication_state import OfferPublicationState, OfferPublicationStatus
 from models.offer_request import OfferRequest, OfferRequestStatus
 from models.offer import Offer, OfferStatus
 from models.trade import Trade, TradeStatus
@@ -71,6 +71,8 @@ DUAL_ROLE_PLAN_SCHEMA_VERSION = "bot_webapp_mixed_load_role_plan_v1"
 DUAL_ROLE_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_role_result_v1"
 DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1"
 DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
+DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
+DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
 MIN_CLEANUP_PREFIX_LENGTH = 5
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -2747,6 +2749,185 @@ async def load_runner_ready_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
+    setup_event_listeners()
+    prefix = args.prefix
+    await cleanup_prefix(prefix)
+    commodity_id, commodity_name = await resolve_commodity()
+    offer_origin = str(args.offer_origin)
+    run_id = _dual_role_run_id(prefix, getattr(args, "run_id", None))
+    topology = "single-db staging role-worker smoke"
+
+    async with patched_trading_boundaries():
+        users = await create_load_fixture_users(prefix, user_count=args.user_count)
+        owner = users[1] if offer_origin == "bot" else users[0]
+        if offer_origin == "bot":
+            harness = AiogramDispatcherHarness()
+            try:
+                offer_id = await create_bot_offer_with_dispatcher(
+                    harness=harness,
+                    owner=owner,
+                    commodity_name=commodity_name,
+                    prefix=prefix,
+                    quantity=args.hot_offer_quantity,
+                    price=args.price,
+                    offer_type=args.offer_type,
+                )
+            finally:
+                await harness.close()
+        else:
+            offer_id = await create_offer_for_user(
+                user_id=owner.user_id,
+                commodity_id=commodity_id,
+                prefix=prefix,
+                index=9900,
+                offer_type=args.offer_type,
+                quantity=args.hot_offer_quantity,
+                price=args.price,
+            )
+
+    offer = await load_offer_snapshot(offer_id)
+    plans = build_dual_role_worker_plans(
+        run_id=run_id,
+        prefix=prefix,
+        users=users,
+        owner_user_id=owner.user_id,
+        offer_id=offer_id,
+        offer_public_id=offer_public_identity(offer),
+        total_requests=args.hot_offer_requests,
+        telegram_ratio=args.telegram_ratio,
+        target_rps=args.target_rps,
+        amount=args.request_amount,
+        barrier_epoch=time.time() + args.barrier_delay_seconds,
+    )
+    output_dir = Path(args.output_dir)
+    plan_result = _write_dual_role_plan_files(output_dir, plans, mode="staging_dual_role_run")
+    prepare = build_dual_role_prepare_artifact(
+        run_id=run_id,
+        prefix=prefix,
+        topology=topology,
+        offer_origin=offer_origin,
+        telegram_gateway_boundary="mock",
+        commodity_id=commodity_id,
+        commodity_name=commodity_name,
+        users=users,
+        owner_user_id=owner.user_id,
+        offer=offer,
+        hot_offer_requests=args.hot_offer_requests,
+        telegram_ratio=args.telegram_ratio,
+        target_rps=args.target_rps,
+        hot_offer_quantity=args.hot_offer_quantity,
+        request_amount=args.request_amount,
+        expected_winner_count=args.expected_winner_count,
+        plan_result=plan_result,
+    )
+    prepare_path = output_dir / "prepare.json"
+    write_json_artifact(prepare_path, prepare)
+    print_json(
+        {
+            "status": "ok",
+            "prepare_path": str(prepare_path),
+            "manifest_path": plan_result["manifest_path"],
+            "plan_paths": prepare["plan_paths"],
+            "offer": prepare["offer"],
+            "scenario": prepare["scenario"],
+        }
+    )
+    return 0
+
+
+async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
+    prepare = read_json_artifact(Path(args.prepare))
+    merged_result = read_json_artifact(Path(args.merged_result))
+    offer = _require_mapping(prepare.get("offer"), "prepare offer")
+    persistence = await inspect_hot_offer_persistence(int(offer["id"]))
+    report = build_dual_role_final_report(
+        prepare=prepare,
+        merged_result=merged_result,
+        persistence=persistence,
+    )
+    if args.output:
+        write_json_artifact(Path(args.output), report)
+    print_json(report)
+    return 1 if args.check and report["status"] != "ok" else 0
+
+
+async def observability_snapshot_command(args: argparse.Namespace) -> int:
+    started = time.perf_counter()
+    redis_errors = 0
+    redis_info: dict[str, Any] = {}
+    try:
+        redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            await redis_client.ping()
+            redis_latency_ms = round((time.perf_counter() - started) * 1000.0, 3)
+            raw_info = await redis_client.info()
+            redis_info = {
+                "connected_clients": raw_info.get("connected_clients"),
+                "total_error_replies": raw_info.get("total_error_replies"),
+                "rejected_connections": raw_info.get("rejected_connections"),
+            }
+        finally:
+            await redis_client.aclose()
+    except Exception:
+        redis_errors = 1
+        redis_latency_ms = None
+
+    async with AsyncSessionLocal() as db:
+        max_connections = int((await db.execute(text("show max_connections"))).scalar_one())
+        pg_states = {
+            str(row[0] or "none"): int(row[1])
+            for row in (
+                await db.execute(
+                    text("select state, count(*) from pg_stat_activity group by state order by state nulls last")
+                )
+            ).all()
+        }
+        unsynced_change_logs = int(
+            await db.scalar(select(func.count(ChangeLog.id)).where(ChangeLog.synced == False)) or 0
+        )
+        retryable_publications = int(
+            await db.scalar(
+                select(func.count(OfferPublicationState.id)).where(
+                    OfferPublicationState.status.in_(
+                        [
+                            OfferPublicationStatus.PENDING,
+                            OfferPublicationStatus.FAILED,
+                            OfferPublicationStatus.LAGGED,
+                        ]
+                    )
+                )
+            )
+            or 0
+        )
+
+    payload = {
+        "db_pool": {
+            "process_pool_size": getattr(settings, "db_pool_size", None),
+            "process_max_overflow": getattr(settings, "db_max_overflow", None),
+            "postgres_max_connections": max_connections,
+            "pg_stat_activity": pg_states,
+        },
+        "redis": {
+            "ping_latency_ms": redis_latency_ms,
+            "errors": redis_errors,
+            **redis_info,
+        },
+        "sync": {
+            "unsynced_change_log_count": unsynced_change_logs,
+            "max_lag_seconds": None,
+        },
+        "worker_backlog": {
+            "unsynced_change_logs": unsynced_change_logs,
+            "retryable_publication_states": retryable_publications,
+        },
+    }
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0
+
+
 def _dual_role_run_id(prefix: str, explicit_run_id: str | None = None) -> str:
     normalized = str(explicit_run_id or "").strip()
     if normalized:
@@ -2804,6 +2985,147 @@ def _write_dual_role_plan_files(output_dir: Path, plans: Mapping[str, Mapping[st
     manifest_path = output_dir / "manifest.json"
     write_json_artifact(manifest_path, manifest)
     return {"manifest_path": str(manifest_path), "manifest": manifest}
+
+
+def dual_role_scenario_name(offer_origin: str) -> str:
+    normalized = str(offer_origin or "").strip().lower()
+    if normalized not in {"webapp", "bot"}:
+        raise TradingProbeError(f"unsupported dual-role offer origin: {offer_origin}")
+    return f"{normalized}_hot_offer"
+
+
+def offer_public_identity(offer: Offer) -> str | None:
+    return str(getattr(offer, "offer_public_id", "") or "").strip() or None
+
+
+def build_dual_role_prepare_artifact(
+    *,
+    run_id: str,
+    prefix: str,
+    topology: str,
+    offer_origin: str,
+    telegram_gateway_boundary: str,
+    commodity_id: int,
+    commodity_name: str,
+    users: list[LoadUserRef],
+    owner_user_id: int,
+    offer: Offer,
+    hot_offer_requests: int,
+    telegram_ratio: float,
+    target_rps: float,
+    hot_offer_quantity: int,
+    request_amount: int,
+    expected_winner_count: int,
+    plan_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": DUAL_ROLE_PREPARE_SCHEMA_VERSION,
+        "status": "ok",
+        "run_id": run_id,
+        "prefix": prefix,
+        "topology": topology,
+        "telegram_gateway_boundary": telegram_gateway_boundary,
+        "scenario": {
+            "name": dual_role_scenario_name(offer_origin),
+            "offer_origin": offer_origin,
+            "hot_offer_requests": int(hot_offer_requests),
+            "telegram_ratio": float(telegram_ratio),
+            "target_rps": float(target_rps),
+            "hot_offer_quantity": int(hot_offer_quantity),
+            "request_amount": int(request_amount),
+            "expected_winner_count": int(expected_winner_count),
+        },
+        "commodity": {
+            "id": int(commodity_id),
+            "name": commodity_name,
+        },
+        "users": {
+            "count": len(users),
+            "owner_user_id": int(owner_user_id),
+            "user_ids": [int(user.user_id) for user in users],
+        },
+        "offer": {
+            "id": int(offer.id),
+            "public_id": offer_public_identity(offer),
+            "owner_user_id": int(owner_user_id),
+            "home_server": getattr(getattr(offer, "home_server", None), "value", getattr(offer, "home_server", None)),
+            "status": getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None)),
+            "quantity": int(getattr(offer, "quantity", 0) or 0),
+            "remaining_quantity": (
+                int(offer.remaining_quantity) if getattr(offer, "remaining_quantity", None) is not None else None
+            ),
+        },
+        "plan_manifest_path": plan_result["manifest_path"],
+        "plan_paths": dict((plan_result.get("manifest") or {}).get("plan_paths") or {}),
+        "created_epoch": round(time.time(), 6),
+    }
+
+
+def summarize_attempt_error_details(merged_result: Mapping[str, Any]) -> dict[str, int]:
+    details: dict[str, int] = {}
+    for attempt in merged_result.get("attempts") or []:
+        if not isinstance(attempt, Mapping):
+            continue
+        if attempt.get("outcome") != "error":
+            continue
+        detail = str(attempt.get("detail") or "unknown")
+        details[detail] = details.get(detail, 0) + 1
+    return dict(sorted(details.items()))
+
+
+def build_dual_role_final_report(
+    *,
+    prepare: Mapping[str, Any],
+    merged_result: Mapping[str, Any],
+    persistence: HotOfferPersistenceSnapshot,
+) -> dict[str, Any]:
+    scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
+    scenario_name = str(scenario.get("name") or "hot_offer")
+    expected_winner_count = int(scenario.get("expected_winner_count") or 0)
+    summary = _require_mapping(merged_result.get("summary"), "merged result summary")
+    report = {
+        "schema_version": DUAL_ROLE_FINAL_SCHEMA_VERSION,
+        "status": "ok",
+        "run_id": prepare.get("run_id"),
+        "prefix": prepare.get("prefix"),
+        "topology": prepare.get("topology"),
+        "telegram_gateway_boundary": prepare.get("telegram_gateway_boundary"),
+        "merged_schema_version": merged_result.get("schema_version"),
+        "reports": {
+            scenario_name: {
+                "summary": summary,
+                "offer_id": persistence.offer_id,
+                "owner_user_id": _require_mapping(prepare.get("offer"), "prepare offer").get("owner_user_id"),
+                "expected_winner_count": expected_winner_count,
+                "persisted_trade_count": persistence.persisted_trade_count,
+                "offer_remaining_quantity": persistence.remaining_quantity,
+                "offer_status": persistence.offer_status,
+                "persistence": asdict(persistence),
+                "roles": dict(merged_result.get("roles") or {}),
+                "role_start_skew": dict(merged_result.get("role_start_skew") or {}),
+                "attempt_error_details": summarize_attempt_error_details(merged_result),
+            }
+        },
+    }
+    try:
+        assert_hot_offer_contention_acceptance(
+            persisted_trade_count=persistence.persisted_trade_count,
+            response_success_count=int(summary.get("success") or 0),
+            error_count=int(summary.get("error") or 0),
+            remaining_quantity=persistence.remaining_quantity,
+            status=persistence.offer_status,
+            expected_winner_count=expected_winner_count,
+            original_quantity=persistence.original_quantity,
+            completed_trade_quantity=persistence.completed_trade_quantity,
+            completed_ledger_count=persistence.completed_ledger_count,
+            trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
+            failed_internal_ledger_count=persistence.failed_internal_ledger_count,
+        )
+        report["correctness_failures"] = []
+    except TradingProbeError as exc:
+        report["status"] = "failed"
+        report["correctness_failures"] = [str(exc)]
+    return report
 
 
 async def write_dual_role_plan_command(args: argparse.Namespace) -> int:
@@ -2907,6 +3229,22 @@ def build_parser() -> argparse.ArgumentParser:
     ready_parser = subparsers.add_parser("load-runner-ready")
     ready_parser.add_argument("--role", choices=tuple(LOAD_RUNNER_ROLES), required=True)
 
+    prepare_parser = subparsers.add_parser("prepare-dual-role-run")
+    prepare_parser.add_argument("--output-dir", required=True)
+    prepare_parser.add_argument("--prefix", required=True)
+    prepare_parser.add_argument("--run-id")
+    prepare_parser.add_argument("--offer-origin", choices=("webapp", "bot"), default="webapp")
+    prepare_parser.add_argument("--user-count", type=int, default=1000)
+    prepare_parser.add_argument("--hot-offer-requests", type=int, default=1000)
+    prepare_parser.add_argument("--telegram-ratio", type=float, default=0.6)
+    prepare_parser.add_argument("--target-rps", type=float, default=600.0)
+    prepare_parser.add_argument("--hot-offer-quantity", type=int, default=5)
+    prepare_parser.add_argument("--request-amount", type=int, default=5)
+    prepare_parser.add_argument("--expected-winner-count", type=int, default=1)
+    prepare_parser.add_argument("--price", type=int, default=100000)
+    prepare_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
+    prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=8.0)
+
     plan_parser = subparsers.add_parser("write-dual-role-plan")
     add_dual_role_plan_arguments(plan_parser)
 
@@ -2925,6 +3263,15 @@ def build_parser() -> argparse.ArgumentParser:
     merge_parser = subparsers.add_parser("merge-role-results")
     merge_parser.add_argument("--output")
     merge_parser.add_argument("results", nargs="+")
+
+    finalize_parser = subparsers.add_parser("finalize-dual-role-run")
+    finalize_parser.add_argument("--prepare", required=True)
+    finalize_parser.add_argument("--merged-result", required=True)
+    finalize_parser.add_argument("--output")
+    finalize_parser.add_argument("--check", action="store_true")
+
+    observability_parser = subparsers.add_parser("observability-snapshot")
+    observability_parser.add_argument("--output")
 
     bench_parser = subparsers.add_parser("run-benchmark")
     bench_parser.add_argument("--prefix", required=True)
@@ -2974,6 +3321,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await cleanup_command(args)
     if args.command == "load-runner-ready":
         return await load_runner_ready_command(args)
+    if args.command == "prepare-dual-role-run":
+        return await prepare_dual_role_run_command(args)
     if args.command == "write-dual-role-plan":
         return await write_dual_role_plan_command(args)
     if args.command == "run-dual-role-artifact-smoke":
@@ -2982,6 +3331,10 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_role_plan_command(args)
     if args.command == "merge-role-results":
         return await merge_role_results_command(args)
+    if args.command == "finalize-dual-role-run":
+        return await finalize_dual_role_run_command(args)
+    if args.command == "observability-snapshot":
+        return await observability_snapshot_command(args)
     if args.command == "run-benchmark":
         return await run_benchmark(args)
     if args.command == "run-mixed-load":

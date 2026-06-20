@@ -408,6 +408,120 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn("SERVER_MODE must be foreign", message)
         self.assertIn("BOT_TOKEN must be empty", message)
 
+    def test_dual_role_final_report_accepts_consistent_hot_offer(self):
+        prepare = {
+            "run_id": "run-5",
+            "prefix": "probe-",
+            "topology": "single-db staging role-worker smoke",
+            "telegram_gateway_boundary": "mock",
+            "scenario": {
+                "name": "webapp_hot_offer",
+                "expected_winner_count": 1,
+            },
+            "offer": {
+                "id": 42,
+                "owner_user_id": 7,
+            },
+        }
+        merged_result = {
+            "schema_version": worker.DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
+            "summary": {
+                "total": 10,
+                "success": 1,
+                "rejected": 9,
+                "error": 0,
+                "business_request_rps": 20.0,
+                "telegram_update_rps": 24.0,
+                "latency": {},
+                "surfaces": {},
+            },
+            "roles": {},
+            "role_start_skew": {},
+            "attempts": [],
+        }
+        persistence = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=5,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=1,
+            completed_trade_quantity=5,
+            completed_ledger_count=1,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+
+        report = worker.build_dual_role_final_report(
+            prepare=prepare,
+            merged_result=merged_result,
+            persistence=persistence,
+        )
+
+        self.assertEqual(report["schema_version"], worker.DUAL_ROLE_FINAL_SCHEMA_VERSION)
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["correctness_failures"], [])
+        self.assertEqual(report["reports"]["webapp_hot_offer"]["persisted_trade_count"], 1)
+
+    def test_dual_role_final_report_fails_closed_on_request_errors(self):
+        prepare = {
+            "run_id": "run-6",
+            "prefix": "probe-",
+            "topology": "single-db staging role-worker smoke",
+            "telegram_gateway_boundary": "mock",
+            "scenario": {
+                "name": "bot_hot_offer",
+                "expected_winner_count": 1,
+            },
+            "offer": {
+                "id": 42,
+                "owner_user_id": 7,
+            },
+        }
+        merged_result = {
+            "schema_version": worker.DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
+            "summary": {
+                "total": 10,
+                "success": 1,
+                "rejected": 8,
+                "error": 1,
+                "business_request_rps": 20.0,
+                "telegram_update_rps": 24.0,
+                "latency": {},
+                "surfaces": {},
+            },
+            "roles": {},
+            "role_start_skew": {},
+            "attempts": [
+                {
+                    "outcome": "error",
+                    "detail": "Pool timeout",
+                }
+            ],
+        }
+        persistence = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=5,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=1,
+            completed_trade_quantity=5,
+            completed_ledger_count=1,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+
+        report = worker.build_dual_role_final_report(
+            prepare=prepare,
+            merged_result=merged_result,
+            persistence=persistence,
+        )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("expected zero internal errors", report["correctness_failures"][0])
+        self.assertEqual(report["reports"]["bot_hot_offer"]["attempt_error_details"], {"Pool timeout": 1})
+
 
 if __name__ == "__main__":
     unittest.main()
