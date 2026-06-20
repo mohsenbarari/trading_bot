@@ -1663,6 +1663,179 @@ Implementation status:
   planning and acceptance helpers; the mutating high-load benchmark runs explicitly on staging with
   synthetic data and captured artifacts.
 
+### Step 11B - Dual-Role Staging Load Simulation Roadmap
+
+Goal: move from a single in-container mixed-load probe to a closer staging simulation where Telegram
+traffic and WebApp traffic are generated from separate runtime roles and the sync boundary remains
+visible.
+
+This roadmap is required before treating the mixed-load benchmark as production-relevant evidence.
+Do not use production peers, production data, or production Telegram credentials for this roadmap.
+
+#### Step 11B-0 - Define The Simulation Topology
+
+Required decision:
+
+- The minimum acceptable release topology is two load-runner containers:
+  `load_telegram_foreign` and `load_webapp_iran`.
+- The preferred topology is a twin staging stack with independent foreign and Iran runtimes:
+  foreign app/bot/sync/db/redis plus Iran app/sync/db/redis, and two load-runner containers driving
+  their respective runtime surfaces.
+- A single shared database is allowed only for local smoke validation and must be reported as
+  "single-db smoke", not as cross-server evidence.
+
+Required invariants:
+
+- `load_telegram_foreign` may simulate Telegram updates through `aiogram.Dispatcher`; it must not
+  call Iran WebApp APIs directly.
+- `load_webapp_iran` may call WebApp APIs; it must not call Telegram, construct Telegram channel
+  edits, or import/run `run_bot.py`.
+- Iran runtime must keep the Telegram runtime guard active: no bot service and no Telegram gateway
+  calls from Iran.
+- Foreign runtime must keep the WebApp/chat surface guard active: no user-facing WebApp surface from
+  foreign.
+
+Exit criteria:
+
+- The selected topology is documented in the benchmark artifact.
+- Any weaker topology is explicitly labeled so it cannot be mistaken for full cross-server evidence.
+
+#### Step 11B-1 - Add Staging-Only Load Runner Services
+
+Required actions:
+
+- Add compose services or an overlay compose file for:
+  `load_telegram_foreign` and `load_webapp_iran`.
+- Use the application image, but run a benchmark command instead of API, bot polling, or sync worker.
+- Set explicit service identity, for example `TRADING_BOT_SERVICE=load_runner`.
+- Set explicit runtime role:
+  `SERVER_MODE=foreign` for Telegram load and `SERVER_MODE=iran` for WebApp load.
+- Keep both services behind a staging-only compose profile such as `staging-load`; they must never
+  start in normal staging deploys.
+- Add hard startup guards so `load_telegram_foreign` refuses to run unless the runtime is foreign,
+  and `load_webapp_iran` refuses to run unless the runtime is Iran.
+
+Required tests:
+
+- Compose/config test proves load services are profile-gated.
+- Guard tests prove Telegram load cannot run with `SERVER_MODE=iran` and WebApp load cannot run with
+  `SERVER_MODE=foreign`.
+- No production compose file starts these services by default.
+
+Exit criteria:
+
+- The runner containers can be started and stopped without changing the normal staging app/bot/sync
+  lifecycle.
+
+#### Step 11B-2 - Split The Mixed-Load Worker Into Coordinator And Role Workers
+
+Required behavior:
+
+- A coordinator creates one run id/prefix, seeds or verifies synthetic users, creates hot-offer test
+  cases, starts both role workers at the same barrier time, and gathers artifacts.
+- The Telegram role worker receives a run plan and feeds Telegram `message` / `callback_query`
+  updates through `aiogram.Dispatcher`.
+- The WebApp role worker receives a run plan and sends requests through the WebApp trade API path.
+- Each role worker writes per-request results with a monotonic timestamp, source role, source
+  surface, user id, offer public id, idempotency key, outcome, and latency.
+- The coordinator merges results with final DB/API/sync-health inspection.
+
+Required tests:
+
+- Deterministic plan-splitting test preserves the 60/40 distribution.
+- Barrier-time test proves both workers start within the accepted skew window.
+- Artifact schema test locks required fields and redaction.
+
+Exit criteria:
+
+- One local smoke run can execute the coordinator with tiny counts and produce a merged artifact.
+
+#### Step 11B-3 - Hot Offer Contention Scenarios
+
+Required scenarios:
+
+- WebApp-created hot offer receives concurrent Telegram and WebApp requests.
+- Bot-created hot offer receives concurrent Telegram and WebApp requests.
+- Full-fill hot offer: capacity equals one request amount, so exactly one winner is allowed.
+- Partial-fill hot offer: capacity permits multiple winners, and total completed quantity must equal
+  original quantity without exceeding it.
+- Retail lot hot offer: concurrent requests target lots where some become unavailable during the
+  run.
+- Duplicate/replay hot offer: repeated idempotency keys and duplicate Telegram callbacks do not
+  create duplicate trades.
+
+Default release target:
+
+- 1000 synthetic users.
+- At least 600 confirmed business requests per second.
+- 60 percent Telegram / 40 percent WebApp business-request mix.
+- Several dozen or more near-simultaneous requests on the same offer at the start of each hot-offer
+  scenario.
+
+Acceptance is fail-closed:
+
+- `remaining_quantity < 0` is an immediate failure.
+- Completed trade quantity greater than original quantity is an immediate failure.
+- More successful responses than persisted trades is an immediate failure.
+- Persisted trades without corresponding successful request ledger rows are an immediate failure.
+- Terminal offers returning to active are an immediate failure.
+- Unclassified internal errors are an immediate failure.
+
+#### Step 11B-4 - Cross-Server Sync Evidence
+
+Required checks for the preferred twin-stack topology:
+
+- Offer created on foreign appears on Iran within the accepted lag window.
+- Offer created on Iran appears on foreign/Telegram projection within the accepted lag window.
+- Trade accepted on Iran reaches foreign Telegram terminal projection.
+- Trade accepted on foreign reaches Iran WebApp history/detail projection.
+- Sync health is clean after the run.
+- No messenger tables are part of the sync evidence.
+- Stale/replayed sync events do not reactivate hot offers after terminal state.
+
+Exit criteria:
+
+- The artifact includes per-server final offer/trade/request-ledger counts and sync-health
+  snapshots.
+
+#### Step 11B-5 - Operational Safety And Cleanup
+
+Required behavior:
+
+- All synthetic data uses a unique run prefix.
+- Cleanup is explicit and prefix-scoped.
+- The cleanup command removes synthetic users, offers, trades, notifications, request ledger rows,
+  publication states where safe, change-log rows, and Redis confirmation keys.
+- Cleanup must not delete production-like or prefixless rows.
+- A failed run leaves enough artifact data for diagnosis before cleanup is attempted.
+
+Required tests:
+
+- Cleanup dry-run test lists only prefix-scoped rows.
+- Cleanup refuses empty or overly broad prefixes.
+- Failed-run artifact is written before cleanup.
+
+Exit criteria:
+
+- Staging can be returned to a clean synthetic state after each load run.
+
+#### Step 11B-6 - Performance And Capacity Report
+
+Required artifact fields:
+
+- Business-request RPS.
+- Telegram-update RPS.
+- Per-role p50/p95/p99/max latency.
+- Success/rejection/error counts by role and scenario.
+- Hot-offer final state and trade/request-ledger consistency.
+- DB connection pool pressure, Redis latency/error counters, sync lag, and worker backlog.
+- Any Telegram gateway mock/real boundary used by the run.
+
+Exit criteria:
+
+- The report clearly separates correctness failures from capacity warnings.
+- Production consideration remains blocked until owner-led staging validation reviews the artifact.
+
 ## Step 12 - Cutover Readiness And Production Gate Preparation
 
 Goal: prepare for a future production decision without performing it.
