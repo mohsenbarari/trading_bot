@@ -1841,6 +1841,20 @@ Exit criteria:
 - The artifact includes per-server final offer/trade/request-ledger counts and sync-health
   snapshots.
 
+Implementation status:
+
+- `scripts/sync_probe_worker.py offer-sync-evidence --prefix <run-prefix>` captures per-server
+  offer-specific evidence for `offers`, `trades`, `offer_requests`, and `offer_publication_states`.
+- Messenger/no-sync tables are explicitly excluded from the evidence table set.
+- `scripts/sync_probe_worker.py validate-offer-sync-evidence-artifact` validates the final two-server
+  artifact. It requires all Step 11B-4 checks, enforces the accepted lag window, compares foreign/Iran
+  counts and final offer statuses, rejects terminal reactivation, and requires clean sync-health
+  snapshots on both servers.
+- `tests/test_bot_webapp_sync_evidence.py` locks the evidence table set, snapshot comparison,
+  lag-window validation, health cleanliness, and required-check coverage.
+- The real twin-stack/staging run still has to produce the artifact; this step adds the evidence
+  contract and fail-closed validator needed before that run.
+
 #### Step 11B-5 - Operational Safety And Cleanup
 
 Required behavior:

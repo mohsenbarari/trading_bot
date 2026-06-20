@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 import redis.asyncio as redis
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, false, func, or_, select, text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -23,8 +23,13 @@ if str(REPO_ROOT) not in sys.path:
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.events import setup_event_listeners
+from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.utils import utc_now
 from models.change_log import ChangeLog
+from models.offer import Offer, OfferStatus
+from models.offer_publication_state import OfferPublicationState
+from models.offer_request import OfferRequest
+from models.trade import Trade
 from models.market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
 from core.services.cross_server_recovery_service import (
     clear_active_publication_gate,
@@ -36,6 +41,36 @@ from core.services.offer_publication_reconciliation_service import (
     publication_observability_summary,
     reconcile_offer_publications,
 )
+
+
+BOT_WEBAPP_SYNC_EVIDENCE_SCHEMA_VERSION = "bot_webapp_cross_server_sync_evidence_v1"
+OFFER_SYNC_SNAPSHOT_SCHEMA_VERSION = "bot_webapp_offer_sync_snapshot_v1"
+OFFER_SYNC_TABLES = ("offers", "trades", "offer_requests", "offer_publication_states")
+MESSENGER_NO_SYNC_TABLES = (
+    "messages",
+    "conversations",
+    "chats",
+    "chat_members",
+    "chat_files",
+    "upload_batches",
+    "upload_sessions",
+)
+REQUIRED_BOT_WEBAPP_SYNC_CHECKS = (
+    "foreign_offer_to_iran",
+    "iran_offer_to_foreign_projection",
+    "iran_trade_to_foreign_telegram_terminal",
+    "foreign_trade_to_iran_webapp_history",
+    "stale_replay_terminal_guard",
+)
+TERMINAL_OFFER_STATUSES = {
+    OfferStatus.COMPLETED.value,
+    OfferStatus.CANCELLED.value,
+    OfferStatus.EXPIRED.value,
+}
+
+
+class SyncProbeError(RuntimeError):
+    pass
 
 
 def json_safe(value: Any) -> Any:
@@ -106,6 +141,286 @@ async def health(args: argparse.Namespace) -> int:
             "publication_reconciliation": publication_reconciliation,
         }
     )
+    return 0
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _count_values(values: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(_enum_value(value) or "null")
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def offer_sync_evidence_tables() -> tuple[str, ...]:
+    for table_name in OFFER_SYNC_TABLES:
+        entry = get_sync_registry_entry(table_name)
+        if entry.policy != SyncPolicy.SYNC:
+            raise SyncProbeError(f"{table_name} is not classified as sync")
+    return OFFER_SYNC_TABLES
+
+
+def assert_no_messenger_tables_in_evidence(table_names: list[str] | tuple[str, ...]) -> None:
+    forbidden = sorted(set(table_names) & set(MESSENGER_NO_SYNC_TABLES))
+    if forbidden:
+        raise SyncProbeError(f"messenger/no-sync tables are not valid sync evidence: {', '.join(forbidden)}")
+
+
+def _snapshot_offer_statuses(snapshot: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(item["offer_public_id"]): str(item["status"])
+        for item in snapshot.get("offers", [])
+        if item.get("offer_public_id")
+    }
+
+
+def validate_offer_sync_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    if snapshot.get("schema_version") != OFFER_SYNC_SNAPSHOT_SCHEMA_VERSION:
+        raise SyncProbeError("unsupported offer sync snapshot schema_version")
+    table_names = tuple(snapshot.get("evidence_tables") or ())
+    if table_names != OFFER_SYNC_TABLES:
+        raise SyncProbeError(f"offer sync snapshot evidence_tables mismatch: {table_names}")
+    assert_no_messenger_tables_in_evidence(table_names)
+    if not str(snapshot.get("server_mode") or "").strip():
+        raise SyncProbeError("offer sync snapshot server_mode is required")
+    if not str(snapshot.get("prefix") or "").strip():
+        raise SyncProbeError("offer sync snapshot prefix is required")
+    table_counts = snapshot.get("table_counts")
+    if not isinstance(table_counts, dict):
+        raise SyncProbeError("offer sync snapshot table_counts is required")
+    for table_name in OFFER_SYNC_TABLES:
+        if table_name not in table_counts:
+            raise SyncProbeError(f"offer sync snapshot missing table count for {table_name}")
+    if any(int(table_counts.get(table_name) or 0) < 0 for table_name in OFFER_SYNC_TABLES):
+        raise SyncProbeError("offer sync snapshot table counts must be non-negative")
+    return snapshot
+
+
+def assert_offer_sync_snapshots_match(foreign_snapshot: dict[str, Any], iran_snapshot: dict[str, Any]) -> None:
+    foreign = validate_offer_sync_snapshot(foreign_snapshot)
+    iran = validate_offer_sync_snapshot(iran_snapshot)
+    if foreign.get("prefix") != iran.get("prefix"):
+        raise SyncProbeError("cross-server offer sync evidence prefixes differ")
+    if foreign.get("table_counts") != iran.get("table_counts"):
+        raise SyncProbeError(
+            "cross-server offer sync table counts differ: "
+            f"foreign={foreign.get('table_counts')} iran={iran.get('table_counts')}"
+        )
+
+    foreign_statuses = _snapshot_offer_statuses(foreign)
+    iran_statuses = _snapshot_offer_statuses(iran)
+    if set(foreign_statuses) != set(iran_statuses):
+        raise SyncProbeError("cross-server offer public id sets differ")
+    for public_id in sorted(foreign_statuses):
+        foreign_status = foreign_statuses[public_id]
+        iran_status = iran_statuses[public_id]
+        if foreign_status != iran_status:
+            raise SyncProbeError(
+                f"cross-server offer status differs for {public_id}: foreign={foreign_status} iran={iran_status}"
+            )
+        if foreign_status in TERMINAL_OFFER_STATUSES and iran_status == OfferStatus.ACTIVE.value:
+            raise SyncProbeError(f"terminal offer reactivated on iran for {public_id}")
+        if iran_status in TERMINAL_OFFER_STATUSES and foreign_status == OfferStatus.ACTIVE.value:
+            raise SyncProbeError(f"terminal offer reactivated on foreign for {public_id}")
+
+
+def assert_sync_health_clean(payload: dict[str, Any], *, role: str) -> None:
+    if payload.get("status") != "ok":
+        raise SyncProbeError(f"{role} sync health status is not ok")
+    if payload.get("redis_ok") is False:
+        raise SyncProbeError(f"{role} sync health redis_ok is false")
+    unsynced = int(payload.get("unsynced_change_log_count") or 0)
+    queues = payload.get("redis_queues") or {}
+    outbound = int(queues.get("sync:outbound") or 0)
+    retry = int(queues.get("sync:retry") or 0)
+    if unsynced or outbound or retry:
+        raise SyncProbeError(
+            f"{role} sync health is dirty: unsynced={unsynced} outbound={outbound} retry={retry}"
+        )
+
+
+def validate_cross_server_sync_evidence_artifact(
+    artifact: dict[str, Any],
+    *,
+    accepted_lag_seconds: float,
+) -> dict[str, Any]:
+    if artifact.get("schema_version") != BOT_WEBAPP_SYNC_EVIDENCE_SCHEMA_VERSION:
+        raise SyncProbeError("unsupported cross-server sync evidence schema_version")
+    if accepted_lag_seconds <= 0:
+        raise SyncProbeError("accepted_lag_seconds must be positive")
+    checks = artifact.get("checks")
+    if not isinstance(checks, dict):
+        raise SyncProbeError("cross-server sync evidence checks are required")
+    missing = sorted(set(REQUIRED_BOT_WEBAPP_SYNC_CHECKS) - set(checks))
+    if missing:
+        raise SyncProbeError(f"cross-server sync evidence missing checks: {', '.join(missing)}")
+    for check_name in REQUIRED_BOT_WEBAPP_SYNC_CHECKS:
+        check = checks.get(check_name) or {}
+        if not bool(check.get("ok")):
+            raise SyncProbeError(f"cross-server sync evidence check failed: {check_name}")
+        duration = float(check.get("duration_seconds") or 0)
+        if duration < 0:
+            raise SyncProbeError(f"cross-server sync evidence check has negative duration: {check_name}")
+        if duration > accepted_lag_seconds:
+            raise SyncProbeError(
+                f"cross-server sync evidence check {check_name} exceeded lag window: "
+                f"{duration:.3f}s > {accepted_lag_seconds:.3f}s"
+            )
+
+    server_snapshots = artifact.get("server_snapshots") or {}
+    sync_health = artifact.get("sync_health") or {}
+    foreign_snapshot = server_snapshots.get("foreign")
+    iran_snapshot = server_snapshots.get("iran")
+    if not isinstance(foreign_snapshot, dict) or not isinstance(iran_snapshot, dict):
+        raise SyncProbeError("cross-server sync evidence requires foreign and iran snapshots")
+    assert_offer_sync_snapshots_match(foreign_snapshot, iran_snapshot)
+    for role in ("foreign", "iran"):
+        role_health = sync_health.get(role)
+        if not isinstance(role_health, dict):
+            raise SyncProbeError(f"cross-server sync evidence missing {role} sync health")
+        assert_sync_health_clean(role_health, role=role)
+    return artifact
+
+
+def read_json_file(path: str | Path) -> dict[str, Any]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SyncProbeError(f"JSON artifact must be an object: {path}")
+    return data
+
+
+def _where_or_false(*conditions):
+    normalized = [condition for condition in conditions if condition is not None]
+    if not normalized:
+        return false()
+    if len(normalized) == 1:
+        return normalized[0]
+    return or_(*normalized)
+
+
+async def collect_offer_sync_evidence_snapshot(prefix: str) -> dict[str, Any]:
+    normalized_prefix = str(prefix or "").strip()
+    if not normalized_prefix:
+        raise SyncProbeError("offer sync evidence prefix is required")
+    pattern = f"{normalized_prefix}%"
+    evidence_tables = offer_sync_evidence_tables()
+    assert_no_messenger_tables_in_evidence(evidence_tables)
+
+    async with AsyncSessionLocal() as db:
+        offer_rows = (
+            await db.execute(
+                select(
+                    Offer.id,
+                    Offer.offer_public_id,
+                    Offer.status,
+                    Offer.home_server,
+                    Offer.version_id,
+                    Offer.remaining_quantity,
+                )
+                .where(Offer.notes.like(pattern))
+                .order_by(Offer.offer_public_id)
+            )
+        ).all()
+        offer_ids = [int(row.id) for row in offer_rows]
+        offer_public_ids = [str(row.offer_public_id) for row in offer_rows if row.offer_public_id]
+        offer_filter = OfferPublicationState.offer_public_id.in_(offer_public_ids) if offer_public_ids else None
+        trade_filter = Trade.offer_id.in_(offer_ids) if offer_ids else None
+        request_filter = _where_or_false(
+            OfferRequest.local_offer_id.in_(offer_ids) if offer_ids else None,
+            OfferRequest.offer_public_id.in_(offer_public_ids) if offer_public_ids else None,
+        )
+        publication_filter = _where_or_false(
+            OfferPublicationState.offer_id.in_(offer_ids) if offer_ids else None,
+            offer_filter,
+        )
+
+        trade_rows = (
+            await db.execute(
+                select(Trade.id, Trade.status, Trade.quantity, Trade.trade_number, Trade.offer_id).where(
+                    trade_filter if trade_filter is not None else false()
+                )
+            )
+        ).all()
+        request_rows = (
+            await db.execute(
+                select(
+                    OfferRequest.id,
+                    OfferRequest.result_status,
+                    OfferRequest.request_source_surface,
+                    OfferRequest.offer_public_id,
+                    OfferRequest.resulting_trade_id,
+                ).where(request_filter)
+            )
+        ).all()
+        publication_rows = (
+            await db.execute(
+                select(
+                    OfferPublicationState.id,
+                    OfferPublicationState.offer_public_id,
+                    OfferPublicationState.surface,
+                    OfferPublicationState.status,
+                    OfferPublicationState.publication_owner_server,
+                    OfferPublicationState.last_known_offer_status,
+                ).where(publication_filter)
+            )
+        ).all()
+
+    offers = [
+        {
+            "id": int(row.id),
+            "offer_public_id": row.offer_public_id,
+            "status": _enum_value(row.status),
+            "home_server": row.home_server,
+            "version_id": int(row.version_id or 0),
+            "remaining_quantity": row.remaining_quantity,
+        }
+        for row in offer_rows
+    ]
+    trade_statuses = [_enum_value(row.status) for row in trade_rows]
+    request_statuses = [_enum_value(row.result_status) for row in request_rows]
+    publication_statuses = [_enum_value(row.status) for row in publication_rows]
+    snapshot = {
+        "schema_version": OFFER_SYNC_SNAPSHOT_SCHEMA_VERSION,
+        "captured_at": utc_now(),
+        "server_mode": settings.server_mode,
+        "prefix": normalized_prefix,
+        "evidence_tables": evidence_tables,
+        "messenger_tables_included": [],
+        "table_counts": {
+            "offers": len(offer_rows),
+            "trades": len(trade_rows),
+            "offer_requests": len(request_rows),
+            "offer_publication_states": len(publication_rows),
+        },
+        "offer_status_counts": _count_values([row.status for row in offer_rows]),
+        "trade_status_counts": _count_values(trade_statuses),
+        "offer_request_status_counts": _count_values(request_statuses),
+        "offer_request_surface_counts": _count_values([row.request_source_surface for row in request_rows]),
+        "publication_status_counts": _count_values(publication_statuses),
+        "publication_surface_counts": _count_values([row.surface for row in publication_rows]),
+        "completed_trade_quantity": sum(int(row.quantity or 0) for row in trade_rows if _enum_value(row.status) == "completed"),
+        "offers": offers,
+    }
+    validate_offer_sync_snapshot(snapshot)
+    return snapshot
+
+
+async def offer_sync_evidence(args: argparse.Namespace) -> int:
+    print_json(await collect_offer_sync_evidence_snapshot(args.prefix))
+    return 0
+
+
+async def validate_offer_sync_evidence_artifact(args: argparse.Namespace) -> int:
+    artifact = read_json_file(args.artifact)
+    validate_cross_server_sync_evidence_artifact(
+        artifact,
+        accepted_lag_seconds=float(args.accepted_lag_seconds),
+    )
+    print_json({"status": "ok", "artifact": str(args.artifact)})
     return 0
 
 
@@ -360,6 +675,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("health")
 
+    offer_evidence_parser = subparsers.add_parser("offer-sync-evidence")
+    offer_evidence_parser.add_argument("--prefix", required=True)
+
+    validate_evidence_parser = subparsers.add_parser("validate-offer-sync-evidence-artifact")
+    validate_evidence_parser.add_argument("--artifact", required=True)
+    validate_evidence_parser.add_argument("--accepted-lag-seconds", type=float, default=2.0)
+
     insert_parser = subparsers.add_parser("insert-probe")
     insert_parser.add_argument("--date", required=True)
     insert_parser.add_argument("--note", required=True)
@@ -415,6 +737,8 @@ async def main_async() -> int:
     args = build_parser().parse_args()
     handlers = {
         "health": health,
+        "offer-sync-evidence": offer_sync_evidence,
+        "validate-offer-sync-evidence-artifact": validate_offer_sync_evidence_artifact,
         "insert-probe": insert_probe,
         "delete-probe": delete_probe,
         "exists-probe": exists_probe,
