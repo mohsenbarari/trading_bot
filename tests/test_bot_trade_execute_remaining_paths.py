@@ -163,7 +163,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         )
         bot.send_message.assert_awaited_once()
 
-    async def test_handle_channel_trade_remote_home_retries_timeout_with_same_idempotency_key(self):
+    async def test_handle_channel_trade_remote_home_schedules_recovery_after_timeout(self):
         user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
         offer = make_offer()
         callback = make_callback()
@@ -177,22 +177,29 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
         ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(side_effect=[
             (504, {"detail": "timeout"}),
-            (200, {"trade_number": 123, "quantity": 2, "price": 150000, "commodity_name": "سکه", "trade_type": "buy"}),
         ])) as forward_mock, patch(
             "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
         ), patch("bot.handlers.trade_execute.current_server", return_value="foreign"), patch(
             "bot.handlers.trade_execute.asyncio.sleep", new=AsyncMock()
-        ) as sleep_mock:
+        ) as sleep_mock, patch(
+            "bot.handlers.trade_execute._schedule_remote_trade_success_recovery"
+        ) as schedule_recovery_mock:
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
 
-        self.assertEqual(forward_mock.await_count, 2)
-        first_payload = forward_mock.await_args_list[0].args[1]
-        second_payload = forward_mock.await_args_list[1].args[1]
+        forward_mock.assert_awaited_once()
+        first_payload = forward_mock.await_args.args[1]
         self.assertEqual(first_payload["idempotency_key"], "telegram_callback:5:legacy_offer:7:2:remaining:5:50")
-        self.assertEqual(second_payload["idempotency_key"], "telegram_callback:5:legacy_offer:7:2:remaining:5:50")
-        sleep_mock.assert_awaited_once_with(0.4)
-        bot.send_message.assert_awaited_once()
-        callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
+        sleep_mock.assert_not_awaited()
+        bot.send_message.assert_not_awaited()
+        schedule_recovery_mock.assert_called_once()
+        self.assertEqual(
+            schedule_recovery_mock.call_args.kwargs["idempotency_key"],
+            "telegram_callback:5:legacy_offer:7:2:remaining:5:50",
+        )
+        callback.answer.assert_awaited_with(
+            "درخواست معامله ارسال شد؛ نتیجه تا چند لحظه دیگر همگام می‌شود.",
+            show_alert=False,
+        )
 
     async def test_handle_channel_trade_local_completed_trade_retries_and_tolerates_side_effect_failures(self):
         user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)

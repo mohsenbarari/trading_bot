@@ -2391,12 +2391,14 @@ async def _execute_trade_authoritatively(
             )
             if callable(getattr(db, "commit", None)):
                 await _commit_trade_execution(db)
-            return trade_to_response(
-                existing_trade_obj,
-                identity_map=existing_identity_map,
-                customer_relation_map=existing_customer_relation_map,
-                offer_notes=getattr(offer, "notes", None),
-            )
+            existing_response_kwargs = {
+                "identity_map": existing_identity_map,
+                "customer_relation_map": existing_customer_relation_map,
+            }
+            existing_offer_notes = getattr(offer, "notes", None)
+            if existing_offer_notes is not None:
+                existing_response_kwargs["offer_notes"] = existing_offer_notes
+            return trade_to_response(existing_trade_obj, **existing_response_kwargs)
     
     # گرفتن شماره معامله جدید
     next_trade_number = await _allocate_next_trade_number(db)
@@ -2904,14 +2906,16 @@ async def _execute_trade_authoritatively(
             error_class=type(exc).__name__,
         )
     
-    return trade_to_response(
-        response_trade,
-        identity_map=participant_identity_map,
-        customer_relation_map=participant_customer_relation_map,
-        viewer_context=context,
-        history_target_user_id=owner_user.id,
-        offer_notes=getattr(offer, "notes", None),
-    )
+    response_kwargs = {
+        "identity_map": participant_identity_map,
+        "customer_relation_map": participant_customer_relation_map,
+        "viewer_context": context,
+        "history_target_user_id": owner_user.id,
+    }
+    offer_notes = getattr(offer, "notes", None)
+    if offer_notes is not None:
+        response_kwargs["offer_notes"] = offer_notes
+    return trade_to_response(response_trade, **response_kwargs)
 
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
@@ -3027,6 +3031,11 @@ async def execute_trade_internal(
         )
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="این سرور مرجع آفر نیست.")
 
+    resolved_offer_id = offer.id
+    expunge_offer = getattr(db, "expunge", None)
+    if callable(expunge_offer):
+        expunge_offer(offer)
+
     responder = await db.get(User, internal_data.responder_user_id)
     if not responder or responder.is_deleted:
         log_trading_event(
@@ -3063,7 +3072,7 @@ async def execute_trade_internal(
 
     return await _execute_trade_authoritatively(
         trade_data=TradeCreate(
-            offer_id=offer.id,
+            offer_id=resolved_offer_id,
             offer_public_id=internal_data.offer_public_id,
             quantity=internal_data.quantity,
             idempotency_key=internal_data.idempotency_key,

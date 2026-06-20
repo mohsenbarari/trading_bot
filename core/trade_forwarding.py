@@ -61,7 +61,12 @@ def _body_summary(text: str) -> dict[str, Any]:
     return summarize_response_body(text)
 
 
-async def forward_trade_to_home_server(target_server: str, payload: dict[str, Any]) -> Tuple[int, Any]:
+async def forward_trade_to_home_server(
+    target_server: str,
+    payload: dict[str, Any],
+    *,
+    timeout_seconds: float | None = None,
+) -> Tuple[int, Any]:
     target_url = peer_server_url_for(target_server)
     source_server = current_server()
     log_context = _safe_forward_log_context(target_server, payload)
@@ -88,7 +93,7 @@ async def forward_trade_to_home_server(target_server: str, payload: dict[str, An
 
     try:
         async with httpx.AsyncClient(
-            timeout=settings.trade_forward_timeout_seconds,
+            timeout=timeout_seconds if timeout_seconds is not None else settings.trade_forward_timeout_seconds,
             verify=_tls_verify_setting(),
         ) as client:
             response = await client.post(
