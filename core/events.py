@@ -40,12 +40,17 @@ def _get_sync_redis():
     if _sync_redis is None:
         import redis as sync_redis
         from core.config import settings
+        try:
+            socket_timeout = max(0.05, float(getattr(settings, "sync_signal_redis_timeout_seconds", 0.25)))
+        except (TypeError, ValueError):
+            socket_timeout = 0.25
         _sync_redis = sync_redis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
             db=0,
             decode_responses=True,
-            socket_connect_timeout=2,
+            socket_connect_timeout=socket_timeout,
+            socket_timeout=socket_timeout,
             socket_keepalive=True,
             retry_on_timeout=True
         )

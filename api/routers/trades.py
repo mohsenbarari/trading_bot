@@ -5,6 +5,7 @@ API Router for Trade Management - MiniApp Integration
 import logging
 import os
 import hashlib
+import time as time_module
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
@@ -370,6 +371,7 @@ def _is_trade_unique_constraint_error(exc: Exception) -> bool:
 
 
 async def _commit_trade_execution(db: AsyncSession) -> None:
+    started_at = time_module.perf_counter()
     try:
         await db.commit()
     except Exception as exc:
@@ -385,6 +387,17 @@ async def _commit_trade_execution(db: AsyncSession) -> None:
                 detail="این معامله قبلاً ثبت شده یا شماره معامله تکراری است. لطفاً وضعیت معاملات را بروزرسانی کنید.",
             ) from exc
         raise
+    finally:
+        duration_ms = (time_module.perf_counter() - started_at) * 1000
+        if duration_ms >= 500:
+            log_trading_event(
+                logger,
+                "trade_commit.slow",
+                level="warning",
+                action="trade_commit",
+                result="slow",
+                duration_ms=round(duration_ms, 2),
+            )
 
 
 def _resolve_trade_participant_name(

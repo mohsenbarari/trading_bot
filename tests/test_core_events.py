@@ -383,13 +383,18 @@ class CoreEventsTests(unittest.TestCase):
             created_clients.append((kwargs, client))
             return client
 
-        with patch('redis.Redis', side_effect=build_client), patch('core.config.settings', SimpleNamespace(redis_host='host', redis_port=6379)):
+        with patch('redis.Redis', side_effect=build_client), patch(
+            'core.config.settings',
+            SimpleNamespace(redis_host='host', redis_port=6379, sync_signal_redis_timeout_seconds=0.3),
+        ):
             first = events._get_sync_redis()
             second = events._get_sync_redis()
 
         self.assertIs(first, second)
         self.assertEqual(len(created_clients), 1)
         self.assertEqual(created_clients[0][0]['host'], 'host')
+        self.assertEqual(created_clients[0][0]['socket_connect_timeout'], 0.3)
+        self.assertEqual(created_clients[0][0]['socket_timeout'], 0.3)
 
         connection = _FakeConnection()
         sync_redis = _FakeSyncRedis()

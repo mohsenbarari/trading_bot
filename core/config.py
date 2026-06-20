@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     web_push_vapid_subject: str | None = None
     web_push_ttl_seconds: int = 3600
     web_push_timeout_seconds: float = 5.0
+    sync_signal_redis_timeout_seconds: float = 0.25
 
     # SMS.ir Service
     smsir_api_key: str | None = None
