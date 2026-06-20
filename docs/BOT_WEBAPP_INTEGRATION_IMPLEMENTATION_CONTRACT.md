@@ -1876,6 +1876,20 @@ Exit criteria:
 
 - Staging can be returned to a clean synthetic state after each load run.
 
+Implementation status:
+
+- `scripts/trading_core_probe_worker.py cleanup --prefix <run-prefix>` now refuses empty, short,
+  wildcard, and known broad prefixes before any database mutation.
+- Cleanup supports `--dry-run` and `--artifact <path>` so a failed/stale run can be inspected before
+  destructive cleanup.
+- Cleanup scope now includes synthetic `offer_requests` and `offer_publication_states`, in addition
+  to users, offers, trades, notifications, chat members, change-log rows, and Redis confirmation/
+  counter keys.
+- SQL LIKE patterns escape literal underscores in prefixes such as `P7_TRADING_...`, so cleanup does
+  not treat project prefixes as broad wildcard matches.
+- `tests/test_trading_core_mixed_load_helpers.py` locks prefix guard behavior, LIKE escaping, and the
+  dry-run report shape for request-ledger/publication-state cleanup.
+
 #### Step 11B-6 - Performance And Capacity Report
 
 Required artifact fields:

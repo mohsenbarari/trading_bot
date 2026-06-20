@@ -339,6 +339,43 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         with self.assertRaises(worker.TradingProbeError):
             worker.assert_duplicate_replay_acceptance(statuses=["success", "success"], persistence=corrupted)
 
+    def test_cleanup_prefix_guard_rejects_empty_broad_and_wildcard_prefixes(self):
+        self.assertEqual(worker.validate_cleanup_prefix("P7_TRADING_1405_"), "P7_TRADING_1405_")
+
+        for value in ("", "abc", "test", "prod", "stage", "bad%prefix", "bad*prefix", "bad?prefix"):
+            with self.subTest(value=value):
+                with self.assertRaises(worker.TradingProbeError):
+                    worker.validate_cleanup_prefix(value)
+
+    def test_cleanup_prefix_patterns_escape_sql_like_wildcards(self):
+        prefix_pattern, contains_pattern = worker.cleanup_prefix_patterns("P7_TRADING_1405_")
+
+        self.assertEqual(prefix_pattern, r"P7\_TRADING\_1405\_%")
+        self.assertEqual(contains_pattern, r"%P7\_TRADING\_1405\_%")
+
+    def test_cleanup_dry_run_report_lists_request_and_publication_scope(self):
+        plan = worker.CleanupPlan(
+            prefix="P7_TRADING_1405_",
+            user_ids=[1, 2],
+            offer_ids=[10],
+            offer_public_ids=["ofr_10"],
+            trade_ids=[20],
+            offer_request_ids=[30, 31],
+            publication_state_ids=[40, 41],
+            notification_ids=[50],
+            chat_member_ids=[60],
+        )
+
+        report = worker.cleanup_report_payload(plan=plan, dry_run=True, deleted_redis_keys=3)
+
+        self.assertTrue(report["dry_run"])
+        self.assertEqual(report["planned_counts"]["offer_requests"], 2)
+        self.assertEqual(report["planned_counts"]["offer_publication_states"], 2)
+        self.assertEqual(report["planned_ids"]["offer_public_ids"], ["ofr_10"])
+        self.assertEqual(report["deleted_offer_requests"], 0)
+        self.assertEqual(report["deleted_publication_states"], 0)
+        self.assertEqual(report["deleted_redis_keys"], 3)
+
     def test_load_runner_runtime_surface_guard_accepts_expected_roles(self):
         with patch.object(worker.settings, "environment", "staging"), patch.object(
             worker.settings, "trading_bot_service", "load_runner"

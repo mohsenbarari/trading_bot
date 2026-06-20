@@ -56,6 +56,7 @@ from models.change_log import ChangeLog
 from models.chat_member import ChatMember
 from models.commodity import Commodity
 from models.notification import Notification
+from models.offer_publication_state import OfferPublicationState
 from models.offer_request import OfferRequest, OfferRequestStatus
 from models.offer import Offer, OfferStatus
 from models.trade import Trade, TradeStatus
@@ -70,6 +71,21 @@ DUAL_ROLE_PLAN_SCHEMA_VERSION = "bot_webapp_mixed_load_role_plan_v1"
 DUAL_ROLE_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_role_result_v1"
 DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1"
 DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
+MIN_CLEANUP_PREFIX_LENGTH = 5
+LIKE_ESCAPE = "\\"
+BROAD_CLEANUP_PREFIXES = {
+    "admin",
+    "bench",
+    "dev",
+    "load",
+    "prod",
+    "production",
+    "stage",
+    "staging",
+    "test",
+    "tmp",
+    "user",
+}
 
 
 LOAD_RUNNER_ROLES = {
@@ -173,6 +189,19 @@ class HotOfferPersistenceSnapshot:
     trades_without_completed_ledger_count: int
     failed_internal_ledger_count: int
     duplicate_replay_ledger_count: int
+
+
+@dataclass(frozen=True)
+class CleanupPlan:
+    prefix: str
+    user_ids: list[int]
+    offer_ids: list[int]
+    offer_public_ids: list[str]
+    trade_ids: list[int]
+    offer_request_ids: list[int]
+    publication_state_ids: list[int]
+    notification_ids: list[int]
+    chat_member_ids: list[int]
 
 
 def json_safe(value: Any) -> Any:
@@ -813,7 +842,82 @@ def assert_load_runner_runtime_surface(role: str) -> dict[str, Any]:
     }
 
 
-async def cleanup_redis_for_user_ids(user_ids: list[int]) -> int:
+def validate_cleanup_prefix(prefix: str) -> str:
+    normalized = str(prefix or "").strip()
+    if len(normalized) < MIN_CLEANUP_PREFIX_LENGTH:
+        raise TradingProbeError(
+            f"cleanup prefix must be at least {MIN_CLEANUP_PREFIX_LENGTH} characters"
+        )
+    lowered = normalized.lower()
+    if lowered in BROAD_CLEANUP_PREFIXES:
+        raise TradingProbeError(f"cleanup prefix is too broad: {normalized}")
+    if any(char in normalized for char in ("%", "*", "?")):
+        raise TradingProbeError("cleanup prefix must not contain wildcard characters")
+    return normalized
+
+
+def escape_sql_like_literal(value: str) -> str:
+    escaped = value.replace(LIKE_ESCAPE, LIKE_ESCAPE + LIKE_ESCAPE)
+    escaped = escaped.replace("%", LIKE_ESCAPE + "%")
+    escaped = escaped.replace("_", LIKE_ESCAPE + "_")
+    return escaped
+
+
+def cleanup_prefix_patterns(prefix: str) -> tuple[str, str]:
+    normalized = validate_cleanup_prefix(prefix)
+    escaped = escape_sql_like_literal(normalized)
+    return f"{escaped}%", f"%{escaped}%"
+
+
+def in_filter(column: Any, values: list[int] | list[str]):
+    return column.in_(values) if values else false()
+
+
+def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
+    return {
+        "users": len(plan.user_ids),
+        "chat_members": len(plan.chat_member_ids),
+        "offers": len(plan.offer_ids),
+        "offer_publication_states": len(plan.publication_state_ids),
+        "offer_requests": len(plan.offer_request_ids),
+        "trades": len(plan.trade_ids),
+        "notifications": len(plan.notification_ids),
+    }
+
+
+def cleanup_report_payload(
+    *,
+    plan: CleanupPlan,
+    dry_run: bool,
+    deleted_users: int = 0,
+    deleted_chat_members: int = 0,
+    deleted_offers: int = 0,
+    deleted_trades: int = 0,
+    deleted_notifications: int = 0,
+    deleted_offer_requests: int = 0,
+    deleted_publication_states: int = 0,
+    deleted_change_logs: int = 0,
+    deleted_redis_keys: int = 0,
+) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "dry_run": dry_run,
+        "prefix": plan.prefix,
+        "planned_counts": cleanup_plan_counts(plan),
+        "planned_ids": asdict(plan),
+        "deleted_users": deleted_users,
+        "deleted_chat_members": deleted_chat_members,
+        "deleted_offers": deleted_offers,
+        "deleted_trades": deleted_trades,
+        "deleted_notifications": deleted_notifications,
+        "deleted_offer_requests": deleted_offer_requests,
+        "deleted_publication_states": deleted_publication_states,
+        "deleted_change_logs": deleted_change_logs,
+        "deleted_redis_keys": deleted_redis_keys,
+    }
+
+
+async def cleanup_redis_for_user_ids(user_ids: list[int], *, dry_run: bool = False) -> int:
     if not user_ids:
         return 0
     deleted = 0
@@ -834,30 +938,56 @@ async def cleanup_redis_for_user_ids(user_ids: list[int]) -> int:
             async for key in client.scan_iter(match=f"confirm:{user_id}:*"):
                 keys.append(str(key))
         if keys:
-            deleted = int(await client.delete(*keys) or 0)
+            unique_keys = sorted(set(keys))
+            deleted = len(unique_keys) if dry_run else int(await client.delete(*unique_keys) or 0)
     finally:
         await client.aclose()
     return deleted
 
 
-async def cleanup_prefix(prefix: str) -> dict[str, Any]:
-    pattern = f"{prefix}%"
-    contains_pattern = f"%{prefix}%"
+async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
+    normalized_prefix = validate_cleanup_prefix(prefix)
+    pattern, contains_pattern = cleanup_prefix_patterns(normalized_prefix)
     async with AsyncSessionLocal() as db:
         user_ids = [
             int(item)
             for item in (
-                await db.execute(select(User.id).where(User.account_name.like(pattern)))
+                await db.execute(select(User.id).where(User.account_name.like(pattern, escape=LIKE_ESCAPE)))
             ).scalars().all()
         ]
-        offer_ids = [
+        offer_rows = (
+            await db.execute(
+                select(Offer.id, Offer.offer_public_id).where(
+                    (Offer.notes.like(contains_pattern, escape=LIKE_ESCAPE))
+                    | (Offer.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
+                    | in_filter(Offer.user_id, user_ids)
+                )
+            )
+        ).all()
+        offer_ids = [int(row.id) for row in offer_rows]
+        offer_public_ids = sorted({str(row.offer_public_id) for row in offer_rows if row.offer_public_id})
+        offer_request_ids = [
             int(item)
             for item in (
                 await db.execute(
-                    select(Offer.id).where(
-                        (Offer.notes.like(contains_pattern))
-                        | (Offer.idempotency_key.like(pattern))
-                        | (Offer.user_id.in_(user_ids) if user_ids else false())
+                    select(OfferRequest.id).where(
+                        (OfferRequest.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
+                        | in_filter(OfferRequest.local_offer_id, offer_ids)
+                        | in_filter(OfferRequest.offer_public_id, offer_public_ids)
+                        | in_filter(OfferRequest.requester_user_id, user_ids)
+                        | in_filter(OfferRequest.actor_user_id, user_ids)
+                    )
+                )
+            ).scalars().all()
+        ]
+        publication_state_ids = [
+            int(item)
+            for item in (
+                await db.execute(
+                    select(OfferPublicationState.id).where(
+                        (OfferPublicationState.dedupe_key.like(pattern, escape=LIKE_ESCAPE))
+                        | in_filter(OfferPublicationState.offer_id, offer_ids)
+                        | in_filter(OfferPublicationState.offer_public_id, offer_public_ids)
                     )
                 )
             ).scalars().all()
@@ -867,10 +997,11 @@ async def cleanup_prefix(prefix: str) -> dict[str, Any]:
             for item in (
                 await db.execute(
                     select(Trade.id).where(
-                        (Trade.idempotency_key.like(pattern))
-                        | (Trade.offer_id.in_(offer_ids) if offer_ids else false())
-                        | (Trade.offer_user_id.in_(user_ids) if user_ids else false())
-                        | (Trade.responder_user_id.in_(user_ids) if user_ids else false())
+                        (Trade.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
+                        | in_filter(Trade.offer_id, offer_ids)
+                        | in_filter(Trade.offer_user_id, user_ids)
+                        | in_filter(Trade.responder_user_id, user_ids)
+                        | in_filter(Trade.actor_user_id, user_ids)
                     )
                 )
             ).scalars().all()
@@ -880,8 +1011,8 @@ async def cleanup_prefix(prefix: str) -> dict[str, Any]:
             for item in (
                 await db.execute(
                     select(Notification.id).where(
-                        (Notification.user_id.in_(user_ids) if user_ids else false())
-                        | Notification.message.like(contains_pattern)
+                        in_filter(Notification.user_id, user_ids)
+                        | Notification.message.like(contains_pattern, escape=LIKE_ESCAPE)
                     )
                 )
             ).scalars().all()
@@ -889,67 +1020,106 @@ async def cleanup_prefix(prefix: str) -> dict[str, Any]:
         chat_member_ids = [
             int(item)
             for item in (
-                await db.execute(
-                    select(ChatMember.id).where(ChatMember.user_id.in_(user_ids) if user_ids else false())
-                )
+                await db.execute(select(ChatMember.id).where(in_filter(ChatMember.user_id, user_ids)))
             ).scalars().all()
         ]
+    return CleanupPlan(
+        prefix=normalized_prefix,
+        user_ids=user_ids,
+        offer_ids=offer_ids,
+        offer_public_ids=offer_public_ids,
+        trade_ids=trade_ids,
+        offer_request_ids=offer_request_ids,
+        publication_state_ids=publication_state_ids,
+        notification_ids=notification_ids,
+        chat_member_ids=chat_member_ids,
+    )
 
+
+async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any]:
+    plan = await collect_cleanup_plan(prefix)
+    if dry_run:
+        planned_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids, dry_run=True)
+        return cleanup_report_payload(plan=plan, dry_run=True, deleted_redis_keys=planned_redis_keys)
+
+    async with AsyncSessionLocal() as db:
         deleted_notifications = 0
         deleted_chat_members = 0
         deleted_trades = 0
         deleted_offers = 0
         deleted_users = 0
-        if notification_ids:
+        deleted_offer_requests = 0
+        deleted_publication_states = 0
+        if plan.notification_ids:
             deleted_notifications = int(
-                (await db.execute(delete(Notification).where(Notification.id.in_(notification_ids)))).rowcount or 0
+                (await db.execute(delete(Notification).where(Notification.id.in_(plan.notification_ids)))).rowcount or 0
             )
-        if chat_member_ids:
+        if plan.publication_state_ids:
+            deleted_publication_states = int(
+                (
+                    await db.execute(
+                        delete(OfferPublicationState).where(OfferPublicationState.id.in_(plan.publication_state_ids))
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.offer_request_ids:
+            deleted_offer_requests = int(
+                (await db.execute(delete(OfferRequest).where(OfferRequest.id.in_(plan.offer_request_ids)))).rowcount
+                or 0
+            )
+        if plan.chat_member_ids:
             deleted_chat_members = int(
-                (await db.execute(delete(ChatMember).where(ChatMember.id.in_(chat_member_ids)))).rowcount or 0
+                (await db.execute(delete(ChatMember).where(ChatMember.id.in_(plan.chat_member_ids)))).rowcount or 0
             )
-        if trade_ids:
-            deleted_trades = int((await db.execute(delete(Trade).where(Trade.id.in_(trade_ids)))).rowcount or 0)
-        if offer_ids:
-            deleted_offers = int((await db.execute(delete(Offer).where(Offer.id.in_(offer_ids)))).rowcount or 0)
-        if user_ids:
-            deleted_users = int((await db.execute(delete(User).where(User.id.in_(user_ids)))).rowcount or 0)
+        if plan.trade_ids:
+            deleted_trades = int((await db.execute(delete(Trade).where(Trade.id.in_(plan.trade_ids)))).rowcount or 0)
+        if plan.offer_ids:
+            deleted_offers = int((await db.execute(delete(Offer).where(Offer.id.in_(plan.offer_ids)))).rowcount or 0)
+        if plan.user_ids:
+            deleted_users = int((await db.execute(delete(User).where(User.id.in_(plan.user_ids)))).rowcount or 0)
 
         change_log_result = await db.execute(
             text(
                 """
                 DELETE FROM change_log
-                WHERE data::text LIKE :pattern
+                WHERE strpos(data::text, :raw_prefix) > 0
                    OR (table_name = 'users' AND record_id = ANY(:user_ids))
                    OR (table_name = 'offers' AND record_id = ANY(:offer_ids))
                    OR (table_name = 'trades' AND record_id = ANY(:trade_ids))
+                   OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
+                   OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
                    OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
                    OR (table_name = 'chat_members' AND record_id = ANY(:chat_member_ids))
                 """
             ),
             {
-                "pattern": contains_pattern,
-                "user_ids": user_ids or [-1],
-                "offer_ids": offer_ids or [-1],
-                "trade_ids": trade_ids or [-1],
-                "notification_ids": notification_ids or [-1],
-                "chat_member_ids": chat_member_ids or [-1],
+                "raw_prefix": plan.prefix,
+                "user_ids": plan.user_ids or [-1],
+                "offer_ids": plan.offer_ids or [-1],
+                "trade_ids": plan.trade_ids or [-1],
+                "offer_request_ids": plan.offer_request_ids or [-1],
+                "publication_state_ids": plan.publication_state_ids or [-1],
+                "notification_ids": plan.notification_ids or [-1],
+                "chat_member_ids": plan.chat_member_ids or [-1],
             },
         )
         await db.commit()
 
-    deleted_redis_keys = await cleanup_redis_for_user_ids(user_ids)
-    return {
-        "status": "ok",
-        "prefix": prefix,
-        "deleted_users": deleted_users,
-        "deleted_chat_members": deleted_chat_members,
-        "deleted_offers": deleted_offers,
-        "deleted_trades": deleted_trades,
-        "deleted_notifications": deleted_notifications,
-        "deleted_change_logs": int(change_log_result.rowcount or 0),
-        "deleted_redis_keys": deleted_redis_keys,
-    }
+    deleted_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids)
+    return cleanup_report_payload(
+        plan=plan,
+        dry_run=False,
+        deleted_users=deleted_users,
+        deleted_chat_members=deleted_chat_members,
+        deleted_offers=deleted_offers,
+        deleted_trades=deleted_trades,
+        deleted_notifications=deleted_notifications,
+        deleted_offer_requests=deleted_offer_requests,
+        deleted_publication_states=deleted_publication_states,
+        deleted_change_logs=int(change_log_result.rowcount or 0),
+        deleted_redis_keys=deleted_redis_keys,
+    )
 
 
 async def resolve_commodity() -> tuple[int, str]:
@@ -2565,7 +2735,10 @@ async def run_hot_offer_scenarios_command(args: argparse.Namespace) -> int:
 
 
 async def cleanup_command(args: argparse.Namespace) -> int:
-    print_json(await cleanup_prefix(args.prefix))
+    payload = await cleanup_prefix(args.prefix, dry_run=bool(args.dry_run))
+    if args.artifact:
+        write_json_artifact(Path(args.artifact), payload)
+    print_json(payload)
     return 0
 
 
@@ -2728,6 +2901,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     cleanup_parser = subparsers.add_parser("cleanup")
     cleanup_parser.add_argument("--prefix", required=True)
+    cleanup_parser.add_argument("--dry-run", action="store_true")
+    cleanup_parser.add_argument("--artifact")
 
     ready_parser = subparsers.add_parser("load-runner-ready")
     ready_parser.add_argument("--role", choices=tuple(LOAD_RUNNER_ROLES), required=True)
