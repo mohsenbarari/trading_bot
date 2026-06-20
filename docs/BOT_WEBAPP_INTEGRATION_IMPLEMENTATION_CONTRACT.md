@@ -1907,6 +1907,25 @@ Exit criteria:
 - The report clearly separates correctness failures from capacity warnings.
 - Production consideration remains blocked until owner-led staging validation reviews the artifact.
 
+Implementation status:
+
+- `scripts/report_bot_webapp_capacity.py` builds a staging-only capacity artifact from mixed-load
+  scenario output plus explicit observability input.
+- The artifact schema is `bot_webapp_capacity_report_v1` and includes:
+  - conservative aggregate business-request RPS and Telegram-update RPS;
+  - per-role `telegram_foreign` and `webapp_iran` p50/p95/p99/max latency, scenario latency, and
+    success/rejection/error counts;
+  - per-scenario hot-offer final state and trade/request-ledger consistency fields;
+  - DB pool, Redis, sync lag, worker backlog, and Telegram gateway mock/real boundary evidence.
+- `correctness_failures` and `capacity_warnings` are separate fields. Low RPS is reported as a
+  capacity warning, while request errors, over-trading, invalid remaining quantity, or
+  trade/request-ledger mismatches are reported as correctness failures.
+- The report validator fails closed unless `production_gate.status` remains
+  `blocked_until_owner_staging_validation`; this step does not unlock production or merge any
+  branch.
+- `tests/test_bot_webapp_capacity_report.py` locks the schema, required observability fields,
+  correctness/capacity separation, and closed production gate behavior.
+
 ## Step 12 - Cutover Readiness And Production Gate Preparation
 
 Goal: prepare for a future production decision without performing it.
