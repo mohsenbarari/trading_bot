@@ -242,7 +242,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
                 },
             },
         )
-        counter_mock.assert_awaited_once_with(db, locked_user, "trade", 4)
+        counter_mock.assert_not_awaited()
+        self.assertEqual(locked_user.trades_count, 1)
+        self.assertEqual(locked_user.commodities_traded_count, 4)
         self.assertEqual(publish_mock.await_count, 2)
         self.assertEqual(publish_mock.await_args_list[0].args[0], "trade:created")
         self.assertEqual(publish_mock.await_args_list[1].args[0], "offer:updated")
@@ -268,6 +270,68 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             history_target_user_id=locked_user.id,
         )
         self.assertEqual(result, {"id": 88, "trade_number": 10000})
+
+    async def test_execute_trade_authoritatively_queues_notifications_for_cross_server_requests(self):
+        locked_user = make_user()
+        context = make_context(locked_user)
+        offer = make_offer(
+            user=SimpleNamespace(id=9, account_name="seller", mobile_number="09125555555", telegram_id=999),
+        )
+        reloaded_trade = SimpleNamespace(id=88, created_at=datetime(2026, 5, 27, 12, 0, tzinfo=timezone.utc))
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=9999,
+        )
+        background_tasks = BackgroundTasks()
+
+        with patch("api.routers.trades.current_server", return_value="iran"), patch(
+            "api.routers.trades.check_user_limits", return_value=(True, None)
+        ), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[locked_user.id, 15], [offer.user_id, 19]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ) as notif_mock, patch(
+            "api.routers.trades._queue_trade_user_notification",
+            return_value=True,
+        ) as queue_notif_mock, patch(
+            "api.routers.trades._queue_trade_channel_buttons_update",
+            return_value=True,
+        ) as queue_buttons_mock, patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 88, "trade_number": 10000},
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                background_tasks,
+                db=db,
+                context=context,
+                request_source_server="foreign",
+            )
+
+        self.assertEqual(result, {"id": 88, "trade_number": 10000})
+        notif_mock.assert_not_awaited()
+        queue_buttons_mock.assert_called_once_with(background_tasks, offer)
+        self.assertEqual(queue_notif_mock.call_count, 4)
+        queued_user_ids = [call.args[1] for call in queue_notif_mock.call_args_list]
+        self.assertEqual(queued_user_ids, [locked_user.id, 15, offer.user_id, 19])
 
     async def test_execute_trade_authoritatively_updates_retail_lots_and_tolerates_side_effect_failures(self):
         locked_user = make_user()
@@ -327,7 +391,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         flag_modified.assert_called_once_with(offer, "lot_sizes")
         self.assertEqual(len(background_tasks.tasks), 2)
         notif_mock.assert_awaited_once()
-        counter_mock.assert_awaited_once_with(db, locked_user, "trade", 3)
+        counter_mock.assert_not_awaited()
+        self.assertEqual(locked_user.trades_count, 1)
+        self.assertEqual(locked_user.commodities_traded_count, 3)
         self.assertEqual(publish_mock.await_count, 2)
         logger.error.assert_called_once()
         response_mock.assert_called_once_with(
@@ -471,7 +537,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(notif_mock.await_count, 2)
         self.assertEqual(notif_mock.await_args_list[0].args[1], owner_user.id)
         self.assertEqual(notif_mock.await_args_list[1].args[1], offer.user_id)
-        counter_mock.assert_awaited_once_with(db, owner_user, "trade", 4)
+        counter_mock.assert_not_awaited()
+        self.assertEqual(owner_user.trades_count, 1)
+        self.assertEqual(owner_user.commodities_traded_count, 4)
         self.assertEqual(publish_mock.await_args_list[0].args[1]["responder_user_id"], owner_user.id)
         self.assertEqual(result, {"id": 91, "trade_number": 10004})
 
@@ -556,7 +624,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("|", tier2_notification_message)
         self.assertNotIn("👤 طرف معامله:", tier2_notification_message)
         self.assertIn("👤 طرف معامله: tier2_customer", owner_notification_message)
-        counter_mock.assert_awaited_once_with(db, customer_user, "trade", 4)
+        counter_mock.assert_not_awaited()
+        self.assertEqual(customer_user.trades_count, 1)
+        self.assertEqual(customer_user.commodities_traded_count, 4)
         self.assertEqual(publish_mock.await_args_list[0].args[1]["price"], 49700)
         self.assertEqual(result, {"id": 93, "trade_number": 10005})
 

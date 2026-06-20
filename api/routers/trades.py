@@ -400,6 +400,11 @@ async def _commit_trade_execution(db: AsyncSession) -> None:
             )
 
 
+def _apply_trade_counter_increment(user: User | object, quantity: int) -> None:
+    user.trades_count = (getattr(user, "trades_count", None) or 0) + 1
+    user.commodities_traded_count = (getattr(user, "commodities_traded_count", None) or 0) + quantity
+
+
 def _resolve_trade_participant_name(
     user: object | None,
     user_id: object,
@@ -1655,6 +1660,77 @@ def _queue_trade_telegram_message(background_tasks: BackgroundTasks, chat_id: in
     return True
 
 
+def _create_user_notification_sync(
+    user_id: int,
+    message: str,
+    level: NotificationLevel,
+    category: NotificationCategory,
+    extra_payload: dict | None,
+) -> bool:
+    import asyncio
+    from core.db import AsyncSessionLocal
+
+    async def _runner() -> None:
+        async with AsyncSessionLocal() as notification_db:
+            await create_user_notification(
+                notification_db,
+                user_id,
+                message,
+                level=level,
+                category=category,
+                extra_payload=extra_payload,
+            )
+
+    try:
+        asyncio.run(_runner())
+        return True
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_notification_create_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="notification",
+            error_class=type(exc).__name__,
+        )
+        return False
+
+
+def _queue_trade_user_notification(
+    background_tasks: BackgroundTasks,
+    user_id: int,
+    message: str,
+    *,
+    level: NotificationLevel,
+    category: NotificationCategory,
+    extra_payload: dict | None,
+) -> bool:
+    background_tasks.add_task(
+        _create_user_notification_sync,
+        user_id,
+        message,
+        level,
+        category,
+        extra_payload,
+    )
+    return True
+
+
+def _queue_trade_channel_buttons_update(background_tasks: BackgroundTasks, offer: Offer | object) -> bool:
+    offer_id = getattr(offer, "id", None)
+    if offer_id is None:
+        return False
+    background_tasks.add_task(
+        update_channel_buttons_sync,
+        offer_id,
+        getattr(offer, "remaining_quantity", None),
+        getattr(offer, "status", None),
+        getattr(offer, "lot_sizes", None),
+    )
+    return True
+
+
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
     from core.db import AsyncSessionLocal
@@ -2077,6 +2153,7 @@ async def _execute_trade_authoritatively(
     actor_user = context.actor_user
     request_source_surface = _normalize_trade_request_surface(request_source_surface)
     request_source_server = normalize_server(request_source_server, current_server())
+    defer_cross_server_side_effects = request_source_server != current_server()
     offer_request_ledger: OfferRequest | None = None
     _ensure_accountant_market_access_allowed(context)
     log_trading_event(
@@ -2474,6 +2551,7 @@ async def _execute_trade_authoritatively(
         result_status=OfferRequestStatus.COMPLETED_TRADE,
         resulting_trade_id=getattr(response_trade_record, "id", None),
     )
+    _apply_trade_counter_increment(owner_user, trade_quantity)
     
     # Commit با محافظت Optimistic Locking
     await _commit_trade_execution(db)
@@ -2538,22 +2616,24 @@ async def _execute_trade_authoritatively(
     # ===== ارسال پیام‌های تلگرام در Background (غیر-بلاکینگ) =====
     # این کار باعث می‌شود پاسخ API سریعتر برگردد
     
-    # آپدیت دکمه‌های کانال (مستقیم - نه در background)
-    try:
-        await update_channel_buttons(offer)
-    except Exception as exc:
-        log_trading_event(
-            logger,
-            "trade_channel_buttons_update_failed",
-            level="error",
-            action="trading_side_effect",
-            result="failure",
-            side_effect="telegram_channel_buttons",
-            offer_id=getattr(offer, "id", None),
-            trade_id=getattr(response_trade_record, "id", None),
-            trade_number=response_trade_number,
-            error_class=type(exc).__name__,
-        )
+    if defer_cross_server_side_effects:
+        _queue_trade_channel_buttons_update(background_tasks, offer)
+    else:
+        try:
+            await update_channel_buttons(offer)
+        except Exception as exc:
+            log_trading_event(
+                logger,
+                "trade_channel_buttons_update_failed",
+                level="error",
+                action="trading_side_effect",
+                result="failure",
+                side_effect="telegram_channel_buttons",
+                offer_id=getattr(offer, "id", None),
+                trade_id=getattr(response_trade_record, "id", None),
+                trade_number=response_trade_number,
+                error_class=type(exc).__name__,
+            )
     
     # ارسال نوتیفیکیشن‌ها
     trade_timestamp = getattr(response_trade, "created_at", None) or getattr(created_trade, "created_at", None) or datetime.now(timezone.utc)
@@ -2597,27 +2677,38 @@ async def _execute_trade_authoritatively(
         extra_payload: dict[str, object | None],
     ) -> None:
         for audience_user_id in audience_user_ids:
-            await create_user_notification(
-                db,
-                audience_user_id,
-                _build_trade_notification_message(
-                    trade_emoji=trade_emoji,
-                    trade_type_label=trade_type_label,
-                    trade_price=trade_price,
-                    trade_quantity=trade_quantity,
-                    commodity_name=offer.commodity.name,
-                    trade_number=trade_number,
-                    trade_datetime=trade_datetime,
-                    counterparty_name=counterparty_name,
-                    audience_user_id=audience_user_id,
-                    customer_relation_map=participant_customer_relation_map,
-                    trade_path_summary=trade_path_summary,
-                    offer_notes=offer_notes,
-                ),
-                level=NotificationLevel.SUCCESS,
-                category=NotificationCategory.TRADE,
-                extra_payload=extra_payload,
+            message = _build_trade_notification_message(
+                trade_emoji=trade_emoji,
+                trade_type_label=trade_type_label,
+                trade_price=trade_price,
+                trade_quantity=trade_quantity,
+                commodity_name=offer.commodity.name,
+                trade_number=trade_number,
+                trade_datetime=trade_datetime,
+                counterparty_name=counterparty_name,
+                audience_user_id=audience_user_id,
+                customer_relation_map=participant_customer_relation_map,
+                trade_path_summary=trade_path_summary,
+                offer_notes=offer_notes,
             )
+            if defer_cross_server_side_effects:
+                _queue_trade_user_notification(
+                    background_tasks,
+                    audience_user_id,
+                    message,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=extra_payload,
+                )
+            else:
+                await create_user_notification(
+                    db,
+                    audience_user_id,
+                    message,
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload=extra_payload,
+                )
 
     chain_leg_contexts: list[dict[str, object]] = []
     if uses_customer_trade_chain:
@@ -2830,11 +2921,6 @@ async def _execute_trade_authoritatively(
                 trade_number=response_trade_number,
                 error_class=type(exc).__name__,
             )
-    
-    # افزایش شمارنده معامله
-    # فقط پاسخ‌دهنده (کسی که روی لفظ دیگران معامله می‌کند) شمارنده‌اش افزایش می‌یابد
-    # صاحب لفظ شمارنده‌اش افزایش نمی‌یابد (چون او فقط لفظ داده، فعالانه معامله نکرده)
-    await increment_user_counter(db, owner_user, 'trade', trade_quantity)
     
     # ارسال رویداد SSE
     if uses_customer_trade_chain:

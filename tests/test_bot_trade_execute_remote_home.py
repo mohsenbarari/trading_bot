@@ -186,6 +186,9 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_awaited_with("پیشنهاد جدید برای شما ارسال شد.", show_alert=False)
 
         callback = make_callback()
+        events: list[str] = []
+        callback.answer.side_effect = lambda *args, **kwargs: events.append("answer")
+        bot.send_message.side_effect = lambda *args, **kwargs: events.append("send_message")
         success_payload = {
             "trade_number": 10020,
             "trade_type": "sell",
@@ -204,6 +207,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once()
+        self.assertEqual(events, ["answer", "send_message"])
         bot.send_message.assert_awaited_once()
         success_text = bot.send_message.await_args.kwargs["text"]
         self.assertNotIn("معامله ثبت شد", success_text)

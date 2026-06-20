@@ -526,11 +526,6 @@ async def _execute_confirmed_channel_trade_via_shared_command(
         return
 
     try:
-        await background_tasks()
-    except Exception as exc:
-        logger.debug(f"Failed to run channel trade background tasks: {exc}")
-
-    try:
         if callback.message and callback.message.chat.id != settings.channel_id:
             await callback.message.edit_reply_markup(reply_markup=None)
             await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
@@ -538,6 +533,11 @@ async def _execute_confirmed_channel_trade_via_shared_command(
         logger.debug(f"Failed to clear private suggestion buttons: {exc}")
 
     await callback.answer("معامله ثبت شد ✅", show_alert=False)
+
+    try:
+        await background_tasks()
+    except Exception as exc:
+        logger.debug(f"Failed to run channel trade background tasks: {exc}")
 
 
 @router.callback_query(ChannelTradeCallback.filter())
@@ -696,6 +696,10 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                         await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
                 except Exception as exc:
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
+                try:
+                    await callback.answer("معامله ثبت شد ✅", show_alert=False)
+                except Exception as exc:
+                    logger.debug(f"Failed to answer remote-home trade callback: {exc}")
                 await _notify_remote_trade_success(
                     bot,
                     user,
@@ -705,7 +709,6 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                     fallback_chat_id=callback_chat_id,
                     idempotency_key=idempotency_key,
                 )
-                await callback.answer("معامله ثبت شد ✅", show_alert=False)
                 return
 
             if status_code == 504:

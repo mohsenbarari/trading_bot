@@ -153,10 +153,19 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         session = FakeSession(offer)
         callback = make_callback(chat_id=200)
         bot = SimpleNamespace(send_message=AsyncMock())
+        events: list[str] = []
+        callback.answer.side_effect = lambda *args, **kwargs: events.append("answer")
+
+        def record_background_task():
+            events.append("background_task")
+
+        async def execute_trade_side_effect(*args, **kwargs):
+            kwargs["background_tasks"].add_task(record_background_task)
+            return {"id": 88}
 
         with patch(
             "bot.handlers.trade_execute._execute_trade_authoritatively",
-            new=AsyncMock(return_value={"id": 88}),
+            new=AsyncMock(side_effect=execute_trade_side_effect),
         ) as execute_mock, patch(
             "bot.handlers.trade_execute.remove_trade_suggestion_record",
             new=AsyncMock(),
@@ -190,6 +199,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once_with(7, 200, 50)
         callback.answer.assert_awaited_once_with("معامله ثبت شد ✅", show_alert=False)
+        self.assertEqual(events, ["answer", "background_task"])
 
 
 if __name__ == "__main__":
