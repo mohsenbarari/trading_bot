@@ -22,7 +22,11 @@ from types import SimpleNamespace
 from typing import Any, Awaitable, Callable
 
 import redis.asyncio as redis
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Update
 from fastapi import BackgroundTasks, HTTPException
+from starlette.responses import JSONResponse
 from sqlalchemy import delete, false, func, select, text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +36,11 @@ if str(REPO_ROOT) not in sys.path:
 from api.routers import offers as offers_router
 from api.routers import realtime as realtime_router
 from api.routers import trades as trades_router
+from bot.callbacks import TextOfferActionCallback
+from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
+from bot.middlewares import AuthMiddleware
+from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.offer_parser import parse_offer_text
 from core.config import settings
 from core.db import AsyncSessionLocal
@@ -40,6 +48,7 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
+from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
 from models.change_log import ChangeLog
 from models.chat_member import ChatMember
@@ -63,6 +72,29 @@ class FixtureUsers:
     @property
     def ids(self) -> list[int]:
         return [self.seller_id, self.responder_a_id, self.responder_b_id]
+
+
+@dataclass(frozen=True)
+class LoadUserRef:
+    user_id: int
+    telegram_id: int
+
+
+@dataclass(frozen=True)
+class MixedLoadAttemptSpec:
+    index: int
+    surface: str
+    user_id: int
+    telegram_id: int
+
+
+@dataclass(frozen=True)
+class MixedLoadAttemptResult:
+    index: int
+    surface: str
+    status: str
+    duration_ms: float
+    detail: str | None = None
 
 
 def json_safe(value: Any) -> Any:
@@ -132,6 +164,95 @@ def assert_race_acceptance(
         raise TradingProbeError(f"race expected offer status completed, got {status}")
 
 
+def build_mixed_surface_plan(
+    *,
+    users: list[LoadUserRef],
+    owner_user_id: int,
+    total_requests: int,
+    telegram_ratio: float,
+) -> list[MixedLoadAttemptSpec]:
+    if total_requests <= 0:
+        raise TradingProbeError("mixed load total_requests must be positive")
+    if not 0 < telegram_ratio < 1:
+        raise TradingProbeError("mixed load telegram_ratio must be between 0 and 1")
+    responders = [user for user in users if user.user_id != owner_user_id]
+    if not responders:
+        raise TradingProbeError("mixed load requires at least one responder distinct from the owner")
+
+    telegram_slots_per_ten = int(round(telegram_ratio * 10))
+    telegram_slots_per_ten = max(1, min(9, telegram_slots_per_ten))
+    plan: list[MixedLoadAttemptSpec] = []
+    for index in range(total_requests):
+        responder = responders[index % len(responders)]
+        surface = "telegram" if index % 10 < telegram_slots_per_ten else "webapp"
+        plan.append(
+            MixedLoadAttemptSpec(
+                index=index,
+                surface=surface,
+                user_id=responder.user_id,
+                telegram_id=responder.telegram_id,
+            )
+        )
+    return plan
+
+
+def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_seconds: float) -> dict[str, Any]:
+    by_surface: dict[str, dict[str, Any]] = {}
+    for surface in ("telegram", "webapp"):
+        surface_results = [item for item in results if item.surface == surface]
+        by_surface[surface] = {
+            "total": len(surface_results),
+            "success": sum(1 for item in surface_results if item.status == "success"),
+            "rejected": sum(1 for item in surface_results if item.status == "rejected"),
+            "error": sum(1 for item in surface_results if item.status == "error"),
+            "latency": summarize_samples([item.duration_ms for item in surface_results]),
+        }
+
+    safe_elapsed = max(float(elapsed_seconds), 0.001)
+    return {
+        "total": len(results),
+        "elapsed_seconds": round(safe_elapsed, 3),
+        "business_request_rps": round(len(results) / safe_elapsed, 3),
+        "telegram_update_count": sum(2 for item in results if item.surface == "telegram"),
+        "telegram_update_rps": round(
+            sum(2 for item in results if item.surface == "telegram") / safe_elapsed,
+            3,
+        ),
+        "success": sum(1 for item in results if item.status == "success"),
+        "rejected": sum(1 for item in results if item.status == "rejected"),
+        "error": sum(1 for item in results if item.status == "error"),
+        "latency": summarize_samples([item.duration_ms for item in results]),
+        "surfaces": by_surface,
+    }
+
+
+def assert_hot_offer_contention_acceptance(
+    *,
+    persisted_trade_count: int,
+    response_success_count: int,
+    error_count: int,
+    remaining_quantity: int | None,
+    status: str | None,
+    expected_winner_count: int,
+) -> None:
+    if error_count:
+        raise TradingProbeError(f"hot-offer contention expected zero internal errors, got {error_count}")
+    if persisted_trade_count != expected_winner_count:
+        raise TradingProbeError(
+            f"hot-offer contention expected {expected_winner_count} persisted trades, got {persisted_trade_count}"
+        )
+    if response_success_count != expected_winner_count:
+        raise TradingProbeError(
+            f"hot-offer contention expected {expected_winner_count} successful responses, got {response_success_count}"
+        )
+    if remaining_quantity is None or remaining_quantity < 0:
+        raise TradingProbeError(f"hot-offer contention produced invalid remaining_quantity={remaining_quantity}")
+    if remaining_quantity != 0:
+        raise TradingProbeError(f"hot-offer contention expected remaining_quantity=0, got {remaining_quantity}")
+    if status != OfferStatus.COMPLETED.value:
+        raise TradingProbeError(f"hot-offer contention expected completed status, got {status}")
+
+
 async def cleanup_redis_for_user_ids(user_ids: list[int]) -> int:
     if not user_ids:
         return 0
@@ -149,6 +270,8 @@ async def cleanup_redis_for_user_ids(user_ids: list[int]) -> int:
                 ]
             )
             async for key in client.scan_iter(match=f"expire_rate:{user_id}:*"):
+                keys.append(str(key))
+            async for key in client.scan_iter(match=f"confirm:{user_id}:*"):
                 keys.append(str(key))
         if keys:
             deleted = int(await client.delete(*keys) or 0)
@@ -347,6 +470,46 @@ async def create_fixture_users(prefix: str) -> FixtureUsers:
         return FixtureUsers(seller_id=users[0].id, responder_a_id=users[1].id, responder_b_id=users[2].id)
 
 
+async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[LoadUserRef]:
+    if user_count < 3:
+        raise TradingProbeError("mixed load requires at least 3 synthetic users")
+
+    setup_event_listeners()
+    prefix_hash = abs(hash(prefix)) % 1000
+    users: list[User] = []
+    for index in range(user_count):
+        users.append(
+            User(
+                account_name=f"{prefix}load_{index:04d}",
+                mobile_number=f"0988{prefix_hash:03d}{index:04d}",
+                telegram_id=8800000000 + prefix_hash * 10000 + index,
+                username=None,
+                full_name=f"P7 Mixed Load User {index:04d}",
+                address="P7 mixed load synthetic user",
+                role=UserRole.STANDARD,
+                account_status=UserAccountStatus.ACTIVE,
+                has_bot_access=True,
+                home_server=settings.server_mode,
+                max_sessions=1,
+                max_accountants=0,
+                max_customers=0,
+                max_daily_trades=None,
+                max_active_commodities=None,
+                max_daily_requests=None,
+                can_block_users=False,
+            )
+        )
+
+    async with AsyncSessionLocal() as db:
+        db.add_all(users)
+        await db.commit()
+        refs: list[LoadUserRef] = []
+        for user in users:
+            await db.refresh(user)
+            refs.append(LoadUserRef(user_id=int(user.id), telegram_id=int(user.telegram_id)))
+        return refs
+
+
 async def fake_market_open(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
     return SimpleNamespace(is_open=True, next_transition_at=None)
 
@@ -532,6 +695,167 @@ class FakeMessage:
         self.answers.append({"text": text_value, "kwargs": kwargs})
 
 
+class RecordingTelegramBot:
+    def __init__(self) -> None:
+        self.bot = Bot(token="123456:BENCHMARK_TEST_TOKEN")
+        self.sent_messages: list[dict[str, Any]] = []
+        self.edited_texts: list[dict[str, Any]] = []
+        self.edited_markups: list[dict[str, Any]] = []
+        self.callback_answers: dict[str, dict[str, Any]] = {}
+        self._message_id = 500000
+        self._patch_bot_methods()
+
+    def _next_message_id(self) -> int:
+        self._message_id += 1
+        return self._message_id
+
+    def _patch_bot_methods(self) -> None:
+        async def send_message(*_args: Any, **kwargs: Any) -> SimpleNamespace:
+            message_id = self._next_message_id()
+            self.sent_messages.append({"message_id": message_id, **kwargs})
+            return SimpleNamespace(message_id=message_id)
+
+        async def edit_message_text(*_args: Any, **kwargs: Any) -> bool:
+            self.edited_texts.append(dict(kwargs))
+            return True
+
+        async def edit_message_reply_markup(*_args: Any, **kwargs: Any) -> bool:
+            self.edited_markups.append(dict(kwargs))
+            return True
+
+        async def answer_callback_query(*_args: Any, **kwargs: Any) -> bool:
+            callback_query_id = str(kwargs.get("callback_query_id") or "")
+            self.callback_answers[callback_query_id] = dict(kwargs)
+            return True
+
+        self.bot.send_message = send_message  # type: ignore[method-assign]
+        self.bot.edit_message_text = edit_message_text  # type: ignore[method-assign]
+        self.bot.edit_message_reply_markup = edit_message_reply_markup  # type: ignore[method-assign]
+        self.bot.answer_callback_query = answer_callback_query  # type: ignore[method-assign]
+
+    async def close(self) -> None:
+        await self.bot.session.close()
+
+
+class AiogramDispatcherHarness:
+    def __init__(self) -> None:
+        self.telegram = RecordingTelegramBot()
+        self.dp = Dispatcher(storage=MemoryStorage())
+        self.dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
+        self.dp.update.outer_middleware(BotLoggingContextMiddleware())
+        self.dp.include_router(bot_trade_create.router)
+        self.dp.include_router(bot_trade_execute.router)
+        self._update_id = 700000
+        self._message_id = 800000
+
+    def _next_update_id(self) -> int:
+        self._update_id += 1
+        return self._update_id
+
+    def _next_message_id(self) -> int:
+        self._message_id += 1
+        return self._message_id
+
+    def _telegram_user_payload(self, telegram_id: int) -> dict[str, Any]:
+        return {
+            "id": telegram_id,
+            "is_bot": False,
+            "first_name": f"Bench {telegram_id}",
+        }
+
+    async def feed_private_text(self, *, telegram_id: int, text_value: str) -> None:
+        now = int(time.time())
+        update = Update.model_validate(
+            {
+                "update_id": self._next_update_id(),
+                "message": {
+                    "message_id": self._next_message_id(),
+                    "date": now,
+                    "chat": {
+                        "id": telegram_id,
+                        "type": "private",
+                        "first_name": f"Bench {telegram_id}",
+                    },
+                    "from": self._telegram_user_payload(telegram_id),
+                    "text": text_value,
+                },
+            },
+            context={"bot": self.telegram.bot},
+        )
+        await self.dp.feed_update(self.telegram.bot, update)
+
+    async def feed_channel_callback(
+        self,
+        *,
+        telegram_id: int,
+        callback_data: str,
+        callback_id: str,
+        channel_message_id: int,
+    ) -> dict[str, Any] | None:
+        now = int(time.time())
+        channel_id = settings.channel_id or -1000000000000
+        update = Update.model_validate(
+            {
+                "update_id": self._next_update_id(),
+                "callback_query": {
+                    "id": callback_id,
+                    "from": self._telegram_user_payload(telegram_id),
+                    "chat_instance": f"bench-chat-{channel_id}",
+                    "message": {
+                        "message_id": channel_message_id,
+                        "date": now,
+                        "chat": {
+                            "id": channel_id,
+                            "type": "channel",
+                            "title": "Benchmark Channel",
+                        },
+                        "text": "benchmark offer",
+                    },
+                    "data": callback_data,
+                },
+            },
+            context={"bot": self.telegram.bot},
+        )
+        await self.dp.feed_update(self.telegram.bot, update)
+        return self.telegram.callback_answers.get(callback_id)
+
+    async def feed_private_callback(
+        self,
+        *,
+        telegram_id: int,
+        callback_data: str,
+        callback_id: str,
+    ) -> dict[str, Any] | None:
+        now = int(time.time())
+        update = Update.model_validate(
+            {
+                "update_id": self._next_update_id(),
+                "callback_query": {
+                    "id": callback_id,
+                    "from": self._telegram_user_payload(telegram_id),
+                    "chat_instance": f"bench-private-{telegram_id}",
+                    "message": {
+                        "message_id": self._next_message_id(),
+                        "date": now,
+                        "chat": {
+                            "id": telegram_id,
+                            "type": "private",
+                            "first_name": f"Bench {telegram_id}",
+                        },
+                        "text": "benchmark preview",
+                    },
+                    "data": callback_data,
+                },
+            },
+            context={"bot": self.telegram.bot},
+        )
+        await self.dp.feed_update(self.telegram.bot, update)
+        return self.telegram.callback_answers.get(callback_id)
+
+    async def close(self) -> None:
+        await self.telegram.close()
+
+
 async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
@@ -544,6 +868,216 @@ async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[s
             "parsed_trade_type": state.data.get("trade_type"),
             "parsed_commodity_id": state.data.get("commodity_id"),
         }
+
+
+async def execute_webapp_trade_for_user(
+    *,
+    user_id: int,
+    offer_id: int,
+    quantity: int,
+    idempotency_key: str,
+) -> str:
+    background_tasks = BackgroundTasks()
+    try:
+        async with AsyncSessionLocal() as db:
+            user = await load_user(db, user_id)
+            response = await trades_router.create_trade(
+                trade_data=trades_router.TradeCreate(
+                    offer_id=offer_id,
+                    quantity=quantity,
+                    idempotency_key=idempotency_key,
+                ),
+                background_tasks=background_tasks,
+                raw_request=SimpleNamespace(body=lambda: b""),
+                db=db,
+                context=owner_context(user),
+            )
+        await background_tasks()
+    except HTTPException as exc:
+        return "rejected" if int(exc.status_code or 500) < 500 else "error"
+    except Exception:
+        return "error"
+
+    if isinstance(response, JSONResponse):
+        return "success" if response.status_code < 400 else ("rejected" if response.status_code < 500 else "error")
+    return "success"
+
+
+async def create_bot_offer_with_dispatcher(
+    *,
+    harness: AiogramDispatcherHarness,
+    owner: LoadUserRef,
+    commodity_name: str,
+    prefix: str,
+    quantity: int,
+    price: int,
+    offer_type: str,
+) -> int:
+    verb = "خ" if offer_type == "buy" else "ف"
+    marker = f"{prefix} bot hot {owner.user_id}"
+    text_value = f"{verb} {commodity_name} {quantity} عدد {price}: {marker}"
+    await harness.feed_private_text(telegram_id=owner.telegram_id, text_value=text_value)
+    await harness.feed_private_callback(
+        telegram_id=owner.telegram_id,
+        callback_data=TextOfferActionCallback(action="confirm").pack(),
+        callback_id=f"{prefix}bot-create-confirm-{owner.user_id}",
+    )
+    async with AsyncSessionLocal() as db:
+        offer = (
+            await db.execute(
+                select(Offer)
+                .where(Offer.user_id == owner.user_id, Offer.notes == marker)
+                .order_by(Offer.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if offer is None:
+            raise TradingProbeError("Dispatcher bot offer creation did not persist an offer")
+        return int(offer.id)
+
+
+async def load_offer_snapshot(offer_id: int) -> Offer:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, offer_id)
+        if offer is None:
+            raise TradingProbeError(f"offer {offer_id} disappeared")
+        await db.refresh(offer, ["commodity"])
+        return offer
+
+
+async def execute_bot_trade_with_dispatcher(
+    *,
+    harness: AiogramDispatcherHarness,
+    spec: MixedLoadAttemptSpec,
+    offer: Offer,
+    amount: int,
+    prefix: str,
+) -> str:
+    callback_data = build_channel_trade_callback_data(
+        offer_id=offer.id,
+        offer_public_id=getattr(offer, "offer_public_id", None),
+        amount=amount,
+    )
+    channel_message_id = int(getattr(offer, "channel_message_id", None) or getattr(offer, "id", 0) or 1)
+    first_callback_id = f"{prefix}tap1-{spec.index}"
+    second_callback_id = f"{prefix}tap2-{spec.index}"
+    try:
+        await harness.feed_channel_callback(
+            telegram_id=spec.telegram_id,
+            callback_data=callback_data,
+            callback_id=first_callback_id,
+            channel_message_id=channel_message_id,
+        )
+        answer = await harness.feed_channel_callback(
+            telegram_id=spec.telegram_id,
+            callback_data=callback_data,
+            callback_id=second_callback_id,
+            channel_message_id=channel_message_id,
+        )
+    except Exception:
+        return "error"
+
+    answer_text = str((answer or {}).get("text") or "")
+    if "معامله ثبت شد" in answer_text:
+        return "success"
+    if answer_text:
+        return "rejected"
+    return "rejected"
+
+
+async def run_hot_offer_contention(
+    *,
+    prefix: str,
+    offer_id: int,
+    owner_user_id: int,
+    users: list[LoadUserRef],
+    total_requests: int,
+    telegram_ratio: float,
+    target_rps: float,
+    amount: int,
+    expected_winner_count: int,
+) -> dict[str, Any]:
+    if target_rps <= 0:
+        raise TradingProbeError("target_rps must be positive")
+
+    harness = AiogramDispatcherHarness()
+    plan = build_mixed_surface_plan(
+        users=users,
+        owner_user_id=owner_user_id,
+        total_requests=total_requests,
+        telegram_ratio=telegram_ratio,
+    )
+    started = time.perf_counter()
+
+    async def _attempt(spec: MixedLoadAttemptSpec) -> MixedLoadAttemptResult:
+        scheduled_at = started + (spec.index / target_rps)
+        delay = scheduled_at - time.perf_counter()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        attempt_started = time.perf_counter()
+        status_value = "error"
+        detail: str | None = None
+        try:
+            if spec.surface == "webapp":
+                status_value = await execute_webapp_trade_for_user(
+                    user_id=spec.user_id,
+                    offer_id=offer_id,
+                    quantity=amount,
+                    idempotency_key=f"{prefix}web-{offer_id}-{spec.index}",
+                )
+            else:
+                offer = await load_offer_snapshot(offer_id)
+                status_value = await execute_bot_trade_with_dispatcher(
+                    harness=harness,
+                    spec=spec,
+                    offer=offer,
+                    amount=amount,
+                    prefix=prefix,
+                )
+        except Exception as exc:
+            status_value = "error"
+            detail = type(exc).__name__
+        return MixedLoadAttemptResult(
+            index=spec.index,
+            surface=spec.surface,
+            status=status_value,
+            duration_ms=round((time.perf_counter() - attempt_started) * 1000.0, 3),
+            detail=detail,
+        )
+
+    try:
+        results = await asyncio.gather(*[_attempt(spec) for spec in plan])
+    finally:
+        await harness.close()
+    elapsed = time.perf_counter() - started
+
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, offer_id)
+        if offer is None:
+            raise TradingProbeError(f"offer {offer_id} disappeared after contention")
+        persisted_trade_count = int(await db.scalar(select(func.count(Trade.id)).where(Trade.offer_id == offer_id)) or 0)
+        remaining_quantity = int(offer.remaining_quantity or 0)
+        offer_status = getattr(getattr(offer, "status", None), "value", None)
+
+    summary = summarize_attempt_results(results, elapsed_seconds=elapsed)
+    assert_hot_offer_contention_acceptance(
+        persisted_trade_count=persisted_trade_count,
+        response_success_count=int(summary["success"]),
+        error_count=int(summary["error"]),
+        remaining_quantity=remaining_quantity,
+        status=offer_status,
+        expected_winner_count=expected_winner_count,
+    )
+    return {
+        "offer_id": offer_id,
+        "owner_user_id": owner_user_id,
+        "expected_winner_count": expected_winner_count,
+        "persisted_trade_count": persisted_trade_count,
+        "offer_remaining_quantity": remaining_quantity,
+        "offer_status": offer_status,
+        "summary": summary,
+    }
 
 
 async def run_notification_fanout(*, user_ids: list[int], prefix: str, iterations: int) -> dict[str, Any]:
@@ -784,6 +1318,112 @@ async def run_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+async def run_mixed_load_benchmark(args: argparse.Namespace) -> int:
+    setup_event_listeners()
+    prefix = args.prefix
+    await cleanup_prefix(prefix)
+    commodity_id, commodity_name = await resolve_commodity()
+    origins = ["webapp", "bot"] if args.offer_origin == "both" else [args.offer_origin]
+    reports: dict[str, Any] = {}
+
+    async with patched_trading_boundaries():
+        users = await create_load_fixture_users(prefix, user_count=args.user_count)
+        if len(users) < 3:
+            raise TradingProbeError("mixed load fixture did not create enough users")
+
+        if "webapp" in origins:
+            web_owner = users[0]
+            web_offer_id = await create_offer_for_user(
+                user_id=web_owner.user_id,
+                commodity_id=commodity_id,
+                prefix=prefix,
+                index=9100,
+                offer_type=args.offer_type,
+                quantity=args.hot_offer_quantity,
+                price=args.price,
+            )
+            reports["webapp_hot_offer"] = await run_hot_offer_contention(
+                prefix=f"{prefix}webapp-",
+                offer_id=web_offer_id,
+                owner_user_id=web_owner.user_id,
+                users=users,
+                total_requests=args.hot_offer_requests,
+                telegram_ratio=args.telegram_ratio,
+                target_rps=args.target_rps,
+                amount=args.request_amount,
+                expected_winner_count=args.expected_winner_count,
+            )
+
+        if "bot" in origins:
+            bot_owner = users[1]
+            bot_harness = AiogramDispatcherHarness()
+            try:
+                bot_offer_id = await create_bot_offer_with_dispatcher(
+                    harness=bot_harness,
+                    owner=bot_owner,
+                    commodity_name=commodity_name,
+                    prefix=prefix,
+                    quantity=args.hot_offer_quantity,
+                    price=args.price,
+                    offer_type=args.offer_type,
+                )
+            finally:
+                await bot_harness.close()
+            reports["bot_hot_offer"] = await run_hot_offer_contention(
+                prefix=f"{prefix}bot-",
+                offer_id=bot_offer_id,
+                owner_user_id=bot_owner.user_id,
+                users=users,
+                total_requests=args.hot_offer_requests,
+                telegram_ratio=args.telegram_ratio,
+                target_rps=args.target_rps,
+                amount=args.request_amount,
+                expected_winner_count=args.expected_winner_count,
+            )
+
+    async with AsyncSessionLocal() as db:
+        fixture_user_ids = [user.user_id for user in users]
+        synthetic_trade_count = int(
+            await db.scalar(
+                select(func.count(Trade.id)).where(
+                    (Trade.offer_user_id.in_(fixture_user_ids))
+                    | (Trade.responder_user_id.in_(fixture_user_ids))
+                    | (Trade.actor_user_id.in_(fixture_user_ids))
+                )
+            )
+            or 0
+        )
+        synthetic_offer_count = int(
+            await db.scalar(select(func.count(Offer.id)).where(Offer.user_id.in_(fixture_user_ids))) or 0
+        )
+        unsynced_count = int(await db.scalar(select(func.count(ChangeLog.id)).where(ChangeLog.synced == False)) or 0)
+
+    payload = {
+        "status": "ok",
+        "server_mode": settings.server_mode,
+        "prefix": prefix,
+        "commodity_id": commodity_id,
+        "commodity_name": commodity_name,
+        "offer_origin": args.offer_origin,
+        "user_count": args.user_count,
+        "telegram_ratio": args.telegram_ratio,
+        "target_rps": args.target_rps,
+        "hot_offer_requests": args.hot_offer_requests,
+        "hot_offer_quantity": args.hot_offer_quantity,
+        "request_amount": args.request_amount,
+        "expected_winner_count": args.expected_winner_count,
+        "fixture_user_count": len(users),
+        "reports": reports,
+        "synthetic_counts_before_cleanup": {
+            "offers": synthetic_offer_count,
+            "trades": synthetic_trade_count,
+            "unsynced_change_logs": unsynced_count,
+        },
+    }
+    print_json(payload)
+    return 0
+
+
 async def cleanup_command(args: argparse.Namespace) -> int:
     print_json(await cleanup_prefix(args.prefix))
     return 0
@@ -809,6 +1449,19 @@ def build_parser() -> argparse.ArgumentParser:
     bench_parser.add_argument("--quantity", type=int, default=5)
     bench_parser.add_argument("--price", type=int, default=100000)
 
+    mixed_parser = subparsers.add_parser("run-mixed-load")
+    mixed_parser.add_argument("--prefix", required=True)
+    mixed_parser.add_argument("--user-count", type=int, default=1000)
+    mixed_parser.add_argument("--hot-offer-requests", type=int, default=1000)
+    mixed_parser.add_argument("--telegram-ratio", type=float, default=0.6)
+    mixed_parser.add_argument("--target-rps", type=float, default=600.0)
+    mixed_parser.add_argument("--hot-offer-quantity", type=int, default=5)
+    mixed_parser.add_argument("--request-amount", type=int, default=5)
+    mixed_parser.add_argument("--expected-winner-count", type=int, default=1)
+    mixed_parser.add_argument("--price", type=int, default=100000)
+    mixed_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
+    mixed_parser.add_argument("--offer-origin", choices=("webapp", "bot", "both"), default="webapp")
+
     return parser
 
 
@@ -817,6 +1470,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await cleanup_command(args)
     if args.command == "run-benchmark":
         return await run_benchmark(args)
+    if args.command == "run-mixed-load":
+        return await run_mixed_load_benchmark(args)
     raise TradingProbeError(f"Unknown command: {args.command}")
 
 

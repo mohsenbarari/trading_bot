@@ -57,6 +57,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trade-iterations", type=int, default=3)
     parser.add_argument("--notification-iterations", type=int, default=4)
     parser.add_argument("--race-concurrency", type=int, default=4)
+    parser.add_argument("--include-mixed-load", action="store_true")
+    parser.add_argument("--mixed-load-role", choices=("iran", "foreign"), default="iran")
+    parser.add_argument("--mixed-offer-origin", choices=("webapp", "bot", "both"), default="webapp")
+    parser.add_argument("--mixed-user-count", type=int, default=1000)
+    parser.add_argument("--mixed-hot-offer-requests", type=int, default=1000)
+    parser.add_argument("--mixed-telegram-ratio", type=float, default=0.6)
+    parser.add_argument("--mixed-target-rps", type=float, default=600.0)
+    parser.add_argument("--mixed-hot-offer-quantity", type=int, default=5)
+    parser.add_argument("--mixed-request-amount", type=int, default=5)
+    parser.add_argument("--mixed-expected-winner-count", type=int, default=1)
     parser.add_argument("--json", action="store_true", help="Print the final report JSON to stdout.")
     return parser.parse_args(argv)
 
@@ -251,6 +261,27 @@ def write_summary(path: Path, payload: dict[str, Any]) -> None:
             f"- Offer remaining quantity: `{race.get('offer_remaining_quantity')}`",
             f"- Race p95: `{(race.get('latency') or {}).get('p95_ms')}`ms",
             "",
+            "## Mixed Bot/WebApp Load",
+            "",
+        ]
+    )
+    mixed_load = payload.get("mixed_load")
+    if mixed_load:
+        lines.append(f"- Role: `{mixed_load.get('role')}`")
+        lines.append(f"- Offer origin: `{mixed_load.get('offer_origin')}`")
+        for name, report in sorted((mixed_load.get("reports") or {}).items()):
+            summary = report.get("summary") or {}
+            lines.append(
+                f"- `{name}`: `{summary.get('total')}` requests, "
+                f"`{summary.get('business_request_rps')}` business rps, "
+                f"`{summary.get('telegram_update_rps')}` telegram update rps, "
+                f"`{summary.get('error')}` errors"
+            )
+        lines.append("")
+    else:
+        lines.extend(["- Not requested for this run.", ""])
+    lines.extend(
+        [
             "## Final Health",
             "",
             f"- Foreign: `{((payload.get('final_health') or {}).get('foreign') or {}).get('status')}`",
@@ -308,6 +339,33 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             timeout=max(args.timeout, 180),
         )
         payload["scenario"] = scenario
+        if args.include_mixed_load:
+            mixed_load = runner.app_json(
+                args.mixed_load_role,
+                "bot_webapp_mixed_load",
+                "run-mixed-load",
+                "--prefix",
+                prefix,
+                "--user-count",
+                str(args.mixed_user_count),
+                "--hot-offer-requests",
+                str(args.mixed_hot_offer_requests),
+                "--telegram-ratio",
+                str(args.mixed_telegram_ratio),
+                "--target-rps",
+                str(args.mixed_target_rps),
+                "--hot-offer-quantity",
+                str(args.mixed_hot_offer_quantity),
+                "--request-amount",
+                str(args.mixed_request_amount),
+                "--expected-winner-count",
+                str(args.mixed_expected_winner_count),
+                "--offer-origin",
+                args.mixed_offer_origin,
+                timeout=max(args.timeout, 240),
+            )
+            mixed_load["role"] = args.mixed_load_role
+            payload["mixed_load"] = mixed_load
         payload["post_mutation_sync_clean"] = {
             "iran": wait_health_clean(runner, "iran", timeout=args.timeout),
             "foreign": wait_health_clean(runner, "foreign", timeout=args.timeout),

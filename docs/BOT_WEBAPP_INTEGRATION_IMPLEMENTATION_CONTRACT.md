@@ -1,7 +1,7 @@
 # Bot/WebApp Integration Implementation Contract
 
 Date: 2026-06-18
-Last updated: 2026-06-19
+Last updated: 2026-06-20
 
 Branch: `candidate/bot-webapp-integration`
 
@@ -1642,6 +1642,26 @@ Implementation status:
   `docs/BOT_WEBAPP_INTEGRATION_STAGING_VALIDATION.md`.
 - The automated gate can pass before owner sign-off, but Step 11 is not production-ready until the
   manual staging checklist is completed on staging peers with synthetic data and reviewed evidence.
+- High-contention load validation is a required Step 11 staging gate before production
+  consideration. The load gate must simulate Telegram updates through `aiogram.Dispatcher`, must
+  execute WebApp requests through the WebApp trade API path, and must stress hot offers with many
+  simultaneous requests. The default release target is approximately 1000 synthetic users, at least
+  600 confirmed business requests per second, and a 60 percent Telegram / 40 percent WebApp request
+  mix.
+- The load gate must include both directions: an Iran/WebApp-created hot offer receiving Telegram
+  and WebApp requests, and a foreign/Bot-created hot offer receiving Telegram and WebApp requests.
+  For every hot offer, the acceptance rule is strict: no over-trade, no negative remaining quantity,
+  no duplicate trade for the same idempotent request, no terminal-to-active regression, and no
+  unclassified internal error.
+- Telegram load requests must model the bot's real confirmation behavior. A confirmed Telegram
+  request is two callback updates through `Dispatcher`, not a direct handler call and not a single
+  first-tap pending state.
+- WebApp load requests must be measured separately from Telegram updates. Reports must show business
+  request RPS, Telegram update RPS, success/rejection/error counts, p50/p95/p99 latency, final offer
+  status, remaining quantity, persisted trade count, and request-ledger consistency evidence.
+- Full 1000-user/600-rps load is not a normal unit-test responsibility. Unit tests lock deterministic
+  planning and acceptance helpers; the mutating high-load benchmark runs explicitly on staging with
+  synthetic data and captured artifacts.
 
 ## Step 12 - Cutover Readiness And Production Gate Preparation
 
