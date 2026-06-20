@@ -159,14 +159,20 @@ async def apply_offer_channel_state(
 
     try:
         if history_tag:
-            result = await telegram_gateway.edit_message_text(
+            text_result = await telegram_gateway.edit_message_text(
                 channel_id,
                 channel_message_id,
                 build_offer_channel_message(offer, history_tag=history_tag),
-                reply_markup=None,
                 timeout=timeout,
                 idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
             )
+            buttons_result = await telegram_gateway.edit_message_reply_markup(
+                channel_id,
+                channel_message_id,
+                timeout=timeout,
+                idempotency_key=f"offer-channel-buttons-remove:{getattr(offer, 'id', '')}:{status}",
+            )
+            result = text_result if not text_result.ok else buttons_result
         elif status and status != OfferStatus.ACTIVE.value:
             result = await telegram_gateway.edit_message_reply_markup(
                 channel_id,

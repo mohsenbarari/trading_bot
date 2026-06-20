@@ -753,11 +753,18 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             return_value=FakeHttpClientContext(response=SimpleNamespace(status_code=200)),
         ) as client_ctor:
             self.assertTrue(await trades._update_channel_buttons_async(2, 18, OfferStatus.COMPLETED, [10, 8]))
-        terminal_payload = client_ctor.return_value.post.await_args.kwargs["json"]
-        self.assertEqual(terminal_payload["chat_id"], -100)
-        self.assertEqual(terminal_payload["message_id"], 322)
-        self.assertEqual(terminal_payload["reply_markup"], None)
-        self.assertIn("🤝 ✅", terminal_payload["text"])
+        text_call, markup_call = client_ctor.return_value.post.await_args_list
+        text_payload = text_call.kwargs["json"]
+        markup_payload = markup_call.kwargs["json"]
+        self.assertTrue(text_call.args[0].endswith("/editMessageText"))
+        self.assertEqual(text_payload["chat_id"], -100)
+        self.assertEqual(text_payload["message_id"], 322)
+        self.assertNotIn("reply_markup", text_payload)
+        self.assertIn("🤝 ✅", text_payload["text"])
+        self.assertTrue(markup_call.args[0].endswith("/editMessageReplyMarkup"))
+        self.assertEqual(markup_payload["chat_id"], -100)
+        self.assertEqual(markup_payload["message_id"], 322)
+        self.assertNotIn("reply_markup", markup_payload)
 
         aware = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
         naive = datetime(2025, 1, 1, 12, 0)

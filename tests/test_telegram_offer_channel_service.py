@@ -96,11 +96,18 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             result = await channel_service.apply_offer_channel_state(offer, reason="test")
 
         self.assertTrue(result)
-        url = client.post.await_args.args[0]
-        payload = client.post.await_args.kwargs["json"]
-        self.assertTrue(url.endswith("/editMessageText"))
-        self.assertEqual(payload["reply_markup"], None)
-        self.assertIn("🤝 ✅", payload["text"])
+        text_call, markup_call = client.post.await_args_list
+        text_url = text_call.args[0]
+        text_payload = text_call.kwargs["json"]
+        markup_url = markup_call.args[0]
+        markup_payload = markup_call.kwargs["json"]
+        self.assertTrue(text_url.endswith("/editMessageText"))
+        self.assertNotIn("reply_markup", text_payload)
+        self.assertIn("🤝 ✅", text_payload["text"])
+        self.assertTrue(markup_url.endswith("/editMessageReplyMarkup"))
+        self.assertEqual(markup_payload["chat_id"], -100)
+        self.assertEqual(markup_payload["message_id"], 123)
+        self.assertNotIn("reply_markup", markup_payload)
 
     async def test_apply_pure_expired_edits_text_and_removes_buttons(self):
         response = SimpleNamespace(status_code=200, text="")
@@ -119,13 +126,18 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             result = await channel_service.apply_offer_channel_state(offer, reason="test")
 
         self.assertTrue(result)
-        url = client.post.await_args.args[0]
-        payload = client.post.await_args.kwargs["json"]
-        self.assertTrue(url.endswith("/editMessageText"))
-        self.assertEqual(payload["chat_id"], -100)
-        self.assertEqual(payload["message_id"], 123)
-        self.assertEqual(payload["reply_markup"], None)
-        self.assertIn("❌", payload["text"])
+        text_call, markup_call = client.post.await_args_list
+        text_url = text_call.args[0]
+        text_payload = text_call.kwargs["json"]
+        markup_url = markup_call.args[0]
+        markup_payload = markup_call.kwargs["json"]
+        self.assertTrue(text_url.endswith("/editMessageText"))
+        self.assertEqual(text_payload["chat_id"], -100)
+        self.assertEqual(text_payload["message_id"], 123)
+        self.assertNotIn("reply_markup", text_payload)
+        self.assertIn("❌", text_payload["text"])
+        self.assertTrue(markup_url.endswith("/editMessageReplyMarkup"))
+        self.assertNotIn("reply_markup", markup_payload)
 
     async def test_apply_partially_traded_expired_edits_text_and_removes_buttons(self):
         response = SimpleNamespace(status_code=200, text="")
@@ -144,12 +156,17 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             result = await channel_service.apply_offer_channel_state(offer, reason="test")
 
         self.assertTrue(result)
-        url = client.post.await_args.args[0]
-        payload = client.post.await_args.kwargs["json"]
-        self.assertTrue(url.endswith("/editMessageText"))
-        self.assertEqual(payload["reply_markup"], None)
-        self.assertIn("🤝 20 تا ✅", payload["text"])
-        self.assertNotIn("🤝 20تا ✅.", payload["text"])
+        text_call, markup_call = client.post.await_args_list
+        text_url = text_call.args[0]
+        text_payload = text_call.kwargs["json"]
+        markup_url = markup_call.args[0]
+        markup_payload = markup_call.kwargs["json"]
+        self.assertTrue(text_url.endswith("/editMessageText"))
+        self.assertNotIn("reply_markup", text_payload)
+        self.assertIn("🤝 20 تا ✅", text_payload["text"])
+        self.assertNotIn("🤝 20تا ✅.", text_payload["text"])
+        self.assertTrue(markup_url.endswith("/editMessageReplyMarkup"))
+        self.assertNotIn("reply_markup", markup_payload)
 
     async def test_apply_terminal_state_can_use_publication_state_message_id(self):
         response = SimpleNamespace(status_code=200, text="")
