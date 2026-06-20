@@ -30,6 +30,7 @@ _ALLOWED_RESULTS = {
     "conflict",
     "error",
     "noop",
+    "timing",
 }
 
 _ALLOWED_SIDE_EFFECTS = {
@@ -60,6 +61,20 @@ _ALLOWED_REASONS = {
     "wrong_authoritative_server",
 }
 
+_ALLOWED_PHASES = {
+    "allocated_trade_number",
+    "built_execution_plan",
+    "built_response",
+    "checked_idempotency",
+    "committed",
+    "flushed_trade_state",
+    "loaded_response_context",
+    "locked_offer",
+    "prepared_side_effects",
+    "published_realtime",
+    "validated_amount",
+}
+
 
 def _safe_choice(value: Any, allowed: set[str], *, fallback: str) -> str:
     candidate = str(value or "").strip().lower().replace("-", "_")
@@ -80,6 +95,16 @@ def _safe_bool(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        normalized = float(value)
+    except (TypeError, ValueError):
+        return None
+    return normalized if normalized >= 0 else None
 
 
 def summarize_response_body(text: str | bytes | None) -> dict[str, Any]:
@@ -116,6 +141,10 @@ def safe_trading_log_context(
     reason: Any = None,
     response_body_size: Any = None,
     response_body_sha256: Any = None,
+    phase: Any = None,
+    phase_duration_ms: Any = None,
+    total_duration_ms: Any = None,
+    request_source_server: Any = None,
 ) -> dict[str, Any]:
     safe_action = _safe_choice(action, _ALLOWED_ACTIONS, fallback="trading_side_effect")
     safe_result = _safe_choice(result, _ALLOWED_RESULTS, fallback="error")
@@ -141,6 +170,8 @@ def safe_trading_log_context(
         context["source_server"] = normalize_server(str(source_server), default="unknown")
     if target_server:
         context["target_server"] = normalize_server(str(target_server), default="unknown")
+    if request_source_server:
+        context["request_source_server"] = normalize_server(str(request_source_server), default="unknown")
     if error_class:
         context["error_class"] = str(error_class)[:80]
     if has_idempotency_key is not None:
@@ -155,6 +186,14 @@ def safe_trading_log_context(
         context["reason"] = _safe_choice(reason, _ALLOWED_REASONS, fallback="side_effect_failure")
     if response_body_sha256:
         context["response_body_sha256"] = str(response_body_sha256)[:64]
+    if phase:
+        context["phase"] = _safe_choice(phase, _ALLOWED_PHASES, fallback="built_response")
+    for key, value in (
+        ("phase_duration_ms", _safe_float(phase_duration_ms)),
+        ("total_duration_ms", _safe_float(total_duration_ms)),
+    ):
+        if value is not None:
+            context[key] = round(value, 2)
 
     return context
 

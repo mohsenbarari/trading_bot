@@ -1660,17 +1660,16 @@ def _queue_trade_telegram_message(background_tasks: BackgroundTasks, chat_id: in
     return True
 
 
-def _create_user_notification_sync(
+async def _create_user_notification_background(
     user_id: int,
     message: str,
     level: NotificationLevel,
     category: NotificationCategory,
     extra_payload: dict | None,
 ) -> bool:
-    import asyncio
     from core.db import AsyncSessionLocal
 
-    async def _runner() -> None:
+    try:
         async with AsyncSessionLocal() as notification_db:
             await create_user_notification(
                 notification_db,
@@ -1680,9 +1679,6 @@ def _create_user_notification_sync(
                 category=category,
                 extra_payload=extra_payload,
             )
-
-    try:
-        asyncio.run(_runner())
         return True
     except Exception as exc:
         log_trading_event(
@@ -1707,7 +1703,7 @@ def _queue_trade_user_notification(
     extra_payload: dict | None,
 ) -> bool:
     background_tasks.add_task(
-        _create_user_notification_sync,
+        _create_user_notification_background,
         user_id,
         message,
         level,
@@ -1717,16 +1713,29 @@ def _queue_trade_user_notification(
     return True
 
 
+async def _update_trade_channel_buttons_background(offer: Offer | object) -> bool:
+    try:
+        return await update_channel_buttons(offer)
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_channel_buttons_update_failed",
+            level="error",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_channel_buttons",
+            offer_id=getattr(offer, "id", None),
+            error_class=type(exc).__name__,
+        )
+        return False
+
+
 def _queue_trade_channel_buttons_update(background_tasks: BackgroundTasks, offer: Offer | object) -> bool:
-    offer_id = getattr(offer, "id", None)
-    if offer_id is None:
+    if current_server() != "foreign" or getattr(offer, "id", None) is None:
         return False
     background_tasks.add_task(
-        update_channel_buttons_sync,
-        offer_id,
-        getattr(offer, "remaining_quantity", None),
-        getattr(offer, "status", None),
-        getattr(offer, "lot_sizes", None),
+        _update_trade_channel_buttons_background,
+        offer,
     )
     return True
 
@@ -2154,6 +2163,29 @@ async def _execute_trade_authoritatively(
     request_source_surface = _normalize_trade_request_surface(request_source_surface)
     request_source_server = normalize_server(request_source_server, current_server())
     defer_cross_server_side_effects = request_source_server != current_server()
+    timing_started_at = time_module.perf_counter()
+    timing_last_mark = timing_started_at
+
+    def mark_trade_phase(phase: str) -> None:
+        nonlocal timing_last_mark
+        if not defer_cross_server_side_effects:
+            return
+        now = time_module.perf_counter()
+        log_trading_event(
+            logger,
+            "trade_execute.phase_timing",
+            action="trade_execute",
+            result="timing",
+            offer_id=trade_data.offer_id,
+            phase=phase,
+            phase_duration_ms=round((now - timing_last_mark) * 1000, 2),
+            total_duration_ms=round((now - timing_started_at) * 1000, 2),
+            source_server=current_server(),
+            request_source_server=request_source_server,
+            has_idempotency_key=bool(trade_data.idempotency_key),
+        )
+        timing_last_mark = now
+
     offer_request_ledger: OfferRequest | None = None
     _ensure_accountant_market_access_allowed(context)
     log_trading_event(
@@ -2212,6 +2244,7 @@ async def _execute_trade_authoritatively(
     
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+    mark_trade_phase("locked_offer")
 
     offer_request_ledger = await _create_offer_request_ledger_for_trade(
         db,
@@ -2332,6 +2365,7 @@ async def _execute_trade_authoritatively(
     
     # بارگذاری روابط لفظ
     await db.refresh(offer, ["user", "commodity"])
+    mark_trade_phase("validated_amount")
 
     responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
     _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)
@@ -2412,6 +2446,7 @@ async def _execute_trade_authoritatively(
         for node in trade_execution_plan.nodes
     ]
     uses_customer_trade_chain = trade_execution_plan.uses_customer_trade_chain
+    mark_trade_phase("built_execution_plan")
 
     if trade_data.idempotency_key:
         await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
@@ -2476,9 +2511,11 @@ async def _execute_trade_authoritatively(
             if existing_offer_notes is not None:
                 existing_response_kwargs["offer_notes"] = existing_offer_notes
             return trade_to_response(existing_trade_obj, **existing_response_kwargs)
+    mark_trade_phase("checked_idempotency")
     
     # گرفتن شماره معامله جدید
     next_trade_number = await _allocate_next_trade_number(db)
+    mark_trade_phase("allocated_trade_number")
     
     # نوع معامله از دید پاسخ‌دهنده
     responder_trade_type = TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL
@@ -2552,9 +2589,11 @@ async def _execute_trade_authoritatively(
         resulting_trade_id=getattr(response_trade_record, "id", None),
     )
     _apply_trade_counter_increment(owner_user, trade_quantity)
+    mark_trade_phase("flushed_trade_state")
     
     # Commit با محافظت Optimistic Locking
     await _commit_trade_execution(db)
+    mark_trade_phase("committed")
     
     # بارگذاری روابط معامله
     result = await db.execute(
@@ -2598,6 +2637,7 @@ async def _execute_trade_authoritatively(
             )
         ],
     )
+    mark_trade_phase("loaded_response_context")
     offer_user_payload = _build_trade_participant_payload(
         "offer_user",
         user=response_offer_user,
@@ -2921,6 +2961,7 @@ async def _execute_trade_authoritatively(
                 trade_number=response_trade_number,
                 error_class=type(exc).__name__,
             )
+    mark_trade_phase("prepared_side_effects")
     
     # ارسال رویداد SSE
     if uses_customer_trade_chain:
@@ -2991,6 +3032,7 @@ async def _execute_trade_authoritatively(
             trade_number=response_trade_number,
             error_class=type(exc).__name__,
         )
+    mark_trade_phase("published_realtime")
     
     response_kwargs = {
         "identity_map": participant_identity_map,
@@ -3001,7 +3043,9 @@ async def _execute_trade_authoritatively(
     offer_notes = getattr(offer, "notes", None)
     if offer_notes is not None:
         response_kwargs["offer_notes"] = offer_notes
-    return trade_to_response(response_trade, **response_kwargs)
+    response = trade_to_response(response_trade, **response_kwargs)
+    mark_trade_phase("built_response")
+    return response
 
 
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
