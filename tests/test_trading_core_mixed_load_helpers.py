@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from scripts import trading_core_probe_worker as worker
 
@@ -100,6 +101,38 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 status="active",
                 expected_winner_count=1,
             )
+
+    def test_load_runner_runtime_surface_guard_accepts_expected_roles(self):
+        with patch.object(worker.settings, "environment", "staging"), patch.object(
+            worker.settings, "trading_bot_service", "load_runner"
+        ), patch.object(worker.settings, "server_mode", "foreign"), patch.object(worker.settings, "bot_token", ""):
+            payload = worker.assert_load_runner_runtime_surface("telegram_foreign")
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["surface"], "telegram")
+        self.assertEqual(payload["server_mode"], "foreign")
+
+        with patch.object(worker.settings, "environment", "staging"), patch.object(
+            worker.settings, "trading_bot_service", "load_runner"
+        ), patch.object(worker.settings, "server_mode", "iran"), patch.object(worker.settings, "bot_token", None):
+            payload = worker.assert_load_runner_runtime_surface("webapp_iran")
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["surface"], "webapp")
+        self.assertEqual(payload["server_mode"], "iran")
+
+    def test_load_runner_runtime_surface_guard_fails_closed(self):
+        with patch.object(worker.settings, "environment", "production"), patch.object(
+            worker.settings, "trading_bot_service", "app"
+        ), patch.object(worker.settings, "server_mode", "iran"), patch.object(worker.settings, "bot_token", "token"):
+            with self.assertRaises(worker.TradingProbeError) as exc_info:
+                worker.assert_load_runner_runtime_surface("telegram_foreign")
+
+        message = str(exc_info.exception)
+        self.assertIn("ENVIRONMENT must be staging", message)
+        self.assertIn("TRADING_BOT_SERVICE must be load_runner", message)
+        self.assertIn("SERVER_MODE must be foreign", message)
+        self.assertIn("BOT_TOKEN must be empty", message)
 
 
 if __name__ == "__main__":

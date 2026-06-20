@@ -41,6 +41,23 @@ def active_compose_services(path: Path) -> dict[str, dict[str, object]]:
     return services
 
 
+def compose_service_block(path: Path, service_name: str) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    start: int | None = None
+    end = len(lines)
+    for index, raw_line in enumerate(lines):
+        if raw_line.startswith(f"  {service_name}:"):
+            start = index
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if start is not None and index > start and indent == 2 and raw_line.strip().endswith(":"):
+            end = index
+            break
+    if start is None:
+        raise AssertionError(f"{service_name} service not found in {path}")
+    return "\n".join(lines[start:end])
+
+
 class DeploymentSurfaceGuardTests(unittest.TestCase):
     def test_repository_has_no_runtime_or_entrypoint_deployment_identity_leaks(self):
         repo_root = Path(__file__).resolve().parents[1]
@@ -72,6 +89,30 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
             )
             self.assertNotIn("run_bot.py", raw_service)
             self.assertNotIn("BOT_TOKEN:", raw_service)
+
+    def test_staging_load_runners_are_profile_gated_and_role_bound(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
+
+        telegram_runner = compose_service_block(staging_compose, "load_telegram_foreign")
+        webapp_runner = compose_service_block(staging_compose, "load_webapp_iran")
+
+        for service_name, block in (
+            ("load_telegram_foreign", telegram_runner),
+            ("load_webapp_iran", webapp_runner),
+        ):
+            self.assertIn("profiles:", block, msg=f"{service_name} must be profile-gated")
+            self.assertIn("- staging-load", block, msg=f"{service_name} must stay out of normal staging deploys")
+            self.assertIn("TRADING_BOT_SERVICE: load_runner", block)
+            self.assertIn('BOT_TOKEN: ""', block)
+            self.assertNotIn("run_bot.py", block)
+            self.assertNotIn("uvicorn main:app", block)
+            self.assertNotIn("python -m core.sync_worker", block)
+
+        self.assertIn('"--role", "telegram_foreign"', telegram_runner)
+        self.assertIn("SERVER_MODE: foreign", telegram_runner)
+        self.assertIn('"--role", "webapp_iran"', webapp_runner)
+        self.assertIn("SERVER_MODE: iran", webapp_runner)
 
 
 if __name__ == "__main__":

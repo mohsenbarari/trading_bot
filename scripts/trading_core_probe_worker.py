@@ -48,6 +48,7 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
+from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, normalize_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
 from models.change_log import ChangeLog
@@ -61,6 +62,18 @@ from models.user import User, UserRole
 
 class TradingProbeError(RuntimeError):
     pass
+
+
+LOAD_RUNNER_ROLES = {
+    "telegram_foreign": {
+        "server_mode": SERVER_FOREIGN,
+        "surface": "telegram",
+    },
+    "webapp_iran": {
+        "server_mode": SERVER_IRAN,
+        "surface": "webapp",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -251,6 +264,39 @@ def assert_hot_offer_contention_acceptance(
         raise TradingProbeError(f"hot-offer contention expected remaining_quantity=0, got {remaining_quantity}")
     if status != OfferStatus.COMPLETED.value:
         raise TradingProbeError(f"hot-offer contention expected completed status, got {status}")
+
+
+def assert_load_runner_runtime_surface(role: str) -> dict[str, Any]:
+    role_config = LOAD_RUNNER_ROLES.get(role)
+    if role_config is None:
+        raise TradingProbeError(f"unsupported load runner role: {role}")
+
+    configured_environment = str(getattr(settings, "environment", "") or "").strip().lower()
+    configured_service = str(getattr(settings, "trading_bot_service", "") or "").strip().lower()
+    configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
+    reasons: list[str] = []
+
+    if configured_environment != "staging":
+        reasons.append("ENVIRONMENT must be staging for load runner runtime")
+    if configured_service != "load_runner":
+        reasons.append("TRADING_BOT_SERVICE must be load_runner for load runner runtime")
+    if configured_server_mode != role_config["server_mode"]:
+        reasons.append(f"SERVER_MODE must be {role_config['server_mode']} for {role} load runner")
+    if getattr(settings, "bot_token", None):
+        reasons.append("BOT_TOKEN must be empty for staging load runner runtime")
+
+    if reasons:
+        raise TradingProbeError("; ".join(reasons))
+
+    return {
+        "status": "ok",
+        "role": role,
+        "surface": role_config["surface"],
+        "environment": configured_environment,
+        "server_mode": configured_server_mode,
+        "service": configured_service,
+        "telegram_credential_configured": False,
+    }
 
 
 async def cleanup_redis_for_user_ids(user_ids: list[int]) -> int:
@@ -1429,12 +1475,20 @@ async def cleanup_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def load_runner_ready_command(args: argparse.Namespace) -> int:
+    print_json(assert_load_runner_runtime_surface(args.role))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Stage P7 trading benchmark helpers inside an app container.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     cleanup_parser = subparsers.add_parser("cleanup")
     cleanup_parser.add_argument("--prefix", required=True)
+
+    ready_parser = subparsers.add_parser("load-runner-ready")
+    ready_parser.add_argument("--role", choices=tuple(LOAD_RUNNER_ROLES), required=True)
 
     bench_parser = subparsers.add_parser("run-benchmark")
     bench_parser.add_argument("--prefix", required=True)
@@ -1468,6 +1522,8 @@ def build_parser() -> argparse.ArgumentParser:
 async def dispatch(args: argparse.Namespace) -> int:
     if args.command == "cleanup":
         return await cleanup_command(args)
+    if args.command == "load-runner-ready":
+        return await load_runner_ready_command(args)
     if args.command == "run-benchmark":
         return await run_benchmark(args)
     if args.command == "run-mixed-load":

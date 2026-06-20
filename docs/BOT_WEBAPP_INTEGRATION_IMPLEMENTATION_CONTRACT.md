@@ -1727,6 +1727,14 @@ Exit criteria:
 - The runner containers can be started and stopped without changing the normal staging app/bot/sync
   lifecycle.
 
+Implementation status:
+
+- Staging-only `load_telegram_foreign` and `load_webapp_iran` services are declared in
+  `deploy/staging/docker-compose.staging.yml` behind the `staging-load` profile.
+- `scripts/trading_core_probe_worker.py load-runner-ready` owns the role guard for these services.
+- `tests/test_deployment_surface_guard.py` and `tests/test_trading_core_mixed_load_helpers.py` lock
+  the profile gating, role binding, and fail-closed guard behavior.
+
 #### Step 11B-2 - Split The Mixed-Load Worker Into Coordinator And Role Workers
 
 Required behavior:

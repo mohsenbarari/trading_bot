@@ -129,6 +129,58 @@ services:
     networks:
       - staging_net
 
+  load_telegram_foreign:
+    image: *app_image
+    build: *app_build
+    profiles:
+      - staging-load
+    restart: "no"
+    command: ["python", "scripts/trading_core_probe_worker.py", "load-runner-ready", "--role", "telegram_foreign"]
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: load_runner
+      ENVIRONMENT: staging
+      SERVER_MODE: foreign
+      BOT_TOKEN: ""
+      DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    networks:
+      - staging_net
+
+  load_webapp_iran:
+    image: *app_image
+    build: *app_build
+    profiles:
+      - staging-load
+    restart: "no"
+    command: ["python", "scripts/trading_core_probe_worker.py", "load-runner-ready", "--role", "webapp_iran"]
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: load_runner
+      ENVIRONMENT: staging
+      SERVER_MODE: iran
+      BOT_TOKEN: ""
+      DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    depends_on:
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - staging_net
+
 networks:
   staging_net:
     driver: bridge
