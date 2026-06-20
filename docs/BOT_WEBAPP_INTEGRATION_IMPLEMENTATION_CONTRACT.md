@@ -1758,6 +1758,26 @@ Exit criteria:
 
 - One local smoke run can execute the coordinator with tiny counts and produce a merged artifact.
 
+Implementation status:
+
+- `scripts/trading_core_probe_worker.py` now has deterministic dual-role plan artifacts:
+  `write-dual-role-plan` splits one mixed-load run into `telegram_foreign` and `webapp_iran`
+  plan files with one shared barrier time.
+- `run-role-plan` is the real role-worker entrypoint. It refuses to run unless the container passes
+  the staging-only load-runner guard from Step 11B-1, then executes the role through either
+  `aiogram.Dispatcher` or the WebApp trade API path.
+- Role result artifacts include the required per-request fields: monotonic timestamp, source role,
+  source surface, user id, offer public id, idempotency key, outcome, and latency.
+- Telegram result artifacts record the idempotency key generated inside the Telegram callback handler
+  when the handler reaches trade execution; rejected attempts that never reach that point still keep
+  the field present and mark `idempotency_key_observed=false`.
+- `merge-role-results` merges role-worker artifacts into one run artifact with surface summaries and
+  role start-skew evidence.
+- `run-dual-role-artifact-smoke` is available for schema/coordinator smoke only. It does not execute
+  trades and must not be used as performance or cross-server sync evidence.
+- `tests/test_trading_core_mixed_load_helpers.py` locks plan splitting, barrier skew, artifact schema,
+  and merged-result validation.
+
 #### Step 11B-3 - Hot Offer Contention Scenarios
 
 Required scenarios:

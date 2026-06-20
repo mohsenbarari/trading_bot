@@ -10,16 +10,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextvars
 import json
 import math
 import sys
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 import redis.asyncio as redis
 from aiogram import Bot, Dispatcher
@@ -64,6 +65,12 @@ class TradingProbeError(RuntimeError):
     pass
 
 
+DUAL_ROLE_PLAN_SCHEMA_VERSION = "bot_webapp_mixed_load_role_plan_v1"
+DUAL_ROLE_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_role_result_v1"
+DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1"
+DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
+
+
 LOAD_RUNNER_ROLES = {
     "telegram_foreign": {
         "server_mode": SERVER_FOREIGN,
@@ -74,6 +81,24 @@ LOAD_RUNNER_ROLES = {
         "surface": "webapp",
     },
 }
+SURFACE_TO_LOAD_RUNNER_ROLE = {config["surface"]: role for role, config in LOAD_RUNNER_ROLES.items()}
+
+_TELEGRAM_IDEMPOTENCY_KEYS: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "trading_probe_telegram_idempotency_keys",
+    default=None,
+)
+_ORIGINAL_CHANNEL_TRADE_IDEMPOTENCY_KEY = bot_trade_execute._channel_trade_idempotency_key
+
+
+def _recording_channel_trade_idempotency_key(*args: Any, **kwargs: Any) -> str:
+    key = str(_ORIGINAL_CHANNEL_TRADE_IDEMPOTENCY_KEY(*args, **kwargs))
+    recorder = _TELEGRAM_IDEMPOTENCY_KEYS.get()
+    if recorder is not None:
+        recorder.append(key)
+    return key
+
+
+bot_trade_execute._channel_trade_idempotency_key = _recording_channel_trade_idempotency_key
 
 
 @dataclass(frozen=True)
@@ -207,6 +232,327 @@ def build_mixed_surface_plan(
             )
         )
     return plan
+
+
+def synthetic_load_user_refs(
+    *,
+    user_count: int,
+    start_user_id: int = 1,
+    start_telegram_id: int = 9_000_000_000,
+) -> list[LoadUserRef]:
+    if user_count <= 1:
+        raise TradingProbeError("synthetic load plan requires at least two users")
+    return [
+        LoadUserRef(user_id=start_user_id + index, telegram_id=start_telegram_id + index)
+        for index in range(user_count)
+    ]
+
+
+def mixed_attempt_to_artifact_dict(spec: MixedLoadAttemptSpec) -> dict[str, Any]:
+    return asdict(spec)
+
+
+def mixed_attempt_from_artifact_dict(raw: Mapping[str, Any]) -> MixedLoadAttemptSpec:
+    try:
+        index = int(raw["index"])
+        surface = str(raw["surface"])
+        user_id = int(raw["user_id"])
+        telegram_id = int(raw["telegram_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TradingProbeError(f"invalid mixed load attempt artifact: {exc}") from exc
+    if index < 0:
+        raise TradingProbeError(f"invalid mixed load attempt index: {index}")
+    if surface not in SURFACE_TO_LOAD_RUNNER_ROLE:
+        raise TradingProbeError(f"unsupported mixed load attempt surface: {surface}")
+    if user_id <= 0 or telegram_id <= 0:
+        raise TradingProbeError("mixed load attempt user ids must be positive")
+    return MixedLoadAttemptSpec(index=index, surface=surface, user_id=user_id, telegram_id=telegram_id)
+
+
+def split_mixed_plan_by_role(plan: list[MixedLoadAttemptSpec]) -> dict[str, list[MixedLoadAttemptSpec]]:
+    split: dict[str, list[MixedLoadAttemptSpec]] = {role: [] for role in LOAD_RUNNER_ROLES}
+    for spec in plan:
+        role = SURFACE_TO_LOAD_RUNNER_ROLE.get(spec.surface)
+        if role is None:
+            raise TradingProbeError(f"unsupported mixed load attempt surface: {spec.surface}")
+        split[role].append(spec)
+    return split
+
+
+def build_dual_role_worker_plans(
+    *,
+    run_id: str,
+    prefix: str,
+    users: list[LoadUserRef],
+    owner_user_id: int,
+    offer_id: int,
+    offer_public_id: str | None,
+    total_requests: int,
+    telegram_ratio: float,
+    target_rps: float,
+    amount: int,
+    barrier_epoch: float,
+) -> dict[str, dict[str, Any]]:
+    normalized_run_id = str(run_id or "").strip()
+    normalized_prefix = str(prefix or "").strip()
+    if not normalized_run_id:
+        raise TradingProbeError("dual-role run_id is required")
+    if not normalized_prefix:
+        raise TradingProbeError("dual-role prefix is required")
+    if offer_id <= 0:
+        raise TradingProbeError("dual-role offer_id must be positive")
+    if amount <= 0:
+        raise TradingProbeError("dual-role request amount must be positive")
+    if target_rps <= 0:
+        raise TradingProbeError("dual-role target_rps must be positive")
+    if not math.isfinite(float(barrier_epoch)):
+        raise TradingProbeError("dual-role barrier_epoch must be finite")
+
+    plan = build_mixed_surface_plan(
+        users=users,
+        owner_user_id=owner_user_id,
+        total_requests=total_requests,
+        telegram_ratio=telegram_ratio,
+    )
+    split = split_mixed_plan_by_role(plan)
+    artifact_plans: dict[str, dict[str, Any]] = {}
+    normalized_offer_public_id = str(offer_public_id).strip() if offer_public_id else None
+    for role, role_config in LOAD_RUNNER_ROLES.items():
+        surface = str(role_config["surface"])
+        attempts = split[role]
+        artifact_plans[role] = {
+            "schema_version": DUAL_ROLE_PLAN_SCHEMA_VERSION,
+            "run_id": normalized_run_id,
+            "prefix": normalized_prefix,
+            "role": role,
+            "surface": surface,
+            "barrier_epoch": round(float(barrier_epoch), 6),
+            "target_rps": float(target_rps),
+            "request_amount": int(amount),
+            "offer": {
+                "id": int(offer_id),
+                "public_id": normalized_offer_public_id,
+                "owner_user_id": int(owner_user_id),
+            },
+            "attempts": [mixed_attempt_to_artifact_dict(spec) for spec in attempts],
+        }
+    return artifact_plans
+
+
+def _require_mapping(value: Any, name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TradingProbeError(f"{name} must be an object")
+    return value
+
+
+def validate_role_plan_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
+    payload = _require_mapping(raw, "role plan")
+    if payload.get("schema_version") != DUAL_ROLE_PLAN_SCHEMA_VERSION:
+        raise TradingProbeError("unsupported role plan schema_version")
+    run_id = str(payload.get("run_id") or "").strip()
+    prefix = str(payload.get("prefix") or "").strip()
+    role = str(payload.get("role") or "").strip()
+    surface = str(payload.get("surface") or "").strip()
+    if not run_id:
+        raise TradingProbeError("role plan run_id is required")
+    if not prefix:
+        raise TradingProbeError("role plan prefix is required")
+    role_config = LOAD_RUNNER_ROLES.get(role)
+    if role_config is None:
+        raise TradingProbeError(f"unsupported role plan role: {role}")
+    if surface != role_config["surface"]:
+        raise TradingProbeError(f"role plan surface must be {role_config['surface']} for {role}")
+    try:
+        barrier_epoch = float(payload["barrier_epoch"])
+        target_rps = float(payload["target_rps"])
+        request_amount = int(payload["request_amount"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TradingProbeError(f"invalid role plan timing/request fields: {exc}") from exc
+    if not math.isfinite(barrier_epoch):
+        raise TradingProbeError("role plan barrier_epoch must be finite")
+    if target_rps <= 0:
+        raise TradingProbeError("role plan target_rps must be positive")
+    if request_amount <= 0:
+        raise TradingProbeError("role plan request_amount must be positive")
+
+    offer = _require_mapping(payload.get("offer"), "role plan offer")
+    try:
+        offer_id = int(offer["id"])
+        owner_user_id = int(offer["owner_user_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TradingProbeError(f"invalid role plan offer fields: {exc}") from exc
+    if offer_id <= 0 or owner_user_id <= 0:
+        raise TradingProbeError("role plan offer ids must be positive")
+    if "public_id" not in offer:
+        raise TradingProbeError("role plan offer.public_id field is required")
+
+    attempts = payload.get("attempts")
+    if not isinstance(attempts, list):
+        raise TradingProbeError("role plan attempts must be a list")
+    for attempt in attempts:
+        spec = mixed_attempt_from_artifact_dict(_require_mapping(attempt, "role plan attempt"))
+        if spec.surface != surface:
+            raise TradingProbeError("role plan attempt surface does not match role surface")
+    return payload
+
+
+def role_plan_attempt_specs(plan_payload: Mapping[str, Any]) -> list[MixedLoadAttemptSpec]:
+    validated = validate_role_plan_artifact(plan_payload)
+    return [
+        mixed_attempt_from_artifact_dict(_require_mapping(attempt, "role plan attempt"))
+        for attempt in validated["attempts"]
+    ]
+
+
+def assert_role_plan_barrier_skew(
+    plans: Mapping[str, Mapping[str, Any]],
+    *,
+    max_skew_seconds: float,
+) -> dict[str, Any]:
+    if max_skew_seconds < 0:
+        raise TradingProbeError("max_skew_seconds must be non-negative")
+    barriers = {
+        role: float(validate_role_plan_artifact(plan)["barrier_epoch"])
+        for role, plan in plans.items()
+    }
+    if not barriers:
+        raise TradingProbeError("at least one role plan is required")
+    observed_skew = max(barriers.values()) - min(barriers.values())
+    if observed_skew > max_skew_seconds:
+        raise TradingProbeError(
+            f"role plan barrier skew {observed_skew:.6f}s exceeds {max_skew_seconds:.6f}s"
+        )
+    return {
+        "max_skew_seconds": round(float(max_skew_seconds), 6),
+        "observed_skew_seconds": round(float(observed_skew), 6),
+        "barriers": barriers,
+    }
+
+
+def build_role_attempt_idempotency_key(
+    *,
+    prefix: str,
+    role: str,
+    offer_id: int,
+    attempt_index: int,
+) -> str:
+    return f"{prefix}{role}:{offer_id}:{attempt_index}"
+
+
+def _validate_role_result_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
+    payload = _require_mapping(raw, "role result")
+    if payload.get("schema_version") != DUAL_ROLE_RESULT_SCHEMA_VERSION:
+        raise TradingProbeError("unsupported role result schema_version")
+    role = str(payload.get("role") or "").strip()
+    surface = str(payload.get("surface") or "").strip()
+    role_config = LOAD_RUNNER_ROLES.get(role)
+    if role_config is None:
+        raise TradingProbeError(f"unsupported role result role: {role}")
+    if surface != role_config["surface"]:
+        raise TradingProbeError(f"role result surface must be {role_config['surface']} for {role}")
+    if not str(payload.get("run_id") or "").strip():
+        raise TradingProbeError("role result run_id is required")
+    try:
+        float(payload["started_epoch"])
+        float(payload["finished_epoch"])
+        float(payload["started_monotonic"])
+        float(payload["finished_monotonic"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TradingProbeError(f"invalid role result timing fields: {exc}") from exc
+    attempts = payload.get("attempts")
+    if not isinstance(attempts, list):
+        raise TradingProbeError("role result attempts must be a list")
+    required_attempt_fields = {
+        "index",
+        "monotonic_timestamp",
+        "source_role",
+        "source_surface",
+        "user_id",
+        "offer_public_id",
+        "idempotency_key",
+        "outcome",
+        "latency_ms",
+    }
+    for attempt in attempts:
+        attempt_payload = _require_mapping(attempt, "role result attempt")
+        missing = sorted(required_attempt_fields - set(attempt_payload))
+        if missing:
+            raise TradingProbeError(f"role result attempt missing fields: {', '.join(missing)}")
+        if attempt_payload["source_role"] != role or attempt_payload["source_surface"] != surface:
+            raise TradingProbeError("role result attempt source does not match role result")
+    return payload
+
+
+def assert_role_result_start_skew(
+    results: list[Mapping[str, Any]],
+    *,
+    max_skew_seconds: float,
+) -> dict[str, Any]:
+    if max_skew_seconds < 0:
+        raise TradingProbeError("max_skew_seconds must be non-negative")
+    started: dict[str, float] = {}
+    for result in results:
+        payload = _validate_role_result_artifact(result)
+        started[str(payload["role"])] = float(payload["started_epoch"])
+    if not started:
+        raise TradingProbeError("at least one role result is required")
+    observed_skew = max(started.values()) - min(started.values())
+    if observed_skew > max_skew_seconds:
+        raise TradingProbeError(
+            f"role result start skew {observed_skew:.6f}s exceeds {max_skew_seconds:.6f}s"
+        )
+    return {
+        "max_skew_seconds": round(float(max_skew_seconds), 6),
+        "observed_skew_seconds": round(float(observed_skew), 6),
+        "started_epochs": started,
+    }
+
+
+def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dict[str, Any]:
+    if not result_payloads:
+        raise TradingProbeError("at least one role result artifact is required")
+
+    run_id: str | None = None
+    attempts: list[dict[str, Any]] = []
+    summary_inputs: list[MixedLoadAttemptResult] = []
+    role_summaries: dict[str, Any] = {}
+    started_epochs: list[float] = []
+    finished_epochs: list[float] = []
+    for raw in result_payloads:
+        payload = _validate_role_result_artifact(raw)
+        current_run_id = str(payload["run_id"])
+        if run_id is None:
+            run_id = current_run_id
+        elif run_id != current_run_id:
+            raise TradingProbeError("cannot merge role results from different run ids")
+        role = str(payload["role"])
+        role_summaries[role] = payload.get("summary", {})
+        started_epochs.append(float(payload["started_epoch"]))
+        finished_epochs.append(float(payload["finished_epoch"]))
+        for attempt in payload["attempts"]:
+            attempt_payload = dict(_require_mapping(attempt, "role result attempt"))
+            attempts.append(attempt_payload)
+            summary_inputs.append(
+                MixedLoadAttemptResult(
+                    index=int(attempt_payload["index"]),
+                    surface=str(attempt_payload["source_surface"]),
+                    status=str(attempt_payload["outcome"]),
+                    duration_ms=float(attempt_payload["latency_ms"]),
+                    detail=str(attempt_payload["detail"]) if attempt_payload.get("detail") else None,
+                )
+            )
+
+    elapsed_seconds = max(finished_epochs) - min(started_epochs)
+    attempts.sort(key=lambda item: (float(item["monotonic_timestamp"]), int(item["index"])))
+    return {
+        "schema_version": DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
+        "run_id": run_id,
+        "status": "ok",
+        "roles": role_summaries,
+        "role_start_skew": assert_role_result_start_skew(result_payloads, max_skew_seconds=3600.0),
+        "summary": summarize_attempt_results(summary_inputs, elapsed_seconds=elapsed_seconds),
+        "attempts": attempts,
+    }
 
 
 def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_seconds: float) -> dict[str, Any]:
@@ -998,6 +1344,7 @@ async def execute_bot_trade_with_dispatcher(
     offer: Offer,
     amount: int,
     prefix: str,
+    observed_idempotency_keys: list[str] | None = None,
 ) -> str:
     callback_data = build_channel_trade_callback_data(
         offer_id=offer.id,
@@ -1007,6 +1354,9 @@ async def execute_bot_trade_with_dispatcher(
     channel_message_id = int(getattr(offer, "channel_message_id", None) or getattr(offer, "id", 0) or 1)
     first_callback_id = f"{prefix}tap1-{spec.index}"
     second_callback_id = f"{prefix}tap2-{spec.index}"
+    recorder_token = None
+    if observed_idempotency_keys is not None:
+        recorder_token = _TELEGRAM_IDEMPOTENCY_KEYS.set(observed_idempotency_keys)
     try:
         await harness.feed_channel_callback(
             telegram_id=spec.telegram_id,
@@ -1022,6 +1372,9 @@ async def execute_bot_trade_with_dispatcher(
         )
     except Exception:
         return "error"
+    finally:
+        if recorder_token is not None:
+            _TELEGRAM_IDEMPOTENCY_KEYS.reset(recorder_token)
 
     answer_text = str((answer or {}).get("text") or "")
     if "معامله ثبت شد" in answer_text:
@@ -1029,6 +1382,195 @@ async def execute_bot_trade_with_dispatcher(
     if answer_text:
         return "rejected"
     return "rejected"
+
+
+def write_json_artifact(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=json_safe) + "\n",
+        encoding="utf-8",
+    )
+
+
+def read_json_artifact(path: Path) -> Mapping[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise TradingProbeError(f"failed to read artifact {path}: {exc}") from exc
+    return _require_mapping(data, f"artifact {path}")
+
+
+async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
+    plan = validate_role_plan_artifact(plan_payload)
+    role = str(plan["role"])
+    surface = str(plan["surface"])
+    offer = _require_mapping(plan["offer"], "role plan offer")
+    offer_id = int(offer["id"])
+    offer_public_id = str(offer["public_id"]) if offer.get("public_id") else None
+    request_amount = int(plan["request_amount"])
+    prefix = str(plan["prefix"])
+    target_rps = float(plan["target_rps"])
+    barrier_epoch = float(plan["barrier_epoch"])
+    attempts = role_plan_attempt_specs(plan)
+    harness = AiogramDispatcherHarness() if role == "telegram_foreign" else None
+
+    start_delay = barrier_epoch - time.time()
+    if start_delay > 0:
+        await asyncio.sleep(start_delay)
+    started_epoch = time.time()
+    started_monotonic = time.perf_counter()
+
+    async def _attempt(spec: MixedLoadAttemptSpec) -> tuple[MixedLoadAttemptResult, dict[str, Any]]:
+        scheduled_epoch = barrier_epoch + (spec.index / target_rps)
+        scheduled_delay = scheduled_epoch - time.time()
+        if scheduled_delay > 0:
+            await asyncio.sleep(scheduled_delay)
+
+        monotonic_timestamp = time.perf_counter()
+        attempt_started = time.perf_counter()
+        status_value = "error"
+        detail: str | None = None
+        idempotency_key: str | None = build_role_attempt_idempotency_key(
+            prefix=prefix,
+            role=role,
+            offer_id=offer_id,
+            attempt_index=spec.index,
+        )
+        observed_telegram_keys: list[str] = []
+        try:
+            if surface == "webapp":
+                status_value = await execute_webapp_trade_for_user(
+                    user_id=spec.user_id,
+                    offer_id=offer_id,
+                    quantity=request_amount,
+                    idempotency_key=idempotency_key,
+                )
+            else:
+                if harness is None:
+                    raise TradingProbeError("telegram role worker requires dispatcher harness")
+                offer_snapshot = await load_offer_snapshot(offer_id)
+                status_value = await execute_bot_trade_with_dispatcher(
+                    harness=harness,
+                    spec=spec,
+                    offer=offer_snapshot,
+                    amount=request_amount,
+                    prefix=f"{prefix}{role}-",
+                    observed_idempotency_keys=observed_telegram_keys,
+                )
+                if observed_telegram_keys:
+                    idempotency_key = observed_telegram_keys[-1]
+        except Exception as exc:
+            status_value = "error"
+            detail = type(exc).__name__
+        latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
+        result = MixedLoadAttemptResult(
+            index=spec.index,
+            surface=surface,
+            status=status_value,
+            duration_ms=latency_ms,
+            detail=detail,
+        )
+        return result, {
+            "index": spec.index,
+            "monotonic_timestamp": round(monotonic_timestamp, 6),
+            "source_role": role,
+            "source_surface": surface,
+            "user_id": spec.user_id,
+            "telegram_id": spec.telegram_id,
+            "offer_id": offer_id,
+            "offer_public_id": offer_public_id,
+            "idempotency_key": idempotency_key,
+            "idempotency_key_observed": bool(observed_telegram_keys) if surface == "telegram" else True,
+            "outcome": status_value,
+            "latency_ms": latency_ms,
+            "detail": detail,
+        }
+
+    try:
+        pairs = await asyncio.gather(*[_attempt(spec) for spec in attempts])
+    finally:
+        if harness is not None:
+            await harness.close()
+
+    finished_epoch = time.time()
+    finished_monotonic = time.perf_counter()
+    result_items = [result for result, _artifact in pairs]
+    attempt_artifacts = [artifact for _result, artifact in pairs]
+    return {
+        "schema_version": DUAL_ROLE_RESULT_SCHEMA_VERSION,
+        "run_id": str(plan["run_id"]),
+        "role": role,
+        "surface": surface,
+        "started_epoch": round(started_epoch, 6),
+        "finished_epoch": round(finished_epoch, 6),
+        "started_monotonic": round(started_monotonic, 6),
+        "finished_monotonic": round(finished_monotonic, 6),
+        "summary": summarize_attempt_results(result_items, elapsed_seconds=finished_monotonic - started_monotonic),
+        "attempts": attempt_artifacts,
+    }
+
+
+def build_dry_role_result_artifact(plan_payload: Mapping[str, Any], *, started_epoch: float) -> dict[str, Any]:
+    plan = validate_role_plan_artifact(plan_payload)
+    role = str(plan["role"])
+    surface = str(plan["surface"])
+    offer = _require_mapping(plan["offer"], "role plan offer")
+    offer_id = int(offer["id"])
+    offer_public_id = str(offer["public_id"]) if offer.get("public_id") else None
+    attempts = role_plan_attempt_specs(plan)
+    attempt_artifacts: list[dict[str, Any]] = []
+    results: list[MixedLoadAttemptResult] = []
+    for offset, spec in enumerate(attempts):
+        idempotency_key = build_role_attempt_idempotency_key(
+            prefix=str(plan["prefix"]),
+            role=role,
+            offer_id=offer_id,
+            attempt_index=spec.index,
+        )
+        outcome = "success" if offset == 0 else "rejected"
+        latency_ms = 1.0 + float(offset)
+        monotonic_timestamp = started_epoch + (float(offset) / max(float(plan["target_rps"]), 1.0))
+        attempt_artifacts.append(
+            {
+                "index": spec.index,
+                "monotonic_timestamp": round(monotonic_timestamp, 6),
+                "source_role": role,
+                "source_surface": surface,
+                "user_id": spec.user_id,
+                "telegram_id": spec.telegram_id,
+                "offer_id": offer_id,
+                "offer_public_id": offer_public_id,
+                "idempotency_key": idempotency_key,
+                "idempotency_key_observed": surface == "webapp",
+                "outcome": outcome,
+                "latency_ms": latency_ms,
+                "detail": "dry_run_artifact_smoke",
+            }
+        )
+        results.append(
+            MixedLoadAttemptResult(
+                index=spec.index,
+                surface=surface,
+                status=outcome,
+                duration_ms=latency_ms,
+                detail="dry_run_artifact_smoke",
+            )
+        )
+
+    finished_epoch = started_epoch + (len(attempts) / max(float(plan["target_rps"]), 1.0))
+    return {
+        "schema_version": DUAL_ROLE_RESULT_SCHEMA_VERSION,
+        "run_id": str(plan["run_id"]),
+        "role": role,
+        "surface": surface,
+        "started_epoch": round(started_epoch, 6),
+        "finished_epoch": round(finished_epoch, 6),
+        "started_monotonic": round(started_epoch, 6),
+        "finished_monotonic": round(finished_epoch, 6),
+        "summary": summarize_attempt_results(results, elapsed_seconds=finished_epoch - started_epoch),
+        "attempts": attempt_artifacts,
+        "mode": "artifact_smoke",
+    }
 
 
 async def run_hot_offer_contention(
@@ -1480,6 +2022,154 @@ async def load_runner_ready_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _dual_role_run_id(prefix: str, explicit_run_id: str | None = None) -> str:
+    normalized = str(explicit_run_id or "").strip()
+    if normalized:
+        return normalized
+    return f"{prefix}{int(time.time())}"
+
+
+def _build_dual_role_plans_from_args(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
+    users = synthetic_load_user_refs(
+        user_count=args.user_count,
+        start_user_id=args.start_user_id,
+        start_telegram_id=args.start_telegram_id,
+    )
+    return build_dual_role_worker_plans(
+        run_id=_dual_role_run_id(args.prefix, getattr(args, "run_id", None)),
+        prefix=args.prefix,
+        users=users,
+        owner_user_id=args.owner_user_id,
+        offer_id=args.offer_id,
+        offer_public_id=args.offer_public_id,
+        total_requests=args.hot_offer_requests,
+        telegram_ratio=args.telegram_ratio,
+        target_rps=args.target_rps,
+        amount=args.request_amount,
+        barrier_epoch=time.time() + args.barrier_delay_seconds,
+    )
+
+
+def _write_dual_role_plan_files(output_dir: Path, plans: Mapping[str, Mapping[str, Any]], *, mode: str) -> dict[str, Any]:
+    plan_paths: dict[str, str] = {}
+    role_summaries: dict[str, Any] = {}
+    for role, plan in plans.items():
+        validated = validate_role_plan_artifact(plan)
+        plan_path = output_dir / f"{role}.plan.json"
+        write_json_artifact(plan_path, validated)
+        plan_paths[role] = str(plan_path)
+        role_summaries[role] = {
+            "surface": validated["surface"],
+            "attempts": len(validated["attempts"]),
+            "server_mode": LOAD_RUNNER_ROLES[role]["server_mode"],
+        }
+    run_ids = {str(plan["run_id"]) for plan in plans.values()}
+    if len(run_ids) != 1:
+        raise TradingProbeError("dual-role plans must share one run id")
+    manifest = {
+        "schema_version": DUAL_ROLE_MANIFEST_SCHEMA_VERSION,
+        "run_id": next(iter(run_ids)),
+        "status": "ok",
+        "mode": mode,
+        "created_epoch": round(time.time(), 6),
+        "plan_paths": plan_paths,
+        "roles": role_summaries,
+        "barrier_skew": assert_role_plan_barrier_skew(plans, max_skew_seconds=0.001),
+    }
+    manifest_path = output_dir / "manifest.json"
+    write_json_artifact(manifest_path, manifest)
+    return {"manifest_path": str(manifest_path), "manifest": manifest}
+
+
+async def write_dual_role_plan_command(args: argparse.Namespace) -> int:
+    plans = _build_dual_role_plans_from_args(args)
+    result = _write_dual_role_plan_files(Path(args.output_dir), plans, mode="plan_only")
+    print_json({"status": "ok", **result})
+    return 0
+
+
+async def run_dual_role_artifact_smoke_command(args: argparse.Namespace) -> int:
+    plans = _build_dual_role_plans_from_args(args)
+    output_dir = Path(args.output_dir)
+    result = _write_dual_role_plan_files(output_dir, plans, mode="artifact_smoke")
+    smoke_started_epoch = time.time()
+    role_results: list[dict[str, Any]] = []
+    result_paths: dict[str, str] = {}
+    for offset, (role, plan) in enumerate(plans.items()):
+        role_result = build_dry_role_result_artifact(plan, started_epoch=smoke_started_epoch + (offset * 0.001))
+        result_path = output_dir / f"{role}.result.json"
+        write_json_artifact(result_path, role_result)
+        role_results.append(role_result)
+        result_paths[role] = str(result_path)
+    merged = merge_role_result_artifacts(role_results)
+    merged["mode"] = "artifact_smoke"
+    merged_path = output_dir / "merged.result.json"
+    write_json_artifact(merged_path, merged)
+    print_json(
+        {
+            "status": "ok",
+            "mode": "artifact_smoke",
+            "manifest_path": result["manifest_path"],
+            "result_paths": result_paths,
+            "merged_result_path": str(merged_path),
+            "summary": merged["summary"],
+        }
+    )
+    return 0
+
+
+@asynccontextmanager
+async def optional_patched_boundaries(enabled: bool):
+    if enabled:
+        async with patched_trading_boundaries():
+            yield
+        return
+    yield
+
+
+async def run_role_plan_command(args: argparse.Namespace) -> int:
+    plan = read_json_artifact(Path(args.plan))
+    validated = validate_role_plan_artifact(plan)
+    assert_load_runner_runtime_surface(str(validated["role"]))
+    setup_event_listeners()
+    async with optional_patched_boundaries(bool(args.patch_boundaries)):
+        result = await run_role_worker_plan(validated)
+    if args.output:
+        write_json_artifact(Path(args.output), result)
+        print_json({"status": "ok", "result_path": args.output, "summary": result["summary"]})
+    else:
+        print_json(result)
+    return 0
+
+
+async def merge_role_results_command(args: argparse.Namespace) -> int:
+    results = [read_json_artifact(Path(path)) for path in args.results]
+    merged = merge_role_result_artifacts(results)
+    if args.output:
+        write_json_artifact(Path(args.output), merged)
+        print_json({"status": "ok", "merged_result_path": args.output, "summary": merged["summary"]})
+    else:
+        print_json(merged)
+    return 0
+
+
+def add_dual_role_plan_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--prefix", required=True)
+    parser.add_argument("--run-id")
+    parser.add_argument("--user-count", type=int, default=1000)
+    parser.add_argument("--start-user-id", type=int, default=1)
+    parser.add_argument("--start-telegram-id", type=int, default=9_000_000_000)
+    parser.add_argument("--owner-user-id", type=int, default=1)
+    parser.add_argument("--hot-offer-requests", type=int, default=1000)
+    parser.add_argument("--telegram-ratio", type=float, default=0.6)
+    parser.add_argument("--target-rps", type=float, default=600.0)
+    parser.add_argument("--offer-id", type=int, default=1)
+    parser.add_argument("--offer-public-id", default="smoke-offer")
+    parser.add_argument("--request-amount", type=int, default=1)
+    parser.add_argument("--barrier-delay-seconds", type=float, default=5.0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Stage P7 trading benchmark helpers inside an app container.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1489,6 +2179,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     ready_parser = subparsers.add_parser("load-runner-ready")
     ready_parser.add_argument("--role", choices=tuple(LOAD_RUNNER_ROLES), required=True)
+
+    plan_parser = subparsers.add_parser("write-dual-role-plan")
+    add_dual_role_plan_arguments(plan_parser)
+
+    smoke_parser = subparsers.add_parser("run-dual-role-artifact-smoke")
+    add_dual_role_plan_arguments(smoke_parser)
+
+    role_parser = subparsers.add_parser("run-role-plan")
+    role_parser.add_argument("--plan", required=True)
+    role_parser.add_argument("--output")
+    role_parser.add_argument(
+        "--patch-boundaries",
+        action="store_true",
+        help="Use local no-op market/realtime/Telegram boundaries for local DB smoke runs.",
+    )
+
+    merge_parser = subparsers.add_parser("merge-role-results")
+    merge_parser.add_argument("--output")
+    merge_parser.add_argument("results", nargs="+")
 
     bench_parser = subparsers.add_parser("run-benchmark")
     bench_parser.add_argument("--prefix", required=True)
@@ -1524,6 +2233,14 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await cleanup_command(args)
     if args.command == "load-runner-ready":
         return await load_runner_ready_command(args)
+    if args.command == "write-dual-role-plan":
+        return await write_dual_role_plan_command(args)
+    if args.command == "run-dual-role-artifact-smoke":
+        return await run_dual_role_artifact_smoke_command(args)
+    if args.command == "run-role-plan":
+        return await run_role_plan_command(args)
+    if args.command == "merge-role-results":
+        return await merge_role_results_command(args)
     if args.command == "run-benchmark":
         return await run_benchmark(args)
     if args.command == "run-mixed-load":

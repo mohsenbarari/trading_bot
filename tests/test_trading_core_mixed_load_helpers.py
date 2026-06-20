@@ -64,6 +64,113 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(summary["surfaces"]["telegram"]["total"], 2)
         self.assertEqual(summary["surfaces"]["webapp"]["total"], 2)
 
+    def test_dual_role_worker_plans_split_distribution_and_share_barrier(self):
+        users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 12)]
+
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-1",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id="offer-public-42",
+            total_requests=20,
+            telegram_ratio=0.6,
+            target_rps=600.0,
+            amount=5,
+            barrier_epoch=1234.5,
+        )
+
+        self.assertEqual(set(plans), {"telegram_foreign", "webapp_iran"})
+        telegram_plan = worker.validate_role_plan_artifact(plans["telegram_foreign"])
+        webapp_plan = worker.validate_role_plan_artifact(plans["webapp_iran"])
+        self.assertEqual(telegram_plan["surface"], "telegram")
+        self.assertEqual(webapp_plan["surface"], "webapp")
+        self.assertEqual(len(telegram_plan["attempts"]), 12)
+        self.assertEqual(len(webapp_plan["attempts"]), 8)
+        self.assertEqual(telegram_plan["barrier_epoch"], webapp_plan["barrier_epoch"])
+        self.assertEqual(worker.assert_role_plan_barrier_skew(plans, max_skew_seconds=0.001)["observed_skew_seconds"], 0.0)
+
+    def test_role_plan_artifact_validation_fails_closed(self):
+        users = [worker.LoadUserRef(user_id=1, telegram_id=9001), worker.LoadUserRef(user_id=2, telegram_id=9002)]
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-2",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id=None,
+            total_requests=2,
+            telegram_ratio=0.5,
+            target_rps=10.0,
+            amount=1,
+            barrier_epoch=1234.5,
+        )
+        broken = dict(plans["telegram_foreign"])
+        broken["surface"] = "webapp"
+
+        with self.assertRaises(worker.TradingProbeError):
+            worker.validate_role_plan_artifact(broken)
+
+    def test_dry_role_results_merge_into_required_artifact_schema(self):
+        users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 12)]
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-3",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id="offer-public-42",
+            total_requests=10,
+            telegram_ratio=0.6,
+            target_rps=100.0,
+            amount=1,
+            barrier_epoch=1234.5,
+        )
+        telegram_result = worker.build_dry_role_result_artifact(plans["telegram_foreign"], started_epoch=2000.0)
+        webapp_result = worker.build_dry_role_result_artifact(plans["webapp_iran"], started_epoch=2000.001)
+
+        merged = worker.merge_role_result_artifacts([telegram_result, webapp_result])
+
+        self.assertEqual(merged["schema_version"], worker.DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION)
+        self.assertEqual(merged["summary"]["total"], 10)
+        self.assertEqual(merged["summary"]["surfaces"]["telegram"]["total"], 6)
+        self.assertEqual(merged["summary"]["surfaces"]["webapp"]["total"], 4)
+        self.assertIn("role_start_skew", merged)
+        first_attempt = merged["attempts"][0]
+        for key in {
+            "monotonic_timestamp",
+            "source_role",
+            "source_surface",
+            "user_id",
+            "offer_public_id",
+            "idempotency_key",
+            "outcome",
+            "latency_ms",
+        }:
+            self.assertIn(key, first_attempt)
+
+    def test_role_result_merge_rejects_missing_required_attempt_fields(self):
+        users = [worker.LoadUserRef(user_id=1, telegram_id=9001), worker.LoadUserRef(user_id=2, telegram_id=9002)]
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-4",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id="offer-public-42",
+            total_requests=2,
+            telegram_ratio=0.5,
+            target_rps=10.0,
+            amount=1,
+            barrier_epoch=1234.5,
+        )
+        result = worker.build_dry_role_result_artifact(plans["telegram_foreign"], started_epoch=2000.0)
+        del result["attempts"][0]["idempotency_key"]
+
+        with self.assertRaises(worker.TradingProbeError):
+            worker.merge_role_result_artifacts([result])
+
     def test_hot_offer_acceptance_fails_closed_on_data_corruption(self):
         worker.assert_hot_offer_contention_acceptance(
             persisted_trade_count=1,
