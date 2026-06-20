@@ -49,7 +49,7 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
-from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, normalize_server
+from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
 from models.change_log import ChangeLog
@@ -1273,6 +1273,7 @@ async def patched_trading_boundaries():
         "register_market_offer_created": offers_router.register_market_offer_created,
         "update_channel_buttons": trades_router.update_channel_buttons,
         "send_telegram_message_sync": trades_router.send_telegram_message_sync,
+        "forward_trade_to_home_server": trades_router.forward_trade_to_home_server,
         "realtime_publish": realtime_router.publish_event,
         "realtime_publish_user": realtime_router.publish_user_event,
         "bot_market_open": bot_trade_create._bot_market_is_open,
@@ -1286,12 +1287,84 @@ async def patched_trading_boundaries():
     async def no_price_warning(**_kwargs: Any) -> None:
         return None
 
+    async def local_forward_trade_to_home_server(
+        _target_server: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, Any]:
+        try:
+            background_tasks = BackgroundTasks()
+            async with AsyncSessionLocal() as db:
+                offer_public_id = str(payload.get("offer_public_id") or "").strip()
+                offer = await trades_router._resolve_internal_offer_by_public_id(
+                    db,
+                    offer_public_id=offer_public_id,
+                )
+                if not offer:
+                    return 404, {"detail": "لفظ یافت نشد."}
+                resolved_offer_id = int(offer.id)
+                expunge_offer = getattr(db, "expunge", None)
+                if callable(expunge_offer):
+                    expunge_offer(offer)
+
+                responder = await db.get(User, int(payload["responder_user_id"]))
+                if not responder or responder.is_deleted:
+                    return 404, {"detail": "کاربر درخواست‌دهنده یافت نشد"}
+
+                actor_user = responder
+                actor_user_id = payload.get("actor_user_id")
+                if actor_user_id and int(actor_user_id) != int(responder.id):
+                    actor = await db.get(User, int(actor_user_id))
+                    if not actor or actor.is_deleted:
+                        return 404, {"detail": "کاربر اجراکننده یافت نشد"}
+                    actor_user = actor
+
+                edge_received_at = payload.get("edge_received_at")
+                if isinstance(edge_received_at, str):
+                    edge_received_at = datetime.fromisoformat(edge_received_at)
+                if not isinstance(edge_received_at, datetime):
+                    edge_received_at = datetime.utcnow()
+
+                response = await trades_router._execute_trade_authoritatively(
+                    trade_data=trades_router.TradeCreate(
+                        offer_id=resolved_offer_id,
+                        offer_public_id=offer_public_id,
+                        quantity=int(payload["quantity"]),
+                        idempotency_key=payload.get("idempotency_key"),
+                    ),
+                    background_tasks=background_tasks,
+                    db=db,
+                    context=EffectiveOwnerActor(
+                        owner_user=responder,
+                        actor_user=actor_user,
+                        relation=None,
+                        is_accountant_context=int(actor_user.id) != int(responder.id),
+                    ),
+                    edge_received_at=edge_received_at,
+                    request_source_surface=str(payload.get("source_surface") or "webapp"),
+                    request_source_server=str(payload.get("source_server") or current_server()),
+                )
+            await background_tasks()
+        except HTTPException as exc:
+            return int(exc.status_code or 500), {"detail": exc.detail}
+
+        if isinstance(response, JSONResponse):
+            try:
+                return int(response.status_code), json.loads(response.body.decode("utf-8") or "{}")
+            except Exception:
+                return int(response.status_code), {"detail": "invalid JSONResponse body"}
+        if hasattr(response, "model_dump"):
+            return 201, response.model_dump(mode="json")
+        return 201, {"status": "ok"}
+
     offers_router.evaluate_current_market_schedule = fake_market_open
     trades_router.evaluate_current_market_schedule = fake_market_open
     offers_router.send_offer_to_channel = noop_send_offer
     offers_router.register_market_offer_created = noop_register_market_offer_created
     trades_router.update_channel_buttons = noop_update_channel_buttons
     trades_router.send_telegram_message_sync = lambda *_args, **_kwargs: None
+    trades_router.forward_trade_to_home_server = local_forward_trade_to_home_server
     realtime_router.publish_event = noop_async
     realtime_router.publish_user_event = noop_async
     bot_trade_create._bot_market_is_open = lambda: asyncio.sleep(0, result=True)
@@ -1306,6 +1379,7 @@ async def patched_trading_boundaries():
         offers_router.register_market_offer_created = original["register_market_offer_created"]
         trades_router.update_channel_buttons = original["update_channel_buttons"]
         trades_router.send_telegram_message_sync = original["send_telegram_message_sync"]
+        trades_router.forward_trade_to_home_server = original["forward_trade_to_home_server"]
         realtime_router.publish_event = original["realtime_publish"]
         realtime_router.publish_user_event = original["realtime_publish_user"]
         bot_trade_create._bot_market_is_open = original["bot_market_open"]
@@ -1694,6 +1768,12 @@ async def execute_webapp_trade_for_user(
         return "error"
 
     if isinstance(response, JSONResponse):
+        if response.status_code >= 500 and error_details is not None:
+            try:
+                body = json.loads(response.body.decode("utf-8") or "{}")
+            except Exception:
+                body = {"detail": "invalid JSONResponse body"}
+            error_details.append(f"JSONResponse {response.status_code}: {body.get('detail') or body}")
         return "success" if response.status_code < 400 else ("rejected" if response.status_code < 500 else "error")
     return "success"
 
