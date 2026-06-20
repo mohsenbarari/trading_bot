@@ -46,7 +46,12 @@ logger = logging.getLogger(__name__)
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 FOREIGN_INTERNAL_EXACT_PATHS = {"/metrics"}
-FOREIGN_INTERNAL_API_PREFIXES = ("/api/sync", "/api/sessions/internal")
+FOREIGN_INTERNAL_API_PREFIXES = (
+    "/api/sync",
+    "/api/sessions/internal",
+    "/api/trades/internal",
+    "/api/offers/internal",
+)
 FOREIGN_LOOPBACK_INTERNAL_PATHS = {"/api/config"}
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """

@@ -55,6 +55,8 @@ class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
                 "/api/sync/health",
                 "/api/sessions/internal/authority-check",
                 "/api/sessions/internal/reset-user-sessions",
+                "/api/trades/internal/execute",
+                "/api/offers/internal/expire",
                 "/metrics",
             ):
                 with self.subTest(path=path):
@@ -76,7 +78,12 @@ class MainForeignSurfaceGuardTests(unittest.IsolatedAsyncioTestCase):
 
     def test_foreign_mode_does_not_allow_similar_unregistered_prefixes(self):
         with patch.object(main.settings, "server_mode", "foreign"):
-            for path in ("/api/sync-health", "/api/sessions/internalized"):
+            for path in (
+                "/api/sync-health",
+                "/api/sessions/internalized",
+                "/api/trades/internalized",
+                "/api/offers/internalized",
+            ):
                 with self.subTest(path=path):
                     self.assertEqual(
                         main._foreign_surface_guard_reason(_request(path)),
