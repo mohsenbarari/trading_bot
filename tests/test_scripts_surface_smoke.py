@@ -15,6 +15,7 @@ PYTHON_SCRIPTS = (
     'scripts/free_deleted_user.py',
     'scripts/inspect_shared_sync_state.py',
     'scripts/report_bot_webapp_integration_matrix.py',
+    'scripts/report_bot_webapp_cutover_readiness.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
     'scripts/run_observability_gate.py',
@@ -73,6 +74,17 @@ class ScriptsSurfaceSmokeTests(unittest.TestCase):
         self.assertTrue(payload['matrix']['passed'])
         self.assertTrue(payload['matrix']['manual_signoff_required'])
         self.assertGreaterEqual(payload['matrix']['scenario_count'], 27)
+
+    def test_bot_webapp_cutover_readiness_template_outputs_parseable_json(self):
+        result = run_checked([PYTHON_BIN, 'scripts/report_bot_webapp_cutover_readiness.py', '--template'])
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+
+        payload = json.loads(result.stdout)
+
+        self.assertEqual(payload['metadata']['environment'], 'staging')
+        self.assertFalse(payload['metadata']['production_data_used'])
+        self.assertIn('iran', payload['roles'])
+        self.assertIn('foreign', payload['roles'])
 
     def test_messenger_query_plan_report_help_executes(self):
         result = run_checked([PYTHON_BIN, 'scripts/report_messenger_query_plans.py', '--help'])

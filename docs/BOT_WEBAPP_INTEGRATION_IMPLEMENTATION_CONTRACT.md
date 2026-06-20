@@ -1680,6 +1680,21 @@ Exit criteria:
 - A production readiness report can be produced for owner review.
 - No production deploy or production data action occurs from this step.
 
+Implementation status:
+
+- Step 12 readiness gate is code-owned by `scripts/report_bot_webapp_cutover_readiness.py`.
+- The gate evaluates staging/synthetic snapshots only; it does not connect to production, deploy
+  production, or mutate data.
+- The gate fails closed when active offers are non-zero, public identity backfill is incomplete,
+  sync backlog or partial publication state remains, runtime guards are missing, registry/sensitive
+  policy is incomplete, rollback is destructive, backups/observability are not ready, or owner
+  staging sign-off is missing.
+- `tests/test_bot_webapp_cutover_readiness.py` locks the pass/fail behavior, production-data
+  rejection, historical request ledger no-fabrication rule, rollback/backup/observability gates,
+  and CLI JSON/Markdown paths.
+- Staging execution guidance is documented in
+  `docs/BOT_WEBAPP_CUTOVER_READINESS_RUNBOOK.md`.
+
 ## Stop Conditions
 
 Stop immediately and ask for owner decision if any of these happen:
