@@ -1430,9 +1430,18 @@ class FakeMessage:
         self.answers.append({"text": text_value, "kwargs": kwargs})
 
 
+class RecordingAiogramBot(Bot):
+    def __init__(self, recorder: "RecordingTelegramBot") -> None:
+        self._recorder = recorder
+        super().__init__(token="123456:BENCHMARK_TEST_TOKEN")
+
+    async def __call__(self, method: Any, request_timeout: int | None = None) -> Any:
+        return await self._recorder.handle_telegram_method(method)
+
+
 class RecordingTelegramBot:
     def __init__(self) -> None:
-        self.bot = Bot(token="123456:BENCHMARK_TEST_TOKEN")
+        self.bot = RecordingAiogramBot(self)
         self.sent_messages: list[dict[str, Any]] = []
         self.edited_texts: list[dict[str, Any]] = []
         self.edited_markups: list[dict[str, Any]] = []
@@ -1444,24 +1453,69 @@ class RecordingTelegramBot:
         self._message_id += 1
         return self._message_id
 
+    async def _record_send_message(self, **kwargs: Any) -> SimpleNamespace:
+        message_id = self._next_message_id()
+        self.sent_messages.append({"message_id": message_id, **kwargs})
+        return SimpleNamespace(message_id=message_id)
+
+    async def _record_edit_message_text(self, **kwargs: Any) -> bool:
+        self.edited_texts.append(dict(kwargs))
+        return True
+
+    async def _record_edit_message_reply_markup(self, **kwargs: Any) -> bool:
+        self.edited_markups.append(dict(kwargs))
+        return True
+
+    async def _record_answer_callback_query(self, **kwargs: Any) -> bool:
+        callback_query_id = str(kwargs.get("callback_query_id") or "")
+        self.callback_answers[callback_query_id] = dict(kwargs)
+        return True
+
+    async def handle_telegram_method(self, method: Any) -> Any:
+        method_name = type(method).__name__
+        if method_name == "AnswerCallbackQuery":
+            return await self._record_answer_callback_query(
+                callback_query_id=getattr(method, "callback_query_id", ""),
+                text=getattr(method, "text", None),
+                show_alert=getattr(method, "show_alert", None),
+                url=getattr(method, "url", None),
+                cache_time=getattr(method, "cache_time", None),
+            )
+        if method_name == "SendMessage":
+            return await self._record_send_message(
+                chat_id=getattr(method, "chat_id", None),
+                text=getattr(method, "text", None),
+                reply_markup=getattr(method, "reply_markup", None),
+                parse_mode=getattr(method, "parse_mode", None),
+            )
+        if method_name == "EditMessageText":
+            return await self._record_edit_message_text(
+                chat_id=getattr(method, "chat_id", None),
+                message_id=getattr(method, "message_id", None),
+                text=getattr(method, "text", None),
+                reply_markup=getattr(method, "reply_markup", None),
+                parse_mode=getattr(method, "parse_mode", None),
+            )
+        if method_name == "EditMessageReplyMarkup":
+            return await self._record_edit_message_reply_markup(
+                chat_id=getattr(method, "chat_id", None),
+                message_id=getattr(method, "message_id", None),
+                reply_markup=getattr(method, "reply_markup", None),
+            )
+        return True
+
     def _patch_bot_methods(self) -> None:
         async def send_message(*_args: Any, **kwargs: Any) -> SimpleNamespace:
-            message_id = self._next_message_id()
-            self.sent_messages.append({"message_id": message_id, **kwargs})
-            return SimpleNamespace(message_id=message_id)
+            return await self._record_send_message(**kwargs)
 
         async def edit_message_text(*_args: Any, **kwargs: Any) -> bool:
-            self.edited_texts.append(dict(kwargs))
-            return True
+            return await self._record_edit_message_text(**kwargs)
 
         async def edit_message_reply_markup(*_args: Any, **kwargs: Any) -> bool:
-            self.edited_markups.append(dict(kwargs))
-            return True
+            return await self._record_edit_message_reply_markup(**kwargs)
 
         async def answer_callback_query(*_args: Any, **kwargs: Any) -> bool:
-            callback_query_id = str(kwargs.get("callback_query_id") or "")
-            self.callback_answers[callback_query_id] = dict(kwargs)
-            return True
+            return await self._record_answer_callback_query(**kwargs)
 
         self.bot.send_message = send_message  # type: ignore[method-assign]
         self.bot.edit_message_text = edit_message_text  # type: ignore[method-assign]

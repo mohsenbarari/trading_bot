@@ -1,5 +1,8 @@
+import asyncio
 import unittest
 from unittest.mock import patch
+
+from aiogram.methods import AnswerCallbackQuery
 
 from scripts import trading_core_probe_worker as worker
 
@@ -521,6 +524,26 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(report["status"], "failed")
         self.assertIn("expected zero internal errors", report["correctness_failures"][0])
         self.assertEqual(report["reports"]["bot_hot_offer"]["attempt_error_details"], {"Pool timeout": 1})
+
+    def test_recording_bot_handles_bound_callback_answer_without_telegram_network(self):
+        async def run_probe():
+            recorder = worker.RecordingTelegramBot()
+            try:
+                result = await recorder.bot(
+                    AnswerCallbackQuery(
+                        callback_query_id="callback-1",
+                        text="ok",
+                        show_alert=False,
+                    )
+                )
+            finally:
+                await recorder.close()
+            return result, recorder.callback_answers
+
+        result, callback_answers = asyncio.run(run_probe())
+
+        self.assertTrue(result)
+        self.assertEqual(callback_answers["callback-1"]["text"], "ok")
 
 
 if __name__ == "__main__":
