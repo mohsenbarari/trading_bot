@@ -432,6 +432,7 @@ describe('MarketView.vue', () => {
             status: 'expired',
             history_state: 'expired',
             is_read_only: true,
+            is_own_offer: true,
             expire_reason: 'time_limit',
             offer_type: 'buy',
             commodity_name: 'سکه',
@@ -449,6 +450,7 @@ describe('MarketView.vue', () => {
             status: 'completed',
             history_state: 'traded',
             is_read_only: true,
+            is_own_offer: true,
             offer_type: 'sell',
             commodity_name: 'طلای آب‌شده',
             quantity: 8,
@@ -476,20 +478,20 @@ describe('MarketView.vue', () => {
     const buyTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('خریدار'))
     expect(buyTab?.exists()).toBe(true)
     await buyTab!.trigger('click')
-    expect(wrapper.find('.offers-count').text()).toBe('0')
-    expect(wrapper.find('.offers-statuses').text()).toBe('')
+    expect(wrapper.find('.offers-count').text()).toBe('1')
+    expect(wrapper.find('.offers-statuses').text()).toBe('expired')
 
     const sellTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('فروشنده'))
     expect(sellTab?.exists()).toBe(true)
     await sellTab!.trigger('click')
-    expect(wrapper.find('.offers-count').text()).toBe('1')
-    expect(wrapper.find('.offers-statuses').text()).toBe('active')
+    expect(wrapper.find('.offers-count').text()).toBe('2')
+    expect(wrapper.find('.offers-statuses').text()).toBe('active,completed')
 
     const myTab = wrapper.findAll('[role="tab"]').find((btn) => btn.text().includes('لفظ‌های شما'))
     expect(myTab?.exists()).toBe(true)
     await myTab!.trigger('click')
-    expect(wrapper.find('.offers-count').text()).toBe('0')
-    expect(wrapper.find('.offers-statuses').text()).toBe('')
+    expect(wrapper.find('.offers-count').text()).toBe('2')
+    expect(wrapper.find('.offers-statuses').text()).toBe('expired,completed')
 
     wrapper.unmount()
   })

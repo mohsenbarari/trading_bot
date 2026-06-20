@@ -115,21 +115,17 @@ const marketRuntime = ref<MarketRuntimeState>({
 const filterType = ref<MarketFilterType>('all')
 
 const filteredOffers = computed(() => {
-  let list = offers.value || []
-  if (filterType.value !== 'all') {
-    if (filterType.value === 'my') {
-      list = list.filter(o => o.is_own_offer)
-    } else {
-      list = list.filter(o => o.offer_type === filterType.value)
-    }
-  }
-  return list
+  const list = offers.value || []
+  return list.filter((offer) => matchesMarketFilter(offer, filterType.value))
+})
+const filteredMarketHistoryOffers = computed(() => {
+  return marketHistoryOffers.value.filter((offer) => matchesMarketFilter(offer, filterType.value))
 })
 const visibleMarketOffers = computed(() => {
-  if (filterType.value !== 'all') return filteredOffers.value
+  const activeIds = new Set(filteredOffers.value.map((offer) => Number(offer.id)))
   return [
     ...filteredOffers.value,
-    ...marketHistoryOffers.value,
+    ...filteredMarketHistoryOffers.value.filter((offer) => !activeIds.has(Number(offer.id))),
   ]
 })
 
@@ -202,6 +198,12 @@ const shouldCollapseAdminMarketMessage = computed(() => (
   && filteredOffers.value.length > 0
   && !adminMarketMessageExpanded.value
 ))
+
+function matchesMarketFilter(offer: any, filter: MarketFilterType) {
+  if (filter === 'all') return true
+  if (filter === 'my') return offer?.is_own_offer === true
+  return offer?.offer_type === filter
+}
 
 // Computed
 const randomPlaceholder = computed(() => {
