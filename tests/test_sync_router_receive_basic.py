@@ -344,6 +344,46 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
             source=REALTIME_SOURCE_SYNC_APPLY,
         )
 
+    async def test_receive_sync_data_applies_telegram_state_when_completed_trade_sync_arrives_later(self):
+        completed_offer = SimpleNamespace(
+            id=52,
+            status="completed",
+            remaining_quantity=0,
+            lot_sizes=None,
+            channel_message_id=777,
+            commodity=SimpleNamespace(id=2),
+        )
+        db = TerminalOfferRealtimeDB([completed_offer])
+        items = [
+            {
+                "table": "trades",
+                "operation": "INSERT",
+                "id": 702,
+                "data": {"offer_id": 52, "status": "completed", "quantity": 4},
+            },
+        ]
+        publication_state = SimpleNamespace(message_id=777)
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()), patch(
+            "api.routers.realtime.publish_event", new=AsyncMock()
+        ), patch(
+            "core.services.telegram_offer_publication_service.load_telegram_publication_state_for_update",
+            new=AsyncMock(return_value=publication_state),
+        ), patch(
+            "core.services.telegram_offer_channel_service.apply_offer_channel_state",
+            new=AsyncMock(return_value=True),
+        ) as apply_state_mock:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        apply_state_mock.assert_awaited_once_with(
+            completed_offer,
+            publication_state=publication_state,
+            reason="sync_terminal_offer",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

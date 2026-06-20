@@ -143,6 +143,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
              patch("core.services.offer_expiry_service.current_server", return_value="foreign"), \
+             patch("core.offer_expiry.apply_remote_stale_channel_state", AsyncMock(return_value=0)), \
              patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync") as publish_event_sync, \
              patch("core.cache.decr_active_offer_count", AsyncMock()) as decr_active_offer_count:
@@ -185,6 +186,7 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
              patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
              patch("core.offer_expiry.current_server", return_value="foreign"), \
              patch("core.services.offer_expiry_service.current_server", return_value="foreign"), \
+             patch("core.offer_expiry.apply_remote_stale_channel_state", AsyncMock(return_value=0)), \
              patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
              patch("core.events.publish_event_sync", side_effect=RuntimeError("pubsub down")), \
              patch("core.cache.decr_active_offer_count", AsyncMock(side_effect=RuntimeError("redis down"))):
@@ -194,6 +196,45 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         session.commit.assert_awaited_once()
         apply_offer_channel_state.assert_awaited_once()
         self.assertEqual(apply_offer_channel_state.await_args.args[0].id, 5)
+
+    async def test_remote_stale_channel_state_is_presentation_only_on_foreign(self):
+        stale_offer = SimpleNamespace(
+            id=77,
+            offer_type="sell",
+            commodity=SimpleNamespace(name="سکه"),
+            quantity=40,
+            remaining_quantity=40,
+            price=142000,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes="شب میدم",
+            status=offer_expiry.OfferStatus.ACTIVE,
+            expire_reason=None,
+            channel_message_id=707,
+        )
+        session = SimpleNamespace(execute=AsyncMock(return_value=scalars_result([stale_offer])))
+        offer_expiry._remote_channel_expiry_presented_at.clear()
+
+        with patch("core.offer_expiry.current_server", return_value="foreign"), patch(
+            "core.offer_expiry.apply_offer_channel_state", AsyncMock(return_value=True)
+        ) as apply_state_mock:
+            count = await offer_expiry.apply_remote_stale_channel_state(session, datetime(2026, 1, 2, 12, 0, 0))
+
+        self.assertEqual(count, 1)
+        apply_state_mock.assert_awaited_once()
+        presentation_offer = apply_state_mock.await_args.args[0]
+        self.assertEqual(presentation_offer.id, 77)
+        self.assertEqual(presentation_offer.status, offer_expiry.OfferStatus.EXPIRED)
+        self.assertEqual(presentation_offer.expire_reason, "time_limit")
+        self.assertEqual(stale_offer.status, offer_expiry.OfferStatus.ACTIVE)
+
+        with patch("core.offer_expiry.current_server", return_value="foreign"), patch(
+            "core.offer_expiry.apply_offer_channel_state", AsyncMock(return_value=True)
+        ) as replay_apply_state_mock:
+            replay_count = await offer_expiry.apply_remote_stale_channel_state(session, datetime(2026, 1, 2, 12, 0, 0))
+
+        self.assertEqual(replay_count, 0)
+        replay_apply_state_mock.assert_not_awaited()
 
     async def test_offer_expiry_loop_logs_start_success_and_failure_cycles(self):
         sleep_calls = []

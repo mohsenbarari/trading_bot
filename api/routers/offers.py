@@ -1297,6 +1297,10 @@ async def get_market_offer_history(
 
     cutoff_time = utc_now_naive() - timedelta(hours=since_hours)
     expired_at_expr = func.coalesce(Offer.expired_at, Offer.updated_at, Offer.created_at)
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    expiry_minutes = int(getattr(ts, "offer_expiry_minutes", 0) or 0)
 
     trade_totals = (
         select(
@@ -1318,10 +1322,37 @@ async def get_market_offer_history(
         Offer.updated_at,
         Offer.created_at,
     )
+    active_stale_event_at_expr = Offer.created_at + timedelta(minutes=expiry_minutes)
     history_event_at_expr = case(
         (Offer.status == OfferStatus.COMPLETED, completed_event_at_expr),
+        (Offer.status == OfferStatus.ACTIVE, active_stale_event_at_expr),
         else_=expired_at_expr,
     )
+    history_conditions = [
+        and_(
+            Offer.status == OfferStatus.COMPLETED,
+            completed_event_at_expr >= cutoff_time,
+        ),
+        and_(
+            Offer.status == OfferStatus.EXPIRED,
+            or_(
+                Offer.expire_reason == "time_limit",
+                traded_quantity_expr > 0,
+            ),
+            expired_at_expr >= cutoff_time,
+        ),
+    ]
+    if expiry_minutes > 0:
+        stale_cutoff_time = utc_now_naive() - timedelta(minutes=expiry_minutes)
+        active_stale_created_after = cutoff_time - timedelta(minutes=expiry_minutes)
+        history_conditions.append(
+            and_(
+                Offer.status == OfferStatus.ACTIVE,
+                Offer.created_at <= stale_cutoff_time,
+                Offer.created_at >= active_stale_created_after,
+                traded_quantity_expr == 0,
+            )
+        )
 
     query = (
         select(
@@ -1331,22 +1362,7 @@ async def get_market_offer_history(
         )
         .outerjoin(trade_totals, trade_totals.c.offer_id == Offer.id)
         .options(*build_offer_read_options(include_owner_identity=False))
-        .where(
-            or_(
-                and_(
-                    Offer.status == OfferStatus.COMPLETED,
-                    completed_event_at_expr >= cutoff_time,
-                ),
-                and_(
-                    Offer.status == OfferStatus.EXPIRED,
-                    or_(
-                        Offer.expire_reason == "time_limit",
-                        traded_quantity_expr > 0,
-                    ),
-                    expired_at_expr >= cutoff_time,
-                ),
-            )
-        )
+        .where(or_(*history_conditions))
         .order_by(history_event_at_expr.desc(), Offer.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -1358,9 +1374,6 @@ async def get_market_offer_history(
         return []
 
     offers = [row[0] for row in rows]
-    from core.trading_settings import get_trading_settings_async
-
-    ts = await get_trading_settings_async()
     serialized = await _serialize_offer_responses(
         offers,
         db=db,

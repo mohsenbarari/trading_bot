@@ -148,12 +148,50 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_awaited_with("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
 
         callback = make_callback(edit_side_effect=RuntimeError("clear boom"))
+        bot = SimpleNamespace(send_message=AsyncMock())
         with base_patches[0], base_patches[1], base_patches[2], base_patches[3], base_patches[4], patch(
             "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
-        ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(return_value=(200, {"ok": True}))), patch(
+        ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(return_value=(200, {"ok": True}))) as forward_mock, patch(
             "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
         ), patch("bot.handlers.trade_execute.current_server", return_value="foreign"):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
+        callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
+        forward_mock.assert_awaited_once()
+        self.assertEqual(
+            forward_mock.await_args.args[1]["idempotency_key"],
+            "telegram_callback:5:legacy_offer:7:2:remaining:5:50",
+        )
+        bot.send_message.assert_awaited_once()
+
+    async def test_handle_channel_trade_remote_home_retries_timeout_with_same_idempotency_key(self):
+        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        offer = make_offer()
+        callback = make_callback()
+        bot = SimpleNamespace(send_message=AsyncMock())
+
+        with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
+            "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(RetrySession(offer))
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "bot.handlers.trade_execute.is_remote_home", return_value=True
+        ), patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)), patch(
+            "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
+        ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(side_effect=[
+            (504, {"detail": "timeout"}),
+            (200, {"trade_number": 123, "quantity": 2, "price": 150000, "commodity_name": "سکه", "trade_type": "buy"}),
+        ])) as forward_mock, patch(
+            "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
+        ), patch("bot.handlers.trade_execute.current_server", return_value="foreign"), patch(
+            "bot.handlers.trade_execute.asyncio.sleep", new=AsyncMock()
+        ) as sleep_mock:
+            await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
+
+        self.assertEqual(forward_mock.await_count, 2)
+        first_payload = forward_mock.await_args_list[0].args[1]
+        second_payload = forward_mock.await_args_list[1].args[1]
+        self.assertEqual(first_payload["idempotency_key"], "telegram_callback:5:legacy_offer:7:2:remaining:5:50")
+        self.assertEqual(second_payload["idempotency_key"], "telegram_callback:5:legacy_offer:7:2:remaining:5:50")
+        sleep_mock.assert_awaited_once_with(0.4)
+        bot.send_message.assert_awaited_once()
         callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
 
     async def test_handle_channel_trade_local_completed_trade_retries_and_tolerates_side_effect_failures(self):

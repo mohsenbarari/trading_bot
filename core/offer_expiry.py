@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -38,6 +39,32 @@ logger = logging.getLogger(__name__)
 CHECK_INTERVAL = 2.0
 MIN_DEADLINE_SLEEP_SECONDS = 0.1
 _loop_errors = RepeatedErrorLogger(every=10)
+REMOTE_CHANNEL_EXPIRY_PRESENTATION_TTL_SECONDS = 60 * 60
+REMOTE_CHANNEL_EXPIRY_PRESENTATION_MAX_KEYS = 5000
+_remote_channel_expiry_presented_at: dict[int, float] = {}
+
+
+def _remember_remote_channel_expiry_result(offer_id: int, applied: bool) -> None:
+    if not applied:
+        return
+    now = time.monotonic()
+    _remote_channel_expiry_presented_at[offer_id] = now
+    if len(_remote_channel_expiry_presented_at) <= REMOTE_CHANNEL_EXPIRY_PRESENTATION_MAX_KEYS:
+        return
+    cutoff = now - REMOTE_CHANNEL_EXPIRY_PRESENTATION_TTL_SECONDS
+    for key, applied_at in list(_remote_channel_expiry_presented_at.items()):
+        if applied_at < cutoff or len(_remote_channel_expiry_presented_at) > REMOTE_CHANNEL_EXPIRY_PRESENTATION_MAX_KEYS:
+            _remote_channel_expiry_presented_at.pop(key, None)
+
+
+def _remote_channel_expiry_recently_presented(offer_id: int) -> bool:
+    applied_at = _remote_channel_expiry_presented_at.get(offer_id)
+    if applied_at is None:
+        return False
+    if time.monotonic() - applied_at <= REMOTE_CHANNEL_EXPIRY_PRESENTATION_TTL_SECONDS:
+        return True
+    _remote_channel_expiry_presented_at.pop(offer_id, None)
+    return False
 
 
 async def remove_channel_buttons(channel_message_id: int) -> None:
@@ -99,6 +126,7 @@ async def expire_stale_offers() -> int:
         expired_offers = result.scalars().all()
         
         if not expired_offers:
+            await apply_remote_stale_channel_state(session, cutoff_time)
             return 0
         
         result = await expire_offers_authoritatively(
@@ -140,8 +168,66 @@ async def expire_stale_offers() -> int:
                     await decr_active_offer_count(uid)
         except Exception as e:
             logger.debug(f"Failed to update offer count cache: {e}")
+
+        await apply_remote_stale_channel_state(session, cutoff_time)
     
     return count
+
+
+async def apply_remote_stale_channel_state(session, cutoff_time) -> int:
+    """
+    Presentation-only Telegram convergence for remote-home offers on foreign.
+
+    Foreign must not authoritatively expire Iran-owned offers. It may still
+    remove channel interaction and show the expired marker once the same
+    time-limit has elapsed, while the real row state converges through sync.
+    """
+    if current_server() != "foreign":
+        return 0
+
+    stmt = (
+        select(Offer)
+        .options(selectinload(Offer.commodity))
+        .where(
+            Offer.status == OfferStatus.ACTIVE,
+            Offer.home_server.isnot(None),
+            Offer.home_server != current_server(),
+            Offer.channel_message_id.isnot(None),
+            Offer.created_at <= cutoff_time,
+        )
+        .limit(100)
+    )
+    result = await session.execute(stmt)
+    remote_stale_offers = result.scalars().all()
+    applied_count = 0
+    for offer in remote_stale_offers:
+        offer_id = int(getattr(offer, "id", 0) or 0)
+        if not offer_id or _remote_channel_expiry_recently_presented(offer_id):
+            continue
+        presentation_offer = SimpleNamespace(
+            id=offer.id,
+            offer_type=offer.offer_type,
+            commodity=getattr(offer, "commodity", None),
+            quantity=offer.quantity,
+            remaining_quantity=offer.remaining_quantity,
+            price=offer.price,
+            is_wholesale=offer.is_wholesale,
+            lot_sizes=offer.lot_sizes,
+            notes=offer.notes,
+            status=OfferStatus.EXPIRED,
+            expire_reason="time_limit",
+            channel_message_id=offer.channel_message_id,
+        )
+        applied = await apply_offer_channel_state(
+            presentation_offer,
+            reason="remote_auto_expire_time_limit_presentation",
+        )
+        _remember_remote_channel_expiry_result(offer_id, applied)
+        if applied:
+            applied_count += 1
+    if applied_count:
+        logger.info("⏰ Applied remote-home channel expiry presentation to %s offers", applied_count)
+    return applied_count
 
 
 def _as_naive_utc(value):

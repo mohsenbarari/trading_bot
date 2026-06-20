@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import json
 import hashlib
 from aiogram import Router, F, types, Bot
@@ -14,7 +15,7 @@ from models.offer_request import OfferRequestSourceSurface
 from core.config import settings
 from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
-from core.utils import check_user_limits
+from core.utils import check_user_limits, utc_now
 from core.enums import UserRole
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from api.deps import EffectiveOwnerActor
@@ -90,17 +91,76 @@ def _channel_trade_idempotency_key(
     offer: Offer,
     actual_amount: int,
 ) -> str:
-    callback_id = getattr(callback, "id", None)
-    if callback_id:
-        return _compact_idempotency_key("telegram_callback", callback_id)
-
     callback_message = getattr(callback, "message", None)
     message_id = getattr(callback_message, "message_id", None)
     offer_ref = getattr(offer, "offer_public_id", None) or f"legacy_offer:{getattr(offer, 'id', '')}"
+    remaining = getattr(offer, "remaining_quantity", None)
+    if remaining is None:
+        remaining = getattr(offer, "quantity", "")
     return _compact_idempotency_key(
-        "telegram_callback_fallback",
-        f"{getattr(user, 'id', '')}:{offer_ref}:{actual_amount}:{message_id or 'no_message'}",
+        "telegram_callback",
+        f"{getattr(user, 'id', '')}:{offer_ref}:{actual_amount}:remaining:{remaining}:{message_id or 'no_message'}",
     )
+
+
+def _build_remote_trade_success_message(body: object, fallback_offer: Offer, amount: int) -> str:
+    if isinstance(body, dict):
+        trade_type = str(body.get("trade_type") or "").lower()
+        if trade_type == "buy":
+            trade_emoji = "🟢"
+            trade_label = "خرید"
+        elif trade_type == "sell":
+            trade_emoji = "🔴"
+            trade_label = "فروش"
+        else:
+            trade_emoji = "✅"
+            trade_label = "معامله"
+
+        price = body.get("price") or getattr(fallback_offer, "price", 0) or 0
+        quantity = body.get("quantity") or amount
+        commodity_name = body.get("commodity_name") or getattr(getattr(fallback_offer, "commodity", None), "name", None) or "نامشخص"
+        counterparty_name = (
+            body.get("counterparty_name")
+            or body.get("offer_user_name")
+            or getattr(getattr(fallback_offer, "user", None), "account_name", None)
+            or "نامشخص"
+        )
+        trade_number = body.get("trade_number")
+        created_at = body.get("created_at")
+
+        lines = [
+            f"{trade_emoji} {trade_label}",
+            "",
+            f"💰 فی: {int(price):,}" if isinstance(price, (int, float)) else f"💰 فی: {price}",
+            f"📦 تعداد: {quantity}",
+            f"🏷️ کالا: {commodity_name}",
+            f"👤 طرف معامله: {counterparty_name}",
+        ]
+        if trade_number:
+            lines.append(f"🔢 شماره معامله: {trade_number}")
+        if created_at:
+            lines.append(f"🕐 زمان معامله: {created_at}")
+        return "\n".join(lines)
+
+    return (
+        "✅ معامله ثبت شد\n\n"
+        f"💰 فی: {getattr(fallback_offer, 'price', 0):,}\n"
+        f"📦 تعداد: {amount}\n"
+        f"🏷️ کالا: {getattr(getattr(fallback_offer, 'commodity', None), 'name', None) or 'نامشخص'}"
+    )
+
+
+async def _notify_remote_trade_success(bot: Bot, user: User, offer: Offer, amount: int, body: object) -> None:
+    target_chat_id = user.telegram_id
+    if not target_chat_id:
+        return
+    try:
+        await bot.send_message(
+            chat_id=target_chat_id,
+            text=_build_remote_trade_success_message(body, offer, amount),
+        )
+    except Exception as exc:
+        logger.debug(f"Failed to send remote-home trade success message: {exc}")
 
 
 async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
@@ -366,24 +426,25 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                 await callback.answer("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
                 return
 
-            status_code, body = await forward_trade_to_home_server(
-                offer.home_server,
-                {
-                    "offer_id": offer.id,
-                    "offer_public_id": getattr(offer, "offer_public_id", None),
-                    "quantity": actual_amount,
-                    "responder_user_id": user.id,
-                    "edge_received_at": datetime.utcnow().isoformat(),
-                    "source_surface": OfferRequestSourceSurface.TELEGRAM_BOT.value,
-                    "source_server": current_server(),
-                    "idempotency_key": _channel_trade_idempotency_key(
-                        callback=callback,
-                        user=user,
-                        offer=offer,
-                        actual_amount=actual_amount,
-                    ),
-                },
-            )
+            forward_payload = {
+                "offer_id": offer.id,
+                "offer_public_id": getattr(offer, "offer_public_id", None),
+                "quantity": actual_amount,
+                "responder_user_id": user.id,
+                "edge_received_at": utc_now().isoformat(),
+                "source_surface": OfferRequestSourceSurface.TELEGRAM_BOT.value,
+                "source_server": current_server(),
+                "idempotency_key": _channel_trade_idempotency_key(
+                    callback=callback,
+                    user=user,
+                    offer=offer,
+                    actual_amount=actual_amount,
+                ),
+            }
+            status_code, body = await forward_trade_to_home_server(offer.home_server, forward_payload)
+            if status_code == 504:
+                await asyncio.sleep(0.4)
+                status_code, body = await forward_trade_to_home_server(offer.home_server, forward_payload)
 
             if status_code == 409 and isinstance(body, dict) and body.get("error_code") == "TRADE_LOT_UNAVAILABLE":
                 target_chat_id = user.telegram_id or callback.from_user.id
@@ -403,6 +464,7 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                         await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
                 except Exception as exc:
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
+                await _notify_remote_trade_success(bot, user, offer, actual_amount, body)
                 await callback.answer("معامله ثبت شد ✅", show_alert=False)
                 return
 

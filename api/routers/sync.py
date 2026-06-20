@@ -1675,13 +1675,14 @@ async def receive_sync_data(
         # Terminal sync can arrive through direct-push and worker replay. The
         # helper treats Telegram "message is not modified" as success, so replay
         # is safe and does not create duplicate visible tags.
-        if settings.server_mode != "iran" and terminal_offers:
+        terminal_telegram_offer_ids = [*terminal_offers, *completed_trade_offer_ids]
+        if settings.server_mode != "iran" and terminal_telegram_offer_ids:
             try:
                 from sqlalchemy.orm import selectinload
                 from core.services.telegram_offer_channel_service import apply_offer_channel_state
                 from core.services.telegram_offer_publication_service import load_telegram_publication_state_for_update
 
-                unique_offer_ids = list(set(terminal_offers))
+                unique_offer_ids = list(set(terminal_telegram_offer_ids))
                 stmt = (
                     select(Offer)
                     .options(selectinload(Offer.commodity))

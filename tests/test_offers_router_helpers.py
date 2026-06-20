@@ -526,6 +526,9 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.offers.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=2)),
         ):
             result = await offers_module.get_market_offer_history(
                 skip=25,
@@ -542,9 +545,12 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trades.status = 'COMPLETED'", history_sql)
         self.assertIn("offers.status = 'COMPLETED'", history_sql)
         self.assertIn("offers.status = 'EXPIRED'", history_sql)
+        self.assertIn("offers.status = 'ACTIVE'", history_sql)
         self.assertIn("offers.expire_reason = 'time_limit'", history_sql)
         self.assertIn("coalesce(anon_1.traded_quantity, 0) > 0", history_sql)
+        self.assertIn("coalesce(anon_1.traded_quantity, 0) = 0", history_sql)
         self.assertIn("coalesce(offers.expired_at, offers.updated_at, offers.created_at) >=", history_sql)
+        self.assertIn("offers.created_at <=", history_sql)
         self.assertIn("ORDER BY CASE", history_sql)
         self.assertIn("OFFSET 25", history_sql)
         self.assertIn("LIMIT 25", history_sql)
@@ -553,6 +559,9 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "api.routers.offers.get_active_customer_relation_for_customer",
             new=AsyncMock(return_value=SimpleNamespace(customer_tier="tier1")),
+        ), patch(
+            "core.trading_settings.get_trading_settings_async",
+            new=AsyncMock(return_value=SimpleNamespace(offer_expiry_minutes=2)),
         ):
             result = await offers_module.get_market_offer_history(
                 db=hidden_db,
@@ -568,6 +577,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         retail_completed_event_at = datetime(2026, 1, 2, 8, 45, 0)
         partial_event_at = datetime(2026, 1, 2, 8, 30, 0)
         pure_expired_event_at = datetime(2026, 1, 2, 8, 15, 0)
+        active_stale_event_at = datetime(2026, 1, 2, 8, 0, 0)
         wholesale_completed_offer = make_offer_model(
             id=21,
             status=OfferStatus.COMPLETED,
@@ -597,6 +607,13 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             remaining_quantity=15,
             is_wholesale=True,
         )
+        active_stale_offer = make_offer_model(
+            id=25,
+            status=OfferStatus.ACTIVE,
+            quantity=40,
+            remaining_quantity=40,
+            is_wholesale=True,
+        )
         history_db = CapturingDB(
             FakeRowExecuteResult(
                 [
@@ -604,6 +621,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                     (retail_completed_offer, 20, retail_completed_event_at),
                     (partial_expired_offer, 12, partial_event_at),
                     (pure_expired_offer, 0, pure_expired_event_at),
+                    (active_stale_offer, 0, active_stale_event_at),
                 ]
             )
         )
@@ -612,6 +630,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             make_offer_response(id=22, status="completed", quantity=20, remaining_quantity=0, is_wholesale=False),
             make_offer_response(id=23, status="expired", quantity=20, remaining_quantity=8, is_wholesale=False),
             make_offer_response(id=24, status="expired", quantity=15, remaining_quantity=15),
+            make_offer_response(id=25, status="active", quantity=40, remaining_quantity=40),
         ]
 
         with patch(
@@ -635,7 +654,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                 current_user=current_user,
             )
 
-        self.assertEqual(len(result), 4)
+        self.assertEqual(len(result), 5)
         self.assertEqual(result[0].history_state, "traded")
         self.assertEqual(result[0].history_label, "معامله‌شده")
         self.assertEqual(result[0].traded_quantity, 10)
@@ -657,6 +676,12 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[3].traded_quantity, 0)
         self.assertFalse(result[3].is_partially_traded)
         self.assertEqual(result[3].history_event_at, "jalali:2026-01-02T08:15:00")
+        self.assertEqual(result[4].history_state, "expired")
+        self.assertEqual(result[4].history_label, "منقضی")
+        self.assertEqual(result[4].traded_quantity, 0)
+        self.assertFalse(result[4].is_partially_traded)
+        self.assertTrue(result[4].is_read_only)
+        self.assertEqual(result[4].history_event_at, "jalali:2026-01-02T08:00:00")
         serialize_mock.assert_awaited_once()
         self.assertEqual(serialize_mock.call_args.kwargs["viewer_user_id"], 8)
         self.assertFalse(serialize_mock.call_args.kwargs["include_owner_identity"])
