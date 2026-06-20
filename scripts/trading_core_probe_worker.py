@@ -56,8 +56,9 @@ from models.change_log import ChangeLog
 from models.chat_member import ChatMember
 from models.commodity import Commodity
 from models.notification import Notification
+from models.offer_request import OfferRequest, OfferRequestStatus
 from models.offer import Offer, OfferStatus
-from models.trade import Trade
+from models.trade import Trade, TradeStatus
 from models.user import User, UserRole
 
 
@@ -133,6 +134,45 @@ class MixedLoadAttemptResult:
     status: str
     duration_ms: float
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class HotOfferScenarioSpec:
+    name: str
+    origin: str
+    quantity: int
+    request_amount: int
+    expected_winner_count: int
+    total_requests: int
+    telegram_ratio: float
+    target_rps: float
+    offer_type: str = "sell"
+    price: int = 100000
+    is_wholesale: bool = True
+    lot_sizes: tuple[int, ...] = ()
+
+    @property
+    def expected_completed_quantity(self) -> int:
+        return self.request_amount * self.expected_winner_count
+
+    @property
+    def start_burst_request_count(self) -> int:
+        # "Several dozen" concurrent requests should hit the same offer immediately.
+        return min(self.total_requests, max(1, int(math.ceil(self.target_rps * 0.075))))
+
+
+@dataclass(frozen=True)
+class HotOfferPersistenceSnapshot:
+    offer_id: int
+    original_quantity: int
+    remaining_quantity: int | None
+    offer_status: str | None
+    persisted_trade_count: int
+    completed_trade_quantity: int
+    completed_ledger_count: int
+    trades_without_completed_ledger_count: int
+    failed_internal_ledger_count: int
+    duplicate_replay_ledger_count: int
 
 
 def json_safe(value: Any) -> Any:
@@ -585,6 +625,102 @@ def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_
     }
 
 
+def build_hot_offer_scenario_specs(
+    *,
+    total_requests: int,
+    telegram_ratio: float,
+    target_rps: float,
+    price: int,
+    offer_type: str,
+) -> list[HotOfferScenarioSpec]:
+    if total_requests < 40:
+        raise TradingProbeError("hot-offer scenarios require at least 40 requests to create several-dozen contention")
+    scenarios = [
+        HotOfferScenarioSpec(
+            name="webapp_full_fill",
+            origin="webapp",
+            quantity=5,
+            request_amount=5,
+            expected_winner_count=1,
+            total_requests=total_requests,
+            telegram_ratio=telegram_ratio,
+            target_rps=target_rps,
+            price=price,
+            offer_type=offer_type,
+        ),
+        HotOfferScenarioSpec(
+            name="bot_full_fill",
+            origin="bot",
+            quantity=5,
+            request_amount=5,
+            expected_winner_count=1,
+            total_requests=total_requests,
+            telegram_ratio=telegram_ratio,
+            target_rps=target_rps,
+            price=price,
+            offer_type=offer_type,
+        ),
+        HotOfferScenarioSpec(
+            name="webapp_partial_fill",
+            origin="webapp",
+            quantity=20,
+            request_amount=5,
+            expected_winner_count=4,
+            total_requests=total_requests,
+            telegram_ratio=telegram_ratio,
+            target_rps=target_rps,
+            price=price,
+            offer_type=offer_type,
+        ),
+        HotOfferScenarioSpec(
+            name="bot_partial_fill",
+            origin="bot",
+            quantity=20,
+            request_amount=5,
+            expected_winner_count=4,
+            total_requests=total_requests,
+            telegram_ratio=telegram_ratio,
+            target_rps=target_rps,
+            price=price,
+            offer_type=offer_type,
+        ),
+        HotOfferScenarioSpec(
+            name="webapp_retail_lot",
+            origin="webapp",
+            quantity=30,
+            request_amount=10,
+            expected_winner_count=3,
+            total_requests=total_requests,
+            telegram_ratio=telegram_ratio,
+            target_rps=target_rps,
+            price=price,
+            offer_type=offer_type,
+            is_wholesale=False,
+            lot_sizes=(10, 10, 10),
+        ),
+        HotOfferScenarioSpec(
+            name="bot_retail_lot",
+            origin="bot",
+            quantity=30,
+            request_amount=10,
+            expected_winner_count=3,
+            total_requests=total_requests,
+            telegram_ratio=telegram_ratio,
+            target_rps=target_rps,
+            price=price,
+            offer_type=offer_type,
+            is_wholesale=False,
+            lot_sizes=(10, 10, 10),
+        ),
+    ]
+    for scenario in scenarios:
+        if scenario.expected_completed_quantity != scenario.quantity:
+            raise TradingProbeError(f"hot-offer scenario {scenario.name} does not complete exactly")
+        if scenario.start_burst_request_count < 36:
+            raise TradingProbeError(f"hot-offer scenario {scenario.name} does not create several-dozen contention")
+    return scenarios
+
+
 def assert_hot_offer_contention_acceptance(
     *,
     persisted_trade_count: int,
@@ -593,6 +729,13 @@ def assert_hot_offer_contention_acceptance(
     remaining_quantity: int | None,
     status: str | None,
     expected_winner_count: int,
+    original_quantity: int | None = None,
+    completed_trade_quantity: int | None = None,
+    completed_ledger_count: int | None = None,
+    trades_without_completed_ledger_count: int = 0,
+    failed_internal_ledger_count: int = 0,
+    expected_remaining_quantity: int = 0,
+    require_terminal_completed: bool = True,
 ) -> None:
     if error_count:
         raise TradingProbeError(f"hot-offer contention expected zero internal errors, got {error_count}")
@@ -606,9 +749,34 @@ def assert_hot_offer_contention_acceptance(
         )
     if remaining_quantity is None or remaining_quantity < 0:
         raise TradingProbeError(f"hot-offer contention produced invalid remaining_quantity={remaining_quantity}")
-    if remaining_quantity != 0:
-        raise TradingProbeError(f"hot-offer contention expected remaining_quantity=0, got {remaining_quantity}")
-    if status != OfferStatus.COMPLETED.value:
+    if remaining_quantity != expected_remaining_quantity:
+        raise TradingProbeError(
+            f"hot-offer contention expected remaining_quantity={expected_remaining_quantity}, got {remaining_quantity}"
+        )
+    if original_quantity is not None and completed_trade_quantity is not None:
+        if completed_trade_quantity > original_quantity:
+            raise TradingProbeError(
+                f"hot-offer contention over-traded quantity {completed_trade_quantity} > {original_quantity}"
+            )
+        expected_completed_quantity = original_quantity - expected_remaining_quantity
+        if completed_trade_quantity != expected_completed_quantity:
+            raise TradingProbeError(
+                "hot-offer contention expected completed quantity "
+                f"{expected_completed_quantity}, got {completed_trade_quantity}"
+            )
+    if completed_ledger_count is not None and completed_ledger_count < persisted_trade_count:
+        raise TradingProbeError(
+            "hot-offer contention has persisted trades without corresponding completed request ledger rows"
+        )
+    if trades_without_completed_ledger_count:
+        raise TradingProbeError(
+            "hot-offer contention has persisted trades without corresponding successful request ledger rows"
+        )
+    if failed_internal_ledger_count:
+        raise TradingProbeError(
+            f"hot-offer contention expected zero failed_internal ledgers, got {failed_internal_ledger_count}"
+        )
+    if require_terminal_completed and status != OfferStatus.COMPLETED.value:
         raise TradingProbeError(f"hot-offer contention expected completed status, got {status}")
 
 
@@ -993,17 +1161,20 @@ async def create_offer_for_user(
     offer_type: str = "sell",
     quantity: int = 5,
     price: int = 100000,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
 ) -> int:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
+        normalized_lot_sizes = list(lot_sizes) if lot_sizes else None
         response = await offers_router.create_offer(
             offers_router.OfferCreate(
                 offer_type=offer_type,
                 commodity_id=commodity_id,
                 quantity=quantity,
                 price=price,
-                is_wholesale=True,
-                lot_sizes=None,
+                is_wholesale=is_wholesale,
+                lot_sizes=normalized_lot_sizes,
                 notes=f"{prefix} offer {index}",
                 warning_acknowledged=True,
             ),
@@ -1295,6 +1466,75 @@ async def execute_webapp_trade_for_user(
     return "success"
 
 
+async def inspect_hot_offer_persistence(offer_id: int) -> HotOfferPersistenceSnapshot:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, offer_id)
+        if offer is None:
+            raise TradingProbeError(f"offer {offer_id} disappeared after contention")
+        trade_rows = (
+            await db.execute(
+                select(Trade.id, Trade.quantity).where(
+                    Trade.offer_id == offer_id,
+                    Trade.status == TradeStatus.COMPLETED,
+                )
+            )
+        ).all()
+        trade_ids = {int(row[0]) for row in trade_rows if row[0] is not None}
+        completed_trade_quantity = sum(int(row[1] or 0) for row in trade_rows)
+        completed_ledger_trade_ids = {
+            int(value)
+            for value in (
+                await db.execute(
+                    select(OfferRequest.resulting_trade_id).where(
+                        OfferRequest.local_offer_id == offer_id,
+                        OfferRequest.result_status == OfferRequestStatus.COMPLETED_TRADE,
+                        OfferRequest.resulting_trade_id.is_not(None),
+                    )
+                )
+            ).scalars()
+            if value is not None
+        }
+        completed_ledger_count = int(
+            await db.scalar(
+                select(func.count(OfferRequest.id)).where(
+                    OfferRequest.local_offer_id == offer_id,
+                    OfferRequest.result_status == OfferRequestStatus.COMPLETED_TRADE,
+                )
+            )
+            or 0
+        )
+        failed_internal_ledger_count = int(
+            await db.scalar(
+                select(func.count(OfferRequest.id)).where(
+                    OfferRequest.local_offer_id == offer_id,
+                    OfferRequest.result_status == OfferRequestStatus.FAILED_INTERNAL,
+                )
+            )
+            or 0
+        )
+        duplicate_replay_ledger_count = int(
+            await db.scalar(
+                select(func.count(OfferRequest.id)).where(
+                    OfferRequest.local_offer_id == offer_id,
+                    OfferRequest.result_status == OfferRequestStatus.DUPLICATE_REPLAY,
+                )
+            )
+            or 0
+        )
+        return HotOfferPersistenceSnapshot(
+            offer_id=offer_id,
+            original_quantity=int(offer.quantity or 0),
+            remaining_quantity=int(offer.remaining_quantity or 0) if offer.remaining_quantity is not None else None,
+            offer_status=getattr(getattr(offer, "status", None), "value", None),
+            persisted_trade_count=len(trade_ids),
+            completed_trade_quantity=completed_trade_quantity,
+            completed_ledger_count=completed_ledger_count,
+            trades_without_completed_ledger_count=len(trade_ids - completed_ledger_trade_ids),
+            failed_internal_ledger_count=failed_internal_ledger_count,
+            duplicate_replay_ledger_count=duplicate_replay_ledger_count,
+        )
+
+
 async def create_bot_offer_with_dispatcher(
     *,
     harness: AiogramDispatcherHarness,
@@ -1304,10 +1544,15 @@ async def create_bot_offer_with_dispatcher(
     quantity: int,
     price: int,
     offer_type: str,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
 ) -> int:
     verb = "خ" if offer_type == "buy" else "ف"
     marker = f"{prefix} bot hot {owner.user_id}"
-    text_value = f"{verb} {commodity_name} {quantity} عدد {price}: {marker}"
+    lots_text = ""
+    if not is_wholesale and lot_sizes:
+        lots_text = " " + " ".join(str(item) for item in lot_sizes)
+    text_value = f"{verb} {commodity_name} {quantity} عدد {price}{lots_text}: {marker}"
     await harness.feed_private_text(telegram_id=owner.telegram_id, text_value=text_value)
     await harness.feed_private_callback(
         telegram_id=owner.telegram_id,
@@ -1640,31 +1885,245 @@ async def run_hot_offer_contention(
         await harness.close()
     elapsed = time.perf_counter() - started
 
-    async with AsyncSessionLocal() as db:
-        offer = await db.get(Offer, offer_id)
-        if offer is None:
-            raise TradingProbeError(f"offer {offer_id} disappeared after contention")
-        persisted_trade_count = int(await db.scalar(select(func.count(Trade.id)).where(Trade.offer_id == offer_id)) or 0)
-        remaining_quantity = int(offer.remaining_quantity or 0)
-        offer_status = getattr(getattr(offer, "status", None), "value", None)
+    persistence = await inspect_hot_offer_persistence(offer_id)
 
     summary = summarize_attempt_results(results, elapsed_seconds=elapsed)
     assert_hot_offer_contention_acceptance(
-        persisted_trade_count=persisted_trade_count,
+        persisted_trade_count=persistence.persisted_trade_count,
         response_success_count=int(summary["success"]),
         error_count=int(summary["error"]),
-        remaining_quantity=remaining_quantity,
-        status=offer_status,
+        remaining_quantity=persistence.remaining_quantity,
+        status=persistence.offer_status,
         expected_winner_count=expected_winner_count,
+        original_quantity=persistence.original_quantity,
+        completed_trade_quantity=persistence.completed_trade_quantity,
+        completed_ledger_count=persistence.completed_ledger_count,
+        trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
+        failed_internal_ledger_count=persistence.failed_internal_ledger_count,
     )
     return {
         "offer_id": offer_id,
         "owner_user_id": owner_user_id,
         "expected_winner_count": expected_winner_count,
-        "persisted_trade_count": persisted_trade_count,
-        "offer_remaining_quantity": remaining_quantity,
-        "offer_status": offer_status,
+        "persisted_trade_count": persistence.persisted_trade_count,
+        "offer_remaining_quantity": persistence.remaining_quantity,
+        "offer_status": persistence.offer_status,
+        "persistence": asdict(persistence),
         "summary": summary,
+    }
+
+
+async def create_hot_offer_for_scenario(
+    *,
+    scenario: HotOfferScenarioSpec,
+    owner: LoadUserRef,
+    commodity_id: int,
+    commodity_name: str,
+    prefix: str,
+    index: int,
+) -> int:
+    if scenario.origin == "webapp":
+        return await create_offer_for_user(
+            user_id=owner.user_id,
+            commodity_id=commodity_id,
+            prefix=prefix,
+            index=index,
+            offer_type=scenario.offer_type,
+            quantity=scenario.quantity,
+            price=scenario.price,
+            is_wholesale=scenario.is_wholesale,
+            lot_sizes=list(scenario.lot_sizes) if scenario.lot_sizes else None,
+        )
+    if scenario.origin == "bot":
+        harness = AiogramDispatcherHarness()
+        try:
+            return await create_bot_offer_with_dispatcher(
+                harness=harness,
+                owner=owner,
+                commodity_name=commodity_name,
+                prefix=prefix,
+                quantity=scenario.quantity,
+                price=scenario.price,
+                offer_type=scenario.offer_type,
+                is_wholesale=scenario.is_wholesale,
+                lot_sizes=list(scenario.lot_sizes) if scenario.lot_sizes else None,
+            )
+        finally:
+            await harness.close()
+    raise TradingProbeError(f"unsupported hot-offer scenario origin: {scenario.origin}")
+
+
+async def run_hot_offer_scenario(
+    *,
+    prefix: str,
+    scenario: HotOfferScenarioSpec,
+    users: list[LoadUserRef],
+    commodity_id: int,
+    commodity_name: str,
+    index: int,
+) -> dict[str, Any]:
+    if len(users) < 3:
+        raise TradingProbeError("hot-offer scenarios require at least three synthetic users")
+    owner = users[1] if scenario.origin == "bot" else users[0]
+    scenario_prefix = f"{prefix}{scenario.name}-"
+    offer_id = await create_hot_offer_for_scenario(
+        scenario=scenario,
+        owner=owner,
+        commodity_id=commodity_id,
+        commodity_name=commodity_name,
+        prefix=scenario_prefix,
+        index=index,
+    )
+    report = await run_hot_offer_contention(
+        prefix=scenario_prefix,
+        offer_id=offer_id,
+        owner_user_id=owner.user_id,
+        users=users,
+        total_requests=scenario.total_requests,
+        telegram_ratio=scenario.telegram_ratio,
+        target_rps=scenario.target_rps,
+        amount=scenario.request_amount,
+        expected_winner_count=scenario.expected_winner_count,
+    )
+    report["scenario"] = asdict(scenario)
+    report["start_burst_request_count"] = scenario.start_burst_request_count
+    return report
+
+
+def assert_duplicate_replay_acceptance(
+    *,
+    statuses: list[str],
+    persistence: HotOfferPersistenceSnapshot,
+) -> None:
+    if not statuses:
+        raise TradingProbeError("duplicate/replay probe did not execute any attempts")
+    error_count = sum(1 for status_value in statuses if status_value == "error")
+    if error_count:
+        raise TradingProbeError(f"duplicate/replay probe expected zero internal errors, got {error_count}")
+    if "success" not in statuses:
+        raise TradingProbeError("duplicate/replay probe expected at least one successful attempt")
+    if persistence.persisted_trade_count != 1:
+        raise TradingProbeError(
+            f"duplicate/replay probe expected exactly one persisted trade, got {persistence.persisted_trade_count}"
+        )
+    if persistence.completed_trade_quantity > persistence.original_quantity:
+        raise TradingProbeError(
+            "duplicate/replay probe over-traded quantity "
+            f"{persistence.completed_trade_quantity} > {persistence.original_quantity}"
+        )
+    if persistence.completed_trade_quantity != persistence.original_quantity:
+        raise TradingProbeError(
+            "duplicate/replay probe expected completed quantity "
+            f"{persistence.original_quantity}, got {persistence.completed_trade_quantity}"
+        )
+    if persistence.remaining_quantity != 0:
+        raise TradingProbeError(
+            f"duplicate/replay probe expected remaining_quantity=0, got {persistence.remaining_quantity}"
+        )
+    if persistence.offer_status != OfferStatus.COMPLETED.value:
+        raise TradingProbeError(f"duplicate/replay probe expected completed status, got {persistence.offer_status}")
+    if persistence.trades_without_completed_ledger_count:
+        raise TradingProbeError("duplicate/replay probe persisted a trade without completed request ledger")
+    if persistence.failed_internal_ledger_count:
+        raise TradingProbeError(
+            f"duplicate/replay probe expected zero failed_internal ledgers, got {persistence.failed_internal_ledger_count}"
+        )
+
+
+async def run_duplicate_replay_probe(
+    *,
+    prefix: str,
+    users: list[LoadUserRef],
+    commodity_id: int,
+    commodity_name: str,
+    price: int,
+    offer_type: str,
+) -> dict[str, Any]:
+    if len(users) < 4:
+        raise TradingProbeError("duplicate/replay probe requires at least four synthetic users")
+
+    web_owner = users[0]
+    web_responder = users[2]
+    web_offer_id = await create_offer_for_user(
+        user_id=web_owner.user_id,
+        commodity_id=commodity_id,
+        prefix=f"{prefix}duplicate-web-",
+        index=9800,
+        offer_type=offer_type,
+        quantity=5,
+        price=price,
+    )
+    duplicate_key = f"{prefix}duplicate-web-key"
+    web_statuses = await asyncio.gather(
+        execute_webapp_trade_for_user(
+            user_id=web_responder.user_id,
+            offer_id=web_offer_id,
+            quantity=5,
+            idempotency_key=duplicate_key,
+        ),
+        execute_webapp_trade_for_user(
+            user_id=web_responder.user_id,
+            offer_id=web_offer_id,
+            quantity=5,
+            idempotency_key=duplicate_key,
+        ),
+    )
+    web_persistence = await inspect_hot_offer_persistence(web_offer_id)
+    assert_duplicate_replay_acceptance(statuses=list(web_statuses), persistence=web_persistence)
+
+    bot_owner = users[1]
+    bot_responder = users[3]
+    bot_harness = AiogramDispatcherHarness()
+    try:
+        bot_offer_id = await create_bot_offer_with_dispatcher(
+            harness=bot_harness,
+            owner=bot_owner,
+            commodity_name=commodity_name,
+            prefix=f"{prefix}duplicate-bot-",
+            quantity=5,
+            price=price,
+            offer_type=offer_type,
+        )
+        bot_offer = await load_offer_snapshot(bot_offer_id)
+        bot_spec = MixedLoadAttemptSpec(
+            index=0,
+            surface="telegram",
+            user_id=bot_responder.user_id,
+            telegram_id=bot_responder.telegram_id,
+        )
+        first_bot_status = await execute_bot_trade_with_dispatcher(
+            harness=bot_harness,
+            spec=bot_spec,
+            offer=bot_offer,
+            amount=5,
+            prefix=f"{prefix}duplicate-bot-first-",
+        )
+        second_bot_status = await execute_bot_trade_with_dispatcher(
+            harness=bot_harness,
+            spec=bot_spec,
+            offer=await load_offer_snapshot(bot_offer_id),
+            amount=5,
+            prefix=f"{prefix}duplicate-bot-replay-",
+        )
+    finally:
+        await bot_harness.close()
+    bot_persistence = await inspect_hot_offer_persistence(bot_offer_id)
+    assert_duplicate_replay_acceptance(
+        statuses=[first_bot_status, second_bot_status],
+        persistence=bot_persistence,
+    )
+
+    return {
+        "webapp_repeated_idempotency_key": {
+            "offer_id": web_offer_id,
+            "statuses": list(web_statuses),
+            "persistence": asdict(web_persistence),
+        },
+        "telegram_duplicate_callbacks": {
+            "offer_id": bot_offer_id,
+            "statuses": [first_bot_status, second_bot_status],
+            "persistence": asdict(bot_persistence),
+        },
     }
 
 
@@ -2012,6 +2471,99 @@ async def run_mixed_load_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+async def run_hot_offer_scenarios_command(args: argparse.Namespace) -> int:
+    setup_event_listeners()
+    prefix = args.prefix
+    await cleanup_prefix(prefix)
+    commodity_id, commodity_name = await resolve_commodity()
+    selected = set(args.scenario or [])
+    all_scenarios = build_hot_offer_scenario_specs(
+        total_requests=args.hot_offer_requests,
+        telegram_ratio=args.telegram_ratio,
+        target_rps=args.target_rps,
+        price=args.price,
+        offer_type=args.offer_type,
+    )
+    known_names = {scenario.name for scenario in all_scenarios} | {"duplicate_replay"}
+    unknown = sorted(selected - known_names)
+    if unknown:
+        raise TradingProbeError(f"unknown hot-offer scenario(s): {', '.join(unknown)}")
+
+    reports: dict[str, Any] = {}
+    async with patched_trading_boundaries():
+        users = await create_load_fixture_users(prefix, user_count=args.user_count)
+        if len(users) < 4:
+            raise TradingProbeError("hot-offer scenarios require at least four synthetic users")
+        for index, scenario in enumerate(all_scenarios, start=9700):
+            if selected and scenario.name not in selected:
+                continue
+            reports[scenario.name] = await run_hot_offer_scenario(
+                prefix=prefix,
+                scenario=scenario,
+                users=users,
+                commodity_id=commodity_id,
+                commodity_name=commodity_name,
+                index=index,
+            )
+        if not selected or "duplicate_replay" in selected:
+            reports["duplicate_replay"] = await run_duplicate_replay_probe(
+                prefix=prefix,
+                users=users,
+                commodity_id=commodity_id,
+                commodity_name=commodity_name,
+                price=args.price,
+                offer_type=args.offer_type,
+            )
+
+    async with AsyncSessionLocal() as db:
+        fixture_user_ids = [user.user_id for user in users]
+        synthetic_trade_count = int(
+            await db.scalar(
+                select(func.count(Trade.id)).where(
+                    (Trade.offer_user_id.in_(fixture_user_ids))
+                    | (Trade.responder_user_id.in_(fixture_user_ids))
+                    | (Trade.actor_user_id.in_(fixture_user_ids))
+                )
+            )
+            or 0
+        )
+        synthetic_offer_count = int(
+            await db.scalar(select(func.count(Offer.id)).where(Offer.user_id.in_(fixture_user_ids))) or 0
+        )
+        synthetic_offer_request_count = int(
+            await db.scalar(
+                select(func.count(OfferRequest.id)).where(
+                    (OfferRequest.requester_user_id.in_(fixture_user_ids))
+                    | (OfferRequest.actor_user_id.in_(fixture_user_ids))
+                )
+            )
+            or 0
+        )
+        unsynced_count = int(await db.scalar(select(func.count(ChangeLog.id)).where(ChangeLog.synced == False)) or 0)
+
+    payload = {
+        "status": "ok",
+        "server_mode": settings.server_mode,
+        "prefix": prefix,
+        "commodity_id": commodity_id,
+        "commodity_name": commodity_name,
+        "user_count": args.user_count,
+        "telegram_ratio": args.telegram_ratio,
+        "target_rps": args.target_rps,
+        "hot_offer_requests": args.hot_offer_requests,
+        "scenario_count": len(reports),
+        "reports": reports,
+        "synthetic_counts_before_cleanup": {
+            "offers": synthetic_offer_count,
+            "trades": synthetic_trade_count,
+            "offer_requests": synthetic_offer_request_count,
+            "unsynced_change_logs": unsynced_count,
+        },
+    }
+    print_json(payload)
+    return 0
+
+
 async def cleanup_command(args: argparse.Namespace) -> int:
     print_json(await cleanup_prefix(args.prefix))
     return 0
@@ -2225,6 +2777,20 @@ def build_parser() -> argparse.ArgumentParser:
     mixed_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
     mixed_parser.add_argument("--offer-origin", choices=("webapp", "bot", "both"), default="webapp")
 
+    hot_scenarios_parser = subparsers.add_parser("run-hot-offer-scenarios")
+    hot_scenarios_parser.add_argument("--prefix", required=True)
+    hot_scenarios_parser.add_argument("--user-count", type=int, default=1000)
+    hot_scenarios_parser.add_argument("--hot-offer-requests", type=int, default=1000)
+    hot_scenarios_parser.add_argument("--telegram-ratio", type=float, default=0.6)
+    hot_scenarios_parser.add_argument("--target-rps", type=float, default=600.0)
+    hot_scenarios_parser.add_argument("--price", type=int, default=100000)
+    hot_scenarios_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
+    hot_scenarios_parser.add_argument(
+        "--scenario",
+        action="append",
+        help="Run only a named scenario. Repeat for multiple scenarios. Defaults to all scenarios.",
+    )
+
     return parser
 
 
@@ -2245,6 +2811,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_benchmark(args)
     if args.command == "run-mixed-load":
         return await run_mixed_load_benchmark(args)
+    if args.command == "run-hot-offer-scenarios":
+        return await run_hot_offer_scenarios_command(args)
     raise TradingProbeError(f"Unknown command: {args.command}")
 
 

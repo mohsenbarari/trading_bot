@@ -171,6 +171,53 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         with self.assertRaises(worker.TradingProbeError):
             worker.merge_role_result_artifacts([result])
 
+    def test_hot_offer_scenario_specs_cover_step_11b3_matrix(self):
+        scenarios = worker.build_hot_offer_scenario_specs(
+            total_requests=1000,
+            telegram_ratio=0.6,
+            target_rps=600.0,
+            price=100000,
+            offer_type="sell",
+        )
+
+        names = {scenario.name for scenario in scenarios}
+        self.assertEqual(
+            names,
+            {
+                "webapp_full_fill",
+                "bot_full_fill",
+                "webapp_partial_fill",
+                "bot_partial_fill",
+                "webapp_retail_lot",
+                "bot_retail_lot",
+            },
+        )
+        self.assertEqual({scenario.origin for scenario in scenarios}, {"webapp", "bot"})
+        self.assertTrue(any(scenario.expected_winner_count == 1 for scenario in scenarios))
+        self.assertTrue(any(scenario.expected_winner_count > 1 for scenario in scenarios))
+        self.assertTrue(any(not scenario.is_wholesale and scenario.lot_sizes for scenario in scenarios))
+        for scenario in scenarios:
+            self.assertEqual(scenario.expected_completed_quantity, scenario.quantity)
+            self.assertGreaterEqual(scenario.start_burst_request_count, 36)
+
+    def test_hot_offer_scenario_specs_reject_weak_contention(self):
+        with self.assertRaises(worker.TradingProbeError):
+            worker.build_hot_offer_scenario_specs(
+                total_requests=20,
+                telegram_ratio=0.6,
+                target_rps=600.0,
+                price=100000,
+                offer_type="sell",
+            )
+        with self.assertRaises(worker.TradingProbeError):
+            worker.build_hot_offer_scenario_specs(
+                total_requests=1000,
+                telegram_ratio=0.6,
+                target_rps=100.0,
+                price=100000,
+                offer_type="sell",
+            )
+
     def test_hot_offer_acceptance_fails_closed_on_data_corruption(self):
         worker.assert_hot_offer_contention_acceptance(
             persisted_trade_count=1,
@@ -208,6 +255,89 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 status="active",
                 expected_winner_count=1,
             )
+
+    def test_hot_offer_acceptance_validates_quantities_and_ledger(self):
+        worker.assert_hot_offer_contention_acceptance(
+            persisted_trade_count=4,
+            response_success_count=4,
+            error_count=0,
+            remaining_quantity=0,
+            status="completed",
+            expected_winner_count=4,
+            original_quantity=20,
+            completed_trade_quantity=20,
+            completed_ledger_count=4,
+        )
+
+        with self.assertRaises(worker.TradingProbeError):
+            worker.assert_hot_offer_contention_acceptance(
+                persisted_trade_count=4,
+                response_success_count=4,
+                error_count=0,
+                remaining_quantity=0,
+                status="completed",
+                expected_winner_count=4,
+                original_quantity=20,
+                completed_trade_quantity=25,
+                completed_ledger_count=4,
+            )
+        with self.assertRaises(worker.TradingProbeError):
+            worker.assert_hot_offer_contention_acceptance(
+                persisted_trade_count=4,
+                response_success_count=4,
+                error_count=0,
+                remaining_quantity=0,
+                status="completed",
+                expected_winner_count=4,
+                original_quantity=20,
+                completed_trade_quantity=20,
+                completed_ledger_count=3,
+            )
+        with self.assertRaises(worker.TradingProbeError):
+            worker.assert_hot_offer_contention_acceptance(
+                persisted_trade_count=4,
+                response_success_count=4,
+                error_count=0,
+                remaining_quantity=0,
+                status="completed",
+                expected_winner_count=4,
+                original_quantity=20,
+                completed_trade_quantity=20,
+                completed_ledger_count=4,
+                failed_internal_ledger_count=1,
+            )
+
+    def test_duplicate_replay_acceptance_allows_successful_replay_without_duplicate_trade(self):
+        snapshot = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=5,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=1,
+            completed_trade_quantity=5,
+            completed_ledger_count=1,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+
+        worker.assert_duplicate_replay_acceptance(statuses=["success", "success"], persistence=snapshot)
+        worker.assert_duplicate_replay_acceptance(statuses=["success", "rejected"], persistence=snapshot)
+
+        corrupted = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=5,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=2,
+            completed_trade_quantity=10,
+            completed_ledger_count=2,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+        with self.assertRaises(worker.TradingProbeError):
+            worker.assert_duplicate_replay_acceptance(statuses=["success", "success"], persistence=corrupted)
 
     def test_load_runner_runtime_surface_guard_accepts_expected_roles(self):
         with patch.object(worker.settings, "environment", "staging"), patch.object(

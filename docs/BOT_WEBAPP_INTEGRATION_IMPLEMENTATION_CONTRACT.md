@@ -1809,6 +1809,21 @@ Acceptance is fail-closed:
 - Terminal offers returning to active are an immediate failure.
 - Unclassified internal errors are an immediate failure.
 
+Implementation status:
+
+- `scripts/trading_core_probe_worker.py run-hot-offer-scenarios` owns the Step 11B-3 scenario matrix.
+- The matrix covers WebApp-created and Bot-created hot offers for full-fill, partial-fill, and
+  retail-lot contention. Each scenario keeps the default 1000-user / 600-rps / 60-40 mix and refuses
+  weak configurations that do not create several-dozen immediate contenders.
+- The runner also executes a dedicated `duplicate_replay` probe:
+  WebApp repeated idempotency keys must not create duplicate trades, and duplicate Telegram callback
+  attempts after a completed trade must not create a second trade.
+- Hot-offer acceptance now inspects the persisted offer, completed trades, completed quantity, and
+  `offer_requests` ledger rows. It fails closed on over-trade, negative remaining quantity, incomplete
+  ledger coverage, `failed_internal` ledgers, terminal reactivation, and unexpected internal errors.
+- `tests/test_trading_core_mixed_load_helpers.py` locks the scenario coverage, contention threshold,
+  quantity/ledger acceptance rules, and duplicate/replay acceptance.
+
 #### Step 11B-4 - Cross-Server Sync Evidence
 
 Required checks for the preferred twin-stack topology:
