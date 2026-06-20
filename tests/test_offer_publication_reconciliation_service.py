@@ -31,10 +31,12 @@ class FakeSummaryResult:
 class FakeSummaryDB:
     def __init__(self, *results):
         self.results = list(results)
+        self.statements = []
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
         if not self.results:
             raise AssertionError("Unexpected execute call")
+        self.statements.append(str(stmt))
         return self.results.pop(0)
 
 
@@ -227,6 +229,10 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(summary["finding_counts"]["active_offer_without_webapp_state"], 3)
         self.assertEqual(summary["finding_counts"]["unsynced_publication_state_backlog"], 4)
         self.assertEqual(summary["finding_counts"]["unsynced_offer_backlog"], 6)
+        observed_sql = "\n".join(db.statements)
+        self.assertIn("o.status = 'ACTIVE'", observed_sql)
+        self.assertIn("o.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')", observed_sql)
+        self.assertNotIn("o.status = 'active'", observed_sql)
 
 
 if __name__ == "__main__":
