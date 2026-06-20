@@ -182,7 +182,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["trade_data"].offer_id, 7)
         self.assertEqual(kwargs["trade_data"].offer_public_id, "ofr_bot_local_7")
         self.assertEqual(kwargs["trade_data"].quantity, 2)
-        self.assertEqual(kwargs["trade_data"].idempotency_key, "telegram_callback:cb1")
+        self.assertEqual(kwargs["trade_data"].idempotency_key, "telegram_callback:5:ofr_bot_local_7:2:remaining:5:50")
         self.assertEqual(kwargs["request_source_surface"], OfferRequestSourceSurface.TELEGRAM_BOT)
         self.assertEqual(kwargs["request_source_server"], "foreign")
         self.assertEqual(kwargs["context"].owner_user, user)

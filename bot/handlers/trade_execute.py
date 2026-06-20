@@ -30,6 +30,7 @@ from core.services.trade_service import (
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.server_routing import current_server, is_remote_home
 from core.trade_forwarding import forward_trade_to_home_server
+from core.trading_observability import log_trading_event
 from bot.utils.trade_suggestion_messages import (
     PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
     build_offer_trade_buttons,
@@ -178,17 +179,56 @@ def _build_remote_trade_success_message(body: object, fallback_offer: Offer, amo
     return "\n".join(lines)
 
 
-async def _notify_remote_trade_success(bot: Bot, user: User, offer: Offer, amount: int, body: object) -> None:
-    target_chat_id = user.telegram_id
+async def _notify_remote_trade_success(
+    bot: Bot,
+    user: User,
+    offer: Offer,
+    amount: int,
+    body: object,
+    *,
+    fallback_chat_id: int | None = None,
+    idempotency_key: str | None = None,
+) -> None:
+    target_chat_id = fallback_chat_id or getattr(user, "telegram_id", None)
     if not target_chat_id:
+        log_trading_event(
+            logger,
+            "remote_home_trade_success_message.skipped",
+            level="warning",
+            action="trading_side_effect",
+            result="noop",
+            side_effect="telegram_message",
+            offer_id=getattr(offer, "id", None),
+            has_idempotency_key=bool(idempotency_key),
+            reason="missing_actor",
+        )
         return
     try:
         await bot.send_message(
             chat_id=target_chat_id,
             text=_build_remote_trade_success_message(body, offer, amount),
         )
+        log_trading_event(
+            logger,
+            "remote_home_trade_success_message.sent",
+            action="trading_side_effect",
+            result="success",
+            side_effect="telegram_message",
+            offer_id=getattr(offer, "id", None),
+            has_idempotency_key=bool(idempotency_key),
+        )
     except Exception as exc:
-        logger.debug(f"Failed to send remote-home trade success message: {exc}")
+        log_trading_event(
+            logger,
+            "remote_home_trade_success_message.failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="telegram_message",
+            offer_id=getattr(offer, "id", None),
+            has_idempotency_key=bool(idempotency_key),
+            error_class=type(exc).__name__,
+        )
 
 
 async def update_offer_channel_markup(bot: Bot, offer: Offer) -> None:
@@ -544,7 +584,15 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                         await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
                 except Exception as exc:
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
-                await _notify_remote_trade_success(bot, user, offer, actual_amount, body)
+                await _notify_remote_trade_success(
+                    bot,
+                    user,
+                    offer,
+                    actual_amount,
+                    body,
+                    fallback_chat_id=getattr(getattr(callback, "from_user", None), "id", None),
+                    idempotency_key=idempotency_key,
+                )
                 await callback.answer("معامله ثبت شد ✅", show_alert=False)
                 return
 
@@ -555,7 +603,15 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                     logger.debug(f"Failed to rollback before remote-home completion recovery: {exc}")
                 recovered_body = await _wait_for_forwarded_trade_completion(idempotency_key)
                 if recovered_body:
-                    await _notify_remote_trade_success(bot, user, offer, actual_amount, recovered_body)
+                    await _notify_remote_trade_success(
+                        bot,
+                        user,
+                        offer,
+                        actual_amount,
+                        recovered_body,
+                        fallback_chat_id=getattr(getattr(callback, "from_user", None), "id", None),
+                        idempotency_key=idempotency_key,
+                    )
                     try:
                         if callback.message and callback.message.chat.id != settings.channel_id:
                             await callback.message.edit_reply_markup(reply_markup=None)

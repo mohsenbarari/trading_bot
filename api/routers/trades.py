@@ -641,6 +641,7 @@ def _build_trade_history_select():
         selectinload(Trade.offer_user),
         selectinload(Trade.responder_user),
         selectinload(Trade.commodity),
+        selectinload(Trade.offer),
     )
 
 
@@ -1460,6 +1461,9 @@ def trade_to_response(
         history_target_user_id=history_target_user_id,
         customer_relation_map=customer_relation_map,
     )
+    loaded_offer = getattr(trade, "__dict__", {}).get("offer")
+    resolved_offer_notes = offer_notes if offer_notes is not None else getattr(loaded_offer, "notes", None)
+
     return TradeResponse(
         id=trade.id,
         trade_number=trade.trade_number,
@@ -1475,7 +1479,7 @@ def trade_to_response(
         **counterparty_payload,
         **customer_context_payload,
         **trade_path_payload,
-        offer_notes=offer_notes if offer_notes is not None else getattr(getattr(trade, "offer", None), "notes", None),
+        offer_notes=resolved_offer_notes,
         created_at=to_jalali_str(trade.created_at) or ""
     )
 
@@ -3193,7 +3197,8 @@ async def get_trade(
         select(Trade).options(
             selectinload(Trade.offer_user),
             selectinload(Trade.responder_user),
-            selectinload(Trade.commodity)
+            selectinload(Trade.commodity),
+            selectinload(Trade.offer),
         ).where(Trade.id == trade_id)
     )
     trade = result.scalar_one_or_none()

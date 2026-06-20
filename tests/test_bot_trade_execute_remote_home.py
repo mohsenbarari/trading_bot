@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from bot.handlers.trade_execute import handle_channel_trade
+from bot.handlers.trade_execute import _notify_remote_trade_success, handle_channel_trade
 from models.offer import OfferStatus, OfferType
 
 
@@ -62,6 +62,43 @@ def make_offer():
 
 
 class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_notify_remote_trade_success_prefers_callback_chat_over_stored_telegram_id(self):
+        user = SimpleNamespace(id=5, telegram_id=555)
+        offer = make_offer()
+        bot = SimpleNamespace(send_message=AsyncMock())
+
+        await _notify_remote_trade_success(
+            bot,
+            user,
+            offer,
+            2,
+            {"trade_number": 10029, "trade_type": "sell", "commodity_name": "سکه"},
+            fallback_chat_id=300,
+            idempotency_key="telegram_callback:test",
+        )
+
+        bot.send_message.assert_awaited_once()
+        self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 300)
+
+    async def test_notify_remote_trade_success_uses_callback_chat_fallback(self):
+        user = SimpleNamespace(id=5, telegram_id=None)
+        offer = make_offer()
+        bot = SimpleNamespace(send_message=AsyncMock())
+
+        await _notify_remote_trade_success(
+            bot,
+            user,
+            offer,
+            2,
+            {"trade_number": 10030, "trade_type": "sell", "commodity_name": "سکه"},
+            fallback_chat_id=300,
+            idempotency_key="telegram_callback:test",
+        )
+
+        bot.send_message.assert_awaited_once()
+        self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 300)
+        self.assertIn("🔴 فروش", bot.send_message.await_args.kwargs["text"])
+
     async def test_handle_channel_trade_remote_home_handles_pending_suggestion_success_and_error(self):
         user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
         bot = SimpleNamespace(send_message=AsyncMock())
