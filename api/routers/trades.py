@@ -1624,6 +1624,13 @@ def send_telegram_message_sync(chat_id: int, text: str) -> bool:
         return False
 
 
+def _queue_trade_telegram_message(background_tasks: BackgroundTasks, chat_id: int | None, text: str) -> bool:
+    if current_server() != "foreign" or not chat_id:
+        return False
+    background_tasks.add_task(send_telegram_message_sync, chat_id, text)
+    return True
+
+
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
     from core.db import AsyncSessionLocal
@@ -2653,11 +2660,9 @@ async def _execute_trade_authoritatively(
             )
 
             responder_telegram_id = getattr(leg_responder_user, "telegram_id", None)
-            if responder_telegram_id:
-                background_tasks.add_task(send_telegram_message_sync, responder_telegram_id, leg_responder_msg)
+            _queue_trade_telegram_message(background_tasks, responder_telegram_id, leg_responder_msg)
             offer_telegram_id = getattr(leg_offer_user, "telegram_id", None)
-            if offer_telegram_id:
-                background_tasks.add_task(send_telegram_message_sync, offer_telegram_id, leg_offer_owner_msg)
+            _queue_trade_telegram_message(background_tasks, offer_telegram_id, leg_offer_owner_msg)
 
             try:
                 leg_responder_audience = await build_trade_notification_audience_user_ids(
@@ -2735,9 +2740,9 @@ async def _execute_trade_authoritatively(
             offer_notes=getattr(offer, "notes", None),
         )
 
-        background_tasks.add_task(send_telegram_message_sync, owner_user.telegram_id, responder_msg)
+        _queue_trade_telegram_message(background_tasks, owner_user.telegram_id, responder_msg)
         if offer.user:
-            background_tasks.add_task(send_telegram_message_sync, offer.user.telegram_id, offer_owner_msg)
+            _queue_trade_telegram_message(background_tasks, offer.user.telegram_id, offer_owner_msg)
 
         responder_audience = [owner_user.id]
         offer_owner_audience = [offer.user_id]

@@ -575,6 +575,15 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(trades.send_telegram_message_sync(1, "hello"))
         logger.error.assert_called_once()
 
+        background_tasks = SimpleNamespace(add_task=Mock())
+        with patch("api.routers.trades.current_server", return_value="iran"):
+            self.assertFalse(trades._queue_trade_telegram_message(background_tasks, 1, "hello"))
+        background_tasks.add_task.assert_not_called()
+
+        with patch("api.routers.trades.current_server", return_value="foreign"):
+            self.assertTrue(trades._queue_trade_telegram_message(background_tasks, 1, "hello"))
+        background_tasks.add_task.assert_called_once_with(trades.send_telegram_message_sync, 1, "hello")
+
     async def test_update_channel_button_helpers(self):
         offer = SimpleNamespace(
             id=9,

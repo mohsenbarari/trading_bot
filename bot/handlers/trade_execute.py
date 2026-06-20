@@ -1,21 +1,23 @@
-import logging
 import asyncio
+import logging
 import json
 import hashlib
 from aiogram import Router, F, types, Bot
 from typing import Optional
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from datetime import datetime
 from fastapi import BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 
 from models.user import User
 from models.offer import Offer, OfferType, OfferStatus
-from models.offer_request import OfferRequestSourceSurface
+from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
+from models.trade import Trade
 from core.config import settings
 from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
-from core.utils import check_user_limits, utc_now
+from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from api.deps import EffectiveOwnerActor
@@ -129,6 +131,8 @@ def _build_remote_trade_success_message(body: object, fallback_offer: Offer, amo
         created_at = body.get("created_at")
 
         lines = [
+            "✅ معامله ثبت شد",
+            "",
             f"{trade_emoji} {trade_label}",
             "",
             f"💰 فی: {int(price):,}" if isinstance(price, (int, float)) else f"💰 فی: {price}",
@@ -240,6 +244,54 @@ def _json_response_body(response: JSONResponse) -> dict:
         return json.loads(response.body.decode("utf-8"))
     except Exception:
         return {}
+
+
+def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object | None]:
+    commodity = getattr(trade, "commodity", None)
+    offer_user = getattr(trade, "offer_user", None)
+    return {
+        "trade_number": getattr(trade, "trade_number", None),
+        "trade_type": getattr(getattr(trade, "trade_type", None), "value", getattr(trade, "trade_type", None)),
+        "commodity_name": getattr(commodity, "name", None),
+        "quantity": getattr(trade, "quantity", None),
+        "price": getattr(trade, "price", None),
+        "created_at": to_jalali_str(getattr(trade, "created_at", None)) or "",
+        "counterparty_name": getattr(offer_user, "full_name", None) or getattr(offer_user, "account_name", None),
+    }
+
+
+async def _wait_for_forwarded_trade_completion(idempotency_key: str | None) -> dict[str, object | None] | None:
+    if not idempotency_key:
+        return None
+    attempts = max(1, int(max(settings.trade_forward_grace_seconds, 1) / 0.25))
+    for attempt in range(attempts):
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(OfferRequest)
+                .where(
+                    OfferRequest.idempotency_key == idempotency_key,
+                    OfferRequest.result_status == OfferRequestStatus.COMPLETED_TRADE,
+                )
+                .order_by(OfferRequest.id.desc())
+            )
+            ledger = result.scalar_one_or_none()
+            trade_id = getattr(ledger, "resulting_trade_id", None) if ledger else None
+            if trade_id:
+                trade_result = await session.execute(
+                    select(Trade)
+                    .options(
+                        selectinload(Trade.offer_user),
+                        selectinload(Trade.responder_user),
+                        selectinload(Trade.commodity),
+                    )
+                    .where(Trade.id == trade_id)
+                )
+                trade = trade_result.scalar_one_or_none()
+                if trade:
+                    return _trade_model_to_remote_home_body(trade)
+        if attempt < attempts - 1:
+            await asyncio.sleep(0.25)
+    return None
 
 
 async def _execute_confirmed_channel_trade_via_shared_command(
@@ -426,6 +478,12 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                 await callback.answer("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
                 return
 
+            idempotency_key = _channel_trade_idempotency_key(
+                callback=callback,
+                user=user,
+                offer=offer,
+                actual_amount=actual_amount,
+            )
             forward_payload = {
                 "offer_id": offer.id,
                 "offer_public_id": getattr(offer, "offer_public_id", None),
@@ -434,12 +492,7 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                 "edge_received_at": utc_now().isoformat(),
                 "source_surface": OfferRequestSourceSurface.TELEGRAM_BOT.value,
                 "source_server": current_server(),
-                "idempotency_key": _channel_trade_idempotency_key(
-                    callback=callback,
-                    user=user,
-                    offer=offer,
-                    actual_amount=actual_amount,
-                ),
+                "idempotency_key": idempotency_key,
             }
             status_code, body = await forward_trade_to_home_server(offer.home_server, forward_payload)
             if status_code == 504:
@@ -466,6 +519,29 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
                 await _notify_remote_trade_success(bot, user, offer, actual_amount, body)
                 await callback.answer("معامله ثبت شد ✅", show_alert=False)
+                return
+
+            if status_code == 504:
+                try:
+                    await session.rollback()
+                except Exception as exc:
+                    logger.debug(f"Failed to rollback before remote-home completion recovery: {exc}")
+                recovered_body = await _wait_for_forwarded_trade_completion(idempotency_key)
+                if recovered_body:
+                    await _notify_remote_trade_success(bot, user, offer, actual_amount, recovered_body)
+                    try:
+                        if callback.message and callback.message.chat.id != settings.channel_id:
+                            await callback.message.edit_reply_markup(reply_markup=None)
+                            await remove_trade_suggestion_record(offer_id, callback.message.chat.id, callback.message.message_id)
+                    except Exception as exc:
+                        logger.debug(f"Failed to clear recovered remote-home suggestion buttons: {exc}")
+                    await callback.answer("معامله ثبت شد ✅", show_alert=False)
+                    return
+
+                await callback.answer(
+                    "درخواست معامله ارسال شد؛ نتیجه تا چند لحظه دیگر همگام می‌شود.",
+                    show_alert=True,
+                )
                 return
 
             detail = body.get("detail") if isinstance(body, dict) else None
