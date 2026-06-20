@@ -32,6 +32,7 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         self.assertTrue(result["ready_for_owner_production_review"])
         self.assertEqual(result["failure_count"], 0)
         self.assertEqual(result["role_summaries"]["iran"]["active_offer_count"], 0)
+        self.assertEqual(result["capacity_summary"]["correctness_failure_count"], 0)
         self.assertIn("performs no production deploy", result["notice"])
 
     def test_production_snapshot_or_production_data_fails_closed(self):
@@ -114,6 +115,59 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         self.assertIn("C12-GLOBAL-BACKUPS", failed_ids)
         self.assertIn("C12-GLOBAL-STAGING-SIGNOFF", failed_ids)
 
+    def test_step11b_capacity_report_is_required_and_must_remain_production_gated(self):
+        snapshot = passing_snapshot()
+        capacity_report = snapshot["global"]["staging_validation"]["capacity_report"]
+        capacity_report["production_gate"]["status"] = "open"
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("C12-GLOBAL-CAPACITY-REPORT", {failure["gate_id"] for failure in result["failures"]})
+
+        snapshot = passing_snapshot()
+        capacity_report = snapshot["global"]["staging_validation"]["capacity_report"]
+        capacity_report["correctness_failure_count"] = 1
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("C12-GLOBAL-CAPACITY-CORRECTNESS", {failure["gate_id"] for failure in result["failures"]})
+
+    def test_step11b_capacity_report_accepts_real_artifact_failure_and_warning_lists(self):
+        snapshot = passing_snapshot()
+        capacity_report = snapshot["global"]["staging_validation"]["capacity_report"]
+        del capacity_report["correctness_failure_count"]
+        del capacity_report["capacity_warning_count"]
+        capacity_report["correctness_failures"] = []
+        capacity_report["capacity_warnings"] = ["webapp_full_fill: business_request_rps below target"]
+        capacity_report["capacity_warnings_reviewed"] = True
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["capacity_summary"]["correctness_failure_count"], 0)
+        self.assertEqual(result["capacity_summary"]["capacity_warning_count"], 1)
+        self.assertEqual(result["capacity_summary"]["production_gate"], cutover.STEP11_CAPACITY_PRODUCTION_GATE_STATUS)
+        self.assertIn("C12-GLOBAL-CAPACITY-WARNINGS", {warning["gate_id"] for warning in result["warnings"]})
+
+    def test_reviewed_capacity_warnings_are_visible_warnings_not_hidden_failures(self):
+        snapshot = passing_snapshot()
+        capacity_report = snapshot["global"]["staging_validation"]["capacity_report"]
+        capacity_report["capacity_warning_count"] = 2
+        capacity_report["capacity_warnings_reviewed"] = True
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "passed")
+        self.assertIn("C12-GLOBAL-CAPACITY-WARNINGS", {warning["gate_id"] for warning in result["warnings"]})
+
+        capacity_report["capacity_warnings_reviewed"] = False
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("C12-GLOBAL-CAPACITY-WARNINGS", {failure["gate_id"] for failure in result["failures"]})
+
     def test_legacy_unknown_and_old_channel_bindings_are_warnings_not_fabricated_history(self):
         snapshot = passing_snapshot()
         report = snapshot["roles"]["foreign"]["backfill_report"]
@@ -161,6 +215,7 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
                 )
             self.assertIn("# Bot/WebApp Cutover Readiness Report", stdout.getvalue())
             self.assertIn("No Production", report_path.read_text(encoding="utf-8"))
+            self.assertIn("Step 11B Capacity Summary", report_path.read_text(encoding="utf-8"))
 
             failed = passing_snapshot()
             failed["roles"]["iran"]["active_offer_count"] = 1

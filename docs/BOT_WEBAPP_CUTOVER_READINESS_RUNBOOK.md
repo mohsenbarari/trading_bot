@@ -56,6 +56,12 @@ python3 scripts/report_bot_webapp_cutover_readiness.py \
   must be ready.
 - Step 11 automated matrix and owner-led manual staging validation must be complete before
   production consideration.
+- The Step 11B capacity report built by `scripts/report_bot_webapp_capacity.py` must be present in
+  `global.staging_validation.capacity_report`, reviewed, and still have
+  `production_gate.status=blocked_until_owner_staging_validation`.
+- `capacity_report.correctness_failure_count` must be zero. Capacity warnings do not get hidden:
+  if `capacity_report.capacity_warning_count` is non-zero, `capacity_warnings_reviewed=true` is
+  required and the readiness report emits a warning.
 
 ## Stop Conditions
 
@@ -69,6 +75,9 @@ Abort the readiness review if any of these appear:
 - Iran can call Telegram;
 - foreign can serve WebApp or chat user surfaces;
 - rollback requires deleting synced or migrated data;
+- the Step 11B capacity report is missing, unreviewed, no longer production-gated, or contains any
+  correctness failure;
+- Step 11B capacity warnings exist but have not been explicitly reviewed;
 - owner staging sign-off is missing.
 
 ## Output Meaning

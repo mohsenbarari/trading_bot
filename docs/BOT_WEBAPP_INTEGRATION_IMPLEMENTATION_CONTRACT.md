@@ -1972,9 +1972,12 @@ Implementation status:
   sync backlog or partial publication state remains, runtime guards are missing, registry/sensitive
   policy is incomplete, rollback is destructive, backups/observability are not ready, or owner
   staging sign-off is missing.
+- The gate also requires the Step 11B `bot_webapp_capacity_report_v1` artifact to be reviewed,
+  free of correctness failures, explicit about reviewed capacity warnings, and still blocked by
+  `production_gate.status=blocked_until_owner_staging_validation`.
 - `tests/test_bot_webapp_cutover_readiness.py` locks the pass/fail behavior, production-data
-  rejection, historical request ledger no-fabrication rule, rollback/backup/observability gates,
-  and CLI JSON/Markdown paths.
+  rejection, historical request ledger no-fabrication rule, Step 11B capacity artifact gating,
+  rollback/backup/observability gates, and CLI JSON/Markdown paths.
 - Staging execution guidance is documented in
   `docs/BOT_WEBAPP_CUTOVER_READINESS_RUNBOOK.md`.
 

@@ -21,6 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MATRIX_VERSION = "step-12-2026-06-20"
 REQUIRED_ROLES = ("iran", "foreign")
 NON_PRODUCTION_ENVIRONMENTS = {"staging", "synthetic", "dry_run", "local"}
+STEP11_CAPACITY_REPORT_SCHEMA_VERSION = "bot_webapp_capacity_report_v1"
+STEP11_CAPACITY_PRODUCTION_GATE_STATUS = "blocked_until_owner_staging_validation"
 NO_PRODUCTION_ACTION_NOTICE = (
     "This report must be generated from staging/synthetic evidence only. "
     "It performs no production deploy, production peer access, or production data action."
@@ -50,12 +52,38 @@ def _to_int(value: Any) -> int | None:
         return None
 
 
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _is_true(value: Any) -> bool:
     return value is True
 
 
 def _is_false(value: Any) -> bool:
     return value is False
+
+
+def _production_gate_status(payload: Mapping[str, Any]) -> Any:
+    production_gate = payload.get("production_gate")
+    if isinstance(production_gate, Mapping):
+        return production_gate.get("status")
+    return production_gate
+
+
+def _count_field_or_list(payload: Mapping[str, Any], count_key: str, list_key: str) -> int | None:
+    count = _to_int(payload.get(count_key))
+    if count is not None:
+        return count
+    list_value = payload.get(list_key)
+    if isinstance(list_value, list):
+        return len(list_value)
+    return None
 
 
 def _gate(
@@ -210,6 +238,21 @@ def template_snapshot() -> dict[str, Any]:
                 "step11_matrix_passed": True,
                 "manual_scenarios_passed": True,
                 "owner_signoff": True,
+                "capacity_report": {
+                    "schema_version": STEP11_CAPACITY_REPORT_SCHEMA_VERSION,
+                    "artifact_path": "replace-with-step-11b-capacity-report-path",
+                    "business_request_rps": 600.0,
+                    "telegram_update_rps": 720.0,
+                    "correctness_failure_count": 0,
+                    "capacity_warning_count": 0,
+                    "capacity_warnings_reviewed": True,
+                    "report_reviewed": True,
+                    "production_gate": {
+                        "status": STEP11_CAPACITY_PRODUCTION_GATE_STATUS,
+                        "reason": "Owner-led staging validation must review this artifact before production consideration.",
+                    },
+                    "telegram_gateway_boundary": "mock",
+                },
             },
         },
     }
@@ -456,6 +499,87 @@ def evaluate_role(role: str, role_payload: Mapping[str, Any]) -> list[GateResult
     return gates
 
 
+def evaluate_capacity_report(staging: Mapping[str, Any]) -> list[GateResult]:
+    capacity_report = _as_mapping(staging.get("capacity_report"))
+    business_rps = _to_float(capacity_report.get("business_request_rps"))
+    telegram_rps = _to_float(capacity_report.get("telegram_update_rps"))
+    correctness_failure_count = _count_field_or_list(
+        capacity_report,
+        "correctness_failure_count",
+        "correctness_failures",
+    )
+    capacity_warning_count = _count_field_or_list(
+        capacity_report,
+        "capacity_warning_count",
+        "capacity_warnings",
+    )
+    production_gate = _production_gate_status(capacity_report)
+    telegram_boundary = str(capacity_report.get("telegram_gateway_boundary") or "").strip().lower()
+    artifact_path = str(capacity_report.get("artifact_path") or "").strip()
+    schema_version = capacity_report.get("schema_version")
+    report_reviewed = capacity_report.get("report_reviewed")
+    warnings_reviewed = capacity_report.get("capacity_warnings_reviewed")
+
+    report_present_and_closed = (
+        schema_version == STEP11_CAPACITY_REPORT_SCHEMA_VERSION
+        and bool(artifact_path)
+        and business_rps is not None
+        and telegram_rps is not None
+        and business_rps >= 0
+        and telegram_rps >= 0
+        and correctness_failure_count is not None
+        and capacity_warning_count is not None
+        and correctness_failure_count >= 0
+        and capacity_warning_count >= 0
+        and production_gate == STEP11_CAPACITY_PRODUCTION_GATE_STATUS
+        and telegram_boundary in {"mock", "real"}
+        and _is_true(report_reviewed)
+    )
+    gates = [
+        _gate(
+            "C12-GLOBAL-CAPACITY-REPORT",
+            "Step 11B capacity report is present, reviewed, and production-gated",
+            report_present_and_closed,
+            (
+                f"schema_version={schema_version}, artifact_path={artifact_path or '<missing>'}, "
+                f"business_request_rps={business_rps if business_rps is not None else '<missing>'}, "
+                f"telegram_update_rps={telegram_rps if telegram_rps is not None else '<missing>'}, "
+                f"production_gate={production_gate}, telegram_gateway_boundary={telegram_boundary or '<missing>'}, "
+                f"report_reviewed={report_reviewed}"
+            ),
+            "Step 12 requires a reviewed Step 11B capacity report, and its production gate must remain blocked.",
+        ),
+        _gate(
+            "C12-GLOBAL-CAPACITY-CORRECTNESS",
+            "Step 11B capacity report has no correctness failures",
+            correctness_failure_count == 0,
+            (
+                "correctness_failure_count="
+                f"{correctness_failure_count if correctness_failure_count is not None else '<missing>'}"
+            ),
+            "Correctness failures in the load/capacity artifact block cutover review.",
+        ),
+    ]
+
+    warnings_passed = capacity_warning_count == 0 or (
+        capacity_warning_count is not None and capacity_warning_count > 0 and _is_true(warnings_reviewed)
+    )
+    gates.append(
+        _gate(
+            "C12-GLOBAL-CAPACITY-WARNINGS",
+            "Step 11B capacity warnings are absent or explicitly reviewed",
+            warnings_passed,
+            (
+                f"capacity_warning_count={capacity_warning_count if capacity_warning_count is not None else '<missing>'}, "
+                f"capacity_warnings_reviewed={warnings_reviewed}"
+            ),
+            "Capacity warnings must stay visible and be reviewed before owner production review.",
+            warning=capacity_warning_count is not None and capacity_warning_count > 0 and warnings_passed,
+        )
+    )
+    return gates
+
+
 def evaluate_global(payload: Mapping[str, Any]) -> list[GateResult]:
     global_section = _as_mapping(payload.get("global"))
     rollback = _as_mapping(global_section.get("rollback"))
@@ -535,6 +659,7 @@ def evaluate_global(payload: Mapping[str, Any]) -> list[GateResult]:
             "The owner must test staging and sign off before any production decision.",
         ),
     ]
+    gates.extend(evaluate_capacity_report(staging))
     return gates
 
 
@@ -597,6 +722,28 @@ def evaluate_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
             ),
         }
 
+    staging = _as_mapping(_as_mapping(_as_mapping(payload.get("global")).get("staging_validation")))
+    capacity_report = _as_mapping(staging.get("capacity_report"))
+    correctness_failure_count = _count_field_or_list(
+        capacity_report,
+        "correctness_failure_count",
+        "correctness_failures",
+    )
+    capacity_warning_count = _count_field_or_list(
+        capacity_report,
+        "capacity_warning_count",
+        "capacity_warnings",
+    )
+    capacity_summary = {
+        "artifact_path": capacity_report.get("artifact_path"),
+        "business_request_rps": _to_float(capacity_report.get("business_request_rps")),
+        "telegram_update_rps": _to_float(capacity_report.get("telegram_update_rps")),
+        "correctness_failure_count": correctness_failure_count,
+        "capacity_warning_count": capacity_warning_count,
+        "telegram_gateway_boundary": capacity_report.get("telegram_gateway_boundary"),
+        "production_gate": _production_gate_status(capacity_report),
+    }
+
     return {
         "version": MATRIX_VERSION,
         "notice": NO_PRODUCTION_ACTION_NOTICE,
@@ -605,6 +752,7 @@ def evaluate_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
         "failure_count": len(failures),
         "warning_count": len(warnings),
         "role_summaries": role_summaries,
+        "capacity_summary": capacity_summary,
         "gates": [asdict(gate) for gate in gates],
         "failures": [asdict(gate) for gate in failures],
         "warnings": [asdict(gate) for gate in warnings],
@@ -640,6 +788,22 @@ def build_markdown_report(result: Mapping[str, Any]) -> str:
             f"`{summary.get('offers_missing_public_id')}` | `{summary.get('unsynced_change_log_count')}` | "
             f"`{summary.get('unsafe_backlog_count')}` | `{summary.get('unresolved_publication_count')}` |"
         )
+
+    capacity_summary = _as_mapping(result.get("capacity_summary"))
+    lines.extend(
+        [
+            "",
+            "## Step 11B Capacity Summary",
+            "",
+            f"- Artifact: `{capacity_summary.get('artifact_path')}`",
+            f"- Business-request RPS: `{capacity_summary.get('business_request_rps')}`",
+            f"- Telegram-update RPS: `{capacity_summary.get('telegram_update_rps')}`",
+            f"- Correctness failures: `{capacity_summary.get('correctness_failure_count')}`",
+            f"- Capacity warnings: `{capacity_summary.get('capacity_warning_count')}`",
+            f"- Telegram gateway boundary: `{capacity_summary.get('telegram_gateway_boundary')}`",
+            f"- Production gate: `{capacity_summary.get('production_gate')}`",
+        ]
+    )
 
     lines.extend(["", "## Gates", ""])
     for gate in result.get("gates") or []:
