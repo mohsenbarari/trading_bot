@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from api.routers.sync import _apply_item, _build_upsert_stmt
 from models.offer import Offer
+from models.offer_request import OfferRequest
 
 
 class AsyncNullContext:
@@ -55,6 +56,9 @@ class ExpressionProbe:
     def in_(self, values):
         return ExpressionProbe(f"{self.expression} IN {tuple(sorted(values))}")
 
+    def isnot(self, other):
+        return ExpressionProbe(f"{self.expression} IS NOT {other}")
+
     def __le__(self, other):
         return ExpressionProbe(f"{self.expression} <= {other.expression}")
 
@@ -79,6 +83,12 @@ class FakeOfferModel:
     version_id = ExpressionProbe("current_version")
 
 
+class FakeOfferRequestModel:
+    idempotency_key = ExpressionProbe("current_idempotency_key")
+    result_status = ExpressionProbe("current_result_status")
+    version_id = ExpressionProbe("current_version")
+
+
 class FakeOfferInsertBuilder:
     def __init__(self):
         self.excluded = {
@@ -93,6 +103,26 @@ class FakeOfferInsertBuilder:
 
     def on_conflict_do_update(self, index_elements, set_, where=None):
         self.conflict_payload = (index_elements, set_)
+        self.where_clause = where
+        return self
+
+
+class FakeOfferRequestInsertBuilder:
+    def __init__(self):
+        self.excluded = {
+            "result_status": ExpressionProbe("incoming_result_status"),
+            "version_id": ExpressionProbe("incoming_version"),
+        }
+        self.where_clause = None
+        self.index_where = None
+
+    def values(self, **kwargs):
+        self.values_payload = kwargs
+        return self
+
+    def on_conflict_do_update(self, index_elements, set_, index_where=None, where=None):
+        self.conflict_payload = (index_elements, set_)
+        self.index_where = index_where
         self.where_clause = where
         return self
 
@@ -117,6 +147,33 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         rendered_where = repr(insert_builder.where_clause)
         self.assertIn("current_version <= incoming_version", rendered_where)
         self.assertIn("current_status IN", rendered_where)
+
+    async def test_offer_request_upsert_uses_atomic_ordering_where_clause(self):
+        insert_builder = FakeOfferRequestInsertBuilder()
+
+        with patch("api.routers.sync.pg_insert", return_value=insert_builder):
+            result = _build_upsert_stmt(
+                FakeOfferRequestModel,
+                "offer_requests",
+                {
+                    "id": 2,
+                    "request_home_server": "foreign",
+                    "idempotency_key": "stage-forward:2",
+                    "result_status": "completed_trade",
+                    "resulting_trade_id": 61,
+                    "version_id": 2,
+                },
+            )
+
+        self.assertIs(result, insert_builder)
+        self.assertEqual(insert_builder.conflict_payload[0], ["request_home_server", "idempotency_key"])
+        self.assertNotIn("request_home_server", insert_builder.conflict_payload[1])
+        self.assertNotIn("idempotency_key", insert_builder.conflict_payload[1])
+        self.assertIsNotNone(insert_builder.index_where)
+        self.assertIsNotNone(insert_builder.where_clause)
+        rendered_where = repr(insert_builder.where_clause)
+        self.assertIn("current_version <= incoming_version", rendered_where)
+        self.assertIn("current_result_status IN", rendered_where)
 
     async def test_out_of_order_offer_update_after_expiry_does_not_reactivate(self):
         existing_offer = make_offer("expired", 3)
@@ -264,3 +321,33 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(terminal_offers, [8])
         builder.assert_called_once()
+
+    async def test_stale_offer_request_upsert_noop_is_logged(self):
+        db = ApplyDB([SimpleNamespace(rowcount=0)])
+        data = {
+            "request_home_server": "foreign",
+            "idempotency_key": "stage-forward:2",
+            "request_source_surface": "webapp",
+            "request_source_server": "iran",
+            "requested_quantity": 5,
+            "result_status": "received",
+            "version_id": 1,
+        }
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="UPSERT"), patch(
+            "api.routers.sync.logger"
+        ) as logger_mock:
+            result = await _apply_item(
+                db,
+                "offer_requests",
+                "INSERT",
+                2,
+                data,
+                model=OfferRequest,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("atomic_upsert_guard_noop", rendered_log)
+        self.assertIn("sync.stale_offer_request_ignored", rendered_log)

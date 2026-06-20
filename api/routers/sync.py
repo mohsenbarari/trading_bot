@@ -134,6 +134,15 @@ def _enum_value(value) -> str:
 
 
 TERMINAL_OFFER_STATUSES = {"completed", "expired", "cancelled"}
+TERMINAL_OFFER_REQUEST_STATUSES = {
+    "rejected_business_rule",
+    "rejected_offer_expired",
+    "rejected_lot_unavailable",
+    "rejected_conflict",
+    "completed_trade",
+    "duplicate_replay",
+    "failed_internal",
+}
 
 
 def _completed_trade_offer_id_from_sync(table: str, data: dict) -> int | None:
@@ -661,10 +670,18 @@ def _build_upsert_stmt(model, table, data):
             for key, value in data.items()
             if key not in {"id", "request_home_server", "idempotency_key"}
         }
+        where_clause = _offer_request_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(
+                index_elements=['request_home_server', 'idempotency_key'],
+                index_where=model.idempotency_key.isnot(None),
+                set_=set_dict,
+            )
         return stmt.on_conflict_do_update(
             index_elements=['request_home_server', 'idempotency_key'],
             index_where=model.idempotency_key.isnot(None),
             set_=set_dict,
+            where=where_clause,
         )
     else:
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
@@ -805,6 +822,11 @@ def _offer_payload_needs_ordering_check(data: dict) -> bool:
     return bool(incoming_status and coerce_positive_int(data.get("version_id")) is not None)
 
 
+def _offer_request_payload_needs_ordering_check(data: dict) -> bool:
+    incoming_status = _enum_value(data.get("result_status"))
+    return bool(incoming_status and coerce_positive_int(data.get("version_id")) is not None)
+
+
 def _offer_upsert_where_clause(model, stmt, data: dict):
     if not _offer_payload_needs_ordering_check(data):
         return None
@@ -820,6 +842,32 @@ def _offer_upsert_where_clause(model, stmt, data: dict):
 
     current_terminal = current_status.in_(list(TERMINAL_OFFER_STATUSES))
     incoming_terminal = incoming_status.in_(list(TERMINAL_OFFER_STATUSES))
+    same_version_terminal_conflict = (
+        current_terminal
+        & incoming_terminal
+        & (current_version == incoming_version)
+        & (current_status != incoming_status)
+    )
+    terminal_reactivation = current_terminal & ~incoming_terminal
+
+    return (current_version <= incoming_version) & ~terminal_reactivation & ~same_version_terminal_conflict
+
+
+def _offer_request_upsert_where_clause(model, stmt, data: dict):
+    if not _offer_request_payload_needs_ordering_check(data):
+        return None
+    current_status = getattr(model, "result_status", None)
+    current_version = getattr(model, "version_id", None)
+    if current_status is None or current_version is None:
+        return None
+    try:
+        incoming_status = stmt.excluded["result_status"]
+        incoming_version = stmt.excluded["version_id"]
+    except (AttributeError, KeyError):
+        return None
+
+    current_terminal = current_status.in_(list(TERMINAL_OFFER_REQUEST_STATUSES))
+    incoming_terminal = incoming_status.in_(list(TERMINAL_OFFER_REQUEST_STATUSES))
     same_version_terminal_conflict = (
         current_terminal
         & incoming_terminal
@@ -878,6 +926,23 @@ def _log_stale_offer_sync_ignored(record_id, operation: str, data: dict, reason:
             "record_id": record_id,
             "reason": reason,
             "incoming_status": _enum_value(data.get("status")),
+            "incoming_version": coerce_positive_int(data.get("version_id")),
+            "sync_meta": metadata,
+        },
+    )
+
+
+def _log_stale_offer_request_sync_ignored(record_id, operation: str, data: dict, reason: str) -> None:
+    metadata = build_sync_metadata("offer_requests", record_id, operation, data)
+    record_sync_conflict(server_mode=settings.server_mode, table="offer_requests", reason=reason)
+    logger.warning(
+        "Ignored stale synced offer request event",
+        extra={
+            "event": "sync.stale_offer_request_ignored",
+            "table": "offer_requests",
+            "record_id": record_id,
+            "reason": reason,
+            "incoming_result_status": _enum_value(data.get("result_status")),
             "incoming_version": coerce_positive_int(data.get("version_id")),
             "sync_meta": metadata,
         },
@@ -995,6 +1060,12 @@ async def _apply_item(
                     and getattr(execute_result, "rowcount", None) == 0
                 ):
                     _log_stale_offer_sync_ignored(record_id, operation, data, "atomic_upsert_guard_noop")
+                if (
+                    table == "offer_requests"
+                    and _offer_request_payload_needs_ordering_check(data)
+                    and getattr(execute_result, "rowcount", None) == 0
+                ):
+                    _log_stale_offer_request_sync_ignored(record_id, operation, data, "atomic_upsert_guard_noop")
             if table == "offers" and (track_new_offer or track_offer_realtime_or_terminal):
                 applied_offer_id = await _resolve_local_record_id_by_public_identity(db, table, data)
                 if applied_offer_id is None and not uses_public_identity:
