@@ -1611,6 +1611,7 @@ async def execute_webapp_trade_for_user(
     offer_id: int,
     quantity: int,
     idempotency_key: str,
+    error_details: list[str] | None = None,
 ) -> str:
     background_tasks = BackgroundTasks()
     try:
@@ -1629,8 +1630,13 @@ async def execute_webapp_trade_for_user(
             )
         await background_tasks()
     except HTTPException as exc:
-        return "rejected" if int(exc.status_code or 500) < 500 else "error"
-    except Exception:
+        status_code = int(exc.status_code or 500)
+        if status_code >= 500 and error_details is not None:
+            error_details.append(f"HTTPException {status_code}: {exc.detail}")
+        return "rejected" if status_code < 500 else "error"
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"{type(exc).__name__}: {exc}")
         return "error"
 
     if isinstance(response, JSONResponse):
@@ -1762,6 +1768,7 @@ async def execute_bot_trade_with_dispatcher(
     amount: int,
     prefix: str,
     observed_idempotency_keys: list[str] | None = None,
+    error_details: list[str] | None = None,
 ) -> str:
     callback_data = build_channel_trade_callback_data(
         offer_id=offer.id,
@@ -1787,7 +1794,9 @@ async def execute_bot_trade_with_dispatcher(
             callback_id=second_callback_id,
             channel_message_id=channel_message_id,
         )
-    except Exception:
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"{type(exc).__name__}: {exc}")
         return "error"
     finally:
         if recorder_token is not None:
@@ -1854,6 +1863,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
             attempt_index=spec.index,
         )
         observed_telegram_keys: list[str] = []
+        attempt_error_details: list[str] = []
         try:
             if surface == "webapp":
                 status_value = await execute_webapp_trade_for_user(
@@ -1861,6 +1871,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                     offer_id=offer_id,
                     quantity=request_amount,
                     idempotency_key=idempotency_key,
+                    error_details=attempt_error_details,
                 )
             else:
                 if harness is None:
@@ -1873,12 +1884,15 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                     amount=request_amount,
                     prefix=f"{prefix}{role}-",
                     observed_idempotency_keys=observed_telegram_keys,
+                    error_details=attempt_error_details,
                 )
                 if observed_telegram_keys:
                     idempotency_key = observed_telegram_keys[-1]
         except Exception as exc:
             status_value = "error"
-            detail = type(exc).__name__
+            detail = f"{type(exc).__name__}: {exc}"
+        if status_value == "error" and detail is None and attempt_error_details:
+            detail = attempt_error_details[-1]
         latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
         result = MixedLoadAttemptResult(
             index=spec.index,
