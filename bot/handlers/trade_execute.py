@@ -67,15 +67,17 @@ def _callback_offer_id(callback_data) -> int | None:
     return offer_id if offer_id > 0 else None
 
 
-async def _load_callback_offer(session, callback_data) -> Offer | None:
+async def _load_callback_offer(session, callback_data, *, lock_for_update: bool = True) -> Offer | None:
     public_id = _callback_offer_public_id(callback_data)
     if public_id:
-        stmt = select(Offer).where(Offer.offer_public_id == public_id).with_for_update()
+        stmt = select(Offer).where(Offer.offer_public_id == public_id)
     else:
         offer_id = _callback_offer_id(callback_data)
         if offer_id is None:
             return None
-        stmt = select(Offer).where(Offer.id == offer_id).with_for_update()
+        stmt = select(Offer).where(Offer.id == offer_id)
+    if lock_for_update:
+        stmt = stmt.with_for_update()
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
@@ -578,12 +580,15 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
         return
     
     async with AsyncSessionLocal() as session:
-        # اول قفل را بگیر، سپس روابط را بارگذاری کن
-        # FOR UPDATE با LEFT OUTER JOIN سازگار نیست
-        offer = await _load_callback_offer(session, callback_data)
+        offer = await _load_callback_offer(session, callback_data, lock_for_update=False)
         
+        if offer and not is_remote_home(offer.home_server):
+            # قفل فقط برای آفرهای local لازم است. برای remote-home، سرور مرجع
+            # خودش قفل authoritative را می‌گیرد و قفل mirror باعث تاخیر cross-server می‌شود.
+            offer = await _load_callback_offer(session, callback_data, lock_for_update=True)
+
         if offer:
-            # بارگذاری روابط بعد از گرفتن قفل
+            # FOR UPDATE با LEFT OUTER JOIN سازگار نیست؛ روابط جداگانه بارگذاری می‌شوند.
             await session.refresh(offer, ["user", "commodity"])
         
         if not offer:
@@ -667,13 +672,19 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                 "source_server": current_server(),
                 "idempotency_key": idempotency_key,
             }
+            offer_home_server = offer.home_server
+            remote_offer_id = offer.id
+            try:
+                await session.rollback()
+            except Exception as exc:
+                logger.debug(f"Failed to rollback local mirror transaction before remote-home trade forward: {exc}")
             configured_forward_timeout = getattr(
                 settings,
                 "trade_forward_timeout_seconds",
                 BOT_REMOTE_HOME_FORWARD_TIMEOUT_SECONDS,
             )
             status_code, body = await forward_trade_to_home_server(
-                offer.home_server,
+                offer_home_server,
                 forward_payload,
                 timeout_seconds=min(configured_forward_timeout, BOT_REMOTE_HOME_FORWARD_TIMEOUT_SECONDS),
             )
@@ -693,7 +704,7 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
                 try:
                     if callback.message and callback.message.chat.id != settings.channel_id:
                         await callback.message.edit_reply_markup(reply_markup=None)
-                        await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
+                        await remove_trade_suggestion_record(remote_offer_id, callback.message.chat.id, callback.message.message_id)
                 except Exception as exc:
                     logger.debug(f"Failed to clear remote-home suggestion buttons: {exc}")
                 try:

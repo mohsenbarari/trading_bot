@@ -21,12 +21,18 @@ class FakeExecuteResult:
 class FakeSession:
     def __init__(self, offer):
         self.offer = offer
+        self.for_update_flags = []
+        self.rollbacks = 0
 
     async def execute(self, stmt):
+        self.for_update_flags.append(getattr(stmt, "_for_update_arg", None) is not None)
         return FakeExecuteResult(self.offer)
 
     async def refresh(self, offer, attrs):
         return None
+
+    async def rollback(self):
+        self.rollbacks += 1
 
 
 class FakeSessionContext:
@@ -268,6 +274,27 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         self.assertIn("خطا", callback.answer.await_args.args[0])
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": True})
+
+    async def test_handle_channel_trade_remote_home_does_not_lock_local_mirror_before_forward(self):
+        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        session = FakeSession(make_offer())
+        callback = make_callback()
+
+        with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
+            "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(session)
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "bot.handlers.trade_execute.is_remote_home", return_value=True
+        ), patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)), patch(
+            "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=True)
+        ), patch("bot.handlers.trade_execute.forward_trade_to_home_server", new=AsyncMock(return_value=(200, {"ok": True}))) as forward_mock, patch(
+            "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
+        ), patch("bot.handlers.trade_execute.current_server", return_value="foreign"):
+            await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
+
+        self.assertEqual(session.for_update_flags, [False])
+        self.assertEqual(session.rollbacks, 1)
+        forward_mock.assert_awaited_once()
 
 
 if __name__ == "__main__":
