@@ -37,6 +37,9 @@ def active_compose_services(path: Path) -> dict[str, dict[str, object]]:
         if "TRADING_BOT_SERVICE:" in stripped:
             _, value = stripped.split("TRADING_BOT_SERVICE:", 1)
             services[current_service]["environment"]["TRADING_BOT_SERVICE"] = value.strip()
+        if "SERVER_MODE:" in stripped:
+            _, value = stripped.split("SERVER_MODE:", 1)
+            services[current_service]["environment"]["SERVER_MODE"] = value.strip()
 
     return services
 
@@ -113,6 +116,19 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("SERVER_MODE: foreign", telegram_runner)
         self.assertIn('"--role", "webapp_iran"', webapp_runner)
         self.assertIn("SERVER_MODE: iran", webapp_runner)
+
+    def test_staging_bot_profile_is_foreign_only_when_enabled(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
+        staging_services = active_compose_services(staging_compose)
+        staging_bot = staging_services["bot"]
+        staging_bot_block = compose_service_block(staging_compose, "bot")
+
+        self.assertIn("profiles:", staging_bot_block)
+        self.assertIn("- staging-bot", staging_bot_block)
+        self.assertEqual(staging_bot["environment"]["TRADING_BOT_SERVICE"], "bot")
+        self.assertEqual(staging_bot["environment"]["SERVER_MODE"], "foreign")
+        self.assertIn("run_bot.py", str(staging_bot.get("command", "")))
 
 
 if __name__ == "__main__":
