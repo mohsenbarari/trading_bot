@@ -190,6 +190,41 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(summary["surfaces"]["telegram"]["total"], 2)
         self.assertEqual(summary["surfaces"]["webapp"]["total"], 2)
 
+    def test_summarize_attempt_results_preserves_error_details(self):
+        results = [
+            worker.MixedLoadAttemptResult(
+                index=0,
+                surface="telegram",
+                status="error",
+                duration_ms=10,
+                detail="RuntimeError: remote forward failed",
+            ),
+            worker.MixedLoadAttemptResult(
+                index=1,
+                surface="webapp",
+                status="error",
+                duration_ms=20,
+                detail="RuntimeError: remote forward failed",
+            ),
+            worker.MixedLoadAttemptResult(
+                index=2,
+                surface="webapp",
+                status="error",
+                duration_ms=20,
+                detail="TimeoutError: db pool exhausted",
+            ),
+        ]
+
+        summary = worker.summarize_attempt_results(results, elapsed_seconds=1.0)
+
+        self.assertEqual(
+            summary["error_details"],
+            [
+                "RuntimeError: remote forward failed",
+                "TimeoutError: db pool exhausted",
+            ],
+        )
+
     def test_dual_role_worker_plans_split_distribution_and_share_barrier(self):
         users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 12)]
 

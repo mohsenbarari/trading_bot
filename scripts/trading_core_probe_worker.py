@@ -757,6 +757,9 @@ def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_
         "latency": summarize_samples([item.duration_ms for item in results]),
         "surfaces": by_surface,
     }
+    error_details = sorted({str(item.detail) for item in results if item.detail})
+    if error_details:
+        summary["error_details"] = error_details
     start_offsets = [
         float(item.start_offset_seconds)
         for item in results
@@ -1512,6 +1515,7 @@ async def patched_trading_boundaries():
                         edge_received_at=edge_received_at,
                         request_source_surface=str(payload.get("source_surface") or "webapp"),
                         request_source_server=str(payload.get("source_server") or current_server()),
+                        request_pre_gated=bool(payload.get("request_pre_gated")),
                     )
                 await background_tasks()
         except HTTPException as exc:
@@ -2660,6 +2664,7 @@ async def run_hot_offer_contention(
         status_value = "error"
         detail: str | None = None
         phase_details: dict[str, Any] = {}
+        attempt_error_details: list[str] = []
         try:
             with override_current_server(server_for_load_surface(spec.surface)):
                 if spec.surface == "webapp":
@@ -2673,6 +2678,7 @@ async def run_hot_offer_contention(
                             offer_id=offer_id,
                             attempt_index=spec.index,
                         ),
+                        error_details=attempt_error_details,
                         phase_details=phase_details,
                     )
                 else:
@@ -2684,12 +2690,15 @@ async def run_hot_offer_contention(
                         offer=telegram_offer_snapshot,
                         amount=amount,
                         prefix=prefix,
+                        error_details=attempt_error_details,
                         phase_details=phase_details,
                         preconfirmed=telegram_preconfirm is not None,
                     )
         except Exception as exc:
             status_value = "error"
-            detail = type(exc).__name__
+            detail = f"{type(exc).__name__}: {exc}"
+        if status_value == "error" and detail is None and attempt_error_details:
+            detail = attempt_error_details[-1]
         full_latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
         try:
             latency_ms = round(float(phase_details.get("business_latency_ms")), 3)
