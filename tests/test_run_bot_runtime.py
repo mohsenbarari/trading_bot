@@ -49,6 +49,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling = AsyncMock()
         fake_dp.update.outer_middleware = MagicMock()
         auth_middleware = object()
+        trade_gate_middleware = object()
 
         with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
             run_bot.settings, 'trading_bot_service', 'bot'
@@ -60,15 +61,19 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.RedisStorage.from_url', return_value='storage'
         ) as storage_from_url, patch('run_bot.Dispatcher', return_value=fake_dp), patch(
             'run_bot.AuthMiddleware', return_value=auth_middleware
-        ) as auth_ctor, patch('run_bot.listen_trade_suggestion_events', _listener_forever):
+        ) as auth_ctor, patch(
+            'run_bot.TradeContentionGateMiddleware', return_value=trade_gate_middleware
+        ) as gate_ctor, patch('run_bot.listen_trade_suggestion_events', _listener_forever):
             await run_bot.main()
 
         init_db.assert_awaited_once()
         setup_event_listeners.assert_called_once_with()
         storage_from_url.assert_called_once_with('redis://localhost:6379/0')
+        gate_ctor.assert_called_once_with()
         auth_ctor.assert_called_once_with(run_bot.AsyncSessionLocal)
-        self.assertEqual(fake_dp.update.outer_middleware.call_count, 2)
-        fake_dp.update.outer_middleware.assert_any_call(auth_middleware)
+        self.assertEqual(fake_dp.update.outer_middleware.call_count, 3)
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[0].args[0], trade_gate_middleware)
+        self.assertIs(fake_dp.update.outer_middleware.call_args_list[1].args[0], auth_middleware)
         self.assertEqual(fake_dp.include_router.call_count, 12)
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()

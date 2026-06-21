@@ -40,7 +40,7 @@ from api.routers import trades as trades_router
 from bot.callbacks import TextOfferActionCallback
 from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
-from bot.middlewares import AuthMiddleware
+from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.offer_parser import parse_offer_text
 from core.config import settings
@@ -49,7 +49,7 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
-from core.services.trade_contention_gate import try_acquire_trade_contention_gate
+from core.services.trade_contention_gate import TradeContentionLease, try_acquire_trade_contention_gate
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
@@ -65,10 +65,6 @@ from models.user import User, UserRole
 
 
 class TradingProbeError(RuntimeError):
-    pass
-
-
-class _RoleAttemptRejected(Exception):
     pass
 
 
@@ -1654,6 +1650,7 @@ class AiogramDispatcherHarness:
     def __init__(self) -> None:
         self.telegram = RecordingTelegramBot()
         self.dp = Dispatcher(storage=MemoryStorage())
+        self.dp.update.outer_middleware(TradeContentionGateMiddleware())
         self.dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         self.dp.update.outer_middleware(BotLoggingContextMiddleware())
         self.dp.include_router(bot_trade_create.router)
@@ -1790,16 +1787,22 @@ async def execute_webapp_trade_for_user(
     offer_public_id: str | None = None,
     quantity: int,
     idempotency_key: str,
+    contention_lease: TradeContentionLease | None = None,
     error_details: list[str] | None = None,
     phase_details: dict[str, Any] | None = None,
 ) -> str:
     background_tasks = BackgroundTasks()
     create_started = time.perf_counter()
-    lease = await try_acquire_trade_contention_gate(offer_public_id=offer_public_id, offer_id=offer_id)
+    lease = contention_lease or await try_acquire_trade_contention_gate(
+        offer_public_id=offer_public_id,
+        offer_id=offer_id,
+    )
     if not lease.acquired:
         if phase_details is not None:
             phase_details["contention_gate_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
             phase_details["exception"] = "HTTPException 409"
+            phase_details["http_status_code"] = 409
+            phase_details["http_detail"] = "contention_gate_rejected"
         return "rejected"
     try:
         async with AsyncSessionLocal() as db:
@@ -1830,6 +1833,8 @@ async def execute_webapp_trade_for_user(
         if phase_details is not None:
             phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
             phase_details["exception"] = f"HTTPException {status_code}"
+            phase_details["http_status_code"] = status_code
+            phase_details["http_detail"] = str(exc.detail)
         return "rejected" if status_code < 500 else "error"
     except Exception as exc:
         if error_details is not None:
@@ -1842,6 +1847,13 @@ async def execute_webapp_trade_for_user(
         await lease.release()
 
     if isinstance(response, JSONResponse):
+        if phase_details is not None and response.status_code >= 400:
+            try:
+                body = json.loads(response.body.decode("utf-8") or "{}")
+            except Exception:
+                body = {"detail": "invalid JSONResponse body"}
+            phase_details["json_response_status_code"] = int(response.status_code)
+            phase_details["json_response_detail"] = str(body.get("detail") or body)
         if response.status_code >= 500 and error_details is not None:
             try:
                 body = json.loads(response.body.decode("utf-8") or "{}")
@@ -2088,15 +2100,6 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         attempt_error_details: list[str] = []
         phase_details: dict[str, Any] = {}
         try:
-            gate_lease = await try_acquire_trade_contention_gate(
-                offer_public_id=offer_public_id,
-                offer_id=offer_id,
-            )
-            if not gate_lease.acquired:
-                phase_details["contention_gate"] = "rejected_before_db"
-                status_value = "rejected"
-                raise _RoleAttemptRejected()
-            phase_details["contention_gate"] = "acquired"
             if surface == "webapp":
                 status_value = await execute_webapp_trade_for_user(
                     user_id=spec.user_id,
@@ -2123,8 +2126,6 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                 )
                 if observed_telegram_keys:
                     idempotency_key = observed_telegram_keys[-1]
-        except _RoleAttemptRejected:
-            pass
         except Exception as exc:
             status_value = "error"
             detail = f"{type(exc).__name__}: {exc}"

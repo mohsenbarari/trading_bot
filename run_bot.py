@@ -21,7 +21,7 @@ from bot.handlers import (
 )
 from core.db import init_db, AsyncSessionLocal
 from core.events import setup_event_listeners
-from bot.middlewares import AuthMiddleware
+from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
@@ -79,6 +79,9 @@ async def main():
     bot = Bot(token=settings.bot_token)
     storage = RedisStorage.from_url(settings.redis_url)
     dp = Dispatcher(storage=storage)
+
+    # Hot trade callbacks must fail fast before Auth opens a DB session.
+    dp.update.outer_middleware(TradeContentionGateMiddleware())
 
     # Auth: inject user into handler data for ALL updates (must be before routers)
     auth_mw = AuthMiddleware(AsyncSessionLocal)

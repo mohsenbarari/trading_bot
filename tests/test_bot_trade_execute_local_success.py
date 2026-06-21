@@ -118,6 +118,36 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.added, [])
         self.assertIn("offers.id", session.statements[0])
 
+    async def test_handle_channel_trade_preconfirmed_local_trade_skips_double_click(self):
+        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        offer = make_offer()
+        session = FakeSession(offer)
+        callback = make_callback(chat_id=200)
+        bot = SimpleNamespace(send_message=AsyncMock())
+
+        with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
+            "bot.handlers.trade_execute.AsyncSessionLocal", return_value=FakeSessionContext(session)
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "bot.handlers.trade_execute.is_remote_home", return_value=False
+        ), patch("bot.handlers.trade_execute.validate_offer_trade_amount", return_value=(True, None, 2, [2, 3])), patch(
+            "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=False)
+        ) as double_click_mock, patch(
+            "bot.handlers.trade_execute._execute_confirmed_channel_trade_via_shared_command",
+            new=AsyncMock(),
+        ) as shared_command_mock, patch(
+            "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100, bot_username="botname")
+        ):
+            await handle_channel_trade(
+                callback,
+                SimpleNamespace(offer_id=7, amount=2),
+                user=user,
+                bot=bot,
+                trade_contention_preconfirmed=True,
+            )
+
+        double_click_mock.assert_not_awaited()
+        shared_command_mock.assert_awaited_once()
+
     async def test_public_channel_trade_callback_resolves_offer_by_public_identity(self):
         user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
         offer = make_offer()

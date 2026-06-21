@@ -543,8 +543,20 @@ async def _execute_confirmed_channel_trade_via_shared_command(
 
 
 @router.callback_query(ChannelTradeCallback.filter())
-async def handle_channel_trade(callback: types.CallbackQuery, callback_data: ChannelTradeCallback, user: Optional[User], bot: Bot):
-    await _handle_channel_trade(callback, callback_data, user, bot)
+async def handle_channel_trade(
+    callback: types.CallbackQuery,
+    callback_data: ChannelTradeCallback,
+    user: Optional[User],
+    bot: Bot,
+    trade_contention_preconfirmed: bool = False,
+):
+    await _handle_channel_trade(
+        callback,
+        callback_data,
+        user,
+        bot,
+        trade_contention_preconfirmed=trade_contention_preconfirmed,
+    )
 
 
 @router.callback_query(ChannelTradePublicCallback.filter())
@@ -553,11 +565,25 @@ async def handle_channel_trade_public(
     callback_data: ChannelTradePublicCallback,
     user: Optional[User],
     bot: Bot,
+    trade_contention_preconfirmed: bool = False,
 ):
-    await _handle_channel_trade(callback, callback_data, user, bot)
+    await _handle_channel_trade(
+        callback,
+        callback_data,
+        user,
+        bot,
+        trade_contention_preconfirmed=trade_contention_preconfirmed,
+    )
 
 
-async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, user: Optional[User], bot: Bot):
+async def _handle_channel_trade(
+    callback: types.CallbackQuery,
+    callback_data,
+    user: Optional[User],
+    bot: Bot,
+    *,
+    trade_contention_preconfirmed: bool = False,
+):
     """کلیک روی دکمه پست کانال - دابل‌کلیک برای تایید"""
     if not user:
         await callback.answer()
@@ -582,7 +608,7 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
     async with AsyncSessionLocal() as session:
         offer = await _load_callback_offer(session, callback_data, lock_for_update=False)
         
-        if offer and not is_remote_home(offer.home_server):
+        if offer and not is_remote_home(getattr(offer, "home_server", None)):
             # قفل فقط برای آفرهای local لازم است. برای remote-home، سرور مرجع
             # خودش قفل authoritative را می‌گیرد و قفل mirror باعث تاخیر cross-server می‌شود.
             offer = await _load_callback_offer(session, callback_data, lock_for_update=True)
@@ -622,8 +648,13 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
         
         # تعداد واقعی معامله
         actual_amount = trade_amount or offer.remaining_quantity or offer.quantity
-        if is_remote_home(offer.home_server):
-            is_confirmed = await check_double_click(user.id, offer_id, actual_amount, timeout=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT)
+        if is_remote_home(getattr(offer, "home_server", None)):
+            is_confirmed = bool(trade_contention_preconfirmed) or await check_double_click(
+                user.id,
+                offer_id,
+                actual_amount,
+                timeout=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
+            )
             local_available_amounts = get_available_trade_amounts(
                 quantity=offer.quantity,
                 remaining_quantity=offer.remaining_quantity or offer.quantity,
@@ -779,7 +810,12 @@ async def _handle_channel_trade(callback: types.CallbackQuery, callback_data, us
             return
         
         # بررسی دابل‌کلیک با Redis (0.5 ثانیه)
-        is_confirmed = await check_double_click(user.id, offer_id, actual_amount, timeout=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT)
+        is_confirmed = bool(trade_contention_preconfirmed) or await check_double_click(
+            user.id,
+            offer_id,
+            actual_amount,
+            timeout=PRIVATE_SUGGESTION_CONFIRM_TIMEOUT,
+        )
         
         if is_confirmed:
             await _execute_confirmed_channel_trade_via_shared_command(

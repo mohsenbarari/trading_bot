@@ -58,6 +58,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         current_user = SimpleNamespace(id=5)
         context = make_context(current_user)
         forwarded = JSONResponse(status_code=202, content={"forwarded": True})
+        lease = SimpleNamespace(release=AsyncMock())
 
         with patch(
             "api.routers.trades._forward_trade_if_remote_home",
@@ -70,11 +71,13 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 trade_data=trade_data,
                 background_tasks=background_tasks,
                 raw_request=SimpleNamespace(),
+                trade_contention_lease=lease,
                 db=FakeDB(),
                 context=context,
             )
 
         self.assertIs(result, forwarded)
+        lease.release.assert_awaited_once()
         forward_mock.assert_awaited_once()
         execute_mock.assert_not_awaited()
 
@@ -108,6 +111,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         background_tasks = BackgroundTasks()
         current_user = SimpleNamespace(id=5)
         context = make_context(current_user)
+        lease = SimpleNamespace(release=AsyncMock())
 
         with patch(
             "api.routers.trades._forward_trade_if_remote_home",
@@ -120,11 +124,13 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
                 trade_data=trade_data,
                 background_tasks=background_tasks,
                 raw_request=SimpleNamespace(),
+                trade_contention_lease=lease,
                 db=FakeDB(),
                 context=context,
             )
 
         self.assertEqual(result, {"id": 77})
+        lease.release.assert_awaited_once()
         execute_mock.assert_awaited_once()
         self.assertEqual(execute_mock.await_args.kwargs["trade_data"], trade_data)
         self.assertIs(execute_mock.await_args.kwargs["background_tasks"], background_tasks)

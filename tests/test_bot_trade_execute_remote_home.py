@@ -275,6 +275,48 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("خطا", callback.answer.await_args.args[0])
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": True})
 
+    async def test_handle_channel_trade_preconfirmed_remote_home_skips_double_click(self):
+        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        bot = SimpleNamespace(send_message=AsyncMock())
+        callback = make_callback()
+        success_payload = {
+            "trade_number": 10020,
+            "trade_type": "sell",
+            "commodity_name": "سکه",
+            "quantity": 2,
+            "price": 123000,
+            "counterparty_name": "مالک لفظ",
+        }
+
+        with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
+            "bot.handlers.trade_execute.AsyncSessionLocal",
+            return_value=FakeSessionContext(FakeSession(make_offer())),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "bot.handlers.trade_execute.is_remote_home", return_value=True
+        ), patch(
+            "bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)
+        ), patch(
+            "bot.handlers.trade_execute.check_double_click", new=AsyncMock(return_value=False)
+        ) as double_click_mock, patch(
+            "bot.handlers.trade_execute.forward_trade_to_home_server",
+            new=AsyncMock(return_value=(200, success_payload)),
+        ) as forward_mock, patch(
+            "bot.handlers.trade_execute.remove_trade_suggestion_record", new=AsyncMock()
+        ), patch(
+            "bot.handlers.trade_execute.current_server", return_value="foreign"
+        ):
+            await handle_channel_trade(
+                callback,
+                SimpleNamespace(offer_id=7, amount=2),
+                user=user,
+                bot=bot,
+                trade_contention_preconfirmed=True,
+            )
+
+        double_click_mock.assert_not_awaited()
+        forward_mock.assert_awaited_once()
+        callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
+
     async def test_handle_channel_trade_remote_home_does_not_lock_local_mirror_before_forward(self):
         user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
         bot = SimpleNamespace(send_message=AsyncMock())

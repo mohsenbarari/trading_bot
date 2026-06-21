@@ -143,6 +143,12 @@ async def _acquire_trade_contention_gate_dependency(trade_data: TradeCreate) -> 
     return lease
 
 
+async def _release_trade_contention_lease(lease: object) -> None:
+    release = getattr(lease, "release", None)
+    if callable(release):
+        await release()
+
+
 class InternalTradeExecuteRequest(BaseModel):
     """درخواست داخلی اجرای معامله روی سرور مرجع آفر"""
     offer_id: int = Field(..., gt=0)
@@ -3157,27 +3163,30 @@ async def create_trade(
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
 ):
-    edge_received_at = datetime.utcnow()
-    _ensure_accountant_market_access_allowed(context)
-    forwarded_response = await _forward_trade_if_remote_home(
-        db,
-        trade_data,
-        context,
-        edge_received_at,
-        request_source_surface=OfferRequestSourceSurface.WEBAPP,
-    )
-    if forwarded_response is not None:
-        return forwarded_response
+    try:
+        edge_received_at = datetime.utcnow()
+        _ensure_accountant_market_access_allowed(context)
+        forwarded_response = await _forward_trade_if_remote_home(
+            db,
+            trade_data,
+            context,
+            edge_received_at,
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+        )
+        if forwarded_response is not None:
+            return forwarded_response
 
-    return await _execute_trade_authoritatively(
-        trade_data=trade_data,
-        background_tasks=background_tasks,
-        db=db,
-        context=context,
-        edge_received_at=edge_received_at,
-        request_source_surface=OfferRequestSourceSurface.WEBAPP,
-        request_source_server=current_server(),
-    )
+        return await _execute_trade_authoritatively(
+            trade_data=trade_data,
+            background_tasks=background_tasks,
+            db=db,
+            context=context,
+            edge_received_at=edge_received_at,
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server=current_server(),
+        )
+    finally:
+        await _release_trade_contention_lease(trade_contention_lease)
 
 
 @router.post("/internal/execute", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
