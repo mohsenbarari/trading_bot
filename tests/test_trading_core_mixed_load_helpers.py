@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from aiogram.methods import AnswerCallbackQuery
 
@@ -8,6 +8,34 @@ from scripts import trading_core_probe_worker as worker
 
 
 class TradingCoreMixedLoadHelperTests(unittest.TestCase):
+    def test_warm_load_runner_dependencies_initializes_redis_singleton(self):
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def execute(self, *_args, **_kwargs):
+                return None
+
+        redis_client = AsyncMock()
+        redis_client.ping = AsyncMock()
+
+        async def run_probe():
+            with patch.object(worker, "AsyncSessionLocal", return_value=FakeSession()), patch.object(
+                worker, "init_redis", new=AsyncMock(return_value=redis_client)
+            ) as init_redis_mock:
+                report = await worker.warm_load_runner_dependencies(db_connections=1)
+            return report, init_redis_mock
+
+        report, init_redis_mock = asyncio.run(run_probe())
+
+        init_redis_mock.assert_awaited_once()
+        redis_client.ping.assert_awaited_once()
+        self.assertTrue(report["redis_singleton_initialized"])
+        self.assertEqual(report["db_connections"], 1)
+
     def test_build_mixed_surface_plan_preserves_ratio_and_skips_owner(self):
         users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 12)]
 

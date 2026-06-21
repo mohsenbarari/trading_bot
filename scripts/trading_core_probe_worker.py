@@ -53,7 +53,7 @@ from core.config import settings
 from core.db import AsyncSessionLocal
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus
 from core.events import setup_event_listeners
-from core.redis import pool
+from core.redis import init_redis, pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.trade_contention_gate import TradeContentionLease, try_acquire_trade_contention_gate
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
@@ -292,15 +292,13 @@ async def warm_load_runner_dependencies(*, db_connections: int) -> dict[str, Any
     db_warm_ms = round((time.perf_counter() - started) * 1000.0, 3)
 
     redis_started = time.perf_counter()
-    redis_client = redis.Redis(connection_pool=pool)
-    try:
-        await redis_client.ping()
-    finally:
-        await redis_client.aclose()
+    redis_client = await init_redis()
+    await redis_client.ping()
     redis_warm_ms = round((time.perf_counter() - redis_started) * 1000.0, 3)
     return {
         "db_connections": safe_connections,
         "db_warm_ms": db_warm_ms,
+        "redis_singleton_initialized": True,
         "redis_warm_ms": redis_warm_ms,
     }
 
