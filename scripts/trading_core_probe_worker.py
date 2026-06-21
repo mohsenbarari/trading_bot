@@ -3838,7 +3838,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
     prepare_parser.add_argument("--retail", action="store_true")
     prepare_parser.add_argument("--lot-sizes", default="")
-    prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=8.0)
+    prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=20.0)
 
     plan_parser = subparsers.add_parser("write-dual-role-plan")
     add_dual_role_plan_arguments(plan_parser)

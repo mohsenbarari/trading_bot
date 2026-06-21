@@ -22,7 +22,7 @@ PRICE="${PRICE:-100000}"
 OFFER_TYPE="${OFFER_TYPE:-sell}"
 HOT_OFFER_IS_WHOLESALE="${HOT_OFFER_IS_WHOLESALE:-1}"
 HOT_OFFER_LOT_SIZES="${HOT_OFFER_LOT_SIZES:-}"
-BARRIER_DELAY_SECONDS="${BARRIER_DELAY_SECONDS:-8}"
+BARRIER_DELAY_SECONDS="${BARRIER_DELAY_SECONDS:-20}"
 DB_POOL_SIZE="${DB_POOL_SIZE:-20}"
 DB_MAX_OVERFLOW="${DB_MAX_OVERFLOW:-20}"
 KEEP_DATA="${KEEP_DATA:-0}"
@@ -59,6 +59,7 @@ Options:
   --lot-sizes VALUE          Retail lot sizes, comma/space separated. Default: $HOT_OFFER_LOT_SIZES
   --db-pool-size N           Load-runner DB pool size. Default: $DB_POOL_SIZE
   --db-max-overflow N        Load-runner DB max overflow. Default: $DB_MAX_OVERFLOW
+  --barrier-delay-seconds N  Delay between plan creation and the shared start barrier. Default: $BARRIER_DELAY_SECONDS
   --keep-data                Do not clean synthetic staging DB rows after the run.
   -h, --help                 Show this help.
 EOF
@@ -108,6 +109,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --db-max-overflow)
             DB_MAX_OVERFLOW="${2:?missing --db-max-overflow value}"
+            shift 2
+            ;;
+        --barrier-delay-seconds)
+            BARRIER_DELAY_SECONDS="${2:?missing --barrier-delay-seconds value}"
             shift 2
             ;;
         --keep-data)
