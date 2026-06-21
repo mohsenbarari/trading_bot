@@ -84,6 +84,18 @@ def _extract_callback_query(event: TelegramObject) -> CallbackQuery | None:
     return None
 
 
+def _is_channel_callback(callback: CallbackQuery) -> bool:
+    configured_channel_id = getattr(settings, "channel_id", None)
+    if configured_channel_id is None:
+        return False
+    message = getattr(callback, "message", None)
+    chat = getattr(message, "chat", None)
+    try:
+        return int(getattr(chat, "id", 0)) == int(configured_channel_id)
+    except (TypeError, ValueError):
+        return False
+
+
 def _confirmation_key(*, telegram_id: int, parsed: ParsedTelegramTradeCallback) -> str:
     digest = hashlib.sha256(f"{telegram_id}:{parsed.raw_data}".encode("utf-8")).hexdigest()[:32]
     return f"{TELEGRAM_TRADE_CONFIRM_PREFIX}:{digest}"
@@ -132,7 +144,7 @@ class TradeContentionGateMiddleware(BaseMiddleware):
         parsed = parse_telegram_trade_callback_data(getattr(callback, "data", None) if callback else None)
         telegram_user = getattr(callback, "from_user", None) if callback else None
         telegram_id = _positive_int(getattr(telegram_user, "id", None))
-        if callback is None or parsed is None or telegram_id is None:
+        if callback is None or parsed is None or telegram_id is None or not _is_channel_callback(callback):
             return await handler(event, data)
         message_chat_id = getattr(getattr(getattr(callback, "message", None), "chat", None), "id", None)
         if not settings.channel_id or int(message_chat_id or 0) != int(settings.channel_id):

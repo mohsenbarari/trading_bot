@@ -6,10 +6,17 @@ from bot.middlewares import trade_contention_gate as middleware
 
 
 class FakeCallbackQuery:
-    def __init__(self, *, data: str, chat_id: int = -100123, telegram_id: int = 9001):
+    def __init__(
+        self,
+        *,
+        data: str,
+        chat_id: int = -100123,
+        chat_type: str = "channel",
+        telegram_id: int = 9001,
+    ):
         self.data = data
         self.from_user = SimpleNamespace(id=telegram_id)
-        self.message = SimpleNamespace(chat=SimpleNamespace(id=chat_id))
+        self.message = SimpleNamespace(chat=SimpleNamespace(id=chat_id, type=chat_type))
         self.answer = AsyncMock()
 
 
@@ -110,7 +117,7 @@ class TradeContentionGateMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_not_awaited()
 
     async def test_private_suggestion_callbacks_bypass_pre_auth_gate(self):
-        callback = FakeCallbackQuery(data="ct2:ofr_public_1:20", chat_id=555)
+        callback = FakeCallbackQuery(data="ct2:ofr_public_1:20", chat_id=555, chat_type="private")
         handler = AsyncMock(return_value="private")
         gate = middleware.TradeContentionGateMiddleware()
         data = {}
