@@ -1,7 +1,9 @@
 import importlib.util
+import asyncio
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +75,23 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
 
         self.assertEqual(surfaces.count("telegram"), 600)
         self.assertEqual(surfaces.count("webapp"), 400)
+
+    def test_reset_scenario_user_runtime_state_dedupes_users(self):
+        users = [
+            matrix_runner.worker.LoadUserRef(user_id=9, telegram_id=9009),
+            matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=9007),
+            matrix_runner.worker.LoadUserRef(user_id=9, telegram_id=9010),
+        ]
+        cleanup = AsyncMock(return_value=3)
+
+        async def run_probe():
+            with patch.object(matrix_runner.worker, "cleanup_redis_for_user_ids", cleanup):
+                return await matrix_runner.reset_scenario_user_runtime_state(users)
+
+        deleted = asyncio.run(run_probe())
+
+        self.assertEqual(deleted, 3)
+        cleanup.assert_awaited_once_with([7, 9])
 
     def test_filter_scenarios_by_family_and_id(self):
         scenarios = matrix_runner.build_comprehensive_scenarios()

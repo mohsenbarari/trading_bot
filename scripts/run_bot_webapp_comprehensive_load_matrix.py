@@ -198,6 +198,12 @@ def scenario_attempt_count(min_attempts: int) -> int:
     return max(int(min_attempts), DEFAULT_MIN_ATTEMPTS_PER_SCENARIO)
 
 
+async def reset_scenario_user_runtime_state(users: list[worker.LoadUserRef]) -> int:
+    """Clear synthetic-user Redis runtime keys so scenarios stay isolated."""
+    user_ids = sorted({int(user.user_id) for user in users})
+    return await worker.cleanup_redis_for_user_ids(user_ids)
+
+
 def summarize_outcomes(outcomes: list[AttemptOutcome], elapsed_seconds: float) -> dict[str, Any]:
     samples = [item.latency_ms for item in outcomes]
     summary = {
@@ -484,6 +490,7 @@ async def run_scenario(
     attempt_error_details: list[str] = []
 
     try:
+        await reset_scenario_user_runtime_state(users)
         if scenario.family == "create_offer":
             harness = worker.AiogramDispatcherHarness()
 
