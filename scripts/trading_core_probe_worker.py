@@ -253,6 +253,32 @@ async def timed_ms(fn: Callable[[], Awaitable[Any]]) -> tuple[Any, float]:
     return result, round((time.perf_counter() - started) * 1000.0, 3)
 
 
+async def warm_load_runner_dependencies(*, db_connections: int) -> dict[str, Any]:
+    """Warm local dependency pools so timed attempts measure the trade path."""
+    safe_connections = min(max(int(db_connections or 1), 1), 32)
+
+    async def warm_db_connection() -> None:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+
+    started = time.perf_counter()
+    await asyncio.gather(*[warm_db_connection() for _ in range(safe_connections)])
+    db_warm_ms = round((time.perf_counter() - started) * 1000.0, 3)
+
+    redis_started = time.perf_counter()
+    redis_client = redis.Redis(connection_pool=pool)
+    try:
+        await redis_client.ping()
+    finally:
+        await redis_client.close()
+    redis_warm_ms = round((time.perf_counter() - redis_started) * 1000.0, 3)
+    return {
+        "db_connections": safe_connections,
+        "db_warm_ms": db_warm_ms,
+        "redis_warm_ms": redis_warm_ms,
+    }
+
+
 def assert_race_acceptance(
     *,
     winner_count: int,
@@ -1745,8 +1771,8 @@ async def execute_webapp_trade_for_user(
     phase_details: dict[str, Any] | None = None,
 ) -> str:
     background_tasks = BackgroundTasks()
+    create_started = time.perf_counter()
     try:
-        create_started = time.perf_counter()
         async with AsyncSessionLocal() as db:
             user = await load_user(db, user_id)
             response = await trades_router.create_trade(
@@ -1771,12 +1797,14 @@ async def execute_webapp_trade_for_user(
         if status_code >= 500 and error_details is not None:
             error_details.append(f"HTTPException {status_code}: {exc.detail}")
         if phase_details is not None:
+            phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
             phase_details["exception"] = f"HTTPException {status_code}"
         return "rejected" if status_code < 500 else "error"
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
         if phase_details is not None:
+            phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
             phase_details["exception"] = type(exc).__name__
         return "error"
 
@@ -1999,6 +2027,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
     barrier_epoch = float(plan["barrier_epoch"])
     attempts = role_plan_attempt_specs(plan)
     harness = AiogramDispatcherHarness() if role == "telegram_foreign" else None
+    warmup = await warm_load_runner_dependencies(db_connections=min(len(attempts), 24))
 
     start_delay = barrier_epoch - time.time()
     if start_delay > 0:
@@ -2100,6 +2129,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         "finished_epoch": round(finished_epoch, 6),
         "started_monotonic": round(started_monotonic, 6),
         "finished_monotonic": round(finished_monotonic, 6),
+        "warmup": warmup,
         "summary": summarize_attempt_results(result_items, elapsed_seconds=finished_monotonic - started_monotonic),
         "attempts": attempt_artifacts,
     }
