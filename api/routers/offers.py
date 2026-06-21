@@ -3,7 +3,7 @@
 API Router for Offer Management - Web App Integration
 """
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
@@ -56,6 +56,10 @@ from core.services.offer_expiry_service import (
     apply_offer_expiry,
     expire_offer_authoritatively,
     expire_offers_authoritatively,
+)
+from core.services.offer_expiry_limits import (
+    OfferManualExpireLimitError,
+    enforce_manual_offer_expire_limits,
 )
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
@@ -1572,7 +1576,12 @@ async def expire_offer_internal(
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal offer expiry source")
 
-    offer = await db.get(Offer, internal_data.offer_id, options=[selectinload(Offer.commodity)])
+    offer = await db.get(
+        Offer,
+        internal_data.offer_id,
+        options=[selectinload(Offer.commodity)],
+        with_for_update=True,
+    )
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
     if getattr(offer, "id", None) is None:
@@ -1589,6 +1598,15 @@ async def expire_offer_internal(
 
     if offer.status != OfferStatus.ACTIVE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+    if internal_data.expire_reason == OfferExpiryReason.MANUAL:
+        try:
+            await enforce_manual_offer_expire_limits(
+                db,
+                owner_user_id=internal_data.owner_user_id,
+            )
+        except OfferManualExpireLimitError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
     try:
         await expire_offer_authoritatively(
@@ -1630,36 +1648,6 @@ async def expire_offer(
     owner_user = context.owner_user
     ts = get_trading_settings()
 
-    from bot.utils.redis_helpers import track_daily_expire, track_expire_rate
-
-    rate_count = await track_expire_rate(owner_user.id, window_seconds=60)
-    if rate_count > ts.offer_expire_rate_per_minute:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"حداکثر {ts.offer_expire_rate_per_minute} منقضی در دقیقه مجاز است"
-        )
-
-    start_of_day = datetime.combine(date.today(), datetime.min.time())
-    total_offers_today = await db.scalar(
-        select(func.count(Offer.id)).where(
-            Offer.user_id == owner_user.id,
-            Offer.created_at >= start_of_day
-        )
-    ) or 0
-
-    daily_data = await track_daily_expire(owner_user.id, total_offers_today)
-    threshold = ts.offer_expire_daily_limit_after_threshold
-    if daily_data["count"] >= threshold:
-        max_allowed = total_offers_today // 3
-        if daily_data["count"] >= max_allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    f"شما امروز {daily_data['count']} لفظ منقضی کرده‌اید. "
-                    f"برای منقضی کردن بیشتر، باید لفظ‌های جدید ثبت کنید."
-                )
-            )
-
     offer = await db.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
     
     if not offer:
@@ -1680,6 +1668,29 @@ async def expire_offer(
     )
     if forwarded_response is not None:
         return forwarded_response
+
+    offer = await db.get(
+        Offer,
+        offer_id,
+        options=[selectinload(Offer.commodity)],
+        with_for_update=True,
+        populate_existing=True,
+    )
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+    if offer.user_id != owner_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
+    if offer.status != OfferStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+    try:
+        await enforce_manual_offer_expire_limits(
+            db,
+            owner_user_id=owner_user.id,
+            trading_settings=ts,
+        )
+    except OfferManualExpireLimitError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
     try:
         await expire_offer_authoritatively(

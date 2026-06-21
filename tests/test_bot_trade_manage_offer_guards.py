@@ -13,13 +13,13 @@ class FakeSession:
     async def scalar(self, stmt):
         return 1
 
-    async def get(self, model, offer_id):
+    async def get(self, model, offer_id, *args, **kwargs):
         return self.offer
 
 
 class FakeSessionFactory:
-    def __init__(self, first_session, second_session):
-        self.sessions = [first_session, second_session]
+    def __init__(self, *sessions):
+        self.sessions = list(sessions)
 
     def __call__(self):
         session = self.sessions.pop(0)
@@ -49,10 +49,10 @@ class BotTradeManageOfferGuardTests(unittest.IsolatedAsyncioTestCase):
             (SimpleNamespace(user_id=4, status=OfferStatus.COMPLETED), "دیگر فعال نیست"),
         ]:
             callback = make_callback()
-            factory = FakeSessionFactory(FakeSession(), FakeSession(offer))
+            factory = FakeSessionFactory(FakeSession(offer))
             with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
-                "bot.handlers.trade_manage.track_expire_rate", new=AsyncMock(return_value=1)
-            ), patch("bot.handlers.trade_manage.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
+                "bot.utils.redis_helpers.track_expire_rate", new=AsyncMock(return_value=1)
+            ), patch("bot.utils.redis_helpers.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
                 "bot.handlers.trade_manage.AsyncSessionLocal", new=factory
             ):
                 await handle_expire_offer(callback, SimpleNamespace(offer_id=5), user=user, bot=SimpleNamespace())

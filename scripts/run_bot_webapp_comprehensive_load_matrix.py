@@ -434,6 +434,7 @@ async def finalize_offer_for_terminal_state(
                 )
                 if status != "success":
                     raise worker.TradingProbeError(f"terminal setup trade failed with status={status}")
+            await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.COMPLETED.value)
             return offer_id
         if terminal_state == "manual_expired":
             status = await expire_attempt(
@@ -446,11 +447,13 @@ async def finalize_offer_for_terminal_state(
             )
             if status != "success":
                 raise worker.TradingProbeError(f"terminal manual expiry setup failed with status={status}")
+            await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.EXPIRED.value)
             return offer_id
         if terminal_state == "time_expired":
             await worker.age_offer_for_time_expiry(offer_id=offer_id, age_minutes=10)
             target_server = SERVER_FOREIGN if origin == "bot" else SERVER_IRAN
             await worker.run_offer_expiry_cycle_for_server(target_server)
+            await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.EXPIRED.value)
             return offer_id
     finally:
         await harness.close()

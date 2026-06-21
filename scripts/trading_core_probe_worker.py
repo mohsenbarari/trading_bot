@@ -1552,10 +1552,10 @@ async def patched_trading_boundaries():
                     offer_public_id = str(payload.get("offer_public_id") or "").strip()
                     if offer_public_id:
                         offer = (
-                            await db.execute(select(Offer).where(Offer.offer_public_id == offer_public_id))
+                            await db.execute(select(Offer).where(Offer.offer_public_id == offer_public_id).with_for_update())
                         ).scalar_one_or_none()
                     if offer is None and payload.get("offer_id"):
-                        offer = await db.get(Offer, int(payload["offer_id"]))
+                        offer = await db.get(Offer, int(payload["offer_id"]), with_for_update=True)
                     if offer is None:
                         return 404, {"detail": "لفظ یافت نشد."}
 
@@ -1567,6 +1567,18 @@ async def patched_trading_boundaries():
                     actor = await db.get(User, int(actor_user_id))
                     if not actor or actor.is_deleted:
                         return 404, {"detail": "کاربر اجراکننده یافت نشد"}
+
+                    if getattr(offer, "status", None) != OfferStatus.ACTIVE:
+                        return 409, {"detail": "این لفظ دیگر فعال نیست"}
+
+                    if payload.get("expire_reason") == offers_router.OfferExpiryReason.MANUAL:
+                        try:
+                            await offers_router.enforce_manual_offer_expire_limits(
+                                db,
+                                owner_user_id=int(owner.id),
+                            )
+                        except offers_router.OfferManualExpireLimitError as exc:
+                            return int(exc.status_code), {"detail": exc.detail}
 
                     await offers_router.expire_offer_authoritatively(
                         db,

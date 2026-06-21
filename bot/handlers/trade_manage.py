@@ -2,8 +2,6 @@ import logging
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
-from datetime import date, datetime, timedelta
-from sqlalchemy import select, func
 
 from models.user import User
 from models.offer import Offer, OfferStatus
@@ -19,8 +17,8 @@ from core.services.offer_expiry_service import (
     OfferNotAuthoritativeError,
     expire_offer_authoritatively,
 )
+from core.services.offer_expiry_limits import OfferManualExpireLimitError, enforce_manual_offer_expire_limits
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
-from bot.utils.redis_helpers import track_expire_rate, track_daily_expire
 from bot.callbacks import ExpireOfferCallback
 
 logger = logging.getLogger(__name__)
@@ -34,39 +32,6 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
         return
     
     ts = get_trading_settings()
-    today = date.today()
-    
-    # بررسی محدودیت در دقیقه (با Redis)
-    rate_count = await track_expire_rate(user.id, window_seconds=60)
-    if rate_count > ts.offer_expire_rate_per_minute:
-        await callback.answer(f"❌ حداکثر {ts.offer_expire_rate_per_minute} منقضی در دقیقه مجاز است")
-        return
-    
-    # شمارش کل لفظ‌های امروز
-    async with AsyncSessionLocal() as session:
-        start_of_day = datetime.combine(today, datetime.min.time())
-        
-        total_offers_today = await session.scalar(
-            select(func.count(Offer.id)).where(
-                Offer.user_id == user.id,
-                Offer.created_at >= start_of_day
-            )
-        ) or 0
-    
-    # دریافت آمار روزانه (با Redis)
-    daily_data = await track_daily_expire(user.id, total_offers_today)
-    
-    # اگر از آستانه رد شده و 1/3 را استفاده کرده
-    threshold = ts.offer_expire_daily_limit_after_threshold
-    if daily_data["count"] >= threshold:
-        max_allowed = total_offers_today // 3
-        if daily_data["count"] >= max_allowed:
-            await callback.answer(
-                f"❌ شما امروز {daily_data['count']} لفظ منقضی کرده‌اید.\n"
-                f"برای منقضی کردن بیشتر، باید لفظ‌های جدید ثبت کنید."
-            )
-            return
-    
     # پارس callback_data
     offer_id = callback_data.offer_id
     
@@ -103,6 +68,25 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 await callback.answer(f"❌ {detail or 'خطا در منقضی کردن لفظ'}")
                 return
         else:
+            offer = await session.get(Offer, offer_id, with_for_update=True)
+            if not offer:
+                await callback.answer("❌ لفظ یافت نشد")
+                return
+            if offer.user_id != user.id:
+                await callback.answer("❌ شما مالک این لفظ نیستید")
+                return
+            if offer.status != OfferStatus.ACTIVE:
+                await callback.answer("❌ این لفظ دیگر فعال نیست")
+                return
+            try:
+                await enforce_manual_offer_expire_limits(
+                    session,
+                    owner_user_id=user.id,
+                    trading_settings=ts,
+                )
+            except OfferManualExpireLimitError as exc:
+                await callback.answer(f"❌ {exc.detail}")
+                return
             try:
                 await expire_offer_authoritatively(
                     session,

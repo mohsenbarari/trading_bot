@@ -55,8 +55,9 @@ class FakeDB:
 
 class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
     async def test_expire_offer_rejects_rate_limited_or_daily_limit_requests(self):
-        db = FakeDB()
         current_user = SimpleNamespace(id=5)
+        offer = SimpleNamespace(id=1, user_id=5, status=OfferStatus.ACTIVE, home_server="iran", channel_message_id=None)
+        db = FakeDB(get_result=offer)
         settings = SimpleNamespace(
             offer_expire_rate_per_minute=2,
             offer_expire_daily_limit_after_threshold=3,
@@ -65,20 +66,24 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
             "bot.utils.redis_helpers.track_expire_rate",
             new=AsyncMock(return_value=3),
-        ):
+        ), patch("api.routers.offers.is_remote_home", return_value=False):
             with self.assertRaises(HTTPException) as exc_info:
                 await expire_offer(offer_id=1, db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 429)
         self.assertEqual(exc_info.exception.detail, "حداکثر 2 منقضی در دقیقه مجاز است")
 
-        db = FakeDB(scalar_result=9)
+        offer = SimpleNamespace(id=1, user_id=5, status=OfferStatus.ACTIVE, home_server="iran", channel_message_id=None)
+        db = FakeDB(scalar_result=9, get_result=offer)
         with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
             "bot.utils.redis_helpers.track_expire_rate",
             new=AsyncMock(return_value=1),
         ), patch(
             "bot.utils.redis_helpers.track_daily_expire",
             new=AsyncMock(return_value={"count": 3}),
-        ), patch("api.routers.offers.date", wraps=date):
+        ), patch("core.services.offer_expiry_limits.date", wraps=date), patch(
+            "api.routers.offers.is_remote_home",
+            return_value=False,
+        ):
             with self.assertRaises(HTTPException) as exc_info:
                 await expire_offer(offer_id=1, db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
@@ -295,7 +300,13 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
         ) as publish_mock, patch(
             "core.cache.set_active_offer_count",
             new=AsyncMock(),
-        ) as set_count_mock:
+        ) as set_count_mock, patch(
+            "bot.utils.redis_helpers.track_expire_rate",
+            new=AsyncMock(return_value=1),
+        ), patch(
+            "bot.utils.redis_helpers.track_daily_expire",
+            new=AsyncMock(return_value={"count": 0}),
+        ):
             result = await expire_offer_internal(payload, request, db=db)
 
         self.assertEqual(result, {"expired": True, "offer_id": 21})

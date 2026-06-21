@@ -14,7 +14,7 @@ class FakeSession:
     async def scalar(self, stmt):
         return 1
 
-    async def get(self, model, offer_id):
+    async def get(self, model, offer_id, *args, **kwargs):
         return self.offer
 
     async def commit(self):
@@ -22,8 +22,8 @@ class FakeSession:
 
 
 class FakeSessionFactory:
-    def __init__(self, first_session, second_session):
-        self.sessions = [first_session, second_session]
+    def __init__(self, *sessions):
+        self.sessions = list(sessions)
 
     def __call__(self):
         session = self.sessions.pop(0)
@@ -53,14 +53,14 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
             channel_message_id=77,
         )
         final_session = FakeSession(offer)
-        factory = FakeSessionFactory(FakeSession(), final_session)
+        factory = FakeSessionFactory(final_session)
         callback = make_callback()
         bot = SimpleNamespace()
         settings_obj = SimpleNamespace(channel_id=-100, offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
 
         with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
-            "bot.handlers.trade_manage.track_expire_rate", new=AsyncMock(return_value=1)
-        ), patch("bot.handlers.trade_manage.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
+            "bot.utils.redis_helpers.track_expire_rate", new=AsyncMock(return_value=1)
+        ), patch("bot.utils.redis_helpers.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
             "bot.handlers.trade_manage.AsyncSessionLocal", new=factory
         ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
             "core.services.offer_expiry_service.current_server",
@@ -82,14 +82,14 @@ class BotTradeManageSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_expire_offer_logs_channel_markup_failures_and_keeps_success_flow(self):
         offer = SimpleNamespace(id=5, user_id=4, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=77)
         final_session = FakeSession(offer)
-        factory = FakeSessionFactory(FakeSession(), final_session)
+        factory = FakeSessionFactory(final_session)
         callback = make_callback()
         bot = SimpleNamespace()
         settings_obj = SimpleNamespace(channel_id=-100, offer_expire_rate_per_minute=5, offer_expire_daily_limit_after_threshold=99)
 
         with patch("bot.handlers.trade_manage.get_trading_settings", return_value=settings_obj), patch(
-            "bot.handlers.trade_manage.track_expire_rate", new=AsyncMock(return_value=1)
-        ), patch("bot.handlers.trade_manage.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
+            "bot.utils.redis_helpers.track_expire_rate", new=AsyncMock(return_value=1)
+        ), patch("bot.utils.redis_helpers.track_daily_expire", new=AsyncMock(return_value={"count": 0})), patch(
             "bot.handlers.trade_manage.AsyncSessionLocal", new=factory
         ), patch("bot.handlers.trade_manage.current_server", return_value="foreign"), patch(
             "core.services.offer_expiry_service.current_server",
