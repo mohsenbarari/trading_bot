@@ -31,6 +31,8 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         trading_settings._fallback_cache = None
         trading_settings._fallback_timestamp = 0
+        trading_settings._async_cache_lock = None
+        trading_settings._async_cache_lock_loop = None
         trading_settings._sync_redis_client = None
         trading_settings._sync_engine = None
 
@@ -200,12 +202,36 @@ class CoreTradingSettingsRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(cached, trading_settings.TradingSettings)
         load_async.assert_not_awaited()
 
+        trading_settings._fallback_cache = None
+        trading_settings._fallback_timestamp = 0
+
         fresh_settings = trading_settings.TradingSettings(offer_max_quantity=70)
         with patch('core.trading_settings._get_from_redis_cache', AsyncMock(return_value=None)), patch(
             'core.trading_settings.load_trading_settings_async', AsyncMock(return_value=fresh_settings)
         ) as load_async, patch('core.trading_settings._set_redis_cache', AsyncMock()) as set_redis_cache:
             cached = await trading_settings.get_trading_settings_async()
         self.assertIs(cached, fresh_settings)
+        load_async.assert_awaited_once()
+        set_redis_cache.assert_awaited_once_with(fresh_settings)
+
+    async def test_async_getter_collapses_concurrent_db_cache_misses(self):
+        fresh_settings = trading_settings.TradingSettings(offer_max_quantity=77)
+        load_count = 0
+
+        async def slow_load():
+            nonlocal load_count
+            load_count += 1
+            await asyncio.sleep(0.01)
+            return fresh_settings
+
+        with patch('core.trading_settings._get_from_redis_cache', AsyncMock(return_value=None)) as redis_cache, patch(
+            'core.trading_settings.load_trading_settings_async', AsyncMock(side_effect=slow_load)
+        ) as load_async, patch('core.trading_settings._set_redis_cache', AsyncMock()) as set_redis_cache:
+            loaded = await asyncio.gather(*[trading_settings.get_trading_settings_async() for _ in range(8)])
+
+        self.assertEqual(loaded, [fresh_settings] * 8)
+        self.assertEqual(load_count, 1)
+        self.assertEqual(redis_cache.await_count, 1)
         load_async.assert_awaited_once()
         set_redis_cache.assert_awaited_once_with(fresh_settings)
 

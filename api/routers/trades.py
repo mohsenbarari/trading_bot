@@ -423,7 +423,7 @@ async def _commit_trade_execution(db: AsyncSession) -> None:
                 level="warning",
                 action="trade_commit",
                 result="slow",
-                duration_ms=round(duration_ms, 2),
+                total_duration_ms=round(duration_ms, 2),
             )
 
 

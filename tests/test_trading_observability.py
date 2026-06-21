@@ -99,6 +99,23 @@ class TradingObservabilityTests(unittest.TestCase):
         self.assertIn('result="failure"', body)
         self.assertNotIn("RequestError", body)
 
+    def test_trade_commit_slow_context_accepts_duration_without_raw_payload(self):
+        logger = Mock()
+
+        extra = log_trading_event(
+            logger,
+            "trade_commit.slow",
+            level="warning",
+            action="trade_commit",
+            result="slow",
+            total_duration_ms=1234.567,
+        )
+
+        logger.warning.assert_called_once_with("trade_commit.slow", extra=extra)
+        self.assertEqual(extra["action"], "trade_commit")
+        self.assertEqual(extra["result"], "slow")
+        self.assertEqual(extra["total_duration_ms"], 1234.57)
+
 
 if __name__ == "__main__":
     unittest.main()

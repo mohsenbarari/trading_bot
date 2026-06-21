@@ -18,6 +18,7 @@ _ALLOWED_ACTIONS = {
     "trade_idempotent_replay",
     "trade_forward",
     "trade_internal_execute",
+    "trade_commit",
     "trading_side_effect",
 }
 
@@ -30,6 +31,7 @@ _ALLOWED_RESULTS = {
     "conflict",
     "error",
     "noop",
+    "slow",
     "timing",
 }
 

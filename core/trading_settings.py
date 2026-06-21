@@ -95,8 +95,29 @@ class TradingSettings(BaseModel):
 # این کش فقط زمانی استفاده می‌شود که Redis در دسترس نباشد
 _fallback_cache: Optional[TradingSettings] = None
 _fallback_timestamp: float = 0
+_async_cache_lock: asyncio.Lock | None = None
+_async_cache_lock_loop: asyncio.AbstractEventLoop | None = None
 _sync_redis_client: Any = None
 _sync_engine: Any = None
+
+
+def _is_local_settings_cache_fresh(current_time: float) -> bool:
+    return _fallback_cache is not None and (current_time - _fallback_timestamp) < CACHE_TTL_SECONDS
+
+
+def _store_local_settings_cache(settings: TradingSettings, *, timestamp: float | None = None) -> None:
+    global _fallback_cache, _fallback_timestamp
+    _fallback_cache = settings
+    _fallback_timestamp = time.time() if timestamp is None else timestamp
+
+
+def _get_async_cache_lock() -> asyncio.Lock:
+    global _async_cache_lock, _async_cache_lock_loop
+    loop = asyncio.get_running_loop()
+    if _async_cache_lock is None or _async_cache_lock_loop is not loop:
+        _async_cache_lock = asyncio.Lock()
+        _async_cache_lock_loop = loop
+    return _async_cache_lock
 
 
 def _load_from_json() -> dict:
@@ -322,18 +343,29 @@ async def get_trading_settings_async() -> TradingSettings:
     
     این تابع برای استفاده در context های async است.
     """
-    # اول از کش Redis
-    cached = await _get_from_redis_cache()
-    if cached is not None:
-        return cached
-    
-    # بارگذاری از DB
-    settings = await load_trading_settings_async()
-    
-    # ذخیره در کش Redis
-    await _set_redis_cache(settings)
-    
-    return settings
+    current_time = time.time()
+    if _is_local_settings_cache_fresh(current_time):
+        return _fallback_cache  # type: ignore[return-value]
+
+    async with _get_async_cache_lock():
+        current_time = time.time()
+        if _is_local_settings_cache_fresh(current_time):
+            return _fallback_cache  # type: ignore[return-value]
+
+        # اول از کش Redis
+        cached = await _get_from_redis_cache()
+        if cached is not None:
+            _store_local_settings_cache(cached, timestamp=current_time)
+            return cached
+
+        # بارگذاری از DB
+        settings = await load_trading_settings_async()
+
+        # ذخیره در کش Redis
+        await _set_redis_cache(settings)
+        _store_local_settings_cache(settings)
+
+        return settings
 
 
 def get_trading_settings() -> TradingSettings:
@@ -353,8 +385,7 @@ def get_trading_settings() -> TradingSettings:
     try:
         shared_cached = _get_from_redis_cache_sync()
         if shared_cached is not None:
-            _fallback_cache = shared_cached
-            _fallback_timestamp = current_time
+            _store_local_settings_cache(shared_cached, timestamp=current_time)
             return shared_cached
     except Exception as e:
         logger.debug(f"Failed to load settings from shared Redis cache: {e}")
@@ -365,8 +396,7 @@ def get_trading_settings() -> TradingSettings:
     
     # بارگذاری مجدد (sync fallback)
     try:
-        _fallback_cache = load_trading_settings()
-        _fallback_timestamp = current_time
+        _store_local_settings_cache(load_trading_settings(), timestamp=current_time)
     except Exception:
         if _fallback_cache is None:
             _fallback_cache = TradingSettings()
@@ -376,24 +406,18 @@ def get_trading_settings() -> TradingSettings:
 
 async def refresh_settings_cache_async() -> None:
     """بروزرسانی فوری کش تنظیمات (async)"""
-    global _fallback_cache, _fallback_timestamp
-    
     settings = await load_trading_settings_async()
     
     # بروزرسانی Redis cache
     await _set_redis_cache(settings)
     
     # بروزرسانی fallback cache
-    _fallback_cache = settings
-    _fallback_timestamp = time.time()
+    _store_local_settings_cache(settings)
 
 
 def refresh_settings_cache() -> None:
     """بروزرسانی فوری کش تنظیمات (sync fallback)"""
-    global _fallback_cache, _fallback_timestamp
-    
-    _fallback_cache = load_trading_settings()
-    _fallback_timestamp = time.time()
+    _store_local_settings_cache(load_trading_settings())
 
 
 async def save_trading_settings_async(settings_dict: dict) -> bool:
