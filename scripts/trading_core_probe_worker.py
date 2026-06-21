@@ -1426,9 +1426,14 @@ async def noop_update_channel_buttons(*_args: Any, **_kwargs: Any) -> bool:
     return True
 
 
+def noop_schedule_web_push(*_args: Any, **_kwargs: Any) -> None:
+    return None
+
+
 @asynccontextmanager
 async def patched_trading_boundaries():
     import core.services.trade_service as trade_service
+    import core.web_push as web_push
 
     original = {
         "offers_evaluate": offers_router.evaluate_current_market_schedule,
@@ -1446,6 +1451,8 @@ async def patched_trading_boundaries():
         "realtime_publish": realtime_router.publish_event,
         "realtime_publish_user": realtime_router.publish_user_event,
         "bot_market_open": bot_trade_create._bot_market_is_open,
+        "schedule_market_offer_web_push": web_push.schedule_market_offer_web_push,
+        "schedule_notification_web_push": web_push.schedule_notification_web_push,
         "validate_competitive_price": trade_service.validate_competitive_price,
         "detect_offer_price_warning": trade_service.detect_offer_price_warning,
     }
@@ -1595,6 +1602,8 @@ async def patched_trading_boundaries():
     realtime_router.publish_event = noop_async
     realtime_router.publish_user_event = noop_async
     bot_trade_create._bot_market_is_open = lambda: asyncio.sleep(0, result=True)
+    web_push.schedule_market_offer_web_push = noop_schedule_web_push
+    web_push.schedule_notification_web_push = noop_schedule_web_push
     trade_service.validate_competitive_price = always_valid_price
     trade_service.detect_offer_price_warning = no_price_warning
     try:
@@ -1615,6 +1624,8 @@ async def patched_trading_boundaries():
         realtime_router.publish_event = original["realtime_publish"]
         realtime_router.publish_user_event = original["realtime_publish_user"]
         bot_trade_create._bot_market_is_open = original["bot_market_open"]
+        web_push.schedule_market_offer_web_push = original["schedule_market_offer_web_push"]
+        web_push.schedule_notification_web_push = original["schedule_notification_web_push"]
         trade_service.validate_competitive_price = original["validate_competitive_price"]
         trade_service.detect_offer_price_warning = original["detect_offer_price_warning"]
 

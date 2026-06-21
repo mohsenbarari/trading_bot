@@ -225,6 +225,20 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             ],
         )
 
+    def test_patched_trading_boundaries_disables_web_push_schedulers(self):
+        async def run_probe():
+            import core.web_push as web_push
+
+            original_market = web_push.schedule_market_offer_web_push
+            original_notification = web_push.schedule_notification_web_push
+            async with worker.patched_trading_boundaries():
+                self.assertIs(web_push.schedule_market_offer_web_push, worker.noop_schedule_web_push)
+                self.assertIs(web_push.schedule_notification_web_push, worker.noop_schedule_web_push)
+            self.assertIs(web_push.schedule_market_offer_web_push, original_market)
+            self.assertIs(web_push.schedule_notification_web_push, original_notification)
+
+        asyncio.run(run_probe())
+
     def test_dual_role_worker_plans_split_distribution_and_share_barrier(self):
         users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 12)]
 
