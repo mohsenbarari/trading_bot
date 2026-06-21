@@ -186,6 +186,24 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         with self.assertRaises(worker.TradingProbeError):
             worker.merge_role_result_artifacts([result])
 
+    def test_role_attempt_idempotency_key_stays_within_trade_column_limit(self):
+        first = worker.build_role_attempt_idempotency_key(
+            prefix="P7_STAGE_TRADE_NONCONC_DIAG_20260621_091252_CLM-004_" * 2,
+            role="telegram_foreign",
+            offer_id=123456789,
+            attempt_index=9999,
+        )
+        second = worker.build_role_attempt_idempotency_key(
+            prefix="P7_STAGE_TRADE_NONCONC_DIAG_20260621_091252_CLM-004_" * 2,
+            role="telegram_foreign",
+            offer_id=123456789,
+            attempt_index=10000,
+        )
+
+        self.assertLessEqual(len(first), 64)
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.startswith("load:telegram-for:123456789:9999:"))
+
     def test_hot_offer_scenario_specs_cover_step_11b3_matrix(self):
         scenarios = worker.build_hot_offer_scenario_specs(
             total_requests=1000,

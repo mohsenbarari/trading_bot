@@ -317,7 +317,12 @@ async def execute_trade_attempt(
             offer_id=offer_id,
             offer_public_id=getattr(offer, "offer_public_id", None),
             quantity=amount,
-            idempotency_key=f"{prefix}web-trade-{offer_id}-{index}",
+            idempotency_key=worker.build_role_attempt_idempotency_key(
+                prefix=prefix,
+                role="webapp",
+                offer_id=offer_id,
+                attempt_index=index,
+            ),
             error_details=error_details,
         )
 

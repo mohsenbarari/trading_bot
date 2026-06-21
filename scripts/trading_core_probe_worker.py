@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextvars
+import hashlib
 import json
 import math
 import sys
@@ -558,7 +559,10 @@ def build_role_attempt_idempotency_key(
     offer_id: int,
     attempt_index: int,
 ) -> str:
-    return f"{prefix}{role}:{offer_id}:{attempt_index}"
+    raw = f"{prefix}|{role}|{offer_id}|{attempt_index}"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    role_token = "".join(ch if ch.isalnum() else "-" for ch in role.lower())[:12] or "role"
+    return f"load:{role_token}:{int(offer_id)}:{int(attempt_index)}:{digest}"
 
 
 def _validate_role_result_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
