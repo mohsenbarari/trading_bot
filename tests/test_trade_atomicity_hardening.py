@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 from fastapi import HTTPException
 
 from api.routers.trades import (
-    TRADE_NUMBER_ALLOCATION_LOCK_ID,
+    TRADE_NUMBER_SEQUENCE_NAME,
     TradeAtomicityError,
     TradeIdempotencyConflictError,
     _allocate_next_trade_number,
@@ -15,7 +15,6 @@ from api.routers.trades import (
     _try_lock_trade_offer_execution,
     _validate_idempotent_trade_replay,
 )
-from core.services.chat_room_service import MANDATORY_CHANNEL_LOCK_KEY
 from models.offer import OfferStatus
 
 
@@ -55,17 +54,16 @@ def make_user(user_id: int):
 
 
 class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
-    def test_trade_number_lock_does_not_share_mandatory_channel_lock_key(self):
-        self.assertNotEqual(TRADE_NUMBER_ALLOCATION_LOCK_ID, MANDATORY_CHANNEL_LOCK_KEY)
-
-    async def test_allocate_next_trade_number_takes_postgresql_advisory_lock(self):
+    async def test_allocate_next_trade_number_uses_postgresql_sequence(self):
         db = FakeDB(dialect_name="postgresql", scalar_result=10010)
 
         next_trade_number = await _allocate_next_trade_number(db)
 
-        self.assertEqual(next_trade_number, 10011)
-        db.execute.assert_awaited_once()
+        self.assertEqual(next_trade_number, 10010)
+        db.execute.assert_not_awaited()
         db.scalar.assert_awaited_once()
+        statement = db.scalar.await_args.args[0]
+        self.assertIn(f"nextval('{TRADE_NUMBER_SEQUENCE_NAME}')", str(statement))
 
     async def test_allocate_next_trade_number_skips_advisory_lock_outside_postgresql(self):
         db = FakeDB(dialect_name="sqlite", scalar_result=None)
