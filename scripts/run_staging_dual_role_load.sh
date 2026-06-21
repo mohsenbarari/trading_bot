@@ -20,6 +20,8 @@ HOT_OFFER_QUANTITY="${HOT_OFFER_QUANTITY:-5}"
 EXPECTED_WINNER_COUNT="${EXPECTED_WINNER_COUNT:-1}"
 PRICE="${PRICE:-100000}"
 OFFER_TYPE="${OFFER_TYPE:-sell}"
+HOT_OFFER_IS_WHOLESALE="${HOT_OFFER_IS_WHOLESALE:-1}"
+HOT_OFFER_LOT_SIZES="${HOT_OFFER_LOT_SIZES:-}"
 BARRIER_DELAY_SECONDS="${BARRIER_DELAY_SECONDS:-8}"
 DB_POOL_SIZE="${DB_POOL_SIZE:-20}"
 DB_MAX_OVERFLOW="${DB_MAX_OVERFLOW:-20}"
@@ -53,6 +55,8 @@ Options:
   --requests N               Hot-offer request count. Default: $HOT_OFFER_REQUESTS
   --target-rps N             Target business request RPS. Default: $TARGET_RPS
   --telegram-ratio N         Telegram request ratio. Default: $TELEGRAM_RATIO
+  --retail                   Create a retail hot offer instead of a wholesale offer.
+  --lot-sizes VALUE          Retail lot sizes, comma/space separated. Default: $HOT_OFFER_LOT_SIZES
   --db-pool-size N           Load-runner DB pool size. Default: $DB_POOL_SIZE
   --db-max-overflow N        Load-runner DB max overflow. Default: $DB_MAX_OVERFLOW
   --keep-data                Do not clean synthetic staging DB rows after the run.
@@ -90,6 +94,14 @@ while [[ $# -gt 0 ]]; do
             TELEGRAM_RATIO="${2:?missing --telegram-ratio value}"
             shift 2
             ;;
+        --retail)
+            HOT_OFFER_IS_WHOLESALE=0
+            shift
+            ;;
+        --lot-sizes)
+            HOT_OFFER_LOT_SIZES="${2:?missing --lot-sizes value}"
+            shift 2
+            ;;
         --db-pool-size)
             DB_POOL_SIZE="${2:?missing --db-pool-size value}"
             shift 2
@@ -116,6 +128,14 @@ case "$OFFER_ORIGIN" in
     webapp|bot) ;;
     *) die "--offer-origin must be webapp or bot" ;;
 esac
+
+prepare_offer_shape_args=()
+if [[ "$HOT_OFFER_IS_WHOLESALE" == "0" || "$HOT_OFFER_IS_WHOLESALE" == "false" || "$HOT_OFFER_IS_WHOLESALE" == "False" ]]; then
+    prepare_offer_shape_args+=(--retail)
+fi
+if [[ -n "$HOT_OFFER_LOT_SIZES" ]]; then
+    prepare_offer_shape_args+=(--lot-sizes "$HOT_OFFER_LOT_SIZES")
+fi
 
 [[ -f "$ENV_FILE" ]] || die "missing $ENV_FILE; run scripts/deploy_staging.sh ensure-env first"
 [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
@@ -183,6 +203,7 @@ run_load_service "$prepare_service" \
     --expected-winner-count "$EXPECTED_WINNER_COUNT" \
     --price "$PRICE" \
     --offer-type "$OFFER_TYPE" \
+    "${prepare_offer_shape_args[@]}" \
     --barrier-delay-seconds "$BARRIER_DELAY_SECONDS" \
     >"$ARTIFACT_DIR/prepare.stdout.log" \
     2>"$ARTIFACT_DIR/prepare.stderr.log"

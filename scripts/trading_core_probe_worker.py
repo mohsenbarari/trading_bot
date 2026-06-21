@@ -216,6 +216,23 @@ def print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=json_safe))
 
 
+def parse_lot_sizes_argument(value: str | None) -> tuple[int, ...]:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ()
+    normalized = raw_value.replace(",", " ")
+    lots: list[int] = []
+    for part in normalized.split():
+        try:
+            lot = int(part)
+        except ValueError as exc:
+            raise TradingProbeError(f"invalid lot size value: {part}") from exc
+        if lot <= 0:
+            raise TradingProbeError(f"lot sizes must be positive, got {lot}")
+        lots.append(lot)
+    return tuple(lots)
+
+
 def percentile(samples: list[float], p: float) -> float | None:
     if not samples:
         return None
@@ -2965,6 +2982,8 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     offer_origin = str(args.offer_origin)
     run_id = _dual_role_run_id(prefix, getattr(args, "run_id", None))
     topology = "single-db staging role-worker smoke"
+    is_wholesale = not bool(args.retail)
+    lot_sizes = parse_lot_sizes_argument(args.lot_sizes)
 
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=args.user_count)
@@ -2980,6 +2999,8 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
                     quantity=args.hot_offer_quantity,
                     price=args.price,
                     offer_type=args.offer_type,
+                    is_wholesale=is_wholesale,
+                    lot_sizes=lot_sizes,
                 )
             finally:
                 await harness.close()
@@ -2992,6 +3013,8 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
                 offer_type=args.offer_type,
                 quantity=args.hot_offer_quantity,
                 price=args.price,
+                is_wholesale=is_wholesale,
+                lot_sizes=lot_sizes,
             )
 
     offer = await load_offer_snapshot(offer_id)
@@ -3025,6 +3048,8 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         telegram_ratio=args.telegram_ratio,
         target_rps=args.target_rps,
         hot_offer_quantity=args.hot_offer_quantity,
+        hot_offer_is_wholesale=is_wholesale,
+        hot_offer_lot_sizes=lot_sizes,
         request_amount=args.request_amount,
         expected_winner_count=args.expected_winner_count,
         plan_result=plan_result,
@@ -3222,6 +3247,8 @@ def build_dual_role_prepare_artifact(
     telegram_ratio: float,
     target_rps: float,
     hot_offer_quantity: int,
+    hot_offer_is_wholesale: bool,
+    hot_offer_lot_sizes: tuple[int, ...] | list[int],
     request_amount: int,
     expected_winner_count: int,
     plan_result: Mapping[str, Any],
@@ -3240,6 +3267,8 @@ def build_dual_role_prepare_artifact(
             "telegram_ratio": float(telegram_ratio),
             "target_rps": float(target_rps),
             "hot_offer_quantity": int(hot_offer_quantity),
+            "hot_offer_is_wholesale": bool(hot_offer_is_wholesale),
+            "hot_offer_lot_sizes": [int(item) for item in hot_offer_lot_sizes],
             "request_amount": int(request_amount),
             "expected_winner_count": int(expected_winner_count),
         },
@@ -3451,6 +3480,8 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--expected-winner-count", type=int, default=1)
     prepare_parser.add_argument("--price", type=int, default=100000)
     prepare_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
+    prepare_parser.add_argument("--retail", action="store_true")
+    prepare_parser.add_argument("--lot-sizes", default="")
     prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=8.0)
 
     plan_parser = subparsers.add_parser("write-dual-role-plan")
