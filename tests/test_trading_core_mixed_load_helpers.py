@@ -193,6 +193,37 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         }:
             self.assertIn(key, first_attempt)
 
+    def test_role_result_merge_uses_attempt_window_not_worker_start_skew(self):
+        users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 12)]
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-3b",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id="offer-public-42",
+            total_requests=10,
+            telegram_ratio=0.6,
+            target_rps=100.0,
+            amount=1,
+            barrier_epoch=1234.5,
+        )
+        telegram_result = worker.build_dry_role_result_artifact(plans["telegram_foreign"], started_epoch=2000.0)
+        webapp_result = worker.build_dry_role_result_artifact(plans["webapp_iran"], started_epoch=2100.0)
+
+        for offset, attempt in enumerate(telegram_result["attempts"]):
+            attempt["monotonic_timestamp"] = 5000.0 + offset * 0.01
+            attempt["latency_ms"] = 10.0
+        for offset, attempt in enumerate(webapp_result["attempts"]):
+            attempt["monotonic_timestamp"] = 5000.005 + offset * 0.01
+            attempt["latency_ms"] = 10.0
+
+        merged = worker.merge_role_result_artifacts([telegram_result, webapp_result])
+
+        self.assertLess(merged["summary"]["elapsed_seconds"], 0.1)
+        self.assertGreater(merged["summary"]["business_request_rps"], 100.0)
+        self.assertEqual(merged["role_start_skew"]["observed_skew_seconds"], 100.0)
+
     def test_role_result_merge_rejects_missing_required_attempt_fields(self):
         users = [worker.LoadUserRef(user_id=1, telegram_id=9001), worker.LoadUserRef(user_id=2, telegram_id=9002)]
         plans = worker.build_dual_role_worker_plans(

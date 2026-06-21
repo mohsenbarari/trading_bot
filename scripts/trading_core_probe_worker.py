@@ -632,6 +632,24 @@ def assert_role_result_start_skew(
     }
 
 
+def _merged_attempt_elapsed_seconds(attempts: list[dict[str, Any]]) -> float | None:
+    if not attempts:
+        return None
+    starts: list[float] = []
+    finishes: list[float] = []
+    for attempt in attempts:
+        try:
+            started = float(attempt["monotonic_timestamp"])
+            duration_seconds = max(float(attempt["latency_ms"]), 0.0) / 1000.0
+        except (KeyError, TypeError, ValueError):
+            continue
+        starts.append(started)
+        finishes.append(started + duration_seconds)
+    if not starts or not finishes:
+        return None
+    return max(finishes) - min(starts)
+
+
 def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dict[str, Any]:
     if not result_payloads:
         raise TradingProbeError("at least one role result artifact is required")
@@ -670,8 +688,10 @@ def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dic
                 )
             )
 
-    elapsed_seconds = max(finished_epochs) - min(started_epochs)
     attempts.sort(key=lambda item: (float(item["monotonic_timestamp"]), int(item["index"])))
+    elapsed_seconds = _merged_attempt_elapsed_seconds(attempts)
+    if elapsed_seconds is None:
+        elapsed_seconds = max(finished_epochs) - min(started_epochs)
     return {
         "schema_version": DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
         "run_id": run_id,
