@@ -2008,7 +2008,9 @@ async def execute_webapp_trade_for_user(
     )
     if not lease.acquired:
         if phase_details is not None:
-            phase_details["contention_gate_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["contention_gate_ms"] = business_latency_ms
             phase_details["exception"] = "HTTPException 409"
             phase_details["http_status_code"] = 409
             phase_details["http_detail"] = "contention_gate_rejected"
@@ -2030,7 +2032,9 @@ async def execute_webapp_trade_for_user(
                 context=owner_context(user),
             )
         if phase_details is not None:
-            phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["create_trade_ms"] = business_latency_ms
         background_started = time.perf_counter()
         await background_tasks()
         if phase_details is not None:
@@ -2040,7 +2044,9 @@ async def execute_webapp_trade_for_user(
         if status_code >= 500 and error_details is not None:
             error_details.append(f"HTTPException {status_code}: {exc.detail}")
         if phase_details is not None:
-            phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["create_trade_ms"] = business_latency_ms
             phase_details["exception"] = f"HTTPException {status_code}"
             phase_details["http_status_code"] = status_code
             phase_details["http_detail"] = str(exc.detail)
@@ -2049,7 +2055,9 @@ async def execute_webapp_trade_for_user(
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
         if phase_details is not None:
-            phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["create_trade_ms"] = business_latency_ms
             phase_details["exception"] = type(exc).__name__
         return "error"
     finally:
@@ -2277,7 +2285,9 @@ async def execute_bot_trade_with_dispatcher(
         )
         telegram_update_count += 1
         if phase_details is not None:
-            phase_details["second_callback_ms"] = round((time.perf_counter() - second_started) * 1000.0, 3)
+            business_latency_ms = round((time.perf_counter() - second_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["second_callback_ms"] = business_latency_ms
             phase_details["second_answer_text"] = str((answer or {}).get("text") or "")
             phase_details["second_answer_alert"] = (answer or {}).get("show_alert")
             phase_details["telegram_update_count"] = telegram_update_count
@@ -2437,7 +2447,11 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
             detail = f"{type(exc).__name__}: {exc}"
         if status_value == "error" and detail is None and attempt_error_details:
             detail = attempt_error_details[-1]
-        latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
+        full_latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
+        try:
+            latency_ms = round(float(phase_details.get("business_latency_ms")), 3)
+        except (TypeError, ValueError):
+            latency_ms = full_latency_ms
         telegram_update_count = int(phase_details.get("telegram_update_count") or 0)
         result = MixedLoadAttemptResult(
             index=spec.index,
@@ -2460,6 +2474,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
             "idempotency_key_observed": bool(observed_telegram_keys) if surface == "telegram" else True,
             "outcome": status_value,
             "latency_ms": latency_ms,
+            "full_latency_ms": full_latency_ms,
             "detail": detail,
             "phase_details": phase_details,
             "telegram_update_count": telegram_update_count,
