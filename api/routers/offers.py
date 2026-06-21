@@ -63,6 +63,7 @@ from core.services.offer_expiry_limits import (
     OfferManualExpireLimitError,
     enforce_manual_offer_expire_limits,
 )
+from core.services.offer_expiry_gate import try_acquire_offer_expiry_gate
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
@@ -1675,88 +1676,94 @@ async def expire_offer(
     owner_user = context.owner_user
     ts = get_trading_settings()
 
-    offer = await db.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
-    
-    if not offer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
-    
-    if offer.user_id != owner_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
-    
-    if offer.status != OfferStatus.ACTIVE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
-
-    forwarded_response = await _forward_offer_expiry_if_remote_home(
-        offer,
-        owner_user_id=owner_user.id,
-        actor_user_id=getattr(context.actor_user, "id", owner_user.id),
-        source_surface=OfferExpirySourceSurface.WEBAPP,
-        expire_reason=OfferExpiryReason.MANUAL,
-    )
-    if forwarded_response is not None:
-        return forwarded_response
-
-    _expunge_if_supported(db, offer)
+    lease = await try_acquire_offer_expiry_gate(offer_id=offer_id)
+    if not lease.acquired:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=OFFER_EXPIRY_LOCK_BUSY_DETAIL)
     try:
-        offer = await db.get(
-            Offer,
-            offer_id,
-            options=[selectinload(Offer.commodity)],
-            with_for_update={"nowait": True},
-            populate_existing=True,
-        )
-    except StaleDataError:
-        await _rollback_if_supported(db)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
-    except (OperationalError, DBAPIError) as exc:
-        if is_offer_expiry_lock_busy(exc):
-            await _raise_offer_expiry_lock_busy(db)
-        raise
-    if not offer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
-    if offer.user_id != owner_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
-    if offer.status != OfferStatus.ACTIVE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+        offer = await db.get(Offer, offer_id, options=[selectinload(Offer.commodity)])
 
-    try:
-        await enforce_manual_offer_expire_limits(
-            db,
+        if not offer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+
+        if offer.user_id != owner_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
+
+        if offer.status != OfferStatus.ACTIVE:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+        forwarded_response = await _forward_offer_expiry_if_remote_home(
+            offer,
             owner_user_id=owner_user.id,
-            trading_settings=ts,
+            actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+            source_surface=OfferExpirySourceSurface.WEBAPP,
+            expire_reason=OfferExpiryReason.MANUAL,
         )
-    except OfferManualExpireLimitError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+        if forwarded_response is not None:
+            return forwarded_response
 
-    try:
-        await expire_offer_authoritatively(
+        _expunge_if_supported(db, offer)
+        try:
+            offer = await db.get(
+                Offer,
+                offer_id,
+                options=[selectinload(Offer.commodity)],
+                with_for_update={"nowait": True},
+                populate_existing=True,
+            )
+        except StaleDataError:
+            await _rollback_if_supported(db)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+        except (OperationalError, DBAPIError) as exc:
+            if is_offer_expiry_lock_busy(exc):
+                await _raise_offer_expiry_lock_busy(db)
+            raise
+        if not offer:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+        if offer.user_id != owner_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="شما مالک این لفظ نیستید.")
+        if offer.status != OfferStatus.ACTIVE:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+        try:
+            await enforce_manual_offer_expire_limits(
+                db,
+                owner_user_id=owner_user.id,
+                trading_settings=ts,
+            )
+        except OfferManualExpireLimitError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+        try:
+            await expire_offer_authoritatively(
+                db,
+                offer,
+                OfferExpiryCommand(
+                    reason=OfferExpiryReason.MANUAL,
+                    source_surface=OfferExpirySourceSurface.WEBAPP,
+                    source_server=current_server(),
+                    expired_by_user_id=owner_user.id,
+                    expired_by_actor_user_id=getattr(context.actor_user, "id", owner_user.id),
+                ),
+            )
+        except OfferNotAuthoritativeError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"این لفظ باید روی سرور {exc.home_server} منقضی شود.")
+        except OfferAlreadyInactiveError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+        except StaleDataError:
+            await _rollback_if_supported(db)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+
+        await _expire_offer_side_effects(
             db,
             offer,
-            OfferExpiryCommand(
-                reason=OfferExpiryReason.MANUAL,
-                source_surface=OfferExpirySourceSurface.WEBAPP,
-                source_server=current_server(),
-                expired_by_user_id=owner_user.id,
-                expired_by_actor_user_id=getattr(context.actor_user, "id", owner_user.id),
-            ),
+            realtime_reason="manual_expire",
+            channel_reason="manual_expire",
+            channel_timeout=10,
         )
-    except OfferNotAuthoritativeError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"این لفظ باید روی سرور {exc.home_server} منقضی شود.")
-    except OfferAlreadyInactiveError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
-    except StaleDataError:
-        await _rollback_if_supported(db)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
 
-    await _expire_offer_side_effects(
-        db,
-        offer,
-        realtime_reason="manual_expire",
-        channel_reason="manual_expire",
-        channel_timeout=10,
-    )
-    
-    return None
+        return None
+    finally:
+        await lease.release()
 
 
 @router.post("/cancel-all", status_code=status.HTTP_200_OK)
