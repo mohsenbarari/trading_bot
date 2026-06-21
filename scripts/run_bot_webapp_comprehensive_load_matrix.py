@@ -534,9 +534,11 @@ async def run_scenario(
                 target_rps=target_rps,
                 amount=shape.request_amount,
                 expected_winner_count=shape.expected_winner_count,
+                check=False,
             )
             summary = dict(report["summary"])
             extra = {"offer_id": offer_id, "persistence": report["persistence"]}
+            correctness_failures.extend(str(item) for item in report.get("correctness_failures") or [])
 
         elif scenario.family == "trade_non_concurrent":
             harness = worker.AiogramDispatcherHarness()

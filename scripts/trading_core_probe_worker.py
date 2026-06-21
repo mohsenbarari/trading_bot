@@ -2616,6 +2616,7 @@ async def run_hot_offer_contention(
     target_rps: float,
     amount: int,
     expected_winner_count: int,
+    check: bool = True,
 ) -> dict[str, Any]:
     if target_rps <= 0:
         raise TradingProbeError("target_rps must be positive")
@@ -2645,7 +2646,12 @@ async def run_hot_offer_contention(
                     user_id=spec.user_id,
                     offer_id=offer_id,
                     quantity=amount,
-                    idempotency_key=f"{prefix}web-{offer_id}-{spec.index}",
+                    idempotency_key=build_role_attempt_idempotency_key(
+                        prefix=prefix,
+                        role="webapp",
+                        offer_id=offer_id,
+                        attempt_index=spec.index,
+                    ),
                 )
             else:
                 offer = await load_offer_snapshot(offer_id)
@@ -2677,19 +2683,25 @@ async def run_hot_offer_contention(
     persistence = await inspect_hot_offer_persistence(offer_id)
 
     summary = summarize_attempt_results(results, elapsed_seconds=elapsed)
-    assert_hot_offer_contention_acceptance(
-        persisted_trade_count=persistence.persisted_trade_count,
-        response_success_count=int(summary["success"]),
-        error_count=int(summary["error"]),
-        remaining_quantity=persistence.remaining_quantity,
-        status=persistence.offer_status,
-        expected_winner_count=expected_winner_count,
-        original_quantity=persistence.original_quantity,
-        completed_trade_quantity=persistence.completed_trade_quantity,
-        completed_ledger_count=persistence.completed_ledger_count,
-        trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
-        failed_internal_ledger_count=persistence.failed_internal_ledger_count,
-    )
+    correctness_failures: list[str] = []
+    try:
+        assert_hot_offer_contention_acceptance(
+            persisted_trade_count=persistence.persisted_trade_count,
+            response_success_count=int(summary["success"]),
+            error_count=int(summary["error"]),
+            remaining_quantity=persistence.remaining_quantity,
+            status=persistence.offer_status,
+            expected_winner_count=expected_winner_count,
+            original_quantity=persistence.original_quantity,
+            completed_trade_quantity=persistence.completed_trade_quantity,
+            completed_ledger_count=persistence.completed_ledger_count,
+            trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
+            failed_internal_ledger_count=persistence.failed_internal_ledger_count,
+        )
+    except TradingProbeError as exc:
+        correctness_failures.append(str(exc))
+        if check:
+            raise
     return {
         "offer_id": offer_id,
         "owner_user_id": owner_user_id,
@@ -2698,6 +2710,7 @@ async def run_hot_offer_contention(
         "offer_remaining_quantity": persistence.remaining_quantity,
         "offer_status": persistence.offer_status,
         "persistence": asdict(persistence),
+        "correctness_failures": correctness_failures,
         "summary": summary,
     }
 
