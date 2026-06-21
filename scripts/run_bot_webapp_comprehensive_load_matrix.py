@@ -537,7 +537,11 @@ async def run_scenario(
                 check=False,
             )
             summary = dict(report["summary"])
-            extra = {"offer_id": offer_id, "persistence": report["persistence"]}
+            extra = {
+                "offer_id": offer_id,
+                "persistence": report["persistence"],
+                "telegram_preconfirm": report.get("telegram_preconfirm"),
+            }
             correctness_failures.extend(str(item) for item in report.get("correctness_failures") or [])
 
         elif scenario.family == "trade_non_concurrent":

@@ -356,6 +356,15 @@ def build_mixed_surface_plan(
     return plan
 
 
+def server_for_load_surface(surface: str) -> str:
+    normalized = str(surface or "").strip().lower()
+    if normalized == "telegram":
+        return SERVER_FOREIGN
+    if normalized == "webapp":
+        return SERVER_IRAN
+    raise TradingProbeError(f"unsupported load surface: {surface}")
+
+
 def synthetic_load_user_refs(
     *,
     user_count: int,
@@ -2632,11 +2641,12 @@ async def run_hot_offer_contention(
     telegram_offer_snapshot = await load_offer_snapshot(offer_id) if telegram_specs else None
     telegram_preconfirm = None
     if telegram_specs and telegram_offer_snapshot is not None:
-        telegram_preconfirm = await preconfirm_bot_trade_callbacks(
-            attempts=telegram_specs,
-            offer=telegram_offer_snapshot,
-            amount=amount,
-        )
+        with override_current_server(SERVER_FOREIGN):
+            telegram_preconfirm = await preconfirm_bot_trade_callbacks(
+                attempts=telegram_specs,
+                offer=telegram_offer_snapshot,
+                amount=amount,
+            )
     started = time.perf_counter()
 
     async def _attempt(spec: MixedLoadAttemptSpec) -> MixedLoadAttemptResult:
@@ -2651,31 +2661,32 @@ async def run_hot_offer_contention(
         detail: str | None = None
         phase_details: dict[str, Any] = {}
         try:
-            if spec.surface == "webapp":
-                status_value = await execute_webapp_trade_for_user(
-                    user_id=spec.user_id,
-                    offer_id=offer_id,
-                    quantity=amount,
-                    idempotency_key=build_role_attempt_idempotency_key(
-                        prefix=prefix,
-                        role="webapp",
+            with override_current_server(server_for_load_surface(spec.surface)):
+                if spec.surface == "webapp":
+                    status_value = await execute_webapp_trade_for_user(
+                        user_id=spec.user_id,
                         offer_id=offer_id,
-                        attempt_index=spec.index,
-                    ),
-                    phase_details=phase_details,
-                )
-            else:
-                if telegram_offer_snapshot is None:
-                    raise TradingProbeError("telegram hot-offer contention requires an offer snapshot")
-                status_value = await execute_bot_trade_with_dispatcher(
-                    harness=harness,
-                    spec=spec,
-                    offer=telegram_offer_snapshot,
-                    amount=amount,
-                    prefix=prefix,
-                    phase_details=phase_details,
-                    preconfirmed=telegram_preconfirm is not None,
-                )
+                        quantity=amount,
+                        idempotency_key=build_role_attempt_idempotency_key(
+                            prefix=prefix,
+                            role="webapp",
+                            offer_id=offer_id,
+                            attempt_index=spec.index,
+                        ),
+                        phase_details=phase_details,
+                    )
+                else:
+                    if telegram_offer_snapshot is None:
+                        raise TradingProbeError("telegram hot-offer contention requires an offer snapshot")
+                    status_value = await execute_bot_trade_with_dispatcher(
+                        harness=harness,
+                        spec=spec,
+                        offer=telegram_offer_snapshot,
+                        amount=amount,
+                        prefix=prefix,
+                        phase_details=phase_details,
+                        preconfirmed=telegram_preconfirm is not None,
+                    )
         except Exception as exc:
             status_value = "error"
             detail = type(exc).__name__

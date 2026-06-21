@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from aiogram.methods import AnswerCallbackQuery
@@ -50,6 +51,88 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in plan if item.surface == "telegram"), 12)
         self.assertEqual(sum(1 for item in plan if item.surface == "webapp"), 8)
         self.assertNotIn(1, {item.user_id for item in plan})
+
+    def test_load_surface_server_mapping_matches_deployment_policy(self):
+        self.assertEqual(worker.server_for_load_surface("telegram"), worker.SERVER_FOREIGN)
+        self.assertEqual(worker.server_for_load_surface("webapp"), worker.SERVER_IRAN)
+        with self.assertRaises(worker.TradingProbeError):
+            worker.server_for_load_surface("messenger")
+
+    def test_hot_offer_contention_runs_surfaces_with_architecture_server_roles(self):
+        users = [
+            worker.LoadUserRef(user_id=1, telegram_id=9001),
+            worker.LoadUserRef(user_id=2, telegram_id=9002),
+            worker.LoadUserRef(user_id=3, telegram_id=9003),
+        ]
+        plan = [
+            worker.MixedLoadAttemptSpec(index=0, surface="telegram", user_id=2, telegram_id=9002),
+            worker.MixedLoadAttemptSpec(index=1, surface="webapp", user_id=3, telegram_id=9003),
+        ]
+        observed_servers = []
+
+        class DummyHarness:
+            async def close(self):
+                return None
+
+        async def fake_load_offer_snapshot(_offer_id):
+            return SimpleNamespace(id=42, offer_public_id="ofr_42")
+
+        async def fake_preconfirm(**_kwargs):
+            observed_servers.append(("preconfirm", worker.current_server()))
+            return {"attempt_count": 1}
+
+        async def fake_bot_trade(**_kwargs):
+            observed_servers.append(("telegram", worker.current_server()))
+            return "rejected"
+
+        async def fake_webapp_trade(**_kwargs):
+            observed_servers.append(("webapp", worker.current_server()))
+            return "rejected"
+
+        async def fake_persistence(_offer_id):
+            return worker.HotOfferPersistenceSnapshot(
+                offer_id=42,
+                original_quantity=5,
+                remaining_quantity=5,
+                offer_status="active",
+                persisted_trade_count=0,
+                completed_trade_quantity=0,
+                completed_ledger_count=0,
+                trades_without_completed_ledger_count=0,
+                failed_internal_ledger_count=0,
+                duplicate_replay_ledger_count=0,
+            )
+
+        async def run_probe():
+            with patch.object(worker, "AiogramDispatcherHarness", DummyHarness), patch.object(
+                worker, "build_mixed_surface_plan", return_value=plan
+            ), patch.object(worker, "load_offer_snapshot", new=fake_load_offer_snapshot), patch.object(
+                worker, "preconfirm_bot_trade_callbacks", new=fake_preconfirm
+            ), patch.object(
+                worker, "execute_bot_trade_with_dispatcher", new=fake_bot_trade
+            ), patch.object(
+                worker, "execute_webapp_trade_for_user", new=fake_webapp_trade
+            ), patch.object(
+                worker, "inspect_hot_offer_persistence", new=fake_persistence
+            ):
+                await worker.run_hot_offer_contention(
+                    prefix="probe-",
+                    offer_id=42,
+                    owner_user_id=1,
+                    users=users,
+                    total_requests=2,
+                    telegram_ratio=0.5,
+                    target_rps=1000.0,
+                    amount=5,
+                    expected_winner_count=1,
+                    check=False,
+                )
+
+        asyncio.run(run_probe())
+
+        self.assertIn(("preconfirm", worker.SERVER_FOREIGN), observed_servers)
+        self.assertIn(("telegram", worker.SERVER_FOREIGN), observed_servers)
+        self.assertIn(("webapp", worker.SERVER_IRAN), observed_servers)
 
     def test_build_mixed_surface_plan_rejects_invalid_inputs(self):
         users = [worker.LoadUserRef(user_id=1, telegram_id=9001)]
