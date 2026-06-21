@@ -76,6 +76,7 @@ class AttemptOutcome:
     status: str
     latency_ms: float
     detail: str | None = None
+    start_offset_seconds: float | None = None
 
 
 SHAPES: dict[str, OfferShape] = {
@@ -85,14 +86,16 @@ SHAPES: dict[str, OfferShape] = {
         request_amount=5,
         expected_winner_count=1,
     ),
-    "wholesale_partial": OfferShape(
-        name="wholesale_partial",
+    "retail_two_lot": OfferShape(
+        name="retail_two_lot",
         quantity=20,
-        request_amount=5,
-        expected_winner_count=4,
+        request_amount=10,
+        expected_winner_count=2,
+        is_wholesale=False,
+        lot_sizes=(10, 10),
     ),
-    "retail_lot": OfferShape(
-        name="retail_lot",
+    "retail_three_lot": OfferShape(
+        name="retail_three_lot",
         quantity=30,
         request_amount=10,
         expected_winner_count=3,
@@ -197,7 +200,7 @@ def scenario_attempt_count(min_attempts: int) -> int:
 
 def summarize_outcomes(outcomes: list[AttemptOutcome], elapsed_seconds: float) -> dict[str, Any]:
     samples = [item.latency_ms for item in outcomes]
-    return {
+    summary = {
         "total": len(outcomes),
         "elapsed_seconds": round(max(elapsed_seconds, 0.001), 3),
         "business_request_rps": round(len(outcomes) / max(elapsed_seconds, 0.001), 3),
@@ -207,6 +210,17 @@ def summarize_outcomes(outcomes: list[AttemptOutcome], elapsed_seconds: float) -
         "latency": worker.summarize_samples(samples),
         "error_details": sorted({item.detail for item in outcomes if item.detail}),
     }
+    start_offsets = [
+        float(item.start_offset_seconds)
+        for item in outcomes
+        if item.start_offset_seconds is not None
+    ]
+    if len(start_offsets) >= 2:
+        attempt_start_elapsed = max(start_offsets) - min(start_offsets)
+        safe_attempt_start_elapsed = max(float(attempt_start_elapsed), 0.001)
+        summary["attempt_start_elapsed_seconds"] = round(safe_attempt_start_elapsed, 3)
+        summary["attempt_start_rps"] = round(len(start_offsets) / safe_attempt_start_elapsed, 3)
+    return summary
 
 
 async def run_scheduled_attempts(
@@ -223,6 +237,7 @@ async def run_scheduled_attempts(
         if delay > 0:
             await asyncio.sleep(delay)
         attempt_started = time.perf_counter()
+        start_offset_seconds = attempt_started - started
         detail = None
         try:
             status = await attempt(index)
@@ -233,6 +248,7 @@ async def run_scheduled_attempts(
             status=status,
             latency_ms=round((time.perf_counter() - attempt_started) * 1000.0, 3),
             detail=detail,
+            start_offset_seconds=start_offset_seconds,
         )
 
     outcomes = await asyncio.gather(*[_run(index) for index in range(total)])
@@ -889,6 +905,11 @@ async def run_matrix(args: argparse.Namespace) -> int:
 
     elapsed = time.perf_counter() - started
     total_attempts = sum(int((report.get("summary") or {}).get("total") or 0) for report in scenario_reports)
+    scenario_attempt_start_rps = [
+        float((report.get("summary") or {}).get("attempt_start_rps"))
+        for report in scenario_reports
+        if (report.get("summary") or {}).get("attempt_start_rps") is not None
+    ]
     failed = [report for report in scenario_reports if report["status"] != "ok"]
     family_counts: dict[str, int] = {}
     for scenario in selected:
@@ -910,6 +931,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
         "total_business_requests": total_attempts,
         "elapsed_seconds": round(elapsed, 3),
         "aggregate_business_request_rps": round(total_attempts / max(elapsed, 0.001), 3),
+        "min_attempt_start_rps": round(min(scenario_attempt_start_rps), 3) if scenario_attempt_start_rps else None,
         "failed_scenarios": [
             {
                 "scenario_id": report["scenario"]["scenario_id"],

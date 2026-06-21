@@ -161,6 +161,7 @@ class MixedLoadAttemptResult:
     duration_ms: float
     detail: str | None = None
     telegram_update_count: int = 0
+    start_offset_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -735,7 +736,7 @@ def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_
 
     safe_elapsed = max(float(elapsed_seconds), 0.001)
     telegram_update_count = sum(item.telegram_update_count for item in results)
-    return {
+    summary = {
         "total": len(results),
         "elapsed_seconds": round(safe_elapsed, 3),
         "business_request_rps": round(len(results) / safe_elapsed, 3),
@@ -747,6 +748,17 @@ def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_
         "latency": summarize_samples([item.duration_ms for item in results]),
         "surfaces": by_surface,
     }
+    start_offsets = [
+        float(item.start_offset_seconds)
+        for item in results
+        if item.start_offset_seconds is not None
+    ]
+    if len(start_offsets) >= 2:
+        attempt_start_elapsed = max(start_offsets) - min(start_offsets)
+        safe_attempt_start_elapsed = max(float(attempt_start_elapsed), 0.001)
+        summary["attempt_start_elapsed_seconds"] = round(safe_attempt_start_elapsed, 3)
+        summary["attempt_start_rps"] = round(len(start_offsets) / safe_attempt_start_elapsed, 3)
+    return summary
 
 
 def build_hot_offer_scenario_specs(
@@ -788,25 +800,29 @@ def build_hot_offer_scenario_specs(
             name="webapp_partial_fill",
             origin="webapp",
             quantity=20,
-            request_amount=5,
-            expected_winner_count=4,
+            request_amount=10,
+            expected_winner_count=2,
             total_requests=total_requests,
             telegram_ratio=telegram_ratio,
             target_rps=target_rps,
             price=price,
             offer_type=offer_type,
+            is_wholesale=False,
+            lot_sizes=(10, 10),
         ),
         HotOfferScenarioSpec(
             name="bot_partial_fill",
             origin="bot",
             quantity=20,
-            request_amount=5,
-            expected_winner_count=4,
+            request_amount=10,
+            expected_winner_count=2,
             total_requests=total_requests,
             telegram_ratio=telegram_ratio,
             target_rps=target_rps,
             price=price,
             offer_type=offer_type,
+            is_wholesale=False,
+            lot_sizes=(10, 10),
         ),
         HotOfferScenarioSpec(
             name="webapp_retail_lot",
@@ -2620,6 +2636,7 @@ async def run_hot_offer_contention(
             await asyncio.sleep(delay)
 
         attempt_started = time.perf_counter()
+        start_offset_seconds = attempt_started - started
         status_value = "error"
         detail: str | None = None
         try:
@@ -2648,6 +2665,7 @@ async def run_hot_offer_contention(
             status=status_value,
             duration_ms=round((time.perf_counter() - attempt_started) * 1000.0, 3),
             detail=detail,
+            start_offset_seconds=start_offset_seconds,
         )
 
     try:

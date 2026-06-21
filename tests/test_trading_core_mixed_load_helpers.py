@@ -323,6 +323,9 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         for scenario in scenarios:
             self.assertEqual(scenario.expected_completed_quantity, scenario.quantity)
             self.assertGreaterEqual(scenario.start_burst_request_count, 36)
+            if scenario.expected_winner_count > 1:
+                self.assertFalse(scenario.is_wholesale)
+                self.assertEqual(sum(scenario.lot_sizes), scenario.quantity)
 
     def test_hot_offer_scenario_specs_reject_weak_contention(self):
         with self.assertRaises(worker.TradingProbeError):

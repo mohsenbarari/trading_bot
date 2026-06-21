@@ -177,6 +177,7 @@ print(
             "family_counts": payload.get("family_counts"),
             "total_business_requests": payload.get("total_business_requests"),
             "aggregate_business_request_rps": payload.get("aggregate_business_request_rps"),
+            "min_attempt_start_rps": payload.get("min_attempt_start_rps"),
             "failed_scenarios": payload.get("failed_scenarios", [])[:10],
             "production_gate": (payload.get("production_gate") or {}).get("status"),
         },

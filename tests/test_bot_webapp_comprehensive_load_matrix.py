@@ -45,6 +45,12 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
 
         self.assertEqual({scenario.offer_type for scenario in scenarios}, {"buy", "sell"})
         self.assertEqual({scenario.shape for scenario in scenarios}, set(matrix_runner.SHAPES))
+        self.assertEqual(set(matrix_runner.SHAPES), {"wholesale_full", "retail_two_lot", "retail_three_lot"})
+        for shape in matrix_runner.SHAPES.values():
+            self.assertEqual(shape.request_amount * shape.expected_winner_count, shape.quantity)
+            if shape.expected_winner_count > 1:
+                self.assertFalse(shape.is_wholesale)
+                self.assertEqual(sum(shape.lot_sizes), shape.quantity)
         self.assertEqual(
             {
                 scenario.offer_origin
@@ -85,6 +91,19 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
             max_scenarios=None,
         )
         self.assertEqual(selected, [scenarios[0]])
+
+    def test_summarize_outcomes_reports_attempt_start_rate_separately(self):
+        outcomes = [
+            matrix_runner.AttemptOutcome(status="success", latency_ms=1000, start_offset_seconds=0.0),
+            matrix_runner.AttemptOutcome(status="rejected", latency_ms=1000, start_offset_seconds=0.01),
+            matrix_runner.AttemptOutcome(status="rejected", latency_ms=1000, start_offset_seconds=0.02),
+        ]
+
+        summary = matrix_runner.summarize_outcomes(outcomes, elapsed_seconds=1.02)
+
+        self.assertLess(summary["business_request_rps"], 3.0)
+        self.assertEqual(summary["attempt_start_elapsed_seconds"], 0.02)
+        self.assertEqual(summary["attempt_start_rps"], 150.0)
 
 
 if __name__ == "__main__":
