@@ -432,6 +432,15 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn("SERVER_MODE must be foreign", message)
         self.assertIn("BOT_TOKEN must be empty", message)
 
+    def test_aiogram_dispatcher_harness_can_be_recreated(self):
+        async def _build_twice():
+            first = worker.AiogramDispatcherHarness()
+            await first.close()
+            second = worker.AiogramDispatcherHarness()
+            await second.close()
+
+        asyncio.run(_build_twice())
+
     def test_dual_role_final_report_accepts_consistent_hot_offer(self):
         prepare = {
             "run_id": "run-5",

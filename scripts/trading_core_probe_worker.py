@@ -1804,6 +1804,33 @@ class RecordingTelegramBot:
         await self.bot.session.close()
 
 
+PROBE_DISPATCHER_ROUTERS = (
+    bot_trade_create.router,
+    bot_trade_execute.router,
+    bot_trade_manage.router,
+)
+
+
+def detach_probe_router(router: Any, *, expected_parent: Any | None = None) -> None:
+    parent = getattr(router, "_parent_router", None)
+    if parent is None:
+        return
+    if expected_parent is not None and parent is not expected_parent:
+        return
+    sub_routers = getattr(parent, "sub_routers", None)
+    if isinstance(sub_routers, list):
+        try:
+            sub_routers.remove(router)
+        except ValueError:
+            pass
+    router._parent_router = None
+
+
+def include_probe_router(dispatcher: Dispatcher, router: Any) -> None:
+    detach_probe_router(router)
+    dispatcher.include_router(router)
+
+
 class AiogramDispatcherHarness:
     def __init__(self) -> None:
         self.telegram = RecordingTelegramBot()
@@ -1811,9 +1838,8 @@ class AiogramDispatcherHarness:
         self.dp.update.outer_middleware(TradeContentionGateMiddleware())
         self.dp.update.outer_middleware(AuthMiddleware(AsyncSessionLocal))
         self.dp.update.outer_middleware(BotLoggingContextMiddleware())
-        self.dp.include_router(bot_trade_create.router)
-        self.dp.include_router(bot_trade_execute.router)
-        self.dp.include_router(bot_trade_manage.router)
+        for router in PROBE_DISPATCHER_ROUTERS:
+            include_probe_router(self.dp, router)
         self._update_id = 700000
         self._message_id = 800000
 
@@ -1922,6 +1948,8 @@ class AiogramDispatcherHarness:
         return self.telegram.callback_answers.get(callback_id)
 
     async def close(self) -> None:
+        for router in PROBE_DISPATCHER_ROUTERS:
+            detach_probe_router(router, expected_parent=self.dp)
         await self.telegram.close()
 
 
