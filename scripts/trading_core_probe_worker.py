@@ -1740,9 +1740,11 @@ async def execute_webapp_trade_for_user(
     quantity: int,
     idempotency_key: str,
     error_details: list[str] | None = None,
+    phase_details: dict[str, Any] | None = None,
 ) -> str:
     background_tasks = BackgroundTasks()
     try:
+        create_started = time.perf_counter()
         async with AsyncSessionLocal() as db:
             user = await load_user(db, user_id)
             response = await trades_router.create_trade(
@@ -1756,15 +1758,24 @@ async def execute_webapp_trade_for_user(
                 db=db,
                 context=owner_context(user),
             )
+        if phase_details is not None:
+            phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+        background_started = time.perf_counter()
         await background_tasks()
+        if phase_details is not None:
+            phase_details["background_tasks_ms"] = round((time.perf_counter() - background_started) * 1000.0, 3)
     except HTTPException as exc:
         status_code = int(exc.status_code or 500)
         if status_code >= 500 and error_details is not None:
             error_details.append(f"HTTPException {status_code}: {exc.detail}")
+        if phase_details is not None:
+            phase_details["exception"] = f"HTTPException {status_code}"
         return "rejected" if status_code < 500 else "error"
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
+        if phase_details is not None:
+            phase_details["exception"] = type(exc).__name__
         return "error"
 
     if isinstance(response, JSONResponse):
@@ -1903,6 +1914,7 @@ async def execute_bot_trade_with_dispatcher(
     prefix: str,
     observed_idempotency_keys: list[str] | None = None,
     error_details: list[str] | None = None,
+    phase_details: dict[str, Any] | None = None,
 ) -> str:
     callback_data = build_channel_trade_callback_data(
         offer_id=offer.id,
@@ -1916,21 +1928,33 @@ async def execute_bot_trade_with_dispatcher(
     if observed_idempotency_keys is not None:
         recorder_token = _TELEGRAM_IDEMPOTENCY_KEYS.set(observed_idempotency_keys)
     try:
-        await harness.feed_channel_callback(
+        first_started = time.perf_counter()
+        first_answer = await harness.feed_channel_callback(
             telegram_id=spec.telegram_id,
             callback_data=callback_data,
             callback_id=first_callback_id,
             channel_message_id=channel_message_id,
         )
+        if phase_details is not None:
+            phase_details["first_callback_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
+            phase_details["first_answer_text"] = str((first_answer or {}).get("text") or "")
+            phase_details["first_answer_alert"] = (first_answer or {}).get("show_alert")
+        second_started = time.perf_counter()
         answer = await harness.feed_channel_callback(
             telegram_id=spec.telegram_id,
             callback_data=callback_data,
             callback_id=second_callback_id,
             channel_message_id=channel_message_id,
         )
+        if phase_details is not None:
+            phase_details["second_callback_ms"] = round((time.perf_counter() - second_started) * 1000.0, 3)
+            phase_details["second_answer_text"] = str((answer or {}).get("text") or "")
+            phase_details["second_answer_alert"] = (answer or {}).get("show_alert")
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
+        if phase_details is not None:
+            phase_details["exception"] = type(exc).__name__
         return "error"
     finally:
         if recorder_token is not None:
@@ -1998,6 +2022,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         )
         observed_telegram_keys: list[str] = []
         attempt_error_details: list[str] = []
+        phase_details: dict[str, Any] = {}
         try:
             if surface == "webapp":
                 status_value = await execute_webapp_trade_for_user(
@@ -2006,6 +2031,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                     quantity=request_amount,
                     idempotency_key=idempotency_key,
                     error_details=attempt_error_details,
+                    phase_details=phase_details,
                 )
             else:
                 if harness is None:
@@ -2019,6 +2045,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                     prefix=f"{prefix}{role}-",
                     observed_idempotency_keys=observed_telegram_keys,
                     error_details=attempt_error_details,
+                    phase_details=phase_details,
                 )
                 if observed_telegram_keys:
                     idempotency_key = observed_telegram_keys[-1]
@@ -2049,6 +2076,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
             "outcome": status_value,
             "latency_ms": latency_ms,
             "detail": detail,
+            "phase_details": phase_details,
         }
 
     try:
