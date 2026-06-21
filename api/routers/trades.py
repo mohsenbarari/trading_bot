@@ -50,6 +50,7 @@ from core.services.trade_contention_gate import (
     trade_contention_lease_was_pre_gated,
     try_acquire_trade_contention_gate,
 )
+from core.services.offer_expiry_service import OfferExpiryReason
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
     apply_offer_request_decision,
@@ -2168,6 +2169,15 @@ async def _is_offer_expired_for_trade(offer: Offer, edge_received_at: Optional[d
     return now > expiry_at
 
 
+def _is_time_limit_expired_offer(offer: Offer | object) -> bool:
+    expire_reason = getattr(offer, "expire_reason", None)
+    expire_reason_value = getattr(expire_reason, "value", expire_reason)
+    return (
+        getattr(offer, "status", None) == OfferStatus.EXPIRED
+        and expire_reason_value == OfferExpiryReason.TIME_LIMIT
+    )
+
+
 async def _forward_trade_if_remote_home(
     db: AsyncSession,
     trade_data: TradeCreate,
@@ -2372,12 +2382,12 @@ async def _execute_trade_authoritatively(
     
     expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
 
-    allow_in_flight_after_auto_expiry = (
-        offer.status == OfferStatus.EXPIRED
+    allow_in_flight_after_time_limit_expiry = (
+        _is_time_limit_expired_offer(offer)
         and edge_received_at is not None
         and not expired_for_trade
     )
-    if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_auto_expiry) or expired_for_trade:
+    if (offer.status != OfferStatus.ACTIVE and not allow_in_flight_after_time_limit_expiry) or expired_for_trade:
         await _commit_rejected_offer_request_ledger(
             db,
             offer_request_ledger,

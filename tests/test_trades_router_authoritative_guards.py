@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 
-from api.routers.trades import TradeCreate, _execute_trade_authoritatively
+from api.routers.trades import TradeCreate, _execute_trade_authoritatively, _is_time_limit_expired_offer
 from core.enums import UserAccountStatus, UserRole
+from core.services.offer_expiry_service import OfferExpiryReason
 from models.offer import OfferStatus, OfferType
 from models.offer_request import OfferRequest, OfferRequestStatus
 
@@ -182,6 +183,49 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 await _execute_trade_authoritatively(trade_data, BackgroundTasks(), db=db, context=make_context(make_user()))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "trade blocked")
+
+    async def test_execute_trade_authoritatively_rejects_manual_expired_offer_even_inside_edge_grace(self):
+        locked_user = make_user()
+        manual_expired_offer = make_offer(status=OfferStatus.EXPIRED, expire_reason=OfferExpiryReason.MANUAL)
+        db = FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[manual_expired_offer])
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))) as block_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=7, quantity=4),
+                    BackgroundTasks(),
+                    db=db,
+                    context=make_context(locked_user),
+                    edge_received_at=datetime.utcnow(),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "این لفظ دیگر فعال نیست.")
+        self.assertEqual(len(db.offer_requests), 1)
+        self.assertEqual(db.offer_requests[0].result_status, OfferRequestStatus.REJECTED_OFFER_EXPIRED)
+        self.assertEqual(db.offer_requests[0].public_failure_code, "offer_not_active")
+        block_mock.assert_not_awaited()
+        db.commit.assert_awaited_once()
+
+    def test_is_time_limit_expired_offer_only_matches_time_limit_reason(self):
+        self.assertTrue(
+            _is_time_limit_expired_offer(
+                make_offer(status=OfferStatus.EXPIRED, expire_reason=OfferExpiryReason.TIME_LIMIT)
+            )
+        )
+        self.assertFalse(
+            _is_time_limit_expired_offer(
+                make_offer(status=OfferStatus.EXPIRED, expire_reason=OfferExpiryReason.MANUAL)
+            )
+        )
+        self.assertFalse(
+            _is_time_limit_expired_offer(
+                make_offer(status=OfferStatus.ACTIVE, expire_reason=OfferExpiryReason.TIME_LIMIT)
+            )
+        )
 
     async def test_execute_trade_authoritatively_rejects_missing_inactive_self_and_blocked_offers(self):
         trade_data = TradeCreate(offer_id=7, quantity=4)

@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
 from core.enums import NotificationCategory, NotificationLevel, UserRole
+from core.services.offer_expiry_service import OfferExpiryReason
 from models.customer_relation import CustomerTier
 from models.offer import OfferStatus, OfferType
 from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
@@ -270,6 +271,61 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             history_target_user_id=locked_user.id,
         )
         self.assertEqual(result, {"id": 88, "trade_number": 10000})
+
+    async def test_execute_trade_authoritatively_allows_time_limit_expired_offer_inside_edge_grace(self):
+        locked_user = make_user()
+        offer = make_offer(
+            status=OfferStatus.EXPIRED,
+            expire_reason=OfferExpiryReason.TIME_LIMIT,
+            user=SimpleNamespace(id=9, account_name="seller", mobile_number="09125555555", telegram_id=999),
+        )
+        reloaded_trade = SimpleNamespace(id=89, created_at=datetime(2026, 5, 27, 12, 1, tzinfo=timezone.utc))
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single=reloaded_trade),
+            ],
+            scalar_result=10001,
+        )
+        background_tasks = BackgroundTasks()
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))), patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(True, None, 4, []),
+        ), patch(
+            "api.routers.trades.build_trade_notification_audience_user_ids",
+            new=AsyncMock(side_effect=[[locked_user.id], [offer.user_id]]),
+        ), patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch("api.routers.trades.update_channel_buttons", new=AsyncMock(return_value=True)), patch(
+            "api.routers.trades.create_user_notification",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.trades.increment_user_counter",
+            new=AsyncMock(),
+        ), patch("api.routers.realtime.publish_event", new=AsyncMock()), patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 89, "trade_number": 10001},
+        ):
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=4),
+                background_tasks,
+                db=db,
+                context=make_context(locked_user),
+                edge_received_at=datetime.utcnow(),
+            )
+
+        self.assertEqual(result, {"id": 89, "trade_number": 10001})
+        self.assertEqual(len(db.added), 1)
+        self.assertEqual(db.offer_requests[0].result_status, OfferRequestStatus.COMPLETED_TRADE)
+        self.assertEqual(offer.remaining_quantity, 0)
+        self.assertEqual(offer.status, OfferStatus.COMPLETED)
+        db.commit.assert_awaited_once()
 
     async def test_execute_trade_authoritatively_queues_notifications_for_cross_server_requests(self):
         locked_user = make_user()
