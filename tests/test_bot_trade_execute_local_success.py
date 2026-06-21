@@ -26,6 +26,7 @@ class FakeSession:
         self.added = []
         self.commits = 0
         self.statements = []
+        self.expunged = []
 
     async def execute(self, stmt):
         self.statements.append(str(stmt))
@@ -39,6 +40,9 @@ class FakeSession:
 
     def add(self, value):
         self.added.append(value)
+
+    def expunge(self, value):
+        self.expunged.append(value)
 
     async def commit(self):
         self.commits += 1
@@ -116,7 +120,9 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["actual_amount"], 2)
         self.assertEqual(session.commits, 0)
         self.assertEqual(session.added, [])
+        self.assertEqual(len(session.statements), 1)
         self.assertIn("offers.id", session.statements[0])
+        self.assertNotIn("FOR UPDATE", session.statements[0].upper())
 
     async def test_handle_channel_trade_preconfirmed_local_trade_skips_double_click(self):
         user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
@@ -230,6 +236,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kwargs["request_pre_gated"])
         self.assertEqual(kwargs["context"].owner_user, user)
         self.assertEqual(user.role.name, "STANDARD")
+        self.assertEqual(session.expunged, [offer])
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once_with(7, 200, 50)
         callback.answer.assert_awaited_once_with("معامله ثبت شد ✅", show_alert=False)

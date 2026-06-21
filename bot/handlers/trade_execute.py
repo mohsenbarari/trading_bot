@@ -483,18 +483,24 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     if not hasattr(user, "trading_restricted_until"):
         setattr(user, "trading_restricted_until", None)
     background_tasks = BackgroundTasks()
+    offer_id = int(offer.id)
+    offer_public_id = getattr(offer, "offer_public_id", None)
+    idempotency_key = _channel_trade_idempotency_key(
+        callback=callback,
+        user=user,
+        offer=offer,
+        actual_amount=actual_amount,
+    )
+    expunge_offer = getattr(session, "expunge", None)
+    if callable(expunge_offer):
+        expunge_offer(offer)
     try:
         result = await _execute_trade_authoritatively(
             trade_data=TradeCreate(
-                offer_id=offer.id,
-                offer_public_id=getattr(offer, "offer_public_id", None),
+                offer_id=offer_id,
+                offer_public_id=offer_public_id,
                 quantity=actual_amount,
-                idempotency_key=_channel_trade_idempotency_key(
-                    callback=callback,
-                    user=user,
-                    offer=offer,
-                    actual_amount=actual_amount,
-                ),
+                idempotency_key=idempotency_key,
             ),
             background_tasks=background_tasks,
             db=session,
@@ -532,7 +538,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     try:
         if callback.message and callback.message.chat.id != settings.channel_id:
             await callback.message.edit_reply_markup(reply_markup=None)
-            await remove_trade_suggestion_record(offer.id, callback.message.chat.id, callback.message.message_id)
+            await remove_trade_suggestion_record(offer_id, callback.message.chat.id, callback.message.message_id)
     except Exception as exc:
         logger.debug(f"Failed to clear private suggestion buttons: {exc}")
 
@@ -614,14 +620,10 @@ async def _handle_channel_trade(
     
     async with AsyncSessionLocal() as session:
         offer = await _load_callback_offer(session, callback_data, lock_for_update=False)
-        
-        if offer and not is_remote_home(getattr(offer, "home_server", None)):
-            # قفل فقط برای آفرهای local لازم است. برای remote-home، سرور مرجع
-            # خودش قفل authoritative را می‌گیرد و قفل mirror باعث تاخیر cross-server می‌شود.
-            offer = await _load_callback_offer(session, callback_data, lock_for_update=True)
 
         if offer:
-            # FOR UPDATE با LEFT OUTER JOIN سازگار نیست؛ روابط جداگانه بارگذاری می‌شوند.
+            # The authoritative trade command acquires the hot-offer advisory lock
+            # before the row lock. Keep callback lookup lock-free to preserve that order.
             await session.refresh(offer, ["user", "commodity"])
         
         if not offer:
