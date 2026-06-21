@@ -10,9 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, or_, case
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import StaleDataError
 
 from core.db import get_db
 from core.config import settings
@@ -56,6 +57,7 @@ from core.services.offer_expiry_service import (
     apply_offer_expiry,
     expire_offer_authoritatively,
     expire_offers_authoritatively,
+    is_offer_expiry_lock_busy,
 )
 from core.services.offer_expiry_limits import (
     OfferManualExpireLimitError,
@@ -81,6 +83,7 @@ logger = logging.getLogger(__name__)
 
 MARKET_CLOSED_DETAIL = "بازار در حال حاضر بسته است. لطفاً در زمان فعال بودن بازار اقدام کنید."
 ACCOUNTANT_MARKET_BLOCKED_DETAIL = "حسابدار دسترسی به بازار ندارد."
+OFFER_EXPIRY_LOCK_BUSY_DETAIL = "این لفظ در حال غیرفعال شدن است."
 OFFER_STATUS_FILTERS = {
     "active": OfferStatus.ACTIVE,
     "completed": OfferStatus.COMPLETED,
@@ -742,6 +745,25 @@ def _normalize_internal_offer_source(value: Optional[str]) -> Optional[str]:
         return None
     normalized = normalize_server(value, default="")
     return normalized if normalized in {"iran", "foreign"} else None
+
+
+def _expunge_if_supported(db: AsyncSession, obj: object | None) -> None:
+    if obj is None:
+        return
+    expunge = getattr(db, "expunge", None)
+    if callable(expunge):
+        expunge(obj)
+
+
+async def _rollback_if_supported(db: AsyncSession) -> None:
+    rollback = getattr(db, "rollback", None)
+    if callable(rollback):
+        await rollback()
+
+
+async def _raise_offer_expiry_lock_busy(db: AsyncSession) -> None:
+    await _rollback_if_supported(db)
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=OFFER_EXPIRY_LOCK_BUSY_DETAIL)
 
 
 def _build_offer_expiry_forward_payload(
@@ -1576,12 +1598,17 @@ async def expire_offer_internal(
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal offer expiry source")
 
-    offer = await db.get(
-        Offer,
-        internal_data.offer_id,
-        options=[selectinload(Offer.commodity)],
-        with_for_update=True,
-    )
+    try:
+        offer = await db.get(
+            Offer,
+            internal_data.offer_id,
+            options=[selectinload(Offer.commodity)],
+            with_for_update={"nowait": True},
+        )
+    except OperationalError as exc:
+        if is_offer_expiry_lock_busy(exc):
+            await _raise_offer_expiry_lock_busy(db)
+        raise
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
     if getattr(offer, "id", None) is None:
@@ -1669,13 +1696,22 @@ async def expire_offer(
     if forwarded_response is not None:
         return forwarded_response
 
-    offer = await db.get(
-        Offer,
-        offer_id,
-        options=[selectinload(Offer.commodity)],
-        with_for_update=True,
-        populate_existing=True,
-    )
+    _expunge_if_supported(db, offer)
+    try:
+        offer = await db.get(
+            Offer,
+            offer_id,
+            options=[selectinload(Offer.commodity)],
+            with_for_update={"nowait": True},
+            populate_existing=True,
+        )
+    except StaleDataError:
+        await _rollback_if_supported(db)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+    except OperationalError as exc:
+        if is_offer_expiry_lock_busy(exc):
+            await _raise_offer_expiry_lock_busy(db)
+        raise
     if not offer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
     if offer.user_id != owner_user.id:
@@ -1707,6 +1743,9 @@ async def expire_offer(
     except OfferNotAuthoritativeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"این لفظ باید روی سرور {exc.home_server} منقضی شود.")
     except OfferAlreadyInactiveError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
+    except StaleDataError:
+        await _rollback_if_supported(db)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
 
     await _expire_offer_side_effects(

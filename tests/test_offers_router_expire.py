@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError
 
 from api.routers.offers import InternalOfferExpireRequest, cancel_all_active_offers, expire_offer, expire_offer_internal
 from models.offer import OfferStatus
@@ -32,12 +33,15 @@ def make_context(owner_user=None, actor_user=None):
 
 
 class FakeDB:
-    def __init__(self, *, scalar_result=None, scalar_results=None, get_result=None, execute_results=None):
+    def __init__(self, *, scalar_result=None, scalar_results=None, get_result=None, get_results=None, execute_results=None):
         self.scalar_result = scalar_result
         self.scalar_results = list(scalar_results or [])
         self.get_result = get_result
+        self.get_results = list(get_results or [])
         self.execute_results = list(execute_results or [])
         self.commit = AsyncMock()
+        self.rollback = AsyncMock()
+        self.expunged = []
 
     async def scalar(self, _stmt):
         if self.scalar_results:
@@ -45,7 +49,15 @@ class FakeDB:
         return self.scalar_result
 
     async def get(self, _model, _id, *args, **kwargs):
+        if self.get_results:
+            result = self.get_results.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
         return self.get_result
+
+    def expunge(self, obj):
+        self.expunged.append(obj)
 
     async def execute(self, _stmt):
         if not self.execute_results:
@@ -88,6 +100,29 @@ class OffersRouterExpireTests(unittest.IsolatedAsyncioTestCase):
                 await expire_offer(offer_id=1, db=db, context=make_context(current_user))
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertIn("امروز 3 لفظ منقضی کرده", exc_info.exception.detail)
+
+    async def test_expire_offer_rejects_busy_authoritative_lock_without_consuming_rate(self):
+        current_user = SimpleNamespace(id=5)
+        offer = SimpleNamespace(id=1, user_id=5, status=OfferStatus.ACTIVE, home_server="iran", channel_message_id=None)
+        lock_error = OperationalError("select", {}, SimpleNamespace(pgcode="55P03"))
+        db = FakeDB(get_results=[offer, lock_error])
+        settings = SimpleNamespace(
+            offer_expire_rate_per_minute=2,
+            offer_expire_daily_limit_after_threshold=3,
+        )
+
+        with patch("api.routers.offers.get_trading_settings", return_value=settings), patch(
+            "bot.utils.redis_helpers.track_expire_rate",
+            new=AsyncMock(return_value=1),
+        ) as rate_mock, patch("api.routers.offers.is_remote_home", return_value=False):
+            with self.assertRaises(HTTPException) as exc_info:
+                await expire_offer(offer_id=1, db=db, context=make_context(current_user))
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(exc_info.exception.detail, "این لفظ در حال غیرفعال شدن است.")
+        self.assertEqual(db.expunged, [offer])
+        db.rollback.assert_awaited_once()
+        rate_mock.assert_not_awaited()
 
     async def test_expire_offer_rejects_missing_foreign_or_inactive_offers(self):
         settings = SimpleNamespace(

@@ -47,6 +47,10 @@ class OfferAlreadyInactiveError(OfferExpiryError):
     pass
 
 
+class OfferExpiryLockBusyError(OfferExpiryError):
+    pass
+
+
 @dataclass(frozen=True)
 class OfferExpiryCommand:
     reason: str
@@ -77,6 +81,14 @@ def normalize_expire_source_surface(value: OfferExpirySourceSurface | str) -> st
 
 def _command_source_server(command: OfferExpiryCommand) -> str:
     return normalize_server(command.source_server, current_server())
+
+
+def is_offer_expiry_lock_busy(exc: BaseException) -> bool:
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+    if code == "55P03":
+        return True
+    return "could not obtain lock" in str(exc).lower()
 
 
 def ensure_offer_expiry_authority(offer: Offer) -> None:

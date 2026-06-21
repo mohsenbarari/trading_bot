@@ -2,6 +2,8 @@ import logging
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm.exc import StaleDataError
 
 from models.user import User
 from models.offer import Offer, OfferStatus
@@ -16,6 +18,7 @@ from core.services.offer_expiry_service import (
     OfferExpirySourceSurface,
     OfferNotAuthoritativeError,
     expire_offer_authoritatively,
+    is_offer_expiry_lock_busy,
 )
 from core.services.offer_expiry_limits import OfferManualExpireLimitError, enforce_manual_offer_expire_limits
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
@@ -24,6 +27,20 @@ from bot.callbacks import ExpireOfferCallback
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+OFFER_EXPIRY_LOCK_BUSY_TEXT = "❌ این لفظ در حال غیرفعال شدن است"
+
+
+def _expunge_if_supported(session, obj) -> None:
+    expunge = getattr(session, "expunge", None)
+    if callable(expunge):
+        expunge(obj)
+
+
+async def _rollback_if_supported(session) -> None:
+    rollback = getattr(session, "rollback", None)
+    if callable(rollback):
+        await rollback()
 
 @router.callback_query(ExpireOfferCallback.filter())
 async def handle_expire_offer(callback: types.CallbackQuery, callback_data: ExpireOfferCallback, user: Optional[User], bot: Bot):
@@ -68,7 +85,24 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 await callback.answer(f"❌ {detail or 'خطا در منقضی کردن لفظ'}")
                 return
         else:
-            offer = await session.get(Offer, offer_id, with_for_update=True)
+            _expunge_if_supported(session, offer)
+            try:
+                offer = await session.get(
+                    Offer,
+                    offer_id,
+                    with_for_update={"nowait": True},
+                    populate_existing=True,
+                )
+            except StaleDataError:
+                await _rollback_if_supported(session)
+                await callback.answer("❌ این لفظ دیگر فعال نیست")
+                return
+            except OperationalError as exc:
+                if is_offer_expiry_lock_busy(exc):
+                    await _rollback_if_supported(session)
+                    await callback.answer(OFFER_EXPIRY_LOCK_BUSY_TEXT)
+                    return
+                raise
             if not offer:
                 await callback.answer("❌ لفظ یافت نشد")
                 return
@@ -103,6 +137,10 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 await callback.answer("❌ این لفظ باید روی سرور مرجع منقضی شود")
                 return
             except OfferAlreadyInactiveError:
+                await callback.answer("❌ این لفظ دیگر فعال نیست")
+                return
+            except StaleDataError:
+                await _rollback_if_supported(session)
                 await callback.answer("❌ این لفظ دیگر فعال نیست")
                 return
 

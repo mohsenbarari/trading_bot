@@ -30,6 +30,7 @@ from aiogram.types import Update
 from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
 from sqlalchemy import delete, false, func, select, text
+from sqlalchemy.exc import OperationalError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -1550,12 +1551,26 @@ async def patched_trading_boundaries():
                 async with AsyncSessionLocal() as db:
                     offer = None
                     offer_public_id = str(payload.get("offer_public_id") or "").strip()
-                    if offer_public_id:
-                        offer = (
-                            await db.execute(select(Offer).where(Offer.offer_public_id == offer_public_id).with_for_update())
-                        ).scalar_one_or_none()
-                    if offer is None and payload.get("offer_id"):
-                        offer = await db.get(Offer, int(payload["offer_id"]), with_for_update=True)
+                    try:
+                        if offer_public_id:
+                            offer = (
+                                await db.execute(
+                                    select(Offer)
+                                    .where(Offer.offer_public_id == offer_public_id)
+                                    .with_for_update(nowait=True)
+                                )
+                            ).scalar_one_or_none()
+                        if offer is None and payload.get("offer_id"):
+                            offer = await db.get(
+                                Offer,
+                                int(payload["offer_id"]),
+                                with_for_update={"nowait": True},
+                            )
+                    except OperationalError as exc:
+                        if offers_router.is_offer_expiry_lock_busy(exc):
+                            await db.rollback()
+                            return 409, {"detail": offers_router.OFFER_EXPIRY_LOCK_BUSY_DETAIL}
+                        raise
                     if offer is None:
                         return 404, {"detail": "لفظ یافت نشد."}
 
