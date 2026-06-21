@@ -2262,6 +2262,7 @@ async def _execute_trade_authoritatively(
     request_source_surface = _normalize_trade_request_surface(request_source_surface)
     request_source_server = normalize_server(request_source_server, current_server())
     defer_cross_server_side_effects = request_source_server != current_server()
+    defer_noncritical_side_effects = defer_cross_server_side_effects or request_pre_gated
     timing_started_at = time_module.perf_counter()
     timing_last_mark = timing_started_at
     idempotency_lock_held = False
@@ -2769,7 +2770,7 @@ async def _execute_trade_authoritatively(
     # ===== ارسال پیام‌های تلگرام در Background (غیر-بلاکینگ) =====
     # این کار باعث می‌شود پاسخ API سریعتر برگردد
     
-    if defer_cross_server_side_effects:
+    if defer_noncritical_side_effects:
         _queue_trade_channel_buttons_update(background_tasks, offer)
     else:
         try:
@@ -2844,7 +2845,7 @@ async def _execute_trade_authoritatively(
                 trade_path_summary=trade_path_summary,
                 offer_notes=offer_notes,
             )
-            if defer_cross_server_side_effects:
+            if defer_noncritical_side_effects:
                 _queue_trade_user_notification(
                     background_tasks,
                     audience_user_id,
