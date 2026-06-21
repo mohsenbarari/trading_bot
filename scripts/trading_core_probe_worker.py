@@ -2628,6 +2628,15 @@ async def run_hot_offer_contention(
         total_requests=total_requests,
         telegram_ratio=telegram_ratio,
     )
+    telegram_specs = [spec for spec in plan if spec.surface == "telegram"]
+    telegram_offer_snapshot = await load_offer_snapshot(offer_id) if telegram_specs else None
+    telegram_preconfirm = None
+    if telegram_specs and telegram_offer_snapshot is not None:
+        telegram_preconfirm = await preconfirm_bot_trade_callbacks(
+            attempts=telegram_specs,
+            offer=telegram_offer_snapshot,
+            amount=amount,
+        )
     started = time.perf_counter()
 
     async def _attempt(spec: MixedLoadAttemptSpec) -> MixedLoadAttemptResult:
@@ -2640,6 +2649,7 @@ async def run_hot_offer_contention(
         start_offset_seconds = attempt_started - started
         status_value = "error"
         detail: str | None = None
+        phase_details: dict[str, Any] = {}
         try:
             if spec.surface == "webapp":
                 status_value = await execute_webapp_trade_for_user(
@@ -2652,25 +2662,35 @@ async def run_hot_offer_contention(
                         offer_id=offer_id,
                         attempt_index=spec.index,
                     ),
+                    phase_details=phase_details,
                 )
             else:
-                offer = await load_offer_snapshot(offer_id)
+                if telegram_offer_snapshot is None:
+                    raise TradingProbeError("telegram hot-offer contention requires an offer snapshot")
                 status_value = await execute_bot_trade_with_dispatcher(
                     harness=harness,
                     spec=spec,
-                    offer=offer,
+                    offer=telegram_offer_snapshot,
                     amount=amount,
                     prefix=prefix,
+                    phase_details=phase_details,
+                    preconfirmed=telegram_preconfirm is not None,
                 )
         except Exception as exc:
             status_value = "error"
             detail = type(exc).__name__
+        full_latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
+        try:
+            latency_ms = round(float(phase_details.get("business_latency_ms")), 3)
+        except (TypeError, ValueError):
+            latency_ms = full_latency_ms
         return MixedLoadAttemptResult(
             index=spec.index,
             surface=spec.surface,
             status=status_value,
-            duration_ms=round((time.perf_counter() - attempt_started) * 1000.0, 3),
+            duration_ms=latency_ms,
             detail=detail,
+            telegram_update_count=int(phase_details.get("telegram_update_count") or 0),
             start_offset_seconds=start_offset_seconds,
         )
 
@@ -2711,6 +2731,7 @@ async def run_hot_offer_contention(
         "offer_status": persistence.offer_status,
         "persistence": asdict(persistence),
         "correctness_failures": correctness_failures,
+        "telegram_preconfirm": telegram_preconfirm,
         "summary": summary,
     }
 
