@@ -49,6 +49,7 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
+from core.services.trade_contention_gate import try_acquire_trade_contention_gate
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
@@ -64,6 +65,10 @@ from models.user import User, UserRole
 
 
 class TradingProbeError(RuntimeError):
+    pass
+
+
+class _RoleAttemptRejected(Exception):
     pass
 
 
@@ -1782,6 +1787,7 @@ async def execute_webapp_trade_for_user(
     *,
     user_id: int,
     offer_id: int,
+    offer_public_id: str | None = None,
     quantity: int,
     idempotency_key: str,
     error_details: list[str] | None = None,
@@ -1789,17 +1795,25 @@ async def execute_webapp_trade_for_user(
 ) -> str:
     background_tasks = BackgroundTasks()
     create_started = time.perf_counter()
+    lease = await try_acquire_trade_contention_gate(offer_public_id=offer_public_id, offer_id=offer_id)
+    if not lease.acquired:
+        if phase_details is not None:
+            phase_details["contention_gate_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["exception"] = "HTTPException 409"
+        return "rejected"
     try:
         async with AsyncSessionLocal() as db:
             user = await load_user(db, user_id)
             response = await trades_router.create_trade(
                 trade_data=trades_router.TradeCreate(
                     offer_id=offer_id,
+                    offer_public_id=offer_public_id,
                     quantity=quantity,
                     idempotency_key=idempotency_key,
                 ),
                 background_tasks=background_tasks,
                 raw_request=SimpleNamespace(body=lambda: b""),
+                trade_contention_lease=lease,
                 db=db,
                 context=owner_context(user),
             )
@@ -1824,6 +1838,8 @@ async def execute_webapp_trade_for_user(
             phase_details["create_trade_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
             phase_details["exception"] = type(exc).__name__
         return "error"
+    finally:
+        await lease.release()
 
     if isinstance(response, JSONResponse):
         if response.status_code >= 500 and error_details is not None:
@@ -2072,10 +2088,20 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         attempt_error_details: list[str] = []
         phase_details: dict[str, Any] = {}
         try:
+            gate_lease = await try_acquire_trade_contention_gate(
+                offer_public_id=offer_public_id,
+                offer_id=offer_id,
+            )
+            if not gate_lease.acquired:
+                phase_details["contention_gate"] = "rejected_before_db"
+                status_value = "rejected"
+                raise _RoleAttemptRejected()
+            phase_details["contention_gate"] = "acquired"
             if surface == "webapp":
                 status_value = await execute_webapp_trade_for_user(
                     user_id=spec.user_id,
                     offer_id=offer_id,
+                    offer_public_id=offer_public_id,
                     quantity=request_amount,
                     idempotency_key=idempotency_key,
                     error_details=attempt_error_details,
@@ -2097,6 +2123,8 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                 )
                 if observed_telegram_keys:
                     idempotency_key = observed_telegram_keys[-1]
+        except _RoleAttemptRejected:
+            pass
         except Exception as exc:
             status_value = "error"
             detail = f"{type(exc).__name__}: {exc}"

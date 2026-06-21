@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     trade_forward_grace_seconds: int = 3
     trade_forward_verify_tls: bool = False
     trade_forward_ca_bundle: str | None = None
+    trade_contention_gate_ttl_seconds: float = 2.5
     foreign_server_url: str | None = None
     sync_api_key: str | None = None
     sync_direct_push_cooldown_seconds: float = 90.0

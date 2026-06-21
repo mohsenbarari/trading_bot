@@ -45,6 +45,10 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.trade_contention_gate import (
+    TradeContentionLease,
+    try_acquire_trade_contention_gate,
+)
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
     apply_offer_request_decision,
@@ -127,6 +131,16 @@ class TradeCreate(BaseModel):
     offer_public_id: Optional[str] = None
     quantity: int = Field(..., gt=0)
     idempotency_key: Optional[str] = None
+
+
+async def _acquire_trade_contention_gate_dependency(trade_data: TradeCreate) -> TradeContentionLease:
+    lease = await try_acquire_trade_contention_gate(
+        offer_public_id=trade_data.offer_public_id,
+        offer_id=trade_data.offer_id,
+    )
+    if not lease.acquired:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=TRADE_CONFLICT_DETAIL)
+    return lease
 
 
 class InternalTradeExecuteRequest(BaseModel):
@@ -3139,6 +3153,7 @@ async def create_trade(
     trade_data: TradeCreate,
     background_tasks: BackgroundTasks,
     raw_request: Request,
+    trade_contention_lease: TradeContentionLease = Depends(_acquire_trade_contention_gate_dependency),
     db: AsyncSession = Depends(get_db),
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context)
 ):
