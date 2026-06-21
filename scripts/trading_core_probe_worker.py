@@ -928,6 +928,12 @@ def in_filter(column: Any, values: list[int] | list[str]):
     return column.in_(values) if values else false()
 
 
+def cleanup_mutating_statement(statement: Any) -> Any:
+    if str(getattr(settings, "environment", "") or "").strip().lower() == "production":
+        raise TradingProbeError("synthetic cleanup is disabled in production runtime")
+    return statement.execution_options(is_sync=True)
+
+
 def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
     return {
         "users": len(plan.user_ids),
@@ -1107,46 +1113,83 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
         deleted_publication_states = 0
         if plan.notification_ids:
             deleted_notifications = int(
-                (await db.execute(delete(Notification).where(Notification.id.in_(plan.notification_ids)))).rowcount or 0
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(Notification).where(Notification.id.in_(plan.notification_ids))
+                        )
+                    )
+                ).rowcount
+                or 0
             )
         if plan.publication_state_ids:
             deleted_publication_states = int(
                 (
                     await db.execute(
-                        delete(OfferPublicationState).where(OfferPublicationState.id.in_(plan.publication_state_ids))
+                        cleanup_mutating_statement(
+                            delete(OfferPublicationState).where(OfferPublicationState.id.in_(plan.publication_state_ids))
+                        )
                     )
                 ).rowcount
                 or 0
             )
         if plan.offer_request_ids:
             deleted_offer_requests = int(
-                (await db.execute(delete(OfferRequest).where(OfferRequest.id.in_(plan.offer_request_ids)))).rowcount
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(OfferRequest).where(OfferRequest.id.in_(plan.offer_request_ids))
+                        )
+                    )
+                ).rowcount
                 or 0
             )
         if plan.chat_member_ids:
             deleted_chat_members = int(
-                (await db.execute(delete(ChatMember).where(ChatMember.id.in_(plan.chat_member_ids)))).rowcount or 0
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(delete(ChatMember).where(ChatMember.id.in_(plan.chat_member_ids)))
+                    )
+                ).rowcount
+                or 0
             )
         if plan.trade_ids:
-            deleted_trades = int((await db.execute(delete(Trade).where(Trade.id.in_(plan.trade_ids)))).rowcount or 0)
+            deleted_trades = int(
+                (
+                    await db.execute(cleanup_mutating_statement(delete(Trade).where(Trade.id.in_(plan.trade_ids))))
+                ).rowcount
+                or 0
+            )
         if plan.offer_ids:
-            deleted_offers = int((await db.execute(delete(Offer).where(Offer.id.in_(plan.offer_ids)))).rowcount or 0)
+            deleted_offers = int(
+                (
+                    await db.execute(cleanup_mutating_statement(delete(Offer).where(Offer.id.in_(plan.offer_ids))))
+                ).rowcount
+                or 0
+            )
         if plan.user_ids:
-            deleted_users = int((await db.execute(delete(User).where(User.id.in_(plan.user_ids)))).rowcount or 0)
+            deleted_users = int(
+                (
+                    await db.execute(cleanup_mutating_statement(delete(User).where(User.id.in_(plan.user_ids))))
+                ).rowcount
+                or 0
+            )
 
         change_log_result = await db.execute(
-            text(
-                """
-                DELETE FROM change_log
-                WHERE strpos(data::text, :raw_prefix) > 0
-                   OR (table_name = 'users' AND record_id = ANY(:user_ids))
-                   OR (table_name = 'offers' AND record_id = ANY(:offer_ids))
-                   OR (table_name = 'trades' AND record_id = ANY(:trade_ids))
-                   OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
-                   OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
-                   OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
-                   OR (table_name = 'chat_members' AND record_id = ANY(:chat_member_ids))
-                """
+            cleanup_mutating_statement(
+                text(
+                    """
+                    DELETE FROM change_log
+                    WHERE strpos(data::text, :raw_prefix) > 0
+                       OR (table_name = 'users' AND record_id = ANY(:user_ids))
+                       OR (table_name = 'offers' AND record_id = ANY(:offer_ids))
+                       OR (table_name = 'trades' AND record_id = ANY(:trade_ids))
+                       OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
+                       OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
+                       OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
+                       OR (table_name = 'chat_members' AND record_id = ANY(:chat_member_ids))
+                    """
+                )
             ),
             {
                 "raw_prefix": plan.prefix,

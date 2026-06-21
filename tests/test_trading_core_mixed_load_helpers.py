@@ -391,6 +391,15 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(report["deleted_publication_states"], 0)
         self.assertEqual(report["deleted_redis_keys"], 3)
 
+    def test_cleanup_mutating_statement_marks_sync_cleanup_and_blocks_production(self):
+        with patch.object(worker.settings, "environment", "staging"):
+            statement = worker.cleanup_mutating_statement(worker.delete(worker.Offer).where(worker.Offer.id == 1))
+
+        self.assertTrue(statement.get_execution_options()["is_sync"])
+        with patch.object(worker.settings, "environment", "production"):
+            with self.assertRaises(worker.TradingProbeError):
+                worker.cleanup_mutating_statement(worker.delete(worker.Offer).where(worker.Offer.id == 1))
+
     def test_load_runner_runtime_surface_guard_accepts_expected_roles(self):
         with patch.object(worker.settings, "environment", "staging"), patch.object(
             worker.settings, "trading_bot_service", "load_runner"
