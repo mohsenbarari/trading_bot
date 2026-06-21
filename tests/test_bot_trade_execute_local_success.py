@@ -143,10 +143,12 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
                 user=user,
                 bot=bot,
                 trade_contention_preconfirmed=True,
+                trade_contention_pre_gated=True,
             )
 
         double_click_mock.assert_not_awaited()
         shared_command_mock.assert_awaited_once()
+        self.assertTrue(shared_command_mock.await_args.kwargs["request_pre_gated"])
 
     async def test_public_channel_trade_callback_resolves_offer_by_public_identity(self):
         user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
@@ -214,6 +216,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
                 session=session,
                 offer=offer,
                 actual_amount=2,
+                request_pre_gated=True,
             )
 
         execute_mock.assert_awaited_once()
@@ -224,6 +227,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["trade_data"].idempotency_key, "telegram_callback:5:ofr_bot_local_7:2:remaining:5:50")
         self.assertEqual(kwargs["request_source_surface"], OfferRequestSourceSurface.TELEGRAM_BOT)
         self.assertEqual(kwargs["request_source_server"], "foreign")
+        self.assertTrue(kwargs["request_pre_gated"])
         self.assertEqual(kwargs["context"].owner_user, user)
         self.assertEqual(user.role.name, "STANDARD")
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)

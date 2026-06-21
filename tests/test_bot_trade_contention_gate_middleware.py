@@ -21,8 +21,9 @@ class FakeCallbackQuery:
 
 
 class FakeLease:
-    def __init__(self, *, acquired: bool):
+    def __init__(self, *, acquired: bool, token: str | None = None):
         self.acquired = acquired
+        self.token = token
         self.release = AsyncMock()
 
 
@@ -93,7 +94,7 @@ class TradeContentionGateMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         callback = FakeCallbackQuery(data="channel_trade:42:5")
         handler = AsyncMock(return_value="handled")
         gate = middleware.TradeContentionGateMiddleware()
-        lease = FakeLease(acquired=True)
+        lease = FakeLease(acquired=True, token="slot-1")
         data = {}
 
         with patch.object(middleware, "CallbackQuery", FakeCallbackQuery), patch.object(
@@ -111,10 +112,36 @@ class TradeContentionGateMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "handled")
         self.assertTrue(data["trade_contention_preconfirmed"])
+        self.assertTrue(data["trade_contention_pre_gated"])
         handler.assert_awaited_once_with(callback, data)
         acquire_mock.assert_awaited_once()
         lease.release.assert_awaited_once()
         callback.answer.assert_not_awaited()
+
+    async def test_gate_fallback_keeps_confirmation_without_marking_pre_gated(self):
+        callback = FakeCallbackQuery(data="channel_trade:42:5")
+        handler = AsyncMock(return_value="handled")
+        gate = middleware.TradeContentionGateMiddleware()
+        lease = FakeLease(acquired=True, token=None)
+        data = {}
+
+        with patch.object(middleware, "CallbackQuery", FakeCallbackQuery), patch.object(
+            middleware.settings, "channel_id", -100123
+        ), patch.object(
+            middleware,
+            "claim_telegram_trade_confirmation",
+            new=AsyncMock(return_value=True),
+        ), patch.object(
+            middleware,
+            "try_acquire_trade_contention_gate",
+            new=AsyncMock(return_value=lease),
+        ):
+            result = await gate(handler, callback, data)
+
+        self.assertEqual(result, "handled")
+        self.assertTrue(data["trade_contention_preconfirmed"])
+        self.assertFalse(data["trade_contention_pre_gated"])
+        lease.release.assert_awaited_once()
 
     async def test_private_suggestion_callbacks_bypass_pre_auth_gate(self):
         callback = FakeCallbackQuery(data="ct2:ofr_public_1:20", chat_id=555, chat_type="private")

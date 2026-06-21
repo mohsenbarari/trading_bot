@@ -14,7 +14,10 @@ from redis.asyncio import Redis
 from bot.utils.trade_suggestion_messages import PRIVATE_SUGGESTION_CONFIRM_TIMEOUT
 from core.config import settings
 from core.redis import get_redis_client, pool
-from core.services.trade_contention_gate import try_acquire_trade_contention_gate
+from core.services.trade_contention_gate import (
+    trade_contention_lease_was_pre_gated,
+    try_acquire_trade_contention_gate,
+)
 from core.telegram_trade_callbacks import (
     CHANNEL_TRADE_LEGACY_CALLBACK_PREFIX,
     CHANNEL_TRADE_PUBLIC_CALLBACK_PREFIX,
@@ -166,6 +169,7 @@ class TradeContentionGateMiddleware(BaseMiddleware):
             return None
 
         data["trade_contention_preconfirmed"] = True
+        data["trade_contention_pre_gated"] = trade_contention_lease_was_pre_gated(lease)
         try:
             return await handler(event, data)
         finally:

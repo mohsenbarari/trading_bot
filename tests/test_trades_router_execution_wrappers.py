@@ -58,7 +58,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         current_user = SimpleNamespace(id=5)
         context = make_context(current_user)
         forwarded = JSONResponse(status_code=202, content={"forwarded": True})
-        lease = SimpleNamespace(release=AsyncMock())
+        lease = SimpleNamespace(acquired=True, token="slot-1", release=AsyncMock())
 
         with patch(
             "api.routers.trades._forward_trade_if_remote_home",
@@ -79,6 +79,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result, forwarded)
         lease.release.assert_awaited_once()
         forward_mock.assert_awaited_once()
+        self.assertTrue(forward_mock.await_args.kwargs["request_pre_gated"])
         execute_mock.assert_not_awaited()
 
     async def test_create_trade_returns_remote_failure_without_local_partial_execution(self):
@@ -111,7 +112,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         background_tasks = BackgroundTasks()
         current_user = SimpleNamespace(id=5)
         context = make_context(current_user)
-        lease = SimpleNamespace(release=AsyncMock())
+        lease = SimpleNamespace(acquired=True, token="slot-1", release=AsyncMock())
 
         with patch(
             "api.routers.trades._forward_trade_if_remote_home",
@@ -136,6 +137,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(execute_mock.await_args.kwargs["background_tasks"], background_tasks)
         self.assertEqual(execute_mock.await_args.kwargs["context"], context)
         self.assertIsInstance(execute_mock.await_args.kwargs["edge_received_at"], datetime)
+        self.assertTrue(execute_mock.await_args.kwargs["request_pre_gated"])
 
     async def test_execute_trade_internal_rejects_invalid_signature(self):
         internal_data = InternalTradeExecuteRequest(
@@ -248,6 +250,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
             source_surface="telegram_bot",
             source_server="iran",
             idempotency_key="idem-1",
+            request_pre_gated=True,
         )
         headers = {"x-timestamp": "1", "x-signature": "sig", "x-api-key": "key", "x-source-server": "iran"}
         responder = SimpleNamespace(id=5, is_deleted=False)
@@ -285,6 +288,7 @@ class TradesRouterExecutionWrapperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execute_mock.await_args.kwargs["edge_received_at"], internal_data.edge_received_at)
         self.assertEqual(execute_mock.await_args.kwargs["request_source_surface"].value, "telegram_bot")
         self.assertEqual(execute_mock.await_args.kwargs["request_source_server"], "iran")
+        self.assertTrue(execute_mock.await_args.kwargs["request_pre_gated"])
 
     async def test_forward_trade_if_remote_home_covers_both_cross_server_directions_and_idempotency(self):
         scenarios = (

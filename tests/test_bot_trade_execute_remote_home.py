@@ -311,10 +311,12 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
                 user=user,
                 bot=bot,
                 trade_contention_preconfirmed=True,
+                trade_contention_pre_gated=True,
             )
 
         double_click_mock.assert_not_awaited()
         forward_mock.assert_awaited_once()
+        self.assertTrue(forward_mock.await_args.args[1]["request_pre_gated"])
         callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
 
     async def test_handle_channel_trade_remote_home_does_not_lock_local_mirror_before_forward(self):
@@ -337,6 +339,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.for_update_flags, [False])
         self.assertEqual(session.rollbacks, 1)
         forward_mock.assert_awaited_once()
+        self.assertNotIn("request_pre_gated", forward_mock.await_args.args[1])
 
 
 if __name__ == "__main__":

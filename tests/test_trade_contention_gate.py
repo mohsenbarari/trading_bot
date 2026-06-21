@@ -7,22 +7,26 @@ from core.services import trade_contention_gate as gate
 class FakeRedis:
     def __init__(self, *, fail: bool = False):
         self.fail = fail
-        self.values = {}
+        self.hashes = {}
         self.closed = False
 
-    async def set(self, key, value, *, nx=False, px=None):
+    async def eval(self, script, _num_keys, key, *args):
         if self.fail:
             raise RuntimeError("redis unavailable")
-        if nx and key in self.values:
-            return False
-        self.values[key] = value
-        return True
-
-    async def eval(self, _script, _num_keys, key, token):
-        if self.values.get(key) == token:
-            del self.values[key]
+        if "hset" in script.lower():
+            token, _ttl_ms, max_inflight = args
+            slots = self.hashes.setdefault(key, set())
+            if len(slots) >= int(max_inflight):
+                return 0
+            slots.add(token)
             return 1
-        return 0
+        token = args[0]
+        slots = self.hashes.get(key, set())
+        removed = 1 if token in slots else 0
+        slots.discard(token)
+        if not slots:
+            self.hashes.pop(key, None)
+        return removed
 
     async def aclose(self):
         self.closed = True
@@ -39,18 +43,36 @@ class TradeContentionGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("42", legacy_key)
         self.assertNotEqual(public_key, legacy_key)
 
-    async def test_gate_acquire_reject_and_owner_release(self):
+    async def test_gate_acquire_rejects_above_inflight_limit_and_owner_release(self):
         redis = FakeRedis()
         with patch("core.services.trade_contention_gate._get_gate_client", return_value=(redis, False)):
-            first = await gate.try_acquire_trade_contention_gate(offer_public_id="ofr_busy", ttl_seconds=2.5)
-            second = await gate.try_acquire_trade_contention_gate(offer_public_id="ofr_busy", ttl_seconds=2.5)
+            first = await gate.try_acquire_trade_contention_gate(
+                offer_public_id="ofr_busy",
+                ttl_seconds=2.5,
+                max_inflight=2,
+            )
+            second = await gate.try_acquire_trade_contention_gate(
+                offer_public_id="ofr_busy",
+                ttl_seconds=2.5,
+                max_inflight=2,
+            )
+            third = await gate.try_acquire_trade_contention_gate(
+                offer_public_id="ofr_busy",
+                ttl_seconds=2.5,
+                max_inflight=2,
+            )
 
             self.assertTrue(first.acquired)
-            self.assertFalse(second.acquired)
+            self.assertTrue(second.acquired)
+            self.assertFalse(third.acquired)
 
             await first.release()
-            third = await gate.try_acquire_trade_contention_gate(offer_public_id="ofr_busy", ttl_seconds=2.5)
-            self.assertTrue(third.acquired)
+            replacement = await gate.try_acquire_trade_contention_gate(
+                offer_public_id="ofr_busy",
+                ttl_seconds=2.5,
+                max_inflight=2,
+            )
+            self.assertTrue(replacement.acquired)
 
     async def test_gate_allows_request_when_redis_is_unavailable(self):
         redis = FakeRedis(fail=True)

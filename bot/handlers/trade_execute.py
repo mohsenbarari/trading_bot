@@ -476,6 +476,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     session,
     offer: Offer,
     actual_amount: int,
+    request_pre_gated: bool = False,
 ) -> None:
     if not hasattr(user, "role"):
         setattr(user, "role", UserRole.STANDARD)
@@ -506,6 +507,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
             edge_received_at=datetime.utcnow(),
             request_source_surface=OfferRequestSourceSurface.TELEGRAM_BOT,
             request_source_server=current_server(),
+            request_pre_gated=request_pre_gated,
         )
     except HTTPException as exc:
         await callback.answer(f"❌ {exc.detail or 'امکان انجام این معامله وجود ندارد.'}", show_alert=True)
@@ -549,6 +551,7 @@ async def handle_channel_trade(
     user: Optional[User],
     bot: Bot,
     trade_contention_preconfirmed: bool = False,
+    trade_contention_pre_gated: bool = False,
 ):
     await _handle_channel_trade(
         callback,
@@ -556,6 +559,7 @@ async def handle_channel_trade(
         user,
         bot,
         trade_contention_preconfirmed=trade_contention_preconfirmed,
+        trade_contention_pre_gated=trade_contention_pre_gated,
     )
 
 
@@ -566,6 +570,7 @@ async def handle_channel_trade_public(
     user: Optional[User],
     bot: Bot,
     trade_contention_preconfirmed: bool = False,
+    trade_contention_pre_gated: bool = False,
 ):
     await _handle_channel_trade(
         callback,
@@ -573,6 +578,7 @@ async def handle_channel_trade_public(
         user,
         bot,
         trade_contention_preconfirmed=trade_contention_preconfirmed,
+        trade_contention_pre_gated=trade_contention_pre_gated,
     )
 
 
@@ -583,6 +589,7 @@ async def _handle_channel_trade(
     bot: Bot,
     *,
     trade_contention_preconfirmed: bool = False,
+    trade_contention_pre_gated: bool = False,
 ):
     """کلیک روی دکمه پست کانال - دابل‌کلیک برای تایید"""
     if not user:
@@ -703,6 +710,8 @@ async def _handle_channel_trade(
                 "source_server": current_server(),
                 "idempotency_key": idempotency_key,
             }
+            if trade_contention_pre_gated:
+                forward_payload["request_pre_gated"] = True
             offer_home_server = offer.home_server
             remote_offer_id = offer.id
             try:
@@ -826,6 +835,7 @@ async def _handle_channel_trade(
                 session=session,
                 offer=offer,
                 actual_amount=actual_amount,
+                request_pre_gated=bool(trade_contention_pre_gated),
             )
             return
         else:

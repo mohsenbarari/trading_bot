@@ -88,14 +88,18 @@ class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
     async def test_offer_execution_lock_uses_postgresql_try_advisory_lock(self):
         postgres_busy_db = FakeDB(dialect_name="postgresql", scalar_result=False)
         postgres_free_db = FakeDB(dialect_name="postgresql", scalar_result=True)
+        postgres_wait_db = FakeDB(dialect_name="postgresql")
         sqlite_db = FakeDB(dialect_name="sqlite")
 
         self.assertFalse(await _try_lock_trade_offer_execution(postgres_busy_db, 7))
         self.assertTrue(await _try_lock_trade_offer_execution(postgres_free_db, 7))
+        self.assertTrue(await _try_lock_trade_offer_execution(postgres_wait_db, 7, wait=True))
         self.assertTrue(await _try_lock_trade_offer_execution(sqlite_db, 7))
 
         postgres_busy_db.scalar.assert_awaited_once()
         postgres_free_db.scalar.assert_awaited_once()
+        postgres_wait_db.execute.assert_awaited_once()
+        postgres_wait_db.scalar.assert_not_awaited()
         sqlite_db.scalar.assert_not_awaited()
 
     def test_idempotent_replay_rejects_mismatched_economic_request(self):

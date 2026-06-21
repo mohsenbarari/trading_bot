@@ -16,11 +16,28 @@ from core.redis import get_redis_client, pool
 logger = logging.getLogger(__name__)
 
 TRADE_CONTENTION_GATE_PREFIX = "trade:contention"
-_RELEASE_IF_OWNER_SCRIPT = """
-if redis.call("get", KEYS[1]) == ARGV[1] then
-    return redis.call("del", KEYS[1])
+_ACQUIRE_SEMAPHORE_SLOT_SCRIPT = """
+local key_type = redis.call("type", KEYS[1]).ok
+if key_type ~= "none" and key_type ~= "hash" then
+    return 0
 end
-return 0
+if redis.call("hlen", KEYS[1]) >= tonumber(ARGV[3]) then
+    return 0
+end
+redis.call("hset", KEYS[1], ARGV[1], "1")
+redis.call("pexpire", KEYS[1], ARGV[2])
+return 1
+"""
+_RELEASE_SEMAPHORE_SLOT_SCRIPT = """
+local key_type = redis.call("type", KEYS[1]).ok
+if key_type ~= "hash" then
+    return 0
+end
+local removed = redis.call("hdel", KEYS[1], ARGV[1])
+if redis.call("hlen", KEYS[1]) == 0 then
+    redis.call("del", KEYS[1])
+end
+return removed
 """
 
 
@@ -37,7 +54,7 @@ class TradeContentionLease:
             await self._close_owned_client()
             return
         try:
-            await self._client.eval(_RELEASE_IF_OWNER_SCRIPT, 1, self.key, self.token)
+            await self._client.eval(_RELEASE_SEMAPHORE_SLOT_SCRIPT, 1, self.key, self.token)
         except Exception as exc:
             logger.debug("Failed to release trade contention gate %s: %s", self.key, exc)
         finally:
@@ -48,6 +65,10 @@ class TradeContentionLease:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
             self._client = None
+
+
+def trade_contention_lease_was_pre_gated(lease: object) -> bool:
+    return bool(getattr(lease, "acquired", False) and getattr(lease, "token", None))
 
 
 def build_trade_contention_gate_key(*, offer_public_id: str | None = None, offer_id: int | str | None = None) -> str:
@@ -67,6 +88,11 @@ def _gate_ttl_ms(ttl_seconds: float | None = None) -> int:
     return max(250, int(float(raw_ttl) * 1000))
 
 
+def _gate_max_inflight(max_inflight: int | None = None) -> int:
+    raw_limit = settings.trade_contention_gate_max_inflight if max_inflight is None else max_inflight
+    return max(1, int(raw_limit))
+
+
 def _get_gate_client() -> tuple[Redis, bool]:
     try:
         return get_redis_client(), False
@@ -79,6 +105,7 @@ async def try_acquire_trade_contention_gate(
     offer_public_id: str | None = None,
     offer_id: int | str | None = None,
     ttl_seconds: float | None = None,
+    max_inflight: int | None = None,
 ) -> TradeContentionLease:
     key = build_trade_contention_gate_key(offer_public_id=offer_public_id, offer_id=offer_id)
     token = uuid.uuid4().hex
@@ -86,7 +113,16 @@ async def try_acquire_trade_contention_gate(
     owns_client = False
     try:
         client, owns_client = _get_gate_client()
-        acquired = bool(await client.set(key, token, nx=True, px=_gate_ttl_ms(ttl_seconds)))
+        acquired = bool(
+            await client.eval(
+                _ACQUIRE_SEMAPHORE_SLOT_SCRIPT,
+                1,
+                key,
+                token,
+                _gate_ttl_ms(ttl_seconds),
+                _gate_max_inflight(max_inflight),
+            )
+        )
         lease = TradeContentionLease(
             key=key,
             token=token if acquired else None,

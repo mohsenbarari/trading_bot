@@ -47,6 +47,7 @@ from core.services.trade_service import (
 )
 from core.services.trade_contention_gate import (
     TradeContentionLease,
+    trade_contention_lease_was_pre_gated,
     try_acquire_trade_contention_gate,
 )
 from core.services.offer_request_ledger_service import (
@@ -160,6 +161,7 @@ class InternalTradeExecuteRequest(BaseModel):
     source_surface: str = OfferRequestSourceSurface.WEBAPP.value
     source_server: str
     idempotency_key: Optional[str] = None
+    request_pre_gated: bool = False
 
 
 class TradeResponse(BaseModel):
@@ -304,10 +306,15 @@ async def _lock_trade_idempotency_key(db: AsyncSession, idempotency_key: str | N
     return True
 
 
-async def _try_lock_trade_offer_execution(db: AsyncSession, offer_id: int) -> bool:
+async def _try_lock_trade_offer_execution(db: AsyncSession, offer_id: int, *, wait: bool = False) -> bool:
     if _db_dialect_name(db) != "postgresql":
         return True
     offer_lock_id = _stable_advisory_lock_id(f"offer:{int(offer_id)}")
+    if wait:
+        await db.execute(
+            select(func.pg_advisory_xact_lock(TRADE_OFFER_EXECUTION_LOCK_NAMESPACE, offer_lock_id))
+        )
+        return True
     locked = await db.scalar(
         select(func.pg_try_advisory_xact_lock(TRADE_OFFER_EXECUTION_LOCK_NAMESPACE, offer_lock_id))
     )
@@ -2168,6 +2175,7 @@ async def _forward_trade_if_remote_home(
     edge_received_at: datetime,
     *,
     request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
+    request_pre_gated: bool = False,
 ) -> Optional[JSONResponse]:
     offer = await db.get(Offer, trade_data.offer_id)
     if not offer or not is_remote_home(offer.home_server):
@@ -2191,6 +2199,8 @@ async def _forward_trade_if_remote_home(
         "source_server": current_server(),
         "idempotency_key": trade_data.idempotency_key,
     }
+    if request_pre_gated:
+        payload["request_pre_gated"] = True
     if getattr(actor_user, "id", None) != owner_user.id:
         payload["actor_user_id"] = actor_user.id
     log_trading_event(
@@ -2241,6 +2251,7 @@ async def _execute_trade_authoritatively(
     edge_received_at: Optional[datetime] = None,
     request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
     request_source_server: str | None = None,
+    request_pre_gated: bool = False,
 ):
     """
     انجام معامله روی یک لفظ از MiniApp
@@ -2329,7 +2340,7 @@ async def _execute_trade_authoritatively(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
 
     idempotency_lock_held = await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
-    if not await _try_lock_trade_offer_execution(db, trade_data.offer_id):
+    if not await _try_lock_trade_offer_execution(db, trade_data.offer_id, wait=request_pre_gated):
         await _reject_trade_offer_contention(
             db,
             trade_data=trade_data,
@@ -3168,6 +3179,7 @@ async def create_trade(
             context,
             edge_received_at,
             request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_pre_gated=trade_contention_lease_was_pre_gated(trade_contention_lease),
         )
         if forwarded_response is not None:
             return forwarded_response
@@ -3180,6 +3192,7 @@ async def create_trade(
             edge_received_at=edge_received_at,
             request_source_surface=OfferRequestSourceSurface.WEBAPP,
             request_source_server=current_server(),
+            request_pre_gated=trade_contention_lease_was_pre_gated(trade_contention_lease),
         )
     finally:
         await _release_trade_contention_lease(trade_contention_lease)
@@ -3324,6 +3337,7 @@ async def execute_trade_internal(
         edge_received_at=internal_data.edge_received_at,
         request_source_surface=_normalize_trade_request_surface(internal_data.source_surface),
         request_source_server=payload_source_server,
+        request_pre_gated=internal_data.request_pre_gated,
     )
 
 
