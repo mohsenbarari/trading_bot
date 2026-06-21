@@ -272,6 +272,34 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.offer_requests[0].public_failure_code, "lot_unavailable")
         db.commit.assert_awaited_once()
 
+    async def test_execute_trade_authoritatively_rejects_hot_offer_contention_with_ledger(self):
+        locked_user = make_user()
+        offer = make_offer()
+        db = FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[offer])
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._try_lock_trade_offer_execution",
+            new=AsyncMock(return_value=False),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    TradeCreate(offer_id=7, quantity=4, idempotency_key="idem-busy"),
+                    BackgroundTasks(),
+                    db=db,
+                    context=make_context(locked_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(exc_info.exception.detail, "این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید.")
+        self.assertEqual(db.added, [])
+        self.assertEqual(len(db.offer_requests), 1)
+        self.assertEqual(db.offer_requests[0].result_status, OfferRequestStatus.REJECTED_CONFLICT)
+        self.assertEqual(db.offer_requests[0].public_failure_code, "offer_contention")
+        self.assertEqual(db.offer_requests[0].internal_failure_code, "offer_execution_lock_busy")
+        self.assertIsNone(db.offer_requests[0].idempotency_key)
+        self.assertEqual(db.offer_requests[0].internal_failure_context["idempotency_key_present"], True)
+        db.commit.assert_awaited_once()
+
     async def test_execute_trade_authoritatively_rejects_invalid_amount_and_reuses_idempotent_trade(self):
         locked_user = make_user()
         offer = make_offer(is_wholesale=True, lot_sizes=None)

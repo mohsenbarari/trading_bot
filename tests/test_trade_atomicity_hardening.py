@@ -11,6 +11,7 @@ from api.routers.trades import (
     _apply_offer_trade_mutation,
     _commit_trade_execution,
     _lock_trade_idempotency_key,
+    _try_lock_trade_offer_execution,
     _validate_idempotent_trade_replay,
 )
 from models.offer import OfferStatus
@@ -80,6 +81,19 @@ class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
 
         postgres_db.execute.assert_awaited_once()
         sqlite_db.execute.assert_not_awaited()
+
+    async def test_offer_execution_lock_uses_postgresql_try_advisory_lock(self):
+        postgres_busy_db = FakeDB(dialect_name="postgresql", scalar_result=False)
+        postgres_free_db = FakeDB(dialect_name="postgresql", scalar_result=True)
+        sqlite_db = FakeDB(dialect_name="sqlite")
+
+        self.assertFalse(await _try_lock_trade_offer_execution(postgres_busy_db, 7))
+        self.assertTrue(await _try_lock_trade_offer_execution(postgres_free_db, 7))
+        self.assertTrue(await _try_lock_trade_offer_execution(sqlite_db, 7))
+
+        postgres_busy_db.scalar.assert_awaited_once()
+        postgres_free_db.scalar.assert_awaited_once()
+        sqlite_db.scalar.assert_not_awaited()
 
     def test_idempotent_replay_rejects_mismatched_economic_request(self):
         existing_trade = SimpleNamespace(

@@ -76,6 +76,7 @@ TRADE_UNAVAILABLE_DETAIL = "امکان انجام این معامله وجود �
 TRADE_CONFLICT_DETAIL = "این لفظ توسط کاربر دیگری در حال معامله است. لطفاً دوباره تلاش کنید."
 TRADE_NUMBER_ALLOCATION_LOCK_ID = 362_514_001
 TRADE_IDEMPOTENCY_LOCK_NAMESPACE = 362_514
+TRADE_OFFER_EXECUTION_LOCK_NAMESPACE = 362_515
 
 
 router = APIRouter(
@@ -288,6 +289,16 @@ async def _lock_trade_idempotency_key(db: AsyncSession, idempotency_key: str | N
         )
     )
     return True
+
+
+async def _try_lock_trade_offer_execution(db: AsyncSession, offer_id: int) -> bool:
+    if _db_dialect_name(db) != "postgresql":
+        return True
+    offer_lock_id = _stable_advisory_lock_id(f"offer:{int(offer_id)}")
+    locked = await db.scalar(
+        select(func.pg_try_advisory_xact_lock(TRADE_OFFER_EXECUTION_LOCK_NAMESPACE, offer_lock_id))
+    )
+    return bool(locked)
 
 
 async def _allocate_next_trade_number(db: AsyncSession) -> int:
@@ -2047,6 +2058,67 @@ async def _commit_rejected_offer_request_ledger(
         )
 
 
+async def _reject_trade_offer_contention(
+    db: AsyncSession,
+    *,
+    trade_data: TradeCreate,
+    owner_user: User | object,
+    actor_user: User | object,
+    request_source_surface: OfferRequestSourceSurface | str,
+    request_source_server: str | None,
+    edge_received_at: datetime | None,
+) -> None:
+    offer = await db.get(Offer, trade_data.offer_id)
+    if not offer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="لفظ یافت نشد.")
+
+    ledger_trade_data = trade_data
+    if trade_data.idempotency_key:
+        ledger_trade_data = TradeCreate(
+            offer_id=trade_data.offer_id,
+            offer_public_id=trade_data.offer_public_id,
+            quantity=trade_data.quantity,
+            idempotency_key=None,
+        )
+
+    offer_request_ledger = await _create_offer_request_ledger_for_trade(
+        db,
+        offer=offer,
+        trade_data=ledger_trade_data,
+        owner_user=owner_user,
+        actor_user=actor_user,
+        request_source_surface=request_source_surface,
+        request_source_server=request_source_server,
+        edge_received_at=edge_received_at,
+    )
+    await _commit_rejected_offer_request_ledger(
+        db,
+        offer_request_ledger,
+        result_status=OfferRequestStatus.REJECTED_CONFLICT,
+        public_failure_code="offer_contention",
+        public_failure_message=TRADE_CONFLICT_DETAIL,
+        internal_failure_code="offer_execution_lock_busy",
+        internal_failure_context={
+            "offer_id": trade_data.offer_id,
+            "source_server": normalize_server(request_source_server, current_server()),
+            "source_surface": _normalize_trade_request_surface(request_source_surface).value,
+            "idempotency_key_present": bool(trade_data.idempotency_key),
+        },
+    )
+    log_trading_event(
+        logger,
+        "trade_execute.offer_contention_rejected",
+        level="warning",
+        action="trade_execute",
+        result="conflict",
+        offer_id=trade_data.offer_id,
+        source_server=current_server(),
+        request_source_server=normalize_server(request_source_server, current_server()),
+        has_idempotency_key=bool(trade_data.idempotency_key),
+    )
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=TRADE_CONFLICT_DETAIL)
+
+
 async def _flush_trade_request_state(db: AsyncSession) -> None:
     flush = getattr(db, "flush", None)
     if callable(flush):
@@ -2165,6 +2237,7 @@ async def _execute_trade_authoritatively(
     defer_cross_server_side_effects = request_source_server != current_server()
     timing_started_at = time_module.perf_counter()
     timing_last_mark = timing_started_at
+    idempotency_lock_held = False
 
     def mark_trade_phase(phase: str) -> None:
         nonlocal timing_last_mark
@@ -2238,6 +2311,18 @@ async def _execute_trade_authoritatively(
     allowed, error_msg = check_user_limits(owner_user, 'trade', trade_data.quantity)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
+
+    idempotency_lock_held = await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
+    if not await _try_lock_trade_offer_execution(db, trade_data.offer_id):
+        await _reject_trade_offer_contention(
+            db,
+            trade_data=trade_data,
+            owner_user=owner_user,
+            actor_user=actor_user,
+            request_source_surface=request_source_surface,
+            request_source_server=request_source_server,
+            edge_received_at=edge_received_at,
+        )
     
     # گرفتن لفظ با قفل
     offer = await db.get(Offer, trade_data.offer_id, with_for_update=True)
@@ -2449,7 +2534,8 @@ async def _execute_trade_authoritatively(
     mark_trade_phase("built_execution_plan")
 
     if trade_data.idempotency_key:
-        await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
+        if not idempotency_lock_held:
+            await _lock_trade_idempotency_key(db, trade_data.idempotency_key)
         existing_trade = await db.execute(
             select(Trade)
             .options(
