@@ -2,7 +2,7 @@ import logging
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import Optional
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm.exc import StaleDataError
 
 from models.user import User
@@ -97,7 +97,7 @@ async def handle_expire_offer(callback: types.CallbackQuery, callback_data: Expi
                 await _rollback_if_supported(session)
                 await callback.answer("❌ این لفظ دیگر فعال نیست")
                 return
-            except OperationalError as exc:
+            except (OperationalError, DBAPIError) as exc:
                 if is_offer_expiry_lock_busy(exc):
                     await _rollback_if_supported(session)
                     await callback.answer(OFFER_EXPIRY_LOCK_BUSY_TEXT)

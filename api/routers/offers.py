@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, or_, case
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
@@ -1605,7 +1605,7 @@ async def expire_offer_internal(
             options=[selectinload(Offer.commodity)],
             with_for_update={"nowait": True},
         )
-    except OperationalError as exc:
+    except (OperationalError, DBAPIError) as exc:
         if is_offer_expiry_lock_busy(exc):
             await _raise_offer_expiry_lock_busy(db)
         raise
@@ -1708,7 +1708,7 @@ async def expire_offer(
     except StaleDataError:
         await _rollback_if_supported(db)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ قبلاً غیرفعال شده است.")
-    except OperationalError as exc:
+    except (OperationalError, DBAPIError) as exc:
         if is_offer_expiry_lock_busy(exc):
             await _raise_offer_expiry_lock_busy(db)
         raise

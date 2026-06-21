@@ -30,7 +30,7 @@ from aiogram.types import Update
 from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
 from sqlalchemy import delete, false, func, select, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -1566,7 +1566,7 @@ async def patched_trading_boundaries():
                                 int(payload["offer_id"]),
                                 with_for_update={"nowait": True},
                             )
-                    except OperationalError as exc:
+                    except (OperationalError, DBAPIError) as exc:
                         if offers_router.is_offer_expiry_lock_busy(exc):
                             await db.rollback()
                             return 409, {"detail": offers_router.OFFER_EXPIRY_LOCK_BUSY_DETAIL}
@@ -1707,7 +1707,16 @@ async def create_offer_for_user(
 async def expire_offer_for_user(*, user_id: int, offer_id: int) -> None:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
-        await offers_router.expire_offer(offer_id, db=db, context=owner_context(user))
+        response = await offers_router.expire_offer(offer_id, db=db, context=owner_context(user))
+        if getattr(response, "status_code", 204) >= 400:
+            detail: Any = getattr(response, "body", b"")
+            if isinstance(response, JSONResponse):
+                try:
+                    body = json.loads(response.body.decode("utf-8") or "{}")
+                    detail = body.get("detail") or body
+                except Exception:
+                    detail = "invalid JSONResponse body"
+            raise HTTPException(status_code=int(response.status_code), detail=detail)
 
 
 async def list_active_offers_for_user(*, user_id: int, limit: int = 30) -> int:
