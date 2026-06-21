@@ -544,14 +544,7 @@ async def get_mandatory_channel(db: AsyncSession) -> Chat | None:
 
 
 def _normalize_mandatory_channel_metadata(chat: Chat) -> bool:
-    normalized_title = (
-        MANDATORY_CHANNEL_TITLE if _has_disallowed_control_chars(chat.title) else _clean_text(chat.title) or MANDATORY_CHANNEL_TITLE
-    )
-    normalized_description = (
-        MANDATORY_CHANNEL_DESCRIPTION
-        if _has_disallowed_control_chars(chat.description)
-        else _clean_text(chat.description) or MANDATORY_CHANNEL_DESCRIPTION
-    )
+    normalized_title, normalized_description = _normalized_mandatory_channel_metadata(chat)
     changed = False
 
     if chat.title != normalized_title:
@@ -565,6 +558,23 @@ def _normalize_mandatory_channel_metadata(chat: Chat) -> bool:
         chat.updated_at = _utcnow()
 
     return changed
+
+
+def _normalized_mandatory_channel_metadata(chat: Chat) -> tuple[str, str]:
+    normalized_title = (
+        MANDATORY_CHANNEL_TITLE if _has_disallowed_control_chars(chat.title) else _clean_text(chat.title) or MANDATORY_CHANNEL_TITLE
+    )
+    normalized_description = (
+        MANDATORY_CHANNEL_DESCRIPTION
+        if _has_disallowed_control_chars(chat.description)
+        else _clean_text(chat.description) or MANDATORY_CHANNEL_DESCRIPTION
+    )
+    return normalized_title, normalized_description
+
+
+def _mandatory_channel_metadata_is_normalized(chat: Chat) -> bool:
+    normalized_title, normalized_description = _normalized_mandatory_channel_metadata(chat)
+    return chat.title == normalized_title and chat.description == normalized_description
 
 
 def _soft_delete_duplicate_mandatory_channel(chat: Chat, *, now: datetime) -> bool:
@@ -584,6 +594,10 @@ def _soft_delete_duplicate_mandatory_channel(chat: Chat, *, now: datetime) -> bo
 
 
 async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
+    channels = await _list_mandatory_channels(db)
+    if len(channels) == 1 and _mandatory_channel_metadata_is_normalized(channels[0]):
+        return channels[0]
+
     await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": MANDATORY_CHANNEL_LOCK_KEY})
 
     channels = await _list_mandatory_channels(db)

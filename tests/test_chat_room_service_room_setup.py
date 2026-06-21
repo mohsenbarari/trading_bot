@@ -16,6 +16,7 @@ from core.services.chat_room_service import (
     count_active_chat_members,
     create_group_chat,
     create_optional_channel,
+    ensure_mandatory_channel,
     ensure_mandatory_channel_rollout,
     get_channel_or_404,
     get_group_or_404,
@@ -318,6 +319,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         deleted_user = SimpleNamespace(id=9, is_deleted=True)
         db = FakeDB(
             [
+                FakeExecuteResult(scalars=[]),
                 FakeExecuteResult(),
                 FakeExecuteResult(scalars=[]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
@@ -394,6 +396,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         )
         db = FakeDB(
             [
+                FakeExecuteResult(scalars=[chat]),
                 FakeExecuteResult(),
                 FakeExecuteResult(scalars=[chat]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
@@ -446,6 +449,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         admin_user = SimpleNamespace(id=7, is_deleted=False)
         db = FakeDB(
             [
+                FakeExecuteResult(scalars=[primary_chat, duplicate_chat]),
                 FakeExecuteResult(),
                 FakeExecuteResult(scalars=[primary_chat, duplicate_chat]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
@@ -463,6 +467,20 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(db.added), 1)
         self.assertEqual(db.added[0].user_id, 7)
         db.flush.assert_awaited_once()
+
+    async def test_ensure_mandatory_channel_skips_advisory_lock_for_clean_single_channel(self):
+        chat = SimpleNamespace(
+            id=44,
+            title=MANDATORY_CHANNEL_TITLE,
+            description=MANDATORY_CHANNEL_DESCRIPTION,
+        )
+        db = FakeDB([FakeExecuteResult(scalars=[chat])])
+
+        result = await ensure_mandatory_channel(db)
+
+        self.assertIs(result, chat)
+        self.assertEqual(db.execute_results, [])
+        db.flush.assert_not_awaited()
 
 
 if __name__ == "__main__":
