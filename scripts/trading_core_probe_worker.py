@@ -2073,6 +2073,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
     attempts = role_plan_attempt_specs(plan)
     harness = AiogramDispatcherHarness() if role == "telegram_foreign" else None
     warmup = await warm_load_runner_dependencies(db_connections=min(len(attempts), 24))
+    telegram_offer_snapshot = await load_offer_snapshot(offer_id) if harness is not None else None
 
     start_delay = barrier_epoch - time.time()
     if start_delay > 0:
@@ -2111,13 +2112,12 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                     phase_details=phase_details,
                 )
             else:
-                if harness is None:
+                if harness is None or telegram_offer_snapshot is None:
                     raise TradingProbeError("telegram role worker requires dispatcher harness")
-                offer_snapshot = await load_offer_snapshot(offer_id)
                 status_value = await execute_bot_trade_with_dispatcher(
                     harness=harness,
                     spec=spec,
-                    offer=offer_snapshot,
+                    offer=telegram_offer_snapshot,
                     amount=request_amount,
                     prefix=f"{prefix}{role}-",
                     observed_idempotency_keys=observed_telegram_keys,
