@@ -52,6 +52,41 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in plan if item.surface == "webapp"), 8)
         self.assertNotIn(1, {item.user_id for item in plan})
 
+    def test_cleanup_redis_for_user_ids_removes_exact_expire_rate_key(self):
+        class FakeRedis:
+            def __init__(self):
+                self.deleted_keys = None
+
+            async def scan_iter(self, *, match):
+                for key in {
+                    "expire_rate:7:*": ["expire_rate:7:legacy-window"],
+                    "confirm:7:*": ["confirm:7:offer"],
+                }.get(match, []):
+                    yield key
+
+            async def delete(self, *keys):
+                self.deleted_keys = keys
+                return len(keys)
+
+            async def aclose(self):
+                return None
+
+        fake_client = FakeRedis()
+
+        async def run_probe():
+            with patch.object(worker.redis, "Redis", return_value=fake_client):
+                dry_count = await worker.cleanup_redis_for_user_ids([7], dry_run=True)
+                deleted_count = await worker.cleanup_redis_for_user_ids([7], dry_run=False)
+            return dry_count, deleted_count
+
+        dry_count, deleted_count = asyncio.run(run_probe())
+
+        self.assertEqual(dry_count, 6)
+        self.assertEqual(deleted_count, 6)
+        self.assertIn("expire_rate:7", fake_client.deleted_keys)
+        self.assertIn("expire_rate:7:legacy-window", fake_client.deleted_keys)
+        self.assertIn("confirm:7:offer", fake_client.deleted_keys)
+
     def test_load_surface_server_mapping_matches_deployment_policy(self):
         self.assertEqual(worker.server_for_load_surface("telegram"), worker.SERVER_FOREIGN)
         self.assertEqual(worker.server_for_load_surface("webapp"), worker.SERVER_IRAN)

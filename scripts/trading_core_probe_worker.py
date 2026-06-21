@@ -1057,6 +1057,7 @@ async def cleanup_redis_for_user_ids(user_ids: list[int], *, dry_run: bool = Fal
         for user_id in user_ids:
             keys.extend(
                 [
+                    f"expire_rate:{user_id}",
                     f"user:{user_id}:active_offer_count",
                     f"user:{user_id}:unread_count",
                     f"daily_expire:{user_id}:{today}",
