@@ -290,6 +290,7 @@ print(
         {
             "final_status": final.get("status"),
             "correctness_failures": final.get("correctness_failures", []),
+            "attempt_start_rps": capacity.get("attempt_start_rps"),
             "business_request_rps": capacity.get("business_request_rps"),
             "telegram_update_rps": capacity.get("telegram_update_rps"),
             "capacity_warnings": capacity.get("capacity_warnings", []),

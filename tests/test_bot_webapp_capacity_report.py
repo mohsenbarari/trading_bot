@@ -3,10 +3,11 @@ import unittest
 from scripts import report_bot_webapp_capacity as capacity
 
 
-def sample_summary(*, business_rps=620.0, telegram_rps=744.0, errors=0):
+def sample_summary(*, business_rps=620.0, attempt_start_rps=None, telegram_rps=744.0, errors=0):
     return {
         "total": 100,
         "business_request_rps": business_rps,
+        "attempt_start_rps": business_rps if attempt_start_rps is None else attempt_start_rps,
         "telegram_update_rps": telegram_rps,
         "success": 1,
         "rejected": 99 - errors,
@@ -31,11 +32,22 @@ def sample_summary(*, business_rps=620.0, telegram_rps=744.0, errors=0):
     }
 
 
-def sample_report(*, business_rps=620.0, errors=0, completed_ledger_count=1, completed_trade_quantity=5):
+def sample_report(
+    *,
+    business_rps=620.0,
+    attempt_start_rps=None,
+    errors=0,
+    completed_ledger_count=1,
+    completed_trade_quantity=5,
+):
     return {
         "reports": {
             "webapp_full_fill": {
-                "summary": sample_summary(business_rps=business_rps, errors=errors),
+                "summary": sample_summary(
+                    business_rps=business_rps,
+                    attempt_start_rps=attempt_start_rps,
+                    errors=errors,
+                ),
                 "offer_status": "completed",
                 "offer_remaining_quantity": 0,
                 "persisted_trade_count": 1,
@@ -74,6 +86,7 @@ class BotWebappCapacityReportTests(unittest.TestCase):
         )
 
         self.assertEqual(report["schema_version"], capacity.BOT_WEBAPP_CAPACITY_REPORT_SCHEMA_VERSION)
+        self.assertEqual(report["attempt_start_rps"], 620.0)
         self.assertEqual(report["business_request_rps"], 620.0)
         self.assertEqual(report["telegram_update_rps"], 744.0)
         self.assertEqual(report["production_gate"]["status"], capacity.PRODUCTION_GATE_BLOCKED_STATUS)
@@ -88,9 +101,9 @@ class BotWebappCapacityReportTests(unittest.TestCase):
         self.assertEqual(validation["status"], "valid")
         self.assertEqual(validation["production_gate"], capacity.PRODUCTION_GATE_BLOCKED_STATUS)
 
-    def test_low_rps_is_capacity_warning_not_correctness_failure(self):
+    def test_low_attempt_start_rps_is_capacity_warning_not_correctness_failure(self):
         report = capacity.build_capacity_report(
-            mixed_payload=sample_report(business_rps=550.0),
+            mixed_payload=sample_report(business_rps=550.0, attempt_start_rps=550.0),
             observability=sample_observability(),
             telegram_gateway_boundary="mock",
             target_business_rps=600.0,
@@ -99,6 +112,19 @@ class BotWebappCapacityReportTests(unittest.TestCase):
         self.assertEqual(report["correctness_failures"], [])
         self.assertEqual(len(report["capacity_warnings"]), 1)
         self.assertIn("below target", report["capacity_warnings"][0])
+
+    def test_slow_ack_does_not_warn_when_attempt_start_rps_meets_target(self):
+        report = capacity.build_capacity_report(
+            mixed_payload=sample_report(business_rps=499.0, attempt_start_rps=600.6),
+            observability=sample_observability(),
+            telegram_gateway_boundary="mock",
+            target_business_rps=600.0,
+        )
+
+        self.assertEqual(report["attempt_start_rps"], 600.6)
+        self.assertEqual(report["business_request_rps"], 499.0)
+        self.assertEqual(report["correctness_failures"], [])
+        self.assertEqual(report["capacity_warnings"], [])
 
     def test_zero_top_level_hot_offer_values_are_preserved_without_persistence(self):
         mixed_payload = sample_report()
@@ -159,6 +185,11 @@ class BotWebappCapacityReportTests(unittest.TestCase):
 
         broken = dict(report)
         del broken["business_request_rps"]
+        with self.assertRaises(capacity.CapacityReportError):
+            capacity.validate_capacity_report(broken)
+
+        broken = dict(report)
+        del broken["attempt_start_rps"]
         with self.assertRaises(capacity.CapacityReportError):
             capacity.validate_capacity_report(broken)
 

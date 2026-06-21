@@ -650,6 +650,18 @@ def _merged_attempt_elapsed_seconds(attempts: list[dict[str, Any]]) -> float | N
     return max(finishes) - min(starts)
 
 
+def _merged_attempt_start_elapsed_seconds(attempts: list[dict[str, Any]]) -> float | None:
+    starts: list[float] = []
+    for attempt in attempts:
+        try:
+            starts.append(float(attempt["monotonic_timestamp"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if len(starts) < 2:
+        return None
+    return max(starts) - min(starts)
+
+
 def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dict[str, Any]:
     if not result_payloads:
         raise TradingProbeError("at least one role result artifact is required")
@@ -692,13 +704,19 @@ def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dic
     elapsed_seconds = _merged_attempt_elapsed_seconds(attempts)
     if elapsed_seconds is None:
         elapsed_seconds = max(finished_epochs) - min(started_epochs)
+    attempt_start_elapsed_seconds = _merged_attempt_start_elapsed_seconds(attempts)
+    summary = summarize_attempt_results(summary_inputs, elapsed_seconds=elapsed_seconds)
+    if attempt_start_elapsed_seconds is not None:
+        safe_attempt_start_elapsed = max(float(attempt_start_elapsed_seconds), 0.001)
+        summary["attempt_start_elapsed_seconds"] = round(safe_attempt_start_elapsed, 3)
+        summary["attempt_start_rps"] = round(len(attempts) / safe_attempt_start_elapsed, 3)
     return {
         "schema_version": DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
         "run_id": run_id,
         "status": "ok",
         "roles": role_summaries,
         "role_start_skew": assert_role_result_start_skew(result_payloads, max_skew_seconds=3600.0),
-        "summary": summarize_attempt_results(summary_inputs, elapsed_seconds=elapsed_seconds),
+        "summary": summary,
         "attempts": attempts,
     }
 

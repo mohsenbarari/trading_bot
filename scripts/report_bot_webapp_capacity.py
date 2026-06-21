@@ -139,6 +139,7 @@ def scenario_from_report(name: str, report: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name,
         "business_request_rps": as_float(summary.get("business_request_rps")),
+        "attempt_start_rps": as_float(summary.get("attempt_start_rps"), default=as_float(summary.get("business_request_rps"))),
         "telegram_update_rps": as_float(summary.get("telegram_update_rps")),
         "counts": scenario_counts_from_summary(summary),
         "latency": latency_summary(summary.get("latency") or {}),
@@ -213,10 +214,10 @@ def collect_correctness_failures(report: dict[str, Any]) -> list[str]:
 def collect_capacity_warnings(report: dict[str, Any], *, target_business_rps: float) -> list[str]:
     warnings: list[str] = []
     for scenario in report.get("scenarios") or []:
-        business_rps = as_float(scenario.get("business_request_rps"))
-        if business_rps < target_business_rps:
+        attempt_start_rps = as_float(scenario.get("attempt_start_rps"), default=as_float(scenario.get("business_request_rps")))
+        if attempt_start_rps < target_business_rps:
             warnings.append(
-                f"{scenario.get('name', 'unknown')}: business_request_rps {business_rps} below target {target_business_rps}"
+                f"{scenario.get('name', 'unknown')}: attempt_start_rps {attempt_start_rps} below target {target_business_rps}"
             )
     return warnings
 
@@ -242,6 +243,7 @@ def build_capacity_report(
     report = {
         "schema_version": BOT_WEBAPP_CAPACITY_REPORT_SCHEMA_VERSION,
         "target_business_rps": float(target_business_rps),
+        "attempt_start_rps": min((scenario["attempt_start_rps"] for scenario in scenarios), default=0.0),
         "business_request_rps": min((scenario["business_request_rps"] for scenario in scenarios), default=0.0),
         "telegram_update_rps": min((scenario["telegram_update_rps"] for scenario in scenarios), default=0.0),
         "roles": roles,
@@ -273,7 +275,7 @@ def validate_capacity_report(report: dict[str, Any]) -> dict[str, Any]:
         raise CapacityReportError("correctness_failures must be a list")
     if not isinstance(report.get("capacity_warnings"), list):
         raise CapacityReportError("capacity_warnings must be a list")
-    if "business_request_rps" not in report or "telegram_update_rps" not in report:
+    if "business_request_rps" not in report or "telegram_update_rps" not in report or "attempt_start_rps" not in report:
         raise CapacityReportError("capacity report is missing top-level RPS fields")
 
     observability = report.get("observability") or {}
@@ -299,7 +301,11 @@ def validate_capacity_report(report: dict[str, Any]) -> dict[str, Any]:
     if not scenarios:
         raise CapacityReportError("capacity report must contain at least one scenario")
     for scenario in scenarios:
-        if "business_request_rps" not in scenario or "telegram_update_rps" not in scenario:
+        if (
+            "business_request_rps" not in scenario
+            or "telegram_update_rps" not in scenario
+            or "attempt_start_rps" not in scenario
+        ):
             raise CapacityReportError(f"{scenario.get('name', 'unknown')} is missing RPS fields")
         hot_offer = scenario.get("hot_offer") or {}
         for field in (
