@@ -50,8 +50,20 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
     def test_summarize_attempt_results_reports_business_and_telegram_rps(self):
         results = [
-            worker.MixedLoadAttemptResult(index=0, surface="telegram", status="success", duration_ms=10),
-            worker.MixedLoadAttemptResult(index=1, surface="telegram", status="rejected", duration_ms=20),
+            worker.MixedLoadAttemptResult(
+                index=0,
+                surface="telegram",
+                status="success",
+                duration_ms=10,
+                telegram_update_count=1,
+            ),
+            worker.MixedLoadAttemptResult(
+                index=1,
+                surface="telegram",
+                status="rejected",
+                duration_ms=20,
+                telegram_update_count=2,
+            ),
             worker.MixedLoadAttemptResult(index=2, surface="webapp", status="rejected", duration_ms=30),
             worker.MixedLoadAttemptResult(index=3, surface="webapp", status="error", duration_ms=40),
         ]
@@ -59,8 +71,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         summary = worker.summarize_attempt_results(results, elapsed_seconds=2.0)
 
         self.assertEqual(summary["business_request_rps"], 2.0)
-        self.assertEqual(summary["telegram_update_count"], 4)
-        self.assertEqual(summary["telegram_update_rps"], 2.0)
+        self.assertEqual(summary["telegram_update_count"], 3)
+        self.assertEqual(summary["telegram_update_rps"], 1.5)
         self.assertEqual(summary["success"], 1)
         self.assertEqual(summary["rejected"], 2)
         self.assertEqual(summary["error"], 1)

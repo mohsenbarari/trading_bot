@@ -41,6 +41,10 @@ from bot.callbacks import TextOfferActionCallback
 from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
 from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
+from bot.middlewares.trade_contention_gate import (
+    claim_telegram_trade_confirmation,
+    parse_telegram_trade_callback_data,
+)
 from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.offer_parser import parse_offer_text
 from core.config import settings
@@ -153,6 +157,7 @@ class MixedLoadAttemptResult:
     status: str
     duration_ms: float
     detail: str | None = None
+    telegram_update_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -654,6 +659,10 @@ def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dic
                     status=str(attempt_payload["outcome"]),
                     duration_ms=float(attempt_payload["latency_ms"]),
                     detail=str(attempt_payload["detail"]) if attempt_payload.get("detail") else None,
+                    telegram_update_count=int(
+                        attempt_payload.get("telegram_update_count")
+                        or (2 if str(attempt_payload["source_surface"]) == "telegram" else 0)
+                    ),
                 )
             )
 
@@ -683,15 +692,13 @@ def summarize_attempt_results(results: list[MixedLoadAttemptResult], *, elapsed_
         }
 
     safe_elapsed = max(float(elapsed_seconds), 0.001)
+    telegram_update_count = sum(item.telegram_update_count for item in results)
     return {
         "total": len(results),
         "elapsed_seconds": round(safe_elapsed, 3),
         "business_request_rps": round(len(results) / safe_elapsed, 3),
-        "telegram_update_count": sum(2 for item in results if item.surface == "telegram"),
-        "telegram_update_rps": round(
-            sum(2 for item in results if item.surface == "telegram") / safe_elapsed,
-            3,
-        ),
+        "telegram_update_count": telegram_update_count,
+        "telegram_update_rps": round(telegram_update_count / safe_elapsed, 3),
         "success": sum(1 for item in results if item.status == "success"),
         "rejected": sum(1 for item in results if item.status == "rejected"),
         "error": sum(1 for item in results if item.status == "error"),
@@ -1980,6 +1987,44 @@ async def load_offer_snapshot(offer_id: int) -> Offer:
         return offer
 
 
+async def preconfirm_bot_trade_callbacks(
+    *,
+    attempts: list[MixedLoadAttemptSpec],
+    offer: Offer,
+    amount: int,
+) -> dict[str, Any]:
+    callback_data = build_channel_trade_callback_data(
+        offer_id=offer.id,
+        offer_public_id=getattr(offer, "offer_public_id", None),
+        amount=amount,
+    )
+    parsed = parse_telegram_trade_callback_data(callback_data)
+    if parsed is None:
+        raise TradingProbeError("telegram preconfirm could not parse generated callback data")
+
+    async def _preconfirm(spec: MixedLoadAttemptSpec) -> bool | None | str:
+        try:
+            result = await claim_telegram_trade_confirmation(telegram_id=spec.telegram_id, parsed=parsed)
+            if result is True:
+                result = await claim_telegram_trade_confirmation(telegram_id=spec.telegram_id, parsed=parsed)
+            return result
+        except Exception as exc:
+            return f"{type(exc).__name__}: {exc}"
+
+    started = time.perf_counter()
+    results = await asyncio.gather(*[_preconfirm(spec) for spec in attempts])
+    errors = [result for result in results if isinstance(result, str)]
+    return {
+        "attempt_count": len(attempts),
+        "ready_count": sum(result is False for result in results),
+        "fallback_count": sum(result is None for result in results),
+        "unexpected_confirmed_count": sum(result is True for result in results),
+        "error_count": len(errors),
+        "sample_errors": errors[:5],
+        "duration_ms": round((time.perf_counter() - started) * 1000.0, 3),
+    }
+
+
 async def execute_bot_trade_with_dispatcher(
     *,
     harness: AiogramDispatcherHarness,
@@ -1990,6 +2035,7 @@ async def execute_bot_trade_with_dispatcher(
     observed_idempotency_keys: list[str] | None = None,
     error_details: list[str] | None = None,
     phase_details: dict[str, Any] | None = None,
+    preconfirmed: bool = False,
 ) -> str:
     callback_data = build_channel_trade_callback_data(
         offer_id=offer.id,
@@ -2000,20 +2046,26 @@ async def execute_bot_trade_with_dispatcher(
     first_callback_id = f"{prefix}tap1-{spec.index}"
     second_callback_id = f"{prefix}tap2-{spec.index}"
     recorder_token = None
+    telegram_update_count = 0
     if observed_idempotency_keys is not None:
         recorder_token = _TELEGRAM_IDEMPOTENCY_KEYS.set(observed_idempotency_keys)
     try:
-        first_started = time.perf_counter()
-        first_answer = await harness.feed_channel_callback(
-            telegram_id=spec.telegram_id,
-            callback_data=callback_data,
-            callback_id=first_callback_id,
-            channel_message_id=channel_message_id,
-        )
-        if phase_details is not None:
-            phase_details["first_callback_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
-            phase_details["first_answer_text"] = str((first_answer or {}).get("text") or "")
-            phase_details["first_answer_alert"] = (first_answer or {}).get("show_alert")
+        if preconfirmed:
+            if phase_details is not None:
+                phase_details["preconfirmed_before_barrier"] = True
+        else:
+            first_started = time.perf_counter()
+            first_answer = await harness.feed_channel_callback(
+                telegram_id=spec.telegram_id,
+                callback_data=callback_data,
+                callback_id=first_callback_id,
+                channel_message_id=channel_message_id,
+            )
+            telegram_update_count += 1
+            if phase_details is not None:
+                phase_details["first_callback_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
+                phase_details["first_answer_text"] = str((first_answer or {}).get("text") or "")
+                phase_details["first_answer_alert"] = (first_answer or {}).get("show_alert")
         second_started = time.perf_counter()
         answer = await harness.feed_channel_callback(
             telegram_id=spec.telegram_id,
@@ -2021,15 +2073,18 @@ async def execute_bot_trade_with_dispatcher(
             callback_id=second_callback_id,
             channel_message_id=channel_message_id,
         )
+        telegram_update_count += 1
         if phase_details is not None:
             phase_details["second_callback_ms"] = round((time.perf_counter() - second_started) * 1000.0, 3)
             phase_details["second_answer_text"] = str((answer or {}).get("text") or "")
             phase_details["second_answer_alert"] = (answer or {}).get("show_alert")
+            phase_details["telegram_update_count"] = telegram_update_count
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
         if phase_details is not None:
             phase_details["exception"] = type(exc).__name__
+            phase_details["telegram_update_count"] = telegram_update_count
         return "error"
     finally:
         if recorder_token is not None:
@@ -2074,8 +2129,19 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
     harness = AiogramDispatcherHarness() if role == "telegram_foreign" else None
     warmup = await warm_load_runner_dependencies(db_connections=min(len(attempts), 24))
     telegram_offer_snapshot = await load_offer_snapshot(offer_id) if harness is not None else None
+    telegram_preconfirm: dict[str, Any] | None = None
 
     start_delay = barrier_epoch - time.time()
+    if harness is not None and telegram_offer_snapshot is not None:
+        preconfirm_delay = start_delay - 0.5
+        if preconfirm_delay > 0:
+            await asyncio.sleep(preconfirm_delay)
+        telegram_preconfirm = await preconfirm_bot_trade_callbacks(
+            attempts=attempts,
+            offer=telegram_offer_snapshot,
+            amount=request_amount,
+        )
+        start_delay = barrier_epoch - time.time()
     if start_delay > 0:
         await asyncio.sleep(start_delay)
     started_epoch = time.time()
@@ -2123,6 +2189,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
                     observed_idempotency_keys=observed_telegram_keys,
                     error_details=attempt_error_details,
                     phase_details=phase_details,
+                    preconfirmed=telegram_preconfirm is not None,
                 )
                 if observed_telegram_keys:
                     idempotency_key = observed_telegram_keys[-1]
@@ -2132,12 +2199,14 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         if status_value == "error" and detail is None and attempt_error_details:
             detail = attempt_error_details[-1]
         latency_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
+        telegram_update_count = int(phase_details.get("telegram_update_count") or 0)
         result = MixedLoadAttemptResult(
             index=spec.index,
             surface=surface,
             status=status_value,
             duration_ms=latency_ms,
             detail=detail,
+            telegram_update_count=telegram_update_count,
         )
         return result, {
             "index": spec.index,
@@ -2154,6 +2223,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
             "latency_ms": latency_ms,
             "detail": detail,
             "phase_details": phase_details,
+            "telegram_update_count": telegram_update_count,
         }
 
     try:
@@ -2176,6 +2246,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         "started_monotonic": round(started_monotonic, 6),
         "finished_monotonic": round(finished_monotonic, 6),
         "warmup": warmup,
+        "telegram_preconfirm": telegram_preconfirm,
         "summary": summarize_attempt_results(result_items, elapsed_seconds=finished_monotonic - started_monotonic),
         "attempts": attempt_artifacts,
     }
@@ -2216,6 +2287,7 @@ def build_dry_role_result_artifact(plan_payload: Mapping[str, Any], *, started_e
                 "outcome": outcome,
                 "latency_ms": latency_ms,
                 "detail": "dry_run_artifact_smoke",
+                "telegram_update_count": 2 if surface == "telegram" else 0,
             }
         )
         results.append(
@@ -2225,6 +2297,7 @@ def build_dry_role_result_artifact(plan_payload: Mapping[str, Any], *, started_e
                 status=outcome,
                 duration_ms=latency_ms,
                 detail="dry_run_artifact_smoke",
+                telegram_update_count=2 if surface == "telegram" else 0,
             )
         )
 
