@@ -598,7 +598,19 @@ async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
     if len(channels) == 1 and _mandatory_channel_metadata_is_normalized(channels[0]):
         return channels[0]
 
-    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": MANDATORY_CHANNEL_LOCK_KEY})
+    lock_result = await db.execute(
+        text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+        {"lock_key": MANDATORY_CHANNEL_LOCK_KEY},
+    )
+    if not bool(lock_result.scalar_one()):
+        # This helper can run from login/sync/bootstrap paths while trading is
+        # under heavy load. If another transaction is already repairing the
+        # mandatory channel, avoid blocking unrelated hot paths on the global
+        # housekeeping lock.
+        channels = await _list_mandatory_channels(db)
+        if channels:
+            return channels[0]
+        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": MANDATORY_CHANNEL_LOCK_KEY})
 
     channels = await _list_mandatory_channels(db)
     if channels:

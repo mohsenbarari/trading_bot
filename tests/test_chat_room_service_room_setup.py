@@ -320,7 +320,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             [
                 FakeExecuteResult(scalars=[]),
-                FakeExecuteResult(),
+                FakeExecuteResult(scalar_one_value=True),
                 FakeExecuteResult(scalars=[]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
                 FakeExecuteResult(scalar_one_or_none_value=None),
@@ -397,7 +397,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             [
                 FakeExecuteResult(scalars=[chat]),
-                FakeExecuteResult(),
+                FakeExecuteResult(scalar_one_value=True),
                 FakeExecuteResult(scalars=[chat]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
                 FakeExecuteResult(scalar_one_or_none_value=admin_member),
@@ -450,7 +450,7 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             [
                 FakeExecuteResult(scalars=[primary_chat, duplicate_chat]),
-                FakeExecuteResult(),
+                FakeExecuteResult(scalar_one_value=True),
                 FakeExecuteResult(scalars=[primary_chat, duplicate_chat]),
                 FakeExecuteResult(scalar_one_or_none_value=7),
                 FakeExecuteResult(scalar_one_or_none_value=None),
@@ -480,6 +480,28 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(result, chat)
         self.assertEqual(db.execute_results, [])
+        db.flush.assert_not_awaited()
+
+    async def test_ensure_mandatory_channel_returns_existing_channel_when_housekeeping_lock_is_busy(self):
+        chat = SimpleNamespace(
+            id=44,
+            title="اطلاع\u001dرسانی",
+            description=MANDATORY_CHANNEL_DESCRIPTION,
+            is_deleted=False,
+        )
+        db = FakeDB(
+            [
+                FakeExecuteResult(scalars=[chat]),
+                FakeExecuteResult(scalar_one_value=False),
+                FakeExecuteResult(scalars=[chat]),
+            ]
+        )
+
+        result = await ensure_mandatory_channel(db)
+
+        self.assertIs(result, chat)
+        self.assertEqual(chat.title, "اطلاع\u001dرسانی")
+        self.assertEqual(db.added, [])
         db.flush.assert_not_awaited()
 
 
