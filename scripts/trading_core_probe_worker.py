@@ -2285,6 +2285,7 @@ async def expire_bot_offer_with_dispatcher(
     offer_id: int,
     prefix: str,
     index: int,
+    error_details: list[str] | None = None,
 ) -> str:
     try:
         answer = await harness.feed_private_callback(
@@ -2292,7 +2293,9 @@ async def expire_bot_offer_with_dispatcher(
             callback_data=ExpireOfferCallback(offer_id=offer_id).pack(),
             callback_id=f"{prefix}bot-expire-{owner.user_id}-{index}",
         )
-    except Exception:
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"{type(exc).__name__}: {exc}")
         return "error"
     answer_text = str((answer or {}).get("text") or "")
     if "منقضی شد" in answer_text:

@@ -293,6 +293,7 @@ async def execute_trade_attempt(
     amount: int,
     prefix: str,
     index: int,
+    error_details: list[str] | None = None,
 ) -> str:
     offer = await worker.load_offer_snapshot(offer_id)
     if surface == "telegram":
@@ -308,6 +309,7 @@ async def execute_trade_attempt(
                 offer=offer,
                 amount=amount,
                 prefix=prefix,
+                error_details=error_details,
             )
     with override_current_server(SERVER_IRAN):
         return await worker.execute_webapp_trade_for_user(
@@ -316,6 +318,7 @@ async def execute_trade_attempt(
             offer_public_id=getattr(offer, "offer_public_id", None),
             quantity=amount,
             idempotency_key=f"{prefix}web-trade-{offer_id}-{index}",
+            error_details=error_details,
         )
 
 
@@ -327,6 +330,7 @@ async def expire_attempt(
     offer_id: int,
     prefix: str,
     index: int,
+    error_details: list[str] | None = None,
 ) -> str:
     if surface == "telegram":
         with override_current_server(SERVER_FOREIGN):
@@ -336,11 +340,14 @@ async def expire_attempt(
                 offer_id=offer_id,
                 prefix=prefix,
                 index=index,
+                error_details=error_details,
             )
     try:
         with override_current_server(SERVER_IRAN):
             await worker.expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
-    except Exception:
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"{type(exc).__name__}: {exc}")
         return "rejected"
     return "success"
 
@@ -453,6 +460,7 @@ async def run_scenario(
     outcomes: list[AttemptOutcome] = []
     summary: dict[str, Any] = {}
     extra: dict[str, Any] = {}
+    attempt_error_details: list[str] = []
 
     try:
         if scenario.family == "create_offer":
@@ -543,6 +551,7 @@ async def run_scenario(
                         amount=shape.request_amount,
                         prefix=scenario_prefix,
                         index=index,
+                        error_details=attempt_error_details,
                     )
 
                 outcomes, elapsed = await run_scheduled_attempts(
@@ -586,6 +595,7 @@ async def run_scenario(
                         offer_id=offer_ids[index],
                         prefix=scenario_prefix,
                         index=index,
+                        error_details=attempt_error_details,
                     )
 
                 outcomes, elapsed = await run_scheduled_attempts(
@@ -623,6 +633,7 @@ async def run_scenario(
                         offer_id=offer_id,
                         prefix=scenario_prefix,
                         index=index,
+                        error_details=attempt_error_details,
                     )
 
                 outcomes, elapsed = await run_scheduled_attempts(
@@ -707,6 +718,7 @@ async def run_scenario(
                         amount=shape.request_amount,
                         prefix=scenario_prefix,
                         index=index,
+                        error_details=attempt_error_details,
                     )
 
                 outcomes, elapsed = await run_scheduled_attempts(
@@ -775,7 +787,11 @@ async def run_scenario(
                 raise worker.TradingProbeError("seed offer has no public id")
 
             async def _attempt(index: int) -> str:
-                viewer = responder_for_index(users, owner_user_id=owner.user_id, index=index)
+                viewer = (
+                    owner
+                    if scenario.family == "public_detail_view"
+                    else responder_for_index(users, owner_user_id=owner.user_id, index=index)
+                )
                 with override_current_server(SERVER_IRAN):
                     if scenario.family == "public_detail_view":
                         await worker.load_public_offer_detail_for_user(
@@ -804,6 +820,8 @@ async def run_scenario(
 
     if summary.get("error"):
         correctness_failures.append(f"{summary['error']} request(s) ended with error")
+    if attempt_error_details:
+        summary["attempt_error_details"] = sorted(set(attempt_error_details))[:20]
 
     return {
         "scenario": asdict(scenario),
