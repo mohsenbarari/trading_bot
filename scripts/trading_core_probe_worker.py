@@ -17,7 +17,7 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping
@@ -37,9 +37,10 @@ if str(REPO_ROOT) not in sys.path:
 from api.routers import offers as offers_router
 from api.routers import realtime as realtime_router
 from api.routers import trades as trades_router
-from bot.callbacks import TextOfferActionCallback
+from bot.callbacks import ExpireOfferCallback, TextOfferActionCallback
 from bot.handlers import trade_execute as bot_trade_execute
 from bot.handlers import trade_create as bot_trade_create
+from bot.handlers import trade_manage as bot_trade_manage
 from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
 from bot.middlewares.trade_contention_gate import (
     claim_telegram_trade_confirmation,
@@ -57,6 +58,7 @@ from core.services.trade_contention_gate import TradeContentionLease, try_acquir
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
+from core import offer_expiry as offer_expiry_worker
 from models.change_log import ChangeLog
 from models.chat_member import ChatMember
 from models.commodity import Commodity
@@ -1325,6 +1327,11 @@ async def patched_trading_boundaries():
         "update_channel_buttons": trades_router.update_channel_buttons,
         "send_telegram_message_sync": trades_router.send_telegram_message_sync,
         "forward_trade_to_home_server": trades_router.forward_trade_to_home_server,
+        "bot_forward_trade_to_home_server": bot_trade_execute.forward_trade_to_home_server,
+        "offer_expiry_forward": offers_router.forward_offer_expiry_to_home_server,
+        "bot_offer_expiry_forward": bot_trade_manage.forward_offer_expiry_to_home_server,
+        "offer_expiry_apply_channel_state": offer_expiry_worker.apply_offer_channel_state,
+        "bot_manage_apply_channel_state": bot_trade_manage.apply_offer_channel_state,
         "realtime_publish": realtime_router.publish_event,
         "realtime_publish_user": realtime_router.publish_user_event,
         "bot_market_open": bot_trade_create._bot_market_is_open,
@@ -1411,6 +1418,56 @@ async def patched_trading_boundaries():
             return 201, response.model_dump(mode="json")
         return 201, {"status": "ok"}
 
+    async def local_forward_offer_expiry_to_home_server(
+        _target_server: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, Any]:
+        target_server = normalize_server(_target_server, current_server())
+        try:
+            with override_current_server(target_server):
+                async with AsyncSessionLocal() as db:
+                    offer = None
+                    offer_public_id = str(payload.get("offer_public_id") or "").strip()
+                    if offer_public_id:
+                        offer = (
+                            await db.execute(select(Offer).where(Offer.offer_public_id == offer_public_id))
+                        ).scalar_one_or_none()
+                    if offer is None and payload.get("offer_id"):
+                        offer = await db.get(Offer, int(payload["offer_id"]))
+                    if offer is None:
+                        return 404, {"detail": "لفظ یافت نشد."}
+
+                    owner = await db.get(User, int(payload["owner_user_id"]))
+                    if not owner or owner.is_deleted:
+                        return 404, {"detail": "کاربر مالک یافت نشد"}
+
+                    actor_user_id = payload.get("actor_user_id") or payload.get("owner_user_id")
+                    actor = await db.get(User, int(actor_user_id))
+                    if not actor or actor.is_deleted:
+                        return 404, {"detail": "کاربر اجراکننده یافت نشد"}
+
+                    await offers_router.expire_offer_authoritatively(
+                        db,
+                        offer,
+                        offers_router.OfferExpiryCommand(
+                            reason=payload.get("expire_reason") or offers_router.OfferExpiryReason.MANUAL,
+                            source_surface=payload.get("source_surface")
+                            or offers_router.OfferExpirySourceSurface.WEBAPP,
+                            source_server=payload.get("source_server") or current_server(),
+                            expired_by_user_id=int(owner.id),
+                            expired_by_actor_user_id=int(actor.id),
+                        ),
+                    )
+        except offers_router.OfferAlreadyInactiveError:
+            return 409, {"detail": "این لفظ دیگر فعال نیست"}
+        except offers_router.OfferNotAuthoritativeError as exc:
+            return 409, {"detail": f"این لفظ باید روی سرور {exc.home_server} منقضی شود"}
+        except HTTPException as exc:
+            return int(exc.status_code or 500), {"detail": exc.detail}
+        return 200, {"expired": True}
+
     offers_router.evaluate_current_market_schedule = fake_market_open
     trades_router.evaluate_current_market_schedule = fake_market_open
     offers_router.send_offer_to_channel = noop_send_offer
@@ -1418,6 +1475,11 @@ async def patched_trading_boundaries():
     trades_router.update_channel_buttons = noop_update_channel_buttons
     trades_router.send_telegram_message_sync = lambda *_args, **_kwargs: None
     trades_router.forward_trade_to_home_server = local_forward_trade_to_home_server
+    bot_trade_execute.forward_trade_to_home_server = local_forward_trade_to_home_server
+    offers_router.forward_offer_expiry_to_home_server = local_forward_offer_expiry_to_home_server
+    bot_trade_manage.forward_offer_expiry_to_home_server = local_forward_offer_expiry_to_home_server
+    offer_expiry_worker.apply_offer_channel_state = noop_update_channel_buttons
+    bot_trade_manage.apply_offer_channel_state = noop_update_channel_buttons
     realtime_router.publish_event = noop_async
     realtime_router.publish_user_event = noop_async
     bot_trade_create._bot_market_is_open = lambda: asyncio.sleep(0, result=True)
@@ -1433,6 +1495,11 @@ async def patched_trading_boundaries():
         trades_router.update_channel_buttons = original["update_channel_buttons"]
         trades_router.send_telegram_message_sync = original["send_telegram_message_sync"]
         trades_router.forward_trade_to_home_server = original["forward_trade_to_home_server"]
+        bot_trade_execute.forward_trade_to_home_server = original["bot_forward_trade_to_home_server"]
+        offers_router.forward_offer_expiry_to_home_server = original["offer_expiry_forward"]
+        bot_trade_manage.forward_offer_expiry_to_home_server = original["bot_offer_expiry_forward"]
+        offer_expiry_worker.apply_offer_channel_state = original["offer_expiry_apply_channel_state"]
+        bot_trade_manage.apply_offer_channel_state = original["bot_manage_apply_channel_state"]
         realtime_router.publish_event = original["realtime_publish"]
         realtime_router.publish_user_event = original["realtime_publish_user"]
         bot_trade_create._bot_market_is_open = original["bot_market_open"]
@@ -1505,6 +1572,47 @@ async def list_active_offers_for_user(*, user_id: int, limit: int = 30) -> int:
             context=owner_context(user),
         )
         return len(offers)
+
+
+async def list_market_history_for_user(*, user_id: int, limit: int = 30) -> int:
+    async with AsyncSessionLocal() as db:
+        user = await load_user(db, user_id)
+        offers = await offers_router.get_market_offer_history(
+            skip=0,
+            limit=limit,
+            since_hours=48,
+            db=db,
+            current_user=user,
+            context=owner_context(user),
+        )
+        return len(offers)
+
+
+async def load_public_offer_detail_for_user(*, user_id: int, offer_public_id: str, limit: int = 30) -> int:
+    async with AsyncSessionLocal() as db:
+        user = await load_user(db, user_id)
+        detail = await offers_router.get_public_offer_detail(
+            offer_public_id=offer_public_id,
+            limit=limit,
+            offset=0,
+            db=db,
+            current_user=user,
+        )
+        return len(getattr(detail, "request_ledger", []) or [])
+
+
+async def age_offer_for_time_expiry(*, offer_id: int, age_minutes: int = 10) -> None:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, offer_id)
+        if offer is None:
+            raise TradingProbeError(f"offer {offer_id} disappeared before age update")
+        offer.created_at = datetime.utcnow() - timedelta(minutes=age_minutes)
+        await db.commit()
+
+
+async def run_offer_expiry_cycle_for_server(server: str) -> int:
+    with override_current_server(server):
+        return int(await offer_expiry_worker.expire_stale_offers())
 
 
 async def execute_trade_for_user(
@@ -1662,6 +1770,7 @@ class AiogramDispatcherHarness:
         self.dp.update.outer_middleware(BotLoggingContextMiddleware())
         self.dp.include_router(bot_trade_create.router)
         self.dp.include_router(bot_trade_execute.router)
+        self.dp.include_router(bot_trade_manage.router)
         self._update_id = 700000
         self._message_id = 800000
 
@@ -2096,6 +2205,40 @@ async def execute_bot_trade_with_dispatcher(
     if answer_text:
         return "rejected"
     return "rejected"
+
+
+async def expire_bot_offer_with_dispatcher(
+    *,
+    harness: AiogramDispatcherHarness,
+    owner: LoadUserRef,
+    offer_id: int,
+    prefix: str,
+    index: int,
+) -> str:
+    try:
+        answer = await harness.feed_private_callback(
+            telegram_id=owner.telegram_id,
+            callback_data=ExpireOfferCallback(offer_id=offer_id).pack(),
+            callback_id=f"{prefix}bot-expire-{owner.user_id}-{index}",
+        )
+    except Exception:
+        return "error"
+    answer_text = str((answer or {}).get("text") or "")
+    if "منقضی شد" in answer_text:
+        return "success"
+    return "rejected"
+
+
+async def execute_bot_market_view_with_dispatcher(
+    *,
+    harness: AiogramDispatcherHarness,
+    user: LoadUserRef,
+) -> str:
+    try:
+        await harness.feed_private_text(telegram_id=user.telegram_id, text_value="📈 معامله")
+    except Exception:
+        return "error"
+    return "success"
 
 
 def write_json_artifact(path: Path, payload: Mapping[str, Any]) -> None:

@@ -1,0 +1,91 @@
+import importlib.util
+import sys
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MODULE_PATH = REPO_ROOT / "scripts" / "run_bot_webapp_comprehensive_load_matrix.py"
+
+spec = importlib.util.spec_from_file_location("run_bot_webapp_comprehensive_load_matrix", MODULE_PATH)
+matrix_runner = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+sys.modules[spec.name] = matrix_runner
+spec.loader.exec_module(matrix_runner)
+
+
+class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
+    def test_matrix_covers_required_scenario_families(self):
+        scenarios = matrix_runner.build_comprehensive_scenarios()
+        family_counts = {}
+        for scenario in scenarios:
+            family_counts[scenario.family] = family_counts.get(scenario.family, 0) + 1
+
+        self.assertEqual(len(scenarios), 228)
+        self.assertEqual(
+            family_counts,
+            {
+                "active_view": 24,
+                "after_completed_reject": 12,
+                "after_manual_expiry_reject": 12,
+                "after_time_expiry_reject": 12,
+                "create_offer": 12,
+                "manual_expire_contention": 12,
+                "manual_expire_non_concurrent": 24,
+                "market_history_view": 36,
+                "public_detail_view": 48,
+                "time_expiry": 12,
+                "trade_concurrent": 12,
+                "trade_non_concurrent": 12,
+            },
+        )
+
+    def test_matrix_preserves_offer_origin_type_shape_and_surface_coverage(self):
+        scenarios = matrix_runner.build_comprehensive_scenarios()
+
+        self.assertEqual({scenario.offer_type for scenario in scenarios}, {"buy", "sell"})
+        self.assertEqual({scenario.shape for scenario in scenarios}, set(matrix_runner.SHAPES))
+        self.assertEqual(
+            {
+                scenario.offer_origin
+                for scenario in scenarios
+                if scenario.offer_origin is not None
+            },
+            {"bot", "webapp"},
+        )
+        self.assertEqual(
+            {
+                scenario.request_surface
+                for scenario in scenarios
+                if scenario.request_surface is not None
+            },
+            {"telegram", "webapp"},
+        )
+
+    def test_surface_distribution_keeps_sixty_forty_mix(self):
+        surfaces = [matrix_runner.surface_for_index(index, 0.6) for index in range(1000)]
+
+        self.assertEqual(surfaces.count("telegram"), 600)
+        self.assertEqual(surfaces.count("webapp"), 400)
+
+    def test_filter_scenarios_by_family_and_id(self):
+        scenarios = matrix_runner.build_comprehensive_scenarios()
+
+        trade_only = matrix_runner.filter_scenarios(
+            scenarios,
+            families={"trade_concurrent"},
+            names=set(),
+            max_scenarios=None,
+        )
+        self.assertEqual(len(trade_only), 12)
+        selected = matrix_runner.filter_scenarios(
+            scenarios,
+            families=set(),
+            names={scenarios[0].scenario_id},
+            max_scenarios=None,
+        )
+        self.assertEqual(selected, [scenarios[0]])
+
+
+if __name__ == "__main__":
+    unittest.main()

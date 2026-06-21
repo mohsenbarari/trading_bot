@@ -1662,6 +1662,11 @@ Implementation status:
 - Full 1000-user/600-rps load is not a normal unit-test responsibility. Unit tests lock deterministic
   planning and acceptance helpers; the mutating high-load benchmark runs explicitly on staging with
   synthetic data and captured artifacts.
+- The comprehensive staging load matrix must go beyond the original hot-offer gate. It must include
+  create, view/read, concurrent trade, non-concurrent trade, manual expiry, time-limit expiry,
+  requests after completed/expired terminal states, wholesale/full-fill, wholesale/partial-fill,
+  retail-lot offers, buy/sell directions, Bot-origin offers, WebApp-origin offers, and a 60 percent
+  Telegram / 40 percent WebApp request mix wherever both surfaces produce server-side requests.
 
 ### Step 11B - Dual-Role Staging Load Simulation Roadmap
 
@@ -1925,6 +1930,56 @@ Implementation status:
   branch.
 - `tests/test_bot_webapp_capacity_report.py` locks the schema, required observability fields,
   correctness/capacity separation, and closed production gate behavior.
+
+#### Step 11B-7 - Comprehensive Bot/WebApp Load Matrix
+
+Required behavior:
+
+- Execute a finite, explicit matrix for the user's "all possible" staging-load requirement instead
+  of treating the two hot-offer contention runs as complete evidence.
+- Use 1000 synthetic users by default.
+- Use at least 600 target business requests per second per logical scenario.
+- Keep the default 60 percent Telegram / 40 percent WebApp request mix for mixed-surface scenarios.
+- Run Telegram-side actions through `aiogram.Dispatcher`; do not call Telegram APIs or connect the
+  Iran runtime to Telegram.
+- Run WebApp-side actions through the same router/service paths used by the PWA.
+- Keep the run staging-only and synthetic-data-only. The production gate must remain blocked until
+  owner-led staging validation is complete.
+
+Required scenario families:
+
+- `create_offer`: Bot and WebApp offer creation for buy/sell and all offer shapes.
+- `active_view`: WebApp market-list reads and Telegram market-entry interactions against active
+  synthetic offers.
+- `public_detail_view`: public offer detail reads for active, completed, manually expired, and
+  time-expired offers.
+- `market_history_view`: market-history reads for completed, manually expired, and time-expired
+  terminal offers.
+- `trade_concurrent`: many simultaneous mixed-surface requests against one hot offer.
+- `trade_non_concurrent`: one request per offer at load speed, proving the normal no-contention path.
+- `manual_expire_non_concurrent`: owner-triggered expiry from Bot and WebApp with one offer per
+  request.
+- `manual_expire_contention`: many near-simultaneous owner expiry attempts against one offer, where
+  exactly one expiry may win.
+- `time_expiry`: stale synthetic active offers are expired by the real offer-expiry worker.
+- `after_completed_reject`, `after_manual_expiry_reject`, `after_time_expiry_reject`: terminal
+  offers must reject later trade requests without creating new trades or reactivating the offer.
+
+Implementation status:
+
+- `scripts/run_bot_webapp_comprehensive_load_matrix.py` owns the explicit comprehensive load matrix.
+  The current matrix contains 228 logical scenarios across the required families.
+- The default per-scenario hit count is 40 attempts, so every logical scenario is hit several dozen
+  times. Operators may raise `--attempts-per-scenario` for longer staging runs without changing the
+  scenario contract.
+- `scripts/run_staging_comprehensive_load_matrix.sh` runs the matrix through the staging
+  `staging-load` compose profile and writes `comprehensive-matrix.json` under the selected artifact
+  directory.
+- `tests/test_bot_webapp_comprehensive_load_matrix.py` locks the matrix shape, family counts,
+  buy/sell coverage, Bot/WebApp origin coverage, Telegram/WebApp surface coverage, and the exact
+  60/40 distribution helper.
+- This step complements Step 11B-3 and does not replace the dual-role hot-offer gate or the
+  cross-server sync evidence gate. It is broad staging-load evidence; it is not production approval.
 
 ## Step 12 - Cutover Readiness And Production Gate Preparation
 
