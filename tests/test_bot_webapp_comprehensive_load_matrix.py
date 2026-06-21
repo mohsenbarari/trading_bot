@@ -124,6 +124,68 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(summary["attempt_start_elapsed_seconds"], 0.02)
         self.assertEqual(summary["attempt_start_rps"], 150.0)
 
+    def test_write_admission_limit_only_applies_to_write_heavy_non_contention_families(self):
+        scenarios = {
+            scenario.family: scenario
+            for scenario in matrix_runner.build_comprehensive_scenarios()
+        }
+
+        self.assertEqual(
+            matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["create_offer"], 24),
+            24,
+        )
+        self.assertEqual(
+            matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["trade_non_concurrent"], 24),
+            24,
+        )
+        self.assertEqual(
+            matrix_runner.write_admission_max_concurrency_for_scenario(
+                scenarios["manual_expire_non_concurrent"],
+                24,
+            ),
+            24,
+        )
+        self.assertIsNone(
+            matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["trade_concurrent"], 24)
+        )
+        self.assertIsNone(
+            matrix_runner.write_admission_max_concurrency_for_scenario(
+                scenarios["after_manual_expiry_reject"],
+                24,
+            )
+        )
+        self.assertIsNone(
+            matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["create_offer"], 0)
+        )
+
+    def test_run_scheduled_attempts_honors_max_concurrency(self):
+        running = 0
+        peak_running = 0
+
+        async def attempt(_index):
+            nonlocal running, peak_running
+            running += 1
+            peak_running = max(peak_running, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+            return "success"
+
+        async def run_probe():
+            return await matrix_runner.run_scheduled_attempts(
+                total=8,
+                target_rps=1000,
+                attempt=attempt,
+                max_concurrency=2,
+            )
+
+        outcomes, _elapsed = asyncio.run(run_probe())
+        summary = matrix_runner.summarize_outcomes(outcomes, elapsed_seconds=1.0)
+
+        self.assertEqual(peak_running, 2)
+        self.assertEqual(summary["success"], 8)
+        self.assertIn("admission_wait", summary)
+        self.assertGreater(summary["admission_wait"]["max_ms"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

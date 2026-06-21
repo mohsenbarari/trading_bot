@@ -77,6 +77,7 @@ class AttemptOutcome:
     latency_ms: float
     detail: str | None = None
     start_offset_seconds: float | None = None
+    admission_wait_ms: float | None = None
 
 
 SHAPES: dict[str, OfferShape] = {
@@ -102,6 +103,12 @@ SHAPES: dict[str, OfferShape] = {
         is_wholesale=False,
         lot_sizes=(10, 10, 10),
     ),
+}
+
+WRITE_HEAVY_NON_CONTENTION_FAMILIES = {
+    "create_offer",
+    "trade_non_concurrent",
+    "manual_expire_non_concurrent",
 }
 
 
@@ -198,6 +205,16 @@ def scenario_attempt_count(min_attempts: int) -> int:
     return max(int(min_attempts), DEFAULT_MIN_ATTEMPTS_PER_SCENARIO)
 
 
+def write_admission_max_concurrency_for_scenario(
+    scenario: MatrixScenario,
+    configured_max_concurrency: int,
+) -> int | None:
+    if scenario.family not in WRITE_HEAVY_NON_CONTENTION_FAMILIES:
+        return None
+    max_concurrency = int(configured_max_concurrency or 0)
+    return max_concurrency if max_concurrency > 0 else None
+
+
 async def reset_scenario_user_runtime_state(users: list[worker.LoadUserRef]) -> int:
     """Clear synthetic-user Redis runtime keys so scenarios stay isolated."""
     user_ids = sorted({int(user.user_id) for user in users})
@@ -226,6 +243,13 @@ def summarize_outcomes(outcomes: list[AttemptOutcome], elapsed_seconds: float) -
         safe_attempt_start_elapsed = max(float(attempt_start_elapsed), 0.001)
         summary["attempt_start_elapsed_seconds"] = round(safe_attempt_start_elapsed, 3)
         summary["attempt_start_rps"] = round(len(start_offsets) / safe_attempt_start_elapsed, 3)
+    admission_waits = [
+        float(item.admission_wait_ms)
+        for item in outcomes
+        if item.admission_wait_ms is not None
+    ]
+    if admission_waits:
+        summary["admission_wait"] = worker.summarize_samples(admission_waits)
     return summary
 
 
@@ -234,8 +258,11 @@ async def run_scheduled_attempts(
     total: int,
     target_rps: float,
     attempt: Callable[[int], Awaitable[str]],
+    max_concurrency: int | None = None,
 ) -> tuple[list[AttemptOutcome], float]:
     started = time.perf_counter()
+    concurrency_limit = int(max_concurrency or 0)
+    semaphore = asyncio.Semaphore(concurrency_limit) if concurrency_limit > 0 else None
 
     async def _run(index: int) -> AttemptOutcome:
         scheduled_at = started + (index / target_rps)
@@ -245,8 +272,14 @@ async def run_scheduled_attempts(
         attempt_started = time.perf_counter()
         start_offset_seconds = attempt_started - started
         detail = None
+        admission_wait_ms = None
         try:
-            status = await attempt(index)
+            if semaphore is None:
+                status = await attempt(index)
+            else:
+                async with semaphore:
+                    admission_wait_ms = round((time.perf_counter() - attempt_started) * 1000.0, 3)
+                    status = await attempt(index)
         except Exception as exc:
             status = "error"
             detail = f"{type(exc).__name__}: {exc}"
@@ -255,6 +288,7 @@ async def run_scheduled_attempts(
             latency_ms=round((time.perf_counter() - attempt_started) * 1000.0, 3),
             detail=detail,
             start_offset_seconds=start_offset_seconds,
+            admission_wait_ms=admission_wait_ms,
         )
 
     outcomes = await asyncio.gather(*[_run(index) for index in range(total)])
@@ -481,9 +515,14 @@ async def run_scenario(
     telegram_ratio: float,
     target_rps: float,
     run_prefix: str,
+    write_max_concurrency: int,
 ) -> dict[str, Any]:
     shape = SHAPES[scenario.shape]
     scenario_prefix = f"{run_prefix}{scenario.scenario_id}_"
+    scenario_write_max_concurrency = write_admission_max_concurrency_for_scenario(
+        scenario,
+        write_max_concurrency,
+    )
     await worker.cleanup_prefix(scenario_prefix)
     started = time.perf_counter()
     correctness_failures: list[str] = []
@@ -517,6 +556,7 @@ async def run_scenario(
                     total=attempts_per_scenario,
                     target_rps=target_rps,
                     attempt=_attempt,
+                    max_concurrency=scenario_write_max_concurrency,
                 )
             finally:
                 await harness.close()
@@ -595,6 +635,7 @@ async def run_scenario(
                     total=attempts_per_scenario,
                     target_rps=target_rps,
                     attempt=_attempt,
+                    max_concurrency=scenario_write_max_concurrency,
                 )
             finally:
                 await harness.close()
@@ -639,6 +680,7 @@ async def run_scenario(
                     total=attempts_per_scenario,
                     target_rps=target_rps,
                     attempt=_attempt,
+                    max_concurrency=scenario_write_max_concurrency,
                 )
             finally:
                 await harness.close()
@@ -857,6 +899,11 @@ async def run_scenario(
 
     if summary.get("error"):
         correctness_failures.append(f"{summary['error']} request(s) ended with error")
+    if scenario_write_max_concurrency is not None:
+        summary["admission_control"] = {
+            "max_concurrency": scenario_write_max_concurrency,
+            "scope": "write_heavy_non_contention",
+        }
     if attempt_error_details:
         summary["attempt_error_details"] = sorted(set(attempt_error_details))[:20]
 
@@ -916,6 +963,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
                     telegram_ratio=args.telegram_ratio,
                     target_rps=args.target_rps,
                     run_prefix=prefix,
+                    write_max_concurrency=args.write_max_concurrency,
                 )
             )
 
@@ -942,6 +990,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
         "telegram_ratio": args.telegram_ratio,
         "target_rps": args.target_rps,
         "attempts_per_scenario": attempts_per_scenario,
+        "write_max_concurrency": args.write_max_concurrency,
         "scenario_count": len(selected),
         "family_counts": dict(sorted(family_counts.items())),
         "total_business_requests": total_attempts,
@@ -976,6 +1025,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attempts-per-scenario", type=int, default=DEFAULT_MIN_ATTEMPTS_PER_SCENARIO)
     parser.add_argument("--target-rps", type=float, default=600.0)
     parser.add_argument("--telegram-ratio", type=float, default=0.6)
+    parser.add_argument(
+        "--write-max-concurrency",
+        type=int,
+        default=24,
+        help=(
+            "Admission-control limit for write-heavy non-contention scenarios. "
+            "Set <=0 to disable."
+        ),
+    )
     parser.add_argument("--family", action="append", help="Run only this scenario family; repeatable.")
     parser.add_argument("--scenario", action="append", help="Run only this scenario id/name; repeatable.")
     parser.add_argument("--max-scenarios", type=int)
