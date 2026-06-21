@@ -49,7 +49,7 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
-from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server
+from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
 from models.change_log import ChangeLog
@@ -1293,59 +1293,61 @@ async def patched_trading_boundaries():
         *,
         timeout_seconds: float | None = None,
     ) -> tuple[int, Any]:
+        target_server = normalize_server(_target_server, current_server())
         try:
-            background_tasks = BackgroundTasks()
-            async with AsyncSessionLocal() as db:
-                offer_public_id = str(payload.get("offer_public_id") or "").strip()
-                offer = await trades_router._resolve_internal_offer_by_public_id(
-                    db,
-                    offer_public_id=offer_public_id,
-                )
-                if not offer:
-                    return 404, {"detail": "لفظ یافت نشد."}
-                resolved_offer_id = int(offer.id)
-                expunge_offer = getattr(db, "expunge", None)
-                if callable(expunge_offer):
-                    expunge_offer(offer)
-
-                responder = await db.get(User, int(payload["responder_user_id"]))
-                if not responder or responder.is_deleted:
-                    return 404, {"detail": "کاربر درخواست‌دهنده یافت نشد"}
-
-                actor_user = responder
-                actor_user_id = payload.get("actor_user_id")
-                if actor_user_id and int(actor_user_id) != int(responder.id):
-                    actor = await db.get(User, int(actor_user_id))
-                    if not actor or actor.is_deleted:
-                        return 404, {"detail": "کاربر اجراکننده یافت نشد"}
-                    actor_user = actor
-
-                edge_received_at = payload.get("edge_received_at")
-                if isinstance(edge_received_at, str):
-                    edge_received_at = datetime.fromisoformat(edge_received_at)
-                if not isinstance(edge_received_at, datetime):
-                    edge_received_at = datetime.utcnow()
-
-                response = await trades_router._execute_trade_authoritatively(
-                    trade_data=trades_router.TradeCreate(
-                        offer_id=resolved_offer_id,
+            with override_current_server(target_server):
+                background_tasks = BackgroundTasks()
+                async with AsyncSessionLocal() as db:
+                    offer_public_id = str(payload.get("offer_public_id") or "").strip()
+                    offer = await trades_router._resolve_internal_offer_by_public_id(
+                        db,
                         offer_public_id=offer_public_id,
-                        quantity=int(payload["quantity"]),
-                        idempotency_key=payload.get("idempotency_key"),
-                    ),
-                    background_tasks=background_tasks,
-                    db=db,
-                    context=EffectiveOwnerActor(
-                        owner_user=responder,
-                        actor_user=actor_user,
-                        relation=None,
-                        is_accountant_context=int(actor_user.id) != int(responder.id),
-                    ),
-                    edge_received_at=edge_received_at,
-                    request_source_surface=str(payload.get("source_surface") or "webapp"),
-                    request_source_server=str(payload.get("source_server") or current_server()),
-                )
-            await background_tasks()
+                    )
+                    if not offer:
+                        return 404, {"detail": "لفظ یافت نشد."}
+                    resolved_offer_id = int(offer.id)
+                    expunge_offer = getattr(db, "expunge", None)
+                    if callable(expunge_offer):
+                        expunge_offer(offer)
+
+                    responder = await db.get(User, int(payload["responder_user_id"]))
+                    if not responder or responder.is_deleted:
+                        return 404, {"detail": "کاربر درخواست‌دهنده یافت نشد"}
+
+                    actor_user = responder
+                    actor_user_id = payload.get("actor_user_id")
+                    if actor_user_id and int(actor_user_id) != int(responder.id):
+                        actor = await db.get(User, int(actor_user_id))
+                        if not actor or actor.is_deleted:
+                            return 404, {"detail": "کاربر اجراکننده یافت نشد"}
+                        actor_user = actor
+
+                    edge_received_at = payload.get("edge_received_at")
+                    if isinstance(edge_received_at, str):
+                        edge_received_at = datetime.fromisoformat(edge_received_at)
+                    if not isinstance(edge_received_at, datetime):
+                        edge_received_at = datetime.utcnow()
+
+                    response = await trades_router._execute_trade_authoritatively(
+                        trade_data=trades_router.TradeCreate(
+                            offer_id=resolved_offer_id,
+                            offer_public_id=offer_public_id,
+                            quantity=int(payload["quantity"]),
+                            idempotency_key=payload.get("idempotency_key"),
+                        ),
+                        background_tasks=background_tasks,
+                        db=db,
+                        context=EffectiveOwnerActor(
+                            owner_user=responder,
+                            actor_user=actor_user,
+                            relation=None,
+                            is_accountant_context=int(actor_user.id) != int(responder.id),
+                        ),
+                        edge_received_at=edge_received_at,
+                        request_source_surface=str(payload.get("source_surface") or "webapp"),
+                        request_source_server=str(payload.get("source_server") or current_server()),
+                    )
+                await background_tasks()
         except HTTPException as exc:
             return int(exc.status_code or 500), {"detail": exc.detail}
 

@@ -1,6 +1,8 @@
 """Helpers for server affinity and cross-server authority routing."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Optional
 
 from core.config import settings
@@ -9,6 +11,7 @@ from core.deployment_surface import extract_host, foreign_server_aliases, iran_s
 SERVER_FOREIGN = "foreign"
 SERVER_IRAN = "iran"
 KNOWN_SERVERS = {SERVER_FOREIGN, SERVER_IRAN}
+_CURRENT_SERVER_OVERRIDE: ContextVar[str | None] = ContextVar("current_server_override", default=None)
 
 
 def normalize_server(value: Optional[str], default: str = SERVER_FOREIGN) -> str:
@@ -23,7 +26,20 @@ def normalize_server(value: Optional[str], default: str = SERVER_FOREIGN) -> str
 
 
 def current_server() -> str:
+    override = _CURRENT_SERVER_OVERRIDE.get()
+    if override:
+        return normalize_server(override)
     return normalize_server(settings.server_mode)
+
+
+@contextmanager
+def override_current_server(server: str):
+    """Temporarily override server affinity for isolated probes/tests."""
+    token = _CURRENT_SERVER_OVERRIDE.set(normalize_server(server, current_server()))
+    try:
+        yield
+    finally:
+        _CURRENT_SERVER_OVERRIDE.reset(token)
 
 
 def peer_server_name() -> str:

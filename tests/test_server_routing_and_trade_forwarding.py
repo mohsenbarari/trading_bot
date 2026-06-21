@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import unittest
 from types import SimpleNamespace
@@ -24,6 +25,34 @@ class ServerRoutingTests(unittest.TestCase):
         with patch.object(server_routing.settings, "server_mode", "foreign"):
             self.assertEqual(server_routing.current_server(), server_routing.SERVER_FOREIGN)
             self.assertEqual(server_routing.peer_server_name(), server_routing.SERVER_IRAN)
+
+    def test_current_server_override_is_scoped_and_normalized(self):
+        with patch.object(server_routing.settings, "server_mode", "foreign"):
+            self.assertEqual(server_routing.current_server(), server_routing.SERVER_FOREIGN)
+            with server_routing.override_current_server("IR"):
+                self.assertEqual(server_routing.current_server(), server_routing.SERVER_IRAN)
+                self.assertEqual(server_routing.peer_server_name(), server_routing.SERVER_FOREIGN)
+            self.assertEqual(server_routing.current_server(), server_routing.SERVER_FOREIGN)
+
+    def test_current_server_override_is_context_local_for_concurrent_tasks(self):
+        async def read_with_override(server: str) -> tuple[str, str]:
+            with server_routing.override_current_server(server):
+                before = server_routing.current_server()
+                await asyncio.sleep(0)
+                after = server_routing.current_server()
+                return before, after
+
+        async def run_concurrent_reads() -> tuple[tuple[str, str], tuple[str, str]]:
+            return await asyncio.gather(
+                read_with_override("iran"),
+                read_with_override("foreign"),
+            )
+
+        with patch.object(server_routing.settings, "server_mode", "foreign"):
+            iran_result, foreign_result = asyncio.run(run_concurrent_reads())
+
+        self.assertEqual(iran_result, (server_routing.SERVER_IRAN, server_routing.SERVER_IRAN))
+        self.assertEqual(foreign_result, (server_routing.SERVER_FOREIGN, server_routing.SERVER_FOREIGN))
 
     def test_host_from_request_handles_missing_headers_original_host_and_normalization(self):
         self.assertEqual(server_routing._host_from_request(None), "")
