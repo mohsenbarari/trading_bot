@@ -287,7 +287,7 @@ async def warm_load_runner_dependencies(*, db_connections: int) -> dict[str, Any
     try:
         await redis_client.ping()
     finally:
-        await redis_client.close()
+        await redis_client.aclose()
     redis_warm_ms = round((time.perf_counter() - redis_started) * 1000.0, 3)
     return {
         "db_connections": safe_connections,
