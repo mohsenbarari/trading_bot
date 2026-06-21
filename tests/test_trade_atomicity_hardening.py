@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from fastapi import HTTPException
 
 from api.routers.trades import (
+    TRADE_NUMBER_ALLOCATION_LOCK_ID,
     TradeAtomicityError,
     TradeIdempotencyConflictError,
     _allocate_next_trade_number,
@@ -14,6 +15,7 @@ from api.routers.trades import (
     _try_lock_trade_offer_execution,
     _validate_idempotent_trade_replay,
 )
+from core.services.chat_room_service import MANDATORY_CHANNEL_LOCK_KEY
 from models.offer import OfferStatus
 
 
@@ -53,6 +55,9 @@ def make_user(user_id: int):
 
 
 class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
+    def test_trade_number_lock_does_not_share_mandatory_channel_lock_key(self):
+        self.assertNotEqual(TRADE_NUMBER_ALLOCATION_LOCK_ID, MANDATORY_CHANNEL_LOCK_KEY)
+
     async def test_allocate_next_trade_number_takes_postgresql_advisory_lock(self):
         db = FakeDB(dialect_name="postgresql", scalar_result=10010)
 
