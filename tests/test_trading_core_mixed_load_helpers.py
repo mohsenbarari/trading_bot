@@ -56,11 +56,15 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         class FakeRedis:
             def __init__(self):
                 self.deleted_keys = None
+                self.scan_matches = []
 
             async def scan_iter(self, *, match):
+                self.scan_matches.append(match)
                 for key in {
-                    "expire_rate:7:*": ["expire_rate:7:legacy-window"],
-                    "confirm:7:*": ["confirm:7:offer"],
+                    "expire_rate:*": [b"expire_rate:7:legacy-window", b"expire_rate:8:other"],
+                    "confirm:*": [b"confirm:7:offer", b"confirm:8:offer"],
+                    "daily_expire:*": [b"daily_expire:7:1999-01-01", b"daily_expire:8:1999-01-01"],
+                    "user:*": [b"user:7:profile-cache", b"user:8:profile-cache"],
                 }.get(match, []):
                     yield key
 
@@ -81,11 +85,18 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         dry_count, deleted_count = asyncio.run(run_probe())
 
-        self.assertEqual(dry_count, 6)
-        self.assertEqual(deleted_count, 6)
+        self.assertEqual(dry_count, 8)
+        self.assertEqual(deleted_count, 8)
+        self.assertEqual(
+            fake_client.scan_matches,
+            ["expire_rate:*", "confirm:*", "daily_expire:*", "user:*"] * 2,
+        )
         self.assertIn("expire_rate:7", fake_client.deleted_keys)
         self.assertIn("expire_rate:7:legacy-window", fake_client.deleted_keys)
         self.assertIn("confirm:7:offer", fake_client.deleted_keys)
+        self.assertIn("daily_expire:7:1999-01-01", fake_client.deleted_keys)
+        self.assertIn("user:7:profile-cache", fake_client.deleted_keys)
+        self.assertNotIn("confirm:8:offer", fake_client.deleted_keys)
 
     def test_load_surface_server_mapping_matches_deployment_policy(self):
         self.assertEqual(worker.server_for_load_surface("telegram"), worker.SERVER_FOREIGN)

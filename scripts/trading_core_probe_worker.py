@@ -1056,6 +1056,7 @@ async def cleanup_redis_for_user_ids(user_ids: list[int], *, dry_run: bool = Fal
     try:
         keys: list[str] = []
         today = datetime.utcnow().strftime("%Y-%m-%d")
+        user_id_set = {str(int(user_id)) for user_id in user_ids}
         for user_id in user_ids:
             keys.extend(
                 [
@@ -1065,10 +1066,12 @@ async def cleanup_redis_for_user_ids(user_ids: list[int], *, dry_run: bool = Fal
                     f"daily_expire:{user_id}:{today}",
                 ]
             )
-            async for key in client.scan_iter(match=f"expire_rate:{user_id}:*"):
-                keys.append(str(key))
-            async for key in client.scan_iter(match=f"confirm:{user_id}:*"):
-                keys.append(str(key))
+        for pattern in ("expire_rate:*", "confirm:*", "daily_expire:*", "user:*"):
+            async for key in client.scan_iter(match=pattern):
+                key_text = key.decode("utf-8") if isinstance(key, bytes) else str(key)
+                parts = key_text.split(":")
+                if len(parts) >= 2 and parts[1] in user_id_set:
+                    keys.append(key_text)
         if keys:
             unique_keys = sorted(set(keys))
             deleted = len(unique_keys) if dry_run else int(await client.delete(*unique_keys) or 0)
