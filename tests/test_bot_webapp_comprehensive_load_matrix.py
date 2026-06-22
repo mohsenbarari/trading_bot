@@ -187,6 +187,48 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertIn("admission_wait", summary)
         self.assertGreater(summary["admission_wait"]["max_ms"], 0)
 
+    def test_fast_seed_bot_offer_uses_foreign_direct_create_with_channel_message_id(self):
+        calls = {}
+        owner = matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=7007)
+        shape = matrix_runner.SHAPES["wholesale_full"]
+
+        async def fake_create_offer_for_user(**kwargs):
+            calls["create"] = kwargs
+            calls["server"] = matrix_runner.worker.current_server()
+            return 42
+
+        async def fail_dispatcher_create(**_kwargs):
+            raise AssertionError("fast seed must not use dispatcher offer creation")
+
+        async def run_probe():
+            with patch.object(
+                matrix_runner.worker,
+                "create_offer_for_user",
+                new=fake_create_offer_for_user,
+            ), patch.object(
+                matrix_runner.worker,
+                "create_bot_offer_with_dispatcher",
+                new=fail_dispatcher_create,
+            ):
+                return await matrix_runner.create_offer(
+                    origin="bot",
+                    owner=owner,
+                    commodity_id=11,
+                    commodity_name="امام",
+                    shape=shape,
+                    offer_type="buy",
+                    prefix="probe-",
+                    index=2003,
+                    fast_seed_bot_offer=True,
+                )
+
+        offer_id = asyncio.run(run_probe())
+
+        self.assertEqual(offer_id, 42)
+        self.assertEqual(calls["server"], matrix_runner.SERVER_FOREIGN)
+        self.assertEqual(calls["create"]["user_id"], owner.user_id)
+        self.assertEqual(calls["create"]["channel_message_id"], 900_002_003)
+
     def test_telegram_trade_attempt_can_preconfirm_callback_on_foreign_server(self):
         calls = {}
         user = matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=7007)

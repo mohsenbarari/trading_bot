@@ -306,9 +306,11 @@ async def create_offer(
     prefix: str,
     index: int,
     bot_harness: worker.AiogramDispatcherHarness | None = None,
+    fast_seed_bot_offer: bool = False,
 ) -> int:
-    if origin == "webapp":
-        with override_current_server(SERVER_IRAN):
+    if origin == "webapp" or fast_seed_bot_offer:
+        target_server = SERVER_IRAN if origin == "webapp" else SERVER_FOREIGN
+        with override_current_server(target_server):
             return await worker.create_offer_for_user(
                 user_id=owner.user_id,
                 commodity_id=commodity_id,
@@ -319,6 +321,7 @@ async def create_offer(
                 price=100000 + index,
                 is_wholesale=shape.is_wholesale,
                 lot_sizes=shape.lot_sizes,
+                channel_message_id=(900_000_000 + index) if origin == "bot" else None,
             )
     harness = bot_harness or worker.AiogramDispatcherHarness()
     close_harness = bot_harness is None
@@ -637,6 +640,7 @@ async def run_scenario(
                             prefix=scenario_prefix,
                             index=2000 + index,
                             bot_harness=harness,
+                            fast_seed_bot_offer=True,
                         )
                     )
                     offer_owners.append(owner)
@@ -688,6 +692,7 @@ async def run_scenario(
                             prefix=scenario_prefix,
                             index=3000 + index,
                             bot_harness=harness,
+                            fast_seed_bot_offer=True,
                         )
                     )
                     offer_owners.append(owner)
@@ -771,6 +776,7 @@ async def run_scenario(
                         prefix=scenario_prefix,
                         index=5000 + index,
                         bot_harness=harness,
+                        fast_seed_bot_offer=True,
                     )
                     await worker.age_offer_for_time_expiry(offer_id=offer_id, age_minutes=10)
                     offer_ids.append(offer_id)
