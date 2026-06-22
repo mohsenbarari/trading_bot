@@ -350,23 +350,48 @@ async def execute_trade_attempt(
     prefix: str,
     index: int,
     error_details: list[str] | None = None,
+    preconfirm_telegram: bool = False,
+    record_rejected_details: bool = False,
 ) -> str:
     offer = await worker.load_offer_snapshot(offer_id)
     if surface == "telegram":
         with override_current_server(SERVER_FOREIGN):
-            return await worker.execute_bot_trade_with_dispatcher(
+            spec = worker.MixedLoadAttemptSpec(
+                index=index,
+                surface="telegram",
+                user_id=user.user_id,
+                telegram_id=user.telegram_id,
+            )
+            phase_details: dict[str, Any] = {}
+            preconfirmed = False
+            if preconfirm_telegram:
+                preconfirm_result = await worker.preconfirm_bot_trade_callback(
+                    spec=spec,
+                    offer=offer,
+                    amount=amount,
+                )
+                phase_details["telegram_preconfirm_result"] = str(preconfirm_result)
+                preconfirmed = preconfirm_result is False
+                if isinstance(preconfirm_result, str) and error_details is not None:
+                    error_details.append(f"telegram_preconfirm_failed: {preconfirm_result}")
+            status = await worker.execute_bot_trade_with_dispatcher(
                 harness=harness,
-                spec=worker.MixedLoadAttemptSpec(
-                    index=index,
-                    surface="telegram",
-                    user_id=user.user_id,
-                    telegram_id=user.telegram_id,
-                ),
+                spec=spec,
                 offer=offer,
                 amount=amount,
                 prefix=prefix,
                 error_details=error_details,
+                phase_details=phase_details,
+                preconfirmed=preconfirmed,
             )
+            if status == "rejected" and record_rejected_details and error_details is not None:
+                answer_text = (
+                    str(phase_details.get("second_answer_text") or "")
+                    or str(phase_details.get("first_answer_text") or "")
+                    or "telegram callback rejected without answer text"
+                )
+                error_details.append(f"telegram_callback_rejected: {answer_text}")
+            return status
     with override_current_server(SERVER_IRAN):
         return await worker.execute_webapp_trade_for_user(
             user_id=user.user_id,
@@ -629,6 +654,8 @@ async def run_scenario(
                         prefix=scenario_prefix,
                         index=index,
                         error_details=attempt_error_details,
+                        preconfirm_telegram=True,
+                        record_rejected_details=True,
                     )
 
                 outcomes, elapsed = await run_scheduled_attempts(

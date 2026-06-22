@@ -3,6 +3,7 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 
@@ -185,6 +186,108 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(summary["success"], 8)
         self.assertIn("admission_wait", summary)
         self.assertGreater(summary["admission_wait"]["max_ms"], 0)
+
+    def test_telegram_trade_attempt_can_preconfirm_callback_on_foreign_server(self):
+        calls = {}
+        user = matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=7007)
+        offer = SimpleNamespace(id=42, offer_public_id="ofr_42")
+
+        async def fake_load_offer_snapshot(offer_id):
+            calls["loaded_offer_id"] = offer_id
+            return offer
+
+        async def fake_preconfirm_bot_trade_callback(**kwargs):
+            calls["preconfirm"] = kwargs
+            calls["preconfirm_server"] = matrix_runner.worker.current_server()
+            return False
+
+        async def fake_execute_bot_trade_with_dispatcher(**kwargs):
+            calls["bot_trade"] = kwargs
+            calls["bot_trade_server"] = matrix_runner.worker.current_server()
+            return "success"
+
+        async def run_probe():
+            with patch.object(
+                matrix_runner.worker,
+                "load_offer_snapshot",
+                new=fake_load_offer_snapshot,
+            ), patch.object(
+                matrix_runner.worker,
+                "preconfirm_bot_trade_callback",
+                new=fake_preconfirm_bot_trade_callback,
+            ), patch.object(
+                matrix_runner.worker,
+                "execute_bot_trade_with_dispatcher",
+                new=fake_execute_bot_trade_with_dispatcher,
+            ):
+                return await matrix_runner.execute_trade_attempt(
+                    surface="telegram",
+                    harness=SimpleNamespace(),
+                    user=user,
+                    offer_id=42,
+                    amount=5,
+                    prefix="probe-",
+                    index=3,
+                    preconfirm_telegram=True,
+                )
+
+        status = asyncio.run(run_probe())
+
+        self.assertEqual(status, "success")
+        self.assertEqual(calls["loaded_offer_id"], 42)
+        self.assertEqual(calls["preconfirm_server"], matrix_runner.SERVER_FOREIGN)
+        self.assertEqual(calls["bot_trade_server"], matrix_runner.SERVER_FOREIGN)
+        self.assertTrue(calls["bot_trade"]["preconfirmed"])
+
+    def test_telegram_trade_attempt_records_rejection_answer_text(self):
+        error_details = []
+        user = matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=7007)
+        offer = SimpleNamespace(id=42, offer_public_id="ofr_42")
+
+        async def fake_load_offer_snapshot(_offer_id):
+            return offer
+
+        async def fake_preconfirm_bot_trade_callback(**_kwargs):
+            return False
+
+        async def fake_execute_bot_trade_with_dispatcher(**kwargs):
+            kwargs["phase_details"]["second_answer_text"] = "برای تایید دوباره روی همان دکمه بزنید ☑️"
+            return "rejected"
+
+        async def run_probe():
+            with patch.object(
+                matrix_runner.worker,
+                "load_offer_snapshot",
+                new=fake_load_offer_snapshot,
+            ), patch.object(
+                matrix_runner.worker,
+                "preconfirm_bot_trade_callback",
+                new=fake_preconfirm_bot_trade_callback,
+            ), patch.object(
+                matrix_runner.worker,
+                "execute_bot_trade_with_dispatcher",
+                new=fake_execute_bot_trade_with_dispatcher,
+            ):
+                return await matrix_runner.execute_trade_attempt(
+                    surface="telegram",
+                    harness=SimpleNamespace(),
+                    user=user,
+                    offer_id=42,
+                    amount=5,
+                    prefix="probe-",
+                    index=3,
+                    error_details=error_details,
+                    preconfirm_telegram=True,
+                    record_rejected_details=True,
+                )
+
+        status = asyncio.run(run_probe())
+
+        self.assertEqual(status, "rejected")
+        self.assertEqual(
+            error_details,
+            ["telegram_callback_rejected: برای تایید دوباره روی همان دکمه بزنید ☑️"],
+        )
 
 
 if __name__ == "__main__":

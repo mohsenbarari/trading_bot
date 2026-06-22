@@ -45,6 +45,7 @@ from bot.handlers import trade_create as bot_trade_create
 from bot.handlers import trade_manage as bot_trade_manage
 from bot.middlewares import AuthMiddleware, TradeContentionGateMiddleware
 from bot.middlewares.trade_contention_gate import (
+    ParsedTelegramTradeCallback,
     claim_telegram_trade_confirmation,
     parse_telegram_trade_callback_data,
 )
@@ -2308,13 +2309,7 @@ async def preconfirm_bot_trade_callbacks(
         raise TradingProbeError("telegram preconfirm could not parse generated callback data")
 
     async def _preconfirm(spec: MixedLoadAttemptSpec) -> bool | None | str:
-        try:
-            result = await claim_telegram_trade_confirmation(telegram_id=spec.telegram_id, parsed=parsed)
-            if result is True:
-                result = await claim_telegram_trade_confirmation(telegram_id=spec.telegram_id, parsed=parsed)
-            return result
-        except Exception as exc:
-            return f"{type(exc).__name__}: {exc}"
+        return await preconfirm_parsed_bot_trade_callback(spec=spec, parsed=parsed)
 
     started = time.perf_counter()
     results = await asyncio.gather(*[_preconfirm(spec) for spec in attempts])
@@ -2328,6 +2323,37 @@ async def preconfirm_bot_trade_callbacks(
         "sample_errors": errors[:5],
         "duration_ms": round((time.perf_counter() - started) * 1000.0, 3),
     }
+
+
+async def preconfirm_parsed_bot_trade_callback(
+    *,
+    spec: MixedLoadAttemptSpec,
+    parsed: ParsedTelegramTradeCallback,
+) -> bool | None | str:
+    try:
+        result = await claim_telegram_trade_confirmation(telegram_id=spec.telegram_id, parsed=parsed)
+        if result is True:
+            result = await claim_telegram_trade_confirmation(telegram_id=spec.telegram_id, parsed=parsed)
+        return result
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
+
+
+async def preconfirm_bot_trade_callback(
+    *,
+    spec: MixedLoadAttemptSpec,
+    offer: Offer,
+    amount: int,
+) -> bool | None | str:
+    callback_data = build_channel_trade_callback_data(
+        offer_id=offer.id,
+        offer_public_id=getattr(offer, "offer_public_id", None),
+        amount=amount,
+    )
+    parsed = parse_telegram_trade_callback_data(callback_data)
+    if parsed is None:
+        raise TradingProbeError("telegram preconfirm could not parse generated callback data")
+    return await preconfirm_parsed_bot_trade_callback(spec=spec, parsed=parsed)
 
 
 async def execute_bot_trade_with_dispatcher(
