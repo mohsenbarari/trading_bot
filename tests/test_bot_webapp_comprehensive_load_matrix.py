@@ -220,6 +220,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
                     prefix="probe-",
                     index=2003,
                     fast_seed_bot_offer=True,
+                    time_limit_buffer_minutes=60,
                 )
 
         offer_id = asyncio.run(run_probe())
@@ -228,6 +229,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(calls["server"], matrix_runner.SERVER_FOREIGN)
         self.assertEqual(calls["create"]["user_id"], owner.user_id)
         self.assertEqual(calls["create"]["channel_message_id"], 900_002_003)
+        self.assertEqual(calls["create"]["time_limit_buffer_minutes"], 60)
 
     def test_telegram_trade_attempt_can_preconfirm_callback_on_foreign_server(self):
         calls = {}

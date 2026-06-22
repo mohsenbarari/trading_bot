@@ -1685,6 +1685,7 @@ async def create_offer_for_user(
     is_wholesale: bool = True,
     lot_sizes: list[int] | tuple[int, ...] | None = None,
     channel_message_id: int | None = None,
+    time_limit_buffer_minutes: int | None = None,
 ) -> int:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
@@ -1707,11 +1708,16 @@ async def create_offer_for_user(
         if not hasattr(response, "id"):
             raise TradingProbeError(f"create_offer returned unexpected response: {response!r}")
         offer_id = int(response.id)
-        if channel_message_id is not None:
+        if channel_message_id is not None or time_limit_buffer_minutes is not None:
             offer = await db.get(Offer, offer_id)
             if offer is None:
                 raise TradingProbeError(f"created offer {offer_id} disappeared before channel id seed")
-            offer.channel_message_id = int(channel_message_id)
+            if channel_message_id is not None:
+                offer.channel_message_id = int(channel_message_id)
+            if time_limit_buffer_minutes is not None:
+                buffered_created_at = datetime.utcnow() + timedelta(minutes=int(time_limit_buffer_minutes))
+                offer.created_at = buffered_created_at
+                offer.updated_at = buffered_created_at
             await db.commit()
         return offer_id
 

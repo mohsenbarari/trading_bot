@@ -307,6 +307,7 @@ async def create_offer(
     index: int,
     bot_harness: worker.AiogramDispatcherHarness | None = None,
     fast_seed_bot_offer: bool = False,
+    time_limit_buffer_minutes: int | None = None,
 ) -> int:
     if origin == "webapp" or fast_seed_bot_offer:
         target_server = SERVER_IRAN if origin == "webapp" else SERVER_FOREIGN
@@ -322,6 +323,7 @@ async def create_offer(
                 is_wholesale=shape.is_wholesale,
                 lot_sizes=shape.lot_sizes,
                 channel_message_id=(900_000_000 + index) if origin == "bot" else None,
+                time_limit_buffer_minutes=time_limit_buffer_minutes,
             )
     harness = bot_harness or worker.AiogramDispatcherHarness()
     close_harness = bot_harness is None
@@ -641,6 +643,7 @@ async def run_scenario(
                             index=2000 + index,
                             bot_harness=harness,
                             fast_seed_bot_offer=True,
+                            time_limit_buffer_minutes=60,
                         )
                     )
                     offer_owners.append(owner)
@@ -693,6 +696,7 @@ async def run_scenario(
                             index=3000 + index,
                             bot_harness=harness,
                             fast_seed_bot_offer=True,
+                            time_limit_buffer_minutes=60,
                         )
                     )
                     offer_owners.append(owner)
