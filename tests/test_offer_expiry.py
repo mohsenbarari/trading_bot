@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from sqlalchemy.orm.exc import StaleDataError
+
 from core import offer_expiry
 from models.offer import OfferStatus
 
@@ -169,6 +171,44 @@ class OfferExpiryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decr_active_offer_count.await_count, 3)
         decr_active_offer_count.assert_any_await(11)
         decr_active_offer_count.assert_any_await(22)
+
+    async def test_expire_stale_offers_retries_after_concurrent_expiry_stale_row_conflict(self):
+        settings_obj = SimpleNamespace(offer_expiry_minutes=15)
+        first_scan_offer = SimpleNamespace(id=10, status=OfferStatus.ACTIVE, home_server="foreign", user_id=10)
+        retry_scan_offer = SimpleNamespace(id=11, status=OfferStatus.ACTIVE, home_server="foreign", user_id=11)
+        expiry_result = SimpleNamespace(expired_count=1, expired_offers=(retry_scan_offer,))
+        session = SimpleNamespace(
+            execute=AsyncMock(side_effect=[scalars_result([first_scan_offer]), scalars_result([retry_scan_offer])]),
+            rollback=AsyncMock(),
+        )
+
+        class SessionManager:
+            async def __aenter__(self):
+                return session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        expire_authoritatively = AsyncMock(side_effect=[StaleDataError("stale offer update"), expiry_result])
+
+        with patch("core.trading_settings.get_trading_settings_async", AsyncMock(return_value=settings_obj)), \
+             patch("core.offer_expiry.AsyncSessionLocal", return_value=SessionManager()), \
+             patch("core.offer_expiry.current_server", return_value="foreign"), \
+             patch("core.offer_expiry.expire_offers_authoritatively", expire_authoritatively), \
+             patch("core.offer_expiry.apply_remote_stale_channel_state", AsyncMock(return_value=0)), \
+             patch("core.offer_expiry.apply_offer_channel_state", AsyncMock()) as apply_offer_channel_state, \
+             patch("core.events.publish_event_sync"), \
+             patch("core.cache.decr_active_offer_count", AsyncMock()):
+            count = await offer_expiry.expire_stale_offers()
+
+        self.assertEqual(count, 1)
+        self.assertEqual(session.execute.await_count, 2)
+        session.rollback.assert_awaited_once()
+        self.assertEqual(expire_authoritatively.await_count, 2)
+        self.assertEqual(expire_authoritatively.await_args_list[0].args[1], [first_scan_offer])
+        self.assertEqual(expire_authoritatively.await_args_list[1].args[1], [retry_scan_offer])
+        apply_offer_channel_state.assert_awaited_once()
+        self.assertEqual(apply_offer_channel_state.await_args.args[0].id, 11)
 
     async def test_expire_stale_offers_tolerates_realtime_and_cache_failures(self):
         settings_obj = SimpleNamespace(offer_expiry_minutes=15)

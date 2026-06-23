@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.exc import StaleDataError
 
 from core.db import AsyncSessionLocal
 from core.config import settings
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 # Maximum idle sleep when there is no near expiry deadline.
 CHECK_INTERVAL = 2.0
 MIN_DEADLINE_SLEEP_SECONDS = 0.1
+STALE_EXPIRY_RETRY_ATTEMPTS = 1
 _loop_errors = RepeatedErrorLogger(every=10)
 REMOTE_CHANNEL_EXPIRY_PRESENTATION_TTL_SECONDS = 60 * 60
 REMOTE_CHANNEL_EXPIRY_PRESENTATION_MAX_KEYS = 5000
@@ -112,42 +114,48 @@ async def expire_stale_offers() -> int:
     cutoff_time = now - timedelta(minutes=expiry_minutes)
     
     async with AsyncSessionLocal() as session:
-        # Find active offers older than cutoff
-        stmt = (
-            select(Offer)
-            .options(selectinload(Offer.commodity))
-            .where(
-                Offer.status == OfferStatus.ACTIVE,
-                Offer.home_server == current_server(),
-                Offer.created_at <= cutoff_time
-            )
-        )
-        result = await session.execute(stmt)
-        expired_offers = result.scalars().all()
-        
-        if not expired_offers:
+        expiry_result = None
+        for attempt in range(STALE_EXPIRY_RETRY_ATTEMPTS + 1):
+            expired_offers = await _load_local_stale_active_offers(session, cutoff_time)
+
+            if not expired_offers:
+                await apply_remote_stale_channel_state(session, cutoff_time)
+                return 0
+
+            try:
+                expiry_result = await expire_offers_authoritatively(
+                    session,
+                    expired_offers,
+                    OfferExpiryCommand(
+                        reason=OfferExpiryReason.TIME_LIMIT,
+                        source_surface=OfferExpirySourceSurface.SYSTEM,
+                        source_server=current_server(),
+                        expired_by_user_id=None,
+                        expired_by_actor_user_id=None,
+                    ),
+                    now=now,
+                )
+                break
+            except StaleDataError:
+                await session.rollback()
+                if attempt >= STALE_EXPIRY_RETRY_ATTEMPTS:
+                    raise
+                logger.info(
+                    "Offer expiry hit a stale row conflict; retrying active offer scan",
+                    extra={"event": "offer_expiry.stale_retry", "attempt": attempt + 1},
+                )
+
+        if expiry_result is None:
             await apply_remote_stale_channel_state(session, cutoff_time)
             return 0
-        
-        result = await expire_offers_authoritatively(
-            session,
-            expired_offers,
-            OfferExpiryCommand(
-                reason=OfferExpiryReason.TIME_LIMIT,
-                source_surface=OfferExpirySourceSurface.SYSTEM,
-                source_server=current_server(),
-                expired_by_user_id=None,
-                expired_by_actor_user_id=None,
-            ),
-            now=now,
-        )
-        count = result.expired_count
-        offer_ids = [o.id for o in result.expired_offers]
+
+        count = expiry_result.expired_count
+        offer_ids = [o.id for o in expiry_result.expired_offers]
         
         logger.info(f"⏰ Auto-expired {count} offers: {offer_ids}")
         
         # Apply terminal channel state on foreign and remove interactive buttons.
-        for offer in result.expired_offers:
+        for offer in expiry_result.expired_offers:
             await apply_offer_channel_state(offer, reason="auto_expire_time_limit")
         
         # Publish realtime events for each expired offer
@@ -161,9 +169,9 @@ async def expire_stale_offers() -> int:
         # Update Redis cache for affected users
         try:
             from core.cache import decr_active_offer_count
-            user_ids = set(o.user_id for o in result.expired_offers if o.user_id)
+            user_ids = set(o.user_id for o in expiry_result.expired_offers if o.user_id)
             for uid in user_ids:
-                user_expired_count = sum(1 for o in result.expired_offers if o.user_id == uid)
+                user_expired_count = sum(1 for o in expiry_result.expired_offers if o.user_id == uid)
                 for _ in range(user_expired_count):
                     await decr_active_offer_count(uid)
         except Exception as e:
@@ -172,6 +180,20 @@ async def expire_stale_offers() -> int:
         await apply_remote_stale_channel_state(session, cutoff_time)
     
     return count
+
+
+async def _load_local_stale_active_offers(session, cutoff_time):
+    stmt = (
+        select(Offer)
+        .options(selectinload(Offer.commodity))
+        .where(
+            Offer.status == OfferStatus.ACTIVE,
+            Offer.home_server == current_server(),
+            Offer.created_at <= cutoff_time,
+        )
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
 
 
 async def apply_remote_stale_channel_state(session, cutoff_time) -> int:
