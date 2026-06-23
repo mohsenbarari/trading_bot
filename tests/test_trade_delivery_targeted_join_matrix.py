@@ -91,6 +91,25 @@ class TradeDeliveryTargetedJoinMatrixTests(unittest.TestCase):
         self.assertEqual(payload["catalog"]["scenario_count"], 204)
         self.assertEqual(payload["catalog"]["outage_class_count"], 3)
 
+    def test_run_git_value_falls_back_to_matrix_env_when_git_binary_is_missing(self):
+        def missing_git(*_args, **_kwargs):
+            raise FileNotFoundError("git")
+
+        with patch.object(targeted_matrix.subprocess, "run", side_effect=missing_git), patch.dict(
+            targeted_matrix.os.environ,
+            {
+                "CANDIDATE_MATRIX_BRANCH": "candidate/bot-webapp-integration",
+                "CANDIDATE_MATRIX_COMMIT": "abc123",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                targeted_matrix.run_git_value(["branch", "--show-current"]),
+                "candidate/bot-webapp-integration",
+            )
+            self.assertEqual(targeted_matrix.run_git_value(["rev-parse", "HEAD"]), "abc123")
+            self.assertIsNone(targeted_matrix.run_git_value(["status", "--short"]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,12 +120,19 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def run_git_value(args: list[str]) -> str | None:
-    result = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        if args == ["branch", "--show-current"]:
+            return os.environ.get("CANDIDATE_MATRIX_BRANCH") or None
+        if args == ["rev-parse", "HEAD"]:
+            return os.environ.get("CANDIDATE_MATRIX_COMMIT") or None
+        return None
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None

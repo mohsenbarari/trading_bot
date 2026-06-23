@@ -114,6 +114,8 @@ def build_targeted_join_command(args: argparse.Namespace) -> list[str]:
             str(args.artifact_dir / "trade-delivery-targeted-join-matrix.json"),
             "--dry-run",
         ]
+    current_branch = run_git_value(["branch", "--show-current"]) or ""
+    current_commit = run_git_value(["rev-parse", "HEAD"]) or ""
     return [
         "docker",
         "compose",
@@ -130,6 +132,10 @@ def build_targeted_join_command(args: argparse.Namespace) -> list[str]:
         "--no-deps",
         "-e",
         "PYTHONDONTWRITEBYTECODE=1",
+        "-e",
+        f"CANDIDATE_MATRIX_BRANCH={current_branch}",
+        "-e",
+        f"CANDIDATE_MATRIX_COMMIT={current_commit}",
         "-v",
         f"{REPO_ROOT}:/app:ro",
         "-v",

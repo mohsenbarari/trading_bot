@@ -57,7 +57,9 @@ from core.enums import NotificationCategory, NotificationLevel, UserAccountStatu
 from core.events import setup_event_listeners
 from core.redis import init_redis, pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
+from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
 from core.services.trade_contention_gate import TradeContentionLease, try_acquire_trade_contention_gate
+from core.offer_source import OfferSourceSurface, normalize_offer_source_surface
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, normalize_server, override_current_server
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
@@ -68,7 +70,7 @@ from models.commodity import Commodity
 from models.notification import Notification
 from models.offer_publication_state import OfferPublicationState, OfferPublicationStatus
 from models.offer_request import OfferRequest, OfferRequestStatus
-from models.offer import Offer, OfferStatus
+from models.offer import Offer, OfferStatus, OfferType
 from models.trade import Trade, TradeStatus
 from models.user import User, UserRole
 
@@ -1686,28 +1688,52 @@ async def create_offer_for_user(
     lot_sizes: list[int] | tuple[int, ...] | None = None,
     channel_message_id: int | None = None,
     time_limit_buffer_minutes: int | None = None,
+    source_surface: OfferSourceSurface | str = OfferSourceSurface.WEBAPP,
 ) -> int:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
         normalized_lot_sizes = list(lot_sizes) if lot_sizes else None
-        response = await offers_router.create_offer(
-            offers_router.OfferCreate(
-                offer_type=offer_type,
-                commodity_id=commodity_id,
-                quantity=quantity,
-                price=price,
-                is_wholesale=is_wholesale,
-                lot_sizes=normalized_lot_sizes,
-                notes=f"{prefix} offer {index}",
-                warning_acknowledged=True,
-            ),
-            db=db,
-            current_user=user,
-            context=owner_context(user),
-        )
-        if not hasattr(response, "id"):
-            raise TradingProbeError(f"create_offer returned unexpected response: {response!r}")
-        offer_id = int(response.id)
+        normalized_source_surface = normalize_offer_source_surface(source_surface)
+        if normalized_source_surface == OfferSourceSurface.WEBAPP:
+            response = await offers_router.create_offer(
+                offers_router.OfferCreate(
+                    offer_type=offer_type,
+                    commodity_id=commodity_id,
+                    quantity=quantity,
+                    price=price,
+                    is_wholesale=is_wholesale,
+                    lot_sizes=normalized_lot_sizes,
+                    notes=f"{prefix} offer {index}",
+                    warning_acknowledged=True,
+                ),
+                db=db,
+                current_user=user,
+                context=owner_context(user),
+            )
+            if not hasattr(response, "id"):
+                raise TradingProbeError(f"create_offer returned unexpected response: {response!r}")
+            offer_id = int(response.id)
+        else:
+            if normalized_source_surface != OfferSourceSurface.TELEGRAM_BOT:
+                raise TradingProbeError(f"unsupported synthetic offer source_surface={source_surface!r}")
+            offer = await create_authoritative_offer(
+                db,
+                OfferCreationCommand(
+                    source_surface=OfferSourceSurface.TELEGRAM_BOT,
+                    owner_user_id=user.id,
+                    actor_user_id=user.id,
+                    offer_type=OfferType.BUY if offer_type == "buy" else OfferType.SELL,
+                    commodity_id=commodity_id,
+                    quantity=quantity,
+                    price=price,
+                    is_wholesale=is_wholesale,
+                    lot_sizes=normalized_lot_sizes,
+                    original_lot_sizes=normalized_lot_sizes,
+                    notes=f"{prefix} offer {index}",
+                    status=OfferStatus.ACTIVE,
+                ),
+            )
+            offer_id = int(offer.id)
         if channel_message_id is not None or time_limit_buffer_minutes is not None:
             offer = await db.get(Offer, offer_id)
             if offer is None:

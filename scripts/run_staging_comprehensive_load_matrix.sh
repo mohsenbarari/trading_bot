@@ -127,6 +127,7 @@ run_load_service() {
     STAGING_LOAD_DB_POOL_SIZE="$DB_POOL_SIZE" \
     STAGING_LOAD_DB_MAX_OVERFLOW="$DB_MAX_OVERFLOW" \
     "${compose_cmd[@]}" --profile staging-load run --rm --no-deps \
+        -v "$PROJECT_DIR:/app:ro" \
         -v "$ARTIFACT_DIR:/artifacts" \
         "$service" "$@"
 }

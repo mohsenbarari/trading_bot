@@ -324,6 +324,7 @@ async def create_offer(
                 lot_sizes=shape.lot_sizes,
                 channel_message_id=(900_000_000 + index) if origin == "bot" else None,
                 time_limit_buffer_minutes=time_limit_buffer_minutes,
+                source_surface="telegram_bot" if origin == "bot" else "webapp",
             )
     harness = bot_harness or worker.AiogramDispatcherHarness()
     close_harness = bot_harness is None

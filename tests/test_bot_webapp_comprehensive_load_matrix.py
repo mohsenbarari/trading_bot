@@ -230,6 +230,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(calls["create"]["user_id"], owner.user_id)
         self.assertEqual(calls["create"]["channel_message_id"], 900_002_003)
         self.assertEqual(calls["create"]["time_limit_buffer_minutes"], 60)
+        self.assertEqual(calls["create"]["source_surface"], "telegram_bot")
 
     def test_telegram_trade_attempt_can_preconfirm_callback_on_foreign_server(self):
         calls = {}
