@@ -954,6 +954,56 @@ def setup_user_block_events():
     logger.info("✅ UserBlock event listeners registered")
 
 
+def setup_telegram_link_token_events():
+    """Setup event listeners for WebApp-issued Telegram account-link tokens."""
+    from models.telegram_link_token import TelegramLinkToken
+
+    def telegram_link_token_payload(target):
+        status = getattr(target, "status", None)
+        return {
+            "id": target.id,
+            "user_id": target.user_id,
+            "token_hash": target.token_hash,
+            "status": status.value if hasattr(status, "value") else status,
+            "issued_by_server": target.issued_by_server,
+            "expires_at": _isoformat_or_none(getattr(target, "expires_at", None)),
+            "used_at": _isoformat_or_none(getattr(target, "used_at", None)),
+            "used_telegram_id": getattr(target, "used_telegram_id", None),
+            "revoked_at": _isoformat_or_none(getattr(target, "revoked_at", None)),
+            "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+            "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+        }
+
+    @event.listens_for(TelegramLinkToken, 'after_insert')
+    def on_telegram_link_token_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_link_tokens", target.id, "INSERT", telegram_link_token_payload(target))
+        except Exception as e:
+            logger.error(f"Error in telegram_link_token after_insert event: {e}")
+
+    @event.listens_for(TelegramLinkToken, 'after_update')
+    def on_telegram_link_token_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_link_tokens", target.id, "UPDATE", telegram_link_token_payload(target))
+        except Exception as e:
+            logger.error(f"Error in telegram_link_token after_update event: {e}")
+
+    @event.listens_for(TelegramLinkToken, 'after_delete')
+    def on_telegram_link_token_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "telegram_link_tokens", target.id, "DELETE", {"id": target.id})
+        except Exception as e:
+            logger.error(f"Error in telegram_link_token after_delete event: {e}")
+
+    logger.info("✅ TelegramLinkToken event listeners registered")
+
+
 def setup_trading_settings_events():
     """Setup event listeners for TradingSetting model"""
     from models.trading_setting import TradingSetting
@@ -1352,6 +1402,7 @@ def setup_all_events():
     setup_market_schedule_override_events()
     setup_market_runtime_state_events()
     setup_user_block_events()
+    setup_telegram_link_token_events()
     setup_notification_events()
     setup_user_notification_preference_events()
     setup_admin_message_events()

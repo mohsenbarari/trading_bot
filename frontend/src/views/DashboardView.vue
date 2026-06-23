@@ -1588,33 +1588,33 @@ onMounted(fetchUser)
   transform: scale(0.98);
 }
 .hero-btn:hover {
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.04);
 }
 .hero-btn--open {
   border-color: rgba(15, 118, 110, 0.18);
   background: linear-gradient(135deg, rgba(240, 253, 250, 0.98), rgba(255, 255, 255, 0.96));
   box-shadow:
-    0 16px 34px rgba(22, 163, 74, 0.2),
-    0 0 0 1px rgba(22, 163, 74, 0.07);
+    inset 0 0 0 1px rgba(22, 163, 74, 0.1),
+    inset 0 -24px 42px rgba(22, 163, 74, 0.16);
 }
 .hero-btn--closed {
   border-color: rgba(220, 38, 38, 0.16);
   background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.96));
   box-shadow:
-    0 14px 32px rgba(220, 38, 38, 0.17),
-    0 0 0 1px rgba(220, 38, 38, 0.06);
+    inset 0 0 0 1px rgba(220, 38, 38, 0.1),
+    inset 0 -24px 42px rgba(220, 38, 38, 0.14);
 }
 
 .hero-btn--open:hover {
   box-shadow:
-    0 20px 44px rgba(22, 163, 74, 0.28),
-    0 0 0 1px rgba(22, 163, 74, 0.1);
+    inset 0 0 0 1px rgba(22, 163, 74, 0.14),
+    inset 0 -28px 48px rgba(22, 163, 74, 0.22);
 }
 
 .hero-btn--closed:hover {
   box-shadow:
-    0 18px 40px rgba(220, 38, 38, 0.23),
-    0 0 0 1px rgba(220, 38, 38, 0.1);
+    inset 0 0 0 1px rgba(220, 38, 38, 0.14),
+    inset 0 -28px 48px rgba(220, 38, 38, 0.2);
 }
 
 .hero-btn-content {

@@ -35,8 +35,9 @@ const emit = defineEmits<{
       <span v-if="error" class="telegram-connect-panel__error">{{ error }}</span>
     </span>
 
-    <span class="telegram-connect-panel__state">
-      {{ connected ? 'متصل' : loading ? 'در حال اتصال' : 'ضربه بزنید' }}
+    <span class="telegram-connect-panel__state" aria-hidden="true">
+      <span v-if="loading" class="telegram-connect-panel__spinner"></span>
+      <span v-else>{{ connected ? 'متصل' : 'ضربه بزنید' }}</span>
     </span>
   </button>
 </template>
@@ -142,6 +143,7 @@ const emit = defineEmits<{
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.35rem;
   min-height: 2rem;
   padding: 0.24rem 0.72rem;
   border-radius: var(--ds-radius-full);
@@ -151,6 +153,21 @@ const emit = defineEmits<{
   font-size: var(--ds-font-xs);
   font-weight: 900;
   white-space: nowrap;
+}
+
+.telegram-connect-panel__spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  animation: telegram-connect-spin 0.8s linear infinite;
+}
+
+@keyframes telegram-connect-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 640px) {

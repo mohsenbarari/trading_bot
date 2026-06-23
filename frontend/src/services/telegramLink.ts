@@ -12,7 +12,12 @@ export interface TelegramLinkResponse {
 }
 
 export async function requestTelegramLink(): Promise<TelegramLinkResponse> {
-  const response = await apiFetch('/api/auth/telegram-link-token', { method: 'POST' })
+  let response: Response
+  try {
+    response = await apiFetch('/api/auth/telegram-link-token', { method: 'POST', retryNetwork: false })
+  } catch {
+    throw new Error('ساخت لینک اتصال تلگرام ناموفق بود. چند لحظه بعد دوباره تلاش کنید.')
+  }
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = typeof payload?.detail === 'string' ? payload.detail : 'ساخت لینک اتصال تلگرام ناموفق بود.'

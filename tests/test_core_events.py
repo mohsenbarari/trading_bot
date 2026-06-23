@@ -1,4 +1,5 @@
 from datetime import datetime
+from contextlib import ExitStack
 import json
 from types import SimpleNamespace
 import unittest
@@ -815,6 +816,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_trade_delivery_receipt_events()
             events.setup_notification_events()
             events.setup_user_notification_preference_events()
+            events.setup_telegram_link_token_events()
             events.setup_admin_message_events()
 
         connection = _FakeConnection()
@@ -987,6 +989,23 @@ class CoreEventsTests(unittest.TestCase):
             registry[('UserNotificationPreference', 'after_update')](None, connection, notification_preference)
             registry[('UserNotificationPreference', 'after_delete')](None, connection, notification_preference)
 
+            telegram_link_token = SimpleNamespace(
+                id=10,
+                user_id=1,
+                token_hash='hashed-token-value',
+                status=SimpleNamespace(value='pending'),
+                issued_by_server='iran',
+                expires_at=now,
+                used_at=None,
+                used_telegram_id=None,
+                revoked_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('TelegramLinkToken', 'after_insert')](None, connection, telegram_link_token)
+            registry[('TelegramLinkToken', 'after_update')](None, connection, telegram_link_token)
+            registry[('TelegramLinkToken', 'after_delete')](None, connection, telegram_link_token)
+
             accountant_relation = SimpleNamespace(
                 id=8,
                 owner_user_id=3,
@@ -1033,7 +1052,15 @@ class CoreEventsTests(unittest.TestCase):
             registry[('CustomerRelation', 'after_update')](None, connection, customer_relation)
             registry[('CustomerRelation', 'after_delete')](None, connection, customer_relation)
 
-        self.assertGreaterEqual(log_change.call_count, 34)
+        self.assertGreaterEqual(log_change.call_count, 37)
+        telegram_link_payloads = [
+            call.args[4]
+            for call in log_change.call_args_list
+            if call.args[1] == 'telegram_link_tokens' and call.args[3] != 'DELETE'
+        ]
+        self.assertEqual(telegram_link_payloads[0]['token_hash'], 'hashed-token-value')
+        self.assertEqual(telegram_link_payloads[0]['status'], 'pending')
+        self.assertNotIn('raw_token', telegram_link_payloads[0])
         logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
         logger.info.assert_any_call('✅ CustomerRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')
@@ -1047,41 +1074,31 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ TradeDeliveryReceipt event listeners registered')
         logger.info.assert_any_call('✅ Notification event listeners registered')
         logger.info.assert_any_call('✅ UserNotificationPreference event listeners registered')
+        logger.info.assert_any_call('✅ TelegramLinkToken event listeners registered')
         logger.info.assert_any_call('✅ AdminMessage event listeners registered')
 
-        with patch('core.events.setup_user_events') as setup_user_events, patch(
-            'core.events.setup_accountant_relation_events'
-        ) as setup_accountant_relation_events, patch(
-            'core.events.setup_customer_relation_events'
-        ) as setup_customer_relation_events, patch(
-            'core.events.setup_chat_events'
-        ) as setup_chat_events, patch(
-            'core.events.setup_chat_member_events'
-        ) as setup_chat_member_events, patch(
-            'core.events.setup_invitation_events'
-        ) as setup_invitation_events, patch('core.events.setup_offer_events') as setup_offer_events, patch(
-            'core.events.setup_offer_request_events'
-        ) as setup_offer_request_events, patch(
-            'core.events.setup_offer_publication_state_events'
-        ) as setup_offer_publication_state_events, patch(
-            'core.events.setup_trade_events'
-        ) as setup_trade_events, patch(
-            'core.events.setup_trade_delivery_receipt_events'
-        ) as setup_trade_delivery_receipt_events, patch(
-            'core.events.setup_commodity_events'
-        ) as setup_commodity_events, patch(
-            'core.events.setup_commodity_alias_events'
-        ) as setup_commodity_alias_events, patch('core.events.setup_trading_settings_events') as setup_trading_settings_events, patch(
-            'core.events.setup_user_block_events'
-        ) as setup_user_block_events, patch('core.events.setup_notification_events') as setup_notification_events, patch(
-            'core.events.setup_user_notification_preference_events'
-        ) as setup_user_notification_preference_events, patch(
-            'core.events.setup_admin_message_events'
-        ) as setup_admin_message_events, patch(
-            'core.events.register_sync_outbox_guards'
-        ) as register_sync_outbox_guards, patch.object(
-            events, 'logger'
-        ) as logger:
+        with ExitStack() as stack:
+            setup_user_events = stack.enter_context(patch('core.events.setup_user_events'))
+            setup_accountant_relation_events = stack.enter_context(patch('core.events.setup_accountant_relation_events'))
+            setup_customer_relation_events = stack.enter_context(patch('core.events.setup_customer_relation_events'))
+            setup_chat_events = stack.enter_context(patch('core.events.setup_chat_events'))
+            setup_chat_member_events = stack.enter_context(patch('core.events.setup_chat_member_events'))
+            setup_invitation_events = stack.enter_context(patch('core.events.setup_invitation_events'))
+            setup_offer_events = stack.enter_context(patch('core.events.setup_offer_events'))
+            setup_offer_request_events = stack.enter_context(patch('core.events.setup_offer_request_events'))
+            setup_offer_publication_state_events = stack.enter_context(patch('core.events.setup_offer_publication_state_events'))
+            setup_trade_events = stack.enter_context(patch('core.events.setup_trade_events'))
+            setup_trade_delivery_receipt_events = stack.enter_context(patch('core.events.setup_trade_delivery_receipt_events'))
+            setup_commodity_events = stack.enter_context(patch('core.events.setup_commodity_events'))
+            setup_commodity_alias_events = stack.enter_context(patch('core.events.setup_commodity_alias_events'))
+            setup_trading_settings_events = stack.enter_context(patch('core.events.setup_trading_settings_events'))
+            setup_user_block_events = stack.enter_context(patch('core.events.setup_user_block_events'))
+            setup_notification_events = stack.enter_context(patch('core.events.setup_notification_events'))
+            setup_user_notification_preference_events = stack.enter_context(patch('core.events.setup_user_notification_preference_events'))
+            setup_telegram_link_token_events = stack.enter_context(patch('core.events.setup_telegram_link_token_events'))
+            setup_admin_message_events = stack.enter_context(patch('core.events.setup_admin_message_events'))
+            register_sync_outbox_guards = stack.enter_context(patch('core.events.register_sync_outbox_guards'))
+            logger = stack.enter_context(patch.object(events, 'logger'))
             events.setup_all_events()
 
         register_sync_outbox_guards.assert_called_once()
@@ -1102,6 +1119,7 @@ class CoreEventsTests(unittest.TestCase):
         setup_user_block_events.assert_called_once()
         setup_notification_events.assert_called_once()
         setup_user_notification_preference_events.assert_called_once()
+        setup_telegram_link_token_events.assert_called_once()
         setup_admin_message_events.assert_called_once()
         logger.info.assert_called_with('🎯 All event listeners initialized')
         self.assertIs(events.setup_event_listeners, events.setup_all_events)
