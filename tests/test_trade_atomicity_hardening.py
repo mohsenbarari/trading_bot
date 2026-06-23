@@ -9,6 +9,7 @@ from api.routers.trades import (
     TradeAtomicityError,
     TradeIdempotencyConflictError,
     _allocate_next_trade_number,
+    _allocate_trade_numbers,
     _apply_offer_trade_mutation,
     _commit_trade_execution,
     _lock_trade_idempotency_key,
@@ -72,6 +73,23 @@ class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(next_trade_number, 10000)
         db.execute.assert_not_awaited()
+        db.scalar.assert_awaited_once()
+
+    async def test_allocate_trade_numbers_uses_sequence_for_each_postgresql_chain_leg(self):
+        db = FakeDB(dialect_name="postgresql")
+        db.scalar = AsyncMock(side_effect=[10010, 10012, 10014])
+
+        trade_numbers = await _allocate_trade_numbers(db, 3)
+
+        self.assertEqual(trade_numbers, [10010, 10012, 10014])
+        self.assertEqual(db.scalar.await_count, 3)
+
+    async def test_allocate_trade_numbers_uses_contiguous_block_outside_postgresql(self):
+        db = FakeDB(dialect_name="sqlite", scalar_result=None)
+
+        trade_numbers = await _allocate_trade_numbers(db, 3)
+
+        self.assertEqual(trade_numbers, [10000, 10001, 10002])
         db.scalar.assert_awaited_once()
 
     async def test_idempotency_key_lock_is_postgresql_only(self):

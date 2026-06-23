@@ -100,6 +100,8 @@ BROAD_CLEANUP_PREFIXES = {
     "tmp",
     "user",
 }
+CLEANUP_DB_RETRY_ATTEMPTS = 3
+RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001"}
 
 
 LOAD_RUNNER_ROLES = {
@@ -1006,6 +1008,15 @@ def cleanup_mutating_statement(statement: Any) -> Any:
     return statement.execution_options(is_sync=True)
 
 
+def is_retryable_cleanup_database_error(exc: BaseException) -> bool:
+    orig = getattr(exc, "orig", None)
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    if code in RETRYABLE_CLEANUP_SQLSTATES:
+        return True
+    message = str(exc).lower()
+    return "deadlock detected" in message or "could not serialize access" in message
+
+
 def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
     return {
         "users": len(plan.user_ids),
@@ -1179,6 +1190,22 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
         planned_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids, dry_run=True)
         return cleanup_report_payload(plan=plan, dry_run=True, deleted_redis_keys=planned_redis_keys)
 
+    last_retryable_error: BaseException | None = None
+    for attempt in range(1, CLEANUP_DB_RETRY_ATTEMPTS + 1):
+        try:
+            return await delete_cleanup_plan(plan)
+        except DBAPIError as exc:
+            if not is_retryable_cleanup_database_error(exc) or attempt >= CLEANUP_DB_RETRY_ATTEMPTS:
+                raise
+            last_retryable_error = exc
+            await asyncio.sleep(0.15 * attempt)
+            plan = await collect_cleanup_plan(prefix)
+    if last_retryable_error is not None:
+        raise last_retryable_error
+    raise TradingProbeError("cleanup retry loop exited unexpectedly")
+
+
+async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
         deleted_notifications = 0
         deleted_chat_members = 0

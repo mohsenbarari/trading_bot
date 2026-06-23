@@ -336,6 +336,16 @@ async def _allocate_next_trade_number(db: AsyncSession) -> int:
     return (max_trade_number or 9999) + 1
 
 
+async def _allocate_trade_numbers(db: AsyncSession, count: int) -> list[int]:
+    if count <= 0:
+        return []
+    if _db_dialect_name(db) == "postgresql":
+        return [await _allocate_next_trade_number(db) for _ in range(count)]
+
+    first_trade_number = await _allocate_next_trade_number(db)
+    return list(range(first_trade_number, first_trade_number + count))
+
+
 def _validate_idempotent_trade_replay(
     *,
     existing_trade: Trade | object,
@@ -2797,8 +2807,8 @@ async def _execute_trade_authoritatively(
             return trade_to_response(existing_trade_obj, **existing_response_kwargs)
     mark_trade_phase("checked_idempotency")
     
-    # گرفتن شماره معامله جدید
-    next_trade_number = await _allocate_next_trade_number(db)
+    trade_number_count = max(1, len(trade_execution_nodes) - 1) if uses_customer_trade_chain else 1
+    allocated_trade_numbers = await _allocate_trade_numbers(db, trade_number_count)
     mark_trade_phase("allocated_trade_number")
     
     # نوع معامله از دید پاسخ‌دهنده
@@ -2816,7 +2826,7 @@ async def _execute_trade_authoritatively(
             leg_offer_user = offer_node["user"]
             leg_responder_user = responder_node["user"]
             leg_trade = Trade(
-                trade_number=next_trade_number,
+                trade_number=allocated_trade_numbers[leg_index],
                 offer_id=offer.id if leg_index == 0 else None,
                 offer_user_id=int(offer_node["user_id"]),
                 offer_user_mobile=getattr(leg_offer_user, "mobile_number", None),
@@ -2832,12 +2842,11 @@ async def _execute_trade_authoritatively(
             )
             db.add(leg_trade)
             created_chain_trades.append(leg_trade)
-            next_trade_number += 1
 
         response_trade_record = created_chain_trades[-1]
     else:
         response_trade_record = Trade(
-            trade_number=next_trade_number,
+            trade_number=allocated_trade_numbers[0],
             offer_id=offer.id,
             offer_user_id=offer.user_id,
             offer_user_mobile=offer.user.mobile_number if offer.user else None,
