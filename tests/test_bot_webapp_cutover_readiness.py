@@ -33,12 +33,15 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         self.assertEqual(result["failure_count"], 0)
         self.assertEqual(result["role_summaries"]["iran"]["active_offer_count"], 0)
         self.assertEqual(result["capacity_summary"]["correctness_failure_count"], 0)
+        self.assertEqual(result["trade_delivery_summary"]["status"], "valid")
+        self.assertEqual(result["trade_delivery_summary"]["production_gate"], cutover.STEP11_TRADE_DELIVERY_PRODUCTION_GATE_STATUS)
         self.assertIn("performs no production deploy", result["notice"])
 
     def test_production_snapshot_or_production_data_fails_closed(self):
         snapshot = passing_snapshot()
         snapshot["metadata"]["environment"] = "production"
         snapshot["metadata"]["production_data_used"] = True
+        snapshot["metadata"]["production_deploy_command_run"] = True
 
         result = cutover.evaluate_snapshot(snapshot)
 
@@ -46,6 +49,7 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         failed_ids = {failure["gate_id"] for failure in result["failures"]}
         self.assertIn("C12-ENV-01", failed_ids)
         self.assertIn("C12-ENV-02", failed_ids)
+        self.assertIn("C12-ENV-03", failed_ids)
 
     def test_any_active_offer_blocks_cutover(self):
         snapshot = passing_snapshot()
@@ -94,12 +98,16 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         snapshot["roles"]["iran"]["publication_state"]["pending_count"] = 1
         snapshot["roles"]["iran"]["runtime_guards"]["telegram_blocked"] = False
         snapshot["roles"]["foreign"]["runtime_guards"]["webapp_user_surface_blocked"] = False
+        snapshot["global"]["contract_stages"]["latest_commit_pushed"] = False
         snapshot["global"]["registry_coverage_complete"] = False
         snapshot["global"]["sensitive_field_policy_complete"] = False
+        snapshot["global"]["migrations"]["destructive_changes"] = True
         snapshot["global"]["rollback"]["destructive_cleanup_required"] = True
         snapshot["global"]["observability"]["sync_health_reviewed"] = False
+        snapshot["global"]["observability"]["receipt_backlog_visible"] = False
         snapshot["global"]["backups"]["restore_smoke_passed"] = False
         snapshot["global"]["staging_validation"]["owner_signoff"] = False
+        snapshot["global"]["staging_validation"]["evidence_fresh"] = False
 
         result = cutover.evaluate_snapshot(snapshot)
 
@@ -108,8 +116,10 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         self.assertIn("C12-IRAN-PUBLICATION", failed_ids)
         self.assertIn("C12-IRAN-TELEGRAM-GUARD", failed_ids)
         self.assertIn("C12-FOREIGN-WEBAPP-GUARD", failed_ids)
+        self.assertIn("C12-GLOBAL-CONTRACT-STAGES", failed_ids)
         self.assertIn("C12-GLOBAL-REGISTRY", failed_ids)
         self.assertIn("C12-GLOBAL-SENSITIVE-POLICY", failed_ids)
+        self.assertIn("C12-GLOBAL-MIGRATIONS", failed_ids)
         self.assertIn("C12-GLOBAL-ROLLBACK", failed_ids)
         self.assertIn("C12-GLOBAL-OBSERVABILITY", failed_ids)
         self.assertIn("C12-GLOBAL-BACKUPS", failed_ids)
@@ -168,6 +178,42 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertIn("C12-GLOBAL-CAPACITY-WARNINGS", {failure["gate_id"] for failure in result["failures"]})
 
+    def test_trade_delivery_report_is_required_reviewed_and_production_gated(self):
+        snapshot = passing_snapshot()
+        delivery_report = snapshot["global"]["staging_validation"]["trade_delivery_report"]
+        delivery_report["production_gate"]["status"] = "open"
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("C12-GLOBAL-TRADE-DELIVERY-REPORT", {failure["gate_id"] for failure in result["failures"]})
+
+        snapshot = passing_snapshot()
+        delivery_report = snapshot["global"]["staging_validation"]["trade_delivery_report"]
+        delivery_report["status"] = "invalid"
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("C12-GLOBAL-TRADE-DELIVERY-REPORT", {failure["gate_id"] for failure in result["failures"]})
+
+        snapshot = passing_snapshot()
+        delivery_report = snapshot["global"]["staging_validation"]["trade_delivery_report"]
+        delivery_report["warning_count"] = 2
+        delivery_report["warnings_reviewed"] = True
+
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["trade_delivery_summary"]["warning_count"], 2)
+        self.assertIn("C12-GLOBAL-TRADE-DELIVERY-WARNINGS", {warning["gate_id"] for warning in result["warnings"]})
+
+        delivery_report["warnings_reviewed"] = False
+        result = cutover.evaluate_snapshot(snapshot)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("C12-GLOBAL-TRADE-DELIVERY-WARNINGS", {failure["gate_id"] for failure in result["failures"]})
+
     def test_legacy_unknown_and_old_channel_bindings_are_warnings_not_fabricated_history(self):
         snapshot = passing_snapshot()
         report = snapshot["roles"]["foreign"]["backfill_report"]
@@ -216,6 +262,7 @@ class BotWebAppCutoverReadinessTests(unittest.TestCase):
             self.assertIn("# Bot/WebApp Cutover Readiness Report", stdout.getvalue())
             self.assertIn("No Production", report_path.read_text(encoding="utf-8"))
             self.assertIn("Step 11B Capacity Summary", report_path.read_text(encoding="utf-8"))
+            self.assertIn("Stage 11 Trade Delivery Summary", report_path.read_text(encoding="utf-8"))
 
             failed = passing_snapshot()
             failed["roles"]["iran"]["active_offer_count"] = 1

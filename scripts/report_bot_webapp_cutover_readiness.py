@@ -18,11 +18,13 @@ from typing import Any, Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MATRIX_VERSION = "step-12-2026-06-20"
+MATRIX_VERSION = "step-12-2026-06-23"
 REQUIRED_ROLES = ("iran", "foreign")
 NON_PRODUCTION_ENVIRONMENTS = {"staging", "synthetic", "dry_run", "local"}
 STEP11_CAPACITY_REPORT_SCHEMA_VERSION = "bot_webapp_capacity_report_v1"
+STEP11_TRADE_DELIVERY_REPORT_SCHEMA_VERSION = "trade_delivery_staging_validation_report_v1"
 STEP11_CAPACITY_PRODUCTION_GATE_STATUS = "blocked_until_owner_staging_validation"
+STEP11_TRADE_DELIVERY_PRODUCTION_GATE_STATUS = "blocked_until_owner_staging_validation"
 NO_PRODUCTION_ACTION_NOTICE = (
     "This report must be generated from staging/synthetic evidence only. "
     "It performs no production deploy, production peer access, or production data action."
@@ -184,6 +186,7 @@ def template_snapshot() -> dict[str, Any]:
             "commit_sha": "replace-with-staging-sha",
             "production_data_used": False,
             "production_peer_used": False,
+            "production_deploy_command_run": False,
         },
         "roles": {
             "iran": {
@@ -214,8 +217,20 @@ def template_snapshot() -> dict[str, Any]:
             },
         },
         "global": {
+            "contract_stages": {
+                "stages_complete": True,
+                "stage_11_complete": True,
+                "all_required_commits_pushed": True,
+                "latest_commit_pushed": True,
+            },
             "registry_coverage_complete": True,
             "sensitive_field_policy_complete": True,
+            "migrations": {
+                "additive_only": True,
+                "destructive_changes": False,
+                "migration_forward_compatible": True,
+                "code_only_rollback_compatible": True,
+            },
             "rollback": {
                 "disable_new_behavior_without_delete": True,
                 "destructive_cleanup_required": False,
@@ -228,6 +243,12 @@ def template_snapshot() -> dict[str, Any]:
                 "logs_reviewed": True,
                 "sync_health_reviewed": True,
                 "alerts_configured": True,
+                "receipt_backlog_visible": True,
+                "oldest_pending_visible": True,
+                "terminal_counts_visible": True,
+                "telegram_failures_visible": True,
+                "sync_conflicts_visible": True,
+                "duplicate_guards_visible": True,
             },
             "backups": {
                 "snapshots_ready": True,
@@ -238,6 +259,8 @@ def template_snapshot() -> dict[str, Any]:
                 "step11_matrix_passed": True,
                 "manual_scenarios_passed": True,
                 "owner_signoff": True,
+                "evidence_fresh": True,
+                "required_logs_and_artifacts_available": True,
                 "capacity_report": {
                     "schema_version": STEP11_CAPACITY_REPORT_SCHEMA_VERSION,
                     "artifact_path": "replace-with-step-11b-capacity-report-path",
@@ -253,6 +276,20 @@ def template_snapshot() -> dict[str, Any]:
                     },
                     "telegram_gateway_boundary": "mock",
                 },
+                "trade_delivery_report": {
+                    "schema_version": STEP11_TRADE_DELIVERY_REPORT_SCHEMA_VERSION,
+                    "artifact_path": "replace-with-stage-11-trade-delivery-report-path",
+                    "status": "valid",
+                    "scenario_count": 15,
+                    "warning_count": 0,
+                    "warnings_reviewed": True,
+                    "report_reviewed": True,
+                    "manual_signoff_required": True,
+                    "production_gate": {
+                        "status": STEP11_TRADE_DELIVERY_PRODUCTION_GATE_STATUS,
+                        "reason": "Owner-led staging validation must review this artifact before production consideration.",
+                    },
+                },
             },
         },
     }
@@ -263,6 +300,7 @@ def evaluate_environment(payload: Mapping[str, Any]) -> list[GateResult]:
     environment = str(metadata.get("environment") or "").strip().lower()
     production_data_used = metadata.get("production_data_used")
     production_peer_used = metadata.get("production_peer_used")
+    production_deploy_command_run = metadata.get("production_deploy_command_run")
     gates = [
         _gate(
             "C12-ENV-01",
@@ -277,6 +315,13 @@ def evaluate_environment(payload: Mapping[str, Any]) -> list[GateResult]:
             _is_false(production_data_used) and _is_false(production_peer_used),
             f"production_data_used={production_data_used}, production_peer_used={production_peer_used}",
             "No production deploy, production peer access, or production data action occurs from Step 12.",
+        ),
+        _gate(
+            "C12-ENV-03",
+            "Production deploy command was not run",
+            _is_false(production_deploy_command_run),
+            f"production_deploy_command_run={production_deploy_command_run}",
+            "Stage 12 can prepare readiness evidence only; production deploy commands are forbidden in this stage.",
         ),
     ]
     return gates
@@ -580,13 +625,89 @@ def evaluate_capacity_report(staging: Mapping[str, Any]) -> list[GateResult]:
     return gates
 
 
+def evaluate_trade_delivery_report(staging: Mapping[str, Any]) -> list[GateResult]:
+    delivery_report = _as_mapping(staging.get("trade_delivery_report"))
+    schema_version = delivery_report.get("schema_version")
+    artifact_path = str(delivery_report.get("artifact_path") or "").strip()
+    status = str(delivery_report.get("status") or "").strip().lower()
+    scenario_count = _to_int(delivery_report.get("scenario_count"))
+    warning_count = _count_field_or_list(delivery_report, "warning_count", "warnings")
+    warnings_reviewed = delivery_report.get("warnings_reviewed")
+    report_reviewed = delivery_report.get("report_reviewed")
+    manual_signoff_required = delivery_report.get("manual_signoff_required")
+    production_gate = _production_gate_status(delivery_report)
+
+    report_present_and_closed = (
+        schema_version == STEP11_TRADE_DELIVERY_REPORT_SCHEMA_VERSION
+        and bool(artifact_path)
+        and status == "valid"
+        and scenario_count is not None
+        and scenario_count >= 15
+        and warning_count is not None
+        and warning_count >= 0
+        and _is_true(report_reviewed)
+        and _is_true(manual_signoff_required)
+        and production_gate == STEP11_TRADE_DELIVERY_PRODUCTION_GATE_STATUS
+    )
+    gates = [
+        _gate(
+            "C12-GLOBAL-TRADE-DELIVERY-REPORT",
+            "Stage 11 trade delivery report is present, reviewed, valid, and production-gated",
+            report_present_and_closed,
+            (
+                f"schema_version={schema_version}, artifact_path={artifact_path or '<missing>'}, "
+                f"status={status or '<missing>'}, scenario_count={scenario_count if scenario_count is not None else '<missing>'}, "
+                f"warning_count={warning_count if warning_count is not None else '<missing>'}, "
+                f"report_reviewed={report_reviewed}, manual_signoff_required={manual_signoff_required}, "
+                f"production_gate={production_gate}"
+            ),
+            "Stage 12 requires a reviewed Stage 11 trade delivery artifact, and its production gate must remain blocked.",
+        )
+    ]
+
+    warnings_passed = warning_count == 0 or (
+        warning_count is not None and warning_count > 0 and _is_true(warnings_reviewed)
+    )
+    gates.append(
+        _gate(
+            "C12-GLOBAL-TRADE-DELIVERY-WARNINGS",
+            "Stage 11 trade delivery warnings are absent or explicitly reviewed",
+            warnings_passed,
+            (
+                f"warning_count={warning_count if warning_count is not None else '<missing>'}, "
+                f"warnings_reviewed={warnings_reviewed}"
+            ),
+            "Trade delivery validation warnings must stay visible and be reviewed before owner production review.",
+            warning=warning_count is not None and warning_count > 0 and warnings_passed,
+        )
+    )
+    return gates
+
+
 def evaluate_global(payload: Mapping[str, Any]) -> list[GateResult]:
     global_section = _as_mapping(payload.get("global"))
+    contract_stages = _as_mapping(global_section.get("contract_stages"))
+    migrations = _as_mapping(global_section.get("migrations"))
     rollback = _as_mapping(global_section.get("rollback"))
     observability = _as_mapping(global_section.get("observability"))
     backups = _as_mapping(global_section.get("backups"))
     staging = _as_mapping(global_section.get("staging_validation"))
     gates = [
+        _gate(
+            "C12-GLOBAL-CONTRACT-STAGES",
+            "Contract stages are complete and pushed",
+            _is_true(contract_stages.get("stages_complete"))
+            and _is_true(contract_stages.get("stage_11_complete"))
+            and _is_true(contract_stages.get("all_required_commits_pushed"))
+            and _is_true(contract_stages.get("latest_commit_pushed")),
+            (
+                f"stages_complete={contract_stages.get('stages_complete')}, "
+                f"stage_11_complete={contract_stages.get('stage_11_complete')}, "
+                f"all_required_commits_pushed={contract_stages.get('all_required_commits_pushed')}, "
+                f"latest_commit_pushed={contract_stages.get('latest_commit_pushed')}"
+            ),
+            "Contract stages and required commits must be complete and pushed before owner production review.",
+        ),
         _gate(
             "C12-GLOBAL-REGISTRY",
             "Sync registry coverage is complete",
@@ -600,6 +721,21 @@ def evaluate_global(payload: Mapping[str, Any]) -> list[GateResult]:
             _is_true(global_section.get("sensitive_field_policy_complete")),
             f"sensitive_field_policy_complete={global_section.get('sensitive_field_policy_complete')}",
             "Sensitive-field policy must be complete before cutover.",
+        ),
+        _gate(
+            "C12-GLOBAL-MIGRATIONS",
+            "Migrations are additive and compatible with code-only rollback",
+            _is_true(migrations.get("additive_only"))
+            and _is_false(migrations.get("destructive_changes"))
+            and _is_true(migrations.get("migration_forward_compatible"))
+            and _is_true(migrations.get("code_only_rollback_compatible")),
+            (
+                f"additive_only={migrations.get('additive_only')}, "
+                f"destructive_changes={migrations.get('destructive_changes')}, "
+                f"migration_forward_compatible={migrations.get('migration_forward_compatible')}, "
+                f"code_only_rollback_compatible={migrations.get('code_only_rollback_compatible')}"
+            ),
+            "Schema changes must be additive and compatible with code-only rollback; destructive DB rollback is not the default path.",
         ),
         _gate(
             "C12-GLOBAL-ROLLBACK",
@@ -624,11 +760,23 @@ def evaluate_global(payload: Mapping[str, Any]) -> list[GateResult]:
             _is_true(observability.get("ready"))
             and _is_true(observability.get("logs_reviewed"))
             and _is_true(observability.get("sync_health_reviewed"))
-            and _is_true(observability.get("alerts_configured")),
+            and _is_true(observability.get("alerts_configured"))
+            and _is_true(observability.get("receipt_backlog_visible"))
+            and _is_true(observability.get("oldest_pending_visible"))
+            and _is_true(observability.get("terminal_counts_visible"))
+            and _is_true(observability.get("telegram_failures_visible"))
+            and _is_true(observability.get("sync_conflicts_visible"))
+            and _is_true(observability.get("duplicate_guards_visible")),
             (
                 f"ready={observability.get('ready')}, logs_reviewed={observability.get('logs_reviewed')}, "
                 f"sync_health_reviewed={observability.get('sync_health_reviewed')}, "
-                f"alerts_configured={observability.get('alerts_configured')}"
+                f"alerts_configured={observability.get('alerts_configured')}, "
+                f"receipt_backlog_visible={observability.get('receipt_backlog_visible')}, "
+                f"oldest_pending_visible={observability.get('oldest_pending_visible')}, "
+                f"terminal_counts_visible={observability.get('terminal_counts_visible')}, "
+                f"telegram_failures_visible={observability.get('telegram_failures_visible')}, "
+                f"sync_conflicts_visible={observability.get('sync_conflicts_visible')}, "
+                f"duplicate_guards_visible={observability.get('duplicate_guards_visible')}"
             ),
             "Observability must be ready before owner production review.",
         ),
@@ -650,16 +798,21 @@ def evaluate_global(payload: Mapping[str, Any]) -> list[GateResult]:
             "Owner staging validation is complete before production consideration",
             _is_true(staging.get("step11_matrix_passed"))
             and _is_true(staging.get("manual_scenarios_passed"))
-            and _is_true(staging.get("owner_signoff")),
+            and _is_true(staging.get("owner_signoff"))
+            and _is_true(staging.get("evidence_fresh"))
+            and _is_true(staging.get("required_logs_and_artifacts_available")),
             (
                 f"step11_matrix_passed={staging.get('step11_matrix_passed')}, "
                 f"manual_scenarios_passed={staging.get('manual_scenarios_passed')}, "
-                f"owner_signoff={staging.get('owner_signoff')}"
+                f"owner_signoff={staging.get('owner_signoff')}, "
+                f"evidence_fresh={staging.get('evidence_fresh')}, "
+                f"required_logs_and_artifacts_available={staging.get('required_logs_and_artifacts_available')}"
             ),
             "The owner must test staging and sign off before any production decision.",
         ),
     ]
     gates.extend(evaluate_capacity_report(staging))
+    gates.extend(evaluate_trade_delivery_report(staging))
     return gates
 
 
@@ -743,6 +896,21 @@ def evaluate_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
         "telegram_gateway_boundary": capacity_report.get("telegram_gateway_boundary"),
         "production_gate": _production_gate_status(capacity_report),
     }
+    trade_delivery_report = _as_mapping(staging.get("trade_delivery_report"))
+    trade_delivery_warning_count = _count_field_or_list(
+        trade_delivery_report,
+        "warning_count",
+        "warnings",
+    )
+    trade_delivery_summary = {
+        "artifact_path": trade_delivery_report.get("artifact_path"),
+        "status": trade_delivery_report.get("status"),
+        "scenario_count": _to_int(trade_delivery_report.get("scenario_count")),
+        "warning_count": trade_delivery_warning_count,
+        "warnings_reviewed": trade_delivery_report.get("warnings_reviewed"),
+        "manual_signoff_required": trade_delivery_report.get("manual_signoff_required"),
+        "production_gate": _production_gate_status(trade_delivery_report),
+    }
 
     return {
         "version": MATRIX_VERSION,
@@ -753,6 +921,7 @@ def evaluate_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
         "warning_count": len(warnings),
         "role_summaries": role_summaries,
         "capacity_summary": capacity_summary,
+        "trade_delivery_summary": trade_delivery_summary,
         "gates": [asdict(gate) for gate in gates],
         "failures": [asdict(gate) for gate in failures],
         "warnings": [asdict(gate) for gate in warnings],
@@ -802,6 +971,22 @@ def build_markdown_report(result: Mapping[str, Any]) -> str:
             f"- Capacity warnings: `{capacity_summary.get('capacity_warning_count')}`",
             f"- Telegram gateway boundary: `{capacity_summary.get('telegram_gateway_boundary')}`",
             f"- Production gate: `{capacity_summary.get('production_gate')}`",
+        ]
+    )
+
+    trade_delivery_summary = _as_mapping(result.get("trade_delivery_summary"))
+    lines.extend(
+        [
+            "",
+            "## Stage 11 Trade Delivery Summary",
+            "",
+            f"- Artifact: `{trade_delivery_summary.get('artifact_path')}`",
+            f"- Status: `{trade_delivery_summary.get('status')}`",
+            f"- Scenario count: `{trade_delivery_summary.get('scenario_count')}`",
+            f"- Warning count: `{trade_delivery_summary.get('warning_count')}`",
+            f"- Warnings reviewed: `{trade_delivery_summary.get('warnings_reviewed')}`",
+            f"- Manual signoff required: `{trade_delivery_summary.get('manual_signoff_required')}`",
+            f"- Production gate: `{trade_delivery_summary.get('production_gate')}`",
         ]
     )
 
