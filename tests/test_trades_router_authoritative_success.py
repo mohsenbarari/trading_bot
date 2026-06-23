@@ -221,7 +221,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
         db.commit.assert_awaited_once()
         update_buttons_mock.assert_awaited_once_with(offer)
-        self.assertEqual(len(background_tasks.tasks), 2)
+        self.assertEqual(len(background_tasks.tasks), 1)
+        self.assertEqual(background_tasks.tasks[0].args[0], 10000)
         self.assertEqual(notif_mock.await_count, 4)
         responder_notification_message = notif_mock.await_args_list[0].args[2]
         self.assertNotIn("|", responder_notification_message)
@@ -445,7 +446,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.remaining_quantity, 1)
         self.assertEqual(offer.lot_sizes, [1])
         flag_modified.assert_called_once_with(offer, "lot_sizes")
-        self.assertEqual(len(background_tasks.tasks), 2)
+        self.assertEqual(len(background_tasks.tasks), 1)
+        self.assertEqual(background_tasks.tasks[0].args[0], db.added[0].trade_number)
         notif_mock.assert_awaited_once()
         counter_mock.assert_not_awaited()
         self.assertEqual(locked_user.trades_count, 1)
@@ -2100,8 +2102,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trade_created_payload["responder_user_name"], owner_user.account_name)
         self.assertNotIn("actor_user_id", trade_created_payload)
 
-        owner_side_telegram_task = next(task for task in background_tasks.tasks if task.args[0] == offer.user.telegram_id)
-        self.assertIn(owner_user.account_name, owner_side_telegram_task.args[1])
+        self.assertEqual(len(background_tasks.tasks), 1)
+        self.assertEqual(background_tasks.tasks[0].args[0], 10006)
 
     async def test_execute_trade_authoritatively_uses_relation_aware_counterparty_labels_in_payloads_and_notifications(self):
         owner_user = make_user(id=5, account_name="owner_principal", telegram_id=555)
@@ -2181,8 +2183,8 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(trade_created_payload["offer_user_highlight_accountant_user_id"], offer_accountant_id)
         self.assertEqual(trade_created_payload["offer_user_highlight_accountant_relation_display_name"], "حسابدار فروش")
 
-        responder_telegram_task = next(task for task in background_tasks.tasks if task.args[0] == owner_user.telegram_id)
-        self.assertIn("حسابدار فروش", responder_telegram_task.args[1])
+        self.assertEqual(len(background_tasks.tasks), 1)
+        self.assertEqual(background_tasks.tasks[0].args[0], 10007)
 
 
 if __name__ == "__main__":

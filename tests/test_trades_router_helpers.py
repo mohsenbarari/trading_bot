@@ -1,5 +1,6 @@
 import json
 import asyncio
+import inspect
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -585,6 +586,14 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.trades.current_server", return_value="foreign"):
             self.assertTrue(trades._queue_trade_telegram_message(background_tasks, 1, "hello"))
         background_tasks.add_task.assert_called_once_with(trades.send_telegram_message_sync, 1, "hello")
+
+    def test_completed_trade_path_uses_receipt_delivery_not_direct_telegram_helpers(self):
+        source = inspect.getsource(trades._execute_trade_authoritatively)
+
+        self.assertIn("_queue_trade_completion_delivery_repair", source)
+        self.assertNotIn("_queue_trade_telegram_message(", source)
+        self.assertNotIn("send_telegram_message_sync", source)
+        self.assertNotIn("_legacy_create_user_notification", source)
 
     async def test_update_channel_button_helpers(self):
         offer = SimpleNamespace(

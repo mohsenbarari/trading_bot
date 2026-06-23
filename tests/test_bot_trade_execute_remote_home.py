@@ -1,3 +1,4 @@
+import inspect
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -72,7 +73,13 @@ def make_offer():
 
 
 class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_notify_remote_trade_success_prefers_callback_chat_over_stored_telegram_id(self):
+    def test_remote_home_success_helper_is_receipt_backed_no_direct_send(self):
+        source = inspect.getsource(_notify_remote_trade_success)
+
+        self.assertIn("receipt_backed_delivery", source)
+        self.assertNotIn("send_message(", source)
+
+    async def test_notify_remote_trade_success_is_receipt_backed_no_direct_send(self):
         user = SimpleNamespace(id=5, telegram_id=555)
         offer = make_offer()
         bot = SimpleNamespace(send_message=AsyncMock())
@@ -87,10 +94,9 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             idempotency_key="telegram_callback:test",
         )
 
-        bot.send_message.assert_awaited_once()
-        self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 300)
+        bot.send_message.assert_not_awaited()
 
-    async def test_notify_remote_trade_success_uses_callback_chat_fallback(self):
+    async def test_notify_remote_trade_success_with_callback_chat_still_does_not_send_directly(self):
         user = SimpleNamespace(id=5, telegram_id=None)
         offer = make_offer()
         bot = SimpleNamespace(send_message=AsyncMock())
@@ -105,11 +111,9 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             idempotency_key="telegram_callback:test",
         )
 
-        bot.send_message.assert_awaited_once()
-        self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 300)
-        self.assertIn("🔴 فروش", bot.send_message.await_args.kwargs["text"])
+        bot.send_message.assert_not_awaited()
 
-    async def test_notify_remote_trade_success_when_recovered_sends_from_snapshot(self):
+    async def test_notify_remote_trade_success_when_recovered_waits_but_does_not_send_directly(self):
         user = SimpleNamespace(id=5, telegram_id=None)
         bot = SimpleNamespace(send_message=AsyncMock())
         offer_snapshot = {
@@ -144,11 +148,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             )
 
         wait_mock.assert_awaited_once_with("telegram_callback:test", grace_seconds=8)
-        bot.send_message.assert_awaited_once()
-        self.assertEqual(bot.send_message.await_args.kwargs["chat_id"], 300)
-        recovered_text = bot.send_message.await_args.kwargs["text"]
-        self.assertIn("🔢 شماره معامله: 10021", recovered_text)
-        self.assertIn("📝 توضیحات: تحویل امروز", recovered_text)
+        bot.send_message.assert_not_awaited()
 
     async def test_handle_channel_trade_remote_home_handles_pending_suggestion_success_and_error(self):
         user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
@@ -213,18 +213,8 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
         callback.message.edit_reply_markup.assert_awaited_once_with(reply_markup=None)
         remove_mock.assert_awaited_once()
-        self.assertEqual(events, ["answer", "send_message"])
-        bot.send_message.assert_awaited_once()
-        success_text = bot.send_message.await_args.kwargs["text"]
-        self.assertNotIn("معامله ثبت شد", success_text)
-        self.assertIn("🔴 فروش", success_text)
-        self.assertIn("💰 فی: 123,000", success_text)
-        self.assertIn("📦 تعداد: 2", success_text)
-        self.assertIn("🏷️ کالا: سکه", success_text)
-        self.assertIn("👤 طرف معامله: مالک لفظ", success_text)
-        self.assertIn("🔢 شماره معامله: 10020", success_text)
-        self.assertIn("🕐 زمان معامله: 1404/01/01 12:00", success_text)
-        self.assertIn("📝 توضیحات: تسویه نقدی", success_text)
+        self.assertEqual(events, ["answer"])
+        bot.send_message.assert_not_awaited()
         callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
 
         bot.send_message.reset_mock()

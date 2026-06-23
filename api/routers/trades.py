@@ -25,7 +25,7 @@ from core.config import settings
 from core.enums import NotificationLevel, NotificationCategory
 from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
-    create_user_notification as _legacy_create_user_notification, send_telegram_notification
+    create_user_notification as _legacy_create_user_notification,
 )
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
@@ -50,7 +50,11 @@ from core.services.trade_contention_gate import (
     trade_contention_lease_was_pre_gated,
     try_acquire_trade_contention_gate,
 )
-from core.services.trade_webapp_delivery_service import deliver_webapp_trade_notification
+from core.services.trade_webapp_delivery_service import (
+    deliver_webapp_trade_notification,
+    repair_webapp_trade_delivery_for_trade,
+)
+from core.services.trade_telegram_delivery_service import repair_telegram_trade_delivery_for_trade
 from core.services.offer_expiry_service import OfferExpiryReason
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
@@ -1793,6 +1797,77 @@ def _queue_trade_user_notification(
     return True
 
 
+async def _repair_trade_completion_delivery_background(
+    trade_number: int,
+    current_server_name: str,
+) -> bool:
+    from core.db import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as delivery_db:
+            result = await delivery_db.execute(
+                select(Trade)
+                .options(
+                    selectinload(Trade.offer),
+                    selectinload(Trade.offer_user),
+                    selectinload(Trade.responder_user),
+                    selectinload(Trade.commodity),
+                )
+                .where(Trade.trade_number == int(trade_number))
+                .limit(1)
+            )
+            trade = result.scalar_one_or_none()
+            if trade is None:
+                log_trading_event(
+                    logger,
+                    "trade_delivery_repair_missing_trade",
+                    level="warning",
+                    action="trading_side_effect",
+                    result="noop",
+                    side_effect="receipt_delivery_repair",
+                    trade_number=trade_number,
+                )
+                return False
+            await repair_webapp_trade_delivery_for_trade(
+                delivery_db,
+                trade,
+                current_server=current_server_name,
+            )
+            await repair_telegram_trade_delivery_for_trade(
+                delivery_db,
+                trade,
+                current_server=current_server_name,
+            )
+        return True
+    except Exception as exc:
+        log_trading_event(
+            logger,
+            "trade_delivery_repair_failed",
+            level="warning",
+            action="trading_side_effect",
+            result="failure",
+            side_effect="receipt_delivery_repair",
+            trade_number=trade_number,
+            error_class=type(exc).__name__,
+        )
+        return False
+
+
+def _queue_trade_completion_delivery_repair(
+    background_tasks: BackgroundTasks,
+    trade: Trade | object,
+) -> bool:
+    trade_number = _coerce_trade_user_id(getattr(trade, "trade_number", None))
+    if trade_number is None:
+        return False
+    background_tasks.add_task(
+        _repair_trade_completion_delivery_background,
+        trade_number,
+        current_server(),
+    )
+    return True
+
+
 async def _update_trade_channel_buttons_background(offer: Offer | object) -> bool:
     try:
         return await update_channel_buttons(offer)
@@ -2672,6 +2747,7 @@ async def _execute_trade_authoritatively(
             )
             if callable(getattr(db, "commit", None)):
                 await _commit_trade_execution(db)
+            _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
             existing_response_kwargs = {
                 "identity_map": existing_identity_map,
                 "customer_relation_map": existing_customer_relation_map,
@@ -2821,10 +2897,6 @@ async def _execute_trade_authoritatively(
     )
     offer_user_display_name = offer_user_payload.get("offer_user_name") or "نامشخص"
     responder_user_display_name = responder_user_payload.get("responder_user_name") or "نامشخص"
-    
-    # ===== ارسال پیام‌های تلگرام در Background (غیر-بلاکینگ) =====
-    # این کار باعث می‌شود پاسخ API سریعتر برگردد
-    
     if defer_noncritical_side_effects:
         _queue_trade_channel_buttons_update(background_tasks, offer)
     else:
@@ -2844,9 +2916,6 @@ async def _execute_trade_authoritatively(
                 error_class=type(exc).__name__,
             )
     
-    # ارسال نوتیفیکیشن‌ها
-    trade_timestamp = getattr(response_trade, "created_at", None) or getattr(created_trade, "created_at", None) or datetime.now(timezone.utc)
-    trade_datetime = to_jalali_str(trade_timestamp, "%Y/%m/%d   %H:%M") or ""
     log_trading_event(
         logger,
         "trade_execute.accepted",
@@ -2860,8 +2929,10 @@ async def _execute_trade_authoritatively(
         delegated_actor=getattr(actor_user, "id", None) != getattr(owner_user, "id", None),
         chain_length=len(trade_execution_nodes) - 1,
     )
-    
-    # تعیین نوع و ایموجی
+
+    trade_timestamp = getattr(response_trade, "created_at", None) or getattr(created_trade, "created_at", None) or datetime.now(timezone.utc)
+    trade_datetime = to_jalali_str(trade_timestamp, "%Y/%m/%d   %H:%M") or ""
+
     if responder_trade_type == TradeType.BUY:
         respond_emoji = "🟢"
         respond_type_fa = "خرید"
@@ -2926,13 +2997,16 @@ async def _execute_trade_authoritatively(
             leg_responder_user = trade_execution_nodes[leg_index + 1]["user"]
             if leg_index == len(created_chain_trades) - 1:
                 leg_trade_obj = response_trade
+                delivery_trade_obj = response_trade_record
                 leg_offer_user = response_offer_user or leg_offer_user
                 leg_responder_user = response_responder_user or leg_responder_user
             else:
                 leg_trade_obj = leg_trade
+                delivery_trade_obj = leg_trade
             chain_leg_contexts.append(
                 {
                     "trade": leg_trade_obj,
+                    "delivery_trade": delivery_trade_obj,
                     "offer_user": leg_offer_user,
                     "responder_user": leg_responder_user,
                 }
@@ -2969,27 +3043,10 @@ async def _execute_trade_authoritatively(
                 responder_user_id=getattr(leg_trade_obj, "responder_user_id", None),
                 customer_relation_map=participant_customer_relation_map,
             ).get("trade_path_summary")
-            leg_responder_msg, leg_offer_owner_msg, leg_notif_responder, leg_notif_owner = _build_trade_message_bundle(
-                responder_trade_emoji=respond_emoji,
-                responder_trade_label=respond_type_fa,
-                offer_trade_emoji=offer_emoji,
-                offer_trade_label=offer_type_fa,
-                trade_price=getattr(leg_trade_obj, "price", offer.price),
-                trade_quantity=trade_quantity,
-                commodity_name=offer.commodity.name,
-                trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
-                trade_datetime=trade_datetime,
-                offer_user_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
-                responder_user_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
-                customer_relation_map=participant_customer_relation_map,
-                trade_path_summary=leg_trade_path_summary,
-                offer_notes=getattr(offer, "notes", None),
+            _queue_trade_completion_delivery_repair(
+                background_tasks,
+                leg_context.get("delivery_trade") or leg_trade_obj,
             )
-
-            responder_telegram_id = getattr(leg_responder_user, "telegram_id", None)
-            _queue_trade_telegram_message(background_tasks, responder_telegram_id, leg_responder_msg)
-            offer_telegram_id = getattr(leg_offer_user, "telegram_id", None)
-            _queue_trade_telegram_message(background_tasks, offer_telegram_id, leg_offer_owner_msg)
 
             try:
                 leg_responder_audience = await build_trade_notification_audience_user_ids(
@@ -3046,30 +3103,7 @@ async def _execute_trade_authoritatively(
                     error_class=type(exc).__name__,
                 )
     else:
-        responder_msg, offer_owner_msg, notif_msg_responder, notif_msg_owner = _build_trade_message_bundle(
-            responder_trade_emoji=respond_emoji,
-            responder_trade_label=respond_type_fa,
-            offer_trade_emoji=offer_emoji,
-            offer_trade_label=offer_type_fa,
-            trade_price=executed_trade_price,
-            trade_quantity=trade_quantity,
-            commodity_name=offer.commodity.name,
-            trade_number=response_trade_number,
-            trade_datetime=trade_datetime,
-            offer_user_name=offer_user_display_name,
-            responder_user_name=responder_user_display_name,
-            customer_relation_map=participant_customer_relation_map,
-            trade_path_summary=_build_trade_path_payload(
-                offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
-                responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
-                customer_relation_map=participant_customer_relation_map,
-            ).get("trade_path_summary"),
-            offer_notes=getattr(offer, "notes", None),
-        )
-
-        _queue_trade_telegram_message(background_tasks, owner_user.telegram_id, responder_msg)
-        if offer.user:
-            _queue_trade_telegram_message(background_tasks, offer.user.telegram_id, offer_owner_msg)
+        _queue_trade_completion_delivery_repair(background_tasks, response_trade_record)
 
         responder_audience = [owner_user.id]
         offer_owner_audience = [offer.user_id]

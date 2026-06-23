@@ -221,46 +221,16 @@ async def _notify_remote_trade_success(
     fallback_chat_id: int | None = None,
     idempotency_key: str | None = None,
 ) -> None:
-    target_chat_id = fallback_chat_id or getattr(user, "telegram_id", None)
-    if not target_chat_id:
-        log_trading_event(
-            logger,
-            "remote_home_trade_success_message.skipped",
-            level="warning",
-            action="trading_side_effect",
-            result="noop",
-            side_effect="telegram_message",
-            offer_id=_safe_offer_snapshot_id(offer),
-            has_idempotency_key=bool(idempotency_key),
-            reason="missing_actor",
-        )
-        return
-    try:
-        await bot.send_message(
-            chat_id=target_chat_id,
-            text=_build_remote_trade_success_message(body, offer, amount),
-        )
-        log_trading_event(
-            logger,
-            "remote_home_trade_success_message.sent",
-            action="trading_side_effect",
-            result="success",
-            side_effect="telegram_message",
-            offer_id=_safe_offer_snapshot_id(offer),
-            has_idempotency_key=bool(idempotency_key),
-        )
-    except Exception as exc:
-        log_trading_event(
-            logger,
-            "remote_home_trade_success_message.failed",
-            level="warning",
-            action="trading_side_effect",
-            result="failure",
-            side_effect="telegram_message",
-            offer_id=_safe_offer_snapshot_id(offer),
-            has_idempotency_key=bool(idempotency_key),
-            error_class=type(exc).__name__,
-        )
+    log_trading_event(
+        logger,
+        "remote_home_trade_success_message.receipt_backed",
+        action="trading_side_effect",
+        result="noop",
+        side_effect="telegram_message",
+        offer_id=_safe_offer_snapshot_id(offer),
+        has_idempotency_key=bool(idempotency_key),
+        reason="receipt_backed_delivery",
+    )
 
 
 async def _notify_remote_trade_success_when_recovered(

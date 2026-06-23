@@ -161,7 +161,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             forward_mock.await_args.args[1]["idempotency_key"],
             "telegram_callback:5:legacy_offer:7:2:remaining:5:50",
         )
-        bot.send_message.assert_awaited_once()
+        bot.send_message.assert_not_awaited()
 
     async def test_handle_channel_trade_remote_home_schedules_recovery_after_timeout(self):
         user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
