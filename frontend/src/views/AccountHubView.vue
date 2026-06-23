@@ -116,7 +116,7 @@ async function connectTelegram() {
 }
 
 onMounted(() => {
-  void primeCurrentUserSummary()
+  void primeCurrentUserSummary(true)
 })
 </script>
 

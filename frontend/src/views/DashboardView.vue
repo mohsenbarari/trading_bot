@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, UsersRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
+import { cacheCurrentUserSummary } from '../utils/currentUser'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
@@ -486,6 +487,7 @@ async function fetchUser() {
     const res = await apiFetch('/api/auth/me')
     if (res.ok) {
       user.value = await res.json()
+      cacheCurrentUserSummary(user.value)
       void loadTodayTrades()
     }
     // 401 handling is automatic via apiFetch → forceLogout
@@ -1591,10 +1593,28 @@ onMounted(fetchUser)
 .hero-btn--open {
   border-color: rgba(15, 118, 110, 0.18);
   background: linear-gradient(135deg, rgba(240, 253, 250, 0.98), rgba(255, 255, 255, 0.96));
+  box-shadow:
+    0 16px 34px rgba(22, 163, 74, 0.2),
+    0 0 0 1px rgba(22, 163, 74, 0.07);
 }
 .hero-btn--closed {
-  border-color: rgba(148, 163, 184, 0.18);
-  background: linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(255, 255, 255, 0.96));
+  border-color: rgba(220, 38, 38, 0.16);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.96));
+  box-shadow:
+    0 14px 32px rgba(220, 38, 38, 0.17),
+    0 0 0 1px rgba(220, 38, 38, 0.06);
+}
+
+.hero-btn--open:hover {
+  box-shadow:
+    0 20px 44px rgba(22, 163, 74, 0.28),
+    0 0 0 1px rgba(22, 163, 74, 0.1);
+}
+
+.hero-btn--closed:hover {
+  box-shadow:
+    0 18px 40px rgba(220, 38, 38, 0.23),
+    0 0 0 1px rgba(220, 38, 38, 0.1);
 }
 
 .hero-btn-content {

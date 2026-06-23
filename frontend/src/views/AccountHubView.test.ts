@@ -61,7 +61,7 @@ describe('AccountHubView.vue', () => {
 
     const wrapper = await mountView()
 
-    expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledTimes(1)
+    expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledWith(true)
     expect(wrapper.findAll('.account-section-card')).toHaveLength(4)
     expect(wrapper.text()).toContain('مرکز حساب کاربری')
     expect(wrapper.text()).toContain('نشست‌های فعال')
@@ -129,7 +129,7 @@ describe('AccountHubView.vue', () => {
 
     expect(wrapper.get('.account-telegram-panel').text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
 
-    await wrapper.get('.telegram-connect-panel__button').trigger('click')
+    await wrapper.get('.telegram-connect-panel').trigger('click')
     await flushPromises()
 
     expect(accountHubMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)
@@ -149,9 +149,9 @@ describe('AccountHubView.vue', () => {
 
     const linkedWrapper = await mountView()
     expect(linkedWrapper.get('.account-telegram-panel').text()).toContain('متصل')
-    expect(linkedWrapper.get('.telegram-connect-panel__button').attributes('disabled')).toBeDefined()
+    expect(linkedWrapper.get('.telegram-connect-panel').attributes('disabled')).toBeDefined()
 
-    await linkedWrapper.get('.telegram-connect-panel__button').trigger('click')
+    await linkedWrapper.get('.telegram-connect-panel').trigger('click')
     expect(accountHubMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
   })
 })

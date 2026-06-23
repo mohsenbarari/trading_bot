@@ -166,7 +166,7 @@ async function connectTelegram() {
 }
 
 onMounted(() => {
-  void primeCurrentUserSummary().finally(() => {
+  void primeCurrentUserSummary(true).finally(() => {
     if (!isAccountant.value) {
       void fetchSessions()
     }

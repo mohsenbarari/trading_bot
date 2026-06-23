@@ -125,7 +125,7 @@ describe('DashboardView.vue', () => {
 
     expect(wrapper.get('.telegram-connect-section').text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
 
-    await wrapper.get('.telegram-connect-panel__button').trigger('click')
+    await wrapper.get('.telegram-connect-panel').trigger('click')
     await flushPromises()
 
     expect(dashboardViewMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)

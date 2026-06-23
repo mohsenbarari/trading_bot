@@ -90,6 +90,14 @@ describe('SettingsView.vue', () => {
     settingsViewMocks.clearFileCacheMock.mockResolvedValue(undefined)
 
     settingsViewMocks.apiFetchMock.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/auth/me') {
+        return responseOf(currentUserSummary.value ?? {
+          id: 10,
+          role: 'عادی',
+          account_name: 'settings-user',
+          is_accountant: false,
+        })
+      }
       if (path === '/api/sessions/active') return responseOf(sessionsFixture)
       if (path === '/api/sessions/session-secondary' && options?.method === 'DELETE') return responseOf({})
       if (path === '/api/sessions/logout-all' && options?.method === 'POST') return responseOf({})
@@ -194,9 +202,9 @@ describe('SettingsView.vue', () => {
     const panel = wrapper.get('.telegram-connect-panel')
     expect(panel.text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
     expect(panel.text()).toContain('متصل')
-    expect(wrapper.get('.telegram-connect-panel__button').attributes('disabled')).toBeDefined()
+    expect(panel.attributes('disabled')).toBeDefined()
 
-    await wrapper.get('.telegram-connect-panel__button').trigger('click')
+    await panel.trigger('click')
     expect(settingsViewMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
 
     currentUserSummary.value = null
