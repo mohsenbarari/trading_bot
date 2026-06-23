@@ -39,6 +39,13 @@ class BotWebAppCandidateFullMatrixTests(unittest.TestCase):
 
         self.assertEqual(summary["schema_version"], "bot_webapp_candidate_full_matrix_v1")
         self.assertTrue(summary["dry_run"])
+        self.assertTrue(summary["matrix_design"]["path"].endswith("BOT_WEBAPP_CANDIDATE_FULL_MATRIX_DESIGN.md"))
+        self.assertEqual(summary["matrix_design"]["status"], "required_before_owner_manual_staging_validation")
+        self.assertEqual(
+            summary["matrix_design"]["outage_scope"],
+            ["stable", "short_under_2m", "medium_around_60m"],
+        )
+        self.assertIn("targeted_join_scenarios", summary["matrix_design"]["layers"])
         self.assertEqual(summary["production_gate"]["status"], "blocked_until_owner_staging_validation")
         self.assertEqual(summary["no_pressure_profile"]["users"], 200)
         self.assertEqual(summary["no_pressure_profile"]["target_rps"], 20.0)

@@ -14,6 +14,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = "bot_webapp_candidate_full_matrix_v1"
 PRODUCTION_GATE_STATUS = "blocked_until_owner_staging_validation"
+MATRIX_DESIGN_DOC = REPO_ROOT / "docs" / "BOT_WEBAPP_CANDIDATE_FULL_MATRIX_DESIGN.md"
 DEFAULT_USER_COUNT = 200
 DEFAULT_ATTEMPTS_PER_SCENARIO = 5
 DEFAULT_TARGET_RPS = 20.0
@@ -147,6 +148,22 @@ def build_summary(
         "branch": run_git_value(["branch", "--show-current"]),
         "commit": run_git_value(["rev-parse", "HEAD"]),
         "dry_run": bool(args.dry_run),
+        "matrix_design": {
+            "path": str(MATRIX_DESIGN_DOC),
+            "status": "required_before_owner_manual_staging_validation",
+            "outage_scope": ["stable", "short_under_2m", "medium_around_60m"],
+            "layers": [
+                "deterministic_baseline_gates",
+                "market_behavior_matrix",
+                "trade_notification_delivery_audience_matrix",
+                "runtime_delivery_receipt_matrix",
+                "short_outage_matrix",
+                "medium_outage_matrix",
+                "targeted_join_scenarios",
+                "ui_publication_evidence",
+                "artifact_contract",
+            ],
+        },
         "no_pressure_profile": {
             "users": args.users,
             "attempts_per_scenario": args.attempts_per_scenario,

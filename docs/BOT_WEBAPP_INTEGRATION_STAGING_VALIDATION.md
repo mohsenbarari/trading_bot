@@ -14,11 +14,35 @@ This document is the owner-led staging checklist for Step 11 of
 
 ## Automated Gate
 
-Run the matrix gate from the repository root before any manual scenario pass:
+Before any manual scenario pass, use
+`docs/BOT_WEBAPP_CANDIDATE_FULL_MATRIX_DESIGN.md` as the release-candidate full
+matrix scope. The older Step 11 matrix below is still required, but it is no
+longer sufficient by itself for this candidate because trade-delivery receipts,
+customer-chain notification guarantees, and short/medium outage behavior were
+added later.
+
+Run the deterministic matrix gates from the repository root:
 
 ```bash
 python3 scripts/report_bot_webapp_integration_matrix.py --check --json
-python3 -m unittest tests.test_bot_webapp_integration_matrix tests.test_scripts_surface_smoke
+python3 scripts/report_trade_notification_delivery_matrix.py --check
+python3 scripts/report_trade_delivery_staging_validation.py matrix --repo-root "$PWD"
+python3 -m unittest \
+  tests.test_bot_webapp_integration_matrix \
+  tests.test_bot_webapp_candidate_full_matrix \
+  tests.test_bot_webapp_comprehensive_load_matrix \
+  tests.test_trade_notification_delivery_matrix \
+  tests.test_trade_delivery_receipt_service \
+  tests.test_trade_delivery_worker \
+  tests.test_trade_webapp_delivery_service \
+  tests.test_trade_telegram_delivery_service \
+  tests.test_scripts_surface_smoke
+```
+
+Then run or dry-run the candidate wrapper:
+
+```bash
+python3 scripts/run_bot_webapp_candidate_full_matrix.py --dry-run
 ```
 
 The gate must report:
@@ -27,13 +51,18 @@ The gate must report:
 - `matrix.manual_signoff_required=true`
 - no `failures`
 - no `missing_coverage_refs`
+- `candidate-full-matrix-summary.json` exists for the selected artifact directory
+- production gate remains `blocked_until_owner_staging_validation`
 
 ## Evidence To Capture
 
 - Current branch and commit SHA.
 - Staging deploy artifact or image tag.
 - Automated matrix command output.
+- Candidate full-matrix artifact directory.
 - Iran and foreign sync-health snapshots before and after the run.
+- Trade delivery receipt metrics for WebApp and Telegram channels.
+- Short-outage and medium-outage summary artifacts.
 - DB evidence for each synthetic offer: `offer_public_id`, `home_server`, `status`,
   `remaining_quantity`, `expire_reason`, `expire_source_surface`, `expire_source_server`,
   `expired_by_user_id`, `expired_by_actor_user_id`.
@@ -50,6 +79,8 @@ Each `S11-*` scenario needs a pass/fail note and linked evidence.
 
 Minimum manual batches:
 
+- Complete the full pre-manual-test matrix defined in
+  `docs/BOT_WEBAPP_CANDIDATE_FULL_MATRIX_DESIGN.md`.
 - Bot creates a foreign-home offer; Iran WebApp sees it.
 - WebApp creates an Iran-home offer; foreign Telegram channel sees it.
 - Public offer link opens on Iran WebApp from both surfaces.
@@ -62,6 +93,10 @@ Minimum manual batches:
 - Short outage replay converges to the latest terminal state.
 - Medium/long outage recovery keeps active publication gated until full catch-up, then expires
   pre-recovery active local-only offers instead of publishing them active to the peer.
+- Stable-connectivity trade notifications/messages are delivered to every required WebApp and
+  Telegram recipient.
+- Short-outage remote trade delivery is still sent after recovery.
+- Medium-outage old remote trade delivery is skipped without stale user-facing messages.
 - Cutover rehearsal confirms zero active offers, clean sync-health, clean backlog, and fresh shared
   state before any switch decision.
 - Rollback/fail-closed rehearsal preserves data without destructive cleanup.
