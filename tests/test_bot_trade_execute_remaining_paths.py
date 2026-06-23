@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.exc import IntegrityError
 
 from bot.handlers.trade_execute import handle_channel_trade
+from core.enums import UserAccountStatus, UserRole
 from models.offer import OfferStatus, OfferType
 
 
@@ -73,6 +74,21 @@ def make_callback(chat_id=200, edit_side_effect=None):
     )
 
 
+def make_bot_user(**overrides):
+    data = {
+        "id": 5,
+        "telegram_id": 555,
+        "mobile_number": "0935",
+        "account_name": "buyer",
+        "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
+        "is_deleted": False,
+        "trading_restricted_until": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 def make_offer(quantity=5, remaining_quantity=5, lot_sizes=None):
     return SimpleNamespace(
         id=7,
@@ -127,7 +143,7 @@ def make_jdatetime_module():
 
 class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_channel_trade_remote_home_tolerates_pending_and_clear_exceptions(self):
-        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        user = make_bot_user()
         bot = SimpleNamespace()
         offer = make_offer()
         base_patches = [
@@ -164,7 +180,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_awaited()
 
     async def test_handle_channel_trade_remote_home_schedules_recovery_after_timeout(self):
-        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        user = make_bot_user()
         offer = make_offer()
         callback = make_callback()
         bot = SimpleNamespace(send_message=AsyncMock())
@@ -202,7 +218,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_handle_channel_trade_local_completed_trade_retries_and_tolerates_side_effect_failures(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        user = make_bot_user()
         offer = make_offer(quantity=5, remaining_quantity=5, lot_sizes=[5])
         session = RetrySession(
             offer,
@@ -236,7 +252,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.added, [])
 
     async def test_handle_channel_trade_local_pending_tolerates_suggestion_state_failure(self):
-        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        user = make_bot_user()
         callback = make_callback(edit_side_effect=RuntimeError("pending state fail"))
 
         with patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)), patch(
@@ -253,7 +269,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_awaited_with("برای تایید دوباره روی همان دکمه بزنید ☑️", show_alert=False)
 
     async def test_handle_channel_trade_local_notification_outer_try_is_tolerated(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        user = make_bot_user()
         offer = OfferWithFailingNotificationOwner()
         session = RetrySession(offer, scalar_values=[10000], commit_side_effects=[None])
         callback = make_callback(chat_id=-100)
@@ -277,7 +293,7 @@ class BotTradeExecuteRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         shared_command_mock.assert_awaited_once()
 
     async def test_handle_channel_trade_raises_non_retryable_integrity_error(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        user = make_bot_user()
         offer = make_offer(quantity=5, remaining_quantity=5, lot_sizes=[5])
         error = IntegrityError("stmt", {}, Exception("other constraint"))
         session = RetrySession(offer, scalar_values=[10000], commit_side_effects=[error])

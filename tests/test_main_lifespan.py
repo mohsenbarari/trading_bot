@@ -54,9 +54,13 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("connectivity_monitor", foreign_jobs)
         self.assertNotIn("user_account_status", foreign_jobs)
+        self.assertNotIn("trade_webapp_delivery", foreign_jobs)
+        self.assertIn("trade_telegram_delivery", foreign_jobs)
         self.assertIn("connectivity_monitor", iran_jobs)
         self.assertIn("market_schedule", foreign_jobs)
         self.assertIn("user_account_status", iran_jobs)
+        self.assertIn("trade_webapp_delivery", iran_jobs)
+        self.assertNotIn("trade_telegram_delivery", iran_jobs)
 
     async def test_background_leader_starts_jobs_and_releases_lock_on_cancel(self):
         class FakeRedis:

@@ -29,6 +29,7 @@ from core.connectivity import connectivity_monitor_loop
 from core.market_schedule_loop import market_schedule_loop
 from core.offer_expiry import offer_expiry_loop
 from core.session_expiry import session_expiry_loop
+from core.trade_delivery_worker import telegram_trade_delivery_loop, webapp_trade_delivery_loop
 from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
 import asyncio
@@ -124,6 +125,8 @@ def _background_job_factories():
         ("market_schedule", market_schedule_loop),
         ("session_expiry", session_expiry_loop),
         ("user_account_status", user_account_status_loop),
+        ("trade_webapp_delivery", webapp_trade_delivery_loop),
+        ("trade_telegram_delivery", telegram_trade_delivery_loop),
     ]
     return filter_allowed_background_job_factories(
         jobs,

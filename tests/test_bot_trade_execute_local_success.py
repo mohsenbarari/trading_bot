@@ -7,6 +7,7 @@ from bot.handlers.trade_execute import (
     handle_channel_trade,
     handle_channel_trade_public,
 )
+from core.enums import UserAccountStatus, UserRole
 from models.offer_request import OfferRequestSourceSurface
 from models.offer import OfferStatus, OfferType
 
@@ -68,6 +69,21 @@ def make_callback(chat_id=200):
     )
 
 
+def make_bot_user(**overrides):
+    data = {
+        "id": 5,
+        "telegram_id": 555,
+        "mobile_number": "0935",
+        "account_name": "buyer",
+        "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
+        "is_deleted": False,
+        "trading_restricted_until": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 def make_offer():
     return SimpleNamespace(
         id=7,
@@ -90,7 +106,7 @@ def make_offer():
 
 class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_channel_trade_delegates_confirmed_local_trade_to_shared_command(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        user = make_bot_user()
         offer = make_offer()
         session = FakeSession(offer)
         callback = make_callback(chat_id=200)
@@ -125,7 +141,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("FOR UPDATE", session.statements[0].upper())
 
     async def test_handle_channel_trade_preconfirmed_local_trade_skips_double_click(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        user = make_bot_user()
         offer = make_offer()
         session = FakeSession(offer)
         callback = make_callback(chat_id=200)
@@ -157,7 +173,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(shared_command_mock.await_args.kwargs["request_pre_gated"])
 
     async def test_public_channel_trade_callback_resolves_offer_by_public_identity(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer", trading_restricted_until=None)
+        user = make_bot_user()
         offer = make_offer()
         session = FakeSession(offer)
         callback = make_callback(chat_id=200)
@@ -186,7 +202,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("offers.offer_public_id", session.statements[0])
 
     async def test_confirmed_channel_trade_helper_passes_telegram_metadata_to_shared_command(self):
-        user = SimpleNamespace(id=5, telegram_id=555, mobile_number="0935", account_name="buyer")
+        user = make_bot_user(trading_restricted_until=None)
         offer = make_offer()
         session = FakeSession(offer)
         callback = make_callback(chat_id=200)

@@ -61,6 +61,16 @@ async def create_telegram_link_token(
     *,
     ttl_seconds: int = TELEGRAM_LINK_TOKEN_TTL_SECONDS,
 ) -> TelegramLinkTokenIssueResult:
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        raise TelegramLinkTokenError(BOT_ACCESS_REASON_SYNC_PENDING)
+
+    locked_user_stmt = select(User).where(User.id == int(user_id)).with_for_update()
+    locked_user = (await db.execute(locked_user_stmt)).scalar_one_or_none()
+    if locked_user is None:
+        raise TelegramLinkTokenError(BOT_ACCESS_REASON_SYNC_PENDING)
+    user = locked_user
+
     decision = await evaluate_bot_access(db, user)
     if not decision.allowed:
         raise TelegramLinkTokenError(decision.reason or BOT_ACCESS_REASON_SYNC_PENDING)

@@ -1753,7 +1753,9 @@ async def create_user_notification(
     """
     payload = dict(extra_payload or {})
     trade_number = _coerce_trade_user_id(payload.get("trade_number"))
-    if category == NotificationCategory.TRADE and trade_number is not None:
+    if category == NotificationCategory.TRADE and trade_number is None:
+        raise ValueError("trade_notification_requires_trade_number")
+    if category == NotificationCategory.TRADE:
         result = await deliver_webapp_trade_notification(
             db,
             trade_number=trade_number,

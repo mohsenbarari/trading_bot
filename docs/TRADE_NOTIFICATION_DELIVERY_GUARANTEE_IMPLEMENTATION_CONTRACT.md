@@ -21,6 +21,22 @@ contract for coding, tests, commits, staging validation, and stop/go gates.
 - This contract is intentionally stage based: small related tasks are grouped, while large or
   sensitive changes are split into separate stages with their own gates.
 
+## Post-Implementation Review Remediation
+
+The final implementation review found two production blockers and four hardening items that must be
+closed before production approval:
+
+- Legacy bot `respond_` / `confirm_trade_` paths must be disabled or routed through the authoritative
+  receipt-backed trade path. The low-risk remediation is fail-closed behavior for old links/callbacks.
+- Durable trade delivery workers must be active in runtime, not only request `BackgroundTasks`.
+  WebApp delivery runs on Iran only; Telegram delivery runs on foreign only.
+- Telegram link token issuance must serialize concurrent requests for the same user.
+- Bot eligibility policy must fail closed when local user state is incomplete.
+- Customer invitation text must not claim that all customers can never use the bot, because tier-1
+  customers may be eligible after WebApp registration/linking.
+- Trade WebApp notifications must fail closed if `trade_number` is missing instead of falling back to
+  legacy notification creation.
+
 ## Global Rules For Every Stage
 
 1. Check the active branch with `git branch --show-current` before every edit, test run with side

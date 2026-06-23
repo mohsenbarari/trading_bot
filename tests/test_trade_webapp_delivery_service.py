@@ -448,6 +448,82 @@ class TradeWebAppDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([obj for obj in db.added if isinstance(obj, Notification)]), 1)
         warning_mock.assert_called_once()
 
+    async def test_worker_claims_next_webapp_receipt_on_iran(self):
+        claimed_receipt = make_receipt(
+            status=TradeDeliveryReceiptStatus.PROCESSING,
+            user_id=20,
+            audit_payload={
+                "message": "trade done",
+                "extra_payload": {"route": "/users/10", "trade_number": 10025},
+            },
+        )
+        db = FakeDB([
+            FakeScalarResult(claimed_receipt),
+            FakeScalarResult(),
+        ])
+
+        with patch(
+            "core.services.trade_webapp_delivery_service.publish_webapp_notification_after_commit",
+            new=AsyncMock(),
+        ) as publish_mock:
+            result = await service.claim_and_deliver_next_webapp_receipt(
+                db,
+                current_server="iran",
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_SENT)
+        self.assertEqual(result.trade_number, 10025)
+        self.assertEqual(result.recipient_user_id, 20)
+        self.assertEqual(claimed_receipt.status, TradeDeliveryReceiptStatus.SENT)
+        self.assertEqual(db.commit_count, 1)
+        publish_mock.assert_awaited_once()
+
+    async def test_worker_noops_when_no_due_webapp_receipt_exists(self):
+        db = FakeDB([FakeScalarResult()])
+
+        result = await service.claim_and_deliver_next_webapp_receipt(
+            db,
+            current_server="iran",
+            now=NOW,
+        )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_NO_RECEIPT)
+        self.assertEqual(result.reason, "no_due_webapp_receipt")
+        self.assertEqual(db.commit_count, 0)
+
+    async def test_worker_refuses_webapp_delivery_outside_iran_without_claiming(self):
+        db = FakeDB()
+
+        result = await service.claim_and_deliver_next_webapp_receipt(
+            db,
+            current_server="foreign",
+            now=NOW,
+        )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_BLOCKED_WRONG_SERVER)
+        self.assertEqual(result.reason, "webapp_iran_only")
+        self.assertEqual(db.execute_calls, [])
+
+    async def test_worker_marks_malformed_webapp_receipt_permanent_failed_without_crashing(self):
+        claimed_receipt = make_receipt(
+            status=TradeDeliveryReceiptStatus.PROCESSING,
+            user_id=20,
+            audit_payload={"extra_payload": {"route": "/users/10"}},
+        )
+        db = FakeDB([FakeScalarResult(claimed_receipt)])
+
+        result = await service.claim_and_deliver_next_webapp_receipt(
+            db,
+            current_server="iran",
+            now=NOW,
+        )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_PERMANENT_FAILED)
+        self.assertEqual(claimed_receipt.status, TradeDeliveryReceiptStatus.PERMANENT_FAILED)
+        self.assertEqual(claimed_receipt.reason, "webapp_missing_message_payload")
+        self.assertEqual(db.commit_count, 1)
+
     def test_receipt_backed_webapp_service_does_not_use_generic_notification_helper(self):
         source = inspect.getsource(service)
 
@@ -491,6 +567,28 @@ class TradeWebAppDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["recipient_user_id"], 20)
         self.assertEqual(kwargs["current_server"], "iran")
         self.assertEqual(kwargs["recipient_role"], "responder")
+
+    async def test_trade_router_wrapper_requires_trade_number_for_trade_notifications(self):
+        db = object()
+        with patch(
+            "api.routers.trades.deliver_webapp_trade_notification",
+            new=AsyncMock(),
+        ) as deliver_mock, patch(
+            "api.routers.trades._legacy_create_user_notification",
+            new=AsyncMock(),
+        ) as legacy_mock:
+            with self.assertRaisesRegex(ValueError, "trade_notification_requires_trade_number"):
+                await trades_router.create_user_notification(
+                    db,
+                    20,
+                    "trade done",
+                    level=NotificationLevel.SUCCESS,
+                    category=NotificationCategory.TRADE,
+                    extra_payload={"route": "/users/10"},
+                )
+
+        deliver_mock.assert_not_awaited()
+        legacy_mock.assert_not_awaited()
 
     async def test_trade_router_wrapper_keeps_legacy_helper_for_non_trade_notifications(self):
         db = object()

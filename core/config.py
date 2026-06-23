@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     background_leader_lock_ttl_seconds: int = 90
     background_leader_lock_refresh_seconds: int = 30
     background_leader_retry_seconds: int = 10
+    trade_delivery_worker_interval_seconds: float = 1.0
+    trade_delivery_worker_batch_limit: int = 50
+    trade_delivery_worker_lease_seconds: int = 30
+    trade_delivery_worker_recover_limit: int = 100
 
     database_url: str
     sync_database_url: str

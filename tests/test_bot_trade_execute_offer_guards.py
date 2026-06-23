@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.trade_execute import handle_channel_trade
+from core.enums import UserAccountStatus, UserRole
 from models.offer import OfferStatus
 
 
@@ -45,9 +46,24 @@ def make_callback():
     )
 
 
+def make_bot_user(**overrides):
+    data = {
+        "id": 5,
+        "telegram_id": 555,
+        "mobile_number": "0935",
+        "account_name": "buyer",
+        "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
+        "is_deleted": False,
+        "trading_restricted_until": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 class BotTradeExecuteOfferGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_channel_trade_handles_missing_inactive_and_own_offer(self):
-        user = SimpleNamespace(id=5, trading_restricted_until=None)
+        user = make_bot_user()
         common_patches = [
             patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)),
             patch("bot.handlers.trade_execute.settings", SimpleNamespace(channel_id=-100)),

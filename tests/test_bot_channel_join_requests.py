@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from bot.handlers.start import handle_channel_join_request
 from bot.utils.channel_invites import create_channel_join_request_link
-from core.enums import UserAccountStatus
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeExecuteResult:
@@ -69,6 +69,7 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         join_request = make_join_request()
         user = SimpleNamespace(
             telegram_id=7,
+            role=UserRole.STANDARD,
             has_bot_access=False,
             is_deleted=False,
             account_status=UserAccountStatus.ACTIVE,
@@ -108,6 +109,7 @@ class ChannelJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         join_request = make_join_request(user_id=10)
         user = SimpleNamespace(
             telegram_id=10,
+            role=UserRole.STANDARD,
             has_bot_access=True,
             is_deleted=False,
             account_status=UserAccountStatus.INACTIVE,

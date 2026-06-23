@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.link_account import LinkState, handle_address_completion, handle_contact
-from core.enums import UserAccountStatus
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeState:
@@ -66,9 +66,27 @@ def make_message(phone="+989121111111", from_user_id=10, username="u", full_name
     )
 
 
+def make_user(**overrides):
+    data = {
+        "id": 99,
+        "telegram_id": None,
+        "username": None,
+        "full_name": "acc",
+        "account_name": "acc",
+        "mobile_number": "09121111111",
+        "has_bot_access": False,
+        "address": "تهران خیابان آزادی پلاک ۱۰",
+        "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
+        "is_deleted": False,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_contact_links_account_and_normalizes_phone(self):
-        user = SimpleNamespace(telegram_id=None, username=None, full_name="acc", account_name="acc", has_bot_access=False, address="تهران خیابان آزادی پلاک ۱۰")
+        user = make_user()
         db = FakeDB(user)
         state = FakeState()
         message = make_message()
@@ -93,7 +111,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
 
     async def test_handle_contact_rolls_back_and_reports_commit_error(self):
-        user = SimpleNamespace(telegram_id=None, username=None, full_name="acc", account_name="acc", has_bot_access=False, address="تهران خیابان آزادی پلاک ۱۰")
+        user = make_user()
         db = FakeDB(user, commit_error=RuntimeError("db down"))
         state = FakeState()
         message = make_message()
@@ -137,6 +155,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             address="تهران خیابان آزادی پلاک ۱۰",
             is_deleted=False,
             account_status=UserAccountStatus.INACTIVE,
+            role=UserRole.STANDARD,
         )
         db = FakeDB(inactive_user)
         state = FakeState()
@@ -161,6 +180,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             address="تهران خیابان آزادی پلاک ۱۰",
             is_deleted=True,
             account_status=UserAccountStatus.ACTIVE,
+            role=UserRole.STANDARD,
         )
         db = FakeDB(deleted_user)
         state = FakeState()
@@ -174,15 +194,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("در دسترس نیست", message.answer.await_args.args[0])
 
     async def test_handle_contact_for_placeholder_address_prompts_for_address_completion(self):
-        user = SimpleNamespace(
-            id=99,
-            telegram_id=None,
-            username=None,
-            full_name="acc",
-            account_name="acc",
-            has_bot_access=False,
-            address="System Default",
-        )
+        user = make_user(address="System Default")
         db = FakeDB(user)
         state = FakeState()
         message = make_message()
@@ -200,7 +212,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("تکمیل ثبت‌نام", message.answer.await_args.args[0])
 
     async def test_handle_contact_and_address_completion_cover_permission_and_error_paths(self):
-        user = SimpleNamespace(telegram_id=None, username=None, full_name="acc", account_name="acc", has_bot_access=False, address="تهران خیابان آزادی پلاک ۱۰")
+        user = make_user()
         db = FakeDB(user)
         state = FakeState()
         message = make_message()
@@ -221,15 +233,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertIn("دسترسی این سطح مشتری به ربات تلگرام فعال نیست", message.answer.await_args.args[0])
 
-        user = SimpleNamespace(
-            id=99,
-            telegram_id=None,
-            username=None,
-            full_name="acc",
-            account_name="acc",
-            has_bot_access=False,
-            address="System Default",
-        )
+        user = make_user(address="System Default")
         db = FakeDB(user)
         state = FakeState()
         await state.update_data(link_user_id=99)
@@ -248,15 +252,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("خطا در تکمیل ثبت‌نام", message.answer.await_args.args[0])
 
     async def test_handle_address_completion_links_user_and_saves_address(self):
-        user = SimpleNamespace(
-            id=99,
-            telegram_id=None,
-            username=None,
-            full_name="acc",
-            account_name="acc",
-            has_bot_access=False,
-            address="System Default",
-        )
+        user = make_user(address="System Default")
         db = FakeDB(user)
         state = FakeState()
         await state.update_data(link_user_id=99)

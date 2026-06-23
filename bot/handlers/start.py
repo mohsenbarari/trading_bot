@@ -46,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+LEGACY_RESPOND_PATH_DISABLED_MESSAGE = (
+    "این مسیر قدیمی پاسخ به آفر دیگر فعال نیست. لطفاً از دکمه‌های خود آفر در کانال معاملات استفاده کنید."
+)
+
 
 def build_webapp_link_line() -> str | None:
     frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
@@ -166,63 +170,8 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         if not user:
             await message.answer("❌ برای انجام معامله ابتدا باید ثبت‌نام کنید.")
             return
-        
-        try:
-            from models.offer import Offer, OfferStatus
-            from models.trade import Trade, TradeType, TradeStatus
-            from sqlalchemy.orm import joinedload
-            
-            offer_id = int(token.replace("respond_", ""))
-            
-            async with AsyncSessionLocal() as session:
-                stmt = select(Offer).options(
-                    joinedload(Offer.user),
-                    joinedload(Offer.commodity)
-                ).where(Offer.id == offer_id)
-                offer = (await session.execute(stmt)).scalar_one_or_none()
-                
-                if not offer:
-                    await message.answer("❌ این لفظ یافت نشد یا منقضی شده است.")
-                    return
-                
-                if offer.status != OfferStatus.ACTIVE:
-                    await message.answer("❌ این لفظ دیگر فعال نیست.")
-                    return
-                
-                if offer.user_id == user.id:
-                    await message.answer("❌ شما نمی‌توانید به لفظ خودتان پاسخ دهید.")
-                    return
-                
-                # نمایش اطلاعات لفظ و تایید معامله
-                offer_type_fa = "خرید" if offer.offer_type.value == "buy" else "فروش"
-                respond_type_fa = "فروش" if offer.offer_type.value == "buy" else "خرید"
-                
-                confirm_text = (
-                    f"🤝 **تایید معامله**\n\n"
-                    f"📝 لفظ: {offer_type_fa} {offer.commodity.name}\n"
-                    f"👤 لفظ‌دهنده: {offer.user.account_name}\n"
-                    f"📦 تعداد: {offer.quantity} عدد\n"
-                    f"💰 قیمت: {offer.price:,}\n\n"
-                    f"شما در حال {respond_type_fa} هستید.\n"
-                    f"آیا این معامله را تایید می‌کنید?"
-                )
-                
-                confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="✅ تایید معامله", callback_data=f"confirm_trade_{offer_id}"),
-                        InlineKeyboardButton(text="❌ انصراف", callback_data="cancel_respond")
-                    ]
-                ])
-                
-                await message.answer(
-                    confirm_text,
-                    parse_mode="Markdown",
-                    reply_markup=confirm_keyboard
-                )
-                
-        except (ValueError, Exception) as e:
-            logger.error(f"Error responding to offer: {e}")
-            await message.answer("❌ خطا در پردازش درخواست.")
+
+        await message.answer(LEGACY_RESPOND_PATH_DISABLED_MESSAGE)
         return
     
     # --- حذف پیام و لنگر برای سایر حالات ---
@@ -273,7 +222,10 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
 
             customer_lines = [
                 "✅ دعوت‌نامه مشتری معتبر است.",
-                "ثبت‌نام مشتری فقط از طریق وب‌اپ انجام می‌شود و این حساب به ربات تلگرام دسترسی نخواهد داشت.",
+                (
+                    "ثبت‌نام مشتری از طریق وب‌اپ انجام می‌شود. اگر سطح دسترسی حساب شما مجاز باشد، "
+                    "بعد از تکمیل ثبت‌نام می‌توانید اتصال تلگرام را از داخل وب‌اپ فعال کنید."
+                ),
             ]
             register_line = build_customer_register_link_line(token)
             if register_line:
@@ -425,77 +377,9 @@ async def handle_confirm_trade(callback: types.CallbackQuery, user: Optional[Use
     if local_denial_reason:
         await callback.answer(build_bot_account_access_denial_message(local_denial_reason), show_alert=True)
         return
-    
-    from models.offer import Offer, OfferStatus
-    from models.trade import Trade, TradeType, TradeStatus
-    from sqlalchemy.orm import joinedload
-    
-    offer_id = int(callback.data.split("_")[-1])
-    
-    async with AsyncSessionLocal() as session:
-        decision = await evaluate_bot_access(session, user)
-        if not decision.allowed:
-            await callback.answer(build_bot_account_access_denial_message(decision.reason), show_alert=True)
-            return
 
-        stmt = select(Offer).options(
-            joinedload(Offer.user),
-            joinedload(Offer.commodity)
-        ).where(Offer.id == offer_id)
-        offer = (await session.execute(stmt)).scalar_one_or_none()
-        
-        if not offer:
-            await callback.message.edit_text("❌ لفظ یافت نشد.")
-            await callback.answer()
-            return
-        
-        if offer.status != OfferStatus.ACTIVE:
-            await callback.message.edit_text("❌ این لفظ دیگر فعال نیست.")
-            await callback.answer()
-            return
-        
-        if offer.user_id == user.id:
-            await callback.message.edit_text("❌ شما نمی‌توانید به لفظ خودتان پاسخ دهید.")
-            await callback.answer()
-            return
-        
-        # نوع معامله از دید پاسخ‌دهنده
-        trade_type = TradeType.SELL if offer.offer_type.value == "buy" else TradeType.BUY
-        
-        # ایجاد معامله جدید
-        new_trade = Trade(
-            offer_id=offer.id,
-            offer_user_id=offer.user_id,
-            responder_user_id=user.id,
-            commodity_id=offer.commodity_id,
-            trade_type=trade_type,
-            quantity=offer.quantity,
-            price=offer.price,
-            status=TradeStatus.COMPLETED
-        )
-        session.add(new_trade)
-        
-        # بروزرسانی وضعیت لفظ
-        offer.status = OfferStatus.COMPLETED
-        
-        await session.commit()
-        
-        # پیام تایید
-        offer_type_fa = "خرید" if offer.offer_type.value == "buy" else "فروش"
-        respond_type_fa = "فروش" if offer.offer_type.value == "buy" else "خرید"
-        
-        success_text = (
-            f"✅ **معامله با موفقیت ثبت شد!**\n\n"
-            f"📦 کالا: {offer.commodity.name}\n"
-            f"🔢 تعداد: {offer.quantity} عدد\n"
-            f"💰 قیمت: {offer.price:,}\n\n"
-            f"👤 لفظ‌دهنده ({offer_type_fa}): {offer.user.account_name}\n"
-            f"👤 پاسخ‌دهنده ({respond_type_fa}): {user.account_name}\n\n"
-            f"📞 برای هماهنگی با طرف معامله تماس بگیرید."
-        )
-        
-        await callback.message.edit_text(success_text, parse_mode="Markdown")
-        await callback.answer("✅ معامله ثبت شد!")
+    await callback.message.edit_text(LEGACY_RESPOND_PATH_DISABLED_MESSAGE)
+    await callback.answer("این مسیر دیگر فعال نیست.", show_alert=True)
 
 
 # --- انصراف از پاسخ ---

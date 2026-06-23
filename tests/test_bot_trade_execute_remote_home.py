@@ -8,6 +8,7 @@ from bot.handlers.trade_execute import (
     _notify_remote_trade_success_when_recovered,
     handle_channel_trade,
 )
+from core.enums import UserAccountStatus, UserRole
 from models.offer import OfferStatus, OfferType
 
 
@@ -56,6 +57,19 @@ def make_callback(chat_id=200):
     )
 
 
+def make_bot_user(**overrides):
+    data = {
+        "id": 5,
+        "telegram_id": 555,
+        "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
+        "is_deleted": False,
+        "trading_restricted_until": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 def make_offer():
     return SimpleNamespace(
         id=7,
@@ -80,7 +94,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("send_message(", source)
 
     async def test_notify_remote_trade_success_is_receipt_backed_no_direct_send(self):
-        user = SimpleNamespace(id=5, telegram_id=555)
+        user = make_bot_user()
         offer = make_offer()
         bot = SimpleNamespace(send_message=AsyncMock())
 
@@ -97,7 +111,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_awaited()
 
     async def test_notify_remote_trade_success_with_callback_chat_still_does_not_send_directly(self):
-        user = SimpleNamespace(id=5, telegram_id=None)
+        user = make_bot_user(telegram_id=None)
         offer = make_offer()
         bot = SimpleNamespace(send_message=AsyncMock())
 
@@ -114,7 +128,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_awaited()
 
     async def test_notify_remote_trade_success_when_recovered_waits_but_does_not_send_directly(self):
-        user = SimpleNamespace(id=5, telegram_id=None)
+        user = make_bot_user(telegram_id=None)
         bot = SimpleNamespace(send_message=AsyncMock())
         offer_snapshot = {
             "id": 7,
@@ -151,7 +165,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         bot.send_message.assert_not_awaited()
 
     async def test_handle_channel_trade_remote_home_handles_pending_suggestion_success_and_error(self):
-        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        user = make_bot_user()
         bot = SimpleNamespace(send_message=AsyncMock())
         base_patches = [
             patch("bot.handlers.trade_execute.check_user_limits", return_value=(True, None)),
@@ -266,7 +280,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(callback.answer.await_args.kwargs, {"show_alert": True})
 
     async def test_handle_channel_trade_preconfirmed_remote_home_skips_double_click(self):
-        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        user = make_bot_user()
         bot = SimpleNamespace(send_message=AsyncMock())
         callback = make_callback()
         success_payload = {
@@ -310,7 +324,7 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_awaited_with("معامله ثبت شد ✅", show_alert=False)
 
     async def test_handle_channel_trade_remote_home_does_not_lock_local_mirror_before_forward(self):
-        user = SimpleNamespace(id=5, telegram_id=555, trading_restricted_until=None)
+        user = make_bot_user()
         bot = SimpleNamespace(send_message=AsyncMock())
         session = FakeSession(make_offer())
         callback = make_callback()

@@ -7,6 +7,8 @@ from core.background_job_authority import (
     JOB_OFFER_EXPIRY,
     JOB_SESSION_EXPIRY,
     JOB_SYNC_WORKER,
+    JOB_TRADE_TELEGRAM_DELIVERY,
+    JOB_TRADE_WEBAPP_DELIVERY,
     JOB_USER_ACCOUNT_STATUS,
     REQUIRED_BACKGROUND_JOBS,
     BackgroundJobAuthorityError,
@@ -52,6 +54,12 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertEqual(user_status_decision.reason, "background_job_not_allowed_on_server")
         self.assertFalse(connectivity_decision.ok)
         self.assertEqual(connectivity_decision.reason, "background_job_not_allowed_on_server")
+        webapp_delivery_decision = check_background_job_authority(JOB_TRADE_WEBAPP_DELIVERY, server_mode="foreign")
+        telegram_delivery_decision = check_background_job_authority(JOB_TRADE_TELEGRAM_DELIVERY, server_mode="iran")
+        self.assertFalse(webapp_delivery_decision.ok)
+        self.assertEqual(webapp_delivery_decision.reason, "background_job_not_allowed_on_server")
+        self.assertFalse(telegram_delivery_decision.ok)
+        self.assertEqual(telegram_delivery_decision.reason, "background_job_not_allowed_on_server")
 
         with self.assertRaises(BackgroundJobAuthorityError):
             assert_background_job_authority(JOB_USER_ACCOUNT_STATUS, server_mode="foreign")
@@ -69,6 +77,8 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
 
         self.assertTrue(check_background_job_authority(JOB_USER_ACCOUNT_STATUS, server_mode="iran").ok)
         self.assertTrue(check_background_job_authority(JOB_CONNECTIVITY_MONITOR, server_mode="iran").ok)
+        self.assertTrue(check_background_job_authority(JOB_TRADE_WEBAPP_DELIVERY, server_mode="iran").ok)
+        self.assertTrue(check_background_job_authority(JOB_TRADE_TELEGRAM_DELIVERY, server_mode="foreign").ok)
 
     def test_unknown_jobs_fail_closed_when_filtering_factories(self):
         rejected = []
@@ -114,6 +124,18 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertTrue(sync_worker.local_runtime)
         self.assertEqual(get_sync_registry_entry("change_log").policy, SyncPolicy.INTERNAL_BOOKKEEPING)
         self.assertIn("internal bookkeeping", sync_worker.sync_outbox_behavior)
+
+    def test_trade_delivery_jobs_are_server_scoped_by_channel(self):
+        entries = background_job_authority_entries()
+        webapp = entries[JOB_TRADE_WEBAPP_DELIVERY]
+        telegram = entries[JOB_TRADE_TELEGRAM_DELIVERY]
+
+        self.assertEqual(webapp.allowed_servers, ("iran",))
+        self.assertIn("notifications", webapp.mutated_tables)
+        self.assertIn("webapp", webapp.authority_rule)
+        self.assertEqual(telegram.allowed_servers, ("foreign",))
+        self.assertNotIn("notifications", telegram.mutated_tables)
+        self.assertIn("Telegram Bot API", telegram.external_state)
 
     def test_current_server_is_used_when_server_mode_is_not_explicit(self):
         with patch("core.background_job_authority.current_server", return_value="foreign"):

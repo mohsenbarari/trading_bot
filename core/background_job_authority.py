@@ -17,6 +17,8 @@ JOB_SESSION_EXPIRY = "session_expiry"
 JOB_USER_ACCOUNT_STATUS = "user_account_status"
 JOB_CONNECTIVITY_MONITOR = "connectivity_monitor"
 JOB_SYNC_WORKER = "sync_worker"
+JOB_TRADE_WEBAPP_DELIVERY = "trade_webapp_delivery"
+JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -25,6 +27,8 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_SESSION_EXPIRY,
         JOB_USER_ACCOUNT_STATUS,
         JOB_CONNECTIVITY_MONITOR,
+        JOB_TRADE_WEBAPP_DELIVERY,
+        JOB_TRADE_TELEGRAM_DELIVERY,
     }
 )
 
@@ -156,6 +160,43 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         sync_outbox_behavior="internal bookkeeping only; mark local change_log rows delivered after successful peer receive",
         local_runtime=True,
         external_state=("redis:sync:outbound", "redis:sync:retry"),
+    ),
+    JOB_TRADE_WEBAPP_DELIVERY: BackgroundJobAuthorityEntry(
+        job_name=JOB_TRADE_WEBAPP_DELIVERY,
+        mutated_tables=("trade_delivery_receipts", "notifications"),
+        allowed_servers=(SERVER_IRAN,),
+        authority_rule=(
+            "iran-only WebApp delivery worker; claims only receipt rows whose destination_server is iran "
+            "and channel is webapp"
+        ),
+        outage_behavior=(
+            "repair due local WebApp receipts from durable trade_delivery_receipts; skip expired remote-outage "
+            "deliveries by receipt outage policy"
+        ),
+        sync_outbox_behavior=(
+            "trade_delivery_receipts and notifications are synced non-messenger operational data; "
+            "worker_id and lease_until remain local execution fields"
+        ),
+        side_effects=("local realtime notification event", "local Web Push notification"),
+    ),
+    JOB_TRADE_TELEGRAM_DELIVERY: BackgroundJobAuthorityEntry(
+        job_name=JOB_TRADE_TELEGRAM_DELIVERY,
+        mutated_tables=("trade_delivery_receipts",),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only Telegram delivery worker; claims only receipt rows whose destination_server is "
+            "foreign and channel is telegram"
+        ),
+        outage_behavior=(
+            "retry transient Telegram/network failures; skip unusable linked Telegram identities without "
+            "creating permanent user-level disablement"
+        ),
+        sync_outbox_behavior=(
+            "trade_delivery_receipts are synced non-messenger operational data; worker_id and lease_until "
+            "remain local execution fields"
+        ),
+        external_state=("Telegram Bot API",),
+        side_effects=("Telegram private trade message",),
     ),
 }
 

@@ -12,10 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.services.trade_delivery_receipt_service import (
     TRADE_COMPLETED_EVENT_TYPE,
     WEBAPP_DESTINATION_SERVER,
+    claim_next_receipt_for_delivery,
     claim_receipt_by_identity_for_delivery,
     complete_webapp_receipt_with_notification,
     publish_webapp_notification_after_commit,
     skip_receipt_after_outage_if_needed,
+    transition_receipt_status,
     upsert_trade_delivery_receipt,
 )
 from core.services.trade_notification_audience_service import (
@@ -42,13 +44,16 @@ WEBAPP_DELIVERY_STATUS_QUEUED_FOR_IRAN = "queued_for_iran"
 WEBAPP_DELIVERY_STATUS_CLAIM_BUSY = "claim_busy"
 WEBAPP_DELIVERY_STATUS_TERMINAL_PRESERVED = "terminal_preserved"
 WEBAPP_DELIVERY_STATUS_SKIPPED = "skipped"
+WEBAPP_DELIVERY_STATUS_NO_RECEIPT = "no_receipt"
+WEBAPP_DELIVERY_STATUS_BLOCKED_WRONG_SERVER = "blocked_wrong_server"
+WEBAPP_DELIVERY_STATUS_PERMANENT_FAILED = "permanent_failed"
 
 
 @dataclass(frozen=True, slots=True)
 class WebAppTradeDeliveryResult:
     status: str
-    trade_number: int
-    recipient_user_id: int
+    trade_number: int | None
+    recipient_user_id: int | None
     current_server: str
     destination_server: str
     receipt: TradeDeliveryReceipt | Any | None = None
@@ -84,6 +89,13 @@ def _receipt_status(receipt: TradeDeliveryReceipt | Any | None) -> str | None:
 
 def _is_sent(receipt: TradeDeliveryReceipt | Any | None) -> bool:
     return _receipt_status(receipt) == TradeDeliveryReceiptStatus.SENT.value
+
+
+def _audit_payload_mapping(receipt: TradeDeliveryReceipt | Any) -> Mapping[str, Any]:
+    audit_payload = getattr(receipt, "audit_payload", None)
+    if isinstance(audit_payload, Mapping):
+        return audit_payload
+    return {}
 
 
 def _extra_payload(
@@ -323,6 +335,160 @@ async def deliver_webapp_trade_notification(
         sent_changed=delivery_result.sent_changed,
         realtime_published=realtime_published,
         publish_error_class=publish_error_class,
+    )
+
+
+async def deliver_claimed_webapp_receipt(
+    db: AsyncSession,
+    *,
+    receipt: TradeDeliveryReceipt | Any,
+    current_server: str,
+    commit: bool = True,
+    publish_after_commit: bool = True,
+    now: datetime | None = None,
+) -> WebAppTradeDeliveryResult:
+    normalized_current_server = str(current_server or "")
+    trade_number = _coerce_int(getattr(receipt, "trade_number", None))
+    recipient_user_id = _coerce_int(getattr(receipt, "recipient_user_id", None))
+    if normalized_current_server != WEBAPP_DESTINATION_SERVER:
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_BLOCKED_WRONG_SERVER,
+            trade_number=trade_number,
+            recipient_user_id=recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            receipt=receipt,
+            reason="webapp_iran_only",
+        )
+
+    current_time = now or utc_now()
+    outage_skip = await skip_receipt_after_outage_if_needed(
+        db,
+        receipt,
+        current_server=WEBAPP_DESTINATION_SERVER,
+        now=current_time,
+    )
+    if outage_skip is not None:
+        await _commit_if_requested(db, commit)
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_SKIPPED,
+            trade_number=trade_number,
+            recipient_user_id=recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            receipt=receipt,
+            receipt_changed=True,
+            reason=outage_skip.reason,
+        )
+
+    audit_payload = _audit_payload_mapping(receipt)
+    message = str(audit_payload.get("message") or "").strip()
+    raw_extra_payload = audit_payload.get("extra_payload")
+    extra_payload = raw_extra_payload if isinstance(raw_extra_payload, Mapping) else {}
+    if not message:
+        transition_receipt_status(
+            receipt,
+            TradeDeliveryReceiptStatus.PERMANENT_FAILED,
+            current_server=WEBAPP_DESTINATION_SERVER,
+            now=current_time,
+            reason="webapp_missing_message_payload",
+            error_class="MissingWebAppMessagePayload",
+            error_message="receipt audit_payload.message is required for WebApp delivery",
+        )
+        await _commit_if_requested(db, commit)
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_PERMANENT_FAILED,
+            trade_number=trade_number,
+            recipient_user_id=recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            receipt=receipt,
+            receipt_changed=True,
+            reason="webapp_missing_message_payload",
+        )
+
+    delivery_result = await complete_webapp_receipt_with_notification(
+        db,
+        receipt=receipt,
+        message=message,
+        extra_payload=extra_payload,
+        current_server=WEBAPP_DESTINATION_SERVER,
+        now=current_time,
+    )
+    await _commit_if_requested(db, commit)
+
+    realtime_published = False
+    publish_error_class = None
+    if publish_after_commit and delivery_result.sent_changed:
+        realtime_published, publish_error_class = await _safe_publish_webapp_side_effect(
+            user_id=int(getattr(receipt, "recipient_user_id")),
+            notification=delivery_result.notification,
+            extra_payload=delivery_result.realtime_payload.get("extra_payload"),
+        )
+
+    return WebAppTradeDeliveryResult(
+        status=WEBAPP_DELIVERY_STATUS_SENT,
+        trade_number=trade_number,
+        recipient_user_id=recipient_user_id,
+        current_server=normalized_current_server,
+        destination_server=WEBAPP_DESTINATION_SERVER,
+        receipt=receipt,
+        notification=delivery_result.notification,
+        notification_created=delivery_result.notification_created,
+        receipt_changed=True,
+        sent_changed=delivery_result.sent_changed,
+        realtime_published=realtime_published,
+        publish_error_class=publish_error_class,
+    )
+
+
+async def claim_and_deliver_next_webapp_receipt(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    worker_id: str = WEBAPP_TRADE_DELIVERY_WORKER_ID,
+    lease_seconds: int = 30,
+    commit: bool = True,
+    publish_after_commit: bool = True,
+    now: datetime | None = None,
+) -> WebAppTradeDeliveryResult:
+    normalized_current_server = str(current_server or "")
+    if normalized_current_server != WEBAPP_DESTINATION_SERVER:
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_BLOCKED_WRONG_SERVER,
+            trade_number=None,
+            recipient_user_id=None,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            reason="webapp_iran_only",
+        )
+
+    current_time = now or utc_now()
+    receipt = await claim_next_receipt_for_delivery(
+        db,
+        destination_server=WEBAPP_DESTINATION_SERVER,
+        channel=TradeDeliveryChannel.WEBAPP,
+        worker_id=worker_id,
+        lease_seconds=lease_seconds,
+        now=current_time,
+    )
+    if receipt is None:
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_NO_RECEIPT,
+            trade_number=None,
+            recipient_user_id=None,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            reason="no_due_webapp_receipt",
+        )
+
+    return await deliver_claimed_webapp_receipt(
+        db,
+        receipt=receipt,
+        current_server=normalized_current_server,
+        commit=commit,
+        publish_after_commit=publish_after_commit,
+        now=current_time,
     )
 
 

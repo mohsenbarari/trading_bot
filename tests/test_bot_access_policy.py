@@ -9,6 +9,7 @@ from core.services.bot_access_policy import (
     BOT_ACCESS_REASON_ACCOUNTANT,
     BOT_ACCESS_REASON_CUSTOMER_TIER2,
     BOT_ACCESS_REASON_ROLE_FORBIDDEN,
+    BOT_ACCESS_REASON_SYNC_PENDING,
     evaluate_bot_access,
     evaluate_bot_access_local_state,
 )
@@ -24,6 +25,19 @@ class BotAccessPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evaluate_bot_access_local_state(watch_user).reason, BOT_ACCESS_REASON_ROLE_FORBIDDEN)
         self.assertFalse(evaluate_bot_access_local_state(inactive_user).allowed)
         self.assertTrue(evaluate_bot_access_local_state(standard_user).allowed)
+
+    async def test_local_policy_fails_closed_for_incomplete_non_user_object(self):
+        incomplete_user = SimpleNamespace(id=9, account_status=UserAccountStatus.ACTIVE, is_deleted=False)
+
+        decision = evaluate_bot_access_local_state(incomplete_user)
+
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.reason, "pending_sync")
+
+        incomplete_user = SimpleNamespace(id=10, account_status=UserAccountStatus.ACTIVE, is_deleted=False)
+        incomplete_decision = evaluate_bot_access_local_state(incomplete_user)
+        self.assertFalse(incomplete_decision.allowed)
+        self.assertEqual(incomplete_decision.reason, BOT_ACCESS_REASON_SYNC_PENDING)
 
     async def test_relation_policy_denies_accountants_and_tier2_customers(self):
         db = AsyncSession()

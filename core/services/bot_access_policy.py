@@ -68,7 +68,7 @@ def evaluate_bot_access_local_state(user: User | object | None) -> BotAccessDeci
         return BotAccessDecision(False, BOT_ACCESS_REASON_INACTIVE)
     raw_role = getattr(user, "role", None)
     if raw_role is None and not isinstance(user, User):
-        return BotAccessDecision(True)
+        return BotAccessDecision(False, BOT_ACCESS_REASON_SYNC_PENDING)
     if _enum_value(raw_role) not in BOT_ACCESS_ALLOWED_ROLE_VALUES:
         return BotAccessDecision(False, BOT_ACCESS_REASON_ROLE_FORBIDDEN)
     return BotAccessDecision(True)

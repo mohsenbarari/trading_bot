@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.link_account import LinkState, handle_address_completion, handle_contact
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeState:
@@ -54,6 +55,22 @@ def make_message(contact_user_id=10, phone="+989121111111", from_user_id=10, use
     )
 
 
+def make_user(**overrides):
+    data = {
+        "id": 9,
+        "telegram_id": None,
+        "account_name": "acc",
+        "full_name": "acc",
+        "mobile_number": "09121111111",
+        "address": "تهران خیابان آزادی پلاک ۱۰",
+        "role": UserRole.STANDARD,
+        "account_status": UserAccountStatus.ACTIVE,
+        "is_deleted": False,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_handle_contact_rejects_contact_for_other_sender(self):
         state = FakeState()
@@ -75,7 +92,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("همگام‌سازی", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
-        other_user = SimpleNamespace(id=2, telegram_id=77, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
+        other_user = make_user(id=2, telegram_id=77)
         message = make_message()
         state = FakeState()
         with patch("bot.handlers.link_account.get_db", new=db_factory(other_user)), patch(
@@ -86,7 +103,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("قبلاً به یک اکانت تلگرام دیگر", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
-        same_user = SimpleNamespace(id=3, telegram_id=10, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
+        same_user = make_user(id=3, telegram_id=10)
         message = make_message()
         state = FakeState()
         with patch("bot.handlers.link_account.get_db", new=db_factory(same_user)), patch(
@@ -98,7 +115,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
 
     async def test_handle_contact_blocks_accountant_bot_linking(self):
-        accountant_user = SimpleNamespace(id=5, telegram_id=None, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
+        accountant_user = make_user(id=5)
         message = make_message()
         state = FakeState()
 
@@ -112,7 +129,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
 
     async def test_handle_contact_blocks_customer_bot_linking(self):
-        customer_user = SimpleNamespace(id=6, telegram_id=None, account_name="cust", full_name="cust", address="تهران خیابان آزادی پلاک ۱۰")
+        customer_user = make_user(id=6, account_name="cust", full_name="cust")
         message = make_message()
         state = FakeState()
 
@@ -148,7 +165,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertIn("همگام‌سازی", message.answer.await_args.args[0])
 
-        accountant_user = SimpleNamespace(id=9, telegram_id=None, account_name="acc", full_name="acc", address="System Default")
+        accountant_user = make_user(id=9, address="System Default")
         state = FakeState()
         await state.update_data(link_user_id=9)
         message = SimpleNamespace(text="تهران خیابان آزادی پلاک ۱۰", answer=AsyncMock(), from_user=SimpleNamespace(id=10))
@@ -159,7 +176,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertIn("حسابدارها به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
 
-        customer_user = SimpleNamespace(id=9, telegram_id=None, account_name="cust", full_name="cust", address="System Default")
+        customer_user = make_user(id=9, account_name="cust", full_name="cust", address="System Default")
         state = FakeState()
         await state.update_data(link_user_id=9)
         message = SimpleNamespace(text="تهران خیابان آزادی پلاک ۱۰", answer=AsyncMock(), from_user=SimpleNamespace(id=10))
@@ -172,7 +189,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertIn("دسترسی این سطح مشتری به ربات تلگرام فعال نیست", message.answer.await_args.args[0])
 
-        linked_elsewhere = SimpleNamespace(id=9, telegram_id=77, account_name="acc", full_name="acc", address="System Default")
+        linked_elsewhere = make_user(id=9, telegram_id=77, address="System Default")
         state = FakeState()
         await state.update_data(link_user_id=9)
         message = SimpleNamespace(text="تهران خیابان آزادی پلاک ۱۰", answer=AsyncMock(), from_user=SimpleNamespace(id=10))

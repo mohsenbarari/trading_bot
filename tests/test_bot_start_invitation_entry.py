@@ -179,7 +179,9 @@ class BotStartInvitationEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.updated, [])
         self.assertEqual(state.states, [])
         self.assertIn("مشتری", message.answer.await_args.args[0])
-        self.assertIn("فقط از طریق وب‌اپ", message.answer.await_args.args[0])
+        self.assertIn("از طریق وب‌اپ", message.answer.await_args.args[0])
+        self.assertIn("اتصال تلگرام", message.answer.await_args.args[0])
+        self.assertNotIn("دسترسی نخواهد داشت", message.answer.await_args.args[0])
 
         message = SimpleNamespace(
             bot=SimpleNamespace(),
