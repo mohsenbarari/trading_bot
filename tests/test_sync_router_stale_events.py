@@ -5,6 +5,8 @@ from unittest.mock import patch
 from api.routers.sync import _apply_item, _build_upsert_stmt
 from models.offer import Offer
 from models.offer_request import OfferRequest
+from models.trade import Trade
+from sqlalchemy.exc import IntegrityError
 
 
 class AsyncNullContext:
@@ -41,6 +43,14 @@ class FakeOfferExecuteResult:
         return SimpleNamespace(first=lambda: self._offer)
 
 
+class FakeTradeExecuteResult:
+    def __init__(self, trade):
+        self._trade = trade
+
+    def scalars(self):
+        return SimpleNamespace(first=lambda: self._trade)
+
+
 class FakeScalarExecuteResult:
     def __init__(self, value):
         self._value = value
@@ -53,23 +63,33 @@ class ExpressionProbe:
     def __init__(self, expression):
         self.expression = expression
 
+    @staticmethod
+    def _render(other):
+        return getattr(other, "expression", repr(other))
+
     def in_(self, values):
         return ExpressionProbe(f"{self.expression} IN {tuple(sorted(values))}")
 
     def isnot(self, other):
         return ExpressionProbe(f"{self.expression} IS NOT {other}")
 
+    def is_not_distinct_from(self, other):
+        return ExpressionProbe(f"{self.expression} IS NOT DISTINCT FROM {self._render(other)}")
+
     def __le__(self, other):
-        return ExpressionProbe(f"{self.expression} <= {other.expression}")
+        return ExpressionProbe(f"{self.expression} <= {self._render(other)}")
 
     def __eq__(self, other):
-        return ExpressionProbe(f"{self.expression} == {other.expression}")
+        return ExpressionProbe(f"{self.expression} == {self._render(other)}")
 
     def __ne__(self, other):
-        return ExpressionProbe(f"{self.expression} != {other.expression}")
+        return ExpressionProbe(f"{self.expression} != {self._render(other)}")
 
     def __and__(self, other):
-        return ExpressionProbe(f"({self.expression} AND {other.expression})")
+        return ExpressionProbe(f"({self.expression} AND {self._render(other)})")
+
+    def __or__(self, other):
+        return ExpressionProbe(f"({self.expression} OR {self._render(other)})")
 
     def __invert__(self):
         return ExpressionProbe(f"NOT ({self.expression})")
@@ -89,6 +109,20 @@ class FakeOfferRequestModel:
     version_id = ExpressionProbe("current_version")
 
 
+class FakeTradeModel:
+    offer_id = ExpressionProbe("current_offer_id")
+    offer_user_id = ExpressionProbe("current_offer_user_id")
+    responder_user_id = ExpressionProbe("current_responder_user_id")
+    actor_user_id = ExpressionProbe("current_actor_user_id")
+    commodity_id = ExpressionProbe("current_commodity_id")
+    trade_type = ExpressionProbe("current_trade_type")
+    quantity = ExpressionProbe("current_quantity")
+    price = ExpressionProbe("current_price")
+    status = ExpressionProbe("current_status")
+    trade_number = ExpressionProbe("current_trade_number")
+    archived = ExpressionProbe("current_archived")
+
+
 class FakeOfferInsertBuilder:
     def __init__(self):
         self.excluded = {
@@ -96,6 +130,34 @@ class FakeOfferInsertBuilder:
             "version_id": ExpressionProbe("incoming_version"),
         }
         self.where_clause = None
+
+    def values(self, **kwargs):
+        self.values_payload = kwargs
+        return self
+
+    def on_conflict_do_update(self, index_elements, set_, where=None):
+        self.conflict_payload = (index_elements, set_)
+        self.where_clause = where
+        return self
+
+
+class FakeTradeInsertBuilder:
+    def __init__(self):
+        self.excluded = {
+            "offer_id": ExpressionProbe("incoming_offer_id"),
+            "offer_user_id": ExpressionProbe("incoming_offer_user_id"),
+            "responder_user_id": ExpressionProbe("incoming_responder_user_id"),
+            "actor_user_id": ExpressionProbe("incoming_actor_user_id"),
+            "commodity_id": ExpressionProbe("incoming_commodity_id"),
+            "trade_type": ExpressionProbe("incoming_trade_type"),
+            "quantity": ExpressionProbe("incoming_quantity"),
+            "price": ExpressionProbe("incoming_price"),
+            "status": ExpressionProbe("incoming_status"),
+            "trade_number": ExpressionProbe("incoming_trade_number"),
+            "archived": ExpressionProbe("incoming_archived"),
+        }
+        self.where_clause = None
+        self.conflict_payload = None
 
     def values(self, **kwargs):
         self.values_payload = kwargs
@@ -129,6 +191,43 @@ class FakeOfferRequestInsertBuilder:
 
 def make_offer(status, version_id):
     return SimpleNamespace(id=8, status=status, version_id=version_id)
+
+
+def make_completed_trade(**overrides):
+    values = {
+        "id": 80,
+        "trade_number": 10008,
+        "offer_id": 8,
+        "offer_user_id": 2,
+        "responder_user_id": 5,
+        "actor_user_id": 5,
+        "commodity_id": 1,
+        "trade_type": "buy",
+        "quantity": 3,
+        "price": 120,
+        "status": "completed",
+        "archived": False,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def completed_trade_payload(**overrides):
+    values = {
+        "trade_number": 10008,
+        "offer_id": 8,
+        "offer_user_id": 2,
+        "responder_user_id": 5,
+        "actor_user_id": 5,
+        "commodity_id": 1,
+        "trade_type": "buy",
+        "quantity": 3,
+        "price": 120,
+        "status": "completed",
+        "archived": False,
+    }
+    values.update(overrides)
+    return values
 
 
 class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
@@ -174,6 +273,261 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         rendered_where = repr(insert_builder.where_clause)
         self.assertIn("current_version <= incoming_version", rendered_where)
         self.assertIn("current_result_status IN", rendered_where)
+
+    async def test_trade_upsert_uses_atomic_completed_trade_guard(self):
+        insert_builder = FakeTradeInsertBuilder()
+
+        with patch("api.routers.sync.pg_insert", return_value=insert_builder):
+            result = _build_upsert_stmt(
+                FakeTradeModel,
+                "trades",
+                completed_trade_payload(id=80),
+            )
+
+        self.assertIs(result, insert_builder)
+        self.assertEqual(insert_builder.conflict_payload[0], ["trade_number"])
+        self.assertNotIn("id", insert_builder.conflict_payload[1])
+        self.assertNotIn("trade_number", insert_builder.conflict_payload[1])
+        self.assertIsNotNone(insert_builder.where_clause)
+        rendered_where = repr(insert_builder.where_clause)
+        self.assertIn("current_status !=", rendered_where)
+        self.assertIn("OR", rendered_where)
+        self.assertIn("current_price IS NOT DISTINCT FROM incoming_price", rendered_where)
+        self.assertIn("current_trade_number IS NOT DISTINCT FROM incoming_trade_number", rendered_where)
+
+    async def test_completed_trade_delete_is_ignored(self):
+        existing_trade = make_completed_trade()
+        db = ApplyDB([FakeScalarExecuteResult(80), FakeTradeExecuteResult(existing_trade)])
+
+        with patch("api.routers.sync._build_upsert_stmt") as builder, patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "DELETE",
+                80,
+                {"trade_number": 10008},
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        builder.assert_not_called()
+        self.assertEqual(len(db.execute_calls), 2)
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("completed_trade_delete", rendered_log)
+        self.assertIn("sync.trade_guard_ignored", rendered_log)
+
+    async def test_missing_trade_delete_is_not_reported_as_guard_conflict(self):
+        db = ApplyDB([
+            FakeScalarExecuteResult(None),
+            FakeTradeExecuteResult(None),
+            FakeTradeExecuteResult(None),
+            SimpleNamespace(rowcount=0),
+        ])
+
+        with patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "DELETE",
+                80,
+                {"trade_number": 10008},
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        logger_mock.warning.assert_not_called()
+
+    async def test_completed_trade_cannot_be_reopened_by_sync(self):
+        existing_trade = make_completed_trade()
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade)])
+        data = completed_trade_payload(status="pending")
+
+        with patch("api.routers.sync._build_upsert_stmt") as builder, patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        builder.assert_not_called()
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("completed_to_non_completed_update", rendered_log)
+
+    async def test_completed_trade_business_field_mismatch_is_ignored(self):
+        existing_trade = make_completed_trade()
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade)])
+        data = completed_trade_payload(price=121)
+
+        with patch("api.routers.sync._build_upsert_stmt") as builder, patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        builder.assert_not_called()
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("protected_business_field_mismatch", rendered_log)
+
+    async def test_completed_trade_incomplete_destructive_payload_is_ignored(self):
+        existing_trade = make_completed_trade()
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade)])
+
+        with patch("api.routers.sync._build_upsert_stmt") as builder, patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                {"trade_number": 10008, "status": "completed"},
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        builder.assert_not_called()
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("incomplete_destructive_payload", rendered_log)
+
+    async def test_duplicate_completed_trade_sync_is_idempotent(self):
+        existing_trade = make_completed_trade()
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade), SimpleNamespace(rowcount=1)])
+        data = completed_trade_payload()
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        builder.assert_called_once()
+        self.assertEqual(db.execute_calls[-1], ("TRADE_UPSERT", {"is_sync": True}))
+
+    async def test_duplicate_completed_trade_sync_with_nullable_actor_is_idempotent(self):
+        existing_trade = make_completed_trade(actor_user_id=None)
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade), SimpleNamespace(rowcount=1)])
+        data = completed_trade_payload(actor_user_id=None)
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        builder.assert_called_once()
+
+    async def test_missing_completed_trade_sync_is_inserted(self):
+        db = ApplyDB([FakeTradeExecuteResult(None), SimpleNamespace(rowcount=1)])
+        data = completed_trade_payload()
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "trades",
+                "INSERT",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        builder.assert_called_once()
+        self.assertEqual(db.execute_calls[-1], ("TRADE_UPSERT", {"is_sync": True}))
+
+    async def test_non_completed_trade_can_be_completed_by_valid_sync(self):
+        existing_trade = make_completed_trade(status="pending")
+        db = ApplyDB([FakeTradeExecuteResult(existing_trade), SimpleNamespace(rowcount=1)])
+        data = completed_trade_payload()
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        builder.assert_called_once()
+
+    async def test_trade_atomic_upsert_guard_noop_is_ignored_with_audit_metadata(self):
+        db = ApplyDB([FakeTradeExecuteResult(None), FakeTradeExecuteResult(None), SimpleNamespace(rowcount=0)])
+        data = completed_trade_payload()
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT"), patch(
+            "api.routers.sync.logger"
+        ) as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "UPDATE",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("atomic_upsert_guard_noop", rendered_log)
+        self.assertIn("sync.trade_guard_ignored", rendered_log)
+
+    async def test_trade_natural_key_fallback_calls_guard_before_update(self):
+        duplicate_error = IntegrityError("stmt", {}, Exception("duplicate key value violates unique constraint"))
+        existing_trade = make_completed_trade(price=120)
+        db = ApplyDB([
+            FakeTradeExecuteResult(None),
+            FakeTradeExecuteResult(None),
+            duplicate_error,
+            FakeTradeExecuteResult(existing_trade),
+        ])
+        data = completed_trade_payload(price=121)
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="TRADE_UPSERT"), patch(
+            "api.routers.sync.update"
+        ) as update_mock, patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "trades",
+                "INSERT",
+                80,
+                data,
+                model=Trade,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        update_mock.assert_not_called()
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("protected_business_field_mismatch", rendered_log)
 
     async def test_out_of_order_offer_update_after_expiry_does_not_reactivate(self):
         existing_offer = make_offer("expired", 3)

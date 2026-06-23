@@ -143,6 +143,20 @@ TERMINAL_OFFER_REQUEST_STATUSES = {
     "duplicate_replay",
     "failed_internal",
 }
+COMPLETED_TRADE_STATUS = "completed"
+COMPLETED_TRADE_PROTECTED_FIELDS = (
+    "offer_id",
+    "offer_user_id",
+    "responder_user_id",
+    "actor_user_id",
+    "commodity_id",
+    "trade_type",
+    "quantity",
+    "price",
+    "status",
+    "trade_number",
+)
+COMPLETED_TRADE_VISIBILITY_FIELDS = ("archived",)
 
 
 def _completed_trade_offer_id_from_sync(table: str, data: dict) -> int | None:
@@ -408,7 +422,7 @@ from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
 from models.offer import Offer
 from models.offer_request import OfferRequest
 from models.offer_publication_state import OfferPublicationState
-from models.trade import Trade
+from models.trade import Trade, TradeStatus, TradeType
 from models.commodity import Commodity, CommodityAlias
 from models.chat import Chat
 from models.chat_member import ChatMember
@@ -661,7 +675,10 @@ def _build_upsert_stmt(model, table, data):
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data, where=where_clause)
     elif table == "trades" and data.get("trade_number") not in (None, ""):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "trade_number"}}
-        return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict)
+        where_clause = _trade_completed_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict, where=where_clause)
     elif table == "offer_publication_states" and data.get("dedupe_key"):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
         return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
@@ -822,6 +839,108 @@ async def _localize_offer_reference_by_public_id(db: AsyncSession, table: str, d
     return True
 
 
+def _normalize_completed_trade_field(field: str, value):
+    if field in {
+        "offer_id",
+        "offer_user_id",
+        "responder_user_id",
+        "actor_user_id",
+        "commodity_id",
+        "quantity",
+        "price",
+        "trade_number",
+    }:
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return value
+    if field in {"status", "trade_type"}:
+        return _enum_value(value)
+    if field == "archived":
+        return bool(value)
+    return value
+
+
+async def _load_trade_for_sync_guard(db: AsyncSession, record_id, data: dict):
+    trade_number = data.get("trade_number")
+    if trade_number is not None and trade_number != "":
+        result = await db.execute(select(Trade).where(Trade.trade_number == trade_number))
+        existing = _result_scalar_first(result)
+        if existing is not None:
+            return existing
+
+    candidate_id = coerce_positive_int(data.get("id")) or coerce_positive_int(record_id)
+    if candidate_id is None:
+        return None
+    result = await db.execute(select(Trade).where(Trade.id == candidate_id))
+    return _result_scalar_first(result)
+
+
+def _trade_sync_guard_reason_for_existing(existing, operation: str, data: dict) -> str | None:
+    if existing is None:
+        return None
+
+    current_status = _enum_value(getattr(existing, "status", None))
+    if current_status != COMPLETED_TRADE_STATUS:
+        return None
+
+    if operation == "DELETE":
+        return "completed_trade_delete"
+
+    if operation not in {"INSERT", "UPDATE"}:
+        return None
+
+    incoming_status = _enum_value(data.get("status"))
+    if not incoming_status:
+        return "incomplete_destructive_payload"
+    if incoming_status != COMPLETED_TRADE_STATUS:
+        return "completed_to_non_completed_update"
+
+    missing_fields = [field for field in COMPLETED_TRADE_PROTECTED_FIELDS if field not in data]
+    if missing_fields:
+        return "incomplete_destructive_payload"
+
+    for field in COMPLETED_TRADE_PROTECTED_FIELDS:
+        current_value = _normalize_completed_trade_field(field, getattr(existing, field, None))
+        incoming_value = _normalize_completed_trade_field(field, data.get(field))
+        if current_value != incoming_value:
+            return "protected_business_field_mismatch"
+
+    for field in COMPLETED_TRADE_VISIBILITY_FIELDS:
+        if field not in data:
+            continue
+        current_value = _normalize_completed_trade_field(field, getattr(existing, field, None))
+        incoming_value = _normalize_completed_trade_field(field, data.get(field))
+        if current_value != incoming_value:
+            return "protected_business_field_mismatch"
+
+    return None
+
+
+async def _trade_sync_guard_reason(db: AsyncSession, operation: str, record_id, data: dict) -> str | None:
+    existing = await _load_trade_for_sync_guard(db, record_id, data)
+    return _trade_sync_guard_reason_for_existing(existing, operation, data)
+
+
+def _log_trade_sync_guard_ignored(record_id, operation: str, data: dict, reason: str) -> None:
+    metadata = build_sync_metadata("trades", record_id, operation, data)
+    record_sync_conflict(server_mode=settings.server_mode, table="trades", reason=reason)
+    logger.warning(
+        "Ignored destructive synced trade event",
+        extra={
+            "event": "sync.trade_guard_ignored",
+            "table": "trades",
+            "record_id": record_id,
+            "reason": reason,
+            "incoming_status": _enum_value(data.get("status")),
+            "trade_number": data.get("trade_number"),
+            "sync_meta": metadata,
+        },
+    )
+
+
 def _offer_payload_needs_ordering_check(data: dict) -> bool:
     incoming_status = _enum_value(data.get("status"))
     return bool(incoming_status and coerce_positive_int(data.get("version_id")) is not None)
@@ -882,6 +1001,114 @@ def _offer_request_upsert_where_clause(model, stmt, data: dict):
     terminal_reactivation = current_terminal & ~incoming_terminal
 
     return (current_version <= incoming_version) & ~terminal_reactivation & ~same_version_terminal_conflict
+
+
+def _trade_payload_uses_completed_guard(data: dict) -> bool:
+    return data.get("trade_number") not in (None, "")
+
+
+def _trade_sql_value_for_field(field: str, value):
+    if field == "status":
+        enum_value = _enum_value(value)
+        for candidate in TradeStatus:
+            if candidate.value == enum_value:
+                return candidate
+    if field == "trade_type":
+        enum_value = _enum_value(value)
+        for candidate in TradeType:
+            if candidate.value == enum_value:
+                return candidate
+    return value
+
+
+def _sql_null_safe_equal(left, right):
+    comparator = getattr(left, "is_not_distinct_from", None) or getattr(left, "isnot_distinct_from", None)
+    if callable(comparator):
+        return comparator(right)
+    return left == right
+
+
+def _trade_completed_upsert_where_clause(model, stmt, data: dict):
+    if not _trade_payload_uses_completed_guard(data):
+        return None
+    current_status = getattr(model, "status", None)
+    if current_status is None:
+        return None
+
+    current_not_completed = current_status != TradeStatus.COMPLETED
+    if _enum_value(data.get("status")) != COMPLETED_TRADE_STATUS:
+        return current_not_completed
+    if any(field not in data for field in COMPLETED_TRADE_PROTECTED_FIELDS):
+        return current_not_completed
+
+    try:
+        same_completed_business_fields = stmt.excluded["status"] == TradeStatus.COMPLETED
+    except (AttributeError, KeyError):
+        return current_not_completed
+
+    for field in COMPLETED_TRADE_PROTECTED_FIELDS:
+        current_column = getattr(model, field, None)
+        if current_column is None:
+            return current_not_completed
+        try:
+            incoming_column = stmt.excluded[field]
+        except (AttributeError, KeyError):
+            return current_not_completed
+        same_completed_business_fields = same_completed_business_fields & _sql_null_safe_equal(
+            current_column,
+            incoming_column,
+        )
+
+    for field in COMPLETED_TRADE_VISIBILITY_FIELDS:
+        if field not in data:
+            continue
+        current_column = getattr(model, field, None)
+        if current_column is None:
+            return current_not_completed
+        try:
+            incoming_column = stmt.excluded[field]
+        except (AttributeError, KeyError):
+            return current_not_completed
+        same_completed_business_fields = same_completed_business_fields & _sql_null_safe_equal(
+            current_column,
+            incoming_column,
+        )
+
+    return current_not_completed | same_completed_business_fields
+
+
+def _trade_completed_update_where_clause(model, data: dict):
+    current_status = getattr(model, "status", None)
+    if current_status is None:
+        return None
+
+    current_not_completed = current_status != TradeStatus.COMPLETED
+    if _enum_value(data.get("status")) != COMPLETED_TRADE_STATUS:
+        return current_not_completed
+    if any(field not in data for field in COMPLETED_TRADE_PROTECTED_FIELDS):
+        return current_not_completed
+
+    same_completed_business_fields = current_status == TradeStatus.COMPLETED
+    for field in COMPLETED_TRADE_PROTECTED_FIELDS:
+        current_column = getattr(model, field, None)
+        if current_column is None:
+            return current_not_completed
+        same_completed_business_fields = same_completed_business_fields & (
+            _sql_null_safe_equal(current_column, _trade_sql_value_for_field(field, data.get(field)))
+        )
+
+    for field in COMPLETED_TRADE_VISIBILITY_FIELDS:
+        if field not in data:
+            continue
+        current_column = getattr(model, field, None)
+        if current_column is None:
+            return current_not_completed
+        same_completed_business_fields = same_completed_business_fields & _sql_null_safe_equal(
+            current_column,
+            data.get(field),
+        )
+
+    return current_not_completed | same_completed_business_fields
 
 
 async def _stale_offer_sync_reason(db: AsyncSession, record_id, data: dict) -> str | None:
@@ -970,7 +1197,7 @@ async def _apply_item(
       1. Normal upsert by ID
       2. UniqueViolation fallback → update by natural key
       3. ForeignKeyViolation → returns 'deferred' for retry
-    Returns: 'ok', 'deferred', or 'error'
+    Returns: 'ok', 'ignored', 'deferred', or 'error'
     """
     if table == "trading_settings":
         setting_key = data.get('key')
@@ -1053,26 +1280,42 @@ async def _apply_item(
                 elif status_value in TERMINAL_OFFER_STATUSES:
                     track_offer_realtime_or_terminal = True
 
-        data = _filter_model_columns(model, data)
-        stmt = _build_upsert_stmt(model, table, data)
+        if table == "trades":
+            trade_guard_reason = await _trade_sync_guard_reason(db, operation, record_id, data)
+            if trade_guard_reason:
+                _log_trade_sync_guard_ignored(record_id, operation, data, trade_guard_reason)
+                return 'ignored'
+
+        persist_data = _filter_model_columns(model, data)
+        stmt = _build_upsert_stmt(model, table, persist_data)
 
         try:
+            trade_atomic_guard_noop = False
             async with db.begin_nested():
                 execute_result = await db.execute(stmt, execution_options={"is_sync": True})
                 if (
                     table == "offers"
-                    and _offer_payload_needs_ordering_check(data)
+                    and _offer_payload_needs_ordering_check(persist_data)
                     and getattr(execute_result, "rowcount", None) == 0
                 ):
-                    _log_stale_offer_sync_ignored(record_id, operation, data, "atomic_upsert_guard_noop")
+                    _log_stale_offer_sync_ignored(record_id, operation, persist_data, "atomic_upsert_guard_noop")
                 if (
                     table == "offer_requests"
-                    and _offer_request_payload_needs_ordering_check(data)
+                    and _offer_request_payload_needs_ordering_check(persist_data)
                     and getattr(execute_result, "rowcount", None) == 0
                 ):
-                    _log_stale_offer_request_sync_ignored(record_id, operation, data, "atomic_upsert_guard_noop")
+                    _log_stale_offer_request_sync_ignored(record_id, operation, persist_data, "atomic_upsert_guard_noop")
+                if (
+                    table == "trades"
+                    and _trade_payload_uses_completed_guard(persist_data)
+                    and getattr(execute_result, "rowcount", None) == 0
+                ):
+                    _log_trade_sync_guard_ignored(record_id, operation, persist_data, "atomic_upsert_guard_noop")
+                    trade_atomic_guard_noop = True
+            if trade_atomic_guard_noop:
+                return 'ignored'
             if table == "offers" and (track_new_offer or track_offer_realtime_or_terminal):
-                applied_offer_id = await _resolve_local_record_id_by_public_identity(db, table, data)
+                applied_offer_id = await _resolve_local_record_id_by_public_identity(db, table, persist_data)
                 if applied_offer_id is None and not uses_public_identity:
                     try:
                         applied_offer_id = int(record_id)
@@ -1090,13 +1333,18 @@ async def _apply_item(
             # --- Case A: Unique violation on natural key (e.g. same name, different ID) ---
             if "unique" in err_str or "duplicate key" in err_str:
                 natural_key = NATURAL_KEYS.get(table)
-                natural_value = data.get(natural_key) if natural_key else None
+                natural_value = persist_data.get(natural_key) if natural_key else None
 
                 if natural_value is not None:
                     try:
+                        if table == "trades":
+                            trade_guard_reason = await _trade_sync_guard_reason(db, "UPDATE", record_id, persist_data)
+                            if trade_guard_reason:
+                                _log_trade_sync_guard_ignored(record_id, "UPDATE", persist_data, trade_guard_reason)
+                                return 'ignored'
                         # Update existing record by natural key
                         natural_col = getattr(model, natural_key)
-                        update_data = {k: v for k, v in data.items() if k != 'id' and k != natural_key}
+                        update_data = {k: v for k, v in persist_data.items() if k != 'id' and k != natural_key}
                         if update_data:
                             async with db.begin_nested():
                                 stmt_update = (
@@ -1104,7 +1352,22 @@ async def _apply_item(
                                     .where(natural_col == natural_value)
                                     .values(**update_data)
                                 )
-                                await db.execute(stmt_update, execution_options={"is_sync": True})
+                                if table == "trades":
+                                    where_clause = _trade_completed_update_where_clause(model, persist_data)
+                                    if where_clause is not None:
+                                        stmt_update = stmt_update.where(where_clause)
+                                update_result = await db.execute(stmt_update, execution_options={"is_sync": True})
+                                if (
+                                    table == "trades"
+                                    and getattr(update_result, "rowcount", None) == 0
+                                ):
+                                    _log_trade_sync_guard_ignored(
+                                        record_id,
+                                        "UPDATE",
+                                        persist_data,
+                                        "atomic_upsert_guard_noop",
+                                    )
+                                    return 'ignored'
                         logger.info(
                             "Sync merged by natural key fallback",
                             extra={
@@ -1190,8 +1453,29 @@ async def _apply_item(
                 if local_record_id is not None:
                     record_id = local_record_id
 
+                local_trade_for_delete_guard = None
+                if table == "trades":
+                    local_trade_for_delete_guard = await _load_trade_for_sync_guard(db, record_id, data)
+                    trade_guard_reason = _trade_sync_guard_reason_for_existing(
+                        local_trade_for_delete_guard,
+                        operation,
+                        data,
+                    )
+                    if trade_guard_reason:
+                        _log_trade_sync_guard_ignored(record_id, operation, data, trade_guard_reason)
+                        return 'ignored'
+
                 stmt = delete(model).where(model.id == record_id)
-                await db.execute(stmt, execution_options={"is_sync": True})
+                if table == "trades":
+                    stmt = stmt.where(model.status != TradeStatus.COMPLETED)
+                delete_result = await db.execute(stmt, execution_options={"is_sync": True})
+                if (
+                    table == "trades"
+                    and local_trade_for_delete_guard is not None
+                    and getattr(delete_result, "rowcount", None) == 0
+                ):
+                    _log_trade_sync_guard_ignored(record_id, operation, data, "atomic_delete_guard_noop")
+                    return 'ignored'
             return 'ok'
         except IntegrityError as e:
             logger.error(
@@ -1405,14 +1689,25 @@ async def receive_sync_data(
 
             try:
                 result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
-                if result == 'ok':
+                if result in {'ok', 'ignored'}:
                     processed_count += 1
                     if table == "users":
                         user_changes_applied = True
-                    completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
-                    if completed_trade_offer_id:
-                        completed_trade_offer_ids.append(completed_trade_offer_id)
-                    logger.info(f"✅ Sync Item Applied: {table}:{record_id} ({operation})")
+                    if result == 'ok':
+                        completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
+                        if completed_trade_offer_id:
+                            completed_trade_offer_ids.append(completed_trade_offer_id)
+                        logger.info(f"✅ Sync Item Applied: {table}:{record_id} ({operation})")
+                    else:
+                        logger.info(
+                            "Sync item ignored by guard",
+                            extra={
+                                "event": "sync.item_ignored",
+                                "table": table,
+                                "record_id": record_id,
+                                "operation": operation,
+                            },
+                        )
                 elif result == 'deferred':
                     deferred_items.append((table, operation, model, data, record_id))
                 else:
@@ -1435,14 +1730,25 @@ async def receive_sync_data(
             for table, operation, model, data, record_id in deferred_items:
                 try:
                     result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
-                    if result == 'ok':
+                    if result in {'ok', 'ignored'}:
                         processed_count += 1
                         if table == "users":
                             user_changes_applied = True
-                        completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
-                        if completed_trade_offer_id:
-                            completed_trade_offer_ids.append(completed_trade_offer_id)
-                        logger.info(f"✅ Deferred item applied: {table}:{record_id}")
+                        if result == 'ok':
+                            completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
+                            if completed_trade_offer_id:
+                                completed_trade_offer_ids.append(completed_trade_offer_id)
+                            logger.info(f"✅ Deferred item applied: {table}:{record_id}")
+                        else:
+                            logger.info(
+                                "Deferred sync item ignored by guard",
+                                extra={
+                                    "event": "sync.deferred_item_ignored",
+                                    "table": table,
+                                    "record_id": record_id,
+                                    "operation": operation,
+                                },
+                            )
                     else:
                         errors.append(f"{table}:{record_id} (deferred)")
                         logger.error(
