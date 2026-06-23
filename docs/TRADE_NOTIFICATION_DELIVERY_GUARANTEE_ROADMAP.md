@@ -58,6 +58,15 @@ The WebApp must show Telegram connection entry points only to bot-eligible users
 2. Admin users.
 3. Tier-1 customers after the tier-1 bot-access stage is enabled.
 
+Bot-eligible base roles must be explicit in backend policy and tests. Do not use a vague `role != WATCH` shortcut. The phase-1 role set is:
+
+- `STANDARD`
+- `POLICE`
+- `MIDDLE_MANAGER`
+- `SUPER_ADMIN`
+
+`WATCH` is WebApp-only for this flow unless a later explicit product decision changes its market/bot access.
+
 The WebApp must not show Telegram connection entry points to:
 
 1. Accountants.
@@ -105,6 +114,8 @@ Token rules:
 - Token must be single-use.
 - Creating a new token may revoke previous pending tokens for the same user.
 - Consuming the token and writing `User.telegram_id` should happen in one transaction on the foreign server.
+- Token consume must lock the token row and target user row with row-level locking before validation and mutation.
+- Before writing `User.telegram_id`, the consume path must explicitly check that the same `telegram_id` is not already linked to another live user; this check is in addition to any database uniqueness protection.
 - Token status changes must sync back for audit.
 - If token sync has not reached foreign yet, the bot should show a short "try again in a few moments" message rather than falling back to unsafe linking.
 
@@ -247,7 +258,9 @@ Engineering decision:
 
 Required idempotency key:
 
-- `event_type + trade_id + recipient_user_id + channel`
+- `event_type + trade_number + recipient_user_id + channel`
+
+`trade_id` remains a local foreign-key/lookup field, but it must not be the cross-server dedupe identity. `trade_number` is the stable cross-server trade identity.
 
 Claim protocol:
 
@@ -262,7 +275,7 @@ WebApp-specific rule:
 
 - Add a nullable `dedupe_key` column to `notifications`.
 - Add a partial unique index on `notifications.dedupe_key` where `dedupe_key IS NOT NULL`.
-- Trade-completion WebApp notifications must use `dedupe_key = trade_completed:webapp:{trade_id}:{recipient_user_id}`.
+- Trade-completion WebApp notifications must use `dedupe_key = trade_completed:webapp:{trade_number}:{recipient_user_id}`.
 - Existing non-trade or legacy notifications may keep `dedupe_key = NULL` and must not be affected by the new uniqueness rule.
 - Add nullable `extra_payload JSONB` to `notifications` so persisted notification history carries the same route/trade metadata as real-time notification payloads.
 - Trade-completion notification `extra_payload` must include at least `trade_id`, `trade_number`, `offer_id`, `route`, `counterparty_profile_user_id`, `counterparty_profile_account_name`, `recipient_role`, and `delivery_receipt_id` when those values are known.
@@ -302,21 +315,46 @@ Required fields:
 - `reason`, such as `linked_telegram`, `webapp_only_role`, `not_linked`, `accountant_webapp_only`, `tier2_webapp_only`
 - `notification_id`, nullable, for WebApp notification rows
 - `telegram_message_id`, nullable, if Telegram returns it
+- `worker_id`, nullable, local delivery worker identifier while processing
+- `lease_until`, nullable, local processing lease deadline
 - `attempt_count`
 - `next_retry_at`
 - `last_error`
 - `last_error_class`
+- `event_created_at`, the original trade/event time used for outage classification
 - `created_at`
 - `updated_at`
 - `sent_at`
+- `terminal_at`, nullable, when the receipt entered a terminal state
 
 Required uniqueness:
 
-- `event_type + trade_id + recipient_user_id + channel`
+- `event_type + trade_number + recipient_user_id + channel`
 
 This table is not required inside the trade transaction in the low-risk plan. It is generated from committed trades and can be regenerated if missing.
 
-Status rule:
+Receipt lifecycle state machine:
+
+| From | To | Rule |
+| --- | --- | --- |
+| missing | `pending` | receipt is derived from a committed trade and required channel |
+| missing | `not_required` | product/role/linking rules prove the channel is not required |
+| `pending` | `processing` | only via atomic claim for local `destination_server` |
+| `retry_pending` | `processing` | only when `next_retry_at` is due and local worker claims it |
+| `processing` | `sent` | side effect completed and durable result is recorded |
+| `processing` | `retry_pending` | temporary infrastructure failure or expired local lease recovery |
+| `processing` | `skipped` | terminal product/user-channel condition for this trade |
+| `processing` | `permanent_failed` | non-user fatal system/data error requiring alert/review |
+| `processing` | `pending` | allowed only by an explicit lease-recovery job for expired local leases |
+
+Forbidden transitions:
+
+- Any terminal state (`sent`, `skipped`, `not_required`, `permanent_failed`) must not move back to any non-terminal state.
+- Opposite-server sync data must not overwrite a local terminal state with `pending`, `processing`, or `retry_pending`.
+- `destination_server` must never change after receipt creation.
+- Manual/operator retry in a future phase must not mutate the original terminal receipt in place unless that future phase explicitly changes this rule.
+
+Status rules:
 
 - `permanent_failed` must not be used for user Telegram account problems, because the user may fix Telegram, reconnect the bot, or change the linked account later.
 - User Telegram account/chat delivery problems for the current trade must be marked `skipped`, not `retry_pending`.
@@ -337,11 +375,13 @@ Retention:
 
 Required phase-1 indexes:
 
-- unique: `event_type + trade_id + recipient_user_id + channel`
+- unique: `event_type + trade_number + recipient_user_id + channel`
 - queue scan: `destination_server + channel + status + next_retry_at`
 - audit lookup: `trade_number`
 - recipient history: `recipient_user_id + created_at`
 - partial queue index for active sendable states: `status IN ('pending', 'retry_pending', 'processing')`
+- lease recovery: `destination_server + channel + lease_until` where `status = 'processing'`
+- terminal cleanup: `created_at` where `status IN ('sent', 'skipped', 'not_required', 'permanent_failed')`
 
 Operational requirement:
 
@@ -441,6 +481,9 @@ Implementation decision:
 8. If both local and incoming trades are completed and business fields match, the sync item is idempotent and may be treated as success.
 9. The unique-violation natural-key fallback path for `trades` must call the same guard before updating by `trade_number`.
 10. Every ignored destructive trade sync event must increment/report a sync conflict metric with `table=trades` and a specific reason.
+11. The implementation must use two layers: a Python preflight guard for clear reason classification and an atomic PostgreSQL upsert/delete guard to close races between preflight read and write.
+12. The atomic upsert guard must make destructive updates to a local completed trade a no-op; if the sync execution returns `rowcount == 0`, it must be logged and metered as a trade sync guard no-op.
+13. The atomic delete guard must not delete a local completed trade even if the incoming sync item resolves by `id` or by `trade_number`.
 
 Required guard tests:
 
@@ -452,6 +495,8 @@ Required guard tests:
 - missing incoming completed trade is inserted
 - local non-completed trade can become completed from a valid incoming completed sync item
 - natural-key fallback by `trade_number` cannot bypass the guard
+- atomic upsert guard turns a raced destructive completed-trade update into a no-op and emits conflict metrics
+- atomic delete guard protects a completed trade even when public identity resolution maps to the local row
 
 This is safer and simpler than making notification delivery part of the hot trade transaction. The trade is first protected as a durable fact; then WebApp and Telegram delivery can be repaired from that fact.
 
@@ -470,10 +515,11 @@ Execution ownership:
 Sync conflict policy:
 
 1. Terminal states are monotonic: `sent`, `skipped`, `not_required`, and `permanent_failed` must not be overwritten by older non-terminal sync data.
-2. `processing` leases are local execution state and must not cause the opposite server to execute the receipt.
+2. `processing`, `worker_id`, and `lease_until` are local execution state. They may be persisted and visible for audit after sync, but they are authoritative only on the receipt's `destination_server`.
 3. If a synced receipt conflicts on the unique key, merge by the newest valid lifecycle update while preserving terminal-state precedence.
 4. `destination_server` must be treated as immutable after receipt creation.
 5. Retention cleanup should be coordinated through the normal sync path so rows older than the approved one-year retention window disappear consistently from both servers.
+6. A server must ignore opposite-server non-terminal lease fields for execution decisions. The only cross-server receipt state that can affect user-facing delivery is a valid lifecycle transition owned by the receipt's `destination_server`, with terminal precedence preserved.
 
 ## Latency Target
 
@@ -802,11 +848,33 @@ Exit criteria:
 - tier-1 customers can use the bot market capabilities allowed for full market access
 - tier-2 customers remain blocked from Telegram bot access
 - accountants remain blocked from Telegram bot access
+- bot-eligible base roles are explicit: `STANDARD`, `POLICE`, `MIDDLE_MANAGER`, and `SUPER_ADMIN`; `WATCH` remains WebApp-only for this flow unless later explicitly changed
 - bot eligibility is enforced by a shared backend policy, not only by frontend visibility or message text
 - the same policy gates WebApp link-token creation, bot account linking, bot menu/market visibility, bot offer creation, bot trade execution, and mandatory channel join handling
+- `/start` without a valid WebApp-issued `link_{token}` cannot start contact collection
+- direct `/link` cannot start contact collection and returns only the neutral low-information fallback if it remains reachable
+- token consume locks the token row and target user row before mutation
+- token consume pre-checks duplicate `telegram_id` ownership before writing it
 - disconnected customer users are not bot-eligible because the existing unlink flow soft-deletes them; any future access requires a new live account/relation created through the existing onboarding flows
 - tests prove tier-1 linked and unlinked delivery behavior
 - tests prove tier-1 bot trades keep the existing customer-owner trade path and do not allow direct customer-to-counterparty settlement
+
+### Stage A1: Completed Trade Sync Guard
+
+Protect committed completed trades before shadow reconciliation relies on them as durable delivery facts.
+
+Exit criteria:
+
+- `_trade_sync_guard_reason` exists and is called before `trades` upsert, natural-key fallback update, and delete
+- local trades are resolved by `trade_number` first, with local `id` only as a secondary lookup
+- Python preflight guard returns specific reasons for destructive completed-trade update/delete attempts
+- PostgreSQL atomic upsert/delete guard prevents race-window destructive changes even if preflight saw an older state
+- completed-trade destructive update/delete attempts are ignored, logged, and recorded through sync conflict metrics
+- duplicate completed trade sync with matching business fields is idempotent
+- missing incoming completed trade can still be inserted
+- local non-completed trade can transition to completed when the incoming completed sync item is valid
+- existing offer and offer_request stale/atomic guards are not weakened
+- tests cover preflight guard, atomic no-op guard, delete guard, and natural-key fallback guard paths
 
 ### Stage A: Read-Only Audience Builder
 
@@ -846,7 +914,10 @@ Exit criteria:
 - notification read APIs return `extra_payload`, or equivalent flattened metadata, for trade notifications
 - frontend history and real-time notification handling use one normalized notification schema
 - trade notification history keeps route, trade number, counterparty, and receipt metadata after refresh
-- WebApp trade notifications use `trade_completed:webapp:{trade_id}:{recipient_user_id}`
+- receipt uniqueness uses `event_type + trade_number + recipient_user_id + channel`
+- WebApp trade notifications use `trade_completed:webapp:{trade_number}:{recipient_user_id}`
+- receipt lifecycle transitions are enforced by a shared service or helper, not scattered string assignments
+- local lease fields (`processing`, `worker_id`, `lease_until`) cannot cause opposite-server execution or terminal-state rollback
 - existing notifications with null dedupe keys continue to work unchanged
 
 ### Stage C: Shadow Reconciliation
@@ -942,6 +1013,8 @@ Required tests:
 - WebApp-issued Telegram link token valid/expired/used/invalid cases
 - Telegram contact belongs to sender and phone matches WebApp account
 - Telegram contact from another Telegram user is rejected
+- token consume locks token and user rows and rejects duplicate `telegram_id` ownership
+- bot-eligible base role tests cover `STANDARD`, `POLICE`, `MIDDLE_MANAGER`, `SUPER_ADMIN`, and `WATCH`
 - `/start` without a valid `link_{token}` returns only the neutral low-information response
 - `/link` without a valid WebApp-issued token cannot start contact linking
 - WebApp offer plus WebApp request
@@ -959,6 +1032,9 @@ Required tests:
 - notification history after refresh preserves trade route, trade number, counterparty, and receipt metadata
 - real-time and history notifications use the same normalized frontend shape
 - idempotent trade replay with missing receipt or notification triggers repair instead of hiding the gap
+- receipt uniqueness and WebApp notification dedupe are based on `trade_number`, not local `trade_id`
+- receipt state machine blocks terminal-to-non-terminal transitions
+- opposite-server synced lease fields cannot trigger execution or terminal rollback
 - partial and full offers
 - concurrent requests on one offer
 - sync delay and recovery
@@ -996,15 +1072,17 @@ The trade path stays stable. The guarantee is added around it.
 ## Resolved Engineering Directions From Review
 
 1. `_trade_sync_guard_reason` must be implemented as a small deterministic guard in the sync receiver before trade upsert/delete execution. It must use existing local trade terminal state, incoming sync operation shape, and server authority metadata; it must not rely on ad hoc text matching, bypassable natural-key fallback, or broad exception handling. Existing `offers` and `offer_requests` guards stay intact and get only the minimal integration needed for consistent metrics/tests.
-2. Phase-1 receipt storage must use additive, reversible Alembic migrations with PostgreSQL-native constraints and indexes. Use no table partitioning in phase 1. Dedupe must be enforced with partial unique indexes where needed, receipt lookup/lease cleanup paths must have explicit indexes, and migration tests or schema inspection tests must verify the generated indexes and constraints.
-3. Future manual/operator retry is reserved as an audited operator capability, not as a phase-1 user-facing resend feature. If added later, it must reuse the same receipt claim/lease/destination ownership/idempotency path and must never bypass delivery guards or create direct duplicate sends.
-4. Telegram send failures caused by an unusable linked Telegram account must be non-terminal for the user identity and non-blocking for the application. They should be recorded on that trade delivery attempt, should not create an infinite pending backlog, and future trades should retry against the latest linked Telegram identity.
+2. The completed-trade sync guard must have both a Python preflight reason function and an atomic PostgreSQL write guard. Preflight gives explainable reasons and tests; the atomic guard closes race windows and turns destructive completed-trade writes into no-ops with conflict metrics.
+3. Phase-1 receipt storage must use additive, reversible Alembic migrations with PostgreSQL-native constraints and indexes. Use no table partitioning in phase 1. Receipt and WebApp notification dedupe must use `trade_number` as the cross-server identity; `trade_id` remains a local FK/lookup field only.
+4. Dedupe must be enforced with partial unique indexes where needed, receipt lookup/lease cleanup paths must have explicit indexes, and migration tests or schema inspection tests must verify the generated indexes and constraints.
+5. Future manual/operator retry is reserved as an audited operator capability, not as a phase-1 user-facing resend feature. If added later, prefer a separate event such as `trade_completed_operator_retry` instead of mutating the original terminal receipt in place. Any future retry must reuse the same receipt claim/lease/destination ownership/idempotency path and must never bypass delivery guards or create direct duplicate sends.
+6. Telegram send failures caused by an unusable linked Telegram account must be non-terminal for the user identity and non-blocking for the application. They should be recorded on that trade delivery attempt, should not create an infinite pending backlog, and future trades should retry against the latest linked Telegram identity.
+7. Account-link token consume must lock the token row and target user row, then pre-check duplicate `telegram_id` ownership before writing `User.telegram_id`.
+8. Bot eligibility must use an explicit backend role/customer/account status policy. The phase-1 base role set is `STANDARD`, `POLICE`, `MIDDLE_MANAGER`, and `SUPER_ADMIN`; `WATCH`, accountants, tier-2 customers, deleted users, inactive users, and market-blocked users are not bot-eligible.
 
 ## Remaining Engineering Design Work
 
-1. Specify the exact `_trade_sync_guard_reason` return contract, metrics labels, and sync receiver call site during implementation.
-2. Specify the exact Alembic revision contents for receipt tables, partial unique indexes, cleanup indexes, and downgrade behavior before coding the migration.
-3. Specify the future operator retry permission/audit shape only when that phase is explicitly requested; phase 1 must only keep the design compatible with it.
+No product-decision blocker remains for this roadmap. The next work is implementation-stage decomposition: convert the decisions above into stage-sized code tasks, migrations, tests, rollback notes, and staging verification gates before coding each stage.
 
 ## Non-Goals
 
