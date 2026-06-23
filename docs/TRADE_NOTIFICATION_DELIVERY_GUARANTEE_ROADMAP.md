@@ -43,6 +43,8 @@ These rules are fixed and should not be reopened without an explicit product dec
 9. Telegram linking is optional.
 10. A bot-eligible user who has not linked Telegram must still receive WebApp trade notifications, but no Telegram message can be required for that user until Telegram is linked.
 11. Product expectation is that almost all normal users and admins, and more than 80 percent of tier-1 customers after bot enablement, will link Telegram.
+12. If a tier-1 or tier-2 customer is disconnected by their owner/principal, the customer user account must be soft-deleted through the existing customer unlink lifecycle.
+13. A soft-deleted former customer may be added to the project again later as an accountant, customer, or normal user through the existing onboarding flows. Bot eligibility must be evaluated from the new live account/relation state, not from the old soft-deleted account.
 
 ## Telegram Account Linking Foundation
 
@@ -122,9 +124,9 @@ Direct `/link` without a WebApp-issued token must not remain as an account-linki
 Policy:
 
 - WebApp-to-bot account linking must always start from the WebApp-issued token link.
-- The bot may keep `/link` only as an informational command, but it must not expose product structure, WebApp details, roles, or connection mechanics to random users.
+- Direct `/link` should be removed or disabled as a user-facing linking command. If a stale deployment or Telegram client still sends `/link`, it must not start contact collection and must return only the same neutral low-information response as invalid `/start`.
 - `/start` without a valid `link_{token}` must not link an account based on phone number alone.
-- `/start` or `/link` without a valid token should return a neutral low-information message such as: "پس از تکمیل ثبت‌نام، بات را از مسیر اعلام‌شده شروع کنید."
+- `/start` without a valid token, and any stale `/link` fallback, should return a neutral low-information message such as: "پس از تکمیل ثبت‌نام، بات را از مسیر اعلام‌شده شروع کنید."
 - Sender-owned contact sharing remains mandatory after a valid token is accepted.
 
 ### Existing Users
@@ -262,6 +264,10 @@ WebApp-specific rule:
 - Add a partial unique index on `notifications.dedupe_key` where `dedupe_key IS NOT NULL`.
 - Trade-completion WebApp notifications must use `dedupe_key = trade_completed:webapp:{trade_id}:{recipient_user_id}`.
 - Existing non-trade or legacy notifications may keep `dedupe_key = NULL` and must not be affected by the new uniqueness rule.
+- Add nullable `extra_payload JSONB` to `notifications` so persisted notification history carries the same route/trade metadata as real-time notification payloads.
+- Trade-completion notification `extra_payload` must include at least `trade_id`, `trade_number`, `offer_id`, `route`, `counterparty_profile_user_id`, `counterparty_profile_account_name`, `recipient_role`, and `delivery_receipt_id` when those values are known.
+- Notification read APIs must return `extra_payload`, or equivalent flattened fields, so notification history after refresh behaves like real-time notifications.
+- Frontend notification history and real-time notification handling must normalize the same schema.
 - WebApp notification creation and receipt `sent` update must happen in one database transaction.
 - The existing generic notification helper commits internally and must not be used directly for receipt-backed idempotent trade delivery unless it is safely adapted.
 - Duplicate-key conflicts for the same trade WebApp notification must be treated as successful idempotent delivery after the existing notification row is loaded and linked to the receipt.
@@ -362,6 +368,7 @@ Post-commit receipt creation:
 4. If post-commit receipt creation fails, the reconciler must later discover the committed trade and create missing receipts.
 5. This keeps stable-path latency low without making notification delivery part of the trade transaction.
 6. Existing direct immediate side effects are replaced stage-by-stage by receipt-backed helpers before reconciler sending is enabled for that channel.
+7. If a trade request is replayed idempotently and the committed trade already exists, the route or reconciler must still repair missing receipts/notifications instead of hiding the delivery gap behind the replay response.
 
 ### 2. Iran WebApp Reconciler
 
@@ -499,6 +506,9 @@ Policy:
 3. During medium or long outage, each server sends only the messages it can deliver locally for the trades visible and authoritative on that server.
 4. Delivery receipts for skipped remote delivery after medium/long outage should be marked with an explicit terminal reason such as `expired_delivery_after_outage`.
 5. The exact outage classification must be based on the time between trade commit and visibility on the destination server.
+6. No user-facing old-trade report, WebApp notification, or Telegram message should be sent after medium/long outage recovery for these skipped remote deliveries.
+7. Passive trade history remains the source for old trades, similar to the bot behavior.
+8. Operational receipt/audit state may keep the skip reason for support investigation, but it must not create a user-facing report or notification.
 
 ## Failure Policy
 
@@ -614,6 +624,7 @@ Current risks and required changes:
 
 - `get_web_only_bot_access_reason` currently blocks every customer through `is_user_customer`. This must become tier-aware: tier-1 customers allowed after Stage A0, tier-2 customers still denied.
 - `core/services/customer_relation_service.py` currently has `get_active_customer_relation_for_customer` and `is_user_customer`, but no dedicated `is_tier1_customer` / `is_tier2_customer` helper. Add a small helper or use the active relation directly instead of changing customer trade rules.
+- The existing customer unlink flow soft-deletes active customer user accounts and marks the relation deleted. Bot eligibility must therefore use only the current non-deleted user plus current active relation state; old soft-deleted customer accounts are not eligible.
 - `bot/handlers/start.py` currently lets `/start` without a token call `prompt_contact_for_account_link` for unknown Telegram users. The new WebApp-issued token policy requires changing this to a neutral low-information response.
 - Direct `/link` currently starts contact linking for unknown users. It must stop being a linking path without a valid WebApp-issued token.
 - Existing invitation/customer/accountant token tables should not be reused for Telegram linking because invitation tokens represent registration/relation creation, while Telegram link tokens are short-lived, single-use account binding records.
@@ -670,6 +681,7 @@ Current risks and required changes:
 - Customer trades can create multiple trade rows from one visible action. Delivery receipts must be created per committed trade leg and recipient/channel, not from an invented aggregate unless explicitly designed later.
 - Accountants are included only for WebApp notifications through `build_trade_notification_audience_user_ids`; Telegram receipt generation must filter accountants as `not_required`.
 - Tier-1 customer bot access must preserve the existing owner/principal trade path. Tier-1 bot trades must not turn into direct settlement with the external counterparty when the existing customer path would route through the owner.
+- If a customer relation is disconnected, the existing service soft-deletes the customer user account. Future participation as accountant/customer/normal user must happen through a new live account/onboarding flow, so delivery/audience logic must not treat closed customer relations as active recipients.
 
 Existing tests to reuse/update:
 
@@ -691,13 +703,16 @@ Current risks and required changes:
 
 - `create_user_notification` commits internally. Receipt-backed WebApp delivery needs a no-auto-commit variant or a new idempotent helper so `Notification` creation and receipt `sent` update happen in one transaction.
 - Add nullable `notifications.dedupe_key` and partial unique index without changing existing non-trade notifications.
+- Add nullable `notifications.extra_payload JSONB` because the current helper merges `extra_payload` only into the real-time payload and does not persist it to notification history.
+- Notification history APIs currently expose only the base notification fields, so they must return persisted trade metadata before WebApp delivery can be considered user/support complete.
+- Frontend notification history and real-time notifications must be normalized from one shared shape so refresh does not remove route/trade/counterparty behavior.
 - The idempotent helper should still publish the same real-time event and unread count after the durable row exists.
 - Duplicate notification conflict on the same dedupe key must be treated as success after loading the existing row and linking/marking the receipt.
 
 Existing tests to reuse/update:
 
 - `tests/test_core_notifications_runtime.py`, `tests/test_notifications_router_reads.py`, `tests/test_notifications_router_mutations.py`, `tests/test_notifications_router_stream.py`, and frontend notification runtime tests cover current notification behavior.
-- Add focused tests for `dedupe_key` uniqueness, idempotent duplicate success, receipt/notification same-transaction behavior, and unchanged legacy null-dedupe notifications.
+- Add focused tests for `dedupe_key` uniqueness, persisted `extra_payload`, history/read API metadata, idempotent duplicate success, receipt/notification same-transaction behavior, and unchanged legacy null-dedupe notifications.
 
 ### Telegram private-message delivery
 
@@ -787,6 +802,9 @@ Exit criteria:
 - tier-1 customers can use the bot market capabilities allowed for full market access
 - tier-2 customers remain blocked from Telegram bot access
 - accountants remain blocked from Telegram bot access
+- bot eligibility is enforced by a shared backend policy, not only by frontend visibility or message text
+- the same policy gates WebApp link-token creation, bot account linking, bot menu/market visibility, bot offer creation, bot trade execution, and mandatory channel join handling
+- disconnected customer users are not bot-eligible because the existing unlink flow soft-deletes them; any future access requires a new live account/relation created through the existing onboarding flows
 - tests prove tier-1 linked and unlinked delivery behavior
 - tests prove tier-1 bot trades keep the existing customer-owner trade path and do not allow direct customer-to-counterparty settlement
 
@@ -824,6 +842,10 @@ Exit criteria:
 - table and index size metrics are observable
 - `notifications.dedupe_key` is added as nullable
 - a partial unique index protects non-null notification dedupe keys
+- `notifications.extra_payload JSONB` is added as nullable
+- notification read APIs return `extra_payload`, or equivalent flattened metadata, for trade notifications
+- frontend history and real-time notification handling use one normalized notification schema
+- trade notification history keeps route, trade number, counterparty, and receipt metadata after refresh
 - WebApp trade notifications use `trade_completed:webapp:{trade_id}:{recipient_user_id}`
 - existing notifications with null dedupe keys continue to work unchanged
 
@@ -833,6 +855,8 @@ Run reconcilers in dry-run or shadow mode.
 
 They should compute missing deliveries and log/report them without sending new messages.
 
+This stage is mandatory before any new reconciler performs real sending. It is the gate that proves expected delivery receipts, current immediate side-effect coverage, and duplicate risk before behavior changes.
+
 Exit criteria:
 
 - no production behavior change
@@ -841,6 +865,7 @@ Exit criteria:
 - report proves no completed trade is invisible to the reconciler because of sync conflict handling
 - report proves workers ignore receipts whose `destination_server` belongs to the other server
 - report compares immediate side-effect coverage against receipt/reconciler expectations without sending duplicates
+- report shows idempotent trade replays whose delivery receipts/notifications are missing and proves they can be repaired
 
 ### Stage D: WebApp Repair First
 
@@ -856,6 +881,7 @@ Exit criteria:
 - immediate WebApp trade notifications and WebApp reconciler repair both pass through the same idempotent delivery helper
 - the idempotent helper creates/loads the WebApp notification and marks the receipt `sent` in one transaction
 - direct calls to the generic auto-committing notification helper are not used for receipt-backed trade delivery
+- grep/static tests prove trade-completion paths no longer call the generic auto-committing helper directly except through the receipt-backed helper
 
 ### Stage E: Telegram Repair On Foreign
 
@@ -875,6 +901,7 @@ Exit criteria:
 - direct trade-route Telegram sends are removed/disabled before Telegram repair sends messages
 - the trade route only creates/upserts Telegram receipts and optionally wakes a local worker
 - only the foreign Telegram delivery worker claims receipts and sends Telegram private messages
+- grep/static tests prove trade-completion paths no longer call `_queue_trade_telegram_message` or `send_telegram_message_sync` directly after Telegram repair sending is enabled
 - if a worker crash creates an ambiguous Telegram-send state, duplicate-safe resend is preferred over silence
 - duplicate-safe resend text must briefly say that if the user already received the same trade message, the second copy can be ignored
 
@@ -915,6 +942,8 @@ Required tests:
 - WebApp-issued Telegram link token valid/expired/used/invalid cases
 - Telegram contact belongs to sender and phone matches WebApp account
 - Telegram contact from another Telegram user is rejected
+- `/start` without a valid `link_{token}` returns only the neutral low-information response
+- `/link` without a valid WebApp-issued token cannot start contact linking
 - WebApp offer plus WebApp request
 - WebApp offer plus Telegram request
 - Telegram offer plus WebApp request
@@ -927,6 +956,9 @@ Required tests:
 - customer-chain trades
 - Telegram id present but private message delivery fails because the Telegram user/account is unreachable; receipt becomes `skipped`, the app continues, and no backlog is created
 - Telegram account is fixed or changed after earlier skipped deliveries; only new trades after the fix send Telegram messages
+- notification history after refresh preserves trade route, trade number, counterparty, and receipt metadata
+- real-time and history notifications use the same normalized frontend shape
+- idempotent trade replay with missing receipt or notification triggers repair instead of hiding the gap
 - partial and full offers
 - concurrent requests on one offer
 - sync delay and recovery
@@ -937,6 +969,7 @@ Required tests:
 - worker crash before send
 - worker crash after send before `sent`
 - medium and long outage skip policy
+- medium/long outage recovery does not send old-trade WebApp reports, WebApp notifications, or Telegram messages
 - one-year receipt retention and cleanup guard behavior
 
 ## Why This Can Satisfy The User Requirements
@@ -954,13 +987,24 @@ Therefore, under stable connectivity and healthy workers, missing delivery is re
 
 The trade path stays stable. The guarantee is added around it.
 
-## Remaining Open Questions
+## Resolved Product Decisions From Review
 
-1. What exact code shape should implement `_trade_sync_guard_reason` in the sync receiver while keeping the existing `offers` and `offer_requests` guards unchanged?
-2. What exact Persian wording and styling should be used for the neutral low-information `/start` or `/link` response without a valid WebApp-issued token?
-3. What exact Alembic/index syntax should be used for the approved phase-1 no-partition, one-year-retention receipt table design?
-4. What exact operator-only retry mechanism should be reserved for a future phase?
-5. How should the UI/report label medium/long-outage skipped remote deliveries so support can explain why no opposite-server message was sent?
+1. When a tier-1 or tier-2 customer is disconnected by their owner/principal, the existing behavior remains authoritative: the customer user account is soft-deleted and the relation is closed. The same person may later be added again as an accountant, customer, or normal user through existing onboarding flows.
+2. Medium/long outage recovery must not send old-trade reports or notifications to users. Old trades remain visible through passive history where applicable, and operational audit/receipt state may retain the skip reason without creating user-facing messages.
+3. The neutral no-token bot response must reveal no project structure, role model, WebApp mechanics, token policy, or market details to random Telegram users. The accepted baseline copy is: "پس از تکمیل ثبت‌نام، بات را از مسیر اعلام‌شده شروع کنید." This is understandable enough for real project users and ambiguous for outsiders.
+
+## Resolved Engineering Directions From Review
+
+1. `_trade_sync_guard_reason` must be implemented as a small deterministic guard in the sync receiver before trade upsert/delete execution. It must use existing local trade terminal state, incoming sync operation shape, and server authority metadata; it must not rely on ad hoc text matching, bypassable natural-key fallback, or broad exception handling. Existing `offers` and `offer_requests` guards stay intact and get only the minimal integration needed for consistent metrics/tests.
+2. Phase-1 receipt storage must use additive, reversible Alembic migrations with PostgreSQL-native constraints and indexes. Use no table partitioning in phase 1. Dedupe must be enforced with partial unique indexes where needed, receipt lookup/lease cleanup paths must have explicit indexes, and migration tests or schema inspection tests must verify the generated indexes and constraints.
+3. Future manual/operator retry is reserved as an audited operator capability, not as a phase-1 user-facing resend feature. If added later, it must reuse the same receipt claim/lease/destination ownership/idempotency path and must never bypass delivery guards or create direct duplicate sends.
+4. Telegram send failures caused by an unusable linked Telegram account must be non-terminal for the user identity and non-blocking for the application. They should be recorded on that trade delivery attempt, should not create an infinite pending backlog, and future trades should retry against the latest linked Telegram identity.
+
+## Remaining Engineering Design Work
+
+1. Specify the exact `_trade_sync_guard_reason` return contract, metrics labels, and sync receiver call site during implementation.
+2. Specify the exact Alembic revision contents for receipt tables, partial unique indexes, cleanup indexes, and downgrade behavior before coding the migration.
+3. Specify the future operator retry permission/audit shape only when that phase is explicitly requested; phase 1 must only keep the design compatible with it.
 
 ## Non-Goals
 
