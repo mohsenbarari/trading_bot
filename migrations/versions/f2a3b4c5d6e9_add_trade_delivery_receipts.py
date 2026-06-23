@@ -16,12 +16,13 @@ branch_labels = None
 depends_on = None
 
 
-trade_delivery_channel = sa.Enum(
+trade_delivery_channel = postgresql.ENUM(
     "webapp",
     "telegram",
     name="tradedeliverychannel",
+    create_type=False,
 )
-trade_delivery_receipt_status = sa.Enum(
+trade_delivery_receipt_status = postgresql.ENUM(
     "pending",
     "processing",
     "retry_pending",
@@ -30,10 +31,33 @@ trade_delivery_receipt_status = sa.Enum(
     "not_required",
     "permanent_failed",
     name="tradedeliveryreceiptstatus",
+    create_type=False,
 )
 
 
 def upgrade() -> None:
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tradedeliverychannel') THEN
+                CREATE TYPE tradedeliverychannel AS ENUM ('webapp', 'telegram');
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tradedeliveryreceiptstatus') THEN
+                CREATE TYPE tradedeliveryreceiptstatus AS ENUM (
+                    'pending',
+                    'processing',
+                    'retry_pending',
+                    'sent',
+                    'skipped',
+                    'not_required',
+                    'permanent_failed'
+                );
+            END IF;
+        END
+        $$;
+        """
+    )
     op.add_column("notifications", sa.Column("dedupe_key", sa.String(length=180), nullable=True))
     op.add_column("notifications", sa.Column("extra_payload", postgresql.JSONB(astext_type=sa.Text()), nullable=True))
     op.create_index(
@@ -159,8 +183,8 @@ def downgrade() -> None:
     op.drop_index("ix_trade_delivery_receipts_trade_id", table_name="trade_delivery_receipts")
     op.drop_index(op.f("ix_trade_delivery_receipts_id"), table_name="trade_delivery_receipts")
     op.drop_table("trade_delivery_receipts")
-    trade_delivery_receipt_status.drop(op.get_bind(), checkfirst=True)
-    trade_delivery_channel.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS tradedeliveryreceiptstatus")
+    op.execute("DROP TYPE IF EXISTS tradedeliverychannel")
 
     op.drop_index("ix_notifications_extra_payload_gin", table_name="notifications")
     op.drop_index("ux_notifications_dedupe_key_not_null", table_name="notifications")

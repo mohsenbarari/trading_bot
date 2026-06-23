@@ -7,6 +7,7 @@ Create Date: 2026-06-23 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "f1a2b3c4d5e8"
@@ -15,17 +16,28 @@ branch_labels = None
 depends_on = None
 
 
-telegram_link_token_status = sa.Enum(
+telegram_link_token_status = postgresql.ENUM(
     "pending",
     "used",
     "revoked",
     "expired",
     name="telegramlinktokenstatus",
+    create_type=False,
 )
 
 
 def upgrade() -> None:
-    telegram_link_token_status.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'telegramlinktokenstatus') THEN
+                CREATE TYPE telegramlinktokenstatus AS ENUM ('pending', 'used', 'revoked', 'expired');
+            END IF;
+        END
+        $$;
+        """
+    )
     op.create_table(
         "telegram_link_tokens",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -61,4 +73,4 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_telegram_link_tokens_token_hash"), table_name="telegram_link_tokens")
     op.drop_index(op.f("ix_telegram_link_tokens_id"), table_name="telegram_link_tokens")
     op.drop_table("telegram_link_tokens")
-    telegram_link_token_status.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS telegramlinktokenstatus")
