@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import subprocess
@@ -88,6 +89,7 @@ class TargetedJoinScenario:
 @dataclass(frozen=True)
 class ActorFixture:
     source_actor_id: int
+    source_actor_telegram_id: int | None
     responder_actor_id: int
     source_principal_id: int
     responder_principal_id: int
@@ -257,13 +259,47 @@ def scenario_account_prefix(prefix: str, scenario: TargetedJoinScenario) -> str:
     return safe_key(f"{prefix}{scenario.scenario_id}_{scenario.actor_pair_id}", max_length=54)
 
 
-def phone_for(index: int, offset: int) -> str:
-    seed = 300_000_000 + index * 100 + offset
+def prefix_identity_bucket(prefix: str, *, attempt: int = 0) -> int:
+    digest = hashlib.blake2s(str(prefix).encode("utf-8"), digest_size=4).hexdigest()
+    return (int(digest, 16) + attempt * 7919) % 80_000
+
+
+def matrix_run_key(prefix: str) -> str:
+    return hashlib.blake2s(str(prefix).encode("utf-8"), digest_size=5).hexdigest()
+
+
+def phone_for(prefix: str, index: int, offset: int, *, attempt: int = 0) -> str:
+    seed = 100_000_000 + prefix_identity_bucket(prefix, attempt=attempt) * 10_000 + index * 40 + offset
     return f"09{seed:09d}"[-11:]
 
 
-def telegram_id_for(index: int, offset: int) -> int:
-    return 9_300_000_000 + index * 100 + offset
+def telegram_id_for(prefix: str, index: int, offset: int, *, attempt: int = 0) -> int:
+    return 9_300_000_000 + prefix_identity_bucket(prefix, attempt=attempt) * 10_000 + index * 40 + offset
+
+
+async def available_fixture_identity(
+    db: AsyncSession,
+    *,
+    prefix: str,
+    scenario_index: int,
+    offset: int,
+    telegram_linked: bool,
+) -> tuple[str, int | None]:
+    for attempt in range(10):
+        mobile_number = phone_for(prefix, scenario_index, offset, attempt=attempt)
+        telegram_id = telegram_id_for(prefix, scenario_index, offset, attempt=attempt) if telegram_linked else None
+        existing_mobile = await db.scalar(select(User.id).where(User.mobile_number == mobile_number).limit(1))
+        if existing_mobile is not None:
+            continue
+        if telegram_id is not None:
+            existing_telegram = await db.scalar(select(User.id).where(User.telegram_id == telegram_id).limit(1))
+            if existing_telegram is not None:
+                continue
+        return mobile_number, telegram_id
+    raise RuntimeError(
+        "could_not_allocate_unique_targeted_join_identity "
+        f"prefix={prefix!r} scenario_index={scenario_index} offset={offset}"
+    )
 
 
 def user_home_for_surface(surface: str) -> str:
@@ -273,6 +309,7 @@ def user_home_for_surface(surface: str) -> str:
 async def create_fixture_user(
     db: AsyncSession,
     *,
+    prefix: str,
     account_prefix: str,
     scenario_index: int,
     offset: int,
@@ -280,10 +317,16 @@ async def create_fixture_user(
     home_server: str,
     telegram_linked: bool = True,
 ) -> User:
-    telegram_id = telegram_id_for(scenario_index, offset) if telegram_linked else None
+    mobile_number, telegram_id = await available_fixture_identity(
+        db,
+        prefix=prefix,
+        scenario_index=scenario_index,
+        offset=offset,
+        telegram_linked=telegram_linked,
+    )
     user = User(
         account_name=f"{account_prefix}_{label}"[:96],
-        mobile_number=phone_for(scenario_index, offset),
+        mobile_number=mobile_number,
         telegram_id=telegram_id,
         username=f"{account_prefix}_{label}"[:96],
         full_name=f"{label} {scenario_index}",
@@ -346,6 +389,7 @@ async def create_accountant_relation(
 ) -> User:
     accountant = await create_fixture_user(
         db,
+        prefix=account_prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=offset,
@@ -382,6 +426,7 @@ async def build_actor_fixture(
     account_prefix = scenario_account_prefix(prefix, scenario)
     source_user = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=1,
@@ -390,6 +435,7 @@ async def build_actor_fixture(
     )
     responder_user = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=2,
@@ -398,6 +444,7 @@ async def build_actor_fixture(
     )
     shared_owner = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=3,
@@ -406,6 +453,7 @@ async def build_actor_fixture(
     )
     source_owner = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=4,
@@ -414,6 +462,7 @@ async def build_actor_fixture(
     )
     responder_owner = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=5,
@@ -422,6 +471,7 @@ async def build_actor_fixture(
     )
     source_customer = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=6,
@@ -430,6 +480,7 @@ async def build_actor_fixture(
     )
     responder_customer = await create_fixture_user(
         db,
+        prefix=prefix,
         account_prefix=account_prefix,
         scenario_index=scenario_index,
         offset=7,
@@ -500,6 +551,7 @@ async def build_actor_fixture(
     await db.commit()
     return ActorFixture(
         source_actor_id=int(source_actor.id),
+        source_actor_telegram_id=int(source_actor.telegram_id) if source_actor.telegram_id is not None else None,
         responder_actor_id=int(responder_actor.id),
         source_principal_id=int(source_principal.id),
         responder_principal_id=int(responder_principal.id),
@@ -521,7 +573,7 @@ async def create_scenario_offer(
         origin=origin,
         owner=worker.LoadUserRef(
             user_id=fixture.source_actor_id,
-            telegram_id=telegram_id_for(scenario_index, 6 if scenario.source_kind != "user" else 1),
+            telegram_id=fixture.source_actor_telegram_id,
         ),
         commodity_id=commodity_id,
         commodity_name=commodity_name,
@@ -540,6 +592,7 @@ async def execute_scenario_trade(
     fixture: ActorFixture,
     offer_id: int,
     scenario_index: int,
+    prefix: str,
 ) -> dict[str, Any]:
     source_surface = (
         OfferRequestSourceSurface.TELEGRAM_BOT
@@ -560,7 +613,7 @@ async def execute_scenario_trade(
                 trade_data=trades_router.TradeCreate(
                     offer_id=offer_id,
                     quantity=market_matrix.SHAPES["wholesale_full"].request_amount,
-                    idempotency_key=f"tdj:{scenario.scenario_id}:{scenario_index}",
+                    idempotency_key=f"tdj:{matrix_run_key(prefix)}:{scenario.scenario_id}:{scenario_index}",
                 ),
                 background_tasks=background_tasks,
                 db=db,
@@ -838,6 +891,7 @@ async def execute_scenario(
                 fixture=fixture,
                 offer_id=offer_id,
                 scenario_index=scenario_index,
+                prefix=prefix,
             )
             delivery_result = await repair_and_collect_delivery(
                 scenario=scenario,

@@ -110,6 +110,26 @@ class TradeDeliveryTargetedJoinMatrixTests(unittest.TestCase):
             self.assertEqual(targeted_matrix.run_git_value(["rev-parse", "HEAD"]), "abc123")
             self.assertIsNone(targeted_matrix.run_git_value(["status", "--short"]))
 
+    def test_fixture_identity_depends_on_matrix_prefix_and_retry_attempt(self):
+        first_phone = targeted_matrix.phone_for("P7_STAGE_FIRST_", 1, 1)
+        second_phone = targeted_matrix.phone_for("P7_STAGE_SECOND_", 1, 1)
+        retry_phone = targeted_matrix.phone_for("P7_STAGE_FIRST_", 1, 1, attempt=1)
+
+        self.assertRegex(first_phone, r"^09\d{9}$")
+        self.assertNotEqual(first_phone, second_phone)
+        self.assertNotEqual(first_phone, retry_phone)
+        self.assertNotEqual(
+            targeted_matrix.telegram_id_for("P7_STAGE_FIRST_", 1, 1),
+            targeted_matrix.telegram_id_for("P7_STAGE_SECOND_", 1, 1),
+        )
+
+    def test_matrix_run_key_keeps_targeted_join_idempotency_run_scoped(self):
+        first_key = f"tdj:{targeted_matrix.matrix_run_key('P7_STAGE_FIRST_')}:TDN-001:1"
+        second_key = f"tdj:{targeted_matrix.matrix_run_key('P7_STAGE_SECOND_')}:TDN-001:1"
+
+        self.assertLessEqual(len(first_key), 64)
+        self.assertNotEqual(first_key, second_key)
+
 
 if __name__ == "__main__":
     unittest.main()
