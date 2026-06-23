@@ -680,7 +680,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"🔢 شماره معامله: {new_trade.trade_number}", tier2_notification_message)
         self.assertIn("🕐 زمان معامله:", tier2_notification_message)
         self.assertNotIn("|", tier2_notification_message)
-        self.assertNotIn("👤 طرف معامله:", tier2_notification_message)
+        self.assertIn("👤 طرف معامله: owner", tier2_notification_message)
         self.assertIn("👤 طرف معامله: tier2_customer", owner_notification_message)
         counter_mock.assert_not_awaited()
         self.assertEqual(customer_user.trades_count, 1)

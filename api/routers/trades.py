@@ -1248,6 +1248,35 @@ def _recipient_is_customer(
     }
 
 
+def _recipient_customer_owner_user_id(
+    audience_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> int | None:
+    if audience_user_id is None or not customer_relation_map:
+        return None
+    relation = customer_relation_map.get(audience_user_id)
+    if relation is None:
+        return None
+    if not _recipient_is_customer(audience_user_id, customer_relation_map):
+        return None
+    return _coerce_trade_user_id(getattr(relation, "owner_user_id", None))
+
+
+def _should_hide_counterparty_for_recipient(
+    *,
+    audience_user_id: int | None,
+    counterparty_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> bool:
+    owner_user_id = _recipient_customer_owner_user_id(audience_user_id, customer_relation_map)
+    if owner_user_id is None:
+        return False
+    normalized_counterparty_user_id = _coerce_trade_user_id(counterparty_user_id)
+    if normalized_counterparty_user_id is None:
+        return True
+    return normalized_counterparty_user_id != owner_user_id
+
+
 def _normalize_offer_notes_for_notification(offer_notes: str | None) -> str | None:
     normalized = " ".join(str(offer_notes or "").split())
     return normalized or None
@@ -1265,6 +1294,7 @@ def _build_trade_notification_message(
     counterparty_name: str | None,
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    counterparty_user_id: int | None = None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
 ) -> str:
@@ -1274,7 +1304,11 @@ def _build_trade_notification_message(
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
     ]
-    if counterparty_name and not _recipient_is_customer(audience_user_id, customer_relation_map):
+    if counterparty_name and not _should_hide_counterparty_for_recipient(
+        audience_user_id=audience_user_id,
+        counterparty_user_id=counterparty_user_id,
+        customer_relation_map=customer_relation_map,
+    ):
         lines.append(f"👤 طرف معامله: {counterparty_name}")
     lines.append(f"🔢 شماره معامله: {trade_number}")
     lines.append(f"🕐 زمان معامله: {trade_datetime}")
@@ -2955,6 +2989,7 @@ async def _execute_trade_authoritatively(
         trade_price: int,
         trade_number: int,
         counterparty_name: str | None,
+        counterparty_user_id: int | None,
         trade_path_summary: str | None,
         offer_notes: str | None,
         extra_payload: dict[str, object | None],
@@ -2969,6 +3004,7 @@ async def _execute_trade_authoritatively(
                 trade_number=trade_number,
                 trade_datetime=trade_datetime,
                 counterparty_name=counterparty_name,
+                counterparty_user_id=counterparty_user_id,
                 audience_user_id=audience_user_id,
                 customer_relation_map=participant_customer_relation_map,
                 trade_path_summary=trade_path_summary,
@@ -3069,6 +3105,7 @@ async def _execute_trade_authoritatively(
                     trade_price=getattr(leg_trade_obj, "price", offer.price),
                     trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     counterparty_name=leg_offer_payload.get("offer_user_name") or "نامشخص",
+                    counterparty_user_id=_coerce_trade_user_id(getattr(leg_trade_obj, "offer_user_id", None)),
                     trade_path_summary=leg_trade_path_summary,
                     offer_notes=getattr(offer, "notes", None),
                     extra_payload=_build_trade_notification_extra_payload(
@@ -3084,6 +3121,7 @@ async def _execute_trade_authoritatively(
                     trade_price=getattr(leg_trade_obj, "price", offer.price),
                     trade_number=getattr(leg_trade_obj, "trade_number", response_trade_number),
                     counterparty_name=leg_responder_payload.get("responder_user_name") or "نامشخص",
+                    counterparty_user_id=_coerce_trade_user_id(getattr(leg_trade_obj, "responder_user_id", None)),
                     trade_path_summary=leg_trade_path_summary,
                     offer_notes=getattr(offer, "notes", None),
                     extra_payload=_build_trade_notification_extra_payload(
@@ -3131,6 +3169,9 @@ async def _execute_trade_authoritatively(
                 trade_price=executed_trade_price,
                 trade_number=response_trade_number,
                 counterparty_name=offer_user_display_name,
+                counterparty_user_id=_coerce_trade_user_id(
+                    getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id
+                ),
                 trade_path_summary=_build_trade_path_payload(
                     offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
                     responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
@@ -3146,6 +3187,9 @@ async def _execute_trade_authoritatively(
                 trade_price=executed_trade_price,
                 trade_number=response_trade_number,
                 counterparty_name=responder_user_display_name,
+                counterparty_user_id=_coerce_trade_user_id(
+                    getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id
+                ),
                 trade_path_summary=_build_trade_path_payload(
                     offer_user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
                     responder_user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,

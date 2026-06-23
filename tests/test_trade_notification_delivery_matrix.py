@@ -219,13 +219,14 @@ class TradeNotificationDeliveryMatrixTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(telegram.reason, "accountant_webapp_only")
             return
         if relation is not None:
-            self.assertNotIn("طرف معامله", webapp.message)
+            owner_name = context.users[relation.owner_user_id].account_name
+            self.assertIn(f"طرف معامله: {owner_name}", webapp.message)
             if relation.customer_tier == CustomerTier.TIER_2:
                 self.assertFalse(telegram.required)
                 self.assertEqual(telegram.reason, "customer_tier2")
                 return
             self.assertTrue(telegram.required)
-            self.assertNotIn("طرف معامله", telegram.message)
+            self.assertIn(f"طرف معامله: {owner_name}", telegram.message)
             return
 
         self.assertTrue(telegram.required)

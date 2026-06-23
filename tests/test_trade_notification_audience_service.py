@@ -184,11 +184,11 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(built.result.trade_path_kind, "owner_customer_tier1")
         self.assertEqual(customer_recipient.extra_payload["trade_path_summary"], "مالک ↔ مشتری سطح ۱")
         self.assertTrue(channel(customer_recipient, "telegram").required)
-        self.assertNotIn("طرف معامله", customer_recipient.webapp_message)
+        self.assertIn("طرف معامله: owner", customer_recipient.webapp_message)
         self.assertIn("<b>", channel(customer_recipient, "telegram").message)
-        self.assertNotIn("طرف معامله", channel(customer_recipient, "telegram").message)
+        self.assertIn("طرف معامله: owner", channel(customer_recipient, "telegram").message)
 
-    async def test_tier2_customer_is_webapp_only_and_counterparty_is_suppressed(self):
+    async def test_tier2_customer_is_webapp_only_and_owner_counterparty_is_visible(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)
         customer = make_user(40, account_name="tier2", telegram_id=9040)
         trade = make_trade(offer_user=owner, responder_user=customer)
@@ -213,7 +213,7 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(channel(customer_recipient, "webapp").required)
         self.assertFalse(channel(customer_recipient, "telegram").required)
         self.assertEqual(channel(customer_recipient, "telegram").reason, "customer_tier2")
-        self.assertNotIn("طرف معامله", customer_recipient.webapp_message)
+        self.assertIn("طرف معامله: owner", customer_recipient.webapp_message)
 
     async def test_accountant_monitoring_recipient_is_webapp_only(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)

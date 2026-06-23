@@ -430,6 +430,111 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(customer_view_response.counterparty_name)
         self.assertFalse(customer_view_response.customer_context_visible)
 
+        customer_to_owner_trade = SimpleNamespace(
+            id=3,
+            trade_number=10003,
+            offer_id=16,
+            trade_type=SimpleNamespace(value="buy"),
+            commodity_id=7,
+            commodity=SimpleNamespace(name="Coin"),
+            quantity=5,
+            price=83000,
+            status=SimpleNamespace(value="completed"),
+            offer_user_id=11,
+            offer_user=SimpleNamespace(account_name="customer-account"),
+            responder_user_id=22,
+            responder_user=SimpleNamespace(account_name="owner-account"),
+            actor_user_id=11,
+            created_at=datetime(2025, 1, 3, tzinfo=timezone.utc),
+        )
+        owner_to_customer_trade = SimpleNamespace(
+            id=4,
+            trade_number=10004,
+            offer_id=17,
+            trade_type=SimpleNamespace(value="sell"),
+            commodity_id=7,
+            commodity=SimpleNamespace(name="Coin"),
+            quantity=6,
+            price=84000,
+            status=SimpleNamespace(value="completed"),
+            offer_user_id=22,
+            offer_user=SimpleNamespace(account_name="owner-account"),
+            responder_user_id=11,
+            responder_user=SimpleNamespace(account_name="customer-account"),
+            actor_user_id=11,
+            created_at=datetime(2025, 1, 4, tzinfo=timezone.utc),
+        )
+        for tier, expected_path_kind, expected_summary in (
+            (CustomerTier.TIER_1, "owner_customer_tier1", "مالک ↔ مشتری سطح ۱"),
+            (CustomerTier.TIER_2, "owner_customer_tier2", "مالک ↔ مشتری سطح ۲"),
+        ):
+            with self.subTest(customer_history_tier=tier.value):
+                customer_owner_response = trades.trade_to_response(
+                    customer_to_owner_trade,
+                    identity_map={
+                        22: SimpleNamespace(
+                            display_name="سرگروه مشتری",
+                            profile_user_id=22,
+                            profile_account_name="owner-22",
+                            resolved_from_accountant_id=None,
+                            highlight_accountant_user_id=None,
+                            highlight_accountant_relation_display_name=None,
+                        ),
+                    },
+                    customer_relation_map={
+                        11: SimpleNamespace(
+                            owner_user_id=22,
+                            customer_tier=tier,
+                            management_name="مشتری واسط",
+                        ),
+                    },
+                    viewer_context=SimpleNamespace(
+                        owner_user=SimpleNamespace(id=11, role=None),
+                        actor_user=SimpleNamespace(id=11, role=None),
+                        relation=None,
+                        is_accountant_context=False,
+                    ),
+                    history_target_user_id=11,
+                )
+                self.assertEqual(customer_owner_response.counterparty_user_id, 22)
+                self.assertEqual(customer_owner_response.counterparty_name, "سرگروه مشتری")
+                self.assertEqual(customer_owner_response.trade_path_kind, expected_path_kind)
+                self.assertEqual(customer_owner_response.trade_path_summary, expected_summary)
+                self.assertFalse(customer_owner_response.customer_context_visible)
+
+                owner_customer_response = trades.trade_to_response(
+                    owner_to_customer_trade,
+                    identity_map={
+                        22: SimpleNamespace(
+                            display_name="سرگروه مشتری",
+                            profile_user_id=22,
+                            profile_account_name="owner-22",
+                            resolved_from_accountant_id=None,
+                            highlight_accountant_user_id=None,
+                            highlight_accountant_relation_display_name=None,
+                        ),
+                    },
+                    customer_relation_map={
+                        11: SimpleNamespace(
+                            owner_user_id=22,
+                            customer_tier=tier,
+                            management_name="مشتری واسط",
+                        ),
+                    },
+                    viewer_context=SimpleNamespace(
+                        owner_user=SimpleNamespace(id=11, role=None),
+                        actor_user=SimpleNamespace(id=11, role=None),
+                        relation=None,
+                        is_accountant_context=False,
+                    ),
+                    history_target_user_id=11,
+                )
+                self.assertEqual(owner_customer_response.counterparty_user_id, 22)
+                self.assertEqual(owner_customer_response.counterparty_name, "سرگروه مشتری")
+                self.assertEqual(owner_customer_response.trade_path_kind, expected_path_kind)
+                self.assertEqual(owner_customer_response.trade_path_summary, expected_summary)
+                self.assertFalse(owner_customer_response.customer_context_visible)
+
         event_payload = trades._build_trade_created_event_payload(
             trade_id=91,
             trade_number=10002,

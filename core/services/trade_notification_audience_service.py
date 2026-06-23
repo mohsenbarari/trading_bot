@@ -276,6 +276,35 @@ def _recipient_is_customer(
     }
 
 
+def _recipient_customer_owner_user_id(
+    audience_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> int | None:
+    if audience_user_id is None or not customer_relation_map:
+        return None
+    relation = customer_relation_map.get(audience_user_id)
+    if relation is None:
+        return None
+    if not _recipient_is_customer(audience_user_id, customer_relation_map):
+        return None
+    return _coerce_user_id(getattr(relation, "owner_user_id", None))
+
+
+def _should_hide_counterparty_for_recipient(
+    *,
+    audience_user_id: int | None,
+    counterparty_user_id: int | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> bool:
+    owner_user_id = _recipient_customer_owner_user_id(audience_user_id, customer_relation_map)
+    if owner_user_id is None:
+        return False
+    normalized_counterparty_user_id = _coerce_user_id(counterparty_user_id)
+    if normalized_counterparty_user_id is None:
+        return True
+    return normalized_counterparty_user_id != owner_user_id
+
+
 def _build_trade_notification_message(
     *,
     trade_emoji: str,
@@ -288,6 +317,7 @@ def _build_trade_notification_message(
     counterparty_name: str | None,
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+    counterparty_user_id: int | None = None,
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
 ) -> str:
@@ -297,7 +327,11 @@ def _build_trade_notification_message(
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
     ]
-    if counterparty_name and not _recipient_is_customer(audience_user_id, customer_relation_map):
+    if counterparty_name and not _should_hide_counterparty_for_recipient(
+        audience_user_id=audience_user_id,
+        counterparty_user_id=counterparty_user_id,
+        customer_relation_map=customer_relation_map,
+    ):
         lines.append(f"👤 طرف معامله: {counterparty_name}")
     lines.append(f"🔢 شماره معامله: {trade_number}")
     lines.append(f"🕐 زمان معامله: {trade_datetime}")
@@ -598,6 +632,7 @@ async def build_trade_completion_notification_audience(
                 trade_number=int(trade_number or 0),
                 trade_datetime=trade_datetime,
                 counterparty_name=str(side_spec["counterparty_name"]),
+                counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
                 audience_user_id=audience_user_id,
                 customer_relation_map=customer_relation_map,
                 trade_path_summary=trade_path_payload.get("trade_path_summary"),
@@ -618,6 +653,11 @@ async def build_trade_completion_notification_audience(
             if telegram_requirement.required:
                 telegram_message = str(side_spec["telegram_message"])
                 if _recipient_is_customer(audience_user_id, customer_relation_map):
+                    hide_counterparty = _should_hide_counterparty_for_recipient(
+                        audience_user_id=audience_user_id,
+                        counterparty_user_id=_coerce_user_id(side_spec["counterparty_user_id"]),
+                        customer_relation_map=customer_relation_map,
+                    )
                     telegram_message = _build_trade_telegram_message(
                         trade_emoji=str(side_spec["trade_emoji"]),
                         trade_type_label=str(side_spec["trade_label"]),
@@ -627,7 +667,7 @@ async def build_trade_completion_notification_audience(
                         trade_number=int(trade_number or 0),
                         trade_datetime=trade_datetime,
                         counterparty_name=str(side_spec["counterparty_name"]),
-                        hide_counterparty=True,
+                        hide_counterparty=hide_counterparty,
                         trade_path_summary=trade_path_payload.get("trade_path_summary"),
                         offer_notes=_offer_notes(trade),
                     )

@@ -156,7 +156,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
         ),
         ValidationScenario(
             scenario_id="TDV-005",
-            title="Tier 1 customers keep owner-path delivery, linked Telegram access, and counterparty suppression",
+            title="Tier 1 customers keep owner-path delivery, linked Telegram access, and see their owner as counterparty",
             dimensions=("role:customer_tier1", "link_state:linked", "server:any", "channel:both", "outage:stable"),
             coverage_refs=(
                 CoverageRef(
@@ -168,16 +168,16 @@ def build_validation_matrix() -> list[ValidationScenario]:
         ),
         ValidationScenario(
             scenario_id="TDV-006",
-            title="Tier 2 customers remain WebApp-only and counterparty-suppressed",
+            title="Tier 2 customers remain WebApp-only and see their owner as counterparty",
             dimensions=("role:customer_tier2", "link_state:not_applicable", "server:any", "channel:webapp", "outage:stable"),
             coverage_refs=(
                 CoverageRef(
                     "tests/test_trade_notification_audience_service.py",
-                    "test_tier2_customer_is_webapp_only_and_counterparty_is_suppressed",
+                    "test_tier2_customer_is_webapp_only_and_owner_counterparty_is_visible",
                 ),
                 CoverageRef(
                     "tests/test_trade_execution_seams.py",
-                    "test_notification_message_hides_counterparty_for_customer_audiences",
+                    "test_notification_message_shows_owner_and_hides_non_owner_for_customer_audiences",
                 ),
             ),
             required_staging_evidence=("receipt_metrics",),
