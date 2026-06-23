@@ -15,6 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_VERSION = "bot_webapp_candidate_full_matrix_v1"
 PRODUCTION_GATE_STATUS = "blocked_until_owner_staging_validation"
 MATRIX_DESIGN_DOC = REPO_ROOT / "docs" / "BOT_WEBAPP_CANDIDATE_FULL_MATRIX_DESIGN.md"
+STAGING_COMPOSE_FILE = REPO_ROOT / "deploy" / "staging" / "docker-compose.staging.yml"
+STAGING_ENV_FILE = REPO_ROOT / ".env.staging"
+STAGING_PROJECT_NAME = "trading_bot_staging"
 DEFAULT_USER_COUNT = 200
 DEFAULT_ATTEMPTS_PER_SCENARIO = 5
 DEFAULT_TARGET_RPS = 20.0
@@ -100,18 +103,46 @@ def build_notification_command(args: argparse.Namespace) -> list[str]:
 
 
 def build_targeted_join_command(args: argparse.Namespace) -> list[str]:
-    command = [
-        sys.executable,
-        str(REPO_ROOT / "scripts" / "run_trade_delivery_targeted_join_matrix.py"),
+    if args.dry_run:
+        return [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "run_trade_delivery_targeted_join_matrix.py"),
+            "--check",
+            "--prefix",
+            args.prefix,
+            "--output",
+            str(args.artifact_dir / "trade-delivery-targeted-join-matrix.json"),
+            "--dry-run",
+        ]
+    return [
+        "docker",
+        "compose",
+        "-p",
+        STAGING_PROJECT_NAME,
+        "--env-file",
+        str(STAGING_ENV_FILE),
+        "-f",
+        str(STAGING_COMPOSE_FILE),
+        "--profile",
+        "staging-load",
+        "run",
+        "--rm",
+        "--no-deps",
+        "-e",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "-v",
+        f"{REPO_ROOT}:/app:ro",
+        "-v",
+        f"{args.artifact_dir}:/artifacts",
+        "load_webapp_iran",
+        "python",
+        "scripts/run_trade_delivery_targeted_join_matrix.py",
         "--check",
         "--prefix",
         args.prefix,
         "--output",
-        str(args.artifact_dir / "trade-delivery-targeted-join-matrix.json"),
+        "/artifacts/trade-delivery-targeted-join-matrix.json",
     ]
-    if args.dry_run:
-        command.append("--dry-run")
-    return command
 
 
 def build_stage11_command(args: argparse.Namespace) -> list[str]:
