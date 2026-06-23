@@ -415,6 +415,53 @@ def build_claim_receipt_statement(
     )
 
 
+def build_claim_receipt_by_identity_statement(
+    *,
+    event_type: str,
+    trade_number: int,
+    recipient_user_id: int,
+    channel: Any,
+    destination_server: str,
+    worker_id: str,
+    lease_until: datetime,
+    now: datetime | None = None,
+):
+    current_time = now or utc_now()
+    normalized_channel = _normalize_channel(channel)
+    claimable = (
+        select(TradeDeliveryReceipt.id)
+        .where(
+            TradeDeliveryReceipt.event_type == event_type,
+            TradeDeliveryReceipt.trade_number == int(trade_number),
+            TradeDeliveryReceipt.recipient_user_id == int(recipient_user_id),
+            TradeDeliveryReceipt.channel == normalized_channel,
+            TradeDeliveryReceipt.destination_server == destination_server,
+            TradeDeliveryReceipt.status.in_(
+                [TradeDeliveryReceiptStatus.PENDING, TradeDeliveryReceiptStatus.RETRY_PENDING]
+            ),
+            or_(
+                TradeDeliveryReceipt.next_retry_at.is_(None),
+                TradeDeliveryReceipt.next_retry_at <= current_time,
+            ),
+        )
+        .limit(1)
+        .with_for_update(skip_locked=True)
+        .cte("claimable_trade_delivery_receipt_by_identity")
+    )
+    return (
+        update(TradeDeliveryReceipt)
+        .where(TradeDeliveryReceipt.id == select(claimable.c.id).scalar_subquery())
+        .values(
+            status=TradeDeliveryReceiptStatus.PROCESSING,
+            worker_id=worker_id,
+            lease_until=lease_until,
+            updated_at=current_time,
+            attempt_count=TradeDeliveryReceipt.attempt_count + 1,
+        )
+        .returning(TradeDeliveryReceipt)
+    )
+
+
 async def claim_next_receipt_for_delivery(
     db: AsyncSession,
     *,
@@ -431,6 +478,33 @@ async def claim_next_receipt_for_delivery(
         lease_until=current_time + timedelta(seconds=max(1, int(lease_seconds))),
         now=current_time,
         channel=channel,
+    )
+    result = await db.execute(stmt)
+    return _result_scalar_one_or_none(result)
+
+
+async def claim_receipt_by_identity_for_delivery(
+    db: AsyncSession,
+    *,
+    event_type: str,
+    trade_number: int,
+    recipient_user_id: int,
+    channel: Any,
+    destination_server: str,
+    worker_id: str,
+    lease_seconds: int = 30,
+    now: datetime | None = None,
+) -> TradeDeliveryReceipt | None:
+    current_time = now or utc_now()
+    stmt = build_claim_receipt_by_identity_statement(
+        event_type=event_type,
+        trade_number=trade_number,
+        recipient_user_id=recipient_user_id,
+        channel=channel,
+        destination_server=destination_server,
+        worker_id=worker_id,
+        lease_until=current_time + timedelta(seconds=max(1, int(lease_seconds))),
+        now=current_time,
     )
     result = await db.execute(stmt)
     return _result_scalar_one_or_none(result)

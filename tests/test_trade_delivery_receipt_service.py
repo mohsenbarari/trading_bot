@@ -299,6 +299,27 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("next_retry_at IS NULL", compiled)
         self.assertNotIn("status IN ('processing'", compiled)
 
+    def test_atomic_claim_by_identity_scopes_exact_webapp_receipt(self):
+        stmt = service.build_claim_receipt_by_identity_statement(
+            event_type="trade_completed",
+            trade_number=10025,
+            recipient_user_id=7,
+            channel=TradeDeliveryChannel.WEBAPP,
+            destination_server="iran",
+            worker_id="worker-1",
+            lease_until=NOW + timedelta(seconds=30),
+            now=NOW,
+        )
+        compiled = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+        self.assertIn("FOR UPDATE SKIP LOCKED", compiled)
+        self.assertIn("event_type = 'trade_completed'", compiled)
+        self.assertIn("trade_number = 10025", compiled)
+        self.assertIn("recipient_user_id = 7", compiled)
+        self.assertIn("channel = 'webapp'", compiled)
+        self.assertIn("destination_server = 'iran'", compiled)
+        self.assertIn("status IN ('pending', 'retry_pending')", compiled)
+
     def test_lease_recovery_only_targets_expired_local_processing_rows(self):
         stmt = service.build_recover_expired_leases_statement(
             destination_server="iran",

@@ -25,7 +25,7 @@ from core.config import settings
 from core.enums import NotificationLevel, NotificationCategory
 from core.utils import (
     check_user_limits, increment_user_counter, to_jalali_str,
-    create_user_notification, send_telegram_notification
+    create_user_notification as _legacy_create_user_notification, send_telegram_notification
 )
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
@@ -50,6 +50,7 @@ from core.services.trade_contention_gate import (
     trade_contention_lease_was_pre_gated,
     try_acquire_trade_contention_gate,
 )
+from core.services.trade_webapp_delivery_service import deliver_webapp_trade_notification
 from core.services.offer_expiry_service import OfferExpiryReason
 from core.services.offer_request_ledger_service import (
     OfferRequestLedgerCommand,
@@ -1693,6 +1694,50 @@ def _queue_trade_telegram_message(background_tasks: BackgroundTasks, chat_id: in
         return False
     background_tasks.add_task(send_telegram_message_sync, chat_id, text)
     return True
+
+
+async def create_user_notification(
+    db: AsyncSession,
+    user_id: int,
+    message: str,
+    level: NotificationLevel = NotificationLevel.INFO,
+    category: NotificationCategory = NotificationCategory.SYSTEM,
+    extra_payload: dict | None = None,
+    dedupe_key: str | None = None,
+):
+    """Trade-router notification compatibility wrapper.
+
+    Trade-completion WebApp notifications are routed through receipt-backed
+    delivery. Non-trade notifications keep the legacy helper behavior.
+    """
+    payload = dict(extra_payload or {})
+    trade_number = _coerce_trade_user_id(payload.get("trade_number"))
+    if category == NotificationCategory.TRADE and trade_number is not None:
+        result = await deliver_webapp_trade_notification(
+            db,
+            trade_number=trade_number,
+            recipient_user_id=user_id,
+            message=message,
+            current_server=current_server(),
+            trade_id=_coerce_trade_user_id(payload.get("trade_id")),
+            offer_id=_coerce_trade_user_id(payload.get("offer_id")),
+            recipient_role=str(payload.get("recipient_role") or "trade_recipient"),
+            principal_user_id=_coerce_trade_user_id(payload.get("principal_user_id")),
+            side=str(payload.get("side") or "") or None,
+            extra_payload=payload,
+            reason=str(payload.get("delivery_reason") or "webapp_required"),
+        )
+        return result.notification
+
+    return await _legacy_create_user_notification(
+        db,
+        user_id,
+        message,
+        level=level,
+        category=category,
+        extra_payload=extra_payload,
+        dedupe_key=dedupe_key,
+    )
 
 
 async def _create_user_notification_background(
