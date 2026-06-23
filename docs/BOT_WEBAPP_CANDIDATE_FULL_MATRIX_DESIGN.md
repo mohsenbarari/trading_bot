@@ -48,6 +48,14 @@ parallel ad hoc checklist:
 - `scripts/run_bot_webapp_candidate_full_matrix.py`
   - Candidate wrapper that ties the market matrix, notification-delivery matrix,
     and Stage 11 validation matrix into one artifact directory.
+- `scripts/run_trade_delivery_targeted_join_matrix.py`
+  - Executable staging join matrix for real synthetic offers, trades, delivery
+    receipts, and WebApp/Telegram delivery evidence.
+  - Dry-run mode writes the complete 204-scenario catalog without database,
+    sync, WebApp, or Telegram side effects.
+  - Execution mode uses a fake injected Telegram gateway so the Telegram
+    delivery receipt path is tested without making any real Telegram network
+    call.
 
 ## Matrix Layers
 
@@ -102,12 +110,14 @@ Required commands:
 ```bash
 python3 scripts/report_bot_webapp_integration_matrix.py --check --json
 python3 scripts/report_trade_notification_delivery_matrix.py --check --output /tmp/<run>/trade-notification-delivery-matrix.json
+python3 scripts/run_trade_delivery_targeted_join_matrix.py --dry-run --check --output /tmp/<run>/trade-delivery-targeted-join-matrix.json
 python3 scripts/report_trade_delivery_staging_validation.py matrix --repo-root "$PWD" --output /tmp/<run>/trade-delivery-stage11-matrix.json
 python3 -m unittest \
   tests.test_bot_webapp_integration_matrix \
   tests.test_bot_webapp_candidate_full_matrix \
   tests.test_bot_webapp_comprehensive_load_matrix \
   tests.test_trade_notification_delivery_matrix \
+  tests.test_trade_delivery_targeted_join_matrix \
   tests.test_trade_delivery_receipt_service \
   tests.test_trade_delivery_worker \
   tests.test_trade_webapp_delivery_service \
@@ -391,23 +401,26 @@ Required minimum:
 Purpose: prove that market execution and delivery audience rules meet on real
 completed trades.
 
-The 228 market scenarios and 204 delivery scenarios do not need to be multiplied
-into 46,512 runtime cases. Instead, these join scenarios must be executed on
-staging:
+The executable owner-pretest join runner is
+`scripts/run_trade_delivery_targeted_join_matrix.py`. It is intentionally based
+on the same 204-scenario catalog as Layer 3:
 
-- user/user for all four surface pairs under stable sync.
-- user/tier-1 same-owner for all four surface pairs under stable sync.
-- user/tier-2 same-owner for all four surface pairs under stable sync.
-- tier-1/user other-owner for all four surface pairs under stable sync.
-- tier-2/user other-owner for all four surface pairs under stable sync.
-- tier-1/tier-1 same-owner for all four surface pairs under stable sync.
-- tier-1/tier-2 other-owner for all four surface pairs under stable sync.
-- user/user for all four surface pairs under short outage.
-- user/tier-1 linked for all four surface pairs under short outage.
-- user/tier-2 for all four surface pairs under short outage.
-- user/user for all four surface pairs under medium outage.
-- user/tier-1 linked for all four surface pairs under medium outage.
-- user/tier-2 for all four surface pairs under medium outage.
+- 17 actor pairs.
+- 4 surface pairs.
+- 3 outage classes.
+
+Scenarios that are impossible by product policy are not omitted. They are
+recorded as `policy_unsupported` with explicit reasons. The current unsupported
+classes are:
+
+- `tier2_cannot_create_offer`
+- `tier2_cannot_use_telegram_request`
+
+All policy-supported scenarios must be executable on staging with synthetic
+data. The runner creates real synthetic users, customer relations, accountant
+relations, offers, and trades, then repairs delivery through the real WebApp and
+Telegram receipt services. Telegram network calls are disabled by an injected
+gateway that returns a successful `TelegramGatewayResult`.
 
 Each join scenario must assert:
 
@@ -423,6 +436,10 @@ Each join scenario must assert:
   counterparty.
 - No duplicate visible notification/message exists for one trade, recipient, and
   channel.
+- Stable and short-outage scenarios do not create
+  `expired_delivery_after_outage` skips.
+- Medium-outage scenarios skip old opposite-server required delivery without
+  sending stale user-facing messages.
 
 ## Layer 9: UI And Publication Evidence
 
@@ -455,6 +472,7 @@ The final full matrix artifact directory must include:
 - `candidate-full-matrix-summary.json`
 - `comprehensive-matrix.json`
 - `trade-notification-delivery-matrix.json`
+- `trade-delivery-targeted-join-matrix.json`
 - `trade-delivery-stage11-matrix.json`
 - `trade-delivery-stage11-validation-report.json`
 - `sync-health-before.json`
@@ -504,22 +522,18 @@ Acceptable warning only with explicit explanation:
 
 ## Required Work Before Manual Testing
 
-The current repository already has the baseline catalogs and market runner. The
-remaining pre-manual-test work is:
+The repository now includes the baseline catalogs, market runner, candidate
+wrapper, and executable targeted join matrix runner. The remaining pre-manual
+testing work is operational:
 
-1. Extend the candidate full-matrix wrapper so the artifact explicitly records
-   this design document path and the selected profile.
-2. Add an executable staging delivery matrix runner, or extend the current
-   candidate wrapper, so the Layer 8 targeted join scenarios create real
-   staging trades and collect receipt/message evidence.
-3. Add short-outage and medium-outage execution support to that staging delivery
-   runner. It may simulate outage age for receipt classification where waiting
-   for real time is unnecessary, but the artifact must clearly label simulated
-   time.
-4. Update tests so the scenario counts, required outage classes, required actor
-   pairs, and required artifact keys are locked.
-5. Run the candidate full matrix and validate the artifact before the owner
-   begins manual testing.
+1. Run the deterministic baseline gates.
+2. Run `scripts/run_bot_webapp_candidate_full_matrix.py` on staging.
+3. Review `trade-delivery-targeted-join-matrix.json`, especially any `failed`
+   policy-supported scenario.
+4. Validate the artifact directory.
+5. Clean synthetic data by the run-scoped prefix.
+6. Start owner-led manual staging tests only after the automated artifact is
+   clean.
 
 ## Suggested Execution Order
 
@@ -527,10 +541,9 @@ remaining pre-manual-test work is:
 2. Deterministic baseline gates.
 3. Candidate full matrix dry-run.
 4. No-pressure market behavior matrix.
-5. Runtime delivery targeted join matrix under stable sync.
-6. Short-outage targeted join matrix.
-7. Medium-outage targeted join matrix.
-8. Stage 11 validation report.
-9. Cleanup dry-run.
-10. Cleanup.
-11. Owner-led manual staging test.
+5. Runtime delivery targeted join matrix under stable, short-outage, and
+   medium-outage classes.
+6. Stage 11 validation report.
+7. Cleanup dry-run.
+8. Cleanup.
+9. Owner-led manual staging test.

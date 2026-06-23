@@ -26,12 +26,14 @@ Run the deterministic matrix gates from the repository root:
 ```bash
 python3 scripts/report_bot_webapp_integration_matrix.py --check --json
 python3 scripts/report_trade_notification_delivery_matrix.py --check
+python3 scripts/run_trade_delivery_targeted_join_matrix.py --dry-run --check
 python3 scripts/report_trade_delivery_staging_validation.py matrix --repo-root "$PWD"
 python3 -m unittest \
   tests.test_bot_webapp_integration_matrix \
   tests.test_bot_webapp_candidate_full_matrix \
   tests.test_bot_webapp_comprehensive_load_matrix \
   tests.test_trade_notification_delivery_matrix \
+  tests.test_trade_delivery_targeted_join_matrix \
   tests.test_trade_delivery_receipt_service \
   tests.test_trade_delivery_worker \
   tests.test_trade_webapp_delivery_service \
@@ -52,6 +54,7 @@ The gate must report:
 - no `failures`
 - no `missing_coverage_refs`
 - `candidate-full-matrix-summary.json` exists for the selected artifact directory
+- `trade-delivery-targeted-join-matrix.json` exists for the selected artifact directory
 - production gate remains `blocked_until_owner_staging_validation`
 
 ## Evidence To Capture
@@ -62,6 +65,8 @@ The gate must report:
 - Candidate full-matrix artifact directory.
 - Iran and foreign sync-health snapshots before and after the run.
 - Trade delivery receipt metrics for WebApp and Telegram channels.
+- Targeted join matrix artifact with policy-supported pass/fail results and
+  policy-unsupported tier-2 paths explicitly listed.
 - Short-outage and medium-outage summary artifacts.
 - DB evidence for each synthetic offer: `offer_public_id`, `home_server`, `status`,
   `remaining_quantity`, `expire_reason`, `expire_source_surface`, `expire_source_server`,

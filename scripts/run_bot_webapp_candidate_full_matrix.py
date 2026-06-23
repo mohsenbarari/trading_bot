@@ -99,6 +99,21 @@ def build_notification_command(args: argparse.Namespace) -> list[str]:
     ]
 
 
+def build_targeted_join_command(args: argparse.Namespace) -> list[str]:
+    command = [
+        sys.executable,
+        str(REPO_ROOT / "scripts" / "run_trade_delivery_targeted_join_matrix.py"),
+        "--check",
+        "--prefix",
+        args.prefix,
+        "--output",
+        str(args.artifact_dir / "trade-delivery-targeted-join-matrix.json"),
+    ]
+    if args.dry_run:
+        command.append("--dry-run")
+    return command
+
+
 def build_stage11_command(args: argparse.Namespace) -> list[str]:
     return [
         sys.executable,
@@ -136,10 +151,12 @@ def build_summary(
     *,
     market_run: dict[str, Any],
     notification_run: dict[str, Any],
+    targeted_join_run: dict[str, Any],
     stage11_run: dict[str, Any],
 ) -> dict[str, Any]:
     market_payload = read_json(args.artifact_dir / "comprehensive-matrix.json")
     notification_payload = read_json(args.artifact_dir / "trade-notification-delivery-matrix.json")
+    targeted_join_payload = read_json(args.artifact_dir / "trade-delivery-targeted-join-matrix.json")
     stage11_payload = read_json(args.artifact_dir / "trade-delivery-stage11-matrix.json")
 
     return {
@@ -182,6 +199,9 @@ def build_summary(
             "summary": str(args.artifact_dir / "candidate-full-matrix-summary.json"),
             "market_matrix": str(args.artifact_dir / "comprehensive-matrix.json"),
             "notification_delivery_matrix": str(args.artifact_dir / "trade-notification-delivery-matrix.json"),
+            "trade_delivery_targeted_join_matrix": str(
+                args.artifact_dir / "trade-delivery-targeted-join-matrix.json"
+            ),
             "trade_delivery_stage11_matrix": str(args.artifact_dir / "trade-delivery-stage11-matrix.json"),
         },
         "market_matrix": {
@@ -199,6 +219,17 @@ def build_summary(
             "surface_pair_count": notification_payload.get("surface_pair_count"),
             "outage_class_count": notification_payload.get("outage_class_count"),
             "production_gate": (notification_payload.get("production_gate") or {}).get("status"),
+        },
+        "trade_delivery_targeted_join_matrix": {
+            "run": targeted_join_run,
+            "status": (targeted_join_payload.get("execution") or {}).get("status"),
+            "scenario_count": (targeted_join_payload.get("catalog") or {}).get("scenario_count"),
+            "executable_count": (targeted_join_payload.get("catalog") or {}).get("executable_count"),
+            "policy_unsupported_count": (targeted_join_payload.get("catalog") or {}).get(
+                "policy_unsupported_count"
+            ),
+            "result_counts": (targeted_join_payload.get("execution") or {}).get("result_counts"),
+            "production_gate": (targeted_join_payload.get("execution") or {}).get("production_gate"),
         },
         "trade_delivery_stage11_matrix": {
             "run": stage11_run,
@@ -261,6 +292,12 @@ def main(argv: list[str] | None = None) -> int:
         stderr_path=args.artifact_dir / "trade-notification-delivery-matrix.stderr.log",
         dry_run=args.dry_run,
     )
+    targeted_join_run = run_captured(
+        build_targeted_join_command(args),
+        stdout_path=args.artifact_dir / "trade-delivery-targeted-join-matrix.stdout.json",
+        stderr_path=args.artifact_dir / "trade-delivery-targeted-join-matrix.stderr.log",
+        dry_run=False,
+    )
     stage11_run = run_captured(
         build_stage11_command(args),
         stdout_path=args.artifact_dir / "trade-delivery-stage11-matrix.stdout.json",
@@ -272,12 +309,17 @@ def main(argv: list[str] | None = None) -> int:
         args,
         market_run=market_run,
         notification_run=notification_run,
+        targeted_join_run=targeted_join_run,
         stage11_run=stage11_run,
     )
     write_json(args.artifact_dir / "candidate-full-matrix-summary.json", summary)
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
 
-    failed = [run for run in (market_run, notification_run, stage11_run) if run.get("status") == "failed"]
+    failed = [
+        run
+        for run in (market_run, notification_run, targeted_join_run, stage11_run)
+        if run.get("status") == "failed"
+    ]
     return 1 if failed else 0
 
 

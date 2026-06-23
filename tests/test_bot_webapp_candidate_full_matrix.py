@@ -50,6 +50,11 @@ class BotWebAppCandidateFullMatrixTests(unittest.TestCase):
         self.assertEqual(summary["no_pressure_profile"]["users"], 200)
         self.assertEqual(summary["no_pressure_profile"]["target_rps"], 20.0)
         self.assertEqual(summary["no_pressure_profile"]["write_max_concurrency"], 4)
+        self.assertTrue(
+            summary["artifacts"]["trade_delivery_targeted_join_matrix"].endswith(
+                "trade-delivery-targeted-join-matrix.json"
+            )
+        )
 
         market_command = summary["market_matrix"]["run"]["command"]
         self.assertTrue(any(command.endswith("run_staging_comprehensive_load_matrix.sh") for command in market_command))
@@ -60,6 +65,17 @@ class BotWebAppCandidateFullMatrixTests(unittest.TestCase):
         notification_command = summary["notification_delivery_matrix"]["run"]["command"]
         self.assertIn(str(REPO_ROOT / "scripts" / "report_trade_notification_delivery_matrix.py"), notification_command)
         self.assertIn("--check", notification_command)
+
+        targeted_join = summary["trade_delivery_targeted_join_matrix"]
+        targeted_join_command = targeted_join["run"]["command"]
+        self.assertEqual(targeted_join["run"]["status"], "passed")
+        self.assertEqual(targeted_join["status"], "planned")
+        self.assertEqual(targeted_join["scenario_count"], 204)
+        self.assertEqual(targeted_join["executable_count"], 108)
+        self.assertEqual(targeted_join["policy_unsupported_count"], 96)
+        self.assertIn(str(REPO_ROOT / "scripts" / "run_trade_delivery_targeted_join_matrix.py"), targeted_join_command)
+        self.assertIn("--dry-run", targeted_join_command)
+        self.assertIn("--check", targeted_join_command)
 
         stage11_command = summary["trade_delivery_stage11_matrix"]["run"]["command"]
         self.assertIn(str(REPO_ROOT / "scripts" / "report_trade_delivery_staging_validation.py"), stage11_command)
