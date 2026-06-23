@@ -16,6 +16,7 @@ PYTHON_SCRIPTS = (
     'scripts/inspect_shared_sync_state.py',
     'scripts/report_bot_webapp_integration_matrix.py',
     'scripts/report_bot_webapp_cutover_readiness.py',
+    'scripts/report_trade_notification_delivery_matrix.py',
     'scripts/report_trade_delivery_staging_validation.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',

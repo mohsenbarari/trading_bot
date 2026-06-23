@@ -280,7 +280,7 @@ def template_snapshot() -> dict[str, Any]:
                     "schema_version": STEP11_TRADE_DELIVERY_REPORT_SCHEMA_VERSION,
                     "artifact_path": "replace-with-stage-11-trade-delivery-report-path",
                     "status": "valid",
-                    "scenario_count": 15,
+                    "scenario_count": 16,
                     "warning_count": 0,
                     "warnings_reviewed": True,
                     "report_reviewed": True,

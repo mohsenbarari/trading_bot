@@ -106,7 +106,7 @@ class TradeDeliveryStagingValidationReportTests(unittest.TestCase):
         matrix = report.build_validation_matrix()
 
         self.assertEqual(validation["status"], "valid")
-        self.assertEqual(validation["scenario_count"], 15)
+        self.assertEqual(validation["scenario_count"], 16)
         self.assertFalse(report.collect_matrix_gaps(REPO_ROOT, matrix))
         self.assertEqual(len({scenario.scenario_id for scenario in matrix}), len(matrix))
 

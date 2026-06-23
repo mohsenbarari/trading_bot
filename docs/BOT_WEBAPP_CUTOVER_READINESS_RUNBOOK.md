@@ -8,6 +8,35 @@ gate for owner review after staging validation.
 
 ## Command
 
+Run the full functional Bot/WebApp matrix without pressure. This keeps all 228 logical market
+scenarios, but lowers user count, request rate, and write concurrency so it is a correctness run,
+not a capacity proof:
+
+```bash
+USER_COUNT=200 \
+TARGET_RPS=20 \
+DB_POOL_SIZE=8 \
+DB_MAX_OVERFLOW=8 \
+WRITE_MAX_CONCURRENCY=4 \
+scripts/run_staging_comprehensive_load_matrix.sh \
+  --users 200 \
+  --target-rps 20 \
+  --write-max-concurrency 4
+```
+
+Do not pass `--max-scenarios`, `--family`, or `--scenario` for release retest. The full retest must
+run every logical scenario. Because this is intentionally not a pressure test, do not use its low
+RPS as the Step 11B capacity proof.
+
+Generate the trade notification delivery matrix for the owner/customer/accountant/channel/outage
+coverage layer:
+
+```bash
+python3 scripts/report_trade_notification_delivery_matrix.py \
+  --check \
+  --output tmp/trade-notification-delivery-matrix.json
+```
+
 Generate a passing snapshot template:
 
 ```bash
@@ -37,8 +66,10 @@ python3 scripts/report_bot_webapp_cutover_readiness.py \
 
 - `metadata.environment` must be `staging`, `synthetic`, `dry_run`, or `local`.
 - `metadata.production_data_used=false` and `metadata.production_peer_used=false`.
+- `metadata.production_deploy_command_run=false`.
 - Both `roles.iran` and `roles.foreign` must be present and must declare the matching
   `server_mode`.
+- Contract stages and required commits must be complete and pushed.
 - `active_offer_count=0` on both servers.
 - Backfill report must include total offers, public identifiers before and after migration, missing
   public identifiers, linked trades, old channel message bindings, and `legacy_unknown` rows.
@@ -51,9 +82,13 @@ python3 scripts/report_bot_webapp_cutover_readiness.py \
 - Iran runtime guard must prove Telegram is blocked.
 - Foreign runtime guard must prove WebApp and chat user surfaces are blocked.
 - Registry coverage and sensitive-field policy must be complete.
+- Migrations must be additive, non-destructive, forward-compatible, and compatible with code-only
+  rollback.
 - Rollback must disable new behavior or fail closed without deleting synced or migrated data.
 - Observability, logs, sync-health review, alerts, backups, snapshots, and restore smoke evidence
   must be ready.
+- Observability must show receipt backlog, oldest pending receipt, terminal receipt counts,
+  Telegram failures, sync conflicts, and duplicate guards.
 - Step 11 automated matrix and owner-led manual staging validation must be complete before
   production consideration.
 - The Step 11B capacity report built by `scripts/report_bot_webapp_capacity.py` must be present in
@@ -62,12 +97,20 @@ python3 scripts/report_bot_webapp_cutover_readiness.py \
 - `capacity_report.correctness_failure_count` must be zero. Capacity warnings do not get hidden:
   if `capacity_report.capacity_warning_count` is non-zero, `capacity_warnings_reviewed=true` is
   required and the readiness report emits a warning.
+- The Stage 11 trade delivery report built from `scripts/report_trade_delivery_staging_validation.py`
+  and `scripts/report_trade_notification_delivery_matrix.py` must be present in
+  `global.staging_validation.trade_delivery_report`, reviewed, valid, and still have
+  `production_gate.status=blocked_until_owner_staging_validation`.
+- The notification delivery matrix covers 17 actor pairs, 4 offer/request surface pairs, and 3
+  connectivity classes:
+  stable, short outage under two minutes, and medium outage around one hour.
 
 ## Stop Conditions
 
 Abort the readiness review if any of these appear:
 
 - any production data or production peer was used;
+- any production deploy command was run;
 - any active offer exists on either server;
 - any offer lacks a public identifier after backfill;
 - any historical request attempt was fabricated;
@@ -78,6 +121,8 @@ Abort the readiness review if any of these appear:
 - the Step 11B capacity report is missing, unreviewed, no longer production-gated, or contains any
   correctness failure;
 - Step 11B capacity warnings exist but have not been explicitly reviewed;
+- the Stage 11 trade delivery report is missing, unreviewed, invalid, no longer production-gated, or
+  has unreviewed warnings;
 - owner staging sign-off is missing.
 
 ## Output Meaning

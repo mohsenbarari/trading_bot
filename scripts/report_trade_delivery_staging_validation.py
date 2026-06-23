@@ -184,6 +184,22 @@ def build_validation_matrix() -> list[ValidationScenario]:
         ),
         ValidationScenario(
             scenario_id="TDV-007",
+            title="Actor, customer-chain, accountant, owner, WebApp, and Telegram notification fanout matrix is covered",
+            dimensions=("role:mixed", "link_state:mixed", "server:both", "channel:both", "outage:stable", "outage:short", "outage:medium", "concurrency:not_pressure"),
+            coverage_refs=(
+                CoverageRef(
+                    "tests/test_trade_notification_delivery_matrix.py",
+                    "test_trade_notification_delivery_matrix_runs_all_actor_surface_pairs_against_audience_builder",
+                ),
+                CoverageRef(
+                    "tests/test_trade_notification_delivery_matrix.py",
+                    "test_delivery_scenario_catalog_covers_actor_surface_outage_product",
+                ),
+            ),
+            required_staging_evidence=("receipt_metrics", "latency_distribution", "sanitized_logs", "outage_summary"),
+        ),
+        ValidationScenario(
+            scenario_id="TDV-008",
             title="Short outage remote WebApp and Telegram delivery is still sent after sync visibility",
             dimensions=("role:standard", "link_state:linked", "server:opposite", "channel:both", "outage:short"),
             coverage_refs=(
@@ -199,7 +215,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("outage_summary", "receipt_metrics"),
         ),
         ValidationScenario(
-            scenario_id="TDV-008",
+            scenario_id="TDV-009",
             title="Medium outage remote delivery is skipped without user-facing stale messages",
             dimensions=("role:standard", "link_state:linked", "server:opposite", "channel:both", "outage:medium"),
             coverage_refs=(
@@ -215,7 +231,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("outage_summary", "receipt_metrics"),
         ),
         ValidationScenario(
-            scenario_id="TDV-009",
+            scenario_id="TDV-010",
             title="Long outage remote Telegram delivery is skipped without stale lookup or send",
             dimensions=("role:standard", "link_state:linked", "server:opposite", "channel:telegram", "outage:long"),
             coverage_refs=(
@@ -231,7 +247,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("outage_summary", "receipt_metrics"),
         ),
         ValidationScenario(
-            scenario_id="TDV-010",
+            scenario_id="TDV-011",
             title="High contention does not create duplicate trades or corrupted offer quantities",
             dimensions=("role:mixed", "link_state:mixed", "server:both", "channel:both", "outage:stable", "concurrency:high"),
             coverage_refs=(
@@ -251,7 +267,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("load_profile", "receipt_metrics", "latency_distribution"),
         ),
         ValidationScenario(
-            scenario_id="TDV-011",
+            scenario_id="TDV-012",
             title="WebApp receipt dedupe prevents duplicate visible notifications",
             dimensions=("role:standard", "link_state:any", "server:iran", "channel:webapp", "outage:stable", "concurrency:duplicate_replay"),
             coverage_refs=(
@@ -267,7 +283,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("receipt_metrics",),
         ),
         ValidationScenario(
-            scenario_id="TDV-012",
+            scenario_id="TDV-013",
             title="Telegram user unreachable errors are skipped without crashing or permanent backlog",
             dimensions=("role:standard", "link_state:broken_telegram", "server:foreign", "channel:telegram", "outage:stable"),
             coverage_refs=(
@@ -283,7 +299,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("receipt_metrics",),
         ),
         ValidationScenario(
-            scenario_id="TDV-013",
+            scenario_id="TDV-014",
             title="Worker crash before send is recoverable through receipt retry",
             dimensions=("role:standard", "link_state:linked", "server:both", "channel:both", "outage:stable", "concurrency:worker_crash_before_send"),
             coverage_refs=(
@@ -299,7 +315,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("crash_probes", "receipt_metrics"),
         ),
         ValidationScenario(
-            scenario_id="TDV-014",
+            scenario_id="TDV-015",
             title="Crash after Telegram send before sent is explicitly isolated as the only accepted ambiguity",
             dimensions=("role:standard", "link_state:linked", "server:foreign", "channel:telegram", "outage:stable", "concurrency:worker_crash_after_send"),
             coverage_refs=(
@@ -315,7 +331,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
             required_staging_evidence=("crash_probes", "receipt_metrics"),
         ),
         ValidationScenario(
-            scenario_id="TDV-015",
+            scenario_id="TDV-016",
             title="Load-style staging run preserves 1000 users, 600 rps target, and 60/40 Telegram/WebApp mix",
             dimensions=("role:mixed", "link_state:mixed", "server:both", "channel:both", "outage:stable", "concurrency:load_600rps"),
             coverage_refs=(
