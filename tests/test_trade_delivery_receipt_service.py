@@ -349,7 +349,7 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("status = 'processing'", compiled)
         self.assertIn("lease_until IS NOT NULL", compiled)
         self.assertIn("lease_until <= '2026-06-23 08:30:00+00:00'", compiled)
-        self.assertIn("status='retry_pending'", compiled.replace(" ", ""))
+        self.assertTrue(compiled.lstrip().upper().startswith("SELECT"))
 
     async def test_duplicate_webapp_notification_conflict_loads_existing_without_commit(self):
         existing = Notification(

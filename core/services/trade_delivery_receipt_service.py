@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import redis.asyncio as redis
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -530,25 +530,12 @@ def build_claim_receipt_statement(
     if channel is not None:
         filters.append(TradeDeliveryReceipt.channel == _normalize_channel(channel))
 
-    claimable = (
-        select(TradeDeliveryReceipt.id)
+    return (
+        select(TradeDeliveryReceipt)
         .where(and_(*filters))
         .order_by(TradeDeliveryReceipt.next_retry_at.asc().nullsfirst(), TradeDeliveryReceipt.id.asc())
         .limit(1)
         .with_for_update(skip_locked=True)
-        .cte("claimable_trade_delivery_receipt")
-    )
-    return (
-        update(TradeDeliveryReceipt)
-        .where(TradeDeliveryReceipt.id == select(claimable.c.id).scalar_subquery())
-        .values(
-            status=TradeDeliveryReceiptStatus.PROCESSING,
-            worker_id=worker_id,
-            lease_until=lease_until,
-            updated_at=current_time,
-            attempt_count=TradeDeliveryReceipt.attempt_count + 1,
-        )
-        .returning(TradeDeliveryReceipt)
     )
 
 
@@ -565,8 +552,8 @@ def build_claim_receipt_by_identity_statement(
 ):
     current_time = now or utc_now()
     normalized_channel = _normalize_channel(channel)
-    claimable = (
-        select(TradeDeliveryReceipt.id)
+    return (
+        select(TradeDeliveryReceipt)
         .where(
             TradeDeliveryReceipt.event_type == event_type,
             TradeDeliveryReceipt.trade_number == int(trade_number),
@@ -583,19 +570,6 @@ def build_claim_receipt_by_identity_statement(
         )
         .limit(1)
         .with_for_update(skip_locked=True)
-        .cte("claimable_trade_delivery_receipt_by_identity")
-    )
-    return (
-        update(TradeDeliveryReceipt)
-        .where(TradeDeliveryReceipt.id == select(claimable.c.id).scalar_subquery())
-        .values(
-            status=TradeDeliveryReceiptStatus.PROCESSING,
-            worker_id=worker_id,
-            lease_until=lease_until,
-            updated_at=current_time,
-            attempt_count=TradeDeliveryReceipt.attempt_count + 1,
-        )
-        .returning(TradeDeliveryReceipt)
     )
 
 
@@ -617,7 +591,19 @@ async def claim_next_receipt_for_delivery(
         channel=channel,
     )
     result = await db.execute(stmt)
-    return _result_scalar_one_or_none(result)
+    receipt = _result_scalar_one_or_none(result)
+    if receipt is None:
+        return None
+    transition_receipt_status(
+        receipt,
+        TradeDeliveryReceiptStatus.PROCESSING,
+        current_server=destination_server,
+        now=current_time,
+    )
+    receipt.worker_id = worker_id
+    receipt.lease_until = current_time + timedelta(seconds=max(1, int(lease_seconds)))
+    await _flush_if_available(db)
+    return receipt
 
 
 async def claim_receipt_by_identity_for_delivery(
@@ -644,7 +630,19 @@ async def claim_receipt_by_identity_for_delivery(
         now=current_time,
     )
     result = await db.execute(stmt)
-    return _result_scalar_one_or_none(result)
+    receipt = _result_scalar_one_or_none(result)
+    if receipt is None:
+        return None
+    transition_receipt_status(
+        receipt,
+        TradeDeliveryReceiptStatus.PROCESSING,
+        current_server=destination_server,
+        now=current_time,
+    )
+    receipt.worker_id = worker_id
+    receipt.lease_until = current_time + timedelta(seconds=max(1, int(lease_seconds)))
+    await _flush_if_available(db)
+    return receipt
 
 
 def build_recover_expired_leases_statement(
@@ -654,8 +652,8 @@ def build_recover_expired_leases_statement(
     max_rows: int = 100,
 ):
     current_time = now or utc_now()
-    expired = (
-        select(TradeDeliveryReceipt.id)
+    return (
+        select(TradeDeliveryReceipt)
         .where(
             TradeDeliveryReceipt.destination_server == destination_server,
             TradeDeliveryReceipt.status == TradeDeliveryReceiptStatus.PROCESSING,
@@ -665,20 +663,6 @@ def build_recover_expired_leases_statement(
         .order_by(TradeDeliveryReceipt.lease_until.asc(), TradeDeliveryReceipt.id.asc())
         .limit(max(1, int(max_rows)))
         .with_for_update(skip_locked=True)
-        .cte("expired_trade_delivery_receipts")
-    )
-    return (
-        update(TradeDeliveryReceipt)
-        .where(TradeDeliveryReceipt.id.in_(select(expired.c.id)))
-        .values(
-            status=TradeDeliveryReceiptStatus.RETRY_PENDING,
-            worker_id=None,
-            lease_until=None,
-            next_retry_at=current_time,
-            reason="lease_expired",
-            updated_at=current_time,
-        )
-        .returning(TradeDeliveryReceipt)
     )
 
 
@@ -689,14 +673,28 @@ async def recover_expired_local_leases(
     now: datetime | None = None,
     max_rows: int = 100,
 ) -> list[TradeDeliveryReceipt]:
+    current_time = now or utc_now()
     result = await db.execute(
         build_recover_expired_leases_statement(
             destination_server=destination_server,
-            now=now,
+            now=current_time,
             max_rows=max_rows,
         )
     )
-    return _result_scalars_all(result)
+    receipts = _result_scalars_all(result)
+    for receipt in receipts:
+        transition_receipt_status(
+            receipt,
+            TradeDeliveryReceiptStatus.RETRY_PENDING,
+            current_server=destination_server,
+            now=current_time,
+            reason="lease_expired",
+            next_retry_at=current_time,
+            allow_lease_recovery=True,
+        )
+    if receipts:
+        await _flush_if_available(db)
+    return receipts
 
 
 async def skip_receipt_after_outage_if_needed(
