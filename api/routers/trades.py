@@ -1235,14 +1235,17 @@ def _build_trade_notification_extra_payload(
     }
 
 
-def _recipient_is_tier2_customer(
+def _recipient_is_customer(
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
 ) -> bool:
     if audience_user_id is None or not customer_relation_map:
         return False
     relation = customer_relation_map.get(audience_user_id)
-    return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
+    return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) in {
+        CustomerTier.TIER_1.value,
+        CustomerTier.TIER_2.value,
+    }
 
 
 def _normalize_offer_notes_for_notification(offer_notes: str | None) -> str | None:
@@ -1271,7 +1274,7 @@ def _build_trade_notification_message(
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
     ]
-    if counterparty_name and not _recipient_is_tier2_customer(audience_user_id, customer_relation_map):
+    if counterparty_name and not _recipient_is_customer(audience_user_id, customer_relation_map):
         lines.append(f"👤 طرف معامله: {counterparty_name}")
     lines.append(f"🔢 شماره معامله: {trade_number}")
     lines.append(f"🕐 زمان معامله: {trade_datetime}")

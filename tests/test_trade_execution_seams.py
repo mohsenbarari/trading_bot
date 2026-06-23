@@ -73,32 +73,34 @@ class TradeExecutionSeamTests(unittest.TestCase):
 
         self.assertEqual(str(exc_info.exception), TRADE_UNAVAILABLE_DETAIL)
 
-    def test_notification_message_hides_counterparty_for_tier2_audience(self):
-        tier2_relation = SimpleNamespace(customer_tier=CustomerTier.TIER_2)
+    def test_notification_message_hides_counterparty_for_customer_audiences(self):
+        for tier in (CustomerTier.TIER_1, CustomerTier.TIER_2):
+            with self.subTest(tier=tier.value):
+                customer_relation = SimpleNamespace(customer_tier=tier)
 
-        message = _build_trade_notification_message(
-            trade_emoji="🟢",
-            trade_type_label="خرید",
-            trade_price=50_800,
-            trade_quantity=23,
-            commodity_name="ربع",
-            trade_number=10012,
-            trade_datetime="1405/03/27   16:45",
-            counterparty_name="محسن",
-            audience_user_id=52,
-            customer_relation_map={52: tier2_relation},
-            trade_path_summary="مالک ↔ مشتری سطح ۲",
-            offer_notes="تحویل امروز  ",
-        )
+                message = _build_trade_notification_message(
+                    trade_emoji="🟢",
+                    trade_type_label="خرید",
+                    trade_price=50_800,
+                    trade_quantity=23,
+                    commodity_name="ربع",
+                    trade_number=10012,
+                    trade_datetime="1405/03/27   16:45",
+                    counterparty_name="محسن",
+                    audience_user_id=52,
+                    customer_relation_map={52: customer_relation},
+                    trade_path_summary="مالک ↔ مشتری",
+                    offer_notes="تحویل امروز  ",
+                )
 
-        self.assertIn("🟢 خرید", message)
-        self.assertIn("💰 فی: 50,800", message)
-        self.assertIn("📦 تعداد: 23", message)
-        self.assertIn("🏷️ کالا: ربع", message)
-        self.assertIn("🔢 شماره معامله: 10012", message)
-        self.assertIn("🧭 مسیر: مالک ↔ مشتری سطح ۲", message)
-        self.assertIn("📝 توضیحات: تحویل امروز", message)
-        self.assertNotIn("👤 طرف معامله", message)
+                self.assertIn("🟢 خرید", message)
+                self.assertIn("💰 فی: 50,800", message)
+                self.assertIn("📦 تعداد: 23", message)
+                self.assertIn("🏷️ کالا: ربع", message)
+                self.assertIn("🔢 شماره معامله: 10012", message)
+                self.assertIn("🧭 مسیر: مالک ↔ مشتری", message)
+                self.assertIn("📝 توضیحات: تحویل امروز", message)
+                self.assertNotIn("👤 طرف معامله", message)
 
     def test_message_bundle_preserves_telegram_and_notification_text_contract(self):
         responder_msg, offer_owner_msg, responder_notif, owner_notif = _build_trade_message_bundle(

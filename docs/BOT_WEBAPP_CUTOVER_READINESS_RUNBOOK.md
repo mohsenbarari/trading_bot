@@ -8,33 +8,25 @@ gate for owner review after staging validation.
 
 ## Command
 
-Run the full functional Bot/WebApp matrix without pressure. This keeps all 228 logical market
-scenarios, but lowers user count, request rate, and write concurrency so it is a correctness run,
-not a capacity proof:
+Run the candidate full Bot/WebApp matrix without pressure. This keeps all 228 logical market
+scenarios from the previous full matrix and also generates the trade notification delivery matrix
+for owner/customer/accountant/channel/outage coverage. The default profile lowers user count,
+request rate, attempts, and write concurrency so it is a correctness retest, not a capacity proof:
 
 ```bash
-USER_COUNT=200 \
-TARGET_RPS=20 \
-DB_POOL_SIZE=8 \
-DB_MAX_OVERFLOW=8 \
-WRITE_MAX_CONCURRENCY=4 \
-scripts/run_staging_comprehensive_load_matrix.sh \
-  --users 200 \
-  --target-rps 20 \
-  --write-max-concurrency 4
+python3 scripts/run_bot_webapp_candidate_full_matrix.py
 ```
 
-Do not pass `--max-scenarios`, `--family`, or `--scenario` for release retest. The full retest must
-run every logical scenario. Because this is intentionally not a pressure test, do not use its low
-RPS as the Step 11B capacity proof.
+The runner calls `scripts/run_staging_comprehensive_load_matrix.sh` without `--max-scenarios`,
+`--family`, or `--scenario`; it must run every logical market scenario for release retest. It then
+generates `trade-notification-delivery-matrix.json`, `trade-delivery-stage11-matrix.json`, and
+`candidate-full-matrix-summary.json` in the artifact directory. Because this is intentionally not a
+pressure test, do not use its low RPS as the Step 11B capacity proof.
 
-Generate the trade notification delivery matrix for the owner/customer/accountant/channel/outage
-coverage layer:
+For a command-only review without touching staging:
 
 ```bash
-python3 scripts/report_trade_notification_delivery_matrix.py \
-  --check \
-  --output tmp/trade-notification-delivery-matrix.json
+python3 scripts/run_bot_webapp_candidate_full_matrix.py --dry-run
 ```
 
 Generate a passing snapshot template:

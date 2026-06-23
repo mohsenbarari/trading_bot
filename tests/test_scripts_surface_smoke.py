@@ -20,6 +20,7 @@ PYTHON_SCRIPTS = (
     'scripts/report_trade_delivery_staging_validation.py',
     'scripts/report_messenger_query_plans.py',
     'scripts/report_test_matrix.py',
+    'scripts/run_bot_webapp_candidate_full_matrix.py',
     'scripts/run_observability_gate.py',
     'scripts/reset_sessions.py',
     'scripts/restore_default_commodities.py',

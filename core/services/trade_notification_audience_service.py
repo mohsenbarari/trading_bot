@@ -263,14 +263,17 @@ def _build_trade_profile_route_from_payload(
     return f"/users/{profile_user_id}"
 
 
-def _recipient_is_tier2_customer(
+def _recipient_is_customer(
     audience_user_id: int | None,
     customer_relation_map: Mapping[int, CustomerRelation | object] | None,
 ) -> bool:
     if audience_user_id is None or not customer_relation_map:
         return False
     relation = customer_relation_map.get(audience_user_id)
-    return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) == CustomerTier.TIER_2.value
+    return _normalize_customer_tier_value(getattr(relation, "customer_tier", None)) in {
+        CustomerTier.TIER_1.value,
+        CustomerTier.TIER_2.value,
+    }
 
 
 def _build_trade_notification_message(
@@ -294,7 +297,7 @@ def _build_trade_notification_message(
         f"📦 تعداد: {trade_quantity}",
         f"🏷️ کالا: {commodity_name}",
     ]
-    if counterparty_name and not _recipient_is_tier2_customer(audience_user_id, customer_relation_map):
+    if counterparty_name and not _recipient_is_customer(audience_user_id, customer_relation_map):
         lines.append(f"👤 طرف معامله: {counterparty_name}")
     lines.append(f"🔢 شماره معامله: {trade_number}")
     lines.append(f"🕐 زمان معامله: {trade_datetime}")
@@ -303,6 +306,39 @@ def _build_trade_notification_message(
     normalized_notes = _normalize_offer_notes_for_notification(offer_notes)
     if normalized_notes:
         lines.append(f"📝 توضیحات: {normalized_notes}")
+    return "\n".join(lines)
+
+
+def _build_trade_telegram_message(
+    *,
+    trade_emoji: str,
+    trade_type_label: str,
+    trade_price: int,
+    trade_quantity: int,
+    commodity_name: str,
+    trade_number: int,
+    trade_datetime: str,
+    counterparty_name: str | None,
+    hide_counterparty: bool = False,
+    trade_path_summary: str | None = None,
+    offer_notes: str | None = None,
+) -> str:
+    lines = [
+        f"{trade_emoji} <b>{trade_type_label}</b>",
+        "",
+        f"💰 فی: {trade_price:,}",
+        f"📦 تعداد: {trade_quantity}",
+        f"🏷️ کالا: {commodity_name}",
+    ]
+    if counterparty_name and not hide_counterparty:
+        lines.append(f"👤 طرف معامله: {counterparty_name}")
+    lines.append(f"🔢 شماره معامله: {trade_number}")
+    lines.append(f"🕐 زمان معامله: {trade_datetime}")
+    if trade_path_summary:
+        lines.append(f"🧭 مسیر: {trade_path_summary}")
+    normalized_offer_notes = _normalize_offer_notes_for_notification(offer_notes)
+    if normalized_offer_notes:
+        lines.append(f"📝 توضیحات: {normalized_offer_notes}")
     return "\n".join(lines)
 
 
@@ -323,30 +359,29 @@ def _build_trade_message_bundle(
     trade_path_summary: str | None = None,
     offer_notes: str | None = None,
 ) -> tuple[str, str]:
-    trade_path_line = f"\n🧭 مسیر: {trade_path_summary}" if trade_path_summary else ""
-    normalized_offer_notes = _normalize_offer_notes_for_notification(offer_notes)
-    offer_notes_line = f"\n📝 توضیحات: {normalized_offer_notes}" if normalized_offer_notes else ""
-    responder_msg = (
-        f"{responder_trade_emoji} <b>{responder_trade_label}</b>\n\n"
-        f"💰 فی: {trade_price:,}\n"
-        f"📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {commodity_name}\n"
-        f"👤 طرف معامله: {offer_user_name}\n"
-        f"🔢 شماره معامله: {trade_number}\n"
-        f"🕐 زمان معامله: {trade_datetime}"
-        f"{trade_path_line}"
-        f"{offer_notes_line}"
+    responder_msg = _build_trade_telegram_message(
+        trade_emoji=responder_trade_emoji,
+        trade_type_label=responder_trade_label,
+        trade_price=trade_price,
+        trade_quantity=trade_quantity,
+        commodity_name=commodity_name,
+        trade_number=trade_number,
+        trade_datetime=trade_datetime,
+        counterparty_name=offer_user_name,
+        trade_path_summary=trade_path_summary,
+        offer_notes=offer_notes,
     )
-    offer_owner_msg = (
-        f"{offer_trade_emoji} <b>{offer_trade_label}</b>\n\n"
-        f"💰 فی: {trade_price:,}\n"
-        f"📦 تعداد: {trade_quantity}\n"
-        f"🏷️ کالا: {commodity_name}\n"
-        f"👤 طرف معامله: {responder_user_name}\n"
-        f"🔢 شماره معامله: {trade_number}\n"
-        f"🕐 زمان معامله: {trade_datetime}"
-        f"{trade_path_line}"
-        f"{offer_notes_line}"
+    offer_owner_msg = _build_trade_telegram_message(
+        trade_emoji=offer_trade_emoji,
+        trade_type_label=offer_trade_label,
+        trade_price=trade_price,
+        trade_quantity=trade_quantity,
+        commodity_name=commodity_name,
+        trade_number=trade_number,
+        trade_datetime=trade_datetime,
+        counterparty_name=responder_user_name,
+        trade_path_summary=trade_path_summary,
+        offer_notes=offer_notes,
     )
     return responder_msg, offer_owner_msg
 
@@ -581,13 +616,28 @@ async def build_trade_completion_notification_audience(
                 recipient_role=recipient_role,
             )
             if telegram_requirement.required:
+                telegram_message = str(side_spec["telegram_message"])
+                if _recipient_is_customer(audience_user_id, customer_relation_map):
+                    telegram_message = _build_trade_telegram_message(
+                        trade_emoji=str(side_spec["trade_emoji"]),
+                        trade_type_label=str(side_spec["trade_label"]),
+                        trade_price=trade_price,
+                        trade_quantity=trade_quantity,
+                        commodity_name=commodity_name,
+                        trade_number=int(trade_number or 0),
+                        trade_datetime=trade_datetime,
+                        counterparty_name=str(side_spec["counterparty_name"]),
+                        hide_counterparty=True,
+                        trade_path_summary=trade_path_payload.get("trade_path_summary"),
+                        offer_notes=_offer_notes(trade),
+                    )
                 telegram_requirement = TradeNotificationChannelRequirement(
                     channel=telegram_requirement.channel,
                     destination_server=telegram_requirement.destination_server,
                     required=True,
                     reason=telegram_requirement.reason,
                     telegram_id=telegram_requirement.telegram_id,
-                    message=str(side_spec["telegram_message"]),
+                    message=telegram_message,
                 )
 
             channel_requirements = []

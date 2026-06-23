@@ -156,7 +156,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
         ),
         ValidationScenario(
             scenario_id="TDV-005",
-            title="Tier 1 customers keep owner-path delivery and linked Telegram access",
+            title="Tier 1 customers keep owner-path delivery, linked Telegram access, and counterparty suppression",
             dimensions=("role:customer_tier1", "link_state:linked", "server:any", "channel:both", "outage:stable"),
             coverage_refs=(
                 CoverageRef(
@@ -177,7 +177,7 @@ def build_validation_matrix() -> list[ValidationScenario]:
                 ),
                 CoverageRef(
                     "tests/test_trade_execution_seams.py",
-                    "test_notification_message_hides_counterparty_for_tier2_audience",
+                    "test_notification_message_hides_counterparty_for_customer_audiences",
                 ),
             ),
             required_staging_evidence=("receipt_metrics",),
