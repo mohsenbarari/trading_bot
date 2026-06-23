@@ -254,6 +254,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "shared idempotent command; forward to offer_home_server when remote",
         "notifications and offer update events",
     ),
+    "telegram_link_tokens": _entry(
+        "telegram_link_tokens",
+        SyncPolicy.SYNC,
+        ("webapp_account_settings", "bot_link"),
+        "user/account authority",
+        "single-use token hash; pending records are revoked per user before issuing a new token",
+        "Telegram account linking eligibility and audit",
+    ),
     "trading_settings": _entry(
         "trading_settings",
         SyncPolicy.SYNC,

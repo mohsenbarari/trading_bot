@@ -45,6 +45,10 @@ describe('WebRegister.vue', () => {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ can_connect_telegram: false, telegram_linked: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
 
     const wrapper = mount(WebRegister)
     await flushPromises()

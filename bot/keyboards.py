@@ -21,10 +21,12 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     row_2_buttons = []
     if user_role in (UserRole.SUPER_ADMIN, UserRole.MIDDLE_MANAGER):
         row_2_buttons.append(KeyboardButton(text="🔐 پنل مدیریت")) 
-    row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
-    # دکمه تنظیمات فقط برای کاربران با نقش عادی در منوی اصلی
-    if user_role == UserRole.STANDARD:
+    if user_role in (UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN):
+        row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
+    if user_role in (UserRole.STANDARD, UserRole.POLICE):
         row_2_buttons.append(KeyboardButton(text="⚙️ تنظیمات"))
+    if not row_2_buttons:
+        row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
     keyboard_layout.append(row_2_buttons)
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 

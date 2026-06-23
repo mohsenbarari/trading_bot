@@ -9,7 +9,7 @@ from core.enums import UserAccountStatus
 class FakeState:
     def __init__(self):
         self.cleared = 0
-        self.data = {}
+        self.data = {"telegram_link_token": "unit-token"}
         self.states = []
 
     async def clear(self):
@@ -116,7 +116,10 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         message = make_message()
 
-        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ):
             await handle_contact(message, state)
 
         self.assertEqual(db.commits, 0)
@@ -139,7 +142,10 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         message = make_message()
 
-        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ):
             await handle_contact(message, state)
 
         self.assertEqual(db.commits, 0)
@@ -181,11 +187,14 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         state = FakeState()
         message = make_message()
 
-        with patch("bot.handlers.link_account.get_db", new=db_factory(db)):
+        with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
+            "bot.handlers.link_account.ensure_mandatory_channel_membership",
+            new=AsyncMock(),
+        ):
             await handle_contact(message, state)
 
-        self.assertIsNone(user.telegram_id)
-        self.assertEqual(db.commits, 0)
+        self.assertEqual(user.telegram_id, 10)
+        self.assertEqual(db.commits, 1)
         self.assertEqual(state.data["link_user_id"], 99)
         self.assertEqual(state.states, [LinkState.waiting_for_address])
         self.assertIn("تکمیل ثبت‌نام", message.answer.await_args.args[0])
@@ -210,7 +219,7 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         ):
             await handle_contact(message, state)
         self.assertEqual(state.cleared, 1)
-        self.assertIn("مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+        self.assertIn("دسترسی این سطح مشتری به ربات تلگرام فعال نیست", message.answer.await_args.args[0])
 
         user = SimpleNamespace(
             id=99,

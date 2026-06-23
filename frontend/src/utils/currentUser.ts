@@ -16,6 +16,9 @@ export interface CurrentUserSummary {
   customer_tier?: 'tier1' | 'tier2' | null
   customer_owner_user_id?: number | null
   customer_owner_account_name?: string | null
+  telegram_linked?: boolean
+  can_connect_telegram?: boolean
+  telegram_link_denial_reason?: string | null
 }
 
 const CURRENT_USER_STORAGE_KEY = 'current_user_summary'
@@ -57,6 +60,10 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
           ? Number(user.customer_owner_user_id)
           : null,
     customer_owner_account_name: typeof user.customer_owner_account_name === 'string' ? user.customer_owner_account_name : null,
+    telegram_linked: user.telegram_linked === true,
+    can_connect_telegram: user.can_connect_telegram === true,
+    telegram_link_denial_reason:
+      typeof user.telegram_link_denial_reason === 'string' ? user.telegram_link_denial_reason : null,
   }
 }
 

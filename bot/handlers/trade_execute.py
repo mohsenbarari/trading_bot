@@ -19,6 +19,7 @@ from core.db import AsyncSessionLocal
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
+from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
@@ -601,6 +602,11 @@ async def _handle_channel_trade(
     if not user:
         await callback.answer()
         return
+
+    local_access = evaluate_bot_access_local_state(user)
+    if not local_access.allowed:
+        await callback.answer(bot_access_denial_message(local_access.reason), show_alert=True)
+        return
     
     # ===== بررسی مسدودیت کاربر =====
     if user.trading_restricted_until and user.trading_restricted_until > datetime.utcnow():
@@ -619,6 +625,12 @@ async def _handle_channel_trade(
         return
     
     async with AsyncSessionLocal() as session:
+        if getattr(user, "id", None) is not None and isinstance(user, User):
+            bot_access = await evaluate_bot_access(session, user)
+            if not bot_access.allowed:
+                await callback.answer(bot_access_denial_message(bot_access.reason), show_alert=True)
+                return
+
         offer = await _load_callback_offer(session, callback_data, lock_for_update=False)
 
         if offer:

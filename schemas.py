@@ -99,6 +99,9 @@ class UserRead(UserBase):
     customer_owner_user_id: int | None = None
     customer_owner_account_name: str | None = None
     customer_management_name: str | None = None
+    telegram_linked: bool = False
+    can_connect_telegram: bool = False
+    telegram_link_denial_reason: str | None = None
     is_deleted: bool = False
     avatar_file_id: str | None = None
     created_at: datetime

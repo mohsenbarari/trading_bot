@@ -46,6 +46,14 @@ from core.services.session_service import (
 from core.session_authority import assert_login_allowed_for_server
 from core.services.user_account_status_service import get_user_account_status, is_user_global_web_locked
 from core.services.avatar_service import resolve_owned_avatar_file_id
+from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access
+from core.services.telegram_link_token_service import (
+    TELEGRAM_LINK_TOKEN_TTL_SECONDS,
+    TelegramLinkTokenError,
+    build_telegram_deep_link,
+    build_telegram_start_parameter,
+    create_telegram_link_token,
+)
 from models.session import Platform, UserSession
 import uuid
 from core.utils import create_user_notification, normalize_persian_numerals, utc_now, utc_now_naive
@@ -54,6 +62,7 @@ from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
     get_active_accountant_relation_for_accountant,
     get_pending_accountant_relation_by_invitation_token,
+    is_user_accountant,
     is_accountant_invitation_token,
 )
 from core.services.customer_relation_service import (
@@ -224,6 +233,17 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
+class TelegramLinkTokenResponse(BaseModel):
+    telegram_linked: bool
+    can_connect_telegram: bool
+    bot_username: str | None = None
+    telegram_url: str | None = None
+    start_parameter: str | None = None
+    expires_at: datetime | None = None
+    expires_in: int | None = None
+    detail: str | None = None
+
+
 class PendingRegistrationContext(BaseModel):
     token: str
     account_name: str
@@ -333,6 +353,9 @@ def _serialize_current_user_response(
     customer_tier: CustomerTier | None = None,
     customer_owner_user_id: int | None = None,
     customer_owner_account_name: str | None = None,
+    telegram_linked: bool = False,
+    can_connect_telegram: bool = False,
+    telegram_link_denial_reason: str | None = None,
 ) -> schemas.UserRead:
     return schemas.UserRead.model_validate(current_user).model_copy(
         update={
@@ -343,6 +366,9 @@ def _serialize_current_user_response(
             "customer_tier": customer_tier,
             "customer_owner_user_id": customer_owner_user_id,
             "customer_owner_account_name": customer_owner_account_name,
+            "telegram_linked": telegram_linked,
+            "can_connect_telegram": can_connect_telegram,
+            "telegram_link_denial_reason": telegram_link_denial_reason,
         }
     )
 
@@ -351,8 +377,28 @@ async def _load_current_user_relation_context(
     db: AsyncSession,
     current_user: User,
 ) -> dict[str, object]:
+    if not isinstance(db, AsyncSession):
+        is_accountant = await is_user_accountant(db, current_user.id)
+        customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+        bot_access = await evaluate_bot_access(db, current_user)
+        telegram_linked = getattr(current_user, "telegram_id", None) is not None
+        return {
+            "is_accountant": is_accountant,
+            "accountant_owner_user_id": None,
+            "accountant_owner_account_name": None,
+            "is_customer": customer_relation is not None,
+            "customer_tier": customer_relation.customer_tier if customer_relation else None,
+            "customer_owner_user_id": getattr(customer_relation, "owner_user_id", None) if customer_relation else None,
+            "customer_owner_account_name": None,
+            "telegram_linked": telegram_linked,
+            "can_connect_telegram": bool(bot_access.allowed and not telegram_linked),
+            "telegram_link_denial_reason": None if bot_access.allowed else bot_access.reason,
+        }
+
     accountant_relation = await get_active_accountant_relation_for_accountant(db, current_user.id)
     customer_relation = await get_active_customer_relation_for_customer(db, current_user.id)
+    bot_access = await evaluate_bot_access(db, current_user)
+    telegram_linked = getattr(current_user, "telegram_id", None) is not None
     return {
         "is_accountant": accountant_relation is not None,
         "accountant_owner_user_id": accountant_relation.owner_user_id if accountant_relation else None,
@@ -369,6 +415,9 @@ async def _load_current_user_relation_context(
             if customer_relation and customer_relation.owner_user and not customer_relation.owner_user.is_deleted
             else None
         ),
+        "telegram_linked": telegram_linked,
+        "can_connect_telegram": bool(bot_access.allowed and not telegram_linked),
+        "telegram_link_denial_reason": None if bot_access.allowed else bot_access.reason,
     }
 
 @router.get("/me", response_model=schemas.UserRead)
@@ -380,6 +429,55 @@ async def read_users_me(
     return _serialize_current_user_response(
         current_user,
         **await _load_current_user_relation_context(db, current_user),
+    )
+
+
+@router.post("/telegram-link-token", response_model=TelegramLinkTokenResponse)
+async def issue_telegram_link_token(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Issue a short-lived token that must be consumed by the foreign Telegram bot."""
+    bot_username = (settings.bot_username or "").strip().lstrip("@")
+    if not bot_username:
+        raise HTTPException(status_code=503, detail="نام کاربری ربات تنظیم نشده است")
+
+    decision = await evaluate_bot_access(db, current_user)
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=bot_access_denial_message(decision.reason))
+
+    if getattr(current_user, "telegram_id", None) is not None:
+        return TelegramLinkTokenResponse(
+            telegram_linked=True,
+            can_connect_telegram=False,
+            bot_username=bot_username,
+            detail="این حساب قبلاً به تلگرام متصل شده است",
+        )
+
+    try:
+        issue_result = await create_telegram_link_token(
+            db,
+            current_user,
+            ttl_seconds=TELEGRAM_LINK_TOKEN_TTL_SECONDS,
+        )
+        await db.commit()
+    except TelegramLinkTokenError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail=bot_access_denial_message(exc.reason)) from exc
+    except Exception as exc:
+        await db.rollback()
+        logger.error("Telegram link token issue failed: %s", exc)
+        raise HTTPException(status_code=500, detail="خطا در ساخت لینک اتصال تلگرام") from exc
+
+    start_parameter = build_telegram_start_parameter(issue_result.token)
+    return TelegramLinkTokenResponse(
+        telegram_linked=False,
+        can_connect_telegram=True,
+        bot_username=bot_username,
+        telegram_url=build_telegram_deep_link(bot_username, issue_result.token),
+        start_parameter=start_parameter,
+        expires_at=issue_result.record.expires_at,
+        expires_in=TELEGRAM_LINK_TOKEN_TTL_SECONDS,
     )
 
 

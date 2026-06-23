@@ -17,202 +17,44 @@ class FakeState:
         self.cleared += 1
 
 
-class FakeExecuteResult:
-    def __init__(self, value):
-        self._value = value
-
-    def scalar_one_or_none(self):
-        return self._value
-
-
-class FakeSession:
-    def __init__(self, invitation):
-        self.invitation = invitation
-        self.added = []
-        self.flush = AsyncMock(side_effect=self._flush)
-        self.commits = 0
-
-    async def execute(self, stmt):
-        return FakeExecuteResult(self.invitation)
-
-    def add(self, value):
-        self.added.append(value)
-
-    async def _flush(self):
-        for value in self.added:
-            if getattr(value, "id", None) is None:
-                value.id = 77
-
-    async def commit(self):
-        self.commits += 1
-
-
-class FakeSessionContext:
-    def __init__(self, session):
-        self.session = session
-
-    async def __aenter__(self):
-        return self.session
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
-def make_message(text="تهران خیابان آزادی پلاک ۱۰", user_id=5, username="u", full_name="Full Name"):
+def make_message(text="تهران خیابان آزادی پلاک ۱۰"):
     return SimpleNamespace(
         bot=SimpleNamespace(),
         chat=SimpleNamespace(id=21),
         text=text,
-        from_user=SimpleNamespace(id=user_id, username=username, full_name=full_name),
+        from_user=SimpleNamespace(id=5, username="u", full_name="Full Name"),
         answer=AsyncMock(return_value=SimpleNamespace(message_id=66)),
     )
 
 
 class BotStartRegistrationAddressTests(unittest.IsolatedAsyncioTestCase):
-    async def test_handle_address_rejects_short_address(self):
+    async def test_legacy_registration_address_state_redirects_to_webapp(self):
         state = FakeState("tok")
         message = make_message(text="کوتاه")
 
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()):
-            await handle_address(message, state)
-
-        self.assertIn("آدرس وارد شده کوتاه است", message.answer.await_args.args[0])
-
-    async def test_handle_address_handles_invalid_invitation(self):
-        state = FakeState("tok")
-        message = make_message()
-
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(FakeSession(None)),
-        ):
-            await handle_address(message, state)
-
-        self.assertEqual(state.cleared, 1)
-        self.assertIn("دیگر معتبر نیست", message.answer.await_args.args[0])
-
-    async def test_handle_address_creates_user_and_marks_invitation_used(self):
-        invitation = SimpleNamespace(
-            token="tok",
-            account_name="acc",
-            mobile_number="09120001122",
-            role="standard",
-            is_used=False,
-        )
-        session = FakeSession(invitation)
-        state = FakeState("tok")
-        message = make_message()
-
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(session),
-        ), patch(
-            "bot.handlers.start.ensure_mandatory_channel_membership",
-            new=AsyncMock(),
-        ) as mandatory_mock, patch("bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"), patch(
             "bot.handlers.start.set_anchor"
-        ) as set_anchor, patch(
-            "bot.handlers.start.build_channel_join_request_line",
-            new=AsyncMock(return_value="🔗 [درخواست عضویت در کانال معاملات](https://t.me/joinreq)"),
-        ), patch("bot.handlers.start.settings", SimpleNamespace(frontend_url="https://app")):
+        ) as set_anchor:
             await handle_address(message, state)
 
         self.assertEqual(state.cleared, 1)
-        self.assertTrue(invitation.is_used)
-        self.assertEqual(session.commits, 1)
-        session.flush.assert_awaited_once()
-        self.assertEqual(len(session.added), 1)
-        new_user = session.added[0]
-        self.assertIs(mandatory_mock.await_args.kwargs["user"], new_user)
-        self.assertEqual(new_user.telegram_id, 5)
-        self.assertEqual(new_user.account_name, "acc")
-        self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])
-        self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
+        self.assertIn("این مسیر ثبت‌نام در ربات فعال نیست", message.answer.await_args.args[0])
+        self.assertIn("register?token=tok", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(21, 66)
 
-    async def test_handle_address_blocks_accountant_tokens_from_bot_registration(self):
-        invitation = SimpleNamespace(
-            token="ACCT-token",
-            account_name="acc",
-            mobile_number="09120001122",
-            role="standard",
-            is_used=False,
-        )
-        session = FakeSession(invitation)
-        state = FakeState("ACCT-token")
+    async def test_legacy_registration_address_state_without_token_still_stops_bot_registration(self):
+        state = FakeState(None)
         message = make_message()
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(session),
-        ), patch(
-            "bot.handlers.start.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=SimpleNamespace(id=1)),
-        ), patch(
-            "bot.handlers.start.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
-        ):
+            "bot.handlers.start.set_anchor"
+        ) as set_anchor:
             await handle_address(message, state)
 
         self.assertEqual(state.cleared, 1)
-        self.assertEqual(session.commits, 0)
-        self.assertEqual(len(session.added), 0)
-        self.assertIn("ثبت‌نام حسابدار از مسیر ربات مجاز نیست", message.answer.await_args.args[0])
-
-        session = FakeSession(invitation)
-        state = FakeState("ACCT-token")
-        message = make_message()
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(session),
-        ), patch(
-            "bot.handlers.start.get_pending_accountant_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
-        ):
-            await handle_address(message, state)
-        self.assertIn("دیگر معتبر نیست", message.answer.await_args.args[0])
-
-    async def test_handle_address_blocks_customer_tokens_from_bot_registration(self):
-        invitation = SimpleNamespace(
-            token="CUST-token",
-            account_name="acc",
-            mobile_number="09120001122",
-            role="standard",
-            is_used=False,
-        )
-        session = FakeSession(invitation)
-        state = FakeState("CUST-token")
-        message = make_message()
-
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(session),
-        ), patch(
-            "bot.handlers.start.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=SimpleNamespace(id=1)),
-        ), patch(
-            "bot.handlers.start.settings",
-            SimpleNamespace(frontend_url="https://app.example"),
-        ):
-            await handle_address(message, state)
-
-        self.assertEqual(state.cleared, 1)
-        self.assertEqual(session.commits, 0)
-        self.assertEqual(len(session.added), 0)
-        self.assertIn("ثبت‌نام مشتری از مسیر ربات مجاز نیست", message.answer.await_args.args[0])
-
-        session = FakeSession(invitation)
-        state = FakeState("CUST-token")
-        message = make_message()
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
-            "bot.handlers.start.AsyncSessionLocal",
-            return_value=FakeSessionContext(session),
-        ), patch(
-            "bot.handlers.start.get_pending_customer_relation_by_invitation_token",
-            new=AsyncMock(return_value=None),
-        ):
-            await handle_address(message, state)
-        self.assertIn("دیگر معتبر نیست", message.answer.await_args.args[0])
+        self.assertIn("برای تکمیل ثبت‌نام از وب‌اپ استفاده کنید", message.answer.await_args.args[0])
+        self.assertNotIn("register?token=", message.answer.await_args.args[0])
+        set_anchor.assert_called_once_with(21, 66)
 
 
 if __name__ == "__main__":

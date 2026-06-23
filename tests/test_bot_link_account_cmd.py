@@ -17,6 +17,7 @@ class FakeState:
     def __init__(self):
         self.states = []
         self.data = {}
+        self.cleared = 0
 
     async def set_state(self, state):
         self.states.append(state)
@@ -26,6 +27,9 @@ class FakeState:
 
     async def get_data(self):
         return dict(self.data)
+
+    async def clear(self):
+        self.cleared += 1
 
 
 class BotLinkAccountCmdTests(unittest.IsolatedAsyncioTestCase):
@@ -52,14 +56,15 @@ class BotLinkAccountCmdTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ثبتنام هنوز کامل نشده".replace("\u000c", "‌"), message.answer.await_args.args[0])
         self.assertEqual(state.states, [LinkState.waiting_for_address])
 
-    async def test_cmd_link_prompts_for_contact_and_sets_state(self):
+    async def test_cmd_link_without_registered_user_returns_neutral_fallback(self):
         message = SimpleNamespace(answer=AsyncMock())
         state = FakeState()
 
         await cmd_link(message, state, user=None)
 
-        self.assertIn("شماره موبایل", message.answer.await_args.args[0])
-        self.assertEqual(state.states, [LinkState.waiting_for_contact])
+        self.assertIn("ثبت‌نام را در سامانه کامل کنید", message.answer.await_args.args[0])
+        self.assertEqual(state.states, [])
+        self.assertEqual(state.cleared, 1)
 
     async def test_cmd_link_skips_contact_for_already_linked_user(self):
         message = SimpleNamespace(answer=AsyncMock())

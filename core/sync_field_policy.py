@@ -91,6 +91,20 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
     ("trades", "responder_user_mobile"): _entry("trades", "responder_user_mobile", SyncFieldClassification.SYNC, sensitive=True),
     ("invitations", "mobile_number"): _entry("invitations", "mobile_number", SyncFieldClassification.SYNC, sensitive=True),
     ("invitations", "token"): _entry("invitations", "token", SyncFieldClassification.SYNC, sensitive=True),
+    ("telegram_link_tokens", "token_hash"): _entry(
+        "telegram_link_tokens",
+        "token_hash",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="hash of a short-lived WebApp-issued Telegram link token",
+    ),
+    ("telegram_link_tokens", "used_telegram_id"): _entry(
+        "telegram_link_tokens",
+        "used_telegram_id",
+        SyncFieldClassification.SYNC,
+        sensitive=True,
+        reason="Telegram account id used for link audit",
+    ),
     ("accountant_relations", "mobile_number"): _entry(
         "accountant_relations",
         "mobile_number",

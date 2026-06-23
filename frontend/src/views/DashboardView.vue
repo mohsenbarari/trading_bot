@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, UsersRound } from 'lucide-vue-next'
+import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, Send, UsersRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
+import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import { AppButton, AppEmptyState, AppIconButton, AppInput, AppListItem, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
 
 interface DashboardTrade {
@@ -64,6 +65,8 @@ const projectUsersLoaded = ref(false)
 const lastLoadedProjectUsersQuery = ref('')
 const projectUsersOffset = ref(0)
 const projectUsersHasMore = ref(false)
+const telegramLinkBusy = ref(false)
+const telegramLinkError = ref('')
 
 const isRestricted = computed(() => {
   if (!user.value?.trading_restricted_until) return false
@@ -74,6 +77,11 @@ const isRestricted = computed(() => {
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
 const isAccountant = computed(() => user.value?.is_accountant === true)
 const isCustomer = computed(() => user.value?.is_customer === true || Boolean(user.value?.customer_tier))
+const showTelegramConnectCard = computed(() => (
+  Boolean(user.value?.can_connect_telegram)
+  && user.value?.telegram_linked !== true
+  && !isInactiveAccount.value
+))
 const isMarketOpen = computed(() => marketRuntime.value.is_open)
 const isMarketClosed = computed(() => !isMarketOpen.value)
 const marketEntryStatusLabel = computed(() => (isMarketOpen.value ? 'بازار باز' : 'بازار بسته'))
@@ -506,6 +514,24 @@ function openMarket() {
   router.push('/market')
 }
 
+async function connectTelegram() {
+  if (telegramLinkBusy.value) return
+  telegramLinkBusy.value = true
+  telegramLinkError.value = ''
+  try {
+    const payload = await requestTelegramLink()
+    if (payload.telegram_url) {
+      openTelegramLink(payload.telegram_url)
+      return
+    }
+    telegramLinkError.value = payload.detail || 'لینک اتصال تلگرام آماده نشد.'
+  } catch (error: any) {
+    telegramLinkError.value = error?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
+  } finally {
+    telegramLinkBusy.value = false
+  }
+}
+
 onMounted(fetchUser)
 </script>
 
@@ -666,6 +692,27 @@ onMounted(fetchUser)
                 <span role="cell">{{ formatDashboardNumber(trade.price) }}</span>
               </div>
             </div>
+          </div>
+        </AppSectionCard>
+
+        <AppSectionCard
+          v-if="showTelegramConnectCard"
+          class="telegram-connect-section"
+          title="اتصال تلگرام"
+          description="برای دریافت پیام‌های معاملاتی در هر دو بستر، اتصال تلگرام توصیه می‌شود."
+        >
+          <div class="telegram-connect-content">
+            <div class="telegram-connect-copy">
+              <strong>ربات معاملات را فعال کنید</strong>
+              <span>بعد از ورود به ربات، شماره همین حساب را با دکمه تلگرام ارسال کنید.</span>
+              <p v-if="telegramLinkError" class="telegram-connect-error">{{ telegramLinkError }}</p>
+            </div>
+            <AppButton type="button" size="sm" :loading="telegramLinkBusy" @click="connectTelegram">
+              <template #icon>
+                <Send :size="16" />
+              </template>
+              اتصال
+            </AppButton>
           </div>
         </AppSectionCard>
 
@@ -1490,6 +1537,41 @@ onMounted(fetchUser)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.telegram-connect-section {
+  border: 1px solid rgba(14, 165, 233, 0.18);
+}
+
+.telegram-connect-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.telegram-connect-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.telegram-connect-copy strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 850;
+}
+
+.telegram-connect-copy span,
+.telegram-connect-error {
+  margin: 0;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-font-xs);
+  line-height: 1.8;
+}
+
+.telegram-connect-error {
+  color: var(--ds-danger-600);
 }
 
 .today-trades-counterparty {

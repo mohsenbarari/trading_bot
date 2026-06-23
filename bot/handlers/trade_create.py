@@ -18,6 +18,7 @@ from core.db import AsyncSessionLocal
 from core.offer_expiry_forwarding import forward_offer_expiry_to_home_server
 from core.offer_source import OfferSourceSurface
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
+from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
 from core.server_routing import current_server, is_remote_home
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.services.offer_expiry_service import (
@@ -91,6 +92,17 @@ async def _bot_market_is_open() -> bool:
     return bool(getattr(evaluation, "is_open", False))
 
 
+async def _bot_trade_access_denial_reason(user: User | object | None) -> str | None:
+    decision = evaluate_bot_access_local_state(user)
+    if not decision.allowed:
+        return decision.reason
+    if getattr(user, "id", None) is None or not isinstance(user, User):
+        return None
+    async with AsyncSessionLocal() as session:
+        decision = await evaluate_bot_access(session, user)
+    return None if decision.allowed else decision.reason
+
+
 def _get_price_warning_keyboard(confirm_callback_data: str, cancel_callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -108,8 +120,9 @@ async def handle_trade_button(message: types.Message, state: FSMContext, user: O
     if not user:
         return
 
-    if user.role == UserRole.WATCH:
-        await message.answer("⛔️ شما دسترسی به بخش معاملات را ندارید.")
+    denial_reason = await _bot_trade_access_denial_reason(user)
+    if denial_reason:
+        await message.answer(bot_access_denial_message(denial_reason))
         return
 
     if user.trading_restricted_until:
@@ -1034,9 +1047,9 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     if not user:
         return
     
-    # بررسی نقش کاربر
-    if user.role == UserRole.WATCH:
-        await message.answer("⛔️ شما دسترسی به بخش معاملات را ندارید.")
+    denial_reason = await _bot_trade_access_denial_reason(user)
+    if denial_reason:
+        await message.answer(bot_access_denial_message(denial_reason))
         return
     
     # بررسی مسدودیت

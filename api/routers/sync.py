@@ -283,22 +283,23 @@ TABLE_ORDER = {
     "users": 0,
     "accountant_relations": 1,
     "customer_relations": 2,
-    "chats": 3,
-    "chat_members": 4,
-    "invitations": 5,
-    "admin_market_messages": 6,
-    "admin_broadcast_messages": 7,
-    "notifications": 8,
-    "user_blocks": 9,
-    "commodities": 10,
-    "commodity_aliases": 11,
-    "trading_settings": 12,
-    "market_schedule_overrides": 13,
-    "market_runtime_state": 14,
-    "offers": 15,
-    "offer_publication_states": 16,
-    "offer_requests": 17,
-    "trades": 18,
+    "telegram_link_tokens": 3,
+    "chats": 4,
+    "chat_members": 5,
+    "invitations": 6,
+    "admin_market_messages": 7,
+    "admin_broadcast_messages": 8,
+    "notifications": 9,
+    "user_blocks": 10,
+    "commodities": 11,
+    "commodity_aliases": 12,
+    "trading_settings": 13,
+    "market_schedule_overrides": 14,
+    "market_runtime_state": 15,
+    "offers": 16,
+    "offer_publication_states": 17,
+    "offer_requests": 18,
+    "trades": 19,
 }
 
 async def verify_signature(request: Request):
@@ -402,6 +403,7 @@ from models.customer_relation import CustomerRelation
 from models.user import User
 from models.invitation import Invitation
 from models.notification import Notification
+from models.telegram_link_token import TelegramLinkToken
 from models.admin_message import AdminBroadcastMessage, AdminMarketMessage
 from models.offer import Offer
 from models.offer_request import OfferRequest
@@ -424,6 +426,7 @@ NATURAL_KEYS = {
     "commodities": "name",
     "commodity_aliases": "alias",
     "users": "telegram_id",
+    "telegram_link_tokens": "token_hash",
     "invitations": "token",
     "market_schedule_overrides": "date",
     "trades": "trade_number",
@@ -460,6 +463,7 @@ SEQUENCE_MAP = {
     "offer_publication_states": ("offer_publication_states_id_seq", "offer_publication_states"),
     "offer_requests": ("offer_requests_id_seq", "offer_requests"),
     "trades": ("trades_id_seq", "trades"),
+    "telegram_link_tokens": ("telegram_link_tokens_id_seq", "telegram_link_tokens"),
     "invitations": ("invitations_id_seq", "invitations"),
     "admin_market_messages": ("admin_market_messages_id_seq", "admin_market_messages"),
     "admin_broadcast_messages": ("admin_broadcast_messages_id_seq", "admin_broadcast_messages"),
@@ -507,6 +511,7 @@ def get_model_class(table_name: str):
         "users": User,
         "accountant_relations": AccountantRelation,
         "customer_relations": CustomerRelation,
+        "telegram_link_tokens": TelegramLinkToken,
         "chats": Chat,
         "chat_members": ChatMember,
         "invitations": Invitation,

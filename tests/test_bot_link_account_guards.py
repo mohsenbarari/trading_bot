@@ -8,7 +8,7 @@ from bot.handlers.link_account import LinkState, handle_address_completion, hand
 class FakeState:
     def __init__(self):
         self.cleared = 0
-        self.data = {}
+        self.data = {"telegram_link_token": "unit-token"}
         self.states = []
 
     async def clear(self):
@@ -72,7 +72,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=False),
         ):
             await handle_contact(message, state)
-        self.assertIn("کاربری با این شماره یافت نشد", message.answer.await_args.args[0])
+        self.assertIn("همگام‌سازی", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
         other_user = SimpleNamespace(id=2, telegram_id=77, account_name="acc", full_name="acc", address="تهران خیابان آزادی پلاک ۱۰")
@@ -125,7 +125,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         ):
             await handle_contact(message, state)
 
-        self.assertIn("مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+        self.assertIn("دسترسی این سطح مشتری به ربات تلگرام فعال نیست", message.answer.await_args.args[0])
         self.assertEqual(state.cleared, 1)
 
     async def test_handle_address_completion_guard_branches(self):
@@ -146,7 +146,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.handlers.link_account.get_db", new=db_factory(None)):
             await handle_address_completion(message, state)
         self.assertEqual(state.cleared, 1)
-        self.assertIn("کاربر یافت نشد", message.answer.await_args.args[0])
+        self.assertIn("همگام‌سازی", message.answer.await_args.args[0])
 
         accountant_user = SimpleNamespace(id=9, telegram_id=None, account_name="acc", full_name="acc", address="System Default")
         state = FakeState()
@@ -170,7 +170,7 @@ class BotLinkAccountGuardTests(unittest.IsolatedAsyncioTestCase):
         ):
             await handle_address_completion(message, state)
         self.assertEqual(state.cleared, 1)
-        self.assertIn("مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند", message.answer.await_args.args[0])
+        self.assertIn("دسترسی این سطح مشتری به ربات تلگرام فعال نیست", message.answer.await_args.args[0])
 
         linked_elsewhere = SimpleNamespace(id=9, telegram_id=77, account_name="acc", full_name="acc", address="System Default")
         state = FakeState()

@@ -12,7 +12,11 @@ import logging
 
 from core.db import AsyncSessionLocal
 from core.config import settings
-from core.services.user_account_status_service import is_user_market_blocked
+from core.services.bot_access_policy import evaluate_bot_access
+from core.services.telegram_link_token_service import (
+    TelegramLinkTokenError,
+    load_pending_telegram_link_token_user_for_update,
+)
 from core.services.accountant_relation_service import (
     get_pending_accountant_relation_by_invitation_token,
     is_accountant_invitation_token,
@@ -21,18 +25,17 @@ from core.services.customer_relation_service import (
     get_pending_customer_relation_by_invitation_token,
     is_customer_invitation_token,
 )
-from core.services.chat_room_service import ensure_mandatory_channel_membership
 from models.invitation import Invitation
-from models.user import User, set_legacy_has_bot_access_compatibility
+from models.user import User
 from bot.states import Registration
-from bot.keyboards import get_share_contact_keyboard, get_persistent_menu_keyboard
+from bot.keyboards import get_persistent_menu_keyboard
 from bot.handlers.link_account import (
     BOT_ACCOUNT_INACTIVE_REASON,
     bot_account_access_denial_reason,
     build_bot_account_access_denial_message,
+    build_neutral_account_link_message,
     prompt_contact_for_account_link,
 )
-from bot.utils.channel_invites import build_channel_join_request_line
 from bot.message_manager import (
     set_anchor, 
     delete_previous_anchor,
@@ -49,6 +52,13 @@ def build_webapp_link_line() -> str | None:
     if not frontend_url:
         return None
     return f"🌐 [ورود به وب اپ]({frontend_url})"
+
+
+def build_register_link_line(token: str) -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
+    if not frontend_url:
+        return None
+    return f"🌐 [تکمیل ثبت‌نام در وب اپ]({frontend_url}/register?token={token})"
 
 
 def build_accountant_register_link_line(token: str) -> str | None:
@@ -69,6 +79,39 @@ def build_customer_register_link_line(token: str) -> str | None:
 async def handle_start_with_token(message: types.Message, command: CommandObject, state: FSMContext, user: Optional[User]):
     
     token = command.args
+
+    if token and token.startswith("link_"):
+        await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
+        if user:
+            anchor_msg = await message.answer(
+                "✅ حساب شما قبلاً به تلگرام متصل شده است.",
+                reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+            )
+            set_anchor(message.chat.id, anchor_msg.message_id)
+            return
+
+        raw_link_token = token.replace("link_", "", 1).strip()
+        async with AsyncSessionLocal() as session:
+            try:
+                await load_pending_telegram_link_token_user_for_update(session, raw_link_token)
+            except TelegramLinkTokenError:
+                anchor_msg = await message.answer(
+                    "لینک اتصال آماده نیست یا منقضی شده است. از وب‌اپ دوباره وارد مسیر اتصال شوید.",
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                set_anchor(message.chat.id, anchor_msg.message_id)
+                return
+
+        anchor_msg = await prompt_contact_for_account_link(
+            message,
+            state,
+            prompt_text=(
+                "برای تکمیل اتصال، شماره موبایل همین حساب را از دکمه زیر ارسال کنید."
+            ),
+            link_token=raw_link_token,
+        )
+        set_anchor(message.chat.id, anchor_msg.message_id)
+        return
     
     # --- بررسی لینک پروفایل عمومی ---
     if token and token.startswith("profile_"):
@@ -242,12 +285,17 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
             )
             return
             
-        await state.update_data(token=token, mobile_number=invitation.mobile_number)
-        await state.set_state(Registration.awaiting_contact)
-        
+        register_lines = [
+            "✅ لینک دعوت معتبر است.",
+            "ثبت‌نام از طریق وب‌اپ انجام می‌شود. پس از تکمیل ثبت‌نام، در صورت مجاز بودن می‌توانید اتصال تلگرام را از داخل وب‌اپ فعال کنید.",
+        ]
+        register_line = build_register_link_line(token)
+        if register_line:
+            register_lines.append(register_line)
         anchor_msg = await message.answer(
-            "✅ لینک دعوت شما معتبر است. لطفاً برای تکمیل ثبت‌نام، شماره تماس خود را به اشتراک بگذارید.",
-            reply_markup=get_share_contact_keyboard()
+            "\n\n".join(register_lines),
+            reply_markup=types.ReplyKeyboardRemove(),
+            parse_mode="Markdown",
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
 
@@ -266,14 +314,9 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
     else:
-        anchor_msg = await prompt_contact_for_account_link(
-            message,
-            state,
-            prompt_text=(
-                "سلام! اگر حساب شما قبلاً در وب یا با خط فرمان ساخته شده، "
-                "برای فعال شدن ربات نیازی به لینک دعوت جدید ندارید. "
-                "شماره همراه همان حساب را ارسال کنید تا تلگرام شما متصل شود."
-            ),
+        anchor_msg = await message.answer(
+            build_neutral_account_link_message(),
+            reply_markup=types.ReplyKeyboardRemove(),
         )
         set_anchor(message.chat.id, anchor_msg.message_id)
 
@@ -282,33 +325,22 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
 async def handle_contact(message: types.Message, state: FSMContext):
     
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    
-    shared_contact = message.contact
-    user_phone_number = shared_contact.phone_number
-    
-    if not user_phone_number.startswith('+'):
-        user_phone_number = '+' + user_phone_number
-
     state_data = await state.get_data()
-    expected_phone_number = state_data.get("mobile_number")
     token = state_data.get("token")
+    await state.clear()
 
-    if not user_phone_number.endswith(expected_phone_number[-10:]) or shared_contact.user_id != message.from_user.id:
-        await state.clear()
-        bot_response = await message.answer(
-            "❌ شماره تماس شما با شماره ثبت شده برای این لینک دعوت مطابقت ندارد. ثبت‌نام انجام نشد.",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-        return
-
-    # ذخیره اطلاعات و رفتن به مرحله آدرس
-    await state.update_data(phone_verified=True)
-    await state.set_state(Registration.awaiting_address)
-    
+    register_lines = [
+        "ثبت‌نام از طریق وب‌اپ انجام می‌شود.",
+        "بعد از تکمیل ثبت‌نام، اتصال تلگرام را از داخل وب‌اپ فعال کنید.",
+    ]
+    if token:
+        register_line = build_register_link_line(token)
+        if register_line:
+            register_lines.append(register_line)
     anchor_msg = await message.answer(
-        "✅ شماره تماس تایید شد!\n\n"
-        "📍 آدرس خود را جهت جابجایی سکه وارد نمایید:",
-        reply_markup=types.ReplyKeyboardRemove()
+        "\n\n".join(register_lines),
+        reply_markup=types.ReplyKeyboardRemove(),
+        parse_mode="Markdown",
     )
     set_anchor(message.chat.id, anchor_msg.message_id)
 
@@ -317,113 +349,23 @@ async def handle_contact(message: types.Message, state: FSMContext):
 async def handle_address(message: types.Message, state: FSMContext):
     
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
-    
-    address = message.text.strip()
-    
-    if len(address) < 10:
-        bot_response = await message.answer(
-            "❌ آدرس وارد شده کوتاه است. لطفاً آدرس کامل‌تری وارد کنید."
-        )
-        return
-    
     state_data = await state.get_data()
     token = state_data.get("token")
-    
     await state.clear()
-
-    async with AsyncSessionLocal() as session:
-        inv_stmt = select(Invitation).where(Invitation.token == token)
-        invitation: Optional[Invitation] = (await session.execute(inv_stmt)).scalar_one_or_none()
-
-        if not invitation or invitation.is_used:
-            bot_response = await message.answer("خطا! لینک دعوت شما دیگر معتبر نیست.", reply_markup=types.ReplyKeyboardRemove())
-            return
-
-        if is_accountant_invitation_token(token):
-            relation = await get_pending_accountant_relation_by_invitation_token(session, token)
-            if not relation:
-                await message.answer("خطا! لینک دعوت شما دیگر معتبر نیست.", reply_markup=types.ReplyKeyboardRemove())
-                return
-
-            accountant_lines = [
-                "⚠️ ثبت‌نام حسابدار از مسیر ربات مجاز نیست.",
-                "برای تکمیل ثبت‌نام حسابدار از وب‌اپ استفاده کنید.",
-            ]
-            register_line = build_accountant_register_link_line(token)
-            if register_line:
-                accountant_lines.append(register_line)
-            await message.answer(
-                "\n\n".join(accountant_lines),
-                reply_markup=types.ReplyKeyboardRemove(),
-                parse_mode="Markdown",
-            )
-            return
-
-        if is_customer_invitation_token(token):
-            relation = await get_pending_customer_relation_by_invitation_token(session, token)
-            if not relation:
-                await message.answer("خطا! لینک دعوت شما دیگر معتبر نیست.", reply_markup=types.ReplyKeyboardRemove())
-                return
-
-            customer_lines = [
-                "⚠️ ثبت‌نام مشتری از مسیر ربات مجاز نیست.",
-                "برای تکمیل ثبت‌نام مشتری از وب‌اپ استفاده کنید.",
-            ]
-            register_line = build_customer_register_link_line(token)
-            if register_line:
-                customer_lines.append(register_line)
-            await message.answer(
-                "\n\n".join(customer_lines),
-                reply_markup=types.ReplyKeyboardRemove(),
-                parse_mode="Markdown",
-            )
-            return
-
-        new_user = User(
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            full_name=message.from_user.full_name,
-            account_name=invitation.account_name,
-            mobile_number=invitation.mobile_number,
-            address=address,
-            role=invitation.role,
-        )
-        set_legacy_has_bot_access_compatibility(new_user, enabled=True)
-
-        invitation.is_used = True
-        session.add(new_user)
-        await session.flush()
-        await ensure_mandatory_channel_membership(session, user=new_user)
-        await session.commit()
-
-        welcome_text = (
-            f"✅ خوش آمدید، {message.from_user.full_name}!\n"
-            f"ثبت‌نام شما با موفقیت انجام شد.\n\n"
-        )
-
-        join_request_line = await build_channel_join_request_line(
-            message.bot,
-            user_id=new_user.id,
-        )
-        if join_request_line:
-            welcome_text += (
-                "از لینک زیر برای ثبت درخواست عضویت در کانال معاملات استفاده کنید:\n"
-                f"{join_request_line}\n"
-                "پس از ثبت درخواست، عضویت شما به صورت خودکار تایید می‌شود.\n\n"
-            )
-
-        webapp_link_line = build_webapp_link_line()
-        if webapp_link_line:
-            welcome_text += f"{webapp_link_line}\n\n"
-        
-        welcome_text += "برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید."
-        
-        anchor_msg = await message.answer(
-            welcome_text,
-            parse_mode="Markdown",
-            reply_markup=get_persistent_menu_keyboard(invitation.role, settings.frontend_url)
-        )
-        set_anchor(message.chat.id, anchor_msg.message_id)
+    register_lines = [
+        "این مسیر ثبت‌نام در ربات فعال نیست.",
+        "برای تکمیل ثبت‌نام از وب‌اپ استفاده کنید.",
+    ]
+    if token:
+        register_line = build_register_link_line(token)
+        if register_line:
+            register_lines.append(register_line)
+    anchor_msg = await message.answer(
+        "\n\n".join(register_lines),
+        reply_markup=types.ReplyKeyboardRemove(),
+        parse_mode="Markdown",
+    )
+    set_anchor(message.chat.id, anchor_msg.message_id)
 
 
 @router.chat_join_request()
@@ -438,9 +380,11 @@ async def handle_channel_join_request(join_request: types.ChatJoinRequest):
         )
         user = (await session.execute(stmt)).scalar_one_or_none()
 
-    denial_reason = bot_account_access_denial_reason(user)
-    if user and is_user_market_blocked(user):
-        denial_reason = BOT_ACCOUNT_INACTIVE_REASON
+        denial_reason = bot_account_access_denial_reason(user)
+        if user:
+            decision = await evaluate_bot_access(session, user)
+            if not decision.allowed:
+                denial_reason = decision.reason or BOT_ACCOUNT_INACTIVE_REASON
 
     if denial_reason:
         await join_request.bot.decline_chat_join_request(
@@ -476,6 +420,11 @@ async def handle_confirm_trade(callback: types.CallbackQuery, user: Optional[Use
     if not user:
         await callback.answer("❌ ابتدا ثبت‌نام کنید.", show_alert=True)
         return
+
+    local_denial_reason = bot_account_access_denial_reason(user)
+    if local_denial_reason:
+        await callback.answer(build_bot_account_access_denial_message(local_denial_reason), show_alert=True)
+        return
     
     from models.offer import Offer, OfferStatus
     from models.trade import Trade, TradeType, TradeStatus
@@ -484,6 +433,11 @@ async def handle_confirm_trade(callback: types.CallbackQuery, user: Optional[Use
     offer_id = int(callback.data.split("_")[-1])
     
     async with AsyncSessionLocal() as session:
+        decision = await evaluate_bot_access(session, user)
+        if not decision.allowed:
+            await callback.answer(build_bot_account_access_denial_message(decision.reason), show_alert=True)
+            return
+
         stmt = select(Offer).options(
             joinedload(Offer.user),
             joinedload(Offer.commodity)

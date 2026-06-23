@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import { AppButton, AppCard, AppErrorState, AppFormField, AppInput, AppLoadingState, AppPage, AppPageHeader, AppTextarea } from '../components/ui'
 
 const route = useRoute()
@@ -16,10 +17,14 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
 const inviteInfo = ref<any>(null)
 const otpCode = ref('')
 const address = ref('')
+const canConnectTelegram = ref(false)
+const telegramLinkBusy = ref(false)
+const telegramLinkError = ref('')
 
 const stepTitle = computed(() => {
   if (step.value === 1) return 'بررسی دعوت‌نامه'
   if (step.value === 2) return 'تایید شماره موبایل'
+  if (step.value === 4) return 'اتصال تلگرام'
   return 'ثبت اطلاعات نهایی'
 })
 
@@ -111,12 +116,43 @@ async function submitRegistration() {
     const data = await res.json()
     localStorage.setItem('auth_token', data.access_token)
     localStorage.setItem('refresh_token', data.refresh_token)
+    const meRes = await fetch(`${apiBaseUrl}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${data.access_token}` },
+    })
+    const me = meRes.ok ? await meRes.json().catch(() => null) : null
+    canConnectTelegram.value = me?.can_connect_telegram === true && me?.telegram_linked !== true
+    if (canConnectTelegram.value) {
+      step.value = 4
+      return
+    }
     router.replace('/')
   } catch (e: any) {
     error.value = e.message
   } finally {
     loading.value = false
   }
+}
+
+async function connectTelegram() {
+  if (telegramLinkBusy.value) return
+  telegramLinkBusy.value = true
+  telegramLinkError.value = ''
+  try {
+    const payload = await requestTelegramLink()
+    if (payload.telegram_url) {
+      openTelegramLink(payload.telegram_url)
+      return
+    }
+    telegramLinkError.value = payload.detail || 'لینک اتصال تلگرام آماده نشد.'
+  } catch (e: any) {
+    telegramLinkError.value = e?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
+  } finally {
+    telegramLinkBusy.value = false
+  }
+}
+
+function skipTelegramConnect() {
+  router.replace('/')
 }
 </script>
 
@@ -190,6 +226,13 @@ async function submitRegistration() {
 
           <AppButton block :disabled="address.length < 10" :loading="loading" @click="submitRegistration">تکمیل ثبت‌نام</AppButton>
         </div>
+
+        <div v-else-if="step === 4" class="step-content">
+          <p class="hint">اتصال تلگرام اجباری نیست، اما برای دریافت پیام‌های معاملاتی در ربات توصیه می‌شود.</p>
+          <p v-if="telegramLinkError" class="telegram-link-error">{{ telegramLinkError }}</p>
+          <AppButton block :loading="telegramLinkBusy" @click="connectTelegram">اتصال به ربات تلگرام</AppButton>
+          <AppButton block variant="secondary" @click="skipTelegramConnect">فعلاً رد می‌کنم</AppButton>
+        </div>
       </AppCard>
     </div>
   </AppPage>
@@ -253,5 +296,12 @@ async function submitRegistration() {
 .address-input {
   width: 100%;
   min-height: 7rem;
+}
+
+.telegram-link-error {
+  margin: 0;
+  color: var(--ds-danger-600);
+  font-size: var(--ds-font-sm);
+  line-height: 1.8;
 }
 </style>

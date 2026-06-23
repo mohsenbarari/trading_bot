@@ -3,12 +3,13 @@ import { computed, onMounted, watch, ref } from 'vue'
 import {
   Smartphone,
   Trash2,
-  HardDrive,
   LogOut,
   ChevronLeft,
+  Send,
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
+import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 import {
@@ -33,8 +34,14 @@ const cacheFeedback = ref<string | null>(null)
 const sessions = ref<any[]>([])
 const sessionsLoading = ref(false)
 const sessionsError = ref<string | null>(null)
+const telegramLinkBusy = ref(false)
+const telegramLinkError = ref<string | null>(null)
 
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const showTelegramConnectSection = computed(() => (
+  currentUserSummary.value?.can_connect_telegram === true
+  && currentUserSummary.value?.telegram_linked !== true
+))
 const routeSection = computed<'sessions' | 'storage' | null>(() => {
   if (route.name === 'account-storage') return 'storage'
   if (route.name === 'account-security') return 'sessions'
@@ -136,6 +143,24 @@ async function logout() {
   forceLogout()
 }
 
+async function connectTelegram() {
+  if (telegramLinkBusy.value) return
+  telegramLinkBusy.value = true
+  telegramLinkError.value = null
+  try {
+    const payload = await requestTelegramLink()
+    if (payload.telegram_url) {
+      openTelegramLink(payload.telegram_url)
+      return
+    }
+    telegramLinkError.value = payload.detail || 'لینک اتصال تلگرام آماده نشد.'
+  } catch (error: any) {
+    telegramLinkError.value = error?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
+  } finally {
+    telegramLinkBusy.value = false
+  }
+}
+
 onMounted(() => {
   void primeCurrentUserSummary().finally(() => {
     if (!isAccountant.value) {
@@ -177,6 +202,28 @@ watch(
         title="نشست و خروج برای حسابدار محدود است"
         message="نشست‌های حسابدار و خروج از حساب توسط سرگروه مدیریت می‌شود. در این صفحه فقط حافظه و داده‌های دستگاه در دسترس است."
       />
+
+      <AppSectionCard
+        v-if="showTelegramConnectSection"
+        class="settings-section-card"
+        title="اتصال تلگرام"
+        description="دریافت پیام‌های معاملاتی روی ربات تلگرام برای این حساب فعال می‌شود."
+        tone="primary"
+      >
+        <AppCard class="telegram-settings-card">
+          <div class="telegram-settings-copy">
+            <strong>فعال‌سازی ربات معاملات</strong>
+            <span>بعد از ورود به ربات، شماره موبایل همین حساب را با دکمه تلگرام ارسال کنید.</span>
+            <p v-if="telegramLinkError" class="telegram-settings-error">{{ telegramLinkError }}</p>
+          </div>
+          <AppButton type="button" size="sm" :loading="telegramLinkBusy" @click="connectTelegram">
+            <template #icon>
+              <Send :size="16" />
+            </template>
+            اتصال
+          </AppButton>
+        </AppCard>
+      </AppSectionCard>
 
       <AppSectionCard
         v-if="!isAccountant"
@@ -331,7 +378,8 @@ watch(
 
 .session-card__main,
 .session-card__identity,
-.storage-info {
+.storage-info,
+.telegram-settings-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -339,8 +387,15 @@ watch(
 }
 
 .session-card__identity,
-.storage-info {
+.storage-info,
+.telegram-settings-card {
   min-width: 0;
+}
+
+.telegram-settings-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
 }
 
 .session-icon {
@@ -380,10 +435,23 @@ watch(
 .session-meta,
 .storage-copy,
 .storage-label,
-.storage-feedback {
+.storage-feedback,
+.telegram-settings-copy span,
+.telegram-settings-error {
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
   line-height: 1.8;
+}
+
+.telegram-settings-copy strong {
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-sm);
+  font-weight: 850;
+}
+
+.telegram-settings-error {
+  margin: 0;
+  color: var(--ds-danger-600);
 }
 
 .storage-copy,
@@ -404,7 +472,8 @@ watch(
 
 @media (max-width: 640px) {
   .session-card__main,
-  .storage-info {
+  .storage-info,
+  .telegram-settings-card {
     flex-direction: column;
     align-items: stretch;
   }

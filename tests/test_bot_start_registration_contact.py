@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.start import handle_contact
-from bot.states import Registration
 
 
 class FakeState:
@@ -26,7 +25,7 @@ class FakeState:
         self.states.append(value)
 
 
-def make_message(phone, contact_user_id=10, from_user_id=10):
+def make_message(phone="9123334444", contact_user_id=10, from_user_id=10):
     return SimpleNamespace(
         bot=SimpleNamespace(),
         chat=SimpleNamespace(id=20),
@@ -37,28 +36,20 @@ def make_message(phone, contact_user_id=10, from_user_id=10):
 
 
 class BotStartRegistrationContactTests(unittest.IsolatedAsyncioTestCase):
-    async def test_handle_contact_rejects_mismatched_phone_or_user(self):
+    async def test_legacy_registration_contact_state_redirects_to_webapp(self):
         state = FakeState({"mobile_number": "09123334444", "token": "tok"})
-        message = make_message("+989122223333", contact_user_id=99)
-
-        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()):
-            await handle_contact(message, state)
-
-        self.assertEqual(state.cleared, 1)
-        self.assertIn("مطابقت ندارد", message.answer.await_args.args[0])
-
-    async def test_handle_contact_marks_phone_verified_and_moves_to_address(self):
-        state = FakeState({"mobile_number": "09123334444", "token": "tok"})
-        message = make_message("9123334444")
+        message = make_message(contact_user_id=99)
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
             "bot.handlers.start.set_anchor"
         ) as set_anchor:
             await handle_contact(message, state)
 
-        self.assertEqual(state.updated, [{"phone_verified": True}])
-        self.assertEqual(state.states, [Registration.awaiting_address])
-        self.assertIn("شماره تماس تایید شد", message.answer.await_args.args[0])
+        self.assertEqual(state.cleared, 1)
+        self.assertEqual(state.updated, [])
+        self.assertEqual(state.states, [])
+        self.assertIn("ثبت‌نام از طریق وب‌اپ انجام می‌شود", message.answer.await_args.args[0])
+        self.assertIn("register?token=tok", message.answer.await_args.args[0])
         set_anchor.assert_called_once_with(20, 91)
 
 

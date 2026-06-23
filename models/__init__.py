@@ -19,6 +19,7 @@ from .commodity import Commodity, CommodityAlias
 from .notification import Notification
 from .push_subscription import PushSubscription
 from .user_notification_preference import UserNotificationPreference
+from .telegram_link_token import TelegramLinkToken, TelegramLinkTokenStatus
 from .admin_message import AdminBroadcastMessage, AdminMarketMessage
 from .trading_setting import TradingSetting
 from .market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
@@ -94,6 +95,8 @@ __all__ = [
     "Notification",
     "PushSubscription",
     "UserNotificationPreference",
+    "TelegramLinkToken",
+    "TelegramLinkTokenStatus",
     "AdminBroadcastMessage",
     "AdminMarketMessage",
     "TradingSetting",

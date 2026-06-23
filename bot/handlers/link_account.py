@@ -13,7 +13,21 @@ from core.db import get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
 from core.services.chat_room_service import ensure_mandatory_channel_membership
-from core.services.user_account_status_service import is_user_market_blocked
+from core.services.bot_access_policy import (
+    BOT_ACCESS_REASON_ACCOUNTANT,
+    BOT_ACCESS_REASON_CUSTOMER_TIER2,
+    BOT_ACCESS_REASON_DELETED,
+    BOT_ACCESS_REASON_INACTIVE,
+    BOT_ACCESS_REASON_SYNC_PENDING,
+    bot_access_denial_message,
+    evaluate_bot_access,
+    evaluate_bot_access_local_state,
+)
+from core.services.telegram_link_token_service import (
+    TelegramLinkTokenError,
+    consume_telegram_link_token,
+    load_pending_telegram_link_token_user_for_update,
+)
 from bot.keyboards import get_persistent_menu_keyboard
 from bot.utils.channel_invites import build_channel_join_request_line
 
@@ -24,6 +38,7 @@ INCOMPLETE_ADDRESS_SENTINELS = {"System Default", "REGISTRATION_PENDING"}
 BOT_ACCOUNT_SYNC_PENDING_REASON = "pending_sync"
 BOT_ACCOUNT_INACTIVE_REASON = "inactive"
 BOT_ACCOUNT_DELETED_REASON = "deleted"
+BOT_ACCOUNT_LINK_TOKEN_STATE_KEY = "telegram_link_token"
 
 
 class BotAccountLinkDenied(PermissionError):
@@ -61,8 +76,8 @@ def build_accountant_web_only_message() -> str:
 
 def build_customer_web_only_message() -> str:
     lines = [
-        "⚠️ مشتری‌ها در این فاز به ربات تلگرام دسترسی ندارند.",
-        "برای استفاده از حساب مشتری فقط از وب‌اپ استفاده کنید.",
+        "⚠️ دسترسی این سطح مشتری به ربات تلگرام فعال نیست.",
+        "برای استفاده از بازار فقط از وب‌اپ استفاده کنید.",
     ]
     webapp_link_line = build_webapp_link_line()
     if webapp_link_line:
@@ -71,31 +86,24 @@ def build_customer_web_only_message() -> str:
 
 
 def bot_account_access_denial_reason(user: User | object | None) -> str | None:
-    if user is None:
+    decision = evaluate_bot_access_local_state(user)
+    if decision.allowed:
+        return None
+    if decision.reason == BOT_ACCESS_REASON_SYNC_PENDING:
         return BOT_ACCOUNT_SYNC_PENDING_REASON
-    if getattr(user, "is_deleted", False):
+    if decision.reason == BOT_ACCESS_REASON_DELETED:
         return BOT_ACCOUNT_DELETED_REASON
-    if is_user_market_blocked(user):
+    if decision.reason == BOT_ACCESS_REASON_INACTIVE:
         return BOT_ACCOUNT_INACTIVE_REASON
-    return None
+    return decision.reason
 
 
 def build_bot_account_access_denial_message(reason: str | None) -> str:
-    if reason == BOT_ACCOUNT_INACTIVE_REASON:
-        return (
-            "❌ حساب شما غیرفعال است.\n\n"
-            "تا زمان فعال‌سازی مجدد حساب، امکان اتصال تلگرام یا عضویت در کانال معاملات وجود ندارد."
-        )
-    if reason == BOT_ACCOUNT_DELETED_REASON:
-        return (
-            "❌ این حساب در دسترس نیست.\n\n"
-            "امکان اتصال تلگرام یا عضویت در کانال معاملات برای این حساب وجود ندارد."
-        )
-    return (
-        "⏳ اطلاعات حساب شما هنوز در ربات قابل تایید نیست.\n\n"
-        "اگر همین الان در وب‌اپ ثبت‌نام کرده‌اید، حساب را فعال کرده‌اید، یا شماره را تغییر داده‌اید، "
-        "احتمالاً همگام‌سازی هنوز کامل نشده است. چند لحظه بعد دوباره تلاش کنید."
-    )
+    return bot_access_denial_message(reason)
+
+
+def build_neutral_account_link_message() -> str:
+    return "برای فعال‌سازی این مسیر، ابتدا ثبت‌نام را در سامانه کامل کنید و از همان‌جا وارد ربات شوید."
 
 
 def _is_mocked_relation_check(relation_checker) -> bool:
@@ -112,13 +120,22 @@ async def _run_relation_check(db: AsyncSession, relation_checker, user_id: int) 
 
 async def get_web_only_bot_access_reason(db: AsyncSession, user: User) -> str | None:
     user_id = getattr(user, "id", None)
-    if user_id is None:
+    if not isinstance(db, AsyncSession) and user_id is not None:
+        if await _run_relation_check(db, is_user_accountant, int(user_id)):
+            return "accountant"
+        if await _run_relation_check(db, is_user_customer, int(user_id)):
+            return "customer"
         return None
 
-    if await _run_relation_check(db, is_user_accountant, user_id):
+    decision = await evaluate_bot_access(db, user)
+    if decision.allowed:
+        return None
+    if decision.reason == BOT_ACCESS_REASON_ACCOUNTANT:
         return "accountant"
-    if await _run_relation_check(db, is_user_customer, user_id):
+    if decision.reason == BOT_ACCESS_REASON_CUSTOMER_TIER2:
         return "customer"
+    if decision.reason:
+        return decision.reason
     return None
 
 
@@ -134,6 +151,8 @@ async def finalize_account_link(
     message: types.Message,
     *,
     address: str | None = None,
+    token_record=None,
+    send_success_message: bool = True,
 ) -> None:
     access_denial_reason = bot_account_access_denial_reason(user)
     if access_denial_reason:
@@ -145,16 +164,29 @@ async def finalize_account_link(
     if block_reason == "customer":
         raise PermissionError("CUSTOMER_BOT_ACCESS_FORBIDDEN")
 
-    user.telegram_id = message.from_user.id
-    user.username = message.from_user.username
-    if user.full_name == user.account_name and message.from_user.full_name:
-        user.full_name = message.from_user.full_name
+    if token_record is not None:
+        await consume_telegram_link_token(
+            db,
+            token_record,
+            user,
+            telegram_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+        )
+    else:
+        user.telegram_id = message.from_user.id
+        user.username = message.from_user.username
+        if user.full_name == user.account_name and message.from_user.full_name:
+            user.full_name = message.from_user.full_name
     if address is not None:
         user.address = address
     set_legacy_has_bot_access_compatibility(user, enabled=True)
 
     await ensure_mandatory_channel_membership(db, user=user)
     await db.commit()
+
+    if not send_success_message:
+        return
 
     success_lines = [f"✅ حساب کاربری **{user.account_name}** با موفقیت به تلگرام متصل شد."]
     if address is not None:
@@ -203,6 +235,8 @@ async def prompt_contact_for_account_link(
     message: types.Message,
     state: FSMContext,
     prompt_text: str | None = None,
+    *,
+    link_token: str | None = None,
 ) -> types.Message:
     text = prompt_text or (
         "🔗 برای اتصال حساب کاربری وب به تلگرام، لطفاً شماره موبایل خود را ارسال کنید.\n"
@@ -218,6 +252,8 @@ async def prompt_contact_for_account_link(
             one_time_keyboard=True
         )
     )
+    if link_token:
+        await state.update_data(**{BOT_ACCOUNT_LINK_TOKEN_STATE_KEY: link_token})
     await state.set_state(LinkState.waiting_for_contact)
     return sent_message
 
@@ -236,7 +272,10 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
         )
         return
 
-    await prompt_contact_for_account_link(message, state)
+    await message.answer(build_neutral_account_link_message(), reply_markup=types.ReplyKeyboardRemove())
+    clear_state = getattr(state, "clear", None)
+    if callable(clear_state):
+        await clear_state()
 
 @router.message(LinkState.waiting_for_contact, F.contact)
 async def handle_contact(message: types.Message, state: FSMContext):
@@ -255,17 +294,44 @@ async def handle_contact(message: types.Message, state: FSMContext):
         phone = "0" + phone[2:]
         
     logger.info(f"Linking attempt for phone: {phone} by tg_id: {message.from_user.id}")
+
+    state_data = await state.get_data()
+    link_token = state_data.get(BOT_ACCOUNT_LINK_TOKEN_STATE_KEY)
+    if not link_token:
+        await message.answer(
+            build_neutral_account_link_message(),
+            reply_markup=types.ReplyKeyboardRemove(),
+        )
+        await state.clear()
+        return
     
     async for db in get_db():
-        # Find user by phone
-        stmt = select(User).where(User.mobile_number == phone)
-        user = (await db.execute(stmt)).scalar_one_or_none()
+        token_record = None
+        if isinstance(db, AsyncSession):
+            try:
+                token_record, user, _decision = await load_pending_telegram_link_token_user_for_update(db, link_token)
+            except TelegramLinkTokenError as exc:
+                await message.answer(
+                    build_bot_account_access_denial_message(exc.reason),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                await state.clear()
+                return
+        else:
+            stmt = select(User).where(User.mobile_number == phone)
+            user = (await db.execute(stmt)).scalar_one_or_none()
         
         if not user:
             await message.answer(
                 build_bot_account_access_denial_message(BOT_ACCOUNT_SYNC_PENDING_REASON),
                 reply_markup=types.ReplyKeyboardRemove(),
             )
+            await state.clear()
+            return
+
+        registered_phone = str(getattr(user, "mobile_number", "") or "")
+        if registered_phone and not registered_phone.endswith(phone[-10:]):
+            await message.answer("❌ شماره تماس ارسال شده با حساب انتخاب‌شده مطابقت ندارد.", reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
             return
 
@@ -302,11 +368,36 @@ async def handle_contact(message: types.Message, state: FSMContext):
             return
 
         if user_requires_address_completion(user):
+            try:
+                await finalize_account_link(db, user, message, token_record=token_record, send_success_message=False)
+            except BotAccountLinkDenied as exc:
+                await message.answer(
+                    build_bot_account_access_denial_message(exc.reason),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                )
+                await state.clear()
+                return
+            except PermissionError as exc:
+                await message.answer(
+                    build_web_only_message_for_reason(str(exc).replace("_BOT_ACCESS_FORBIDDEN", "").lower()),
+                    reply_markup=types.ReplyKeyboardRemove(),
+                    parse_mode="Markdown",
+                )
+                await state.clear()
+                return
+            except Exception as e:
+                rollback = getattr(db, "rollback", None)
+                if callable(rollback):
+                    await rollback()
+                logger.error(f"Link error before address completion: {e}")
+                await message.answer("❌ خطا در اتصال حساب.", reply_markup=types.ReplyKeyboardRemove())
+                await state.clear()
+                return
             await prompt_address_completion(message, state, user.id, already_linked=False)
             return
         
         try:
-            await finalize_account_link(db, user, message)
+            await finalize_account_link(db, user, message, token_record=token_record)
         except BotAccountLinkDenied as exc:
             await message.answer(
                 build_bot_account_access_denial_message(exc.reason),
