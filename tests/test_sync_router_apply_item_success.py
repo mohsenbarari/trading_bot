@@ -3,11 +3,14 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from api.routers.sync import _apply_item, _partitioned_sequence_alignment_sql
+from sqlalchemy.dialects import postgresql
+
+from api.routers.sync import _apply_item, _build_upsert_stmt, _partitioned_sequence_alignment_sql
 from models.offer import Offer
 from models.offer_request import OfferRequest
 from models.offer_publication_state import OfferPublicationState
 from models.trade import Trade
+from models.trade_delivery_receipt import TradeDeliveryReceipt
 
 
 class AsyncNullContext:
@@ -73,6 +76,34 @@ class UpdateBuilder:
 
 
 class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
+    def test_trade_delivery_receipt_upsert_uses_dedupe_key_and_preserves_identity_fields(self):
+        stmt = _build_upsert_stmt(
+            TradeDeliveryReceipt,
+            "trade_delivery_receipts",
+            {
+                "id": 41,
+                "event_type": "trade_completed",
+                "dedupe_key": "trade_completed:webapp:10025:7",
+                "trade_number": 10025,
+                "recipient_user_id": 7,
+                "recipient_role": "offer_owner",
+                "channel": "webapp",
+                "destination_server": "iran",
+                "status": "pending",
+                "reason": "webapp_required",
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (dedupe_key)", compiled)
+        self.assertNotIn("event_type = excluded.event_type", compiled)
+        self.assertNotIn("trade_number = excluded.trade_number", compiled)
+        self.assertNotIn("recipient_user_id = excluded.recipient_user_id", compiled)
+        self.assertNotIn("channel = excluded.channel", compiled)
+        self.assertNotIn("destination_server = excluded.destination_server", compiled)
+        self.assertIn("status = excluded.status", compiled)
+
     async def test_apply_item_handles_trading_settings_and_offer_insert_success(self):
         insert_builder = FakeInsertBuilder()
         db = FakeDB()

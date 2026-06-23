@@ -574,6 +574,73 @@ def setup_trade_events():
     logger.info("✅ Trade event listeners registered")
 
 
+def setup_trade_delivery_receipt_events():
+    """Setup event listeners for TradeDeliveryReceipt model."""
+    from models.trade_delivery_receipt import TradeDeliveryReceipt
+
+    def receipt_payload(target) -> Dict[str, Any]:
+        channel = target.channel.value if hasattr(target.channel, "value") else target.channel
+        status = target.status.value if hasattr(target.status, "value") else target.status
+        return {
+            "id": target.id,
+            "event_type": target.event_type,
+            "dedupe_key": target.dedupe_key,
+            "trade_id": target.trade_id,
+            "trade_number": target.trade_number,
+            "offer_id": target.offer_id,
+            "recipient_user_id": target.recipient_user_id,
+            "recipient_role": target.recipient_role,
+            "channel": channel,
+            "destination_server": target.destination_server,
+            "status": status,
+            "reason": target.reason,
+            "notification_id": target.notification_id,
+            "telegram_message_id": target.telegram_message_id,
+            "worker_id": target.worker_id,
+            "lease_until": _isoformat_or_none(getattr(target, "lease_until", None)),
+            "attempt_count": target.attempt_count,
+            "next_retry_at": _isoformat_or_none(getattr(target, "next_retry_at", None)),
+            "last_error": target.last_error,
+            "last_error_class": target.last_error_class,
+            "audit_payload": target.audit_payload,
+            "event_created_at": _isoformat_or_none(getattr(target, "event_created_at", None)),
+            "sent_at": _isoformat_or_none(getattr(target, "sent_at", None)),
+            "terminal_at": _isoformat_or_none(getattr(target, "terminal_at", None)),
+            "created_at": _isoformat_or_none(getattr(target, "created_at", None)),
+            "updated_at": _isoformat_or_none(getattr(target, "updated_at", None)),
+        }
+
+    @event.listens_for(TradeDeliveryReceipt, 'after_insert')
+    def on_trade_delivery_receipt_created(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "trade_delivery_receipts", target.id, "INSERT", receipt_payload(target))
+        except Exception as e:
+            logger.error(f"Error in trade_delivery_receipt after_insert event: {e}")
+
+    @event.listens_for(TradeDeliveryReceipt, 'after_update')
+    def on_trade_delivery_receipt_updated(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            log_change(connection, "trade_delivery_receipts", target.id, "UPDATE", receipt_payload(target))
+        except Exception as e:
+            logger.error(f"Error in trade_delivery_receipt after_update event: {e}")
+
+    @event.listens_for(TradeDeliveryReceipt, 'after_delete')
+    def on_trade_delivery_receipt_deleted(mapper, connection, target):
+        if connection.get_execution_options().get("is_sync"):
+            return
+        try:
+            data = {"id": target.id, "dedupe_key": target.dedupe_key, "trade_number": target.trade_number}
+            log_change(connection, "trade_delivery_receipts", target.id, "DELETE", data)
+        except Exception as e:
+            logger.error(f"Error in trade_delivery_receipt after_delete event: {e}")
+
+    logger.info("✅ TradeDeliveryReceipt event listeners registered")
+
+
 def setup_user_events():
     """Setup event listeners for User model"""
     from models.user import User
@@ -1083,6 +1150,8 @@ def setup_notification_events():
             "created_at": (target.created_at or utc_now_naive()).isoformat(),
             "level": level,
             "category": category,
+            "dedupe_key": target.dedupe_key,
+            "extra_payload": target.extra_payload,
         }
 
     @event.listens_for(Notification, 'after_insert')
@@ -1276,6 +1345,7 @@ def setup_all_events():
     setup_offer_request_events()
     setup_offer_publication_state_events()
     setup_trade_events()
+    setup_trade_delivery_receipt_events()
     setup_commodity_events()
     setup_commodity_alias_events()
     setup_trading_settings_events()

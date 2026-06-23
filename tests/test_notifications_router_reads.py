@@ -3,6 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from api.routers.notifications import (
+    NotificationRead,
     get_all_notifications,
     get_unread_count,
     get_unread_notifications,
@@ -112,6 +113,23 @@ class NotificationsRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("OFFSET 10", unread_sql)
         self.assertIn("LIMIT 25", all_sql)
         self.assertIn("OFFSET 5", all_sql)
+
+    async def test_notification_read_schema_preserves_extra_payload_metadata(self):
+        notification = make_notification(
+            12,
+            dedupe_key="trade_completed:webapp:10025:5",
+            extra_payload={
+                "route": "/users/9?account_name=ali",
+                "trade_number": 10025,
+                "recipient_role": "offer_owner",
+            },
+        )
+
+        payload = NotificationRead.model_validate(notification, from_attributes=True).model_dump()
+
+        self.assertEqual(payload["dedupe_key"], "trade_completed:webapp:10025:5")
+        self.assertEqual(payload["extra_payload"]["route"], "/users/9?account_name=ali")
+        self.assertEqual(payload["extra_payload"]["trade_number"], 10025)
 
 
 if __name__ == "__main__":

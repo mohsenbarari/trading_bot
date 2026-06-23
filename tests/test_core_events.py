@@ -216,7 +216,17 @@ class CoreEventsTests(unittest.TestCase):
             expires_at=now,
             created_at=now,
         )
-        notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
+        notification = SimpleNamespace(
+            id=5,
+            user_id=1,
+            message='hi',
+            is_read=False,
+            created_at=None,
+            level='INFO',
+            category='SYSTEM',
+            dedupe_key='trade_completed:webapp:10001:1',
+            extra_payload={'route': '/users/1'},
+        )
         notification_preference = SimpleNamespace(
             id=6,
             user_id=1,
@@ -322,6 +332,34 @@ class CoreEventsTests(unittest.TestCase):
             created_at=now,
             updated_at=now,
         )
+        trade_delivery_receipt = SimpleNamespace(
+            id=41,
+            event_type='trade_completed',
+            dedupe_key='trade_completed:webapp:10001:1',
+            trade_id=2,
+            trade_number=10001,
+            offer_id=1,
+            recipient_user_id=1,
+            recipient_role='offer_owner',
+            channel=SimpleNamespace(value='webapp'),
+            destination_server='iran',
+            status=SimpleNamespace(value='pending'),
+            reason='webapp_required',
+            notification_id=None,
+            telegram_message_id=None,
+            worker_id='worker-1',
+            lease_until=now,
+            attempt_count=0,
+            next_retry_at=None,
+            last_error=None,
+            last_error_class=None,
+            audit_payload={'receipt': True},
+            event_created_at=now,
+            sent_at=None,
+            terminal_at=None,
+            created_at=now,
+            updated_at=now,
+        )
 
         return {
             ('Chat', 'after_insert'): chat,
@@ -340,6 +378,9 @@ class CoreEventsTests(unittest.TestCase):
             ('OfferPublicationState', 'after_delete'): offer_publication_state,
             ('Trade', 'after_insert'): trade,
             ('Trade', 'after_update'): trade,
+            ('TradeDeliveryReceipt', 'after_insert'): trade_delivery_receipt,
+            ('TradeDeliveryReceipt', 'after_update'): trade_delivery_receipt,
+            ('TradeDeliveryReceipt', 'after_delete'): trade_delivery_receipt,
             ('User', 'after_insert'): user,
             ('User', 'after_update'): user,
             ('AccountantRelation', 'after_insert'): accountant_relation,
@@ -771,6 +812,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_invitation_events()
             events.setup_offer_request_events()
             events.setup_offer_publication_state_events()
+            events.setup_trade_delivery_receipt_events()
             events.setup_notification_events()
             events.setup_user_notification_preference_events()
             events.setup_admin_message_events()
@@ -887,10 +929,52 @@ class CoreEventsTests(unittest.TestCase):
             registry[('OfferPublicationState', 'after_update')](None, connection, publication_state)
             registry[('OfferPublicationState', 'after_delete')](None, connection, publication_state)
 
-            notification = SimpleNamespace(id=5, user_id=1, message='hi', is_read=False, created_at=None, level='INFO', category='SYSTEM')
+            notification = SimpleNamespace(
+                id=5,
+                user_id=1,
+                message='hi',
+                is_read=False,
+                created_at=None,
+                level='INFO',
+                category='SYSTEM',
+                dedupe_key='trade_completed:webapp:10001:1',
+                extra_payload={'route': '/users/1'},
+            )
             registry[('Notification', 'after_insert')](None, connection, notification)
             registry[('Notification', 'after_update')](None, connection, notification)
             registry[('Notification', 'after_delete')](None, connection, notification)
+
+            trade_delivery_receipt = SimpleNamespace(
+                id=41,
+                event_type='trade_completed',
+                dedupe_key='trade_completed:webapp:10001:1',
+                trade_id=2,
+                trade_number=10001,
+                offer_id=1,
+                recipient_user_id=1,
+                recipient_role='offer_owner',
+                channel=SimpleNamespace(value='webapp'),
+                destination_server='iran',
+                status=SimpleNamespace(value='pending'),
+                reason='webapp_required',
+                notification_id=None,
+                telegram_message_id=None,
+                worker_id='worker-1',
+                lease_until=now,
+                attempt_count=0,
+                next_retry_at=None,
+                last_error=None,
+                last_error_class=None,
+                audit_payload={'receipt': True},
+                event_created_at=now,
+                sent_at=None,
+                terminal_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+            registry[('TradeDeliveryReceipt', 'after_insert')](None, connection, trade_delivery_receipt)
+            registry[('TradeDeliveryReceipt', 'after_update')](None, connection, trade_delivery_receipt)
+            registry[('TradeDeliveryReceipt', 'after_delete')](None, connection, trade_delivery_receipt)
 
             notification_preference = SimpleNamespace(
                 id=6,
@@ -960,6 +1044,7 @@ class CoreEventsTests(unittest.TestCase):
         logger.info.assert_any_call('✅ TradingSetting event listeners registered')
         logger.info.assert_any_call('✅ Invitation event listeners registered')
         logger.info.assert_any_call('✅ OfferPublicationState event listeners registered')
+        logger.info.assert_any_call('✅ TradeDeliveryReceipt event listeners registered')
         logger.info.assert_any_call('✅ Notification event listeners registered')
         logger.info.assert_any_call('✅ UserNotificationPreference event listeners registered')
         logger.info.assert_any_call('✅ AdminMessage event listeners registered')
@@ -980,7 +1065,11 @@ class CoreEventsTests(unittest.TestCase):
             'core.events.setup_offer_publication_state_events'
         ) as setup_offer_publication_state_events, patch(
             'core.events.setup_trade_events'
-        ) as setup_trade_events, patch('core.events.setup_commodity_events') as setup_commodity_events, patch(
+        ) as setup_trade_events, patch(
+            'core.events.setup_trade_delivery_receipt_events'
+        ) as setup_trade_delivery_receipt_events, patch(
+            'core.events.setup_commodity_events'
+        ) as setup_commodity_events, patch(
             'core.events.setup_commodity_alias_events'
         ) as setup_commodity_alias_events, patch('core.events.setup_trading_settings_events') as setup_trading_settings_events, patch(
             'core.events.setup_user_block_events'
@@ -1006,6 +1095,7 @@ class CoreEventsTests(unittest.TestCase):
         setup_offer_request_events.assert_called_once()
         setup_offer_publication_state_events.assert_called_once()
         setup_trade_events.assert_called_once()
+        setup_trade_delivery_receipt_events.assert_called_once()
         setup_commodity_events.assert_called_once()
         setup_commodity_alias_events.assert_called_once()
         setup_trading_settings_events.assert_called_once()
@@ -1034,6 +1124,7 @@ class CoreEventsTests(unittest.TestCase):
             events.setup_invitation_events()
             events.setup_offer_request_events()
             events.setup_offer_publication_state_events()
+            events.setup_trade_delivery_receipt_events()
             events.setup_notification_events()
             events.setup_user_notification_preference_events()
             events.setup_admin_message_events()

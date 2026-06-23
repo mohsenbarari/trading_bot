@@ -73,6 +73,42 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["authority_server"], "foreign")
         self.assertEqual(metadata["authoritative_version"], 3)
 
+    def test_trade_delivery_receipt_metadata_uses_dedupe_key_and_destination_server(self):
+        metadata = build_sync_metadata(
+            "trade_delivery_receipts",
+            55,
+            "UPDATE",
+            {
+                "dedupe_key": "trade_completed:webapp:10025:7",
+                "event_type": "trade_completed",
+                "trade_number": 10025,
+                "recipient_user_id": 7,
+                "channel": "webapp",
+                "destination_server": "iran",
+            },
+            change_log_id=111,
+        )
+
+        self.assertEqual(metadata["aggregate_id"], "trade_completed:webapp:10025:7")
+        self.assertEqual(metadata["authority_server"], "iran")
+        self.assertEqual(
+            build_sync_public_identity(
+                "trade_delivery_receipts",
+                55,
+                {
+                    "dedupe_key": "trade_completed:telegram:10025:8",
+                    "trade_number": 10025,
+                },
+            ),
+            {
+                "table": "trade_delivery_receipts",
+                "kind": "dedupe_key",
+                "value": "trade_completed:telegram:10025:8",
+                "record_id": 55,
+                "references": {"trade_number": "10025"},
+            },
+        )
+
     def test_public_identity_payloads_prefer_stable_cross_server_keys(self):
         self.assertEqual(
             build_sync_public_identity("offers", 12, {"offer_public_id": "ofr_12"}),

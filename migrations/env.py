@@ -14,6 +14,7 @@ import models.commodity
 import models.offer  # مدل لفظ
 import models.offer_publication_state
 import models.trade  # مدل معاملات
+import models.trade_delivery_receipt
 import models.message  # مدل پیام چت
 import models.conversation  # مدل مکالمات چت
 import models.push_subscription

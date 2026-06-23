@@ -314,6 +314,7 @@ TABLE_ORDER = {
     "offer_publication_states": 17,
     "offer_requests": 18,
     "trades": 19,
+    "trade_delivery_receipts": 20,
 }
 
 async def verify_signature(request: Request):
@@ -423,6 +424,10 @@ from models.offer import Offer
 from models.offer_request import OfferRequest
 from models.offer_publication_state import OfferPublicationState
 from models.trade import Trade, TradeStatus, TradeType
+from models.trade_delivery_receipt import (
+    TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES,
+    TradeDeliveryReceipt,
+)
 from models.commodity import Commodity, CommodityAlias
 from models.chat import Chat
 from models.chat_member import ChatMember
@@ -445,6 +450,7 @@ NATURAL_KEYS = {
     "market_schedule_overrides": "date",
     "trades": "trade_number",
     "offer_publication_states": "dedupe_key",
+    "trade_delivery_receipts": "dedupe_key",
 }
 
 SAFE_NATURAL_VALUE_LOG_KEYS = {
@@ -453,6 +459,7 @@ SAFE_NATURAL_VALUE_LOG_KEYS = {
     ("market_schedule_overrides", "date"),
     ("trades", "trade_number"),
     ("offer_publication_states", "dedupe_key"),
+    ("trade_delivery_receipts", "dedupe_key"),
 }
 
 
@@ -477,6 +484,7 @@ SEQUENCE_MAP = {
     "offer_publication_states": ("offer_publication_states_id_seq", "offer_publication_states"),
     "offer_requests": ("offer_requests_id_seq", "offer_requests"),
     "trades": ("trades_id_seq", "trades"),
+    "trade_delivery_receipts": ("trade_delivery_receipts_id_seq", "trade_delivery_receipts"),
     "telegram_link_tokens": ("telegram_link_tokens_id_seq", "telegram_link_tokens"),
     "invitations": ("invitations_id_seq", "invitations"),
     "admin_market_messages": ("admin_market_messages_id_seq", "admin_market_messages"),
@@ -536,6 +544,7 @@ def get_model_class(table_name: str):
         "offer_publication_states": OfferPublicationState,
         "offer_requests": OfferRequest,
         "trades": Trade,
+        "trade_delivery_receipts": TradeDeliveryReceipt,
         "commodities": Commodity,
         "commodity_aliases": CommodityAlias,
         "market_schedule_overrides": MarketScheduleOverride,
@@ -682,6 +691,21 @@ def _build_upsert_stmt(model, table, data):
     elif table == "offer_publication_states" and data.get("dedupe_key"):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
         return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
+    elif table == "trade_delivery_receipts" and data.get("dedupe_key"):
+        immutable_fields = {
+            "id",
+            "dedupe_key",
+            "event_type",
+            "trade_number",
+            "recipient_user_id",
+            "channel",
+            "destination_server",
+        }
+        set_dict = {key: value for key, value in data.items() if key not in immutable_fields}
+        where_clause = _trade_delivery_receipt_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict, where=where_clause)
     elif (
         table == "offer_requests"
         and data.get("request_home_server")
@@ -776,6 +800,18 @@ async def _resolve_publication_state_id_by_dedupe_key(db: AsyncSession, dedupe_k
         return None
 
 
+async def _resolve_trade_delivery_receipt_id_by_dedupe_key(db: AsyncSession, dedupe_key: str | None) -> int | None:
+    dedupe = _nonempty_text(dedupe_key)
+    if not dedupe:
+        return None
+    result = await db.execute(select(TradeDeliveryReceipt.id).where(TradeDeliveryReceipt.dedupe_key == dedupe))
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _resolve_offer_request_id_by_idempotency(db: AsyncSession, data: dict) -> int | None:
     request_home_server = _nonempty_text(data.get("request_home_server"))
     idempotency_key = _nonempty_text(data.get("idempotency_key"))
@@ -805,6 +841,8 @@ async def _resolve_local_record_id_by_public_identity(
         return await _resolve_trade_id_by_trade_number(db, data.get("trade_number"))
     if table == "offer_publication_states":
         return await _resolve_publication_state_id_by_dedupe_key(db, data.get("dedupe_key"))
+    if table == "trade_delivery_receipts":
+        return await _resolve_trade_delivery_receipt_id_by_dedupe_key(db, data.get("dedupe_key"))
     if table == "offer_requests":
         return await _resolve_offer_request_id_by_idempotency(db, data)
     return None
@@ -816,6 +854,8 @@ def _sync_table_has_public_identity(table: str, data: dict) -> bool:
     if table == "trades":
         return data.get("trade_number") not in (None, "")
     if table == "offer_publication_states":
+        return bool(_nonempty_text(data.get("dedupe_key")))
+    if table == "trade_delivery_receipts":
         return bool(_nonempty_text(data.get("dedupe_key")))
     if table == "offer_requests":
         return bool(_nonempty_text(data.get("request_home_server")) and _nonempty_text(data.get("idempotency_key")))
@@ -836,6 +876,26 @@ async def _localize_offer_reference_by_public_id(db: AsyncSession, table: str, d
         data["local_offer_id"] = local_offer_id
     else:
         data["offer_id"] = local_offer_id
+    return True
+
+
+async def _localize_trade_delivery_receipt_references(db: AsyncSession, data: dict) -> bool:
+    trade_number = data.get("trade_number")
+    if trade_number in (None, ""):
+        data["trade_id"] = None
+        data["offer_id"] = None
+        return True
+
+    result = await db.execute(
+        select(Trade.id, Trade.offer_id)
+        .where(Trade.trade_number == trade_number)
+        .limit(1)
+    )
+    row = result.first()
+    if row is None:
+        return False
+    data["trade_id"] = row[0]
+    data["offer_id"] = row[1]
     return True
 
 
@@ -1001,6 +1061,25 @@ def _offer_request_upsert_where_clause(model, stmt, data: dict):
     terminal_reactivation = current_terminal & ~incoming_terminal
 
     return (current_version <= incoming_version) & ~terminal_reactivation & ~same_version_terminal_conflict
+
+
+def _trade_delivery_receipt_upsert_where_clause(model, stmt, data: dict):
+    if not _enum_value(data.get("status")):
+        return None
+    current_status = getattr(model, "status", None)
+    if current_status is None:
+        return None
+    try:
+        incoming_status = stmt.excluded["status"]
+    except (AttributeError, KeyError):
+        return None
+
+    terminal_statuses = list(TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES)
+    current_terminal = current_status.in_(terminal_statuses)
+    incoming_terminal = incoming_status.in_(terminal_statuses)
+    same_terminal_state = current_terminal & incoming_terminal & (current_status == incoming_status)
+
+    return (~current_terminal) | same_terminal_state
 
 
 def _trade_payload_uses_completed_guard(data: dict) -> bool:
@@ -1251,6 +1330,18 @@ async def _apply_item(
                     "table": table,
                     "record_id": record_id,
                     "offer_public_id": data.get("offer_public_id"),
+                },
+            )
+            return 'deferred'
+
+        if table == "trade_delivery_receipts" and not await _localize_trade_delivery_receipt_references(db, data):
+            logger.warning(
+                "Synced trade delivery receipt references a trade_number that is not available locally; deferring",
+                extra={
+                    "event": "sync.public_identity.trade_receipt_reference_deferred",
+                    "table": table,
+                    "record_id": record_id,
+                    "trade_number": data.get("trade_number"),
                 },
             )
             return 'deferred'

@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import List
-from pydantic import BaseModel, Field
+from typing import Any, List
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from fastapi.responses import StreamingResponse
 import asyncio
@@ -31,6 +31,8 @@ router = APIRouter(
 )
 
 class NotificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
     id: int
     message: str
     is_read: bool
@@ -38,9 +40,8 @@ class NotificationRead(BaseModel):
     # 👇 این دو خط حیاتی هستند تا فرانت‌اند بتواند استایل را اعمال کند
     level: NotificationLevel 
     category: NotificationCategory
-
-    class Config:
-        from_attributes = True 
+    dedupe_key: str | None = None
+    extra_payload: dict[str, Any] | None = None
 
 
 class PushPublicKeyResponse(BaseModel):
@@ -66,14 +67,13 @@ class PushSubscriptionDelete(BaseModel):
 
 
 class PushSubscriptionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     enabled: bool
     platform: str | None = None
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class PushTestResponse(BaseModel):

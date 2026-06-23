@@ -22,6 +22,7 @@ export interface AppRealtimeNotificationPayload {
     category?: string
     is_read?: boolean
     created_at?: string
+    extra_payload?: Record<string, unknown> | null
     [key: string]: unknown
 }
 
@@ -97,6 +98,10 @@ function normalizeEnumValue(value: unknown): string {
     return typeof value === 'string' ? value.trim().toLowerCase() : ''
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 export function normalizeNotificationId(value: unknown): number | string {
     if (typeof value === 'number' && Number.isFinite(value)) {
         return value
@@ -141,26 +146,31 @@ export function buildNotificationTitle(category: NotificationCategory): string {
 export function normalizeAppNotificationPayload(
     notification: AppRealtimeNotificationPayload = {}
 ): NormalizedAppNotification {
-    const category = normalizeNotificationCategory(notification.category)
-    const level = normalizeNotificationLevel(notification.level)
-    const content = typeof notification.content === 'string' && notification.content.trim()
-        ? notification.content
+    const embeddedPayload = isRecord(notification.extra_payload) ? notification.extra_payload : {}
+    const source = {
+        ...embeddedPayload,
+        ...notification,
+    }
+    const category = normalizeNotificationCategory(source.category)
+    const level = normalizeNotificationLevel(source.level)
+    const content = typeof source.content === 'string' && source.content.trim()
+        ? source.content
         : ''
-    const message = typeof notification.message === 'string' && notification.message.trim()
-        ? notification.message
+    const message = typeof source.message === 'string' && source.message.trim()
+        ? source.message
         : ''
-    const body = content || message || (typeof notification.body === 'string' ? notification.body : '')
+    const body = content || message || (typeof source.body === 'string' ? source.body : '')
 
     return {
-        ...notification,
-        id: normalizeNotificationId(notification.id),
+        ...source,
+        id: normalizeNotificationId(source.id),
         category,
         level,
         body,
         content: content || body,
         message: message || body,
-        title: typeof notification.title === 'string' && notification.title.trim()
-            ? notification.title
+        title: typeof source.title === 'string' && source.title.trim()
+            ? source.title
             : buildNotificationTitle(category),
     }
 }

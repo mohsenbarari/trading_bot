@@ -31,6 +31,8 @@ def _string_or_none(value: Any) -> str | None:
 
 
 def _authority_server(table_name: str, data: dict[str, Any]) -> str | None:
+    if table_name == "trade_delivery_receipts":
+        return _string_or_none(data.get("destination_server"))
     if table_name == "offer_publication_states":
         return _string_or_none(data.get("publication_owner_server"))
     if table_name == "offers":
@@ -55,6 +57,16 @@ def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -
         surface = _string_or_none(data.get("surface"))
         if public_id and surface:
             return f"{surface}:{public_id}"
+    if table_name == "trade_delivery_receipts":
+        dedupe_key = _string_or_none(data.get("dedupe_key"))
+        if dedupe_key:
+            return dedupe_key
+        event_type = _string_or_none(data.get("event_type"))
+        trade_number = _string_or_none(data.get("trade_number"))
+        recipient_user_id = _string_or_none(data.get("recipient_user_id"))
+        channel = _string_or_none(data.get("channel"))
+        if event_type and trade_number and recipient_user_id and channel:
+            return f"{event_type}:{channel}:{trade_number}:{recipient_user_id}"
     if table_name in {"offers", "offer_requests"}:
         public_id = _string_or_none(data.get("offer_public_id"))
         if public_id:
@@ -105,6 +117,20 @@ def build_sync_public_identity(table_name: str, record_id: Any, data: Any) -> di
             }
             if references:
                 identity["references"] = references
+            return identity
+
+    if table_name == "trade_delivery_receipts":
+        dedupe_key = _string_or_none(payload_data.get("dedupe_key"))
+        if dedupe_key:
+            identity = {
+                "table": table_name,
+                "kind": "dedupe_key",
+                "value": dedupe_key,
+                "record_id": record_id,
+            }
+            trade_number = _string_or_none(payload_data.get("trade_number"))
+            if trade_number:
+                identity["references"] = {"trade_number": trade_number}
             return identity
 
     if table_name == "offer_requests":

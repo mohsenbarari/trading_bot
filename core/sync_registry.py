@@ -254,6 +254,15 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "shared idempotent command; forward to offer_home_server when remote",
         "notifications and offer update events",
     ),
+    "trade_delivery_receipts": _entry(
+        "trade_delivery_receipts",
+        SyncPolicy.SYNC,
+        ("webapp_delivery_worker", "telegram_delivery_worker", "reconciliation_job"),
+        "destination_server delivery owner",
+        "dedupe key plus terminal-state precedence; local lease fields are not cross-server execution authority",
+        "trade notification delivery audit and repair",
+        notes="Delivery receipts are non-messenger operational data. Workers must execute only local destination_server rows.",
+    ),
     "telegram_link_tokens": _entry(
         "telegram_link_tokens",
         SyncPolicy.SYNC,

@@ -290,6 +290,7 @@ async def create_user_notification(
     level: NotificationLevel = NotificationLevel.INFO,
     category: NotificationCategory = NotificationCategory.SYSTEM,
     extra_payload: dict | None = None,
+    dedupe_key: str | None = None,
 ) -> Notification:
     """
     ایجاد نوتیفیکیشن برای کاربر و افزایش شمارنده.
@@ -309,7 +310,9 @@ async def create_user_notification(
         message=message,
         is_read=False,
         level=level,
-        category=category
+        category=category,
+        dedupe_key=dedupe_key,
+        extra_payload=extra_payload or None,
     )
     db.add(new_notif)
     await db.commit()
@@ -322,7 +325,9 @@ async def create_user_notification(
         "is_read": False,
         "created_at": new_notif.created_at.isoformat(),
         "level": new_notif.level.value,
-        "category": new_notif.category.value
+        "category": new_notif.category.value,
+        "dedupe_key": new_notif.dedupe_key,
+        "extra_payload": new_notif.extra_payload,
     }
     if extra_payload:
         payload.update(extra_payload)

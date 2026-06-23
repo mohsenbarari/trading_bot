@@ -1,6 +1,6 @@
 # trading_bot/schemas.py (کامل و اصلاح شده)
 
-from pydantic import BaseModel, Field, field_validator, field_serializer, computed_field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, field_serializer, computed_field
 from typing import List, Optional
 from datetime import datetime
 from core.utils import normalize_persian_numerals, to_jalali_str
@@ -477,19 +477,20 @@ class InvitationRead(InvitationBase):
         from_attributes = True
 
 class NotificationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
     id: int
     message: str
     is_read: bool
     created_at: datetime
     level: NotificationLevel     
     category: NotificationCategory
+    dedupe_key: str | None = None
+    extra_payload: dict | None = None
 
     @computed_field
     def created_at_jalali(self) -> str | None:
         return to_jalali_str(self.created_at)
-
-    class Config:
-        from_attributes = True
         
 
 # --- Commodity Schemas ---

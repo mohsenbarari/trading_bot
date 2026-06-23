@@ -107,10 +107,13 @@ class SchemaSmokeTests(unittest.TestCase):
             created_at=created_at,
             level=NotificationLevel.INFO,
             category=NotificationCategory.SYSTEM,
+            dedupe_key="trade_completed:webapp:10025:11",
+            extra_payload={"route": "/users/11", "trade_number": 10025},
         )
 
         self.assertEqual(notification.level, NotificationLevel.INFO)
         self.assertEqual(notification.category, NotificationCategory.SYSTEM)
+        self.assertEqual(notification.extra_payload["route"], "/users/11")
         self.assertEqual(notification.created_at_jalali, to_jalali_str(created_at))
 
     def test_avatar_and_accountant_schema_validators_and_invitation_jalali(self):

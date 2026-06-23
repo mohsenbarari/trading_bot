@@ -164,14 +164,18 @@ class CoreUtilsRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 level=NotificationLevel.SUCCESS,
                 category=NotificationCategory.USER,
                 extra_payload={'route': '/users/19'},
+                dedupe_key='trade_completed:webapp:10025:2',
             )
 
         self.assertEqual(notification.id, 7)
+        self.assertEqual(notification.dedupe_key, 'trade_completed:webapp:10025:2')
+        self.assertEqual(notification.extra_payload, {'route': '/users/19'})
         db.add.assert_called_once()
         db.commit.assert_awaited_once()
         redis_client.incr.assert_awaited_once_with('user:2:unread_count')
         publish_user_event.assert_awaited_once()
         self.assertEqual(publish_user_event.await_args.args[2]['route'], '/users/19')
+        self.assertEqual(publish_user_event.await_args.args[2]['extra_payload'], {'route': '/users/19'})
 
         redis_error_client = AsyncMock()
         redis_error_client.incr = AsyncMock(side_effect=RuntimeError('redis down'))

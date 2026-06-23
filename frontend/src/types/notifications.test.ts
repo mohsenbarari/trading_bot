@@ -38,6 +38,24 @@ describe('notification type helpers', () => {
     expect(normalized.level).toBe('success')
   })
 
+  it('normalizes persisted extra_payload metadata into the same shape as realtime payloads', () => {
+    const normalized = normalizeAppNotificationPayload({
+      id: 91,
+      message: 'trade body',
+      category: 'trade',
+      extra_payload: {
+        route: '/users/19?account_name=ali',
+        trade_number: 10025,
+        recipient_role: 'offer_owner',
+      },
+    })
+
+    expect(normalized.route).toBe('/users/19?account_name=ali')
+    expect(normalized.trade_number).toBe(10025)
+    expect(normalized.recipient_role).toBe('offer_owner')
+    expect(normalized.message).toBe('trade body')
+  })
+
   it('creates toast ids and resolves display kinds for chat, system, and level-driven items', () => {
     const toast = createToastNotification({ title: 't', body: 'b' })
     expect(typeof toast.id).toBe('number')

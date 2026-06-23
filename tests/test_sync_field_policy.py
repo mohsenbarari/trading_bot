@@ -63,6 +63,11 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("users", "mobile_number"): SyncFieldClassification.SYNC,
             ("trades", "offer_user_mobile"): SyncFieldClassification.SYNC,
             ("notifications", "message"): SyncFieldClassification.SYNC,
+            ("notifications", "extra_payload"): SyncFieldClassification.SYNC,
+            ("trade_delivery_receipts", "last_error"): SyncFieldClassification.SYNC,
+            ("trade_delivery_receipts", "audit_payload"): SyncFieldClassification.SYNC,
+            ("trade_delivery_receipts", "worker_id"): SyncFieldClassification.NO_SYNC,
+            ("trade_delivery_receipts", "lease_until"): SyncFieldClassification.NO_SYNC,
             ("push_subscriptions", "endpoint"): SyncFieldClassification.HASH_ONLY,
             ("push_subscriptions", "auth"): SyncFieldClassification.NO_SYNC,
         }
@@ -72,6 +77,15 @@ class SyncFieldPolicyTests(unittest.TestCase):
                 entry = get_sync_field_policy_entry(*key)
                 self.assertIsNotNone(entry)
                 self.assertEqual(entry.classification, classification)
+
+        self.assertEqual(
+            get_sync_field_policy_entry("trade_delivery_receipts", "worker_id").action,
+            SyncFieldAction.DROP,
+        )
+        self.assertEqual(
+            get_sync_field_policy_entry("trade_delivery_receipts", "lease_until").action,
+            SyncFieldAction.DROP,
+        )
 
     def test_no_sync_reference_fields_drop_raw_foreign_keys(self):
         for table_name, field_name, reference_table in {
