@@ -8,6 +8,8 @@ const dashboardViewMocks = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
   forceLogoutMock: vi.fn(),
   locationAssignMock: vi.fn(),
+  requestTelegramLinkMock: vi.fn(),
+  openTelegramLinkMock: vi.fn(),
   notificationStore: {
     appNotifications: [] as Array<Record<string, unknown>>,
   },
@@ -26,6 +28,11 @@ vi.mock('../stores/notifications', () => ({
 vi.mock('../utils/auth', () => ({
   apiFetch: dashboardViewMocks.apiFetchMock,
   forceLogout: dashboardViewMocks.forceLogoutMock,
+}))
+
+vi.mock('../services/telegramLink', () => ({
+  requestTelegramLink: dashboardViewMocks.requestTelegramLinkMock,
+  openTelegramLink: dashboardViewMocks.openTelegramLinkMock,
 }))
 
 function makeJsonResponse(payload: unknown, ok = true) {
@@ -83,6 +90,8 @@ describe('DashboardView.vue', () => {
     dashboardViewMocks.apiFetchMock.mockReset()
     dashboardViewMocks.forceLogoutMock.mockReset()
     dashboardViewMocks.locationAssignMock.mockReset()
+    dashboardViewMocks.requestTelegramLinkMock.mockReset()
+    dashboardViewMocks.openTelegramLinkMock.mockReset()
     dashboardViewMocks.notificationStore.appNotifications = []
     resetMarketRuntimeForTests()
     localStorage.clear()
@@ -90,6 +99,56 @@ describe('DashboardView.vue', () => {
       ...window.location,
       assign: dashboardViewMocks.locationAssignMock,
     })
+  })
+
+  it('shows the Telegram connect panel only before linking and opens the generated link', async () => {
+    mockDashboardApi({
+      user: {
+        id: 41,
+        full_name: 'کاربر تلگرام',
+        account_name: 'telegram41',
+        account_status: 'active',
+        can_connect_telegram: true,
+        telegram_linked: false,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      },
+    })
+    dashboardViewMocks.requestTelegramLinkMock.mockResolvedValue({
+      telegram_linked: false,
+      can_connect_telegram: true,
+      telegram_url: 'https://t.me/example_bot?start=link_token',
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.telegram-connect-section').text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
+
+    await wrapper.get('.telegram-connect-panel__button').trigger('click')
+    await flushPromises()
+
+    expect(dashboardViewMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)
+    expect(dashboardViewMocks.openTelegramLinkMock).toHaveBeenCalledWith('https://t.me/example_bot?start=link_token')
+
+    wrapper.unmount()
+
+    mockDashboardApi({
+      user: {
+        id: 42,
+        full_name: 'کاربر متصل',
+        account_name: 'telegram42',
+        account_status: 'active',
+        can_connect_telegram: true,
+        telegram_linked: true,
+        global_lock_grace_expires_at: null,
+        global_web_locked_at: null,
+        trading_restricted_until: null,
+      },
+    })
+
+    const connectedWrapper = await mountView()
+    expect(connectedWrapper.find('.telegram-connect-section').exists()).toBe(false)
   })
 
   it('loads the current user, shows the unread notification dot, and routes the top-bar actions', async () => {

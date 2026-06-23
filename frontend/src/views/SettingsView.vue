@@ -5,11 +5,11 @@ import {
   Trash2,
   LogOut,
   ChevronLeft,
-  Send,
 } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
+import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
 import {
@@ -38,9 +38,13 @@ const telegramLinkBusy = ref(false)
 const telegramLinkError = ref<string | null>(null)
 
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
 const showTelegramConnectSection = computed(() => (
-  currentUserSummary.value?.can_connect_telegram === true
-  && currentUserSummary.value?.telegram_linked !== true
+  !isAccountant.value
+  && (
+    currentUserSummary.value?.can_connect_telegram === true
+    || telegramConnected.value
+  )
 ))
 const routeSection = computed<'sessions' | 'storage' | null>(() => {
   if (route.name === 'account-storage') return 'storage'
@@ -144,7 +148,7 @@ async function logout() {
 }
 
 async function connectTelegram() {
-  if (telegramLinkBusy.value) return
+  if (telegramLinkBusy.value || telegramConnected.value) return
   telegramLinkBusy.value = true
   telegramLinkError.value = null
   try {
@@ -207,22 +211,15 @@ watch(
         v-if="showTelegramConnectSection"
         class="settings-section-card"
         title="اتصال تلگرام"
-        description="دریافت پیام‌های معاملاتی روی ربات تلگرام برای این حساب فعال می‌شود."
+        description="دسترسی سریع به امکانات اپ در بستر تلگرام"
         tone="primary"
       >
-        <AppCard class="telegram-settings-card">
-          <div class="telegram-settings-copy">
-            <strong>فعال‌سازی ربات معاملات</strong>
-            <span>بعد از ورود به ربات، شماره موبایل همین حساب را با دکمه تلگرام ارسال کنید.</span>
-            <p v-if="telegramLinkError" class="telegram-settings-error">{{ telegramLinkError }}</p>
-          </div>
-          <AppButton type="button" size="sm" :loading="telegramLinkBusy" @click="connectTelegram">
-            <template #icon>
-              <Send :size="16" />
-            </template>
-            اتصال
-          </AppButton>
-        </AppCard>
+        <TelegramConnectPanel
+          :connected="telegramConnected"
+          :loading="telegramLinkBusy"
+          :error="telegramLinkError"
+          @connect="connectTelegram"
+        />
       </AppSectionCard>
 
       <AppSectionCard
@@ -378,8 +375,7 @@ watch(
 
 .session-card__main,
 .session-card__identity,
-.storage-info,
-.telegram-settings-card {
+.storage-info {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -387,15 +383,8 @@ watch(
 }
 
 .session-card__identity,
-.storage-info,
-.telegram-settings-card {
+.storage-info {
   min-width: 0;
-}
-
-.telegram-settings-copy {
-  min-width: 0;
-  display: grid;
-  gap: 0.25rem;
 }
 
 .session-icon {
@@ -435,23 +424,10 @@ watch(
 .session-meta,
 .storage-copy,
 .storage-label,
-.storage-feedback,
-.telegram-settings-copy span,
-.telegram-settings-error {
+.storage-feedback {
   color: var(--ds-text-muted);
   font-size: var(--ds-font-sm);
   line-height: 1.8;
-}
-
-.telegram-settings-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 850;
-}
-
-.telegram-settings-error {
-  margin: 0;
-  color: var(--ds-danger-600);
 }
 
 .storage-copy,
@@ -472,8 +448,7 @@ watch(
 
 @media (max-width: 640px) {
   .session-card__main,
-  .storage-info,
-  .telegram-settings-card {
+  .storage-info {
     flex-direction: column;
     align-items: stretch;
   }

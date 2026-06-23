@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bell, ChevronLeft, Database, Settings, ShieldCheck, Smartphone, UserRound } from 'lucide-vue-next'
@@ -12,8 +12,12 @@ import {
 } from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
+import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
+import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 
 const router = useRouter()
+const telegramLinkBusy = ref(false)
+const telegramLinkError = ref<string | null>(null)
 
 interface AccountAction {
   key: string
@@ -25,6 +29,14 @@ interface AccountAction {
 
 const user = computed(() => currentUserSummary.value)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
+const showTelegramConnectPanel = computed(() => (
+  !isAccountant.value
+  && (
+    currentUserSummary.value?.can_connect_telegram === true
+    || telegramConnected.value
+  )
+))
 
 const profileActions = computed<AccountAction[]>(() => [
   {
@@ -85,6 +97,24 @@ const sessionsRestriction = computed(() => {
   }
 })
 
+async function connectTelegram() {
+  if (telegramLinkBusy.value || telegramConnected.value) return
+  telegramLinkBusy.value = true
+  telegramLinkError.value = null
+  try {
+    const payload = await requestTelegramLink()
+    if (payload.telegram_url) {
+      openTelegramLink(payload.telegram_url)
+      return
+    }
+    telegramLinkError.value = payload.detail || 'لینک اتصال تلگرام آماده نشد.'
+  } catch (error: any) {
+    telegramLinkError.value = error?.message || 'ساخت لینک اتصال تلگرام ناموفق بود.'
+  } finally {
+    telegramLinkBusy.value = false
+  }
+}
+
 onMounted(() => {
   void primeCurrentUserSummary()
 })
@@ -124,6 +154,14 @@ onMounted(() => {
             </template>
           </AppActionCard>
         </div>
+        <TelegramConnectPanel
+          v-if="showTelegramConnectPanel"
+          class="account-telegram-panel"
+          :connected="telegramConnected"
+          :loading="telegramLinkBusy"
+          :error="telegramLinkError"
+          @connect="connectTelegram"
+        />
       </AppSectionCard>
 
       <AppSectionCard
@@ -212,6 +250,10 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.account-telegram-panel {
+  margin-top: 0.75rem;
 }
 
 .account-guidance-list {

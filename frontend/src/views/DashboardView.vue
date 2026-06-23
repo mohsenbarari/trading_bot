@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, Send, UsersRound } from 'lucide-vue-next'
+import { Bell, Store, LogOut, AlertTriangle, Ban, ChevronDown, PackageCheck, UsersRound } from 'lucide-vue-next'
 import { useNotificationStore } from '../stores/notifications'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { formatIranDateTime, getIranHour, IRAN_TIME_ZONE, parseIranDisplayDate } from '../utils/iranTime'
 import { marketRuntime } from '../composables/useMarketRuntime'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
+import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
 import { AppButton, AppEmptyState, AppIconButton, AppInput, AppListItem, AppLoadingState, AppSectionCard, AppStatusBadge } from '../components/ui'
 
 interface DashboardTrade {
@@ -699,21 +700,13 @@ onMounted(fetchUser)
           v-if="showTelegramConnectCard"
           class="telegram-connect-section"
           title="اتصال تلگرام"
-          description="برای دریافت پیام‌های معاملاتی در هر دو بستر، اتصال تلگرام توصیه می‌شود."
+          description="دسترسی سریع به امکانات اپ در بستر تلگرام"
         >
-          <div class="telegram-connect-content">
-            <div class="telegram-connect-copy">
-              <strong>ربات معاملات را فعال کنید</strong>
-              <span>بعد از ورود به ربات، شماره همین حساب را با دکمه تلگرام ارسال کنید.</span>
-              <p v-if="telegramLinkError" class="telegram-connect-error">{{ telegramLinkError }}</p>
-            </div>
-            <AppButton type="button" size="sm" :loading="telegramLinkBusy" @click="connectTelegram">
-              <template #icon>
-                <Send :size="16" />
-              </template>
-              اتصال
-            </AppButton>
-          </div>
+          <TelegramConnectPanel
+            :loading="telegramLinkBusy"
+            :error="telegramLinkError"
+            @connect="connectTelegram"
+          />
         </AppSectionCard>
 
         <section
@@ -1541,37 +1534,6 @@ onMounted(fetchUser)
 
 .telegram-connect-section {
   border: 1px solid rgba(14, 165, 233, 0.18);
-}
-
-.telegram-connect-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.telegram-connect-copy {
-  min-width: 0;
-  display: grid;
-  gap: 0.25rem;
-}
-
-.telegram-connect-copy strong {
-  color: var(--ds-text-primary);
-  font-size: var(--ds-font-sm);
-  font-weight: 850;
-}
-
-.telegram-connect-copy span,
-.telegram-connect-error {
-  margin: 0;
-  color: var(--ds-text-secondary);
-  font-size: var(--ds-font-xs);
-  line-height: 1.8;
-}
-
-.telegram-connect-error {
-  color: var(--ds-danger-600);
 }
 
 .today-trades-counterparty {

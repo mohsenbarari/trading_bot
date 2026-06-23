@@ -9,6 +9,8 @@ const accountHubMocks = vi.hoisted(() => ({
     value: null as null | Record<string, unknown>,
   },
   primeCurrentUserSummaryMock: vi.fn(async () => null),
+  requestTelegramLinkMock: vi.fn(),
+  openTelegramLinkMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -21,6 +23,11 @@ vi.mock('vue-router', () => ({
 vi.mock('../utils/currentUser', () => ({
   currentUserSummary: accountHubMocks.currentUserSummary,
   primeCurrentUserSummary: accountHubMocks.primeCurrentUserSummaryMock,
+}))
+
+vi.mock('../services/telegramLink', () => ({
+  requestTelegramLink: accountHubMocks.requestTelegramLinkMock,
+  openTelegramLink: accountHubMocks.openTelegramLinkMock,
 }))
 
 async function mountView() {
@@ -38,6 +45,8 @@ describe('AccountHubView.vue', () => {
     accountHubMocks.routerPushMock.mockReset()
     accountHubMocks.routerBackMock.mockReset()
     accountHubMocks.primeCurrentUserSummaryMock.mockClear()
+    accountHubMocks.requestTelegramLinkMock.mockReset()
+    accountHubMocks.openTelegramLinkMock.mockReset()
     accountHubMocks.currentUserSummary.value = null
   })
 
@@ -99,5 +108,50 @@ describe('AccountHubView.vue', () => {
     expect(wrapper.findAll('.ui-metric-card')).toHaveLength(0)
     expect(wrapper.findAll('.account-guidance-item')).toHaveLength(2)
     expect(wrapper.findAll('.account-accordion')).toHaveLength(0)
+  })
+
+  it('adds Telegram connection to profile settings and disables it after linking', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 4,
+      role: 'عادی',
+      account_name: 'telegram-user',
+      is_accountant: false,
+      can_connect_telegram: true,
+      telegram_linked: false,
+    }
+    accountHubMocks.requestTelegramLinkMock.mockResolvedValue({
+      telegram_linked: false,
+      can_connect_telegram: true,
+      telegram_url: 'https://t.me/example_bot?start=link_token',
+    })
+
+    const wrapper = await mountView()
+
+    expect(wrapper.get('.account-telegram-panel').text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
+
+    await wrapper.get('.telegram-connect-panel__button').trigger('click')
+    await flushPromises()
+
+    expect(accountHubMocks.requestTelegramLinkMock).toHaveBeenCalledTimes(1)
+    expect(accountHubMocks.openTelegramLinkMock).toHaveBeenCalledWith('https://t.me/example_bot?start=link_token')
+
+    wrapper.unmount()
+    accountHubMocks.requestTelegramLinkMock.mockReset()
+
+    accountHubMocks.currentUserSummary.value = {
+      id: 5,
+      role: 'عادی',
+      account_name: 'linked-user',
+      is_accountant: false,
+      can_connect_telegram: true,
+      telegram_linked: true,
+    }
+
+    const linkedWrapper = await mountView()
+    expect(linkedWrapper.get('.account-telegram-panel').text()).toContain('متصل')
+    expect(linkedWrapper.get('.telegram-connect-panel__button').attributes('disabled')).toBeDefined()
+
+    await linkedWrapper.get('.telegram-connect-panel__button').trigger('click')
+    expect(accountHubMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
   })
 })

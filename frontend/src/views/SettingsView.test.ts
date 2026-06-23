@@ -12,6 +12,8 @@ const settingsViewMocks = vi.hoisted(() => ({
   forceLogoutMock: vi.fn(),
   getCacheSizeMock: vi.fn(),
   clearFileCacheMock: vi.fn(),
+  requestTelegramLinkMock: vi.fn(),
+  openTelegramLinkMock: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -31,6 +33,11 @@ vi.mock('../composables/chat/useChatFileHandler', () => ({
     getCacheSize: settingsViewMocks.getCacheSizeMock,
     clearFileCache: settingsViewMocks.clearFileCacheMock,
   }),
+}))
+
+vi.mock('../services/telegramLink', () => ({
+  requestTelegramLink: settingsViewMocks.requestTelegramLinkMock,
+  openTelegramLink: settingsViewMocks.openTelegramLinkMock,
 }))
 
 const sessionsFixture = [
@@ -76,6 +83,8 @@ describe('SettingsView.vue', () => {
     settingsViewMocks.forceLogoutMock.mockReset()
     settingsViewMocks.getCacheSizeMock.mockReset()
     settingsViewMocks.clearFileCacheMock.mockReset()
+    settingsViewMocks.requestTelegramLinkMock.mockReset()
+    settingsViewMocks.openTelegramLinkMock.mockReset()
 
     settingsViewMocks.getCacheSizeMock.mockResolvedValue('12.50 MB')
     settingsViewMocks.clearFileCacheMock.mockResolvedValue(undefined)
@@ -167,6 +176,30 @@ describe('SettingsView.vue', () => {
     expect(wrapper.find('.search-input-wrapper').exists()).toBe(false)
     expect(settingsViewMocks.apiFetchMock.mock.calls.some(([path]) => String(path).startsWith('/api/blocks'))).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it('keeps the Telegram panel visible as disabled after the account is linked', async () => {
+    currentUserSummary.value = {
+      id: 51,
+      role: 'عادی',
+      is_accountant: false,
+      can_connect_telegram: true,
+      telegram_linked: true,
+    }
+
+    const wrapper = await mountSettingsView()
+    await flushPromises()
+
+    const panel = wrapper.get('.telegram-connect-panel')
+    expect(panel.text()).toContain('برای استفاده از امکانات اپ در بستر تلگرام ضربه بزنید!')
+    expect(panel.text()).toContain('متصل')
+    expect(wrapper.get('.telegram-connect-panel__button').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('.telegram-connect-panel__button').trigger('click')
+    expect(settingsViewMocks.requestTelegramLinkMock).not.toHaveBeenCalled()
+
+    currentUserSummary.value = null
     wrapper.unmount()
   })
 
