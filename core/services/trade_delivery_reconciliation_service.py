@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -481,6 +481,59 @@ async def run_trade_delivery_shadow_reconciliation(
         trades,
         current_server=current_server,
     )
+
+
+def _recalculate_reconciliation_report(
+    report: TradeDeliveryReconciliationReport,
+    trades: Sequence[TradeDeliveryTradeReport],
+) -> TradeDeliveryReconciliationReport:
+    expectations = tuple(expectation for trade in trades for expectation in trade.expectations)
+    return TradeDeliveryReconciliationReport(
+        current_server=report.current_server,
+        dry_run=True,
+        trade_count=len(trades),
+        expectation_count=len(expectations),
+        local_expectation_count=sum(1 for expectation in expectations if expectation.local_owner),
+        missing_receipt_count=sum(1 for expectation in expectations if expectation.missing_receipt),
+        missing_notification_count=sum(1 for expectation in expectations if expectation.missing_notification),
+        delivery_gap_count=sum(1 for expectation in expectations if expectation.delivery_gap),
+        repairable_count=sum(1 for expectation in expectations if expectation.repairable),
+        read_only_count=sum(1 for expectation in expectations if expectation.read_only),
+        trades=tuple(trades),
+    )
+
+
+async def run_trade_delivery_support_audit_by_trade_number(
+    db: AsyncSession,
+    *,
+    current_server: str,
+    trade_number: int,
+    recipient_user_id: int | None = None,
+) -> TradeDeliveryReconciliationReport:
+    """Read-only support view for why a trade delivery did or did not happen."""
+    report = await run_trade_delivery_shadow_reconciliation(
+        db,
+        current_server=current_server,
+        limit=1,
+        trade_numbers=[trade_number],
+    )
+    if recipient_user_id is None:
+        return report
+
+    normalized_recipient_user_id = _coerce_int(recipient_user_id)
+    if normalized_recipient_user_id is None:
+        return _recalculate_reconciliation_report(report, ())
+
+    filtered_trades = []
+    for trade_report in report.trades:
+        filtered_expectations = tuple(
+            expectation
+            for expectation in trade_report.expectations
+            if expectation.recipient_user_id == normalized_recipient_user_id
+        )
+        if filtered_expectations:
+            filtered_trades.append(replace(trade_report, expectations=filtered_expectations))
+    return _recalculate_reconciliation_report(report, filtered_trades)
 
 
 def _delivery_gap(

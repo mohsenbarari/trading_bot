@@ -1,6 +1,6 @@
 import inspect
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -306,6 +306,57 @@ class TradeTelegramDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
         gateway_send.assert_awaited_once()
         self.assertEqual(gateway_send.await_args.args[0], 9033)
         self.assertEqual(gateway_send.await_args.kwargs["parse_mode"], "HTML")
+
+    async def test_short_outage_remote_telegram_delivery_still_sends_after_sync_visibility(self):
+        receipt = make_receipt(
+            audit_payload={
+                "message": "trade message",
+                "extra_payload": {"offer_home_server": "iran"},
+            },
+            event_created_at=NOW - timedelta(seconds=90),
+        )
+        user = make_user(telegram_id=9033)
+        db = FakeDB([FakeScalarResult(user)])
+        gateway_send = AsyncMock(return_value=TelegramGatewayResult(ok=True, method="sendMessage"))
+
+        result = await service.deliver_claimed_telegram_receipt(
+            db,
+            receipt=receipt,
+            current_server="foreign",
+            gateway_send=gateway_send,
+            now=NOW,
+        )
+
+        self.assertEqual(result.status, service.TELEGRAM_DELIVERY_STATUS_SENT)
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.SENT)
+        gateway_send.assert_awaited_once()
+
+    async def test_long_outage_remote_telegram_delivery_skips_without_user_lookup_or_send(self):
+        receipt = make_receipt(
+            audit_payload={
+                "message": "trade message",
+                "extra_payload": {"offer_home_server": "iran"},
+            },
+            event_created_at=NOW - timedelta(hours=2),
+        )
+        db = FakeDB()
+        gateway_send = AsyncMock()
+
+        result = await service.deliver_claimed_telegram_receipt(
+            db,
+            receipt=receipt,
+            current_server="foreign",
+            gateway_send=gateway_send,
+            now=NOW,
+        )
+
+        self.assertEqual(result.status, service.TELEGRAM_DELIVERY_STATUS_SKIPPED)
+        self.assertEqual(result.reason, "expired_delivery_after_outage")
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.SKIPPED)
+        self.assertEqual(receipt.reason, "expired_delivery_after_outage")
+        self.assertEqual(db.execute_calls, [])
+        self.assertEqual(db.commit_count, 1)
+        gateway_send.assert_not_awaited()
 
     async def test_rate_limit_marks_retry_pending_with_bounded_due_time(self):
         receipt = make_receipt(attempt_count=3)

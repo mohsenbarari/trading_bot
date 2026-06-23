@@ -1,6 +1,6 @@
 import inspect
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -84,35 +84,37 @@ class FakeDB:
         return AsyncNullContext()
 
 
-def make_receipt(*, status=TradeDeliveryReceiptStatus.PROCESSING, user_id=20, notification_id=None):
-    return SimpleNamespace(
-        id=41,
-        event_type="trade_completed",
-        dedupe_key=f"trade_completed:webapp:10025:{user_id}",
-        trade_id=501,
-        trade_number=10025,
-        offer_id=77,
-        recipient_user_id=user_id,
-        recipient_role="responder",
-        channel=TradeDeliveryChannel.WEBAPP,
-        destination_server="iran",
-        status=status,
-        reason="webapp_required",
-        notification_id=notification_id,
-        telegram_message_id=None,
-        worker_id="worker",
-        lease_until=NOW,
-        attempt_count=1,
-        next_retry_at=None,
-        last_error=None,
-        last_error_class=None,
-        audit_payload=None,
-        event_created_at=NOW,
-        sent_at=None,
-        terminal_at=None,
-        created_at=NOW,
-        updated_at=NOW,
-    )
+def make_receipt(*, status=TradeDeliveryReceiptStatus.PROCESSING, user_id=20, notification_id=None, **overrides):
+    data = {
+        "id": 41,
+        "event_type": "trade_completed",
+        "dedupe_key": f"trade_completed:webapp:10025:{user_id}",
+        "trade_id": 501,
+        "trade_number": 10025,
+        "offer_id": 77,
+        "recipient_user_id": user_id,
+        "recipient_role": "responder",
+        "channel": TradeDeliveryChannel.WEBAPP,
+        "destination_server": "iran",
+        "status": status,
+        "reason": "webapp_required",
+        "notification_id": notification_id,
+        "telegram_message_id": None,
+        "worker_id": "worker",
+        "lease_until": NOW,
+        "attempt_count": 1,
+        "next_retry_at": None,
+        "last_error": None,
+        "last_error_class": None,
+        "audit_payload": None,
+        "event_created_at": NOW,
+        "sent_at": None,
+        "terminal_at": None,
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
 
 
 def make_trade(*, offer_home_server="foreign"):
@@ -224,6 +226,74 @@ class TradeWebAppDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(notification.extra_payload["recipient_role"], "responder")
         self.assertEqual(notification.extra_payload["delivery_receipt_id"], 41)
         publish_mock.assert_awaited_once()
+
+    async def test_short_outage_remote_webapp_delivery_still_sends_after_sync_visibility(self):
+        claimed_receipt = make_receipt(
+            status=TradeDeliveryReceiptStatus.PROCESSING,
+            user_id=20,
+            audit_payload={"extra_payload": {"offer_home_server": "foreign"}},
+            event_created_at=NOW - timedelta(seconds=90),
+        )
+        db = FakeDB([
+            FakeScalarResult(),
+            FakeScalarResult(claimed_receipt),
+            FakeScalarResult(),
+        ])
+
+        with patch(
+            "core.services.trade_webapp_delivery_service.publish_webapp_notification_after_commit",
+            new=AsyncMock(),
+        ) as publish_mock:
+            result = await service.deliver_webapp_trade_notification(
+                db,
+                trade_number=10025,
+                recipient_user_id=20,
+                message="trade done",
+                current_server="iran",
+                extra_payload={"offer_home_server": "foreign", "route": "/users/10"},
+                event_created_at=NOW - timedelta(seconds=90),
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_SENT)
+        self.assertEqual(claimed_receipt.status, TradeDeliveryReceiptStatus.SENT)
+        self.assertEqual(len([obj for obj in db.added if isinstance(obj, Notification)]), 1)
+        publish_mock.assert_awaited_once()
+
+    async def test_medium_outage_remote_webapp_delivery_is_skipped_without_user_facing_notification(self):
+        claimed_receipt = make_receipt(
+            status=TradeDeliveryReceiptStatus.PROCESSING,
+            user_id=20,
+            audit_payload={"extra_payload": {"offer_home_server": "foreign"}},
+            event_created_at=NOW - timedelta(minutes=10),
+        )
+        db = FakeDB([
+            FakeScalarResult(),
+            FakeScalarResult(claimed_receipt),
+        ])
+
+        with patch(
+            "core.services.trade_webapp_delivery_service.publish_webapp_notification_after_commit",
+            new=AsyncMock(),
+        ) as publish_mock:
+            result = await service.deliver_webapp_trade_notification(
+                db,
+                trade_number=10025,
+                recipient_user_id=20,
+                message="trade done",
+                current_server="iran",
+                extra_payload={"offer_home_server": "foreign", "route": "/users/10"},
+                event_created_at=NOW - timedelta(minutes=10),
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_SKIPPED)
+        self.assertEqual(result.reason, "expired_delivery_after_outage")
+        self.assertEqual(claimed_receipt.status, TradeDeliveryReceiptStatus.SKIPPED)
+        self.assertEqual(claimed_receipt.reason, "expired_delivery_after_outage")
+        self.assertEqual(len([obj for obj in db.added if isinstance(obj, Notification)]), 0)
+        publish_mock.assert_not_awaited()
+        self.assertEqual(db.commit_count, 1)
 
     async def test_foreign_server_only_queues_iran_owned_webapp_receipt(self):
         db = FakeDB([FakeScalarResult()])

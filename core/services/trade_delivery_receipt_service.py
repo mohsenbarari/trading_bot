@@ -7,12 +7,13 @@ workers on top of these guarded helpers.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import redis.asyncio as redis
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,9 +29,18 @@ from models.trade_delivery_receipt import (
 )
 
 
+logger = logging.getLogger(__name__)
+
 TRADE_COMPLETED_EVENT_TYPE = "trade_completed"
 WEBAPP_DESTINATION_SERVER = "iran"
 TELEGRAM_DESTINATION_SERVER = "foreign"
+TRADE_DELIVERY_SHORT_OUTAGE_MAX_SECONDS = 120
+TRADE_DELIVERY_MEDIUM_OUTAGE_MAX_SECONDS = 3600
+TRADE_DELIVERY_RETENTION_DAYS = 365
+TRADE_DELIVERY_EXPIRED_AFTER_OUTAGE_REASON = "expired_delivery_after_outage"
+TRADE_DELIVERY_OUTAGE_SHORT = "short"
+TRADE_DELIVERY_OUTAGE_MEDIUM = "medium"
+TRADE_DELIVERY_OUTAGE_LONG = "long"
 
 NON_TERMINAL_RECEIPT_STATUSES = {
     TradeDeliveryReceiptStatus.PENDING.value,
@@ -88,6 +98,35 @@ class WebAppReceiptDeliveryResult:
     realtime_payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ReceiptOutageClassification:
+    outage_class: str
+    age_seconds: float
+    should_skip_remote_delivery: bool
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ReceiptRetentionReport:
+    dry_run: bool
+    retention_days: int
+    cutoff: datetime
+    terminal_deleted_count: int
+    terminal_candidate_count: int
+    non_terminal_old_count: int
+    oldest_non_terminal_at: datetime | None
+    alert_required: bool
+
+
+@dataclass(frozen=True)
+class ReceiptSkipResult:
+    receipt: TradeDeliveryReceipt
+    changed: bool
+    outage_class: str
+    age_seconds: float
+    reason: str
+
+
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "").lower()
 
@@ -115,6 +154,90 @@ def _normalize_channel(value: Any) -> TradeDeliveryChannel:
     if isinstance(value, TradeDeliveryChannel):
         return value
     return TradeDeliveryChannel(str(getattr(value, "value", value)))
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _safe_event_created_at(receipt: TradeDeliveryReceipt | Any, *, fallback: datetime) -> datetime:
+    raw_value = getattr(receipt, "event_created_at", None)
+    if isinstance(raw_value, datetime):
+        return _as_aware_utc(raw_value)
+    return _as_aware_utc(fallback)
+
+
+def _audit_payload_mapping(receipt: TradeDeliveryReceipt | Any) -> Mapping[str, Any]:
+    payload = getattr(receipt, "audit_payload", None)
+    return payload if isinstance(payload, Mapping) else {}
+
+
+def _receipt_offer_home_server(receipt: TradeDeliveryReceipt | Any) -> str | None:
+    audit_payload = _audit_payload_mapping(receipt)
+    candidates = [
+        audit_payload.get("offer_home_server"),
+        audit_payload.get("home_server"),
+    ]
+    extra_payload = audit_payload.get("extra_payload")
+    if isinstance(extra_payload, Mapping):
+        candidates.extend(
+            [
+                extra_payload.get("offer_home_server"),
+                extra_payload.get("home_server"),
+            ]
+        )
+    for candidate in candidates:
+        normalized = str(candidate or "").strip().lower()
+        if normalized in {WEBAPP_DESTINATION_SERVER, TELEGRAM_DESTINATION_SERVER}:
+            return normalized
+    return None
+
+
+def receipt_is_opposite_server_delivery(receipt: TradeDeliveryReceipt | Any) -> bool:
+    offer_home_server = _receipt_offer_home_server(receipt)
+    destination_server = str(getattr(receipt, "destination_server", "") or "").strip().lower()
+    if offer_home_server is None or destination_server not in {WEBAPP_DESTINATION_SERVER, TELEGRAM_DESTINATION_SERVER}:
+        return False
+    return offer_home_server != destination_server
+
+
+def classify_trade_delivery_outage(
+    *,
+    event_created_at: datetime,
+    visible_at: datetime | None = None,
+) -> tuple[str, float]:
+    current_time = _as_aware_utc(visible_at or utc_now())
+    event_time = _as_aware_utc(event_created_at)
+    age_seconds = max(0.0, (current_time - event_time).total_seconds())
+    if age_seconds <= TRADE_DELIVERY_SHORT_OUTAGE_MAX_SECONDS:
+        return TRADE_DELIVERY_OUTAGE_SHORT, age_seconds
+    if age_seconds <= TRADE_DELIVERY_MEDIUM_OUTAGE_MAX_SECONDS:
+        return TRADE_DELIVERY_OUTAGE_MEDIUM, age_seconds
+    return TRADE_DELIVERY_OUTAGE_LONG, age_seconds
+
+
+def classify_receipt_outage_for_delivery(
+    receipt: TradeDeliveryReceipt | Any,
+    *,
+    now: datetime | None = None,
+) -> ReceiptOutageClassification:
+    current_time = now or utc_now()
+    outage_class, age_seconds = classify_trade_delivery_outage(
+        event_created_at=_safe_event_created_at(receipt, fallback=current_time),
+        visible_at=current_time,
+    )
+    should_skip = (
+        receipt_is_opposite_server_delivery(receipt)
+        and outage_class in {TRADE_DELIVERY_OUTAGE_MEDIUM, TRADE_DELIVERY_OUTAGE_LONG}
+    )
+    return ReceiptOutageClassification(
+        outage_class=outage_class,
+        age_seconds=age_seconds,
+        should_skip_remote_delivery=should_skip,
+        reason=TRADE_DELIVERY_EXPIRED_AFTER_OUTAGE_REASON if should_skip else None,
+    )
 
 
 def _ensure_local_destination(receipt: Any, current_server: str) -> None:
@@ -153,6 +276,20 @@ def _result_scalars_all(result: Any) -> list[Any]:
         if callable(all_rows):
             return list(all_rows())
     return []
+
+
+def _result_scalar(result: Any) -> Any:
+    scalar = getattr(result, "scalar", None)
+    if callable(scalar):
+        return scalar()
+    scalar_one_or_none = getattr(result, "scalar_one_or_none", None)
+    if callable(scalar_one_or_none):
+        return scalar_one_or_none()
+    one = getattr(result, "one", None)
+    if callable(one):
+        row = one()
+        return row[0] if isinstance(row, tuple) and row else row
+    return None
 
 
 def receipt_dedupe_key(
@@ -560,6 +697,138 @@ async def recover_expired_local_leases(
         )
     )
     return _result_scalars_all(result)
+
+
+async def skip_receipt_after_outage_if_needed(
+    db: AsyncSession,
+    receipt: TradeDeliveryReceipt,
+    *,
+    current_server: str,
+    now: datetime | None = None,
+) -> ReceiptSkipResult | None:
+    classification = classify_receipt_outage_for_delivery(receipt, now=now)
+    if not classification.should_skip_remote_delivery:
+        return None
+    result = transition_receipt_status(
+        receipt,
+        TradeDeliveryReceiptStatus.SKIPPED,
+        current_server=current_server,
+        now=now,
+        reason=TRADE_DELIVERY_EXPIRED_AFTER_OUTAGE_REASON,
+        error_class="TradeDeliveryOutagePolicy",
+        error_message=f"{classification.outage_class}_outage_remote_delivery_expired",
+    )
+    await _flush_if_available(db)
+    return ReceiptSkipResult(
+        receipt=receipt,
+        changed=result.changed,
+        outage_class=classification.outage_class,
+        age_seconds=classification.age_seconds,
+        reason=TRADE_DELIVERY_EXPIRED_AFTER_OUTAGE_REASON,
+    )
+
+
+def build_terminal_receipt_retention_cleanup_statement(
+    *,
+    cutoff: datetime,
+    limit: int = 1000,
+):
+    cleanup_targets = (
+        select(TradeDeliveryReceipt.id)
+        .where(
+            TradeDeliveryReceipt.status.in_(list(TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES)),
+            TradeDeliveryReceipt.terminal_at.is_not(None),
+            TradeDeliveryReceipt.terminal_at < cutoff,
+        )
+        .order_by(TradeDeliveryReceipt.terminal_at.asc(), TradeDeliveryReceipt.id.asc())
+        .limit(max(1, int(limit or 1)))
+        .cte("terminal_trade_delivery_receipts_for_cleanup")
+    )
+    return (
+        delete(TradeDeliveryReceipt)
+        .where(TradeDeliveryReceipt.id.in_(select(cleanup_targets.c.id)))
+        .returning(TradeDeliveryReceipt.id)
+    )
+
+
+async def audit_trade_delivery_receipt_retention(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    retention_days: int = TRADE_DELIVERY_RETENTION_DAYS,
+) -> ReceiptRetentionReport:
+    current_time = now or utc_now()
+    cutoff = _as_aware_utc(current_time) - timedelta(days=max(1, int(retention_days)))
+    terminal_result = await db.execute(
+        select(func.count(TradeDeliveryReceipt.id)).where(
+            TradeDeliveryReceipt.status.in_(list(TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES)),
+            TradeDeliveryReceipt.terminal_at.is_not(None),
+            TradeDeliveryReceipt.terminal_at < cutoff,
+        )
+    )
+    non_terminal_result = await db.execute(
+        select(func.count(TradeDeliveryReceipt.id), func.min(TradeDeliveryReceipt.event_created_at)).where(
+            TradeDeliveryReceipt.status.in_(list(NON_TERMINAL_RECEIPT_STATUSES)),
+            TradeDeliveryReceipt.event_created_at < cutoff,
+        )
+    )
+    terminal_count = _coerce_int(_result_scalar(terminal_result)) or 0
+    non_terminal_count, oldest_non_terminal_at = non_terminal_result.one()
+    return ReceiptRetentionReport(
+        dry_run=True,
+        retention_days=max(1, int(retention_days)),
+        cutoff=cutoff,
+        terminal_deleted_count=0,
+        terminal_candidate_count=_coerce_int(terminal_count) or 0,
+        non_terminal_old_count=_coerce_int(non_terminal_count) or 0,
+        oldest_non_terminal_at=oldest_non_terminal_at,
+        alert_required=bool(_coerce_int(non_terminal_count) or 0),
+    )
+
+
+async def cleanup_terminal_trade_delivery_receipts(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    retention_days: int = TRADE_DELIVERY_RETENTION_DAYS,
+    limit: int = 1000,
+    dry_run: bool = True,
+) -> ReceiptRetentionReport:
+    audit_report = await audit_trade_delivery_receipt_retention(
+        db,
+        now=now,
+        retention_days=retention_days,
+    )
+    if audit_report.alert_required:
+        logger.warning(
+            "Old non-terminal trade delivery receipts require operator review before retention cleanup",
+            extra={
+                "event": "trade_delivery_receipt.retention_non_terminal_old",
+                "non_terminal_old_count": audit_report.non_terminal_old_count,
+                "oldest_non_terminal_at": audit_report.oldest_non_terminal_at,
+                "cutoff": audit_report.cutoff,
+            },
+        )
+    if dry_run:
+        return audit_report
+
+    result = await db.execute(
+        build_terminal_receipt_retention_cleanup_statement(
+            cutoff=audit_report.cutoff,
+            limit=limit,
+        )
+    )
+    deleted_rows = _result_scalars_all(result)
+    return ReceiptRetentionReport(
+        dry_run=False,
+        retention_days=audit_report.retention_days,
+        cutoff=audit_report.cutoff,
+        terminal_deleted_count=len(deleted_rows),
+        terminal_candidate_count=audit_report.terminal_candidate_count,
+        non_terminal_old_count=audit_report.non_terminal_old_count,
+        oldest_non_terminal_at=audit_report.oldest_non_terminal_at,
+        alert_required=audit_report.alert_required,
+    )
 
 
 async def load_notification_by_dedupe_key(

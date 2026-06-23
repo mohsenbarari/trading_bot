@@ -15,6 +15,7 @@ from core.services.trade_delivery_receipt_service import (
     claim_receipt_by_identity_for_delivery,
     complete_webapp_receipt_with_notification,
     publish_webapp_notification_after_commit,
+    skip_receipt_after_outage_if_needed,
     upsert_trade_delivery_receipt,
 )
 from core.services.trade_notification_audience_service import (
@@ -40,6 +41,7 @@ WEBAPP_DELIVERY_STATUS_ALREADY_SENT = "already_sent"
 WEBAPP_DELIVERY_STATUS_QUEUED_FOR_IRAN = "queued_for_iran"
 WEBAPP_DELIVERY_STATUS_CLAIM_BUSY = "claim_busy"
 WEBAPP_DELIVERY_STATUS_TERMINAL_PRESERVED = "terminal_preserved"
+WEBAPP_DELIVERY_STATUS_SKIPPED = "skipped"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +59,7 @@ class WebAppTradeDeliveryResult:
     sent_changed: bool = False
     realtime_published: bool = False
     publish_error_class: str | None = None
+    reason: str | None = None
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -264,6 +267,27 @@ async def deliver_webapp_trade_notification(
             receipt=receipt,
             receipt_created=upsert_result.created,
             receipt_changed=upsert_result.changed,
+            reason="webapp_claim_busy",
+        )
+
+    outage_skip = await skip_receipt_after_outage_if_needed(
+        db,
+        claimed_receipt,
+        current_server=WEBAPP_DESTINATION_SERVER,
+        now=current_time,
+    )
+    if outage_skip is not None:
+        await _commit_if_requested(db, commit)
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_SKIPPED,
+            trade_number=normalized_trade_number,
+            recipient_user_id=normalized_recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            receipt=claimed_receipt,
+            receipt_created=upsert_result.created,
+            receipt_changed=True,
+            reason=outage_skip.reason,
         )
 
     delivery_result = await complete_webapp_receipt_with_notification(

@@ -2,6 +2,7 @@ import inspect
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +32,21 @@ class FakeScalarResult:
     def __init__(self, value=None, values=None):
         self.value = value
         self.values = list(values or [])
+
+    def scalar(self):
+        if self.value is not None and not isinstance(self.value, tuple):
+            return self.value
+        if self.values:
+            return self.values[0]
+        return None
+
+    def one(self):
+        if self.value is not None:
+            return self.value if isinstance(self.value, tuple) else (self.value,)
+        if self.values:
+            value = self.values[0]
+            return value if isinstance(value, tuple) else (value,)
+        return (None, None)
 
     def scalar_one_or_none(self):
         return self.value
@@ -385,6 +401,105 @@ class TradeDeliveryReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.terminal_at, NOW)
         self.assertEqual(db.commit_count, 0)
         self.assertGreaterEqual(db.flush_count, 2)
+
+    def test_outage_classification_skips_only_medium_or_long_opposite_server_delivery(self):
+        short_remote = make_receipt(
+            destination_server="iran",
+            audit_payload={"extra_payload": {"offer_home_server": "foreign"}},
+            event_created_at=NOW - timedelta(seconds=119),
+        )
+        medium_remote = make_receipt(
+            destination_server="iran",
+            audit_payload={"extra_payload": {"offer_home_server": "foreign"}},
+            event_created_at=NOW - timedelta(minutes=10),
+        )
+        long_remote = make_receipt(
+            destination_server="foreign",
+            audit_payload={"extra_payload": {"offer_home_server": "iran"}},
+            event_created_at=NOW - timedelta(hours=2),
+        )
+        delayed_local = make_receipt(
+            destination_server="iran",
+            audit_payload={"extra_payload": {"offer_home_server": "iran"}},
+            event_created_at=NOW - timedelta(hours=2),
+        )
+
+        self.assertFalse(service.classify_receipt_outage_for_delivery(short_remote, now=NOW).should_skip_remote_delivery)
+        medium = service.classify_receipt_outage_for_delivery(medium_remote, now=NOW)
+        self.assertEqual(medium.outage_class, service.TRADE_DELIVERY_OUTAGE_MEDIUM)
+        self.assertTrue(medium.should_skip_remote_delivery)
+        long = service.classify_receipt_outage_for_delivery(long_remote, now=NOW)
+        self.assertEqual(long.outage_class, service.TRADE_DELIVERY_OUTAGE_LONG)
+        self.assertTrue(long.should_skip_remote_delivery)
+        self.assertFalse(service.classify_receipt_outage_for_delivery(delayed_local, now=NOW).should_skip_remote_delivery)
+
+    async def test_medium_outage_skip_marks_processing_receipt_terminal_without_user_side_effect(self):
+        receipt = make_receipt(
+            status=TradeDeliveryReceiptStatus.PROCESSING,
+            destination_server="iran",
+            audit_payload={"extra_payload": {"offer_home_server": "foreign"}},
+            event_created_at=NOW - timedelta(minutes=10),
+        )
+        db = FakeDB()
+
+        result = await service.skip_receipt_after_outage_if_needed(
+            db,
+            receipt,
+            current_server="iran",
+            now=NOW,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.outage_class, service.TRADE_DELIVERY_OUTAGE_MEDIUM)
+        self.assertEqual(receipt.status, TradeDeliveryReceiptStatus.SKIPPED)
+        self.assertEqual(receipt.reason, service.TRADE_DELIVERY_EXPIRED_AFTER_OUTAGE_REASON)
+        self.assertEqual(receipt.terminal_at, NOW)
+        self.assertEqual(db.flush_count, 1)
+        self.assertEqual(db.added, [])
+
+    def test_terminal_retention_cleanup_statement_never_targets_non_terminal_rows(self):
+        cutoff = NOW - timedelta(days=365)
+        stmt = service.build_terminal_receipt_retention_cleanup_statement(cutoff=cutoff, limit=50)
+        compiled = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+        self.assertIn("DELETE FROM trade_delivery_receipts", compiled)
+        self.assertIn("terminal_at < '2025-06-23 08:30:00+00:00'", compiled)
+        self.assertIn("status IN", compiled)
+        self.assertIn("sent", compiled)
+        self.assertIn("skipped", compiled)
+        self.assertIn("not_required", compiled)
+        self.assertIn("permanent_failed", compiled)
+        self.assertNotIn("pending", compiled)
+        self.assertNotIn("retry_pending", compiled)
+
+    async def test_retention_cleanup_alerts_on_old_non_terminal_before_deleting_terminal_rows(self):
+        old_non_terminal_at = NOW - timedelta(days=370)
+        db = FakeDB(
+            [
+                FakeScalarResult(value=3),
+                FakeScalarResult(value=(2, old_non_terminal_at)),
+                FakeScalarResult(values=[11, 12]),
+            ]
+        )
+
+        with patch.object(service.logger, "warning") as warning_mock:
+            report = await service.cleanup_terminal_trade_delivery_receipts(
+                db,
+                now=NOW,
+                dry_run=False,
+                limit=2,
+            )
+
+        self.assertFalse(report.dry_run)
+        self.assertEqual(report.terminal_candidate_count, 3)
+        self.assertEqual(report.terminal_deleted_count, 2)
+        self.assertEqual(report.non_terminal_old_count, 2)
+        self.assertTrue(report.alert_required)
+        warning_mock.assert_called_once()
+        self.assertEqual(
+            warning_mock.call_args.kwargs["extra"]["event"],
+            "trade_delivery_receipt.retention_non_terminal_old",
+        )
 
     def test_receipt_backed_service_does_not_use_generic_auto_commit_helper(self):
         source = inspect.getsource(service)

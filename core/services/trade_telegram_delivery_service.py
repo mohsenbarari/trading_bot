@@ -19,6 +19,7 @@ from core.services.trade_delivery_receipt_service import (
     TRADE_COMPLETED_EVENT_TYPE,
     claim_next_receipt_for_delivery,
     claim_receipt_by_identity_for_delivery,
+    skip_receipt_after_outage_if_needed,
     transition_receipt_status,
     upsert_trade_delivery_receipt,
 )
@@ -465,6 +466,24 @@ async def deliver_claimed_telegram_receipt(
             receipt=receipt,
             telegram_message_id=_coerce_int(getattr(receipt, "telegram_message_id", None)),
             reason=getattr(receipt, "reason", None),
+        )
+
+    outage_skip = await skip_receipt_after_outage_if_needed(
+        db,
+        receipt,
+        current_server=TELEGRAM_DESTINATION_SERVER,
+        now=current_time,
+    )
+    if outage_skip is not None:
+        await _commit_if_requested(db, commit)
+        return TelegramTradeDeliveryResult(
+            status=TELEGRAM_DELIVERY_STATUS_SKIPPED,
+            trade_number=trade_number,
+            recipient_user_id=recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=TELEGRAM_DESTINATION_SERVER,
+            receipt=receipt,
+            reason=outage_skip.reason,
         )
 
     message = _message_from_receipt(receipt)

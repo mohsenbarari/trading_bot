@@ -327,6 +327,54 @@ class TradeDeliveryReconciliationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.commit_count, 0)
         self.assertEqual(db.flush_count, 0)
 
+    async def test_support_audit_by_trade_number_filters_recipient_and_explains_delivery_state(self):
+        trade = make_trade()
+        db = FakeDB([FakeScalarResult([trade])])
+        webapp_receipt = make_receipt(
+            user_id=20,
+            channel="webapp",
+            status=TradeDeliveryReceiptStatus.SENT,
+            destination="iran",
+            notification_id=91,
+        )
+        webapp_notification = Notification(
+            id=91,
+            user_id=20,
+            message="sent",
+            dedupe_key="trade_completed:webapp:10025:20",
+        )
+
+        with patch(
+            "core.services.trade_delivery_reconciliation_service.build_trade_completion_notification_audience",
+            new=AsyncMock(return_value=make_audience(recipients=[make_recipient(20)])),
+        ), patch(
+            "core.services.trade_delivery_reconciliation_service.load_trade_delivery_receipts_for_trade_numbers",
+            new=AsyncMock(return_value={("trade_completed", 10025, 20, "webapp"): webapp_receipt}),
+        ), patch(
+            "core.services.trade_delivery_reconciliation_service.load_trade_notifications_for_dedupe_keys",
+            new=AsyncMock(return_value={"trade_completed:webapp:10025:20": webapp_notification}),
+        ):
+            report = await service.run_trade_delivery_support_audit_by_trade_number(
+                db,
+                current_server="iran",
+                trade_number=10025,
+                recipient_user_id=20,
+            )
+
+        self.assertTrue(report.dry_run)
+        self.assertEqual(report.trade_count, 1)
+        self.assertEqual(report.expectation_count, 2)
+        by_channel = {expectation.channel: expectation for expectation in report.expectations}
+        self.assertFalse(by_channel["webapp"].delivery_gap)
+        self.assertEqual(by_channel["webapp"].current_side_effect_state, "webapp_notification_with_dedupe_exists")
+        self.assertTrue(by_channel["telegram"].delivery_gap)
+        self.assertTrue(by_channel["telegram"].read_only)
+        self.assertEqual(by_channel["telegram"].repair_action, service.LOCAL_REPAIR_ACTION_READ_ONLY)
+        self.assertIn("foreign", by_channel["telegram"].explanation)
+        self.assertEqual(db.added, [])
+        self.assertEqual(db.commit_count, 0)
+        self.assertEqual(db.flush_count, 0)
+
     def test_shadow_reconciler_source_has_no_user_facing_side_effects(self):
         source = inspect.getsource(service)
 
