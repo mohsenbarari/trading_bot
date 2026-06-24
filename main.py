@@ -9,6 +9,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from jose import JWTError, jwt
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
     trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages
@@ -32,6 +33,12 @@ from core.session_expiry import session_expiry_loop
 from core.trade_delivery_worker import telegram_trade_delivery_loop, webapp_trade_delivery_loop
 from core.user_account_status_loop import user_account_status_loop
 from core.services.chat_room_service import ensure_mandatory_channel_rollout
+from core.production_test_isolation import (
+    get_isolation_config,
+    isolation_block_payload,
+    user_matches_isolation_allowlist,
+)
+from models.user import User
 import asyncio
 import schemas
 from core.logging_config import configure_logging
@@ -54,6 +61,28 @@ FOREIGN_INTERNAL_API_PREFIXES = (
     "/api/offers/internal",
 )
 FOREIGN_LOOPBACK_INTERNAL_PATHS = {"/api/config"}
+PRODUCTION_TEST_ISOLATION_PUBLIC_EXACT_PATHS = {
+    "/api/config",
+    "/api/auth/request-otp",
+    "/api/auth/resend-otp-sms",
+    "/api/auth/verify-otp",
+    "/api/auth/webapp-login",
+    "/api/auth/register-otp-request",
+    "/api/auth/register-otp-verify",
+    "/api/auth/register-complete",
+    "/api/auth/refresh",
+}
+PRODUCTION_TEST_ISOLATION_PUBLIC_PREFIXES = (
+    "/api/auth/pending-registration/",
+    "/api/invitations/lookup/",
+    "/api/invitations/validate/",
+)
+PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES = (
+    "/api/sync",
+    "/api/sessions/internal",
+    "/api/trades/internal",
+    "/api/offers/internal",
+)
 BACKGROUND_LEADER_LOCK_KEY = "trading_bot:api:background_leader"
 BACKGROUND_LEADER_REFRESH_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -120,6 +149,47 @@ def _foreign_surface_guard_reason(request: Request) -> str | None:
 
 def _foreign_surface_blocked_response() -> JSONResponse:
     return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _user_id_from_token(token: str | None) -> int | None:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        subject = payload.get("sub")
+        return int(subject) if subject is not None else None
+    except (JWTError, TypeError, ValueError):
+        return None
+
+
+def _is_production_test_isolation_public_path(path: str) -> bool:
+    if path in PRODUCTION_TEST_ISOLATION_PUBLIC_EXACT_PATHS:
+        return True
+    return any(_path_matches_prefix(path, prefix.rstrip("/")) for prefix in PRODUCTION_TEST_ISOLATION_PUBLIC_PREFIXES)
+
+
+def _is_production_test_isolation_internal_path(path: str) -> bool:
+    if path == "/metrics":
+        return True
+    return any(_path_matches_prefix(path, prefix) for prefix in PRODUCTION_TEST_ISOLATION_INTERNAL_PREFIXES)
+
+
+def _should_apply_production_test_isolation_to_path(path: str) -> bool:
+    if _is_production_test_isolation_internal_path(path):
+        return False
+    if _is_production_test_isolation_public_path(path):
+        return False
+    return path.startswith("/api/")
 
 
 def _background_job_factories():
@@ -306,6 +376,41 @@ async def enforce_foreign_surface_guard(request: Request, call_next):
         )
         return _foreign_surface_blocked_response()
     return await call_next(request)
+
+
+@app.middleware("http")
+async def enforce_production_test_isolation(request: Request, call_next):
+    path = request.url.path
+    if not _should_apply_production_test_isolation_to_path(path):
+        return await call_next(request)
+
+    config = await get_isolation_config()
+    if not config.enabled:
+        return await call_next(request)
+
+    user_id = _user_id_from_token(_extract_bearer_token(request))
+    user = None
+    if user_id:
+        async with AsyncSessionLocal() as session:
+            user = await session.get(User, user_id)
+    if user_matches_isolation_allowlist(user, config):
+        return await call_next(request)
+
+    logger.warning(
+        "Blocked WebApp request during production test isolation",
+        extra={
+            "event": "production_test_isolation.http_blocked",
+            "path": path,
+            "user_id": user_id,
+            "reason": config.reason,
+            "client_host": request.client.host if request.client else None,
+        },
+    )
+    return JSONResponse(
+        isolation_block_payload(config.reason),
+        status_code=503,
+        headers={"Cache-Control": "no-store"},
+    )
 
 # -------------------------------------------------------
 # 🛣️ API Routers

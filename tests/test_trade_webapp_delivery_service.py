@@ -227,6 +227,45 @@ class TradeWebAppDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(notification.extra_payload["delivery_receipt_id"], 41)
         publish_mock.assert_awaited_once()
 
+    async def test_production_test_isolation_skips_claimed_webapp_receipt_without_notification(self):
+        claimed_receipt = make_receipt(status=TradeDeliveryReceiptStatus.PROCESSING, user_id=20)
+        db = FakeDB([
+            FakeScalarResult(),
+            FakeScalarResult(claimed_receipt),
+        ])
+
+        with patch(
+            "core.services.trade_webapp_delivery_service.should_suppress_user_notification",
+            new=AsyncMock(return_value=True),
+        ), patch(
+            "core.services.trade_webapp_delivery_service.publish_webapp_notification_after_commit",
+            new=AsyncMock(),
+        ) as publish_mock:
+            result = await service.deliver_webapp_trade_notification(
+                db,
+                trade_number=10025,
+                recipient_user_id=20,
+                message="trade done",
+                current_server="iran",
+                trade_id=501,
+                offer_id=77,
+                recipient_role="responder",
+                principal_user_id=20,
+                side="responder",
+                extra_payload={"route": "/users/10"},
+                event_created_at=NOW,
+                now=NOW,
+            )
+
+        self.assertEqual(result.status, service.WEBAPP_DELIVERY_STATUS_SKIPPED)
+        self.assertEqual(result.reason, service.WEBAPP_DELIVERY_PRODUCTION_TEST_ISOLATION_REASON)
+        self.assertEqual(claimed_receipt.status, TradeDeliveryReceiptStatus.SKIPPED)
+        self.assertEqual(claimed_receipt.reason, service.WEBAPP_DELIVERY_PRODUCTION_TEST_ISOLATION_REASON)
+        self.assertIsNone(result.notification)
+        self.assertFalse(any(isinstance(item, Notification) for item in db.added))
+        self.assertEqual(db.commit_count, 1)
+        publish_mock.assert_not_awaited()
+
     async def test_short_outage_remote_webapp_delivery_still_sends_after_sync_visibility(self):
         claimed_receipt = make_receipt(
             status=TradeDeliveryReceiptStatus.PROCESSING,

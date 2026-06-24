@@ -305,6 +305,34 @@ async def create_user_notification(
     Returns:
         Notification: شیء نوتیفیکیشن ایجاد شده
     """
+    try:
+        from core.production_test_isolation import should_suppress_user_notification
+
+        if await should_suppress_user_notification(db, user_id):
+            logger.warning(
+                "Suppressed user notification during production test isolation",
+                extra={
+                    "event": "production_test_isolation.notification_suppressed",
+                    "user_id": user_id,
+                    "category": getattr(category, "value", category),
+                    "dedupe_key": dedupe_key,
+                },
+            )
+            return Notification(
+                user_id=user_id,
+                message=message,
+                is_read=False,
+                level=level,
+                category=category,
+                dedupe_key=dedupe_key,
+                extra_payload=extra_payload or None,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to evaluate production test isolation notification suppression; continuing",
+            extra={"event": "production_test_isolation.notification_suppression_failed", "user_id": user_id},
+        )
+
     new_notif = Notification(
         user_id=user_id,
         message=message,
@@ -361,6 +389,27 @@ async def publish_user_event(user_id: int, event: str, data: dict) -> None:
         event: نام رویداد (مثلاً 'message', 'chat:typing')
         data: داده‌های رویداد (dict)
     """
+    try:
+        from core.db import AsyncSessionLocal
+        from core.production_test_isolation import should_suppress_user_notification
+
+        async with AsyncSessionLocal() as session:
+            if await should_suppress_user_notification(session, user_id):
+                logger.warning(
+                    "Suppressed user realtime event during production test isolation",
+                    extra={
+                        "event": "production_test_isolation.realtime_suppressed",
+                        "user_id": user_id,
+                        "realtime_event": event,
+                    },
+                )
+                return
+    except Exception:
+        logger.exception(
+            "Failed to evaluate production test isolation realtime suppression; continuing",
+            extra={"event": "production_test_isolation.realtime_suppression_failed", "user_id": user_id},
+        )
+
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             channel_key = f"notifications:{user_id}"

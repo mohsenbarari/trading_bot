@@ -226,6 +226,25 @@ async def send_web_push_to_user(
     if not is_web_push_configured():
         return disabled_web_push_result()
 
+    try:
+        from core.production_test_isolation import should_suppress_web_push_for_user
+
+        if await should_suppress_web_push_for_user(db, user_id):
+            logger.warning(
+                "Suppressed Web Push during production test isolation",
+                extra={
+                    "event": "production_test_isolation.web_push_suppressed",
+                    "user_id": user_id,
+                    "tag": payload.get("tag"),
+                },
+            )
+            return disabled_web_push_result()
+    except Exception:
+        logger.exception(
+            "Failed to evaluate production test isolation Web Push suppression; continuing",
+            extra={"event": "production_test_isolation.web_push_suppression_failed", "user_id": user_id},
+        )
+
     result = await db.execute(
         select(PushSubscription).where(
             PushSubscription.user_id == user_id,

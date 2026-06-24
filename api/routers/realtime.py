@@ -24,6 +24,7 @@ from core.market_presence import (
 )
 from core.metrics import record_websocket_publish_failure, set_active_websocket_connections
 from core.services.session_service import is_session_blacklisted
+from core.production_test_isolation import should_block_webapp_user
 from models.session import UserSession
 from models.user import User
 from api.deps import get_current_user_optional
@@ -174,6 +175,9 @@ async def websocket_endpoint(
         user = await session.get(User, user_id)
         if not user or user.is_deleted:
             await websocket.close(code=4003, reason="User is inactive")
+            return
+        if await should_block_webapp_user(session, user):
+            await websocket.close(code=1013, reason="WebApp temporarily unavailable")
             return
 
         if session_id:

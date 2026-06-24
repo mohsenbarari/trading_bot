@@ -14,6 +14,7 @@ import contextvars
 import hashlib
 import json
 import math
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -64,14 +65,26 @@ from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, nor
 from core.telegram_trade_callbacks import build_channel_trade_callback_data
 from core.utils import create_user_notification
 from core import offer_expiry as offer_expiry_worker
+from models.accountant_relation import AccountantRelation
 from models.change_log import ChangeLog
 from models.chat_member import ChatMember
 from models.commodity import Commodity
+from models.customer_relation import CustomerRelation
+from models.invitation import Invitation
 from models.notification import Notification
 from models.offer_publication_state import OfferPublicationState, OfferPublicationStatus
 from models.offer_request import OfferRequest, OfferRequestStatus
 from models.offer import Offer, OfferStatus, OfferType
+from models.push_subscription import PushSubscription
+from models.session import (
+    SessionLoginRequest,
+    SingleSessionRecoveryAdminTarget,
+    SingleSessionRecoveryRequest,
+    UserSession,
+)
+from models.telegram_link_token import TelegramLinkToken
 from models.trade import Trade, TradeStatus
+from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User, UserRole
 
 
@@ -86,6 +99,10 @@ DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
 DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
 DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
 MIN_CLEANUP_PREFIX_LENGTH = 5
+PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
+PRODUCTION_CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
+PRODUCTION_CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
+PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
     "admin",
@@ -102,6 +119,7 @@ BROAD_CLEANUP_PREFIXES = {
 }
 CLEANUP_DB_RETRY_ATTEMPTS = 3
 RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001"}
+_PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = False
 
 
 LOAD_RUNNER_ROLES = {
@@ -213,9 +231,19 @@ class HotOfferPersistenceSnapshot:
 class CleanupPlan:
     prefix: str
     user_ids: list[int]
+    invitation_ids: list[int]
+    accountant_relation_ids: list[int]
+    customer_relation_ids: list[int]
+    user_session_ids: list[Any]
+    session_login_request_ids: list[Any]
+    recovery_request_ids: list[Any]
+    recovery_admin_target_ids: list[Any]
+    telegram_link_token_ids: list[int]
+    push_subscription_ids: list[int]
     offer_ids: list[int]
     offer_public_ids: list[str]
     trade_ids: list[int]
+    trade_delivery_receipt_ids: list[int]
     offer_request_ids: list[int]
     publication_state_ids: list[int]
     notification_ids: list[int]
@@ -985,6 +1013,37 @@ def validate_cleanup_prefix(prefix: str) -> str:
     return normalized
 
 
+def is_production_runtime() -> bool:
+    return str(getattr(settings, "environment", "") or "").strip().lower() == "production"
+
+
+def validate_production_cleanup_prefix(prefix: str) -> str:
+    normalized = validate_cleanup_prefix(prefix)
+    if len(normalized) < PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH:
+        raise TradingProbeError(
+            f"production cleanup prefix must be at least {PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH} characters"
+        )
+    if not normalized.startswith(PRODUCTION_CLEANUP_ALLOWED_PREFIXES):
+        allowed = ", ".join(PRODUCTION_CLEANUP_ALLOWED_PREFIXES)
+        raise TradingProbeError(f"production cleanup prefix must start with one of: {allowed}")
+    return normalized
+
+
+def allow_production_cleanup_hard_delete(prefix: str, *, allow_flag: bool) -> None:
+    global _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED
+    if not is_production_runtime():
+        _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = True
+        return
+    validate_production_cleanup_prefix(prefix)
+    confirm_value = os.getenv(PRODUCTION_CLEANUP_CONFIRM_ENV)
+    if not allow_flag or confirm_value != PRODUCTION_CLEANUP_CONFIRM_VALUE:
+        raise TradingProbeError(
+            "production cleanup hard-delete requires --allow-production-hard-delete and "
+            f"{PRODUCTION_CLEANUP_CONFIRM_ENV}={PRODUCTION_CLEANUP_CONFIRM_VALUE}"
+        )
+    _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = True
+
+
 def escape_sql_like_literal(value: str) -> str:
     escaped = value.replace(LIKE_ESCAPE, LIKE_ESCAPE + LIKE_ESCAPE)
     escaped = escaped.replace("%", LIKE_ESCAPE + "%")
@@ -1003,7 +1062,7 @@ def in_filter(column: Any, values: list[int] | list[str]):
 
 
 def cleanup_mutating_statement(statement: Any) -> Any:
-    if str(getattr(settings, "environment", "") or "").strip().lower() == "production":
+    if is_production_runtime() and not _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED:
         raise TradingProbeError("synthetic cleanup is disabled in production runtime")
     return statement.execution_options(is_sync=True)
 
@@ -1020,11 +1079,21 @@ def is_retryable_cleanup_database_error(exc: BaseException) -> bool:
 def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
     return {
         "users": len(plan.user_ids),
+        "invitations": len(plan.invitation_ids),
+        "accountant_relations": len(plan.accountant_relation_ids),
+        "customer_relations": len(plan.customer_relation_ids),
+        "user_sessions": len(plan.user_session_ids),
+        "session_login_requests": len(plan.session_login_request_ids),
+        "single_session_recovery_requests": len(plan.recovery_request_ids),
+        "single_session_recovery_admin_targets": len(plan.recovery_admin_target_ids),
+        "telegram_link_tokens": len(plan.telegram_link_token_ids),
+        "push_subscriptions": len(plan.push_subscription_ids),
         "chat_members": len(plan.chat_member_ids),
         "offers": len(plan.offer_ids),
         "offer_publication_states": len(plan.publication_state_ids),
         "offer_requests": len(plan.offer_request_ids),
         "trades": len(plan.trade_ids),
+        "trade_delivery_receipts": len(plan.trade_delivery_receipt_ids),
         "notifications": len(plan.notification_ids),
     }
 
@@ -1034,9 +1103,19 @@ def cleanup_report_payload(
     plan: CleanupPlan,
     dry_run: bool,
     deleted_users: int = 0,
+    deleted_invitations: int = 0,
+    deleted_accountant_relations: int = 0,
+    deleted_customer_relations: int = 0,
+    deleted_user_sessions: int = 0,
+    deleted_session_login_requests: int = 0,
+    deleted_recovery_requests: int = 0,
+    deleted_recovery_admin_targets: int = 0,
+    deleted_telegram_link_tokens: int = 0,
+    deleted_push_subscriptions: int = 0,
     deleted_chat_members: int = 0,
     deleted_offers: int = 0,
     deleted_trades: int = 0,
+    deleted_trade_delivery_receipts: int = 0,
     deleted_notifications: int = 0,
     deleted_offer_requests: int = 0,
     deleted_publication_states: int = 0,
@@ -1050,9 +1129,19 @@ def cleanup_report_payload(
         "planned_counts": cleanup_plan_counts(plan),
         "planned_ids": asdict(plan),
         "deleted_users": deleted_users,
+        "deleted_invitations": deleted_invitations,
+        "deleted_accountant_relations": deleted_accountant_relations,
+        "deleted_customer_relations": deleted_customer_relations,
+        "deleted_user_sessions": deleted_user_sessions,
+        "deleted_session_login_requests": deleted_session_login_requests,
+        "deleted_recovery_requests": deleted_recovery_requests,
+        "deleted_recovery_admin_targets": deleted_recovery_admin_targets,
+        "deleted_telegram_link_tokens": deleted_telegram_link_tokens,
+        "deleted_push_subscriptions": deleted_push_subscriptions,
         "deleted_chat_members": deleted_chat_members,
         "deleted_offers": deleted_offers,
         "deleted_trades": deleted_trades,
+        "deleted_trade_delivery_receipts": deleted_trade_delivery_receipts,
         "deleted_notifications": deleted_notifications,
         "deleted_offer_requests": deleted_offer_requests,
         "deleted_publication_states": deleted_publication_states,
@@ -1100,7 +1189,101 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
         user_ids = [
             int(item)
             for item in (
-                await db.execute(select(User.id).where(User.account_name.like(pattern, escape=LIKE_ESCAPE)))
+                await db.execute(
+                    select(User.id).where(
+                        (User.account_name.like(pattern, escape=LIKE_ESCAPE))
+                        | (User.mobile_number.like(pattern, escape=LIKE_ESCAPE))
+                    )
+                )
+            ).scalars().all()
+        ]
+        invitation_ids = [
+            int(item)
+            for item in (
+                await db.execute(
+                    select(Invitation.id).where(
+                        (Invitation.account_name.like(pattern, escape=LIKE_ESCAPE))
+                        | (Invitation.mobile_number.like(pattern, escape=LIKE_ESCAPE))
+                        | in_filter(Invitation.created_by_id, user_ids)
+                    )
+                )
+            ).scalars().all()
+        ]
+        accountant_relation_ids = [
+            int(item)
+            for item in (
+                await db.execute(
+                    select(AccountantRelation.id).where(
+                        in_filter(AccountantRelation.owner_user_id, user_ids)
+                        | in_filter(AccountantRelation.accountant_user_id, user_ids)
+                        | in_filter(AccountantRelation.created_by_user_id, user_ids)
+                        | AccountantRelation.global_account_name.like(pattern, escape=LIKE_ESCAPE)
+                        | AccountantRelation.relation_display_name.like(contains_pattern, escape=LIKE_ESCAPE)
+                        | AccountantRelation.mobile_number.like(pattern, escape=LIKE_ESCAPE)
+                    )
+                )
+            ).scalars().all()
+        ]
+        customer_relation_ids = [
+            int(item)
+            for item in (
+                await db.execute(
+                    select(CustomerRelation.id).where(
+                        in_filter(CustomerRelation.owner_user_id, user_ids)
+                        | in_filter(CustomerRelation.customer_user_id, user_ids)
+                        | in_filter(CustomerRelation.created_by_user_id, user_ids)
+                        | CustomerRelation.management_name.like(contains_pattern, escape=LIKE_ESCAPE)
+                        | CustomerRelation.invitation_token.like(contains_pattern, escape=LIKE_ESCAPE)
+                    )
+                )
+            ).scalars().all()
+        ]
+        user_session_ids = list(
+            (
+                await db.execute(select(UserSession.id).where(in_filter(UserSession.user_id, user_ids)))
+            ).scalars().all()
+        )
+        session_login_request_ids = list(
+            (
+                await db.execute(
+                    select(SessionLoginRequest.id).where(in_filter(SessionLoginRequest.user_id, user_ids))
+                )
+            ).scalars().all()
+        )
+        recovery_request_ids = list(
+            (
+                await db.execute(
+                    select(SingleSessionRecoveryRequest.id).where(
+                        in_filter(SingleSessionRecoveryRequest.user_id, user_ids)
+                        | in_filter(SingleSessionRecoveryRequest.session_login_request_id, session_login_request_ids)
+                    )
+                )
+            ).scalars().all()
+        )
+        recovery_admin_target_ids = list(
+            (
+                await db.execute(
+                    select(SingleSessionRecoveryAdminTarget.id).where(
+                        in_filter(SingleSessionRecoveryAdminTarget.recovery_request_id, recovery_request_ids)
+                        | in_filter(SingleSessionRecoveryAdminTarget.admin_user_id, user_ids)
+                    )
+                )
+            ).scalars().all()
+        )
+        telegram_link_token_ids = [
+            int(item)
+            for item in (
+                await db.execute(
+                    select(TelegramLinkToken.id).where(in_filter(TelegramLinkToken.user_id, user_ids))
+                )
+            ).scalars().all()
+        ]
+        push_subscription_ids = [
+            int(item)
+            for item in (
+                await db.execute(
+                    select(PushSubscription.id).where(in_filter(PushSubscription.user_id, user_ids))
+                )
             ).scalars().all()
         ]
         offer_rows = (
@@ -1140,16 +1323,29 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                 )
             ).scalars().all()
         ]
-        trade_ids = [
+        trade_rows = (
+            await db.execute(
+                select(Trade.id, Trade.trade_number).where(
+                    (Trade.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
+                    | in_filter(Trade.offer_id, offer_ids)
+                    | in_filter(Trade.offer_user_id, user_ids)
+                    | in_filter(Trade.responder_user_id, user_ids)
+                    | in_filter(Trade.actor_user_id, user_ids)
+                )
+            )
+        ).all()
+        trade_ids = [int(row.id) for row in trade_rows]
+        trade_numbers = [int(row.trade_number) for row in trade_rows if row.trade_number is not None]
+        trade_delivery_receipt_ids = [
             int(item)
             for item in (
                 await db.execute(
-                    select(Trade.id).where(
-                        (Trade.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
-                        | in_filter(Trade.offer_id, offer_ids)
-                        | in_filter(Trade.offer_user_id, user_ids)
-                        | in_filter(Trade.responder_user_id, user_ids)
-                        | in_filter(Trade.actor_user_id, user_ids)
+                    select(TradeDeliveryReceipt.id).where(
+                        in_filter(TradeDeliveryReceipt.trade_id, trade_ids)
+                        | in_filter(TradeDeliveryReceipt.trade_number, trade_numbers)
+                        | in_filter(TradeDeliveryReceipt.offer_id, offer_ids)
+                        | in_filter(TradeDeliveryReceipt.recipient_user_id, user_ids)
+                        | TradeDeliveryReceipt.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
                     )
                 )
             ).scalars().all()
@@ -1161,6 +1357,7 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                     select(Notification.id).where(
                         in_filter(Notification.user_id, user_ids)
                         | Notification.message.like(contains_pattern, escape=LIKE_ESCAPE)
+                        | Notification.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
                     )
                 )
             ).scalars().all()
@@ -1174,9 +1371,19 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
     return CleanupPlan(
         prefix=normalized_prefix,
         user_ids=user_ids,
+        invitation_ids=invitation_ids,
+        accountant_relation_ids=accountant_relation_ids,
+        customer_relation_ids=customer_relation_ids,
+        user_session_ids=user_session_ids,
+        session_login_request_ids=session_login_request_ids,
+        recovery_request_ids=recovery_request_ids,
+        recovery_admin_target_ids=recovery_admin_target_ids,
+        telegram_link_token_ids=telegram_link_token_ids,
+        push_subscription_ids=push_subscription_ids,
         offer_ids=offer_ids,
         offer_public_ids=offer_public_ids,
         trade_ids=trade_ids,
+        trade_delivery_receipt_ids=trade_delivery_receipt_ids,
         offer_request_ids=offer_request_ids,
         publication_state_ids=publication_state_ids,
         notification_ids=notification_ids,
@@ -1207,13 +1414,106 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
 
 async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
+        deleted_invitations = 0
+        deleted_accountant_relations = 0
+        deleted_customer_relations = 0
+        deleted_user_sessions = 0
+        deleted_session_login_requests = 0
+        deleted_recovery_requests = 0
+        deleted_recovery_admin_targets = 0
+        deleted_telegram_link_tokens = 0
+        deleted_push_subscriptions = 0
         deleted_notifications = 0
         deleted_chat_members = 0
+        deleted_trade_delivery_receipts = 0
         deleted_trades = 0
         deleted_offers = 0
         deleted_users = 0
         deleted_offer_requests = 0
         deleted_publication_states = 0
+        if plan.recovery_admin_target_ids:
+            deleted_recovery_admin_targets = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(SingleSessionRecoveryAdminTarget).where(
+                                SingleSessionRecoveryAdminTarget.id.in_(plan.recovery_admin_target_ids)
+                            )
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.recovery_request_ids:
+            deleted_recovery_requests = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(SingleSessionRecoveryRequest).where(
+                                SingleSessionRecoveryRequest.id.in_(plan.recovery_request_ids)
+                            )
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.session_login_request_ids:
+            deleted_session_login_requests = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(SessionLoginRequest).where(
+                                SessionLoginRequest.id.in_(plan.session_login_request_ids)
+                            )
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.user_session_ids:
+            deleted_user_sessions = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(delete(UserSession).where(UserSession.id.in_(plan.user_session_ids)))
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.telegram_link_token_ids:
+            deleted_telegram_link_tokens = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(TelegramLinkToken).where(TelegramLinkToken.id.in_(plan.telegram_link_token_ids))
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.push_subscription_ids:
+            deleted_push_subscriptions = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(PushSubscription).where(PushSubscription.id.in_(plan.push_subscription_ids))
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.trade_delivery_receipt_ids:
+            deleted_trade_delivery_receipts = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(TradeDeliveryReceipt).where(
+                                TradeDeliveryReceipt.id.in_(plan.trade_delivery_receipt_ids)
+                            )
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
         if plan.notification_ids:
             deleted_notifications = int(
                 (
@@ -1256,6 +1556,37 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                 ).rowcount
                 or 0
             )
+        if plan.accountant_relation_ids:
+            deleted_accountant_relations = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(AccountantRelation).where(AccountantRelation.id.in_(plan.accountant_relation_ids))
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.customer_relation_ids:
+            deleted_customer_relations = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(
+                            delete(CustomerRelation).where(CustomerRelation.id.in_(plan.customer_relation_ids))
+                        )
+                    )
+                ).rowcount
+                or 0
+            )
+        if plan.invitation_ids:
+            deleted_invitations = int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(delete(Invitation).where(Invitation.id.in_(plan.invitation_ids)))
+                    )
+                ).rowcount
+                or 0
+            )
         if plan.trade_ids:
             deleted_trades = int(
                 (
@@ -1284,9 +1615,13 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                     """
                     DELETE FROM change_log
                     WHERE strpos(data::text, :raw_prefix) > 0
-                       OR (table_name = 'users' AND record_id = ANY(:user_ids))
+                    OR (table_name = 'users' AND record_id = ANY(:user_ids))
+                       OR (table_name = 'invitations' AND record_id = ANY(:invitation_ids))
+                       OR (table_name = 'accountant_relations' AND record_id = ANY(:accountant_relation_ids))
+                       OR (table_name = 'customer_relations' AND record_id = ANY(:customer_relation_ids))
                        OR (table_name = 'offers' AND record_id = ANY(:offer_ids))
                        OR (table_name = 'trades' AND record_id = ANY(:trade_ids))
+                       OR (table_name = 'trade_delivery_receipts' AND record_id = ANY(:trade_delivery_receipt_ids))
                        OR (table_name = 'offer_requests' AND record_id = ANY(:offer_request_ids))
                        OR (table_name = 'offer_publication_states' AND record_id = ANY(:publication_state_ids))
                        OR (table_name = 'notifications' AND record_id = ANY(:notification_ids))
@@ -1297,8 +1632,12 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
             {
                 "raw_prefix": plan.prefix,
                 "user_ids": plan.user_ids or [-1],
+                "invitation_ids": plan.invitation_ids or [-1],
+                "accountant_relation_ids": plan.accountant_relation_ids or [-1],
+                "customer_relation_ids": plan.customer_relation_ids or [-1],
                 "offer_ids": plan.offer_ids or [-1],
                 "trade_ids": plan.trade_ids or [-1],
+                "trade_delivery_receipt_ids": plan.trade_delivery_receipt_ids or [-1],
                 "offer_request_ids": plan.offer_request_ids or [-1],
                 "publication_state_ids": plan.publication_state_ids or [-1],
                 "notification_ids": plan.notification_ids or [-1],
@@ -1312,9 +1651,19 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         plan=plan,
         dry_run=False,
         deleted_users=deleted_users,
+        deleted_invitations=deleted_invitations,
+        deleted_accountant_relations=deleted_accountant_relations,
+        deleted_customer_relations=deleted_customer_relations,
+        deleted_user_sessions=deleted_user_sessions,
+        deleted_session_login_requests=deleted_session_login_requests,
+        deleted_recovery_requests=deleted_recovery_requests,
+        deleted_recovery_admin_targets=deleted_recovery_admin_targets,
+        deleted_telegram_link_tokens=deleted_telegram_link_tokens,
+        deleted_push_subscriptions=deleted_push_subscriptions,
         deleted_chat_members=deleted_chat_members,
         deleted_offers=deleted_offers,
         deleted_trades=deleted_trades,
+        deleted_trade_delivery_receipts=deleted_trade_delivery_receipts,
         deleted_notifications=deleted_notifications,
         deleted_offer_requests=deleted_offer_requests,
         deleted_publication_states=deleted_publication_states,
@@ -3552,6 +3901,11 @@ async def run_hot_offer_scenarios_command(args: argparse.Namespace) -> int:
 
 
 async def cleanup_command(args: argparse.Namespace) -> int:
+    if not args.dry_run:
+        allow_production_cleanup_hard_delete(
+            args.prefix,
+            allow_flag=bool(getattr(args, "allow_production_hard_delete", False)),
+        )
     payload = await cleanup_prefix(args.prefix, dry_run=bool(args.dry_run))
     if args.artifact:
         write_json_artifact(Path(args.artifact), payload)
@@ -4051,6 +4405,7 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_parser = subparsers.add_parser("cleanup")
     cleanup_parser.add_argument("--prefix", required=True)
     cleanup_parser.add_argument("--dry-run", action="store_true")
+    cleanup_parser.add_argument("--allow-production-hard-delete", action="store_true")
     cleanup_parser.add_argument("--artifact")
 
     ready_parser = subparsers.add_parser("load-runner-ready")

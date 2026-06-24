@@ -24,6 +24,7 @@ from core.services.trade_notification_audience_service import (
     WEBAPP_CHANNEL,
     build_trade_completion_notification_audience,
 )
+from core.production_test_isolation import should_suppress_user_notification
 from core.utils import utc_now
 from models.notification import Notification
 from models.trade import Trade
@@ -47,6 +48,7 @@ WEBAPP_DELIVERY_STATUS_SKIPPED = "skipped"
 WEBAPP_DELIVERY_STATUS_NO_RECEIPT = "no_receipt"
 WEBAPP_DELIVERY_STATUS_BLOCKED_WRONG_SERVER = "blocked_wrong_server"
 WEBAPP_DELIVERY_STATUS_PERMANENT_FAILED = "permanent_failed"
+WEBAPP_DELIVERY_PRODUCTION_TEST_ISOLATION_REASON = "production_test_isolation_suppressed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +153,36 @@ async def _safe_publish_webapp_side_effect(
             },
         )
         return False, type(exc).__name__
+
+
+async def _skip_if_production_test_isolation_suppressed(
+    db: AsyncSession,
+    receipt: TradeDeliveryReceipt | Any,
+    *,
+    recipient_user_id: int | None,
+    current_time: datetime,
+    commit: bool,
+) -> bool:
+    if not await should_suppress_user_notification(db, recipient_user_id):
+        return False
+    transition_receipt_status(
+        receipt,
+        TradeDeliveryReceiptStatus.SKIPPED,
+        current_server=WEBAPP_DESTINATION_SERVER,
+        now=current_time,
+        reason=WEBAPP_DELIVERY_PRODUCTION_TEST_ISOLATION_REASON,
+    )
+    await _commit_if_requested(db, commit)
+    logger.warning(
+        "Skipped WebApp trade delivery during production test isolation",
+        extra={
+            "event": "production_test_isolation.trade_webapp_receipt_skipped",
+            "trade_number": getattr(receipt, "trade_number", None),
+            "recipient_user_id": recipient_user_id,
+            "receipt_id": getattr(receipt, "id", None),
+        },
+    )
+    return True
 
 
 async def deliver_webapp_trade_notification(
@@ -302,6 +334,25 @@ async def deliver_webapp_trade_notification(
             reason=outage_skip.reason,
         )
 
+    if await _skip_if_production_test_isolation_suppressed(
+        db,
+        claimed_receipt,
+        recipient_user_id=normalized_recipient_user_id,
+        current_time=current_time,
+        commit=commit,
+    ):
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_SKIPPED,
+            trade_number=normalized_trade_number,
+            recipient_user_id=normalized_recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            receipt=claimed_receipt,
+            receipt_created=upsert_result.created,
+            receipt_changed=True,
+            reason=WEBAPP_DELIVERY_PRODUCTION_TEST_ISOLATION_REASON,
+        )
+
     delivery_result = await complete_webapp_receipt_with_notification(
         db,
         receipt=claimed_receipt,
@@ -379,6 +430,24 @@ async def deliver_claimed_webapp_receipt(
             receipt=receipt,
             receipt_changed=True,
             reason=outage_skip.reason,
+        )
+
+    if await _skip_if_production_test_isolation_suppressed(
+        db,
+        receipt,
+        recipient_user_id=recipient_user_id,
+        current_time=current_time,
+        commit=commit,
+    ):
+        return WebAppTradeDeliveryResult(
+            status=WEBAPP_DELIVERY_STATUS_SKIPPED,
+            trade_number=trade_number,
+            recipient_user_id=recipient_user_id,
+            current_server=normalized_current_server,
+            destination_server=WEBAPP_DESTINATION_SERVER,
+            receipt=receipt,
+            receipt_changed=True,
+            reason=WEBAPP_DELIVERY_PRODUCTION_TEST_ISOLATION_REASON,
         )
 
     audit_payload = _audit_payload_mapping(receipt)
