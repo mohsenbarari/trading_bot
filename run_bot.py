@@ -26,6 +26,7 @@ from bot.middlewares.logging_context import BotLoggingContextMiddleware
 from bot.utils.trade_suggestion_messages import listen_trade_suggestion_events
 from core.logging_config import configure_logging
 from core.offer_publication_worker import offer_telegram_publication_loop
+from core.trade_delivery_worker import telegram_trade_delivery_loop
 
 # Configure logging
 configure_logging("bot")
@@ -108,14 +109,20 @@ async def main():
     logger.info("🤖 Bot started...")
     suggestion_sync_task = asyncio.create_task(listen_trade_suggestion_events(bot))
     offer_publication_task = asyncio.create_task(offer_telegram_publication_loop())
+    telegram_delivery_task = asyncio.create_task(telegram_trade_delivery_loop())
     try:
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Bot error: {e}")
     finally:
-        for task in (suggestion_sync_task, offer_publication_task):
+        for task in (suggestion_sync_task, offer_publication_task, telegram_delivery_task):
             task.cancel()
-        await asyncio.gather(suggestion_sync_task, offer_publication_task, return_exceptions=True)
+        await asyncio.gather(
+            suggestion_sync_task,
+            offer_publication_task,
+            telegram_delivery_task,
+            return_exceptions=True,
+        )
         await bot.session.close()
 
 if __name__ == "__main__":

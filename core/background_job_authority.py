@@ -206,19 +206,22 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         allowed_servers=(SERVER_FOREIGN,),
         authority_rule=(
             "foreign-only Telegram channel publication reconciler; publishes active offers missing "
-            "Telegram publication state through the idempotent offer_publication_states gate"
+            "Telegram publication state through the idempotent offer_publication_states gate and reapplies "
+            "Telegram channel presentation for already-published partial or terminal offers"
         ),
         outage_behavior=(
             "skip active publication while the medium/long outage active-publication gate is enabled; "
-            "otherwise repair missing Telegram channel posts after sync or staging shared-DB creation"
+            "otherwise repair missing Telegram channel posts and converge existing channel message buttons/tags "
+            "after sync or staging shared-DB changes"
         ),
         sync_outbox_behavior=(
             "offer_publication_states and the legacy offers.channel_message_id backfill are sync-visible "
-            "product surface state and must converge through the existing change_log path"
+            "product surface state and must converge through the existing change_log path; Telegram message "
+            "text/markup edits are external presentation side effects and must not mutate offer ownership"
         ),
         offer_impacting=True,
         external_state=("Telegram Bot API",),
-        side_effects=("Telegram channel offer post",),
+        side_effects=("Telegram channel offer post", "Telegram channel offer message text/markup"),
     ),
 }
 

@@ -69,6 +69,8 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.TradeContentionGateMiddleware', return_value=trade_gate_middleware
         ) as gate_ctor, patch('run_bot.listen_trade_suggestion_events', _listener_forever), patch(
             'run_bot.offer_telegram_publication_loop', _worker_forever
+        ), patch(
+            'run_bot.telegram_trade_delivery_loop', _worker_forever
         ):
             await run_bot.main()
 
@@ -102,7 +104,9 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.Dispatcher', return_value=fake_dp
         ), patch('run_bot.AuthMiddleware', return_value=object()), patch(
             'run_bot.listen_trade_suggestion_events', _listener_forever
-        ), patch('run_bot.offer_telegram_publication_loop', _worker_forever), patch.object(run_bot, 'logger') as logger:
+        ), patch('run_bot.offer_telegram_publication_loop', _worker_forever), patch(
+            'run_bot.telegram_trade_delivery_loop', _worker_forever
+        ), patch.object(run_bot, 'logger') as logger:
             await run_bot.main()
 
         logger.error.assert_called_once()
