@@ -400,6 +400,23 @@ def shape_profile(shape_name: str) -> dict[str, Any]:
     }
 
 
+def delivery_scenario_id_for_record(record: dict[str, Any]) -> str:
+    actor_pair_id = str(record.get("actor_pair_id") or "")
+    surface_pair = str(record.get("surface_pair") or "")
+    outage_id = str(record.get("outage_id") or "")
+    for scenario in manifest_builder.delivery_matrix.build_delivery_scenarios():
+        if (
+            scenario.actor_pair_id == actor_pair_id
+            and scenario.surface_pair == surface_pair
+            and scenario.outage_id == outage_id
+        ):
+            return scenario.scenario_id
+    raise RunnerError(
+        "could not map record to delivery scenario: "
+        f"actor_pair_id={actor_pair_id!r} surface_pair={surface_pair!r} outage_id={outage_id!r}"
+    )
+
+
 def scenario_prefix(prefix: str, manifest_id: str) -> str:
     return f"{prefix}{safe_token(manifest_id)}_"
 
@@ -421,7 +438,7 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
         return "policy_unsupported_scenario_requires_negative_guard_driver"
     if record.get("actor_pair_id") != "user__user":
         return "dual_role_worker_currently_supports_standard_user_to_standard_user_only"
-    if record.get("outage_id") != "stable":
+    if record.get("outage_id") not in {"stable", "short_under_2m", "medium_around_60m"}:
         return "outage_simulation_driver_not_implemented_for_role_worker"
     if section == "production_stress_overlay":
         family = str(record.get("family") or "")
@@ -1065,6 +1082,98 @@ def targeted_join_scenario_commands(
     }
 
 
+def outage_policy_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+    user_count: int,
+    hot_offer_requests: int,
+    target_rps: float,
+    telegram_ratio: float,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "outage_policy")
+    outage_id = str(record.get("outage_id") or "")
+    if outage_id not in {"short_under_2m", "medium_around_60m"}:
+        raise RunnerError(f"{manifest_id}: outage policy driver only supports short/medium outage ids")
+    delivery_scenario_id = delivery_scenario_id_for_record(record)
+    dual_role_plan = dual_role_scenario_commands(
+        record,
+        prefix=prefix,
+        artifact_dir=artifact_dir,
+        user_count=user_count,
+        hot_offer_requests=hot_offer_requests,
+        target_rps=target_rps,
+        telegram_ratio=telegram_ratio,
+    )
+    targeted_record = {
+        "manifest_id": f"{manifest_id}_OUTAGE_POLICY_{delivery_scenario_id}",
+        "source_scenario_id": delivery_scenario_id,
+        "offer_home_server": record.get("offer_home_server"),
+        "actor_pair_id": record.get("actor_pair_id"),
+        "source_kind": record.get("source_kind"),
+        "responder_kind": record.get("responder_kind"),
+        "group_relation": record.get("group_relation"),
+        "offer_surface": record.get("offer_surface"),
+        "request_surface": record.get("request_surface"),
+        "outage_id": outage_id,
+        "policy_supported": record.get("policy_supported"),
+        "unsupported_reasons": record.get("unsupported_reasons") or [],
+    }
+    targeted_plan = targeted_join_scenario_commands(
+        targeted_record,
+        prefix=prefix,
+        artifact_dir=artifact_dir,
+    )
+    commands = [
+        *[dict(command) for command in dual_role_plan.get("commands") or []],
+        *[dict(command) for command in targeted_plan.get("commands") or []],
+    ]
+    execution_groups = [
+        *[
+            {
+                **dict(group),
+                "name": f"trade_correctness_{group.get('name')}",
+            }
+            for group in (dual_role_plan.get("execution_groups") or [])
+        ],
+        *[
+            {
+                **dict(group),
+                "name": f"outage_delivery_policy_{group.get('name')}",
+            }
+            for group in (targeted_plan.get("execution_groups") or [])
+        ],
+    ]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "outage_policy_composed_probe",
+        "scenario_prefix": dual_role_plan.get("scenario_prefix"),
+        "artifact_dir": dual_role_plan.get("artifact_dir"),
+        "remote_artifact_dir": dual_role_plan.get("remote_artifact_dir"),
+        "outage_id": outage_id,
+        "delivery_scenario_id": delivery_scenario_id,
+        "offer_home_server": record.get("offer_home_server"),
+        "offer_surface": record.get("offer_surface"),
+        "request_surface": record.get("request_surface"),
+        "trade_correctness_driver": dual_role_plan.get("driver"),
+        "outage_delivery_policy_driver": targeted_plan.get("driver"),
+        "outage_delivery_policy_prefix": targeted_plan.get("scenario_prefix"),
+        "commands": commands,
+        "execution_groups": execution_groups,
+        "component_plans": {
+            "trade_correctness": dual_role_plan,
+            "outage_delivery_policy": targeted_plan,
+        },
+        "safety_note": (
+            "This composed driver does not cut production networking. It validates the trade/stress path with "
+            "the dual-role production driver and validates short/medium delivery policy with the targeted "
+            "join driver using a separate synthetic prefix and fake Telegram gateway."
+        ),
+    }
+
+
 def unsupported_policy_scenario_commands(
     record: dict[str, Any],
     *,
@@ -1348,6 +1457,21 @@ def build_execution_plan(
                     artifact_dir=artifact_dir,
                 )
             )
+        elif (
+            record.get("section") in {"production_base_trade_shape", "production_stress_overlay"}
+            and record.get("outage_id") != "stable"
+        ):
+            scenario_plans.append(
+                outage_policy_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                    user_count=user_count,
+                    hot_offer_requests=hot_offer_requests,
+                    target_rps=target_rps,
+                    telegram_ratio=telegram_ratio,
+                )
+            )
         else:
             scenario_plans.append(
                 dual_role_scenario_commands(
@@ -1373,6 +1497,7 @@ def build_execution_plan(
             ],
             "dual_role_actor_pair_id": "user__user",
             "dual_role_outage_id": "stable",
+            "outage_policy_probe": "short_and_medium_user_to_user_composed_without_network_cut",
             "delivery_contract_catalog": "all_delivery_contract_scenarios",
             "targeted_join_scenarios": "all_targeted_join_scenarios_with_fake_telegram_gateway",
             "stress_families": sorted(DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES),

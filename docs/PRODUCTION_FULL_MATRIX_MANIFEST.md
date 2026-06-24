@@ -90,7 +90,7 @@ implemented production driver. The current implemented command plan covers:
   `missing_public_offer_id`, and `cleanup_scope_violation`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`1395` command-plannable scenarios with these drivers:
+`1715` command-plannable scenarios with these drivers:
 
 - `228` market behavior scenarios using the comprehensive CLM market matrix
   with production confirmation and exact synthetic cleanup;
@@ -110,11 +110,16 @@ With the current manifest count of `5555`, selecting the whole manifest yields
   assertions.
 - `576` policy-unsupported base trade-shape scenarios that assert tier2 offer
   creation and tier2 Telegram request paths reject without partial mutation.
+- `320` short/medium outage user-to-user base/stress scenarios using a composed
+  probe: dual-role trade correctness plus targeted join delivery-policy
+  assertions with a separate synthetic prefix.
 
 It intentionally does not yet implement production execution drivers for
-customer/accountant actor pairs in the base/stress layers or real short/medium
-outage orchestration. Those must remain visible as `driver_gaps` and cannot be
-treated as passed.
+customer/accountant actor pairs in the base/stress layers. Those must remain
+visible as `driver_gaps` and cannot be treated as passed.
+The short/medium outage driver is not a real production network-cut rehearsal;
+it validates the policy with synthetic delivery timing and must not be described
+as proof that firewall or sync-worker outage controls are safe.
 The execution-plan output also includes `driver_gap_summary.by_driver_gap_bucket`
 and `driver_gap_roadmap`, which group the raw gap reasons into implementation
 buckets sorted from easier to harder.
@@ -135,7 +140,6 @@ selected scenario is command-plannable.
 
 Current full-manifest gap buckets are expected to be:
 
-- `outage_orchestration_driver`: `320`
 - `customer_accountant_actor_driver`: `3840`
 
 ## Schema

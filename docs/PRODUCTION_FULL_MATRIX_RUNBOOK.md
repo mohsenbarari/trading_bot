@@ -264,9 +264,16 @@ Current execution-plan limitation:
 - all `204` targeted trade-delivery join scenarios are command-plannable
   through production-gated synthetic fixtures, exact cleanup, and fake Telegram
   transport;
-- current whole-manifest command-plannable count: `1395` of `5555` scenarios;
-- not implemented yet: customer/accountant actor-pair production drivers,
-  and short/medium outage orchestration.
+- all `320` short/medium user-to-user base/stress outage scenarios are
+  command-plannable through a composed probe: dual-role trade correctness plus
+  targeted join delivery-policy assertions with separate synthetic prefixes;
+- current whole-manifest command-plannable count: `1715` of `5555` scenarios;
+- not implemented yet: customer/accountant actor-pair production drivers.
+
+The short/medium outage composed probe does not cut production networking. It
+validates the delivery policy using synthetic timing and fake Telegram transport.
+Do not treat it as a firewall, sync-worker pause, or real peer-disconnect
+rehearsal.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
@@ -275,9 +282,7 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
-   outage control with distinct expected outcomes.
-2. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
+1. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
    assertions for customer, owner, accountant, same-owner, and different-owner
    actor pairs.
 

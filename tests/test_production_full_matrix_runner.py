@@ -180,6 +180,35 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
         self.assertIn("cleanup_targeted_trade_delivery_join_scenario", rendered)
 
+    def test_execution_plan_builds_outage_policy_composed_commands(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_base_trade_shape",
+                "--manifest-id",
+                "PBTS-0007",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "outage_policy_composed_probe")
+        self.assertEqual(scenario_plan["outage_id"], "short_under_2m")
+        self.assertEqual(scenario_plan["delivery_scenario_id"], "TDN-002")
+        self.assertEqual(scenario_plan["trade_correctness_driver"], "two_server_dual_role_hot_offer")
+        self.assertEqual(scenario_plan["outage_delivery_policy_driver"], "targeted_trade_delivery_join_probe")
+        self.assertNotEqual(scenario_plan["scenario_prefix"], scenario_plan["outage_delivery_policy_prefix"])
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("run-role-plan", rendered)
+        self.assertIn("run_trade_delivery_targeted_join_matrix.py", rendered)
+        self.assertIn("TDN-002", rendered)
+
     def test_sharding_is_deterministic_and_non_overlapping(self):
         first = runner.build_plan(
             self.build_args("--section", "production_base_trade_shape", "--shard-count", "2", "--shard-index", "1")
@@ -303,21 +332,20 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 1395)
-        self.assertEqual(execution_plan["driver_gap_count"], 4160)
-        self.assertEqual(summary["total"], 4160)
+        self.assertEqual(execution_plan["executable_count"], 1715)
+        self.assertEqual(execution_plan["driver_gap_count"], 3840)
+        self.assertEqual(summary["total"], 3840)
         self.assertEqual(
             summary["by_section"],
             {
-                "production_base_trade_shape": 624,
-                "production_stress_overlay": 3536,
+                "production_base_trade_shape": 576,
+                "production_stress_overlay": 3264,
             },
         )
         self.assertEqual(
             summary["by_driver_gap_bucket"],
             {
                 "customer_accountant_actor_driver": 3840,
-                "outage_orchestration_driver": 320,
             },
         )
         self.assertEqual(
@@ -326,7 +354,6 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 for item in execution_plan["driver_gap_roadmap"]
             ],
             [
-                ("outage_orchestration_driver", 320),
                 ("customer_accountant_actor_driver", 3840),
             ],
         )
@@ -354,7 +381,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 4160)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 3840)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
