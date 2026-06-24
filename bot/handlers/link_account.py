@@ -29,7 +29,7 @@ from core.services.telegram_link_token_service import (
     load_pending_telegram_link_token_user_for_update,
 )
 from bot.keyboards import get_persistent_menu_keyboard
-from bot.utils.channel_invites import build_channel_join_request_line
+from bot.utils.channel_invites import build_channel_join_request_text
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -56,6 +56,50 @@ def build_webapp_link_line() -> str | None:
     if not frontend_url:
         return None
     return f"🌐 [ورود به وب اپ]({frontend_url})"
+
+
+def build_webapp_plain_link_line() -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip()
+    if not frontend_url:
+        return None
+    return f"🌐 ورود به وب اپ:\n{frontend_url}"
+
+
+async def build_linked_account_panel_message(
+    bot,
+    user: User,
+    *,
+    newly_linked: bool = False,
+    already_linked: bool = False,
+    address_registered: bool = False,
+) -> str:
+    account_name = (getattr(user, "account_name", None) or "حساب شما")
+    if newly_linked:
+        lines = [f"✅ حساب کاربری {account_name} با موفقیت به تلگرام متصل شد."]
+    elif already_linked:
+        lines = ["✅ حساب شما قبلاً متصل شده است. این حساب قبلاً به تلگرام متصل شده است."]
+    else:
+        full_name = (getattr(user, "full_name", None) or account_name)
+        lines = [f"سلام {full_name}! به پنل کاربری خود خوش آمدید."]
+
+    if address_registered:
+        lines.append("📍 آدرس شما ثبت شد و ثبت‌نامتان تکمیل شد.")
+
+    join_request_text = await build_channel_join_request_text(
+        bot,
+        user_id=getattr(user, "id", None),
+    )
+    if join_request_text:
+        lines.append("از لینک زیر برای ثبت درخواست عضویت در کانال معاملات استفاده کنید:")
+        lines.append(join_request_text)
+        lines.append("پس از ثبت درخواست، عضویت شما در کانال به صورت خودکار تایید می‌شود.")
+
+    webapp_link_line = build_webapp_plain_link_line()
+    if webapp_link_line:
+        lines.append(webapp_link_line)
+
+    lines.append("برای دسترسی به امکانات، از دکمه‌های زیر استفاده کنید.")
+    return "\n\n".join(lines)
 
 
 def user_requires_address_completion(user: User) -> bool:
@@ -188,25 +232,14 @@ async def finalize_account_link(
     if not send_success_message:
         return
 
-    success_lines = [f"✅ حساب کاربری **{user.account_name}** با موفقیت به تلگرام متصل شد."]
-    if address is not None:
-        success_lines.append("📍 آدرس شما ثبت شد و ثبت‌نامتان تکمیل شد.")
-    join_request_line = await build_channel_join_request_line(
-        getattr(message, "bot", None),
-        user_id=getattr(user, "id", None),
-    )
-    if join_request_line:
-        success_lines.append(join_request_line)
-        success_lines.append("پس از ثبت درخواست، عضویت شما در کانال به صورت خودکار تایید می‌شود.")
-    webapp_link_line = build_webapp_link_line()
-    if webapp_link_line:
-        success_lines.append(webapp_link_line)
-    success_lines.append("اکنون می‌توانید از تمام امکانات ربات استفاده کنید.")
-
     await message.answer(
-        "\n\n".join(success_lines),
-        reply_markup=types.ReplyKeyboardRemove(),
-        parse_mode="Markdown"
+        await build_linked_account_panel_message(
+            getattr(message, "bot", None),
+            user,
+            newly_linked=True,
+            address_registered=address is not None,
+        ),
+        reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
     )
 
 
@@ -267,7 +300,7 @@ async def cmd_link(message: types.Message, state: FSMContext, user: User | None 
             await prompt_address_completion(message, state, user.id, already_linked=True)
             return
         await message.answer(
-            "✅ حساب شما قبلاً به تلگرام متصل شده است و نیازی به اشتراک‌گذاری دوباره شماره موبایل ندارید.",
+            await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True),
             reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
         )
         return
@@ -363,7 +396,10 @@ async def handle_contact(message: types.Message, state: FSMContext):
             if user_requires_address_completion(user):
                 await prompt_address_completion(message, state, user.id, already_linked=True)
                 return
-            await message.answer("✅ حساب شما قبلاً متصل شده است.", reply_markup=types.ReplyKeyboardRemove())
+            await message.answer(
+                await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True),
+                reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
+            )
             await state.clear()
             return
 

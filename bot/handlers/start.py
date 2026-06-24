@@ -33,6 +33,7 @@ from bot.handlers.link_account import (
     BOT_ACCOUNT_INACTIVE_REASON,
     bot_account_access_denial_reason,
     build_bot_account_access_denial_message,
+    build_linked_account_panel_message,
     build_neutral_account_link_message,
     prompt_contact_for_account_link,
 )
@@ -88,7 +89,7 @@ async def handle_start_with_token(message: types.Message, command: CommandObject
         await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
         if user:
             anchor_msg = await message.answer(
-                "✅ حساب شما قبلاً به تلگرام متصل شده است.",
+                await build_linked_account_panel_message(message.bot, user),
                 reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
             )
             set_anchor(message.chat.id, anchor_msg.message_id)
@@ -261,7 +262,7 @@ async def handle_start_without_token(message: types.Message, state: FSMContext, 
         logger.warning(f"DEBUG: Building keyboard with URL: '{settings.frontend_url}'")
         
         anchor_msg = await message.answer(
-            f"سلام {user.full_name}! به پنل کاربری خود خوش آمدید. برای دسترسی به امکانات از دکمه زیر استفاده کنید.",
+            await build_linked_account_panel_message(message.bot, user),
             reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url)
         )
         set_anchor(message.chat.id, anchor_msg.message_id)

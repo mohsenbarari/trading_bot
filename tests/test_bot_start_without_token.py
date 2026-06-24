@@ -32,16 +32,42 @@ class BotStartWithoutTokenTests(unittest.IsolatedAsyncioTestCase):
             chat=SimpleNamespace(id=10),
             answer=AsyncMock(return_value=SimpleNamespace(message_id=55)),
         )
-        user = SimpleNamespace(full_name="Ali", role="standard")
+        user = SimpleNamespace(id=44, full_name="Ali", account_name="ali_44", role="standard")
 
         with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()) as delete_anchor, patch(
             "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
-        ) as menu_mock, patch("bot.handlers.start.set_anchor") as set_anchor:
+        ) as menu_mock, patch(
+            "bot.handlers.link_account.build_channel_join_request_text",
+            new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/+start_token"),
+        ), patch("bot.handlers.start.set_anchor") as set_anchor:
             await handle_start_without_token(message, state=SimpleNamespace(), user=user)
 
         delete_anchor.assert_awaited_once()
         menu_mock.assert_called_once()
         self.assertIn("سلام Ali", message.answer.await_args.args[0])
+        self.assertIn("https://t.me/+start_token", message.answer.await_args.args[0])
+        self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
+        set_anchor.assert_called_once_with(10, 55)
+
+    async def test_handle_start_with_link_token_for_registered_user_sends_channel_join_link(self):
+        message = SimpleNamespace(
+            bot=SimpleNamespace(),
+            chat=SimpleNamespace(id=10),
+            answer=AsyncMock(return_value=SimpleNamespace(message_id=55)),
+        )
+        user = SimpleNamespace(id=45, full_name="Reza", account_name="reza_45", role="standard")
+
+        with patch("bot.handlers.start.delete_previous_anchor", new=AsyncMock()), patch(
+            "bot.handlers.start.get_persistent_menu_keyboard", return_value="menu"
+        ), patch(
+            "bot.handlers.link_account.build_channel_join_request_text",
+            new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/+deep_token"),
+        ), patch("bot.handlers.start.set_anchor") as set_anchor:
+            await handle_start_with_token(message, SimpleNamespace(args="link_raw-token"), state=SimpleNamespace(), user=user)
+
+        self.assertIn("https://t.me/+deep_token", message.answer.await_args.args[0])
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
+        self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
         set_anchor.assert_called_once_with(10, 55)
 
     async def test_handle_start_without_token_returns_neutral_fallback_for_unknown_user(self):

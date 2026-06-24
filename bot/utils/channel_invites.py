@@ -52,3 +52,19 @@ async def build_channel_join_request_line(
         return None
 
     return f"🔗 [درخواست عضویت در کانال معاملات]({link})"
+
+
+async def build_channel_join_request_text(
+    bot: Bot | None,
+    *,
+    user_id: int | None = None,
+) -> str | None:
+    if bot is None:
+        link = settings.channel_invite_link
+    else:
+        link = await create_channel_join_request_link(bot, user_id=user_id)
+
+    if not link:
+        return None
+
+    return f"🔗 درخواست عضویت در کانال معاملات:\n{link}"

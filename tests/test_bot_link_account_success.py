@@ -89,26 +89,36 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         user = make_user()
         db = FakeDB(user)
         state = FakeState()
-        message = make_message()
+        message = make_message(username="mohsen_telegram", full_name="Linked_User")
 
         with patch("bot.handlers.link_account.get_db", new=db_factory(db)), patch(
             "bot.handlers.link_account.ensure_mandatory_channel_membership",
             new=AsyncMock(),
         ) as mandatory_mock, patch(
+            "bot.handlers.link_account.build_channel_join_request_text",
+            new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/+unit_token"),
+        ), patch(
             "bot.handlers.link_account.settings",
             SimpleNamespace(frontend_url="https://app.example"),
+        ), patch(
+            "bot.handlers.link_account.get_persistent_menu_keyboard",
+            return_value="menu",
         ):
             await handle_contact(message, state)
 
         self.assertEqual(user.telegram_id, 10)
-        self.assertEqual(user.username, "u")
-        self.assertEqual(user.full_name, "Linked User")
+        self.assertEqual(user.username, "mohsen_telegram")
+        self.assertEqual(user.full_name, "Linked_User")
         self.assertTrue(user.has_bot_access)
         self.assertIs(mandatory_mock.await_args.kwargs["user"], user)
         self.assertEqual(db.commits, 1)
         self.assertEqual(state.cleared, 1)
-        self.assertIn("با موفقیت", message.answer.await_args.args[0])
-        self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
+        answer_text = message.answer.await_args.args[0]
+        self.assertIn("با موفقیت", answer_text)
+        self.assertIn("https://t.me/+unit_token", answer_text)
+        self.assertIn("https://app.example", answer_text)
+        self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
 
     async def test_handle_contact_rolls_back_and_reports_commit_error(self):
         user = make_user()
@@ -267,11 +277,14 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.link_account.ensure_mandatory_channel_membership",
             new=AsyncMock(),
         ) as mandatory_mock, patch(
-            "bot.handlers.link_account.build_channel_join_request_line",
-            new=AsyncMock(return_value="🔗 [درخواست عضویت در کانال معاملات](https://t.me/joinreq)"),
+            "bot.handlers.link_account.build_channel_join_request_text",
+            new=AsyncMock(return_value="🔗 درخواست عضویت در کانال معاملات:\nhttps://t.me/joinreq"),
         ), patch(
             "bot.handlers.link_account.settings",
             SimpleNamespace(frontend_url="https://app.example"),
+        ), patch(
+            "bot.handlers.link_account.get_persistent_menu_keyboard",
+            return_value="menu",
         ):
             await handle_address_completion(message, state)
 
@@ -284,6 +297,8 @@ class BotLinkAccountSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.cleared, 1)
         self.assertIn("درخواست عضویت در کانال معاملات", message.answer.await_args.args[0])
         self.assertIn("ورود به وب اپ", message.answer.await_args.args[0])
+        self.assertIsNone(message.answer.await_args.kwargs.get("parse_mode"))
+        self.assertEqual(message.answer.await_args.kwargs["reply_markup"], "menu")
 
 
 if __name__ == "__main__":

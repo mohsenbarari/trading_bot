@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from bot.handlers.start import handle_channel_join_request
+from core.enums import UserAccountStatus, UserRole
 
 
 class FakeExecuteResult:
@@ -61,21 +62,31 @@ class BotStartJoinRequestTests(unittest.IsolatedAsyncioTestCase):
         join_request.bot.decline_chat_join_request.assert_awaited_once_with(chat_id=100, user_id=7)
         join_request.bot.send_message.assert_awaited_once()
 
-        blocked_user = SimpleNamespace(id=7)
+        blocked_user = SimpleNamespace(
+            id=7,
+            role=UserRole.STANDARD,
+            account_status=UserAccountStatus.INACTIVE,
+            is_deleted=False,
+        )
         join_request = make_join_request(chat_id=100)
         with patch("bot.handlers.start.settings.channel_id", 100), patch(
             "bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(blocked_user))
-        ), patch("bot.handlers.start.is_user_market_blocked", return_value=True):
+        ):
             await handle_channel_join_request(join_request)
         self.assertIn("غیرفعال است", join_request.bot.send_message.await_args.kwargs["text"])
 
     async def test_join_request_approve_and_notification_failures_are_tolerated(self):
-        active_user = SimpleNamespace(id=7)
+        active_user = SimpleNamespace(
+            id=7,
+            role=UserRole.STANDARD,
+            account_status=UserAccountStatus.ACTIVE,
+            is_deleted=False,
+        )
         join_request = make_join_request(chat_id=100)
         join_request.bot.send_message = AsyncMock(side_effect=RuntimeError("boom"))
         with patch("bot.handlers.start.settings.channel_id", 100), patch(
             "bot.handlers.start.AsyncSessionLocal", return_value=FakeSessionContext(FakeSession(active_user))
-        ), patch("bot.handlers.start.is_user_market_blocked", return_value=False), patch(
+        ), patch(
             "bot.handlers.start.logger.exception"
         ) as logger_mock:
             await handle_channel_join_request(join_request)
