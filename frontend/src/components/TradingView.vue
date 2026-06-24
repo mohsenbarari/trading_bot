@@ -19,6 +19,12 @@ const props = defineProps<{
   initialTab?: 'offers' | 'my_offers' | 'my_trades'
 }>()
 
+const viewerIsCustomer = computed(() => (
+  props.user?.is_customer === true
+  || props.user?.customer_tier === 'tier1'
+  || props.user?.customer_tier === 'tier2'
+))
+
 // Emits
 const emit = defineEmits<{
   (e: 'navigate', view: string, payload?: any): void
@@ -1117,7 +1123,7 @@ watch(activeTab, (val) => {
               <span class="info-label">🏷️ کالا:</span>
               <span class="info-value">{{ trade.commodity_name }}</span>
             </div>
-            <div class="trade-info-row">
+            <div v-if="!viewerIsCustomer" class="trade-info-row">
               <span class="info-label">👤 طرف معامله:</span>
               <span
                 v-if="!getTradeCounterpartyProfileTarget(trade)"
@@ -1133,7 +1139,7 @@ watch(activeTab, (val) => {
                 {{ getTradeCounterpartyLabel(trade) }}
               </span>
             </div>
-            <div v-if="showTradeCustomerContext(trade)" class="trade-info-row">
+            <div v-if="showTradeCustomerContext(trade) && !viewerIsCustomer" class="trade-info-row">
               <span class="info-label">🪪 مشتری:</span>
               <span class="info-value trade-customer-context-value">
                 <span class="customer-context-badge">مشتری</span>
@@ -1141,7 +1147,7 @@ watch(activeTab, (val) => {
                 <span v-if="trade.customer_context_tier" class="customer-context-tier">{{ getCustomerTierLabel(trade.customer_context_tier) }}</span>
               </span>
             </div>
-            <div v-if="trade.trade_path_summary" class="trade-info-row">
+            <div v-if="trade.trade_path_summary && !viewerIsCustomer" class="trade-info-row">
               <span class="info-label">🧭 مسیر:</span>
               <span class="info-value">{{ trade.trade_path_summary }}</span>
             </div>
@@ -2049,4 +2055,3 @@ watch(activeTab, (val) => {
 }
 
 </style>
-

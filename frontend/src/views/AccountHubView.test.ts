@@ -62,8 +62,10 @@ describe('AccountHubView.vue', () => {
     const wrapper = await mountView()
 
     expect(accountHubMocks.primeCurrentUserSummaryMock).toHaveBeenCalledWith(true)
-    expect(wrapper.findAll('.account-section-card')).toHaveLength(4)
-    expect(wrapper.text()).toContain('مرکز حساب کاربری')
+    expect(wrapper.findAll('.account-section-card')).toHaveLength(3)
+    expect(wrapper.text()).not.toContain('مرکز حساب کاربری')
+    expect(wrapper.text()).toContain('محمد')
+    expect(wrapper.text()).toContain('فعال')
     expect(wrapper.text()).toContain('نشست‌های فعال')
 
     await findAction(wrapper, 'پروفایل من')!.trigger('click')
@@ -95,7 +97,7 @@ describe('AccountHubView.vue', () => {
     expect(wrapper.text()).toContain('دسترسی‌های مجاز حسابدار و حافظه دستگاه')
   })
 
-  it('renders guidance without reviving the old accordion or summary-card layout', async () => {
+  it('keeps account guidance removed without reviving the old accordion or summary-card layout', async () => {
     accountHubMocks.currentUserSummary.value = {
       id: 3,
       role: 'عادی',
@@ -106,8 +108,25 @@ describe('AccountHubView.vue', () => {
     const wrapper = await mountView()
 
     expect(wrapper.findAll('.ui-metric-card')).toHaveLength(0)
-    expect(wrapper.findAll('.account-guidance-item')).toHaveLength(2)
+    expect(wrapper.findAll('.account-guidance-item')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('راهنمای دسترسی')
     expect(wrapper.findAll('.account-accordion')).toHaveLength(0)
+  })
+
+  it('shows inactive account status in the compact header', async () => {
+    accountHubMocks.currentUserSummary.value = {
+      id: 6,
+      role: 'عادی',
+      account_name: 'blocked-user',
+      account_status: 'inactive',
+      is_accountant: false,
+    }
+
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).toContain('blocked-user')
+    expect(wrapper.text()).toContain('غیرفعال')
+    expect(wrapper.get('.account-status-dot').classes()).toContain('account-status-dot--danger')
   })
 
   it('adds Telegram connection to profile settings and disables it after linking', async () => {

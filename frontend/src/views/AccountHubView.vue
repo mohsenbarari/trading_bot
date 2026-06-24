@@ -2,13 +2,13 @@
 import { computed, onMounted, ref } from 'vue'
 import type { Component } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bell, ChevronLeft, Database, Settings, ShieldCheck, Smartphone, UserRound } from 'lucide-vue-next'
+import { Bell, ChevronLeft, Database, Settings, Smartphone, UserRound } from 'lucide-vue-next'
 import {
   AppActionCard,
   AppIconButton,
   AppPage,
-  AppPageHeader,
   AppSectionCard,
+  AppStatusBadge,
 } from '../components/ui'
 import { WorkspaceNotice } from '../components/workspace'
 import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
@@ -29,6 +29,10 @@ interface AccountAction {
 
 const user = computed(() => currentUserSummary.value)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const displayName = computed(() => user.value?.full_name?.trim() || user.value?.account_name?.trim() || 'کاربر')
+const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
+const accountStatusLabel = computed(() => (isInactiveAccount.value ? 'غیرفعال' : 'فعال'))
+const accountStatusTone = computed(() => (isInactiveAccount.value ? 'danger' : 'success'))
 const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
 const showTelegramConnectPanel = computed(() => (
   !isAccountant.value
@@ -123,21 +127,23 @@ onMounted(() => {
 <template>
   <div class="ds-page account-hub-page">
     <AppPage>
-      <AppPageHeader
-        eyebrow="حساب"
-        title="مرکز حساب کاربری"
-      >
-        <template #actions>
-          <AppIconButton type="button" class="account-return-control" label="بازگشت" size="sm" @click="router.back()">
-            <ChevronLeft :size="18" />
-          </AppIconButton>
-        </template>
-      </AppPageHeader>
+      <header class="account-compact-header" aria-label="حساب کاربری">
+        <AppIconButton type="button" class="account-return-control" label="بازگشت" size="sm" @click="router.back()">
+          <ChevronLeft :size="18" />
+        </AppIconButton>
+        <div class="account-identity">
+          <div class="account-identity-name-row">
+            <span class="account-status-dot" :class="`account-status-dot--${accountStatusTone}`" aria-hidden="true"></span>
+            <strong>{{ displayName }}</strong>
+          </div>
+          <AppStatusBadge class="account-status-badge" :tone="accountStatusTone">{{ accountStatusLabel }}</AppStatusBadge>
+        </div>
+        <div class="account-header-spacer" aria-hidden="true"></div>
+      </header>
 
       <AppSectionCard
         class="account-section-card"
         title="پروفایل و تنظیمات"
-        description="اطلاعات حساب و مسیرهای شخصی را از یک نقطه مدیریت کنید."
         tone="primary"
       >
         <div class="account-action-grid">
@@ -213,22 +219,6 @@ onMounted(() => {
         </div>
       </AppSectionCard>
 
-      <AppSectionCard
-        class="account-section-card"
-        title="راهنمای دسترسی"
-        description="این خلاصه کمک می‌کند قبل از ورود به تنظیمات بدانید کدام مسیرها برای نقش فعلی شما فعال هستند."
-      >
-        <div class="account-guidance-list">
-          <div class="account-guidance-item">
-            <ShieldCheck :size="18" />
-            <p>پروفایل و اعلان‌ها برای همه نقش‌ها در دسترس هستند.</p>
-          </div>
-          <div class="account-guidance-item">
-            <Smartphone :size="18" />
-            <p>{{ isAccountant ? 'نشست‌های حسابدار توسط سرگروه مدیریت می‌شوند.' : 'نشست‌های فعال و خروج از حساب از بخش امنیت حساب در دسترس است.' }}</p>
-          </div>
-        </div>
-      </AppSectionCard>
     </AppPage>
   </div>
 </template>
@@ -238,8 +228,75 @@ onMounted(() => {
   padding-bottom: calc(var(--ds-bottom-nav-height) + var(--ds-safe-area-bottom) + 4rem);
 }
 
+.account-compact-header {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) 2.25rem;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  min-height: 2.25rem;
+}
+
 .account-return-control {
   white-space: nowrap;
+}
+
+.account-identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  min-height: 2.25rem;
+  text-align: center;
+}
+
+.account-identity-name-row {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  max-width: 100%;
+}
+
+.account-identity-name-row strong {
+  min-width: 0;
+  max-width: min(16rem, 56vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ds-text-primary);
+  font-size: var(--ds-font-lg);
+  line-height: 1.35;
+}
+
+.account-status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.13);
+}
+
+.account-status-dot--success {
+  background: var(--ds-success-600);
+}
+
+.account-status-dot--danger {
+  background: var(--ds-danger-600);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.13);
+}
+
+.account-status-badge {
+  font-size: var(--ds-font-xs);
+  line-height: 1.2;
+}
+
+.account-header-spacer {
+  width: 2.25rem;
+  height: 2.25rem;
 }
 
 .account-section-card + .account-section-card {
@@ -254,25 +311,6 @@ onMounted(() => {
 
 .account-telegram-panel {
   margin-top: 0.75rem;
-}
-
-.account-guidance-list {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.account-guidance-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 0.6rem;
-  color: var(--ds-text-secondary);
-}
-
-.account-guidance-item p {
-  margin: 0;
-  font-size: var(--ds-font-sm);
-  line-height: 1.8;
 }
 
 @media (max-width: 700px) {

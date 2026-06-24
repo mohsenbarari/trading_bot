@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PublicProfile from '../components/PublicProfile.vue'
-import { AppLoadingState, AppPage, AppPageHeader } from '../components/ui'
+import { AppLoadingState, AppPage } from '../components/ui'
 import { apiFetch } from '../utils/auth'
 
 const router = useRouter()
@@ -36,7 +36,7 @@ function handleNavigate(view: string, payload?: any) {
       query: payload?.account_name ? { account_name: payload.account_name } : {},
     })
   } else if (view === 'home') {
-    router.push('/')
+    router.push({ name: 'account' })
   }
 }
 
@@ -59,11 +59,6 @@ onMounted(async () => {
 <template>
   <AppPage>
     <div class="profile-view">
-      <AppPageHeader
-        eyebrow="حساب کاربری"
-        title="پروفایل من"
-        description="نمای کلی حساب، مسیرهای مدیریتی و اطلاعات عمومی خود را از این صفحه دنبال کنید."
-      />
       <PublicProfile
         v-if="currentUser"
         :key="currentUser.id"

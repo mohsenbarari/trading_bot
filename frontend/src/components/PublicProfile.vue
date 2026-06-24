@@ -262,6 +262,18 @@ const customerProfileContext = computed(() => {
     customerTier: profileData.value.customer_tier,
   };
 });
+const showCustomerTierInProfileBanner = computed(() => {
+  return customerProfileContext.value !== null && !isOwnProfile.value && !viewerIsCustomer.value;
+});
+const shouldHideCustomerTradeRelationshipDetails = computed(() => {
+  return viewerIsCustomer.value || (isOwnProfile.value && customerProfileContext.value !== null);
+});
+const tradeHistoryHelpText = computed(() => {
+  if (shouldHideCustomerTradeRelationshipDetails.value) {
+    return 'در تاریخچه خودتان می‌توانید بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند.';
+  }
+  return 'در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند.';
+});
 const showTargetTradeHistory = computed(() => {
   if (!profileData.value) return false;
   if (isOwnProfile.value) return true;
@@ -1426,7 +1438,7 @@ function handleHistoryPresetChipChange(value: string) {
          </h2>
          <h2 v-else>پروفایل</h2>
       </div>
-      <button class="profile-nav-back" @click="$emit('navigate', 'home')"><ChevronLeft :size="24" /></button>
+      <button class="profile-nav-back" type="button" aria-label="بازگشت" @click="$emit('navigate', 'home')"><ChevronLeft :size="20" /></button>
     </div>
 
     <div v-if="isLoading" class="loading-state-skeleton">
@@ -1462,8 +1474,8 @@ function handleHistoryPresetChipChange(value: string) {
           <div class="customer-context-title">پروفایل مشتری</div>
           <p class="customer-context-copy">
             <span>{{ customerProfileContext.managementName }}</span>
-            <span v-if="customerProfileContext.ownerAccountName"> | مالک: {{ customerProfileContext.ownerAccountName }}</span>
-            <span> | {{ getCustomerTierLabel(customerProfileContext.customerTier) }}</span>
+            <span v-if="customerProfileContext.ownerAccountName"> | سرگروه: {{ customerProfileContext.ownerAccountName }}</span>
+            <span v-if="showCustomerTierInProfileBanner"> | {{ getCustomerTierLabel(customerProfileContext.customerTier) }}</span>
           </p>
         </div>
 
@@ -1747,7 +1759,7 @@ function handleHistoryPresetChipChange(value: string) {
               button-test="public-profile-history-help"
               note-test="public-profile-history-help-note"
               label="راهنمای تاریخچه معاملات"
-              text="در تاریخچه خودتان می‌توانید طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید و کالا را از فهرست کالاهای ثبت‌شده محدود کنید. خروجی‌ها همین فیلترها را رعایت می‌کنند."
+              :text="tradeHistoryHelpText"
             />
           </template>
 
@@ -1791,7 +1803,7 @@ function handleHistoryPresetChipChange(value: string) {
                     </option>
                   </select>
                 </AppFormField>
-                <AppFormField v-if="isOwnProfile" label="طرف دیگر معامله" class="history-filter-field history-filter-field-wide">
+                <AppFormField v-if="isOwnProfile && !shouldHideCustomerTradeRelationshipDetails" label="طرف دیگر معامله" class="history-filter-field history-filter-field-wide">
                   <select
                     :value="historyCounterpartyUserId ?? ''"
                     :disabled="historyCounterpartyOptionsLoading"
@@ -1865,7 +1877,7 @@ function handleHistoryPresetChipChange(value: string) {
                         <span class="trade-commodity">{{ trade.commodity_name }}</span>
                         <span class="trade-price">{{ formatTradePrice(trade.price) }} ریال</span>
                     </div>
-                    <div class="trade-counterparty">
+                    <div v-if="!shouldHideCustomerTradeRelationshipDetails" class="trade-counterparty">
                       <span class="label">طرف معامله:</span>
                       <button
                         v-if="getTradeCounterpartyProfileTarget(trade)"
@@ -1877,16 +1889,16 @@ function handleHistoryPresetChipChange(value: string) {
                       </button>
                       <span v-else class="value">{{ getTradeCounterpartyLabel(trade) }}</span>
                     </div>
-                    <div v-if="trade.trade_path_summary" class="trade-counterparty">
+                    <div v-if="trade.trade_path_summary && !shouldHideCustomerTradeRelationshipDetails" class="trade-counterparty">
                       <span class="label">مسیر:</span>
                       <span class="value">{{ trade.trade_path_summary }}</span>
                     </div>
-                    <div v-if="showTradeCustomerContext(trade)" class="trade-counterparty">
+                    <div v-if="showTradeCustomerContext(trade) && !shouldHideCustomerTradeRelationshipDetails" class="trade-counterparty">
                       <span class="label">رابطه:</span>
                       <span class="value trade-customer-context-value">
                         <span class="customer-context-badge">مشتری</span>
                         <span v-if="getTradeCustomerContextManagementName(trade)">{{ getTradeCustomerContextManagementName(trade) }}</span>
-                        <span v-else-if="getTradeCustomerContextOwnerAccountName(trade)">مالک {{ getTradeCustomerContextOwnerAccountName(trade) }}</span>
+                        <span v-else-if="getTradeCustomerContextOwnerAccountName(trade)">سرگروه {{ getTradeCustomerContextOwnerAccountName(trade) }}</span>
                         <span v-if="getTradeCustomerContextTier(trade)">{{ getCustomerTierLabel(getTradeCustomerContextTier(trade)) }}</span>
                       </span>
                     </div>
@@ -1982,6 +1994,37 @@ function handleHistoryPresetChipChange(value: string) {
   grid-template-columns: 88px 1fr 88px;
   align-items: center;
   padding-bottom: 24px;
+}
+
+.profile-nav-back {
+  justify-self: end;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid var(--ds-border-medium);
+  border-radius: var(--ds-radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ds-bg-card);
+  color: var(--ds-text-primary);
+  box-shadow: var(--ds-shadow-sm);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.profile-nav-back:hover {
+  background: var(--ds-bg-hover);
+  border-color: var(--ds-primary-200);
+  box-shadow: var(--ds-shadow-md);
+}
+
+.profile-nav-back:active {
+  transform: translateY(1px);
+}
+
+.profile-nav-back:focus-visible {
+  outline: 3px solid rgba(51, 144, 236, 0.22);
+  outline-offset: 2px;
 }
 
 .profile-avatar-stack {

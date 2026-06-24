@@ -281,6 +281,23 @@ describe('TradingView.vue', () => {
     wrapper.unmount()
   })
 
+  it('hides my-trades counterparty and customer relationship details for customer viewers', async () => {
+    const wrapper = await mountTradingView({
+      initialTab: 'my_trades',
+      user: { id: 7, account_name: 'my-user', is_customer: true, customer_tier: 'tier2' },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('10001')
+    expect(wrapper.text()).toContain('120,000')
+    expect(wrapper.text()).not.toContain('طرف معامله')
+    expect(wrapper.text()).not.toContain('مالک ↔ مشتری سطح ۲')
+    expect(wrapper.text()).not.toContain('مشتری واسط')
+    expect(wrapper.find('.trade-card .profile-link').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
   it('upserts rich trade:created payloads without reloading and preserves relation-aware profile targets', async () => {
     const wrapper = await mountTradingView({ initialTab: 'my_trades' })
     await flushPromises()

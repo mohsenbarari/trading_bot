@@ -122,7 +122,7 @@ describe('ProfileView.vue', () => {
       params: { id: '99' },
       query: { account_name: 'project-user' },
     })
-    expect(routerPushMock).toHaveBeenNthCalledWith(6, '/')
+    expect(routerPushMock).toHaveBeenNthCalledWith(6, { name: 'account' })
   })
 
   it('keeps the loading fallback and logs when loading the current profile fails', async () => {

@@ -1448,7 +1448,8 @@ describe('PublicProfile.vue', () => {
 
     expect(wrapper.find('.customer-context-banner').exists()).toBe(true)
     expect(wrapper.text()).toContain('پروفایل مشتری')
-    expect(wrapper.text()).toContain('مالک: owner20')
+    expect(wrapper.text()).toContain('سرگروه: owner20')
+    expect(wrapper.text()).not.toContain('مالک: owner20')
     expect(wrapper.find('.profile-menu-card').exists()).toBe(true)
     expect(wrapper.text()).toContain('ارسال پیام')
   })
@@ -1913,7 +1914,7 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/with/60')).toHaveLength(1)
     expect(wrapper.text()).toContain('خرید')
-    expect(wrapper.text()).toContain('مالک owner15')
+    expect(wrapper.text()).toContain('سرگروه owner15')
     expect(wrapper.text()).toContain('سطح 2')
     expect(wrapper.text()).not.toContain('هیچ معامله مشترکی یافت نشد.')
   })
@@ -1961,6 +1962,109 @@ describe('PublicProfile.vue', () => {
 
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/trades/my')).toHaveLength(1)
     expect(wrapper.text()).toContain('هنوز هیچ معامله‌ای انجام نداده‌اید.')
+  })
+
+  it('hides customer tier and trade relationship details on customer own profiles', async () => {
+    currentUserSummary.value = {
+      id: 61,
+      role: 'عادی',
+      account_name: 'customer61',
+      is_customer: true,
+      customer_tier: 'tier2',
+      customer_owner_user_id: 15,
+      customer_owner_account_name: 'owner15',
+    }
+
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url
+
+      if (url === '/api/users-public/61') {
+        return Promise.resolve(makeResponse({
+          id: 61,
+          account_name: 'customer61',
+          avatar_file_id: null,
+          mobile_number: '09123330061',
+          address: 'تهران',
+          created_at_jalali: '۱۴۰۵/۰۱/۱۱',
+          trades_count: 1,
+          resolved_from_accountant_id: null,
+          highlight_accountant_user_id: null,
+          highlight_accountant_relation_display_name: null,
+          accountant_relations: [],
+          customer_owner_user_id: 15,
+          customer_owner_account_name: 'owner15',
+          customer_management_name: 'مشتری سطح دو',
+          customer_tier: 'tier2',
+          customer_relations: [],
+        }))
+      }
+      if (url === '/api/trades/my') {
+        return Promise.resolve(makeResponse([
+          {
+            id: 10,
+            trade_number: 10010,
+            created_at: 'امروز',
+            quantity: 3,
+            commodity_name: 'سکه',
+            price: 150000,
+            trade_type: 'BUY',
+            offer_user_id: 15,
+            offer_user_name: 'owner15',
+            responder_user_id: 61,
+            responder_user_name: 'customer61',
+            counterparty_name: 'owner15',
+            trade_path_summary: 'مالک ↔ مشتری سطح ۲',
+            customer_context_visible: true,
+            customer_context_management_name: 'مشتری سطح دو',
+            customer_context_tier: 'tier2',
+          },
+        ]))
+      }
+      return defaultFetchResponse(url)
+    })
+
+    const PublicProfile = (await import('./PublicProfile.vue')).default
+    const wrapper = mount(PublicProfile, {
+      props: {
+        user: { id: 61, account_name: 'customer61' },
+        viewerUserId: 61,
+        apiBaseUrl: '',
+        jwtToken: 'token',
+      },
+      global: {
+        stubs: {
+          LoadingSkeleton: true,
+          OwnerAccountantManagerModal: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('.customer-context-banner').text()).toContain('سرگروه: owner15')
+    expect(wrapper.find('.customer-context-banner').text()).not.toContain('سطح 2')
+    expect(wrapper.text()).not.toContain('طرف دیگر معامله')
+    await wrapper.get('[data-test="public-profile-history-help"]').trigger('click')
+    expect(wrapper.text()).toContain('بازه زمانی و کالا را از فهرست کالاهای ثبت‌شده محدود کنید')
+    expect(wrapper.text()).not.toContain('طرف دیگر معامله را از میان همکاران پروژه انتخاب کنید')
+
+    const applyButton = wrapper.findAll('button').find((node) => node.text().includes('اعمال فیلتر'))
+    expect(applyButton).toBeTruthy()
+    await applyButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('10010')
+    expect(wrapper.text()).toContain('سکه')
+    expect(wrapper.text()).not.toContain('طرف معامله:')
+    expect(wrapper.text()).not.toContain('مسیر:')
+    expect(wrapper.text()).not.toContain('رابطه:')
+    expect(wrapper.text()).not.toContain('مالک ↔ مشتری سطح ۲')
+    expect(wrapper.text()).not.toContain('سطح 2')
   })
 
   it('filters own trade history by a selected project coworker', async () => {
@@ -2354,6 +2458,9 @@ describe('PublicProfile.vue', () => {
     expect(wrapper.find('.customer-context-banner').exists()).toBe(true)
     expect(wrapper.text()).toContain('پروفایل مشتری')
     expect(wrapper.text()).toContain('مشتری ویژه')
+    expect(wrapper.text()).toContain('سرگروه: owner20')
+    expect(wrapper.text()).toContain('سطح 2')
+    expect(wrapper.text()).not.toContain('مالک: owner20')
     expect(wrapper.text()).not.toContain('نمای مشتری')
     expect(wrapper.text()).not.toContain('زیرمجموعه مالک')
   })
