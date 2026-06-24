@@ -144,6 +144,37 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "خطا در ارسال پیامک")
         self.assertEqual(redis.delete_calls, ["reg_otp:abc", "otp_limit:09120000000"])
 
+    async def test_register_otp_request_can_deliver_via_staging_log_without_sms(self):
+        req = RegisterOTPRequest(token="abc")
+        invitation = SimpleNamespace(
+            is_used=False,
+            expires_at=datetime.utcnow() + timedelta(minutes=5),
+            mobile_number="09120000000",
+        )
+        redis = FakeRedis()
+
+        with patch.object(register_otp_request.__globals__["settings"], "environment", "staging"), patch.object(
+            register_otp_request.__globals__["settings"], "staging_log_otp_codes", True
+        ), patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._load_valid_invitation_by_token",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
+            "api.routers.auth.random.randint",
+            return_value=54321,
+        ), patch("api.routers.auth.send_otp_sms") as send_sms_mock, self.assertLogs(
+            "api.routers.auth", level="WARNING"
+        ) as captured:
+            result = await register_otp_request(req, db=FakeDB())
+
+        self.assertEqual(
+            redis.setex_calls,
+            [("reg_otp:abc", 120, "54321"), ("otp_limit:09120000000", 120, "1")],
+        )
+        send_sms_mock.assert_not_called()
+        self.assertEqual(result, {"detail": "کد تایید در لاگ staging ثبت شد", "expires_in": 120})
+        self.assertIn("STAGING_AUTH_VALUE_FOR_TEST_ONLY", "\n".join(captured.output))
+        self.assertIn("value=54321", "\n".join(captured.output))
+
     async def test_register_otp_verify_rejects_invalid_code_and_persists_verified_flag(self):
         req = RegisterOTPVerify(token="abc", code="12345")
         redis = FakeRedis()

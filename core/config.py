@@ -119,6 +119,7 @@ class Settings(BaseSettings):
     smsir_accountant_invitation_template_id: str | None = "162103"
     smsir_customer_invitation_template_id: str | None = "903643"
     invitation_registration_session_ttl_seconds: int = 600
+    staging_log_otp_codes: bool = False
     
     class Config:
         env_file = ".env"

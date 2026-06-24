@@ -164,6 +164,7 @@ OBSERVABILITY_TELEGRAM_USER_HASH_SALT=$hash_salt
 STAGING_BASIC_AUTH_USER=staging
 STAGING_BASIC_AUTH_PASSWORD=$(secret_hex 8)
 STAGING_ENABLE_DEV_LOGIN=true
+STAGING_LOG_OTP_CODES=true
 
 PEER_SERVER_URL=
 FOREIGN_SERVER_URL=
@@ -182,6 +183,7 @@ ensure_runtime_env_values() {
     ensure_env
     set_env_value FRONTEND_URL "$STAGING_FRONTEND_URL"
     set_env_value EXTRA_CORS_ORIGINS "$STAGING_FRONTEND_URL"
+    set_env_value STAGING_LOG_OTP_CODES true
     ensure_web_push_env
 }
 

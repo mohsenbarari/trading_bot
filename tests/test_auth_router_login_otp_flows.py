@@ -196,6 +196,40 @@ class AuthRouterLoginOtpFlowTests(unittest.IsolatedAsyncioTestCase):
         send_sms_mock.assert_called_once_with("09120000000", "22222")
         self.assertEqual(result["method"], "sms")
 
+    async def test_request_otp_can_deliver_via_staging_log_without_sms_or_telegram(self):
+        invitation = SimpleNamespace(token="INV-1")
+        redis = FakeRedis()
+
+        with patch.object(request_otp.__globals__["settings"], "environment", "staging"), patch.object(
+            request_otp.__globals__["settings"], "staging_log_otp_codes", True
+        ), patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)), patch(
+            "api.routers.auth._find_pending_invitation_for_mobile",
+            new=AsyncMock(return_value=(invitation, None, None)),
+        ), patch(
+            "api.routers.auth.random.randint",
+            return_value=67890,
+        ), patch(
+            "api.routers.auth.is_internet_connected",
+            new=AsyncMock(side_effect=AssertionError("staging log delivery must not check connectivity")),
+        ), patch("api.routers.auth.send_otp_sms") as send_sms_mock, patch(
+            "api.routers.auth.send_telegram_message",
+            new=AsyncMock(side_effect=AssertionError("staging log delivery must not use telegram")),
+        ), self.assertLogs("api.routers.auth", level="WARNING") as captured:
+            result = await request_otp(
+                OTPRequest(mobile_number="09120000000"),
+                raw_request=make_request(),
+                db=FakeDB([FakeExecuteResult(None)]),
+            )
+
+        self.assertEqual(
+            redis.setex_calls,
+            [("otp:09120000000", 120, "67890"), ("otp_limit:09120000000", 120, "1")],
+        )
+        send_sms_mock.assert_not_called()
+        self.assertEqual(result, {"detail": "کد تایید در لاگ staging ثبت شد", "method": "log", "expires_in": 120})
+        self.assertIn("STAGING_AUTH_VALUE_FOR_TEST_ONLY", "\n".join(captured.output))
+        self.assertIn("value=67890", "\n".join(captured.output))
+
     async def test_request_otp_falls_back_to_sms_when_telegram_unavailable(self):
         user = SimpleNamespace(is_deleted=False, telegram_id=456)
         redis = FakeRedis()

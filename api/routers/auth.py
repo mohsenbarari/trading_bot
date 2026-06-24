@@ -77,6 +77,23 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _deliver_otp_via_staging_log(*, mobile: str, otp_code: str, purpose: str) -> bool:
+    if settings.environment != "staging" or not settings.staging_log_otp_codes:
+        return False
+
+    logger.warning(
+        "STAGING_AUTH_VALUE_FOR_TEST_ONLY purpose=%s mobile=%s value=%s",
+        purpose,
+        mobile,
+        otp_code,
+        extra={
+            "staging_auth_purpose": purpose,
+            "staging_auth_value": otp_code,
+        },
+    )
+    return True
+
+
 def _should_announce_project_user_registration(accountant_relation, customer_relation) -> bool:
     return accountant_relation is None and customer_relation is None
 
@@ -531,6 +548,9 @@ async def register_otp_request(
     
     await redis.setex(otp_key, 120, otp_code)
     await redis.setex(rate_limit_key, 120, "1")
+
+    if _deliver_otp_via_staging_log(mobile=mobile, otp_code=otp_code, purpose="registration"):
+        return {"detail": "کد تایید در لاگ staging ثبت شد", "expires_in": 120}
     
     # Send SMS (Always SMS because user is not registered on Telegram yet)
     if send_otp_sms(mobile, otp_code):
@@ -892,6 +912,13 @@ async def request_otp(
     # ذخیره در Redis (۲ دقیقه اعتبار)
     await redis.setex(otp_key, 120, otp_code)
     await redis.setex(rate_limit_key, 120, "1")
+
+    if _deliver_otp_via_staging_log(mobile=mobile, otp_code=otp_code, purpose="login"):
+        return {
+            "detail": "کد تایید در لاگ staging ثبت شد",
+            "method": "log",
+            "expires_in": 120,
+        }
 
     # تصمیم‌گیری برای روش ارسال
     is_connected = await is_internet_connected()
