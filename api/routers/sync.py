@@ -555,9 +555,14 @@ def get_model_class(table_name: str):
     return mapping.get(table_name)
 
 
+def _normalized_sync_text(value: object) -> str:
+    raw_value = getattr(value, "value", value)
+    return str(raw_value or "").strip().lower()
+
+
 def _is_mandatory_channel_record(data: dict) -> bool:
     return (
-        data.get("type") == "channel"
+        _normalized_sync_text(data.get("type")) == "channel"
         and bool(data.get("is_system"))
         and bool(data.get("is_mandatory"))
     )
@@ -565,7 +570,7 @@ def _is_mandatory_channel_record(data: dict) -> bool:
 
 def _is_mandatory_chat_member_record(data: dict) -> bool:
     return (
-        data.get("chat_type") == "channel"
+        _normalized_sync_text(data.get("chat_type")) == "channel"
         and bool(data.get("chat_is_system"))
         and bool(data.get("chat_is_mandatory"))
     )

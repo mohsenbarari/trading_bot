@@ -127,6 +127,46 @@ class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class PeerResponsePolicyTests(unittest.TestCase):
+    def test_policy_forbidden_no_sync_response_is_detected(self):
+        response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {"table": "chat_members", "record_id": 12, "reason": "policy_forbidden:no-sync"}
+                ],
+            },
+        )
+
+        self.assertTrue(sync_worker.peer_response_is_policy_forbidden_no_sync(response))
+
+    def test_policy_forbidden_no_sync_response_requires_exact_single_rejection(self):
+        success_response = FakeResponse(
+            200,
+            '{"status":"success","processed":1,"errors":0}',
+            {"status": "success", "processed": 1, "errors": 0},
+        )
+        mixed_response = FakeResponse(
+            200,
+            '{"status":"partial","processed":1,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 1,
+                "errors": 1,
+                "error_items": [
+                    {"table": "chat_members", "record_id": 12, "reason": "policy_forbidden:no-sync"}
+                ],
+            },
+        )
+
+        self.assertFalse(sync_worker.peer_response_is_policy_forbidden_no_sync(success_response))
+        self.assertFalse(sync_worker.peer_response_is_policy_forbidden_no_sync(mixed_response))
+
+
 class ChangeLogPayloadTests(unittest.TestCase):
     def test_change_log_entry_to_sync_item_includes_change_log_id_and_decoded_data(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)
@@ -461,6 +501,30 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("unsafe", rendered_log_call)
         self.assertNotIn("09123456789", rendered_log_call)
         self.assertIn("peer_response_sha256", rendered_log_call)
+
+    async def test_main_drops_policy_forbidden_no_sync_without_requeue(self):
+        payload = json.dumps({"hash": "abc", "table": "chat_members", "id": 12, "change_log_id": 99})
+        response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {"table": "chat_members", "record_id": 12, "reason": "policy_forbidden:no-sync"}
+                ],
+            },
+        )
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
+            send_return_value=response,
+        )
+
+        send_mock.assert_awaited_once()
+        marker_mock.assert_awaited_once_with(json.loads(payload))
+        self.assertEqual(fake_redis.rpush_calls, [])
+        sleep_mock.assert_not_awaited()
 
     async def test_main_requeues_request_errors(self):
         payload = json.dumps({"hash": "abc"})

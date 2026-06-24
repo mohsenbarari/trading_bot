@@ -192,7 +192,7 @@ class SyncRouterFailClosedPolicyTests(unittest.IsolatedAsyncioTestCase):
                 "table": "chats",
                 "operation": "INSERT",
                 "id": 12,
-                "data": {"type": "channel", "is_system": True, "is_mandatory": True},
+                "data": {"type": "CHANNEL", "is_system": True, "is_mandatory": True},
             },
             {
                 "table": "chat_members",
@@ -201,7 +201,7 @@ class SyncRouterFailClosedPolicyTests(unittest.IsolatedAsyncioTestCase):
                 "data": {
                     "chat_id": 12,
                     "user_id": 9,
-                    "chat_type": "channel",
+                    "chat_type": "CHANNEL",
                     "chat_is_system": True,
                     "chat_is_mandatory": True,
                 },
