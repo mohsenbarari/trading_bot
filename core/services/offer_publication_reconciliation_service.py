@@ -173,7 +173,8 @@ async def publication_observability_summary(
             LEFT JOIN offer_publication_states ps
               ON ps.offer_public_id = o.offer_public_id
              AND ps.surface = 'telegram_channel'
-            WHERE o.channel_message_id IS NOT NULL
+            WHERE o.status = 'ACTIVE'
+              AND o.channel_message_id IS NOT NULL
               AND (ps.id IS NULL OR ps.telegram_message_id IS NULL)
             """,
         ),
@@ -185,7 +186,8 @@ async def publication_observability_summary(
             JOIN offer_publication_states ps
               ON ps.offer_public_id = o.offer_public_id
              AND ps.surface = 'telegram_channel'
-            WHERE ps.telegram_message_id IS NOT NULL
+            WHERE o.status = 'ACTIVE'
+              AND ps.telegram_message_id IS NOT NULL
               AND o.channel_message_id IS NULL
             """,
         ),

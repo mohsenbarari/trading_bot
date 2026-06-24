@@ -231,6 +231,7 @@ class OfferPublicationReconciliationServiceTests(unittest.IsolatedAsyncioTestCas
         self.assertEqual(summary["finding_counts"]["unsynced_offer_backlog"], 6)
         observed_sql = "\n".join(db.statements)
         self.assertIn("o.status = 'ACTIVE'", observed_sql)
+        self.assertGreaterEqual(observed_sql.count("o.status = 'ACTIVE'"), 3)
         self.assertIn("o.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED')", observed_sql)
         self.assertNotIn("o.status = 'active'", observed_sql)
 
