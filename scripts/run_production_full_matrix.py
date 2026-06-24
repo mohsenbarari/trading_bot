@@ -69,6 +69,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "trading_restricted_user",
     "watch_role_market_action",
     "accountant_market_action",
+    "tier2_offer_creation",
 }
 
 DUAL_ROLE_ROLE_BY_SERVER = {

@@ -77,15 +77,15 @@ implemented production driver. The current implemented command plan covers:
   current offer shapes;
 - `24` read-during-write scenarios that run concurrent trade writes while
   WebApp/Iran and Telegram/foreign read probes hit the same offer;
-- twelve production negative-guard probes on Iran/WebApp:
+- thirteen production negative-guard probes on Iran/WebApp:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
   `market_closed`, `inactive_offer_owner`, `inactive_requester`,
-  `trading_restricted_user`, `watch_role_market_action`, and
-  `accountant_market_action`.
+  `trading_restricted_user`, `watch_role_market_action`,
+  `accountant_market_action`, and `tier2_offer_creation`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`172` command-plannable scenarios with these drivers:
+`173` command-plannable scenarios with these drivers:
 
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios;
@@ -93,7 +93,7 @@ With the current manifest count of `5555`, selecting the whole manifest yields
 - `24` user-to-user stable manual-expiry/trade-race stress overlay scenarios;
 - `24` user-to-user stable time-expiry/trade-race stress overlay scenarios;
 - `24` user-to-user stable read-during-write stress overlay scenarios;
-- `12` negative business-guard scenarios with explicit no-partial-mutation
+- `13` negative business-guard scenarios with explicit no-partial-mutation
   assertions.
 
 It intentionally does not yet implement production execution drivers for
@@ -121,7 +121,7 @@ selected scenario is command-plannable.
 
 Current full-manifest gap buckets are expected to be:
 
-- `negative_guard_driver`: `587`
+- `negative_guard_driver`: `586`
 - `market_behavior_driver`: `228`
 - `delivery_contract_driver`: `204`
 - `targeted_join_driver`: `204`

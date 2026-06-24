@@ -1423,6 +1423,50 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
+    def test_negative_guard_evidence_acceptance_for_tier2_offer_creation_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+            "offer_creation": {
+                "before_offer_count": 0,
+                "after_offer_count": 0,
+                "created_offer_delta": 0,
+            },
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="tier2_offer_creation",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_detects_tier2_offer_creation_mutation(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+            "offer_creation": {
+                "before_offer_count": 0,
+                "after_offer_count": 1,
+                "created_offer_delta": 1,
+            },
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="tier2_offer_creation",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertTrue(any("expected created_offer_delta=0" in failure for failure in failures))
+
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {
             "offer": {"remaining_quantity": 5},

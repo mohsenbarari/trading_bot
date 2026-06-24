@@ -70,7 +70,7 @@ from models.accountant_relation import AccountantRelation
 from models.change_log import ChangeLog
 from models.chat_member import ChatMember
 from models.commodity import Commodity
-from models.customer_relation import CustomerRelation
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
 from models.notification import Notification
 from models.offer_publication_state import OfferPublicationState, OfferPublicationStatus
@@ -125,6 +125,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "trading_restricted_user",
     "watch_role_market_action",
     "accountant_market_action",
+    "tier2_offer_creation",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -2411,6 +2412,82 @@ async def update_synthetic_user_for_negative_guard(user_id: int, **values: Any) 
         await db.commit()
 
 
+async def create_active_customer_relation_for_negative_guard(
+    *,
+    owner_user_id: int,
+    customer_user_id: int,
+    prefix: str,
+    tier: CustomerTier,
+) -> int:
+    now = datetime.utcnow()
+    relation = CustomerRelation(
+        owner_user_id=int(owner_user_id),
+        customer_user_id=int(customer_user_id),
+        created_by_user_id=int(owner_user_id),
+        invitation_token=f"{prefix}negative-guard-customer-{customer_user_id}"[:128],
+        management_name=f"{prefix}customer_{customer_user_id}"[:120],
+        customer_tier=tier,
+        commission_rate=None,
+        min_trade_quantity=None,
+        max_trade_quantity=None,
+        max_daily_trades=None,
+        max_daily_commodity_volume=None,
+        status=CustomerRelationStatus.ACTIVE,
+        expires_at=now + timedelta(days=365),
+        activated_at=now,
+    )
+    async with AsyncSessionLocal() as db:
+        db.add(relation)
+        await db.commit()
+        await db.refresh(relation)
+        return int(relation.id)
+
+
+async def count_offers_for_user(user_id: int) -> int:
+    async with AsyncSessionLocal() as db:
+        return int(await db.scalar(select(func.count(Offer.id)).where(Offer.user_id == int(user_id))) or 0)
+
+
+async def execute_offer_creation_for_user(
+    *,
+    user_id: int,
+    commodity_id: int,
+    prefix: str,
+    index: int,
+    phase_details: dict[str, Any] | None = None,
+) -> str:
+    create_started = time.perf_counter()
+    try:
+        await create_offer_for_user(
+            user_id=user_id,
+            commodity_id=commodity_id,
+            prefix=prefix,
+            index=index,
+            offer_type="sell",
+            quantity=5,
+            price=100000,
+        )
+    except HTTPException as exc:
+        status_code = int(exc.status_code or 500)
+        if phase_details is not None:
+            phase_details["business_latency_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["create_offer_ms"] = phase_details["business_latency_ms"]
+            phase_details["exception"] = f"HTTPException {status_code}"
+            phase_details["http_status_code"] = status_code
+            phase_details["http_detail"] = str(exc.detail)
+        return "rejected" if status_code < 500 else "error"
+    except Exception as exc:
+        if phase_details is not None:
+            phase_details["business_latency_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["create_offer_ms"] = phase_details["business_latency_ms"]
+            phase_details["exception"] = type(exc).__name__
+        return "error"
+    if phase_details is not None:
+        phase_details["business_latency_ms"] = round((time.perf_counter() - create_started) * 1000.0, 3)
+        phase_details["create_offer_ms"] = phase_details["business_latency_ms"]
+    return "success"
+
+
 async def run_offer_expiry_cycle_for_server(server: str) -> int:
     with override_current_server(server):
         return int(await offer_expiry_worker.expire_stale_offers())
@@ -3013,6 +3090,7 @@ def assert_negative_guard_evidence(
         "trading_restricted_user",
         "watch_role_market_action",
         "accountant_market_action",
+        "tier2_offer_creation",
     }
     expired_offer_cases = {
         "already_completed_offer",
@@ -3077,6 +3155,11 @@ def assert_negative_guard_evidence(
     completed_requests = int(status_counts.get(OfferRequestStatus.COMPLETED_TRADE.value, 0) or 0)
     if case_id != "already_completed_offer" and completed_requests:
         failures.append(f"{case_id} unexpectedly has completed offer_request rows: {status_counts}")
+    if case_id == "tier2_offer_creation":
+        creation = dict(evidence.get("offer_creation") or {})
+        created_offer_delta = int(creation.get("created_offer_delta") or 0)
+        if created_offer_delta != 0:
+            failures.append(f"{case_id} expected created_offer_delta=0, got {created_offer_delta}")
     return failures
 
 
@@ -3101,6 +3184,7 @@ async def run_negative_guard_case(
     commodity_id, _commodity_name = await resolve_commodity()
     statuses: list[str] = []
     phase_details: list[dict[str, Any]] = []
+    extra_evidence: dict[str, Any] = {}
 
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=4)
@@ -3307,10 +3391,42 @@ async def run_negative_guard_case(
                     )
                 )
                 phase_details.append(details)
+            elif normalized_case_id == "tier2_offer_creation":
+                relation_id = await create_active_customer_relation_for_negative_guard(
+                    owner_user_id=owner.user_id,
+                    customer_user_id=responder_a.user_id,
+                    prefix=prefix,
+                    tier=CustomerTier.TIER_2,
+                )
+                before_offer_count = await count_offers_for_user(responder_a.user_id)
+                details = {
+                    "customer_relation_id": relation_id,
+                    "before_offer_count": before_offer_count,
+                }
+                statuses.append(
+                    await execute_offer_creation_for_user(
+                        user_id=responder_a.user_id,
+                        commodity_id=commodity_id,
+                        prefix=prefix,
+                        index=2,
+                        phase_details=details,
+                    )
+                )
+                after_offer_count = await count_offers_for_user(responder_a.user_id)
+                details["after_offer_count"] = after_offer_count
+                details["created_offer_delta"] = after_offer_count - before_offer_count
+                extra_evidence["offer_creation"] = {
+                    "customer_relation_id": relation_id,
+                    "before_offer_count": before_offer_count,
+                    "after_offer_count": after_offer_count,
+                    "created_offer_delta": after_offer_count - before_offer_count,
+                }
+                phase_details.append(details)
             else:
                 raise TradingProbeError(f"negative guard case branch is missing: {normalized_case_id}")
 
     evidence = await negative_guard_offer_evidence(offer_id)
+    evidence.update(extra_evidence)
     failures = assert_negative_guard_evidence(
         case_id=normalized_case_id,
         status_sequence=statuses,
