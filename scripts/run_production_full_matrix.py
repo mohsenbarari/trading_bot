@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Consume the production full-matrix manifest and build an execution plan.
 
-This runner is fail-closed: the current implementation is a manifest-driven
-dry-run/planning runner only. It does not create production users, offers,
-trades, notifications, or Telegram messages. Real production execution must be
-added as explicit per-section drivers after the owner approves the execution
-contract.
+This runner is fail-closed by default. It can build a manifest-driven command
+plan without production writes, execute live non-mutating preflight checks, and
+execute the guarded command plan only when the explicit production confirmation
+environment variable is present.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1681,6 +1681,245 @@ def run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[di
     return results
 
 
+def command_spec_from_payload(payload: dict[str, Any]) -> CommandSpec:
+    return CommandSpec(
+        name=str(payload.get("name") or "command"),
+        args=[str(item) for item in (payload.get("args") or [])],
+        timeout_seconds=int(payload.get("timeout_seconds") or 30),
+        mutates_production=bool(payload.get("mutates_production")),
+    )
+
+
+def command_result(command: CommandSpec, *, cwd: Path) -> dict[str, Any]:
+    started = time.perf_counter()
+    try:
+        completed = subprocess.run(
+            command.args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=command.timeout_seconds,
+        )
+        status = "passed" if completed.returncode == 0 else "failed"
+        return {
+            **command_payload(command),
+            "status": status,
+            "returncode": completed.returncode,
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+            "stdout": truncate_text(completed.stdout),
+            "stderr": truncate_text(completed.stderr),
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            **command_payload(command),
+            "status": "timeout",
+            "returncode": None,
+            "elapsed_seconds": round(time.perf_counter() - started, 3),
+            "stdout": truncate_text(exc.stdout or ""),
+            "stderr": truncate_text(exc.stderr or ""),
+        }
+
+
+def concurrent_command_results(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
+    started_by_name: dict[str, float] = {}
+    processes: list[tuple[CommandSpec, subprocess.Popen[str]]] = []
+    for command in commands:
+        started_by_name[command.name] = time.perf_counter()
+        processes.append(
+            (
+                command,
+                subprocess.Popen(
+                    command.args,
+                    cwd=cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                ),
+            )
+        )
+
+    results: list[dict[str, Any]] = []
+    for command, process in processes:
+        try:
+            stdout, stderr = process.communicate(timeout=command.timeout_seconds)
+            status = "passed" if process.returncode == 0 else "failed"
+            results.append(
+                {
+                    **command_payload(command),
+                    "status": status,
+                    "returncode": process.returncode,
+                    "elapsed_seconds": round(time.perf_counter() - started_by_name[command.name], 3),
+                    "stdout": truncate_text(stdout or ""),
+                    "stderr": truncate_text(stderr or ""),
+                }
+            )
+        except subprocess.TimeoutExpired as exc:
+            process.kill()
+            stdout, stderr = process.communicate()
+            results.append(
+                {
+                    **command_payload(command),
+                    "status": "timeout",
+                    "returncode": None,
+                    "elapsed_seconds": round(time.perf_counter() - started_by_name[command.name], 3),
+                    "stdout": truncate_text((exc.stdout or "") + (stdout or "")),
+                    "stderr": truncate_text((exc.stderr or "") + (stderr or "")),
+                }
+            )
+    return results
+
+
+def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def execute_scenario_plan(
+    scenario_plan: dict[str, Any],
+    *,
+    index: int,
+    total: int,
+    cwd: Path,
+) -> dict[str, Any]:
+    manifest_id = str(scenario_plan.get("manifest_id") or f"scenario_{index}")
+    started = time.perf_counter()
+    group_results: list[dict[str, Any]] = []
+    failed = False
+    for group in scenario_plan.get("execution_groups") or []:
+        commands = [command_spec_from_payload(item) for item in (group.get("commands") or [])]
+        mode = str(group.get("mode") or "sequential")
+        if mode == "concurrent":
+            command_results = concurrent_command_results(commands, cwd=cwd)
+        else:
+            command_results = []
+            for command in commands:
+                result = command_result(command, cwd=cwd)
+                command_results.append(result)
+                if result.get("status") != "passed":
+                    break
+        group_failed = any(item.get("status") != "passed" for item in command_results)
+        group_results.append(
+            {
+                "name": group.get("name"),
+                "mode": mode,
+                "status": "failed" if group_failed else "passed",
+                "commands": command_results,
+            }
+        )
+        if group_failed:
+            failed = True
+            break
+    status = "failed" if failed else "passed"
+    return {
+        "manifest_id": manifest_id,
+        "driver": scenario_plan.get("driver"),
+        "index": index,
+        "total": total,
+        "status": status,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "groups": group_results,
+    }
+
+
+def execute_command_plan(plan: dict[str, Any], *, cwd: Path) -> tuple[dict[str, Any], int]:
+    execution_plan = plan.get("execution_plan") or {}
+    artifact_dir = Path((plan.get("preflight") or {}).get("artifact_dir") or "/tmp/trading-bot-production-full-matrix")
+    results_path = artifact_dir / "execution-results.jsonl"
+    scenario_plans = list(execution_plan.get("scenario_plans") or [])
+    if os.environ.get(EXECUTION_CONFIRM_ENV) != EXECUTION_CONFIRM_VALUE:
+        execution_plan["execution"] = {
+            "status": "blocked",
+            "reason": "confirmation_missing",
+            "required_env": EXECUTION_CONFIRM_ENV,
+            "required_value": EXECUTION_CONFIRM_VALUE,
+        }
+        plan["status"] = "blocked_execution_confirmation_missing"
+        return plan, 2
+    if (execution_plan.get("coverage_gate") or {}).get("passed") is False:
+        execution_plan["execution"] = {
+            "status": "blocked",
+            "reason": "driver_gaps_remaining",
+            "driver_gap_count": execution_plan.get("driver_gap_count"),
+        }
+        plan["status"] = "blocked_driver_gaps"
+        return plan, 2
+
+    preflight_commands = [
+        command_spec_from_payload(item)
+        for item in (plan.get("preflight") or {}).get("commands") or []
+    ]
+    preflight_results = run_preflight_commands(preflight_commands, cwd=cwd)
+    preflight_failed = [item for item in preflight_results if item.get("status") != "passed"]
+    plan["preflight"]["status"] = "preflight_failed" if preflight_failed else "preflight_passed"
+    plan["preflight"]["results"] = preflight_results
+    if preflight_failed:
+        execution_plan["execution"] = {
+            "status": "blocked",
+            "reason": "preflight_failed",
+            "results_path": str(results_path),
+        }
+        plan["status"] = "preflight_failed"
+        return plan, 1
+
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    if results_path.exists():
+        results_path.unlink()
+    append_jsonl(
+        results_path,
+        {
+            "event": "execution_started",
+            "generated_at": utc_now_iso(),
+            "prefix": plan.get("prefix"),
+            "scenario_count": len(scenario_plans),
+        },
+    )
+
+    passed = 0
+    failed_result: dict[str, Any] | None = None
+    for index, scenario_plan in enumerate(scenario_plans, start=1):
+        print(
+            json.dumps(
+                {
+                    "event": "scenario_started",
+                    "index": index,
+                    "total": len(scenario_plans),
+                    "manifest_id": scenario_plan.get("manifest_id"),
+                    "driver": scenario_plan.get("driver"),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        result = execute_scenario_plan(
+            scenario_plan,
+            index=index,
+            total=len(scenario_plans),
+            cwd=cwd,
+        )
+        append_jsonl(results_path, {"event": "scenario_result", **result})
+        if result["status"] != "passed":
+            failed_result = result
+            break
+        passed += 1
+
+    status = "execution_passed" if failed_result is None else "execution_failed"
+    execution_plan["execution"] = {
+        "status": status,
+        "results_path": str(results_path),
+        "scenario_total": len(scenario_plans),
+        "scenario_passed": passed,
+        "scenario_failed": 0 if failed_result is None else 1,
+        "failed_manifest_id": (failed_result or {}).get("manifest_id"),
+    }
+    plan["status"] = status
+    plan["mutates_production"] = True
+    return plan, 0 if failed_result is None else 1
+
+
 def load_manifest(args: argparse.Namespace) -> dict[str, Any]:
     if args.manifest:
         manifest = read_json(args.manifest)
@@ -1895,7 +2134,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode == "preflight":
         status = "preflight_execution_requested" if args.execute else "preflight_planned"
     elif args.mode == "execution-plan":
-        status = "blocked_not_implemented" if args.execute else "execution_plan_built"
+        status = "execution_requested" if args.execute else "execution_plan_built"
     elif args.execute:
         status = "blocked_not_implemented"
     execution_plan = None
@@ -1957,14 +2196,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "confirmation_value": EXECUTION_CONFIRM_VALUE,
             "preflight_confirmation_env": PREFLIGHT_CONFIRM_ENV,
             "preflight_confirmation_value": PREFLIGHT_CONFIRM_VALUE,
-            "production_drivers_implemented": False,
+            "production_drivers_implemented": True,
             "execution_command_plan_implemented": True,
+            "execution_driver_implemented": True,
             "preflight_driver_implemented": True,
             "full_driver_coverage_gate_available": True,
             "full_driver_coverage_required": bool(args.require_full_driver_coverage),
             "reason": (
                 "This runner can execute live non-mutating preflight and can build guarded production "
-                "execution command plans; automatic production write execution is not implemented."
+                "execution command plans. In execution-plan mode, --execute runs the command plan only "
+                "when the explicit production confirmation environment variable is present."
             ),
         },
         "preflight": {
@@ -2051,7 +2292,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "implemented production command driver."
         ),
     )
-    parser.add_argument("--execute", action="store_true", help="Request production execution. Currently fail-closed.")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help=(
+            "Execute the selected mode. Preflight is non-mutating. Execution-plan mode mutates production "
+            "only with the explicit production confirmation env."
+        ),
+    )
     parser.add_argument("--print-full", action="store_true")
     return parser.parse_args(argv)
 
@@ -2086,6 +2334,8 @@ def main(argv: list[str] | None = None) -> int:
             plan["preflight"]["status"] = plan["status"]
             plan["preflight"]["results"] = results
             exit_code = 1 if failed else 0
+    elif args.execute and args.mode == "execution-plan":
+        plan, exit_code = execute_command_plan(plan, cwd=REPO_ROOT)
     elif args.execute:
         exit_code = 2
     if args.mode == "execution-plan" and args.require_full_driver_coverage and plan["status"] == "blocked_driver_gaps":

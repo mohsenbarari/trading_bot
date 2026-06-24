@@ -32,7 +32,79 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertFalse(plan["execute_requested"])
         self.assertEqual(plan["status"], "planned")
         self.assertEqual(plan["selected_summary"]["selected_count"], 5555)
-        self.assertFalse(plan["execution_contract"]["production_drivers_implemented"])
+        self.assertTrue(plan["execution_contract"]["production_drivers_implemented"])
+
+    def test_execute_scenario_plan_runs_sequential_and_concurrent_groups(self):
+        scenario_plan = {
+            "manifest_id": "LOCAL-001",
+            "driver": "local_test_driver",
+            "execution_groups": [
+                {
+                    "name": "sequential",
+                    "mode": "sequential",
+                    "commands": [
+                        runner.command_payload(
+                            runner.CommandSpec(
+                                name="seq_ok",
+                                args=[sys.executable, "-c", "print('seq-ok')"],
+                                timeout_seconds=10,
+                            )
+                        )
+                    ],
+                },
+                {
+                    "name": "concurrent",
+                    "mode": "concurrent",
+                    "commands": [
+                        runner.command_payload(
+                            runner.CommandSpec(
+                                name="concurrent_a",
+                                args=[sys.executable, "-c", "print('a')"],
+                                timeout_seconds=10,
+                            )
+                        ),
+                        runner.command_payload(
+                            runner.CommandSpec(
+                                name="concurrent_b",
+                                args=[sys.executable, "-c", "print('b')"],
+                                timeout_seconds=10,
+                            )
+                        ),
+                    ],
+                },
+            ],
+        }
+
+        result = runner.execute_scenario_plan(scenario_plan, index=1, total=1, cwd=REPO_ROOT)
+
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual([group["status"] for group in result["groups"]], ["passed", "passed"])
+
+    def test_execute_mode_requires_explicit_production_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "blocked.json"
+            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO):
+                exit_code = runner.main(
+                    [
+                        "--prefix",
+                        "PFM_20260624_180000_",
+                        "--mode",
+                        "execution-plan",
+                        "--section",
+                        "delivery_contract",
+                        "--manifest-id",
+                        "DC-TDN-001",
+                        "--require-full-driver-coverage",
+                        "--execute",
+                        "--output",
+                        str(output),
+                    ]
+                )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_execution_confirmation_missing")
+        self.assertEqual(payload["execution_plan"]["execution"]["reason"], "confirmation_missing")
 
     def test_filters_supported_base_trade_shape_scenarios(self):
         plan = runner.build_plan(
@@ -247,7 +319,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         self.assertEqual(plan["status"], "preflight_planned")
         self.assertTrue(plan["execution_contract"]["preflight_driver_implemented"])
-        self.assertFalse(plan["execution_contract"]["production_drivers_implemented"])
+        self.assertTrue(plan["execution_contract"]["production_drivers_implemented"])
         self.assertGreaterEqual(len(plan["preflight"]["commands"]), 8)
         self.assertTrue(all(not item["mutates_production"] for item in plan["preflight"]["commands"]))
 

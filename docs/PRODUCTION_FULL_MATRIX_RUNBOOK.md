@@ -181,9 +181,10 @@ by `manifest_id`; hand-built scenario lists are not enough for a production
 full matrix.
 
 Current runner status: `scripts/run_production_full_matrix.py` consumes the
-manifest, applies filters/sharding, and writes a run plan. It does not perform
-production writes yet. This fail-closed behavior is intentional until the
-two-server production drivers are implemented and separately reviewed.
+manifest, applies filters/sharding, writes a guarded command plan, and can
+execute that plan only when `PRODUCTION_FULL_MATRIX_CONFIRM` is set to the exact
+approved value. Execution writes per-scenario results to
+`<artifact-dir>/execution-results.jsonl` and stops on the first failed scenario.
 
 The same runner can execute a live non-mutating preflight with a separate
 confirmation variable:
@@ -221,6 +222,16 @@ This command is still side-effect free. It must exit with status
 `blocked_driver_gaps` and exit code `2` while any selected scenario lacks a
 production driver. A real full-matrix execution must not start unless this
 coverage gate passes for the selected scope.
+
+Execute a covered scope only with the explicit production confirmation:
+
+```bash
+PRODUCTION_FULL_MATRIX_CONFIRM=execute-production-full-matrix \
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execution-plan --require-full-driver-coverage --execute --output /tmp/production-full-matrix-execution-result.json"
+```
+
+The executor runs live preflight first. If preflight fails, no scenario commands
+are executed.
 
 The execution-plan artifact includes `driver_gap_summary` and
 `driver_gap_roadmap`. The roadmap groups missing production drivers into
