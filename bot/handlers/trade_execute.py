@@ -16,6 +16,7 @@ from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferR
 from models.trade import Trade
 from core.config import settings
 from core.db import AsyncSessionLocal
+from bot.utils.customer_display import attach_customer_management_names, user_display_name
 from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
@@ -136,7 +137,7 @@ def _remote_trade_offer_snapshot(offer: Offer | object) -> dict[str, object]:
         "price": getattr(offer, "price", None),
         "notes": getattr(offer, "notes", None),
         "commodity_name": getattr(commodity, "name", None),
-        "counterparty_name": getattr(offer_user, "account_name", None),
+        "counterparty_name": user_display_name(offer_user, "نامشخص") if offer_user else None,
     }
 
 
@@ -393,7 +394,7 @@ def _trade_model_to_remote_home_body(trade: Trade | object) -> dict[str, object 
         "quantity": getattr(trade, "quantity", None),
         "price": getattr(trade, "price", None),
         "created_at": to_jalali_str(getattr(trade, "created_at", None)) or "",
-        "counterparty_name": getattr(offer_user, "full_name", None) or getattr(offer_user, "account_name", None),
+        "counterparty_name": user_display_name(offer_user, "نامشخص") if offer_user else None,
         "offer_notes": getattr(offer, "notes", None),
     }
 
@@ -432,6 +433,7 @@ async def _wait_for_forwarded_trade_completion(
                 )
                 trade = trade_result.scalar_one_or_none()
                 if trade:
+                    await attach_customer_management_names(session, [trade.offer_user])
                     return _trade_model_to_remote_home_body(trade)
         if attempt < attempts - 1:
             await asyncio.sleep(0.25)
@@ -607,6 +609,7 @@ async def _handle_channel_trade(
             # The authoritative trade command acquires the hot-offer advisory lock
             # before the row lock. Keep callback lookup lock-free to preserve that order.
             await session.refresh(offer, ["user", "commodity"])
+            await attach_customer_management_names(session, [offer.user])
         
         if not offer:
             await callback.answer(OFFER_UNAVAILABLE_CALLBACK_MESSAGE, show_alert=True)

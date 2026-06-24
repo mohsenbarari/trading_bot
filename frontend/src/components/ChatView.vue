@@ -198,6 +198,7 @@ type MessageSeenMember = {
   account_name: string
   full_name?: string | null
   avatar_file_id?: string | null
+  customer_management_name?: string | null
   seen_at: string
 }
 
@@ -1978,6 +1979,8 @@ const startNewChatFromTarget = (target: NewDirectChatTarget) => {
       id: userId,
       other_user_id: userId,
       other_user_name: userName,
+      profile_user_id: userId,
+      profile_account_name: (target.account_name || '').trim() || null,
       avatar_file_id: target.avatar_file_id ?? null,
       chat_role_kind: target.chat_role_kind ?? null,
       chat_role_label: target.chat_role_label ?? null,
@@ -3199,6 +3202,10 @@ function formatSeenAt(value: string | null | undefined) {
   return formatIranDateTime(value, { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+function getSeenMemberDisplayName(member: MessageSeenMember) {
+  return member.customer_management_name?.trim() || member.full_name || member.account_name || 'کاربر'
+}
+
 function handleForwardSelectedAlbumMessages() {
   const orderedIds = sortMessageIdsByChatOrder(selectedMessages.value)
   if (orderedIds.length === 0) {
@@ -4204,10 +4211,10 @@ defineExpose({
         <div v-else class="seen-list-members">
           <div v-for="member in seenListModal.members" :key="member.user_id" class="seen-list-member">
             <div class="seen-list-avatar" aria-hidden="true">
-              {{ (member.full_name || member.account_name || '?').slice(0, 1) }}
+              {{ getSeenMemberDisplayName(member).slice(0, 1) }}
             </div>
             <div class="seen-list-copy">
-              <strong>{{ member.full_name || member.account_name }}</strong>
+              <strong>{{ getSeenMemberDisplayName(member) }}</strong>
               <span>{{ formatSeenAt(member.seen_at) }}</span>
             </div>
           </div>

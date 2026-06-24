@@ -698,8 +698,8 @@ onBeforeUnmount(() => {
                 <strong>{{ activeRelation.mobile_number || 'ثبت نشده' }}</strong>
               </AppCard>
               <AppCard>
-                <span class="customer-meta-label">حساب کاربری</span>
-                <strong>{{ activeRelation.customer_account_name || activeRelation.invitation_account_name || 'در انتظار ثبت‌نام' }}</strong>
+                <span class="customer-meta-label">وضعیت ثبت‌نام</span>
+                <strong>{{ activeRelation.customer_user_id ? 'تکمیل شده' : 'در انتظار ثبت‌نام' }}</strong>
               </AppCard>
               <AppCard>
                 <span class="customer-meta-label">نرخ کمیسیون</span>
@@ -1171,8 +1171,8 @@ onBeforeUnmount(() => {
         </div>
 
         <AppCard v-if="generatedCreateAccountName" class="customer-generated-account">
-          <span class="customer-meta-label">نام حساب دعوتی</span>
-          <strong>@{{ generatedCreateAccountName }}</strong>
+          <span class="customer-meta-label">دعوت مشتری</span>
+          <strong>آماده ثبت</strong>
         </AppCard>
 
         <WorkspaceNotice v-if="createError" tone="danger" title="ثبت دعوت ناموفق بود" :message="createError" />

@@ -25,6 +25,7 @@ from core.services.trade_history_export_service import (
     resolve_counterparty_account_name_for_perspective,
 )
 from core.utils import to_jalali_str
+from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
 from bot.callbacks import (
     TradeHistoryCallback, HistoryPageCallback, 
@@ -96,6 +97,17 @@ async def get_trade_history(current_user_id: int, target_user_id: int, months: i
             
         result = await session.execute(stmt)
         trades = result.scalars().all()
+        await attach_customer_management_names(
+            session,
+            [
+                target_user,
+                *[
+                    user_obj
+                    for trade in trades
+                    for user_obj in (getattr(trade, "offer_user", None), getattr(trade, "responder_user", None))
+                ],
+            ],
+        )
         
         return target_user, trades
 
@@ -104,7 +116,7 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
     """فرمت‌بندی تاریخچه معاملات"""
     is_self = target_user is None
     
-    title = "📊 تاریخچه معاملات کل شما" if is_self else f"📊 تاریخچه معاملات با {target_user.account_name}"
+    title = "📊 تاریخچه معاملات کل شما" if is_self else f"📊 تاریخچه معاملات با {user_display_name(target_user)}"
     
     if not trades:
         return f"{title}\n\n⚠️ معامله‌ای یافت نشد."
@@ -116,11 +128,11 @@ def format_trade_history(trades, target_user, current_user_id: int) -> str:
         if trade.responder_user_id == current_user_id:
             # کاربر فعلی پاسخ‌دهنده بود - trade_type همان نوع عمل اوست
             is_buy = trade.trade_type == TradeType.BUY
-            counterparty = getattr(getattr(trade, "offer_user", None), "account_name", "")
+            counterparty = resolve_counterparty_account_name_for_perspective(trade, current_user_id)
         else:
             # کاربر فعلی لفظ‌دهنده بود - عکس trade_type
             is_buy = trade.trade_type != TradeType.BUY
-            counterparty = getattr(getattr(trade, "responder_user", None), "account_name", "")
+            counterparty = resolve_counterparty_account_name_for_perspective(trade, current_user_id)
         
         trade_emoji = "🟢" if is_buy else "🔴"
         trade_label = "خرید" if is_buy else "فروش"
@@ -287,7 +299,7 @@ async def generate_excel(trades, target_user, current_user) -> str:
 async def generate_pdf(trades, target_user, current_user, months: Optional[int] = None) -> str:
     """ایجاد فایل PDF با استفاده از سرویس مشترک خروجی تاریخچه معاملات"""
     export_rows = build_trade_history_export_rows(trades, current_user.id)
-    display_name = target_user.account_name if target_user else "پروفایل من"
+    display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
 
     from_date = None
     to_date = None
@@ -325,7 +337,7 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
     try:
         filename = await generate_excel(trades, target_user, user)
         
-        display_name = target_user.account_name if target_user else "پروفایل من"
+        display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
         
         # ارسال فایل
         doc_msg = await bot.send_document(
@@ -362,7 +374,7 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
     try:
         filename = await generate_pdf(trades, target_user, user, months=months)
         
-        display_name = target_user.account_name if target_user else "پروفایل من"
+        display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
         
         # ارسال فایل
         doc_msg = await bot.send_document(
@@ -392,10 +404,12 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
         # ما یک هندلر برای مسیج داریم، اینجا باید کالبک را هندل کنیم.
         # ساده‌ترین راه این است که متن پروفایل را اینجا بازنویسی کنیم.
         from core.config import settings as core_settings
+        async with AsyncSessionLocal() as session:
+            await attach_customer_management_names(session, [user])
         profile_link = f"https://t.me/{core_settings.bot_username}?start=profile_{user.id}"
         profile_text = (
             f"👤 **پروفایل شما**\n\n"
-            f"🔸 **نام کاربری:** `{user.account_name}`\n"
+            f"🔸 **نام کاربری:** `{user_display_name(user)}`\n"
             f"🔹 **نام تلگرام:** {user.full_name}\n"
             f"🔹 **آیدی تلگرام:** `{user.telegram_id}`\n"
             f"🔹 **سطح دسترسی:** {user.role.value}\n\n"
@@ -414,11 +428,12 @@ async def back_to_profile(callback: types.CallbackQuery, callback_data: ProfileC
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
+        await attach_customer_management_names(session, [target_user])
     
     if target_user:
         profile_text = (
             f"👤 پروفایل عمومی\n\n"
-            f"🔸 نام کاربری: {target_user.account_name}\n"
+            f"🔸 نام کاربری: {user_display_name(target_user)}\n"
             f"📞 شماره تماس: {target_user.mobile_number}\n"
             f"📍 آدرس: {target_user.address or 'ثبت نشده'}"
         )

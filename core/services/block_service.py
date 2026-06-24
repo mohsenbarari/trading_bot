@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User
 from models.user_block import UserBlock
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
 
@@ -19,6 +20,24 @@ BLOCK_STATUS_REASON_LIMIT_REACHED = "limit_reached"
 BLOCK_STATUS_REASON_CUSTOMER_DELEGATED = "customer_block_delegated"
 BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED = "accountant_block_delegated"
 ACCOUNTANT_BLOCK_MANAGEMENT_MESSAGE = "قابلیت بلاک کاربران فقط در اختیار سرگروه است."
+
+
+async def _load_customer_display_name_map(db: AsyncSession, user_ids: List[int]) -> dict[int, str]:
+    normalized_ids = sorted({int(user_id) for user_id in user_ids if user_id})
+    if not normalized_ids:
+        return {}
+    result = await db.execute(
+        select(CustomerRelation.customer_user_id, CustomerRelation.management_name).where(
+            CustomerRelation.customer_user_id.in_(normalized_ids),
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+    )
+    return {
+        int(customer_user_id): str(management_name).strip()
+        for customer_user_id, management_name in result.all()
+        if customer_user_id is not None and str(management_name or "").strip()
+    }
 
 
 async def _is_user_customer_for_block(db: AsyncSession, user_id: int) -> bool:
@@ -221,12 +240,13 @@ async def get_blocked_users(db: AsyncSession, user_id: int) -> List[dict]:
     
     result = await db.execute(stmt)
     rows = result.all()
+    customer_names = await _load_customer_display_name_map(db, [user.id for _, user in rows])
     
     blocked_users = []
     for block, user in rows:
         blocked_users.append({
             "id": user.id,
-            "account_name": user.account_name,
+            "account_name": customer_names.get(user.id) or user.account_name,
             "mobile_number": user.mobile_number,
             "full_name": user.full_name,
             "blocked_at": block.created_at
@@ -294,6 +314,13 @@ async def search_users_for_block(
     
     search_pattern = f"%{query}%"
     
+    matching_customer_ids = select(CustomerRelation.customer_user_id).where(
+        CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+        CustomerRelation.deleted_at.is_(None),
+        CustomerRelation.management_name.ilike(search_pattern),
+        CustomerRelation.customer_user_id.is_not(None),
+    )
+
     stmt = (
         select(User)
         .where(
@@ -301,7 +328,8 @@ async def search_users_for_block(
             User.is_deleted == False,
             or_(
                 User.mobile_number.ilike(search_pattern),
-                User.account_name.ilike(search_pattern)
+                User.account_name.ilike(search_pattern),
+                User.id.in_(matching_customer_ids),
             )
         )
         .limit(limit)
@@ -309,6 +337,7 @@ async def search_users_for_block(
     
     result = await db.execute(stmt)
     users = result.scalars().all()
+    customer_names = await _load_customer_display_name_map(db, [user.id for user in users])
     
     user_list = []
     for user in users:
@@ -317,7 +346,7 @@ async def search_users_for_block(
         
         user_list.append({
             "id": user.id,
-            "account_name": user.account_name,
+            "account_name": customer_names.get(user.id) or user.account_name,
             "mobile_number": user.mobile_number,
             "full_name": user.full_name,
             "is_blocked": is_user_blocked

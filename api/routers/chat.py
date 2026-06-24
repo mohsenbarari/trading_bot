@@ -888,13 +888,55 @@ async def _enrich_direct_message_reads(
         for row in result.all():
             mention_details_map[row.id] = row.account_name
 
+    sender_ids = {
+        int(message.sender_id)
+        for message in messages
+        if getattr(message, "sender_id", None) is not None
+    }
+    forwarded_from_ids = {
+        int(message.forwarded_from_id)
+        for message in messages
+        if getattr(message, "forwarded_from_id", None) is not None
+    }
+    customer_sender_names: dict[int, str] = {}
+    customer_lookup_ids = sender_ids | forwarded_from_ids
+    if customer_lookup_ids:
+        from models.customer_relation import CustomerRelation, CustomerRelationStatus
+
+        customer_stmt = select(CustomerRelation.customer_user_id, CustomerRelation.management_name).where(
+            CustomerRelation.customer_user_id.in_(customer_lookup_ids),
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        customer_result = await db.execute(customer_stmt)
+        customer_sender_names = {
+            int(customer_user_id): str(management_name).strip()
+            for customer_user_id, management_name in customer_result.all()
+            if customer_user_id is not None and str(management_name or "").strip()
+        }
+
     identity_map = await load_accountant_chat_identity_map(
         db,
         collect_message_identity_user_ids(messages),
     )
     normalized_messages = []
     for message in messages:
-        payload = apply_accountant_identity_to_message_payload(message.model_dump(), identity_map)
+        payload = message.model_dump()
+        sender_id = payload.get("sender_id")
+        try:
+            normalized_sender_id = int(sender_id)
+        except (TypeError, ValueError):
+            normalized_sender_id = None
+        if normalized_sender_id in customer_sender_names:
+            payload["sender_name"] = customer_sender_names[normalized_sender_id]
+        forwarded_from_id = payload.get("forwarded_from_id")
+        try:
+            normalized_forwarded_from_id = int(forwarded_from_id)
+        except (TypeError, ValueError):
+            normalized_forwarded_from_id = None
+        if normalized_forwarded_from_id in customer_sender_names:
+            payload["forwarded_from_name"] = customer_sender_names[normalized_forwarded_from_id]
+        payload = apply_accountant_identity_to_message_payload(payload, identity_map)
         mentions = payload.get("mentions") or []
         payload["mention_details"] = [
             {"user_id": uid, "account_name": mention_details_map.get(uid, f"user_{uid}")}
@@ -958,9 +1000,15 @@ async def _serialize_direct_messages_with_accountant_contract(
     )
 
 
-def _build_direct_message_accountant_serializer(identity_map):
+def _build_direct_message_accountant_serializer(
+    identity_map,
+    serialized_messages: list[MessageRead] | None = None,
+):
+    serialized_by_id = {message.id: message for message in serialized_messages or []}
+
     def serializer(message: Message) -> MessageRead:
-        base_payload = MessageRead.from_orm_with_forwarding(message)
+        serialized = serialized_by_id.get(message.id)
+        base_payload = serialized if serialized is not None else MessageRead.from_orm_with_forwarding(message)
         return MessageRead(
             **apply_accountant_identity_to_message_payload(base_payload.model_dump(), identity_map)
         )
@@ -1035,6 +1083,7 @@ async def get_group_member_candidates(
                 "chat_role_label": role_badges[item.user_id].label if item.user_id in role_badges else None,
                 "chat_accountant_owner_name": role_badges[item.user_id].accountant_owner_name if item.user_id in role_badges else None,
                 "chat_accountant_owner_label": role_badges[item.user_id].accountant_owner_label if item.user_id in role_badges else None,
+                "customer_management_name": _optional_attr(item, "customer_management_name"),
             }
             for item in page.items
         ],
@@ -1126,6 +1175,7 @@ async def get_group_detail(
                 chat_role_label=role_badges[item.user_id].label if item.user_id in role_badges else None,
                 chat_accountant_owner_name=role_badges[item.user_id].accountant_owner_name if item.user_id in role_badges else None,
                 chat_accountant_owner_label=role_badges[item.user_id].accountant_owner_label if item.user_id in role_badges else None,
+                customer_management_name=_optional_attr(item, "customer_management_name"),
             )
             for item in members
         ],
@@ -1543,6 +1593,7 @@ async def get_channel_members(
             chat_role_label=role_badges[member.user_id].label if member.user_id in role_badges else None,
             chat_accountant_owner_name=role_badges[member.user_id].accountant_owner_name if member.user_id in role_badges else None,
             chat_accountant_owner_label=role_badges[member.user_id].accountant_owner_label if member.user_id in role_badges else None,
+            customer_management_name=_optional_attr(member, "customer_management_name"),
         )
         for member in members
     ]
@@ -1609,6 +1660,7 @@ async def get_channel_invite_candidates(
                 "chat_role_label": role_badges[item.user_id].label if item.user_id in role_badges else None,
                 "chat_accountant_owner_name": role_badges[item.user_id].accountant_owner_name if item.user_id in role_badges else None,
                 "chat_accountant_owner_label": role_badges[item.user_id].accountant_owner_label if item.user_id in role_badges else None,
+                "customer_management_name": _optional_attr(item, "customer_management_name"),
             }
             for item in candidate_page.items
         ],
@@ -1749,7 +1801,7 @@ async def send_room_message(
             chat=chat,
             message=message,
             member_user_ids=await list_active_room_member_user_ids(db, chat_id=chat.id),
-            serializer=_build_direct_message_accountant_serializer(identity_map),
+            serializer=_build_direct_message_accountant_serializer(identity_map, [response_message]),
             publisher=publish_user_event,
         )
     else:
@@ -1793,7 +1845,7 @@ async def send_room_message(
             chat=chat,
             message=message,
             member_user_ids=await list_active_channel_member_user_ids(db, chat_id=chat.id),
-            serializer=_build_direct_message_accountant_serializer(identity_map),
+            serializer=_build_direct_message_accountant_serializer(identity_map, [response_message]),
             publisher=publish_user_event,
         )
     return response_message
@@ -1877,7 +1929,7 @@ async def send_message(
     await publish_direct_message_event(
         receiver_id=data.receiver_id,
         message=message,
-        serializer=_build_direct_message_accountant_serializer(identity_map),
+        serializer=_build_direct_message_accountant_serializer(identity_map, [response_message]),
         publisher=publish_user_event,
         sender_name=sender_name,
     )
@@ -1947,7 +1999,7 @@ async def toggle_message_reaction(
             chat=reaction_chat,
             message=updated_message,
             member_user_ids=await list_active_channel_member_user_ids(db, chat_id=reaction_chat.id),
-            serializer=_build_direct_message_accountant_serializer(identity_map),
+            serializer=_build_direct_message_accountant_serializer(identity_map, [reaction_payload]),
             publisher=publish_user_event,
         )
     elif reaction_chat is not None and reaction_chat.type == ChatType.GROUP and not reaction_chat.is_deleted:
@@ -1955,13 +2007,13 @@ async def toggle_message_reaction(
             chat=reaction_chat,
             message=updated_message,
             member_user_ids=await list_active_room_member_user_ids(db, chat_id=reaction_chat.id),
-            serializer=_build_direct_message_accountant_serializer(identity_map),
+            serializer=_build_direct_message_accountant_serializer(identity_map, [reaction_payload]),
             publisher=publish_user_event,
         )
     else:
         await publish_direct_reaction_event(
             message=updated_message,
-            serializer=_build_direct_message_accountant_serializer(identity_map),
+            serializer=_build_direct_message_accountant_serializer(identity_map, [reaction_payload]),
             publisher=publish_user_event,
         )
 

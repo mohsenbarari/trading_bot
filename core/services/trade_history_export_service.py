@@ -50,6 +50,14 @@ def resolve_trade_type_label_for_perspective(trade: object, perspective_user_id:
     return "خرید" if is_buy else "فروش"
 
 
+def _participant_display_name(user: object | None) -> str:
+    return (
+        getattr(user, "customer_management_name", None)
+        or getattr(user, "account_name", None)
+        or ""
+    )
+
+
 def resolve_counterparty_account_name_for_perspective(trade: object, perspective_user_id: int) -> str:
     responder_user_id = getattr(trade, "responder_user_id", None)
     try:
@@ -58,8 +66,8 @@ def resolve_counterparty_account_name_for_perspective(trade: object, perspective
         normalized_responder_user_id = None
 
     if normalized_responder_user_id == int(perspective_user_id):
-        return getattr(getattr(trade, "offer_user", None), "account_name", "")
-    return getattr(getattr(trade, "responder_user", None), "account_name", "")
+        return _participant_display_name(getattr(trade, "offer_user", None))
+    return _participant_display_name(getattr(trade, "responder_user", None))
 
 
 def build_trade_history_export_rows(trades: Sequence[object], perspective_user_id: int) -> list[TradeHistoryExportRow]:

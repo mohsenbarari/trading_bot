@@ -74,6 +74,7 @@ type ChannelInviteCandidate = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_management_name?: string | null
 }
 
 type ChannelInviteCandidateResponse = {
@@ -105,6 +106,7 @@ type ChannelMember = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_management_name?: string | null
 }
 
 type ChannelMemberMutationResponse = {
@@ -203,7 +205,7 @@ function normalizeSearch(value: string) {
 function compareMemberOrder(left: ChannelMember, right: ChannelMember) {
   if (left.is_channel_creator !== right.is_channel_creator) return left.is_channel_creator ? -1 : 1
   if (left.role !== right.role) return left.role === 'admin' ? -1 : 1
-  return left.account_name.localeCompare(right.account_name, 'fa')
+  return getChannelUserDisplayName(left).localeCompare(getChannelUserDisplayName(right), 'fa')
 }
 
 const filteredMembers = computed(() => {
@@ -213,7 +215,7 @@ const filteredMembers = computed(() => {
     .sort(compareMemberOrder)
     .filter((member) => {
       if (!query) return true
-      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      const haystack = [member.customer_management_name, member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
       return haystack.includes(query)
     })
 })
@@ -226,7 +228,7 @@ const filteredAdmins = computed(() => {
     .sort(compareMemberOrder)
     .filter((member) => {
       if (!query) return true
-      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      const haystack = [member.customer_management_name, member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
       return haystack.includes(query)
     })
 })
@@ -239,7 +241,7 @@ const promotableMembers = computed(() => {
     .sort(compareMemberOrder)
     .filter((member) => {
       if (!query) return true
-      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      const haystack = [member.customer_management_name, member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
       return haystack.includes(query)
     })
 })
@@ -344,6 +346,12 @@ async function clearAvatar() {
 function getPrimaryUserName(accountName: string, fullName?: string | null) {
   const normalizedFullName = (fullName || '').trim()
   return normalizedFullName || accountName
+}
+
+function getChannelUserDisplayName(user: Pick<ChannelMember | ChannelInviteCandidate, 'account_name' | 'full_name' | 'customer_management_name'>) {
+  const customerName = (user.customer_management_name || '').trim()
+  if (customerName) return customerName
+  return getPrimaryUserName(user.account_name, user.full_name)
 }
 
 function openMemberProfile(member: { user_id: number; account_name: string }) {
@@ -823,15 +831,15 @@ async function unfollowCurrentChannel() {
 }
 
 async function promoteMember(member: ChannelMember) {
-  await mutateMember(member, { role: 'admin' }, `${member.account_name} به ادمین کانال تبدیل شد.`)
+  await mutateMember(member, { role: 'admin' }, `${getChannelUserDisplayName(member)} به ادمین کانال تبدیل شد.`)
 }
 
 async function demoteMember(member: ChannelMember) {
-  await mutateMember(member, { role: 'member' }, `نقش ادمینی ${member.account_name} برداشته شد.`)
+  await mutateMember(member, { role: 'member' }, `نقش ادمینی ${getChannelUserDisplayName(member)} برداشته شد.`)
 }
 
 async function removeMember(member: ChannelMember) {
-  await mutateMember(member, { remove_member: true }, `${member.account_name} از کانال حذف شد.`)
+  await mutateMember(member, { remove_member: true }, `${getChannelUserDisplayName(member)} از کانال حذف شد.`)
 }
 
 function openCurrentChannelInMessenger() {
@@ -1148,7 +1156,7 @@ onBeforeUnmount(() => {
           <ChatUserListRow
             v-for="member in filteredMembers"
             :key="member.user_id"
-            :name="getPrimaryUserName(member.account_name, member.full_name)"
+            :name="getChannelUserDisplayName(member)"
             :avatar-file-id="member.avatar_file_id || null"
             :badges="getChannelMemberBadges(member)"
           >
@@ -1188,7 +1196,7 @@ onBeforeUnmount(() => {
             <ChatUserListRow
               v-for="member in filteredAdmins"
               :key="member.user_id"
-              :name="getPrimaryUserName(member.account_name, member.full_name)"
+              :name="getChannelUserDisplayName(member)"
               :avatar-file-id="member.avatar_file_id || null"
               :badges="getChannelMemberBadges(member)"
             >
@@ -1224,7 +1232,7 @@ onBeforeUnmount(() => {
             <ChatUserListRow
               v-for="member in promotableMembers"
               :key="member.user_id"
-              :name="getPrimaryUserName(member.account_name, member.full_name)"
+              :name="getChannelUserDisplayName(member)"
               :avatar-file-id="member.avatar_file_id || null"
               :badges="getPromotableMemberBadges(member)"
             >
@@ -1282,7 +1290,7 @@ onBeforeUnmount(() => {
             tag="button"
             :interactive="true"
             :selected="selectedUserIds.has(candidate.user_id)"
-            :name="getPrimaryUserName(candidate.account_name, candidate.full_name)"
+            :name="getChannelUserDisplayName(candidate)"
             :avatar-file-id="candidate.avatar_file_id || null"
             :badges="getRoleOnlyBadges(candidate)"
             @click="toggleUser(candidate.user_id)"

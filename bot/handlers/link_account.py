@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.user import User, set_legacy_has_bot_access_compatibility
 from core.config import settings
-from core.db import get_db
+from core.db import AsyncSessionLocal, get_db
 from core.services.accountant_relation_service import is_user_accountant
 from core.services.customer_relation_service import is_user_customer
 from core.services.chat_room_service import ensure_mandatory_channel_membership
@@ -30,6 +30,7 @@ from core.services.telegram_link_token_service import (
 )
 from bot.keyboards import get_persistent_menu_keyboard
 from bot.utils.channel_invites import build_channel_join_request_text
+from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -72,8 +73,14 @@ async def build_linked_account_panel_message(
     newly_linked: bool = False,
     already_linked: bool = False,
     address_registered: bool = False,
+    db: AsyncSession | None = None,
 ) -> str:
-    account_name = (getattr(user, "account_name", None) or "حساب شما")
+    if db is not None:
+        await attach_customer_management_names(db, [user])
+    else:
+        async with AsyncSessionLocal() as display_session:
+            await attach_customer_management_names(display_session, [user])
+    account_name = user_display_name(user, "حساب شما")
     if newly_linked:
         lines = [f"✅ حساب کاربری {account_name} با موفقیت به تلگرام متصل شد."]
     elif already_linked:
@@ -238,6 +245,7 @@ async def finalize_account_link(
             user,
             newly_linked=True,
             address_registered=address is not None,
+            db=db,
         ),
         reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
     )
@@ -397,7 +405,7 @@ async def handle_contact(message: types.Message, state: FSMContext):
                 await prompt_address_completion(message, state, user.id, already_linked=True)
                 return
             await message.answer(
-                await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True),
+                await build_linked_account_panel_message(getattr(message, "bot", None), user, already_linked=True, db=db),
                 reply_markup=get_persistent_menu_keyboard(user.role, settings.frontend_url),
             )
             await state.clear()

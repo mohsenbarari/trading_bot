@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.customer_relation import CustomerRelation, CustomerRelationStatus
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,17 @@ async def resolve_relation_aware_sender_display_name(
     identity = (await load_accountant_chat_identity_map(db, [sender_id])).get(sender_id)
     if identity is not None:
         return identity.display_name
+
+    customer_relation_result = await db.execute(
+        select(CustomerRelation.management_name).where(
+            CustomerRelation.customer_user_id == sender_id,
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+    )
+    customer_management_name = str(customer_relation_result.scalar_one_or_none() or "").strip()
+    if customer_management_name:
+        return customer_management_name
 
     return getattr(user, "account_name", None)
 

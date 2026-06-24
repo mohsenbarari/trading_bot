@@ -249,13 +249,17 @@ def build_direct_conversation_projection_stmt(current_user_id: int):
     other_user_id = build_direct_conversation_other_user_id_expr(current_user_id).label("other_user_id")
     user1_relation_display_name = func.nullif(func.btrim(user1_relation_alias.relation_display_name), "")
     user2_relation_display_name = func.nullif(func.btrim(user2_relation_alias.relation_display_name), "")
+    user1_customer_management_name = func.nullif(func.btrim(user1_customer_relation_alias.management_name), "")
+    user2_customer_management_name = func.nullif(func.btrim(user2_customer_relation_alias.management_name), "")
     user1_display_name = func.coalesce(
         user1_relation_display_name,
+        user1_customer_management_name,
         user1_owner_alias.account_name,
         user1_alias.account_name,
     )
     user2_display_name = func.coalesce(
         user2_relation_display_name,
+        user2_customer_management_name,
         user2_owner_alias.account_name,
         user2_alias.account_name,
     )
@@ -543,6 +547,8 @@ def build_direct_poll_summary_stmt(current_user_id: int):
     user2_alias = aliased(User)
     user1_relation_alias = aliased(AccountantRelation)
     user2_relation_alias = aliased(AccountantRelation)
+    user1_customer_relation_alias = aliased(CustomerRelation)
+    user2_customer_relation_alias = aliased(CustomerRelation)
     user1_owner_alias = aliased(User)
     user2_owner_alias = aliased(User)
     current_direct_member_alias = aliased(ChatMember)
@@ -590,13 +596,17 @@ def build_direct_poll_summary_stmt(current_user_id: int):
     ).label("other_user_id")
     user1_relation_display_name = func.nullif(func.btrim(user1_relation_alias.relation_display_name), "")
     user2_relation_display_name = func.nullif(func.btrim(user2_relation_alias.relation_display_name), "")
+    user1_customer_management_name = func.nullif(func.btrim(user1_customer_relation_alias.management_name), "")
+    user2_customer_management_name = func.nullif(func.btrim(user2_customer_relation_alias.management_name), "")
     user1_display_name = func.coalesce(
         user1_relation_display_name,
+        user1_customer_management_name,
         user1_owner_alias.account_name,
         user1_alias.account_name,
     )
     user2_display_name = func.coalesce(
         user2_relation_display_name,
+        user2_customer_management_name,
         user2_owner_alias.account_name,
         user2_alias.account_name,
     )
@@ -681,6 +691,22 @@ def build_direct_poll_summary_stmt(current_user_id: int):
                 user2_relation_alias.accountant_user_id == user2_alias.id,
                 user2_relation_alias.status == AccountantRelationStatus.ACTIVE,
                 user2_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user1_customer_relation_alias,
+            sa.and_(
+                user1_customer_relation_alias.customer_user_id == user1_alias.id,
+                user1_customer_relation_alias.status == CustomerRelationStatus.ACTIVE,
+                user1_customer_relation_alias.deleted_at.is_(None),
+            ),
+        )
+        .outerjoin(
+            user2_customer_relation_alias,
+            sa.and_(
+                user2_customer_relation_alias.customer_user_id == user2_alias.id,
+                user2_customer_relation_alias.status == CustomerRelationStatus.ACTIVE,
+                user2_customer_relation_alias.deleted_at.is_(None),
             ),
         )
         .outerjoin(

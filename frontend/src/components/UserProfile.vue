@@ -68,6 +68,12 @@ const showCustomerContext = computed(() => Boolean(
   || props.user?.customer_owner_account_name
   || props.user?.customer_tier,
 ));
+const userDisplayName = computed(() => {
+  const customerName = typeof props.user?.customer_management_name === 'string'
+    ? props.user.customer_management_name.trim()
+    : '';
+  return customerName || props.user?.account_name || '---';
+});
 const canEditRole = !isCachedMiddleManager();
 
 function getCustomerTierLabel(value: string | null | undefined) {
@@ -727,7 +733,7 @@ async function deleteUser() {
     <div class="profile-details">
       <div class="detail-item">
         <span class="label">نام کاربری</span>
-        <span class="value">{{ user.account_name }}</span>
+        <span class="value">{{ userDisplayName }}</span>
       </div>
       <div class="detail-item">
         <span class="label">موبایل</span>

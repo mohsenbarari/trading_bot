@@ -18,6 +18,7 @@ interface User {
   account_name: string;
   role: string;
   mobile_number: string;
+  customer_management_name?: string | null;
 }
 
 const users = ref<User[]>([]);
@@ -55,6 +56,10 @@ function toggleSearch() {
 
 function selectUser(user: User) {
   emit('navigate', 'user_profile', user);
+}
+
+function getUserDisplayName(user: User) {
+  return user.customer_management_name?.trim() || user.account_name || 'کاربر';
 }
 
 onMounted(fetchUsers);
@@ -101,10 +106,10 @@ onMounted(fetchUsers);
         <div v-for="user in users" :key="user.id" class="user-item" @click="selectUser(user)">
           <div class="user-main-info">
             <div class="user-avatar">
-              {{ user.account_name ? user.account_name[0] : '?' }}
+              {{ getUserDisplayName(user)[0] || '?' }}
             </div>
             <div class="user-details">
-              <span class="user-name">{{ user.account_name }}</span>
+              <span class="user-name">{{ getUserDisplayName(user) }}</span>
               <span class="user-subtext ltr">{{ user.mobile_number }}</span>
             </div>
           </div>

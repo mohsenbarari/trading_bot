@@ -39,6 +39,7 @@ class ChannelInviteCandidate:
     is_already_member: bool = False
     chat_role_kind: str | None = None
     chat_role_label: str | None = None
+    customer_management_name: str | None = None
 
 
 @dataclass
@@ -134,6 +135,7 @@ class ChannelMemberSummary:
     role: ChatMemberRole
     joined_at: datetime
     is_channel_creator: bool
+    customer_management_name: str | None = None
 
 
 @dataclass
@@ -146,6 +148,7 @@ class GroupMemberSummary:
     role: ChatMemberRole
     joined_at: datetime
     is_group_creator: bool
+    customer_management_name: str | None = None
 
 
 @dataclass
@@ -154,6 +157,7 @@ class GroupMessageSeenSummary:
     account_name: str
     full_name: str | None
     avatar_file_id: str | None
+    customer_management_name: str | None
     seen_at: datetime
 
 
@@ -394,6 +398,28 @@ async def _load_active_customer_owner_map(
         int(customer_user_id): int(owner_user_id)
         for customer_user_id, owner_user_id in result.all()
         if customer_user_id is not None and owner_user_id is not None
+    }
+
+
+async def _load_active_customer_management_name_map(
+    db: AsyncSession,
+    user_ids: Sequence[object],
+) -> dict[int, str]:
+    normalized_user_ids = _normalize_positive_user_ids(user_ids)
+    if not normalized_user_ids:
+        return {}
+
+    stmt = select(CustomerRelation.customer_user_id, CustomerRelation.management_name).where(
+        CustomerRelation.customer_user_id.in_(normalized_user_ids),
+        CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+        CustomerRelation.deleted_at.is_(None),
+        CustomerRelation.customer_user_id.is_not(None),
+    )
+    result = await db.execute(stmt)
+    return {
+        int(customer_user_id): str(management_name).strip()
+        for customer_user_id, management_name in result.all()
+        if customer_user_id is not None and str(management_name or "").strip()
     }
 
 
@@ -1387,9 +1413,14 @@ async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMembe
         .order_by(ChatMember.role.asc(), ChatMember.joined_at.asc(), ChatMember.user_id.asc())
     )
     result = await db.execute(stmt)
+    rows = result.all()
+    customer_management_names = await _load_active_customer_management_name_map(
+        db,
+        [user.id for _, user in rows],
+    )
 
     items: list[GroupMemberSummary] = []
-    for member, user in result.all():
+    for member, user in rows:
         items.append(
             GroupMemberSummary(
                 user_id=user.id,
@@ -1400,6 +1431,7 @@ async def list_group_members(db: AsyncSession, *, chat: Chat) -> list[GroupMembe
                 role=member.role,
                 joined_at=member.joined_at,
                 is_group_creator=chat.created_by_id == user.id,
+                customer_management_name=customer_management_names.get(user.id),
             )
         )
     return items
@@ -1434,15 +1466,21 @@ async def list_group_message_seen_members(
         .order_by(ChatMember.last_read_at.desc(), User.account_name.asc())
     )
     result = await db.execute(stmt)
+    rows = result.all()
+    customer_management_names = await _load_active_customer_management_name_map(
+        db,
+        [user.id for _, user in rows],
+    )
     return [
         GroupMessageSeenSummary(
             user_id=user.id,
             account_name=user.account_name,
             full_name=user.full_name,
             avatar_file_id=getattr(user, "avatar_file_id", None),
+            customer_management_name=customer_management_names.get(user.id),
             seen_at=member.last_read_at,
         )
-        for member, user in result.all()
+        for member, user in rows
         if member.last_read_at is not None
     ]
 
@@ -1786,9 +1824,14 @@ async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelM
         .order_by(ChatMember.role.asc(), ChatMember.joined_at.asc(), ChatMember.user_id.asc())
     )
     result = await db.execute(stmt)
-    
+    rows = result.all()
+    customer_management_names = await _load_active_customer_management_name_map(
+        db,
+        [user.id for _, user in rows],
+    )
+
     items: list[ChannelMemberSummary] = []
-    for member, user in result.all():
+    for member, user in rows:
         items.append(
             ChannelMemberSummary(
                 user_id=user.id,
@@ -1799,6 +1842,7 @@ async def list_channel_members(db: AsyncSession, *, chat: Chat) -> list[ChannelM
                 role=member.role,
                 joined_at=member.joined_at,
                 is_channel_creator=chat.created_by_id == user.id,
+                customer_management_name=customer_management_names.get(user.id),
             )
         )
     return items
@@ -2253,11 +2297,18 @@ async def list_group_member_candidates(
         filters.append(~User.id.in_(excluded_member_user_ids))
     if normalized_query:
         search_pattern = f"%{normalized_query}%"
+        matching_customer_user_ids = select(CustomerRelation.customer_user_id).where(
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+            CustomerRelation.customer_user_id.is_not(None),
+            CustomerRelation.management_name.ilike(search_pattern),
+        )
         filters.append(
             or_(
                 User.full_name.ilike(search_pattern),
                 User.account_name.ilike(search_pattern),
                 User.mobile_number.ilike(search_pattern),
+                User.id.in_(matching_customer_user_ids),
             )
         )
 
@@ -2290,6 +2341,10 @@ async def list_group_member_candidates(
 
     paged_users = filtered_users[offset: offset + limit]
     total = len(filtered_users)
+    customer_management_names = await _load_active_customer_management_name_map(
+        db,
+        [user.id for user in paged_users],
+    )
     return ChannelInviteCandidatePage(
         items=[
             ChannelInviteCandidate(
@@ -2299,6 +2354,7 @@ async def list_group_member_candidates(
                 mobile_number=user.mobile_number,
                 avatar_file_id=getattr(user, "avatar_file_id", None),
                 is_already_member=False,
+                customer_management_name=customer_management_names.get(user.id),
             )
             for user in paged_users
         ],

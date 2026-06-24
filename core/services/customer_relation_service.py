@@ -7,6 +7,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 import secrets
 import string
+from typing import Mapping
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, or_, select
@@ -98,6 +99,37 @@ def get_effective_max_customers(owner_user: User) -> int:
     except (TypeError, ValueError):
         normalized_limit = 5
     return max(0, normalized_limit)
+
+
+def _relation_status_value(value: object | None) -> str:
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def normalize_customer_management_name(value: object | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def get_customer_management_name_from_relation(relation: CustomerRelation | object | None) -> str | None:
+    if relation is None:
+        return None
+    status = getattr(relation, "status", CustomerRelationStatus.ACTIVE)
+    if _relation_status_value(status) != CustomerRelationStatus.ACTIVE.value:
+        return None
+    return normalize_customer_management_name(getattr(relation, "management_name", None))
+
+
+def customer_management_name_for_user_id(
+    user_id: object,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None,
+) -> str | None:
+    if not customer_relation_map:
+        return None
+    try:
+        normalized_user_id = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    return get_customer_management_name_from_relation(customer_relation_map.get(normalized_user_id))
 
 
 async def sweep_expired_pending_customer_relations(

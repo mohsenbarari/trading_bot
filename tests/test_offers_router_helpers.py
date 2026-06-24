@@ -211,6 +211,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             make_offer_model(price=53500, offer_type=OfferType.SELL),
             SimpleNamespace(offer_expiry_minutes=15),
             viewer_user_id=7,
+            include_owner_identity=True,
             offer_owner_relation=owner_relation,
             viewer_customer_relation=tier2_viewer_relation,
         )
@@ -218,6 +219,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(projected_response.raw_price, 53500)
         self.assertEqual(projected_response.market_published_price, 53500)
         self.assertEqual(projected_response.viewer_effective_price, 53800)
+        self.assertEqual(projected_response.user_account_name, "مشتری ویژه")
         self.assertTrue(projected_response.customer_badge_visible)
         self.assertEqual(projected_response.customer_management_name, "مشتری ویژه")
         self.assertEqual(projected_response.customer_tier, "tier1")
@@ -265,7 +267,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             include_owner_identity=True,
         )
         self.assertEqual(owner_view.user_id, 21)
-        self.assertEqual(owner_view.user_account_name, "tier1_source")
+        self.assertEqual(owner_view.user_account_name, "مشتری ویژه")
         self.assertEqual(owner_view.viewer_effective_price, 50000)
         self.assertTrue(owner_view.customer_badge_visible)
         self.assertEqual(owner_view.customer_management_name, "مشتری ویژه")
@@ -279,7 +281,7 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
             include_owner_identity=True,
         )
         self.assertEqual(admin_like_view.user_id, 21)
-        self.assertEqual(admin_like_view.user_account_name, "tier1_source")
+        self.assertEqual(admin_like_view.user_account_name, "مشتری ویژه")
         self.assertEqual(admin_like_view.viewer_effective_price, 50000)
         self.assertFalse(admin_like_view.customer_badge_visible)
         self.assertIsNone(admin_like_view.customer_management_name)

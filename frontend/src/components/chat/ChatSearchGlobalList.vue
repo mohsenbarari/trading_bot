@@ -28,7 +28,7 @@ function getOtherUserInfo(msg: any) {
   const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id
   const conv = props.conversations.find(c => c.other_user_id === otherId)
   return {
-      name: conv ? conv.other_user_name : (msg.sender_id === props.currentUserId ? 'ناشناس' : (msg.sender?.account_name || 'ناشناس')),
+      name: conv ? conv.other_user_name : (msg.sender_id === props.currentUserId ? 'ناشناس' : (msg.sender_name || msg.sender?.customer_management_name || msg.sender?.account_name || 'ناشناس')),
       isDeleted: conv ? conv.other_user_is_deleted : false
   }
 }

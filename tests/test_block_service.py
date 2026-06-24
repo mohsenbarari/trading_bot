@@ -178,13 +178,16 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_blocked_users_shapes_joined_rows(self):
         block = SimpleNamespace(created_at="2026-05-07T20:00:00")
         user = SimpleNamespace(id=41, account_name="ali", mobile_number="0912", full_name="Ali")
-        db = SimpleNamespace(execute=AsyncMock(return_value=rows_result([(block, user)])))
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            rows_result([(block, user)]),
+            rows_result([(41, "مشتری علی")]),
+        ]))
 
         result = await block_service.get_blocked_users(db, 40)
 
         self.assertEqual(result, [{
             "id": 41,
-            "account_name": "ali",
+            "account_name": "مشتری علی",
             "mobile_number": "0912",
             "full_name": "Ali",
             "blocked_at": "2026-05-07T20:00:00",
@@ -253,7 +256,10 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(id=81, account_name="ali", mobile_number="0912", full_name="Ali", is_deleted=False),
             SimpleNamespace(id=82, account_name="sara", mobile_number="0935", full_name="Sara", is_deleted=False),
         ]
-        db = SimpleNamespace(execute=AsyncMock(return_value=scalars_result(users)))
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            scalars_result(users),
+            rows_result([(81, "مشتری علی")]),
+        ]))
 
         with patch("core.services.block_service.is_blocked_by", AsyncMock(side_effect=[True, False])) as is_blocked_by:
             result = await block_service.search_users_for_block(db, "09", 80)
@@ -261,7 +267,7 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [
             {
                 "id": 81,
-                "account_name": "ali",
+                "account_name": "مشتری علی",
                 "mobile_number": "0912",
                 "full_name": "Ali",
                 "is_blocked": True,

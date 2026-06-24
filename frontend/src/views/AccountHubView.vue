@@ -29,7 +29,12 @@ interface AccountAction {
 
 const user = computed(() => currentUserSummary.value)
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
-const displayName = computed(() => user.value?.full_name?.trim() || user.value?.account_name?.trim() || 'کاربر')
+const displayName = computed(() => (
+  user.value?.customer_management_name?.trim()
+  || user.value?.full_name?.trim()
+  || user.value?.account_name?.trim()
+  || 'کاربر'
+))
 const isInactiveAccount = computed(() => user.value?.account_status === 'inactive')
 const accountStatusLabel = computed(() => (isInactiveAccount.value ? 'غیرفعال' : 'فعال'))
 const accountStatusTone = computed(() => (isInactiveAccount.value ? 'danger' : 'success'))

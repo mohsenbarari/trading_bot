@@ -31,6 +31,7 @@ from core.services.telegram_offer_channel_service import (
 from core.services.telegram_offer_publication_service import publish_offer_to_telegram_channel_once
 from core.services.customer_relation_service import (
     build_customer_offer_read_model,
+    customer_management_name_for_user_id,
     get_active_customer_relation_for_customer,
     load_offer_customer_read_context,
 )
@@ -306,6 +307,14 @@ def offer_to_response(
         viewer_customer_relation=viewer_customer_relation,
     )
     offer_public_id = ensure_offer_public_id(offer)
+    owner_display_name = ""
+    if include_owner_identity and offer.user:
+        owner_relation_map = {int(offer.user_id): offer_owner_relation} if offer_owner_relation else None
+        owner_display_name = (
+            customer_management_name_for_user_id(offer.user_id, owner_relation_map)
+            or offer.user.account_name
+            or ""
+        )
 
     expires_at_ts = None
     logger.debug("offer_expiry_trace id=%s status=%s", offer.id, offer.status)
@@ -327,7 +336,7 @@ def offer_to_response(
         offer_public_id=offer_public_id,
         public_link=build_offer_public_link(offer_public_id),
         user_id=offer.user_id if include_owner_identity else None,
-        user_account_name=(offer.user.account_name if include_owner_identity and offer.user else ""),
+        user_account_name=owner_display_name,
         is_own_offer=is_own_offer,
         offer_type=offer.offer_type.value,
         commodity_id=offer.commodity_id,
@@ -868,7 +877,15 @@ async def create_offer(
             offer_id=getattr(existing_offer, "id", None),
             has_idempotency_key=bool(idempotency_key),
         )
-        return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
+        return (
+            await _serialize_offer_responses(
+                [existing_offer],
+                db=db,
+                start_settings=ts,
+                viewer_user_id=owner_user.id,
+                include_owner_identity=True,
+            )
+        )[0]
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -1071,7 +1088,15 @@ async def create_offer(
             has_idempotency_key=bool(idempotency_key),
             reason="idempotency_integrity_conflict",
         )
-        return offer_to_response(existing_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
+        return (
+            await _serialize_offer_responses(
+                [existing_offer],
+                db=db,
+                start_settings=ts,
+                viewer_user_id=owner_user.id,
+                include_owner_identity=True,
+            )
+        )[0]
 
     # لینک کردن لفظ قدیمی به جدید
     if offer_data.republished_from_id:
@@ -1173,7 +1198,15 @@ async def create_offer(
                 error_class=type(exc).__name__,
             )
     
-    return offer_to_response(new_offer, ts, viewer_user_id=owner_user.id, include_owner_identity=True)
+    return (
+        await _serialize_offer_responses(
+            [new_offer],
+            db=db,
+            start_settings=ts,
+            viewer_user_id=owner_user.id,
+            include_owner_identity=True,
+        )
+    )[0]
 
 
 @router.get("/public/{offer_public_id}", response_model=PublicOfferResponse)

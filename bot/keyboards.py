@@ -3,6 +3,7 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from core.enums import UserRole, UserAccountStatus
 from core.config import settings
+from bot.utils.customer_display import user_display_name
 from math import ceil
 
 
@@ -66,9 +67,7 @@ def get_users_list_inline_keyboard(users: list, page: int, total_count: int, lim
     # 1. ساخت دکمه‌ها برای کاربران
     user_buttons = []
     for user in users:
-        # نمایش نام کاربری (account_name) طبق درخواست
-        # اگر account_name نداشت، نام کامل یا موبایل را نمایش می‌دهیم
-        display_name = user.account_name or user.full_name or user.mobile_number or f"User {user.id}"
+        display_name = user_display_name(user, user.mobile_number or f"User {user.id}")
         
         user_buttons.append(InlineKeyboardButton(text=display_name, callback_data=f"user_profile_{user.id}"))
     

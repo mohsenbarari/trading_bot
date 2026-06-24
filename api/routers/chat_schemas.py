@@ -63,6 +63,7 @@ class GroupMessageSeenRead(BaseModel):
     account_name: str
     full_name: Optional[str] = None
     avatar_file_id: Optional[str] = None
+    customer_management_name: Optional[str] = None
     seen_at: datetime
 
     class Config:
@@ -128,7 +129,17 @@ class MessageRead(BaseModel):
         forwarded_from_name_override = getattr(obj, "forwarded_from_name_override", None)
         forwarded_from_name = forwarded_from_name_override
         if forwarded_from_name is None and getattr(obj, "forwarded_from", None):
-            forwarded_from_name = obj.forwarded_from.account_name
+            forwarded_from_name = (
+                getattr(obj.forwarded_from, "customer_management_name", None)
+                or obj.forwarded_from.account_name
+            )
+        sender = getattr(obj, "sender", None)
+        sender_name = (
+            getattr(sender, "customer_management_name", None)
+            or getattr(sender, "account_name", None)
+            if sender is not None
+            else None
+        )
 
         data = {
             "id": obj.id,
@@ -145,7 +156,7 @@ class MessageRead(BaseModel):
             "forwarded_from_id": obj.forwarded_from_id,
             "forwarded_from_name_override": forwarded_from_name_override,
             "forwarded_from_name": forwarded_from_name,
-            "sender_name": obj.sender.account_name if getattr(obj, "sender", None) else None,
+            "sender_name": sender_name,
             "mentions": getattr(obj, "mentions", []),
             "mention_all": getattr(obj, "mention_all", False),
             "mention_details": getattr(obj, "mention_details", []),
@@ -345,6 +356,7 @@ class ConversationRead(BaseModel):
     chat_role_label: Optional[str] = None
     chat_accountant_owner_name: Optional[str] = None
     chat_accountant_owner_label: Optional[str] = None
+    customer_management_name: Optional[str] = None
     highlight_accountant_user_id: Optional[int] = None
     highlight_accountant_relation_display_name: Optional[str] = None
     other_user_is_deleted: bool = False
@@ -484,6 +496,7 @@ class GroupMemberRead(BaseModel):
     chat_role_label: Optional[str] = None
     chat_accountant_owner_name: Optional[str] = None
     chat_accountant_owner_label: Optional[str] = None
+    customer_management_name: Optional[str] = None
 
 
 class GroupCreateRequest(BaseModel):
@@ -595,6 +608,7 @@ class ChannelMemberRead(BaseModel):
     chat_role_label: Optional[str] = None
     chat_accountant_owner_name: Optional[str] = None
     chat_accountant_owner_label: Optional[str] = None
+    customer_management_name: Optional[str] = None
 
 
 class ChannelCreateRequest(BaseModel):
@@ -673,6 +687,7 @@ class ChannelInviteCandidateRead(BaseModel):
     chat_role_label: Optional[str] = None
     chat_accountant_owner_name: Optional[str] = None
     chat_accountant_owner_label: Optional[str] = None
+    customer_management_name: Optional[str] = None
 
 
 class ChannelInviteCandidateListResponse(BaseModel):

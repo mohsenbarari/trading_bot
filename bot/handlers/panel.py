@@ -19,7 +19,9 @@ from typing import Optional
 from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
 from core.enums import UserRole
 from core.config import settings
+from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import is_user_global_web_locked
+from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
 router = Router()
 
@@ -105,11 +107,14 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
     # حذف پیام کاربر و لنگر قبلی
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
     
+    async with AsyncSessionLocal() as session:
+        await attach_customer_management_names(session, [user])
+
     profile_link = f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
 
     profile_text = (
         f"👤 **پروفایل شما**\n\n"
-        f"🔸 **نام کاربری:** `{user.account_name}`\n"
+        f"🔸 **نام کاربری:** `{user_display_name(user)}`\n"
         f"🔹 **نام تلگرام:** {user.full_name}\n"
         f"🔹 **آیدی تلگرام:** `{user.telegram_id}`\n"
         f"🔹 **سطح دسترسی:** {user.role.value}\n\n"

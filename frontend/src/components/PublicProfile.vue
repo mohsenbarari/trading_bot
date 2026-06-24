@@ -1180,8 +1180,8 @@ async function togglePublicProfileBlock() {
     const shouldUnblock = isBlocked;
     const confirmed = window.confirm(
       shouldUnblock
-        ? `آیا از رفع بلاک کاربر ${profileData.value.account_name} اطمینان دارید؟`
-        : `آیا از بلاک کاربر ${profileData.value.account_name} اطمینان دارید؟`
+        ? `آیا از رفع بلاک کاربر ${profileDisplayName.value} اطمینان دارید؟`
+        : `آیا از بلاک کاربر ${profileDisplayName.value} اطمینان دارید؟`
     );
     if (!confirmed) {
       return;
@@ -1671,11 +1671,9 @@ function handleHistoryPresetChipChange(value: string) {
                       @click.stop="openOwnerCustomerProfile(relation)"
                     >
                       <span class="public-customer-link-title">{{ relation.management_name }}</span>
-                      <span class="public-customer-handle">@{{ relation.customer_account_name }}</span>
                     </button>
                     <template v-else>
                       <h4>{{ relation.management_name }}</h4>
-                      <p class="public-customer-handle">@{{ relation.customer_account_name || 'unknown' }}</p>
                     </template>
                   </div>
                   <AppStatusBadge tone="info">{{ getCustomerTierLabel(relation.customer_tier) }}</AppStatusBadge>

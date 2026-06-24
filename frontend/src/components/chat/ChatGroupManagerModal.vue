@@ -39,6 +39,7 @@ type PublicUser = {
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
   customer_owner_account_name?: string | null
+  customer_management_name?: string | null
 }
 
 type GroupMember = {
@@ -53,6 +54,7 @@ type GroupMember = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_management_name?: string | null
 }
 
 type GroupRoom = {
@@ -194,7 +196,7 @@ function applySuggestedAccountingGroupTitle() {
 function compareMemberOrder(left: GroupMember, right: GroupMember) {
   if (left.is_group_creator !== right.is_group_creator) return left.is_group_creator ? -1 : 1
   if (left.role !== right.role) return left.role === 'admin' ? -1 : 1
-  return left.account_name.localeCompare(right.account_name, 'fa')
+  return getChatUserDisplayName(left).localeCompare(getChatUserDisplayName(right), 'fa')
 }
 
 const filteredMembers = computed(() => {
@@ -204,7 +206,7 @@ const filteredMembers = computed(() => {
     .sort(compareMemberOrder)
     .filter((member) => {
       if (!query) return true
-      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      const haystack = [member.customer_management_name, member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
       return haystack.includes(query)
     })
 })
@@ -217,7 +219,7 @@ const filteredAdmins = computed(() => {
     .sort(compareMemberOrder)
     .filter((member) => {
       if (!query) return true
-      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      const haystack = [member.customer_management_name, member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
       return haystack.includes(query)
     })
 })
@@ -230,7 +232,7 @@ const promotableMembers = computed(() => {
     .sort(compareMemberOrder)
     .filter((member) => {
       if (!query) return true
-      const haystack = [member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
+      const haystack = [member.customer_management_name, member.account_name, member.full_name, member.mobile_number].join(' ').toLowerCase()
       return haystack.includes(query)
     })
 })
@@ -364,6 +366,11 @@ async function clearAvatar() {
 function getPrimaryUserName(accountName: string, fullName?: string | null) {
   const normalizedFullName = (fullName || '').trim()
   return normalizedFullName || accountName
+}
+
+function getChatUserDisplayName(user: Pick<PublicUser, 'account_name' | 'full_name' | 'customer_management_name'>) {
+  const customerName = (user.customer_management_name || '').trim()
+  return customerName || getPrimaryUserName(user.account_name, user.full_name)
 }
 
 function getGroupMemberBadges(member: GroupMember): ChatUserListRowBadge[] {
@@ -506,7 +513,7 @@ async function loadUsers(query = '', options: { silent?: boolean } = {}) {
   try {
     const data = await apiFetchJson(buildGroupCandidateUrl(query)) as
       | PublicUser[]
-      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null; chat_accountant_owner_name?: string | null; chat_accountant_owner_label?: string | null; customer_owner_account_name?: string | null }> }
+      | { items?: Array<PublicUser | { user_id: number; account_name: string; full_name?: string; mobile_number?: string; avatar_file_id?: string | null; chat_role_kind?: ChatRoleKind | null; chat_role_label?: string | null; chat_accountant_owner_name?: string | null; chat_accountant_owner_label?: string | null; customer_owner_account_name?: string | null; customer_management_name?: string | null }> }
     const rawItems = Array.isArray(data)
       ? data
       : Array.isArray(data?.items)
@@ -524,6 +531,7 @@ async function loadUsers(query = '', options: { silent?: boolean } = {}) {
         chat_accountant_owner_name: item.chat_accountant_owner_name ?? null,
         chat_accountant_owner_label: item.chat_accountant_owner_label ?? null,
         customer_owner_account_name: item.customer_owner_account_name ?? null,
+        customer_management_name: item.customer_management_name ?? null,
       }))
       .filter((item) => Number.isInteger(item.id) && item.id > 0)
     if (requestId !== userLoadSequence) return
@@ -692,15 +700,15 @@ async function mutateMember(member: GroupMember, endpoint: string, method: strin
 }
 
 async function promote(member: GroupMember) {
-  await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'POST', `${member.account_name} ادمین شد.`)
+  await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'POST', `${getChatUserDisplayName(member)} ادمین شد.`)
 }
 
 async function demote(member: GroupMember) {
-  await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'DELETE', `نقش ادمینی ${member.account_name} برداشته شد.`)
+  await mutateMember(member, `/api/chat/groups/${props.groupId}/admins/${member.user_id}`, 'DELETE', `نقش ادمینی ${getChatUserDisplayName(member)} برداشته شد.`)
 }
 
 async function removeMember(member: GroupMember) {
-  await mutateMember(member, `/api/chat/groups/${props.groupId}/members/${member.user_id}`, 'DELETE', `${member.account_name} از گروه حذف شد.`)
+  await mutateMember(member, `/api/chat/groups/${props.groupId}/members/${member.user_id}`, 'DELETE', `${getChatUserDisplayName(member)} از گروه حذف شد.`)
 }
 
 async function leaveGroup() {
@@ -805,7 +813,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   tag="button"
                   :interactive="true"
                   :selected="selectedUserIds.has(user.id)"
-                  :name="user.account_name"
+                  :name="getChatUserDisplayName(user)"
                   :avatar-file-id="user.avatar_file_id || null"
                   :badges="getRoleOnlyBadges(user)"
                   @click="toggleCandidate(user.id)"
@@ -956,7 +964,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                 <ChatUserListRow
                   v-for="member in filteredMembers"
                   :key="member.user_id"
-                  :name="getPrimaryUserName(member.account_name, member.full_name)"
+                  :name="getChatUserDisplayName(member)"
                   :avatar-file-id="member.avatar_file_id || null"
                   :badges="getGroupMemberBadges(member)"
                 >
@@ -996,7 +1004,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   <ChatUserListRow
                     v-for="member in filteredAdmins"
                     :key="member.user_id"
-                    :name="getPrimaryUserName(member.account_name, member.full_name)"
+                    :name="getChatUserDisplayName(member)"
                     :avatar-file-id="member.avatar_file_id || null"
                     :badges="getGroupMemberBadges(member)"
                   >
@@ -1032,7 +1040,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   <ChatUserListRow
                     v-for="member in promotableMembers"
                     :key="member.user_id"
-                    :name="getPrimaryUserName(member.account_name, member.full_name)"
+                    :name="getChatUserDisplayName(member)"
                     :avatar-file-id="member.avatar_file_id || null"
                     :badges="getPromotableMemberBadges(member)"
                   >
@@ -1085,7 +1093,7 @@ watch(() => [props.show, props.groupId] as const, ([show]) => {
                   tag="button"
                   :interactive="true"
                   :selected="selectedUserIds.has(user.id)"
-                  :name="getPrimaryUserName(user.account_name, user.full_name)"
+                  :name="getChatUserDisplayName(user)"
                   :avatar-file-id="user.avatar_file_id || null"
                   :badges="getRoleOnlyBadges(user)"
                   @click="toggleCandidate(user.id)"

@@ -33,6 +33,7 @@ from bot.keyboards import (
     get_max_block_options_keyboard
 )
 from bot.states import UserManagement, UserLimitations
+from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -94,12 +95,7 @@ def _build_webapp_user_profile_url(user_id: int) -> str | None:
 
 
 def _target_user_display_name(target_user: User) -> str:
-    return (
-        getattr(target_user, "account_name", None)
-        or getattr(target_user, "full_name", None)
-        or getattr(target_user, "mobile_number", None)
-        or f"User {target_user.id}"
-    )
+    return user_display_name(target_user, target_user.mobile_number or f"User {target_user.id}")
 
 
 async def _show_user_delete_webapp_redirect(callback: types.CallbackQuery, target_user: User) -> None:
@@ -243,6 +239,7 @@ async def show_users_list(
             stmt = _apply_user_management_scope(stmt, actor)
             stmt = stmt.offset(offset).limit(USERS_PER_PAGE)
             users = (await session.execute(stmt)).scalars().all()
+            await attach_customer_management_names(session, users)
 
         if not users:
             text = "📭 هیچ کاربری یافت نشد."
@@ -268,6 +265,9 @@ async def show_users_list(
 
 
 async def get_user_profile_text(target_user: User) -> str:
+    async with AsyncSessionLocal() as session:
+        await attach_customer_management_names(session, [target_user])
+
     # استفاده از تابع کمکی to_jalali_str برای تبدیل تاریخ
     join_date = to_jalali_str(target_user.created_at, "%Y/%m/%d - %H:%M") if target_user.created_at else "نامشخص"
 
@@ -304,7 +304,7 @@ async def get_user_profile_text(target_user: User) -> str:
     profile_text = (
         f"👤 **پروفایل کاربر**\n"
         f"➖➖➖➖➖➖➖➖\n"
-        f"🆔 **نام کاربری:** `{target_user.account_name or '---'}`\n"
+        f"🆔 **نام کاربری:** `{_target_user_display_name(target_user)}`\n"
         f"📱 **شماره موبایل:** `{target_user.mobile_number or '---'}`\n"
         f"🔰 **سطح دسترسی:** {target_user.role.value}\n"
         f"🔁 **وضعیت حساب:** {'✅ فعال' if get_user_account_status(target_user) == UserAccountStatus.ACTIVE else '⛔ غیرفعال'}\n"
@@ -359,6 +359,8 @@ async def handle_view_user_profile(callback: types.CallbackQuery, user: Optional
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
+        await attach_customer_management_names(session, [target_user])
+        await attach_customer_management_names(session, [target_user])
     
     if not target_user:
         await callback.answer("❌ کاربر یافت نشد.", show_alert=True)
@@ -500,6 +502,7 @@ async def process_search_query(message: types.Message, state: FSMContext, user: 
             )
         )
         user_found = (await session.execute(stmt)).scalar_one_or_none()
+        await attach_customer_management_names(session, [user_found])
 
     if not user_found or not _can_manage_target_user(user, user_found):
         msg = await message.answer(
@@ -1263,7 +1266,7 @@ async def handle_user_block_settings(callback: types.CallbackQuery, user: Option
     text = (
         f"🚫 **تنظیمات قابلیت بلاک**\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👤 کاربر: `{target_user.account_name}`\n\n"
+        f"👤 کاربر: `{_target_user_display_name(target_user)}`\n\n"
         f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
         f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
     )
@@ -1294,7 +1297,8 @@ async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optiona
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
-        
+        await attach_customer_management_names(session, [target_user])
+
         if target_user:
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
@@ -1309,7 +1313,7 @@ async def handle_admin_toggle_block(callback: types.CallbackQuery, user: Optiona
             text = (
                 f"🚫 **تنظیمات قابلیت بلاک**\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
-                f"👤 کاربر: `{target_user.account_name}`\n\n"
+                f"👤 کاربر: `{_target_user_display_name(target_user)}`\n\n"
                 f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
                 f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
             )
@@ -1369,7 +1373,8 @@ async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Option
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
-        
+        await attach_customer_management_names(session, [target_user])
+
         if target_user:
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
@@ -1382,7 +1387,7 @@ async def handle_admin_max_block_set(callback: types.CallbackQuery, user: Option
             text = (
                 f"🚫 **تنظیمات قابلیت بلاک**\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
-                f"👤 کاربر: `{target_user.account_name}`\n\n"
+                f"👤 کاربر: `{_target_user_display_name(target_user)}`\n\n"
                 f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
                 f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
             )
@@ -1460,7 +1465,8 @@ async def process_custom_max_block(message: types.Message, user: Optional[User],
     async with AsyncSessionLocal() as session:
         stmt = select(User).where(User.id == target_user_id)
         target_user = (await session.execute(stmt)).scalar_one_or_none()
-        
+        await attach_customer_management_names(session, [target_user])
+
         if target_user:
             if not _can_manage_target_user(user, target_user):
                 msg = await message.answer("❌ شما مجاز به مدیریت این کاربر نیستید.")
@@ -1474,7 +1480,7 @@ async def process_custom_max_block(message: types.Message, user: Optional[User],
             text = (
                 f"🚫 **تنظیمات قابلیت بلاک**\n"
                 f"━━━━━━━━━━━━━━━━━━━\n\n"
-                f"👤 کاربر: `{target_user.account_name}`\n\n"
+                f"👤 کاربر: `{_target_user_display_name(target_user)}`\n\n"
                 f"📊 قابلیت بلاک: {'✅ فعال' if target_user.can_block_users else '❌ غیرفعال'}\n"
                 f"🔢 سقف بلاک: {target_user.max_blocked_users} نفر\n"
             )

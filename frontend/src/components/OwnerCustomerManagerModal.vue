@@ -205,10 +205,6 @@ function formatCountdown(value: string | null) {
   return clock
 }
 
-function getRelationAccountName(relation: CustomerRelation) {
-  return relation.customer_account_name || relation.invitation_account_name || 'unknown'
-}
-
 function getCustomerTierLabel(tier: CustomerTier) {
   return tier === 'tier2' ? 'سطح 2' : 'سطح 1'
 }
@@ -286,7 +282,7 @@ function getRelationStateText(relation: CustomerRelation) {
   }
 
   if (relation.status === 'active') {
-    return `این مشتری با @${getRelationAccountName(relation)} در ${getCustomerTierLabel(relation.customer_tier)} فعال است.`
+    return `این مشتری در ${getCustomerTierLabel(relation.customer_tier)} فعال است.`
   }
 
   if (relation.status === 'expired') {
@@ -955,7 +951,7 @@ onBeforeUnmount(() => {
                   <button type="button" class="ghost-btn ghost-btn--inline" @click="backToCustomerList">بازگشت به لیست</button>
                   <div>
                     <h4>{{ selectedRelation.management_name }}</h4>
-                    <p>@{{ getRelationAccountName(selectedRelation) }}</p>
+                    <p>{{ getRelationStateText(selectedRelation) }}</p>
                   </div>
                 </div>
 
@@ -1216,7 +1212,6 @@ onBeforeUnmount(() => {
                   >
                     <div class="pending-invitation-main">
                       <strong>{{ relation.management_name }}</strong>
-                      <span>@{{ getRelationAccountName(relation) }}</span>
                       <p>{{ getRelationStateText(relation) }}</p>
                     </div>
                     <div class="pending-invitation-actions">
@@ -1241,7 +1236,6 @@ onBeforeUnmount(() => {
                       <div class="customer-card-title-row">
                         <div class="customer-identity-block">
                           <h5>{{ relation.management_name }}</h5>
-                          <p class="customer-account-name">@{{ getRelationAccountName(relation) }}</p>
                         </div>
                         <div class="customer-card-head-side">
                           <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>

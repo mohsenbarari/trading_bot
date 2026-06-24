@@ -30,11 +30,18 @@ def make_user(
     )
 
 
-def make_relation(*, customer_user_id: int, owner_user_id: int, tier: CustomerTier):
+def make_relation(
+    *,
+    customer_user_id: int,
+    owner_user_id: int,
+    tier: CustomerTier,
+    management_name: str | None = None,
+):
     return SimpleNamespace(
         customer_user_id=customer_user_id,
         owner_user_id=owner_user_id,
         customer_tier=tier,
+        management_name=management_name,
         deleted_at=None,
     )
 
@@ -187,6 +194,33 @@ class TradeNotificationAudienceServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("طرف معامله: owner", customer_recipient.webapp_message)
         self.assertIn("<b>", channel(customer_recipient, "telegram").message)
         self.assertIn("طرف معامله: owner", channel(customer_recipient, "telegram").message)
+
+    async def test_customer_counterparty_uses_management_name_in_messages(self):
+        owner = make_user(10, account_name="owner", telegram_id=9010)
+        customer = make_user(30, account_name="customer_0937", telegram_id=9030)
+        responder = make_user(40, account_name="buyer", telegram_id=9040)
+        trade = make_trade(offer_user=customer, responder_user=responder)
+        relations = {
+            customer.id: make_relation(
+                customer_user_id=customer.id,
+                owner_user_id=owner.id,
+                tier=CustomerTier.TIER_1,
+                management_name="مشتری بازار تهران",
+            )
+        }
+
+        built = await self.build_audience(
+            trade,
+            audience_side_effect=[[responder.id], [customer.id]],
+            users=[owner, customer, responder],
+            relations=relations,
+        )
+
+        responder_recipient = built.result.recipients[0]
+        self.assertIn("طرف معامله: مشتری بازار تهران", responder_recipient.webapp_message)
+        self.assertIn("طرف معامله: مشتری بازار تهران", channel(responder_recipient, "telegram").message)
+        self.assertNotIn("customer_0937", responder_recipient.webapp_message)
+        self.assertNotIn("customer_0937", channel(responder_recipient, "telegram").message)
 
     async def test_tier2_customer_is_webapp_only_and_owner_counterparty_is_visible(self):
         owner = make_user(10, account_name="owner", telegram_id=9010)

@@ -341,7 +341,7 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
                 ),
             },
         )
-        self.assertEqual(relation_aware_response.offer_user_name, "حسابدار فروش")
+        self.assertEqual(relation_aware_response.offer_user_name, "مشتری مستقیم")
         self.assertEqual(relation_aware_response.responder_user_name, "حسابدار خرید")
         self.assertEqual(relation_aware_response.offer_user_profile_user_id, 71)
         self.assertEqual(relation_aware_response.offer_user_profile_account_name, "owner-71")

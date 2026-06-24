@@ -15,6 +15,7 @@ type ForwardUser = {
   chat_role_label?: string | null
   chat_accountant_owner_name?: string | null
   chat_accountant_owner_label?: string | null
+  customer_management_name?: string | null
   highlight_accountant_relation_display_name?: string | null
 }
 
@@ -68,6 +69,8 @@ function buildSearchText(parts: Array<string | null | undefined>) {
 }
 
 function getForwardUserTitle(user: ForwardUser) {
+  const customerName = (user.customer_management_name || '').trim()
+  if (customerName) return customerName
   const fullName = (user.full_name || '').trim()
   return fullName || user.account_name
 }
@@ -217,7 +220,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
 
   const remainingUsers = allUsers.value
     .filter(user => !seenIds.has(user.id))
-    .sort((left, right) => left.account_name.localeCompare(right.account_name, 'fa'))
+    .sort((left, right) => getForwardUserTitle(left).localeCompare(getForwardUserTitle(right), 'fa'))
 
   remainingUsers.forEach((user) => {
     const title = getForwardUserTitle(user)
@@ -229,7 +232,7 @@ const orderedTargets = computed<ForwardTargetCandidate[]>(() => {
       subtitle: user.mobile_number,
       isConversation: false,
       conversationIndex: null,
-      searchText: buildSearchText([title, user.account_name, user.mobile_number]),
+      searchText: buildSearchText([title, user.customer_management_name, user.account_name, user.mobile_number]),
       chatRoleKind: user.chat_role_kind ?? null,
       chatRoleLabel: user.chat_role_label ?? null,
       accountantOwnerLabel: user.chat_accountant_owner_label ?? null,

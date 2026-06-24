@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.services.accountant_chat_contract import AccountantChatIdentity, load_accountant_chat_identity_map
 from core.services.accountant_relation_service import build_trade_notification_audience_user_ids
 from core.services.bot_access_policy import evaluate_bot_access
+from core.services.customer_relation_service import customer_management_name_for_user_id
 from core.utils import to_jalali_str, unique_user_ids
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.trade import Trade, TradeStatus, TradeType
@@ -192,13 +193,15 @@ def _build_trade_participant_payload(
     user: object | None,
     user_id: object,
     identity_map: Mapping[int, AccountantChatIdentity] | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
 ) -> dict[str, object | None]:
     normalized_user_id = _coerce_user_id(user_id)
     fallback_name = getattr(user, "account_name", None)
+    customer_display_name = customer_management_name_for_user_id(normalized_user_id, customer_relation_map)
 
     payload: dict[str, object | None] = {
         f"{field_prefix}_id": normalized_user_id,
-        f"{field_prefix}_name": fallback_name,
+        f"{field_prefix}_name": customer_display_name or fallback_name,
         f"{field_prefix}_profile_user_id": normalized_user_id,
         f"{field_prefix}_profile_account_name": fallback_name,
         f"{field_prefix}_resolved_from_accountant_id": None,
@@ -212,7 +215,11 @@ def _build_trade_participant_payload(
     if identity is None:
         return payload
 
-    payload[f"{field_prefix}_name"] = getattr(identity, "display_name", None) or fallback_name
+    payload[f"{field_prefix}_name"] = (
+        customer_display_name
+        or getattr(identity, "display_name", None)
+        or fallback_name
+    )
     payload[f"{field_prefix}_profile_user_id"] = (
         _coerce_user_id(getattr(identity, "profile_user_id", None))
         or normalized_user_id
@@ -552,12 +559,14 @@ async def build_trade_completion_notification_audience(
         user=offer_user,
         user_id=offer_user_id,
         identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
         user=responder_user,
         user_id=responder_user_id,
         identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
     )
 
     responder_emoji, responder_label, offer_emoji, offer_label = _trade_labels(trade)

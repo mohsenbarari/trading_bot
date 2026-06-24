@@ -38,6 +38,7 @@ from core.services.trade_history_export_service import (
 )
 from core.services.customer_relation_service import (
     apply_customer_commission,
+    customer_management_name_for_user_id,
     get_active_customer_relation_for_customer,
 )
 from core.services.trade_service import (
@@ -914,13 +915,15 @@ def _build_trade_participant_payload(
     user: object | None,
     user_id: object,
     identity_map: Mapping[int, AccountantChatIdentity] | None,
+    customer_relation_map: Mapping[int, CustomerRelation | object] | None = None,
 ) -> dict[str, object | None]:
     normalized_user_id = _coerce_trade_user_id(user_id)
     fallback_name = getattr(user, "account_name", None)
+    customer_display_name = customer_management_name_for_user_id(normalized_user_id, customer_relation_map)
 
     payload: dict[str, object | None] = {
         f"{field_prefix}_id": normalized_user_id,
-        f"{field_prefix}_name": fallback_name,
+        f"{field_prefix}_name": customer_display_name or fallback_name,
         f"{field_prefix}_profile_user_id": normalized_user_id,
         f"{field_prefix}_profile_account_name": fallback_name,
         f"{field_prefix}_resolved_from_accountant_id": None,
@@ -934,7 +937,11 @@ def _build_trade_participant_payload(
     if identity is None:
         return payload
 
-    payload[f"{field_prefix}_name"] = getattr(identity, "display_name", None) or fallback_name
+    payload[f"{field_prefix}_name"] = (
+        customer_display_name
+        or getattr(identity, "display_name", None)
+        or fallback_name
+    )
     payload[f"{field_prefix}_profile_user_id"] = (
         _coerce_trade_user_id(getattr(identity, "profile_user_id", None))
         or normalized_user_id
@@ -1017,12 +1024,14 @@ def _build_trade_created_event_payload(
         user=offer_user,
         user_id=offer_user_id,
         identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
         user=responder_user,
         user_id=responder_user_id,
         identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
     )
     payload: dict[str, object | None] = {
         "id": trade_id,
@@ -1528,12 +1537,14 @@ def trade_to_response(
         user=trade.offer_user,
         user_id=trade.offer_user_id,
         identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
         user=trade.responder_user,
         user_id=trade.responder_user_id,
         identity_map=identity_map,
+        customer_relation_map=customer_relation_map,
     )
     trade_path_payload = _build_trade_path_payload(
         offer_user_id=trade.offer_user_id,
@@ -2936,12 +2947,14 @@ async def _execute_trade_authoritatively(
         user=response_offer_user,
         user_id=getattr(response_trade, "offer_user_id", None) or created_trade.offer_user_id,
         identity_map=participant_identity_map,
+        customer_relation_map=participant_customer_relation_map,
     )
     responder_user_payload = _build_trade_participant_payload(
         "responder_user",
         user=response_responder_user,
         user_id=getattr(response_trade, "responder_user_id", None) or created_trade.responder_user_id,
         identity_map=participant_identity_map,
+        customer_relation_map=participant_customer_relation_map,
     )
     offer_user_display_name = offer_user_payload.get("offer_user_name") or "نامشخص"
     responder_user_display_name = responder_user_payload.get("responder_user_name") or "نامشخص"
@@ -3081,12 +3094,14 @@ async def _execute_trade_authoritatively(
                 user=leg_offer_user,
                 user_id=getattr(leg_trade_obj, "offer_user_id", None),
                 identity_map=participant_identity_map,
+                customer_relation_map=participant_customer_relation_map,
             )
             leg_responder_payload = _build_trade_participant_payload(
                 "responder_user",
                 user=leg_responder_user,
                 user_id=getattr(leg_trade_obj, "responder_user_id", None),
                 identity_map=participant_identity_map,
+                customer_relation_map=participant_customer_relation_map,
             )
             leg_trade_path_summary = _build_trade_path_payload(
                 offer_user_id=getattr(leg_trade_obj, "offer_user_id", None),

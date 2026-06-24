@@ -669,6 +669,36 @@ class CustomerRelationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(owner_view.customer_management_name, "مشتری ویژه")
         self.assertEqual(owner_view.customer_tier, "tier1")
 
+    def test_customer_management_name_for_user_id_uses_active_management_name_only(self):
+        active_relation = SimpleNamespace(
+            management_name=" مشتری بازار ",
+            status=CustomerRelationStatus.ACTIVE,
+        )
+        inactive_relation = SimpleNamespace(
+            management_name="نباید نمایش داده شود",
+            status=CustomerRelationStatus.PENDING,
+        )
+
+        self.assertEqual(
+            customer_relation_service.customer_management_name_for_user_id(
+                "9",
+                {9: active_relation, 10: inactive_relation},
+            ),
+            "مشتری بازار",
+        )
+        self.assertIsNone(
+            customer_relation_service.customer_management_name_for_user_id(
+                10,
+                {9: active_relation, 10: inactive_relation},
+            )
+        )
+        self.assertIsNone(
+            customer_relation_service.customer_management_name_for_user_id(
+                "bad",
+                {9: active_relation},
+            )
+        )
+
     def test_build_customer_offer_read_model_projects_tier2_viewer_effective_price(self):
         viewer_relation = SimpleNamespace(
             customer_tier="tier2",
