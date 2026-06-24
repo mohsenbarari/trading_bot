@@ -1163,6 +1163,115 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 time_expiry_result={"status": "success"},
             )
 
+    def test_dual_role_final_report_accepts_read_during_write_results(self):
+        prepare = {
+            "run_id": "run-5e",
+            "prefix": "probe-",
+            "topology": "single-db staging role-worker smoke",
+            "telegram_gateway_boundary": "mock",
+            "scenario": {
+                "name": "read_during_write",
+                "expected_winner_count": 1,
+                "hot_offer_requests": 12,
+                "idempotency_mode": "unique",
+            },
+            "offer": {
+                "id": 42,
+                "owner_user_id": 7,
+            },
+        }
+        merged_result = {
+            "schema_version": worker.DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
+            "summary": {
+                "total": 12,
+                "success": 1,
+                "rejected": 11,
+                "error": 0,
+                "business_request_rps": 20.0,
+                "telegram_update_rps": 0.0,
+                "latency": {},
+                "surfaces": {},
+            },
+            "roles": {},
+            "role_start_skew": {},
+            "attempts": [],
+        }
+        persistence = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=20,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=1,
+            completed_trade_quantity=20,
+            completed_ledger_count=1,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+        read_results = [
+            {
+                "schema_version": worker.READ_DURING_WRITE_RESULT_SCHEMA_VERSION,
+                "status": "ok",
+                "read_surface": "telegram",
+                "summary": {
+                    "total": 12,
+                    "success": 12,
+                    "error": 0,
+                    "operation_counts": {"telegram_market_view": 12},
+                },
+            },
+            {
+                "schema_version": worker.READ_DURING_WRITE_RESULT_SCHEMA_VERSION,
+                "status": "ok",
+                "read_surface": "webapp",
+                "summary": {
+                    "total": 12,
+                    "success": 12,
+                    "error": 0,
+                    "operation_counts": {
+                        "active_offers": 4,
+                        "public_detail": 4,
+                        "market_history": 4,
+                    },
+                },
+            },
+        ]
+
+        report = worker.build_dual_role_final_report(
+            prepare=prepare,
+            merged_result=merged_result,
+            persistence=persistence,
+            read_during_write_results=read_results,
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["correctness_failures"], [])
+        self.assertEqual(
+            len(report["reports"]["read_during_write"]["read_during_write_results"]),
+            2,
+        )
+
+    def test_read_during_write_acceptance_fails_closed_on_missing_read_surface(self):
+        with self.assertRaises(worker.TradingProbeError):
+            worker.assert_read_during_write_acceptance(
+                read_results=[
+                    {
+                        "status": "ok",
+                        "read_surface": "webapp",
+                        "summary": {
+                            "total": 12,
+                            "error": 0,
+                            "operation_counts": {
+                                "active_offers": 4,
+                                "public_detail": 4,
+                                "market_history": 4,
+                            },
+                        },
+                    }
+                ],
+                expected_read_count=12,
+            )
+
     def test_dual_role_final_report_fails_closed_on_request_errors(self):
         prepare = {
             "run_id": "run-6",

@@ -17,6 +17,7 @@ import math
 import os
 import sys
 import time
+from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -100,6 +101,7 @@ DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
 DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
 MANUAL_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "manual_expiry_trade_race_result_v1"
 TIME_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "time_expiry_trade_race_result_v1"
+READ_DURING_WRITE_RESULT_SCHEMA_VERSION = "read_during_write_result_v1"
 NEGATIVE_GUARD_RESULT_SCHEMA_VERSION = "production_negative_guard_result_v1"
 TIME_EXPIRY_RACE_DELAY_SECONDS = 0.3
 TIME_EXPIRY_RACE_STALE_SKEW_SECONDS = 0.05
@@ -2222,6 +2224,15 @@ async def load_user(session, user_id: int) -> User:
     return user
 
 
+async def load_user_ref(user_id: int) -> LoadUserRef:
+    async with AsyncSessionLocal() as db:
+        user = await load_user(db, user_id)
+        telegram_id = getattr(user, "telegram_id", None)
+        if telegram_id is None:
+            raise TradingProbeError(f"synthetic user {user_id} has no telegram_id")
+        return LoadUserRef(user_id=int(user_id), telegram_id=int(telegram_id))
+
+
 async def create_offer_for_user(
     *,
     user_id: int,
@@ -4179,6 +4190,45 @@ def assert_time_expiry_trade_race_acceptance(
         )
 
 
+def assert_read_during_write_acceptance(
+    *,
+    read_results: list[Mapping[str, Any]],
+    expected_read_count: int,
+) -> None:
+    if not read_results:
+        raise TradingProbeError("read-during-write expected read result artifacts")
+    observed_surfaces = {str(result.get("read_surface") or "") for result in read_results}
+    missing_surfaces = {"telegram", "webapp"} - observed_surfaces
+    if missing_surfaces:
+        raise TradingProbeError(f"read-during-write missing read surfaces: {sorted(missing_surfaces)}")
+    for result in read_results:
+        surface = str(result.get("read_surface") or "unknown")
+        status_value = str(result.get("status") or "unknown")
+        if status_value != "ok":
+            raise TradingProbeError(f"read-during-write {surface} reader failed with status={status_value}")
+        summary = _require_mapping(result.get("summary"), f"read-during-write {surface} summary")
+        total = int(summary.get("total") or 0)
+        errors = int(summary.get("error") or 0)
+        if total < expected_read_count:
+            raise TradingProbeError(
+                f"read-during-write {surface} expected at least {expected_read_count} reads, got {total}"
+            )
+        if errors:
+            raise TradingProbeError(f"read-during-write {surface} expected zero read errors, got {errors}")
+        operation_counts = dict(summary.get("operation_counts") or {})
+        if surface == "webapp":
+            required = {"active_offers", "public_detail", "market_history"}
+        elif surface == "telegram":
+            required = {"telegram_market_view"}
+        else:
+            raise TradingProbeError(f"read-during-write got unsupported surface={surface!r}")
+        missing_operations = sorted(operation for operation in required if int(operation_counts.get(operation) or 0) <= 0)
+        if missing_operations:
+            raise TradingProbeError(
+                f"read-during-write {surface} did not exercise operations: {missing_operations}"
+            )
+
+
 async def run_duplicate_replay_probe(
     *,
     prefix: str,
@@ -5036,6 +5086,143 @@ async def run_time_expiry_race_command(args: argparse.Namespace) -> int:
     return 0 if status in {"success", "rejected"} else 1
 
 
+async def run_read_during_write_command(args: argparse.Namespace) -> int:
+    prepare = read_json_artifact(Path(args.prepare))
+    prefix = str(prepare.get("prefix") or "")
+    read_surface = str(args.read_surface or "").strip().lower()
+    role = {"telegram": "telegram_foreign", "webapp": "webapp_iran"}.get(read_surface)
+    if role is None:
+        raise TradingProbeError(f"unsupported read-during-write surface={read_surface!r}")
+    assert_load_runner_runtime_surface(
+        role,
+        allow_production=bool(args.allow_production_execution),
+        prefix=prefix,
+    )
+
+    scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
+    offer = _require_mapping(prepare.get("offer"), "prepare offer")
+    users_payload = _require_mapping(prepare.get("users"), "prepare users")
+    barrier_epoch_value = prepare.get("barrier_epoch")
+    if barrier_epoch_value is None:
+        raise TradingProbeError("read-during-write requires barrier_epoch in prepare artifact")
+    barrier_epoch = float(barrier_epoch_value)
+    if not math.isfinite(barrier_epoch):
+        raise TradingProbeError(f"read-during-write got invalid barrier_epoch={barrier_epoch_value!r}")
+    target_rps = float(scenario.get("target_rps") or 1.0)
+    if target_rps <= 0:
+        raise TradingProbeError(f"read-during-write got invalid target_rps={target_rps!r}")
+    total_reads = int(scenario.get("hot_offer_requests") or 0)
+    if total_reads <= 0:
+        raise TradingProbeError("read-during-write requires positive hot_offer_requests")
+    owner_user_id = int(users_payload.get("owner_user_id") or offer.get("owner_user_id") or 0)
+    reader_user_ids = [
+        int(user_id)
+        for user_id in (users_payload.get("user_ids") or [])
+        if int(user_id) != owner_user_id
+    ]
+    if not reader_user_ids:
+        raise TradingProbeError("read-during-write requires at least one non-owner reader")
+    offer_public_id = str(offer.get("public_id") or "").strip()
+    if read_surface == "webapp" and not offer_public_id:
+        raise TradingProbeError("read-during-write WebApp detail read requires offer public id")
+
+    await warm_load_runner_dependencies(db_connections=min(total_reads, 12))
+    telegram_readers: list[LoadUserRef] = []
+    harness: AiogramDispatcherHarness | None = None
+    if read_surface == "telegram":
+        telegram_readers = [await load_user_ref(user_id) for user_id in reader_user_ids]
+        harness = AiogramDispatcherHarness()
+
+    start_delay = barrier_epoch - time.time()
+    if start_delay > 0:
+        await asyncio.sleep(start_delay)
+    started_epoch = time.time()
+    started_monotonic = time.perf_counter()
+
+    async def _read_attempt(index: int) -> dict[str, Any]:
+        scheduled_epoch = barrier_epoch + (index / target_rps)
+        scheduled_delay = scheduled_epoch - time.time()
+        if scheduled_delay > 0:
+            await asyncio.sleep(scheduled_delay)
+        attempt_started = time.perf_counter()
+        operation = "telegram_market_view"
+        status_value = "error"
+        detail = ""
+        row_count: int | None = None
+        reader_user_id = reader_user_ids[index % len(reader_user_ids)]
+        try:
+            if read_surface == "telegram":
+                if harness is None:
+                    raise TradingProbeError("telegram read harness was not initialized")
+                reader = telegram_readers[index % len(telegram_readers)]
+                status_value = await execute_bot_market_view_with_dispatcher(harness=harness, user=reader)
+                reader_user_id = reader.user_id
+            else:
+                operation = ("active_offers", "public_detail", "market_history")[index % 3]
+                if operation == "active_offers":
+                    row_count = await list_active_offers_for_user(user_id=reader_user_id)
+                elif operation == "public_detail":
+                    row_count = await load_public_offer_detail_for_user(
+                        user_id=reader_user_id,
+                        offer_public_id=offer_public_id,
+                    )
+                else:
+                    row_count = await list_market_history_for_user(user_id=reader_user_id)
+                status_value = "success"
+        except Exception as exc:
+            status_value = "error"
+            detail = f"{type(exc).__name__}: {exc}"
+        return {
+            "index": index,
+            "read_surface": read_surface,
+            "operation": operation,
+            "reader_user_id": reader_user_id,
+            "status": status_value,
+            "detail": detail,
+            "row_count": row_count,
+            "latency_ms": round((time.perf_counter() - attempt_started) * 1000.0, 3),
+            "monotonic_timestamp": round(time.perf_counter(), 6),
+        }
+
+    async with patched_external_side_effects():
+        try:
+            attempts = await asyncio.gather(*[_read_attempt(index) for index in range(total_reads)])
+        finally:
+            if harness is not None:
+                await harness.close()
+
+    elapsed_seconds = max(time.perf_counter() - started_monotonic, 0.000001)
+    status_counts = Counter(str(attempt.get("status") or "unknown") for attempt in attempts)
+    operation_counts = Counter(str(attempt.get("operation") or "unknown") for attempt in attempts)
+    error_details = sorted({str(attempt.get("detail") or "") for attempt in attempts if attempt.get("status") == "error"})
+    error_details = [detail for detail in error_details if detail]
+    payload = {
+        "schema_version": READ_DURING_WRITE_RESULT_SCHEMA_VERSION,
+        "status": "ok" if int(status_counts.get("error") or 0) == 0 else "failed",
+        "prefix": prefix,
+        "read_surface": read_surface,
+        "offer_id": int(offer["id"]),
+        "offer_public_id": offer_public_id or None,
+        "barrier_epoch": round(barrier_epoch, 6),
+        "started_epoch": round(started_epoch, 6),
+        "elapsed_seconds": round(elapsed_seconds, 6),
+        "summary": {
+            "total": len(attempts),
+            "success": int(status_counts.get("success") or 0),
+            "rejected": int(status_counts.get("rejected") or 0),
+            "error": int(status_counts.get("error") or 0),
+            "read_rps": round(len(attempts) / elapsed_seconds, 3),
+            "operation_counts": dict(sorted(operation_counts.items())),
+            "error_details": error_details,
+        },
+        "attempts": attempts,
+    }
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0 if payload["status"] == "ok" else 1
+
+
 async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
     prepare = read_json_artifact(Path(args.prepare))
     merged_result = read_json_artifact(Path(args.merged_result))
@@ -5043,12 +5230,17 @@ async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
     persistence = await inspect_hot_offer_persistence(int(offer["id"]))
     manual_expiry_result = read_json_artifact(Path(args.manual_expiry_result)) if args.manual_expiry_result else None
     time_expiry_result = read_json_artifact(Path(args.time_expiry_result)) if args.time_expiry_result else None
+    read_during_write_results = [
+        read_json_artifact(Path(path))
+        for path in (args.read_during_write_result or [])
+    ]
     report = build_dual_role_final_report(
         prepare=prepare,
         merged_result=merged_result,
         persistence=persistence,
         manual_expiry_result=manual_expiry_result,
         time_expiry_result=time_expiry_result,
+        read_during_write_results=read_during_write_results,
     )
     if args.output:
         write_json_artifact(Path(args.output), report)
@@ -5307,6 +5499,7 @@ def build_dual_role_final_report(
     persistence: HotOfferPersistenceSnapshot,
     manual_expiry_result: Mapping[str, Any] | None = None,
     time_expiry_result: Mapping[str, Any] | None = None,
+    read_during_write_results: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
     scenario_name = str(scenario.get("name") or "hot_offer")
@@ -5338,6 +5531,7 @@ def build_dual_role_final_report(
                 "attempt_error_details": summarize_attempt_error_details(merged_result),
                 "manual_expiry_result": dict(manual_expiry_result or {}),
                 "time_expiry_result": dict(time_expiry_result or {}),
+                "read_during_write_results": [dict(result) for result in (read_during_write_results or [])],
             }
         },
     }
@@ -5357,6 +5551,24 @@ def build_dual_role_final_report(
                 persistence=persistence,
                 expected_winner_count=expected_winner_count,
                 time_expiry_result=time_expiry_result,
+            )
+        elif scenario_name == "read_during_write":
+            assert_hot_offer_contention_acceptance(
+                persisted_trade_count=persistence.persisted_trade_count,
+                response_success_count=int(summary.get("success") or 0),
+                error_count=int(summary.get("error") or 0),
+                remaining_quantity=persistence.remaining_quantity,
+                status=persistence.offer_status,
+                expected_winner_count=expected_winner_count,
+                original_quantity=persistence.original_quantity,
+                completed_trade_quantity=persistence.completed_trade_quantity,
+                completed_ledger_count=persistence.completed_ledger_count,
+                trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
+                failed_internal_ledger_count=persistence.failed_internal_ledger_count,
+            )
+            assert_read_during_write_acceptance(
+                read_results=list(read_during_write_results or []),
+                expected_read_count=int(scenario.get("hot_offer_requests") or 0),
             )
         elif idempotency_mode == "duplicate_replay":
             statuses = [
@@ -5611,6 +5823,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow this time expiry race worker inside production only with the production full-matrix confirmation env.",
     )
 
+    read_write_parser = subparsers.add_parser("run-read-during-write")
+    read_write_parser.add_argument("--prepare", required=True)
+    read_write_parser.add_argument("--read-surface", choices=("telegram", "webapp"), required=True)
+    read_write_parser.add_argument("--output")
+    read_write_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow this read-during-write worker inside production only with the production full-matrix confirmation env.",
+    )
+
     merge_parser = subparsers.add_parser("merge-role-results")
     merge_parser.add_argument("--output")
     merge_parser.add_argument("results", nargs="+")
@@ -5620,6 +5842,7 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser.add_argument("--merged-result", required=True)
     finalize_parser.add_argument("--manual-expiry-result")
     finalize_parser.add_argument("--time-expiry-result")
+    finalize_parser.add_argument("--read-during-write-result", action="append")
     finalize_parser.add_argument("--output")
     finalize_parser.add_argument("--check", action="store_true")
 
@@ -5688,6 +5911,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_manual_expiry_race_command(args)
     if args.command == "run-time-expiry-race":
         return await run_time_expiry_race_command(args)
+    if args.command == "run-read-during-write":
+        return await run_read_during_write_command(args)
     if args.command == "merge-role-results":
         return await merge_role_results_command(args)
     if args.command == "finalize-dual-role-run":

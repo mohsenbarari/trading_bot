@@ -241,16 +241,18 @@ Current execution-plan limitation:
 - implemented: time-expiry/trade-race stress paths for user-to-user stable
   scenarios across WebApp and Telegram request surfaces, WebApp and Telegram
   offer origins, both offer types, and all current offer shapes;
+- implemented: read-during-write stress paths for user-to-user stable scenarios
+  with concurrent trade writes plus WebApp/Iran and Telegram/foreign read
+  probes against the same offer;
 - implemented: ten Iran/WebApp negative-guard probes:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
   `inactive_requester`, `trading_restricted_user`,
   `watch_role_market_action`, and `accountant_market_action`;
-- current whole-manifest command-plannable count: `146` of `5555` scenarios;
+- current whole-manifest command-plannable count: `170` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
-  short/medium outage orchestration, read-during-write production driver,
-  targeted delivery join production driver, and the remaining negative business
-  guard production driver cases.
+  short/medium outage orchestration, targeted delivery join production driver,
+  and the remaining negative business guard production driver cases.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
@@ -261,17 +263,15 @@ Current driver-gap roadmap for the full manifest:
 
 1. `negative_guard_driver`: `589` gaps. Add explicit production reject-path
    probes and no-partial-mutation assertions.
-2. `specialized_user_stress_driver`: `24` gaps. Extend the dual-role worker for
-   read-during-write.
-3. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
+2. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
    to production-safe two-server execution.
-4. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
+3. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
    notifications after real trade evidence exists.
-5. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
+4. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
    staging/patched execution to production two-server execution.
-6. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
+5. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
    outage control with distinct expected outcomes.
-7. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
+6. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
    assertions for customer, owner, accountant, same-owner, and different-owner
    actor pairs.
 

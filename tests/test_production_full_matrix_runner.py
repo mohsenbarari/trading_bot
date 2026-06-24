@@ -196,9 +196,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 146)
-        self.assertEqual(execution_plan["driver_gap_count"], 5409)
-        self.assertEqual(summary["total"], 5409)
+        self.assertEqual(execution_plan["executable_count"], 170)
+        self.assertEqual(execution_plan["driver_gap_count"], 5385)
+        self.assertEqual(summary["total"], 5385)
         self.assertEqual(
             summary["by_section"],
             {
@@ -206,7 +206,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "market_behavior": 228,
                 "negative_business_guard": 13,
                 "production_base_trade_shape": 1200,
-                "production_stress_overlay": 3560,
+                "production_stress_overlay": 3536,
                 "targeted_trade_delivery_join": 204,
             },
         )
@@ -220,7 +220,6 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "market_behavior_driver": 228,
                 "negative_guard_driver": 589,
                 "outage_orchestration_driver": 320,
-                "specialized_user_stress_driver": 24,
                 "targeted_join_driver": 204,
             },
         )
@@ -231,7 +230,6 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ],
             [
                 ("negative_guard_driver", 589),
-                ("specialized_user_stress_driver", 24),
                 ("market_behavior_driver", 228),
                 ("delivery_contract_driver", 204),
                 ("targeted_join_driver", 204),
@@ -263,7 +261,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5409)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5385)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -441,6 +439,38 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("time_expire_trade_race", rendered)
         self.assertIn("run-time-expiry-race", rendered)
         self.assertIn("--time-expiry-result", rendered)
+
+    def test_execution_plan_builds_read_during_write_commands(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_stress_overlay",
+                "--manifest-id",
+                "PO-3025",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        groups_by_name = {group["name"]: group for group in scenario_plan["execution_groups"]}
+        command_names = [command["name"] for command in scenario_plan["commands"]]
+        self.assertEqual(scenario_plan["request_surface"], "webapp")
+        self.assertEqual(scenario_plan["total_requests"], 12)
+        self.assertIn("distribute_prepare_to_foreign", command_names)
+        self.assertIn("distribute_prepare_to_iran", command_names)
+        self.assertIn("run_read_during_write_telegram_foreign", command_names)
+        self.assertIn("run_read_during_write_webapp_iran", command_names)
+        self.assertEqual(len(groups_by_name["role_workers"]["commands"]), 4)
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("read_during_write", rendered)
+        self.assertIn("run-read-during-write", rendered)
+        self.assertIn("--read-during-write-result", rendered)
 
     def test_execution_plan_builds_negative_guard_commands_for_pre_ledger_case(self):
         plan = runner.build_plan(
