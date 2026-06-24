@@ -99,7 +99,9 @@ def _build_webapp_user_profile_url(user_id: int) -> str | None:
 
 
 def _target_user_display_name(target_user: User) -> str:
-    return user_display_name(target_user, target_user.mobile_number or f"User {target_user.id}")
+    target_user_id = getattr(target_user, "id", None)
+    fallback = getattr(target_user, "mobile_number", None) or f"User {target_user_id}"
+    return user_display_name(target_user, fallback)
 
 
 async def _show_user_delete_webapp_redirect(callback: types.CallbackQuery, target_user: User) -> None:
