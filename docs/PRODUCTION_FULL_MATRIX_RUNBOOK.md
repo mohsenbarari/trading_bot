@@ -244,12 +244,12 @@ Current execution-plan limitation:
 - implemented: read-during-write stress paths for user-to-user stable scenarios
   with concurrent trade writes plus WebApp/Iran and Telegram/foreign read
   probes against the same offer;
-- implemented: ten Iran/WebApp negative-guard probes:
+- implemented: eleven Iran/WebApp negative-guard probes:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
-  `inactive_requester`, `trading_restricted_user`,
+  `market_closed`, `inactive_requester`, `trading_restricted_user`,
   `watch_role_market_action`, and `accountant_market_action`;
-- current whole-manifest command-plannable count: `170` of `5555` scenarios;
+- current whole-manifest command-plannable count: `171` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
   short/medium outage orchestration, targeted delivery join production driver,
   and the remaining negative business guard production driver cases.
@@ -261,7 +261,7 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `negative_guard_driver`: `589` gaps. Add explicit production reject-path
+1. `negative_guard_driver`: `588` gaps. Add explicit production reject-path
    probes and no-partial-mutation assertions.
 2. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
    to production-safe two-server execution.

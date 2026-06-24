@@ -63,6 +63,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "already_completed_offer",
     "manually_expired_offer",
     "time_expired_offer",
+    "market_closed",
     "inactive_requester",
     "trading_restricted_user",
     "watch_role_market_action",

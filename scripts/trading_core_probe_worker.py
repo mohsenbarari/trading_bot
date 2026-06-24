@@ -119,6 +119,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "already_completed_offer",
     "manually_expired_offer",
     "time_expired_offer",
+    "market_closed",
     "inactive_requester",
     "trading_restricted_user",
     "watch_role_market_action",
@@ -1902,6 +1903,10 @@ async def fake_market_open(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
     return SimpleNamespace(is_open=True, next_transition_at=None)
 
 
+async def fake_market_closed(*_args: Any, **_kwargs: Any) -> SimpleNamespace:
+    return SimpleNamespace(is_open=False, reason="negative_guard_market_closed", next_transition_at=None)
+
+
 async def noop_async(*_args: Any, **_kwargs: Any) -> None:
     return None
 
@@ -3002,6 +3007,7 @@ def assert_negative_guard_evidence(
     evidence: Mapping[str, Any],
 ) -> list[str]:
     pre_ledger_cases = {
+        "market_closed",
         "inactive_requester",
         "trading_restricted_user",
         "watch_role_market_action",
@@ -3203,6 +3209,23 @@ async def run_negative_guard_case(
                         phase_details=details,
                     )
                 )
+                phase_details.append(details)
+            elif normalized_case_id == "market_closed":
+                details = {}
+                previous_evaluator = trades_router.evaluate_current_market_schedule
+                trades_router.evaluate_current_market_schedule = fake_market_closed
+                try:
+                    statuses.append(
+                        await execute_webapp_trade_for_user(
+                            user_id=responder_a.user_id,
+                            offer_id=offer_id,
+                            quantity=5,
+                            idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                            phase_details=details,
+                        )
+                    )
+                finally:
+                    trades_router.evaluate_current_market_schedule = previous_evaluator
                 phase_details.append(details)
             elif normalized_case_id == "inactive_requester":
                 await update_synthetic_user_for_negative_guard(

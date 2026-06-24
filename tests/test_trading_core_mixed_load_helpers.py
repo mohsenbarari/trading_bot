@@ -1387,6 +1387,23 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
+    def test_negative_guard_evidence_acceptance_for_market_closed_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="market_closed",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {
             "offer": {"remaining_quantity": 5},
