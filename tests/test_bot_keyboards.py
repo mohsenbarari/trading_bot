@@ -100,8 +100,9 @@ class BotKeyboardsTests(unittest.TestCase):
         self.assertEqual(max_block.inline_keyboard[-1][0].callback_data, 'user_block_settings_6')
 
     def test_miscellaneous_keyboards(self):
-        delete_confirm = keyboards.get_user_delete_confirm_keyboard(12)
-        self.assertEqual(delete_confirm.inline_keyboard[0][0].callback_data, 'user_delete_confirm_12')
+        delete_webapp = keyboards.get_user_delete_webapp_redirect_keyboard(12, 'https://app.example/admin/users/12')
+        self.assertEqual(delete_webapp.inline_keyboard[0][0].url, 'https://app.example/admin/users/12')
+        self.assertEqual(delete_webapp.inline_keyboard[1][0].callback_data, 'user_profile_12')
 
         mini_app = keyboards.get_mini_app_keyboard('https://mini-app')
         self.assertEqual(mini_app.inline_keyboard[0][0].web_app.url, 'https://mini-app')

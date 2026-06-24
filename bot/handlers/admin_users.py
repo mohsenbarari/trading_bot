@@ -12,9 +12,9 @@ import logging
 from datetime import datetime, timedelta
 
 from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
+from core.config import settings
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import get_user_account_status, transition_user_account_status
-from core.services.user_deletion_service import delete_user_account
 from models.user import User
 from core.enums import UserRole, NotificationLevel, NotificationCategory, UserAccountStatus
 from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str, create_user_notification, send_telegram_notification
@@ -24,7 +24,7 @@ from bot.keyboards import (
     get_users_list_inline_keyboard,
     get_user_profile_return_keyboard,
     get_user_role_edit_keyboard,
-    get_user_delete_confirm_keyboard,
+    get_user_delete_webapp_redirect_keyboard,
     get_user_settings_keyboard,
     get_block_duration_keyboard,
     get_limit_duration_keyboard,
@@ -84,6 +84,40 @@ def _can_manage_target_user(actor: Optional[User], target_user: Optional[User]) 
     if actor.role == UserRole.SUPER_ADMIN:
         return True
     return not _is_admin_role_value(target_user.role)
+
+
+def _build_webapp_user_profile_url(user_id: int) -> str | None:
+    frontend_url = (getattr(settings, "frontend_url", "") or "").strip().rstrip("/")
+    if not frontend_url:
+        return None
+    return f"{frontend_url}/admin/users/{user_id}"
+
+
+def _target_user_display_name(target_user: User) -> str:
+    return (
+        getattr(target_user, "account_name", None)
+        or getattr(target_user, "full_name", None)
+        or getattr(target_user, "mobile_number", None)
+        or f"User {target_user.id}"
+    )
+
+
+async def _show_user_delete_webapp_redirect(callback: types.CallbackQuery, target_user: User) -> None:
+    profile_url = _build_webapp_user_profile_url(target_user.id)
+    display_name = _target_user_display_name(target_user)
+    link_line = (
+        f"\n\nلینک مستقیم پروفایل:\n{profile_url}"
+        if profile_url
+        else "\n\nلینک وب اپ در تنظیمات سرور ثبت نشده است."
+    )
+    await callback.message.edit_text(
+        "حذف کاربر از داخل بات برای حفظ مرجعیت داده غیرفعال است.\n\n"
+        f"کاربر: {display_name}\n"
+        "برای حذف، پروفایل همین کاربر را در وب اپ باز کنید و حذف را از همانجا انجام دهید."
+        f"{link_line}",
+        reply_markup=get_user_delete_webapp_redirect_keyboard(target_user.id, profile_url),
+    )
+    await callback.answer()
 
 
 def _apply_user_management_scope(stmt, actor: Optional[User]):
@@ -864,14 +898,8 @@ async def handle_user_delete_request(callback: types.CallbackQuery, user: Option
     if not _can_manage_target_user(user, target_user):
         await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
         return
-    
-    await callback.message.edit_text(
-        "⚠️ **آیا از حذف این کاربر اطمینان دارید؟**\n\n"
-        "این عملیات غیرقابل بازگشت است.",
-        reply_markup=get_user_delete_confirm_keyboard(target_user_id),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
+
+    await _show_user_delete_webapp_redirect(callback, target_user)
 
 @router.callback_query(F.data.startswith("user_delete_confirm_"))
 async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Optional[User], state: FSMContext):
@@ -888,18 +916,7 @@ async def handle_user_delete_confirm(callback: types.CallbackQuery, user: Option
             if not _can_manage_target_user(user, target_user):
                 await callback.answer("❌ شما مجاز به مدیریت این کاربر نیستید.", show_alert=True)
                 return
-            if await _reject_users_callback_if_not_authoritative(callback, "delete"):
-                return
-            try:
-                await delete_user_account(session, target_user)
-            except Exception as e:
-                await callback.answer(f"❌ خطا در حذف کاربر: {str(e)}", show_alert=True)
-                return
-            
-            await callback.answer("✅ کاربر با موفقیت حذف شد.")
-            
-            # بازگشت به لیست کاربران
-            await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id, actor=user)
+            await _show_user_delete_webapp_redirect(callback, target_user)
         else:
             await callback.answer("❌ کاربر یافت نشد یا قبلاً حذف شده است.", show_alert=True)
             await show_users_list(callback.bot, callback.message.chat.id, state, page=1, message_id_to_edit=callback.message.message_id, actor=user)

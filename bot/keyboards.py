@@ -208,12 +208,13 @@ def get_user_role_edit_keyboard(user_id: int) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="🔙 انصراف", callback_data=f"user_profile_{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def get_user_delete_confirm_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(text="✅ بله، حذف شود", callback_data=f"user_delete_confirm_{user_id}")],
-        [InlineKeyboardButton(text="❌ خیر، انصراف", callback_data=f"user_profile_{user_id}")]
-    ]
+def get_user_delete_webapp_redirect_keyboard(user_id: int, profile_url: str | None) -> InlineKeyboardMarkup:
+    buttons = []
+    if profile_url:
+        buttons.append([InlineKeyboardButton(text="🌐 باز کردن پروفایل در وب اپ", url=profile_url)])
+    buttons.append([InlineKeyboardButton(text="🔙 بازگشت به پروفایل", callback_data=f"user_profile_{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 def get_mini_app_keyboard(mini_app_url: str) -> InlineKeyboardMarkup:
     buttons = [[InlineKeyboardButton(text="🔐 ورود به پنل امن تحت وب", web_app={"url": mini_app_url})]]
