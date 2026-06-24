@@ -169,7 +169,11 @@ class ChatRoomServiceGroupMemberTests(unittest.IsolatedAsyncioTestCase):
                             SimpleNamespace(id=30, account_name="outsider", full_name="Outsider User", mobile_number="0914", avatar_file_id=None),
                             SimpleNamespace(id=20, account_name="second-customer", full_name="Second Customer", mobile_number="0915", avatar_file_id=None),
                         ]
-                    )
+                    ),
+                    all=lambda: [
+                        (19, "Customer User"),
+                        (20, "Second Customer"),
+                    ],
                 )
             )
         )
