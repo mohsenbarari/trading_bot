@@ -1,6 +1,8 @@
 import importlib.util
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -103,6 +105,66 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(payload["status"], "blocked_not_implemented")
         self.assertTrue(payload["execute_requested"])
+
+    def test_preflight_mode_builds_non_mutating_command_plan(self):
+        plan = runner.build_plan(self.build_args("--mode", "preflight"))
+
+        self.assertEqual(plan["status"], "preflight_planned")
+        self.assertTrue(plan["execution_contract"]["preflight_driver_implemented"])
+        self.assertFalse(plan["execution_contract"]["production_drivers_implemented"])
+        self.assertGreaterEqual(len(plan["preflight"]["commands"]), 8)
+        self.assertTrue(all(not item["mutates_production"] for item in plan["preflight"]["commands"]))
+
+    def test_preflight_execute_requires_separate_confirmation(self):
+        with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(
+                [
+                    "--prefix",
+                    "PFM_20260624_180000_",
+                    "--mode",
+                    "preflight",
+                    "--execute",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_preflight_confirmation_missing")
+        self.assertEqual(payload["preflight"]["status"], "blocked_confirmation_missing")
+
+    def test_preflight_execute_runs_non_mutating_commands_when_confirmed(self):
+        def fake_run(args, **_kwargs):
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "preflight.json"
+            with patch.dict(
+                os.environ,
+                {runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE},
+                clear=True,
+            ), patch.object(runner.subprocess, "run", side_effect=fake_run) as run_mock, patch(
+                "sys.stdout", new_callable=io.StringIO
+            ) as stdout:
+                exit_code = runner.main(
+                    [
+                        "--prefix",
+                        "PFM_20260624_180000_",
+                        "--mode",
+                        "preflight",
+                        "--execute",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            full_payload = json.loads(output.read_text(encoding="utf-8"))
+            stdout_payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout_payload["status"], "preflight_passed")
+        self.assertEqual(full_payload["preflight"]["status"], "preflight_passed")
+        self.assertEqual(run_mock.call_count, len(full_payload["preflight"]["commands"]))
+        self.assertTrue(all(item["status"] == "passed" for item in full_payload["preflight"]["results"]))
 
     def test_cli_writes_output_and_prints_compact_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

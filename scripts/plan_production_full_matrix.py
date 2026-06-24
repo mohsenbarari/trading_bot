@@ -216,6 +216,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                             str(artifact_dir / "production-full-matrix-run-plan.json"),
                         ]
                     ),
+                    shell_join(
+                        [
+                            "python3",
+                            "scripts/run_production_full_matrix.py",
+                            "--manifest",
+                            str(artifact_dir / "production-full-matrix-manifest.json"),
+                            "--mode",
+                            "preflight",
+                            "--output",
+                            str(artifact_dir / "production-full-matrix-preflight-plan.json"),
+                        ]
+                    ),
                     f"{shell_join(['python3', 'scripts/run_bot_webapp_comprehensive_load_matrix.py', '--prefix', prefix, '--list'])} > {shlex.quote(str(artifact_dir / 'comprehensive-catalog.json'))}",
                     shell_join(
                         [

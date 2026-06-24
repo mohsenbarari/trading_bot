@@ -185,6 +185,17 @@ manifest, applies filters/sharding, and writes a run plan. It does not perform
 production writes yet. This fail-closed behavior is intentional until the
 two-server production drivers are implemented and separately reviewed.
 
+The same runner can execute a live non-mutating preflight with a separate
+confirmation variable:
+
+```bash
+PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM=run-production-preflight \
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode preflight --execute --output /tmp/production-full-matrix-preflight-result.json"
+```
+
+This preflight is allowed to read live service status and run cleanup dry-run
+queries. It must not create or mutate production market data.
+
 ## Matrix Evidence Required
 
 The production run should collect at least:
@@ -198,6 +209,7 @@ The production run should collect at least:
 - scenario catalog artifacts,
 - generated production full-matrix manifest artifact,
 - generated production full-matrix run-plan artifact,
+- generated production full-matrix preflight-plan artifact,
 - execution artifacts for offer creation, concurrent trade, non-concurrent
   trade, manual expiry, time expiry, history/detail views, and trade delivery,
 - post-run cleanup dry-run artifacts,

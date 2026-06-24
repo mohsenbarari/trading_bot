@@ -32,6 +32,24 @@ filter scenarios, shard large runs, and write a run plan. It does not execute
 production writes yet. Passing `--execute` currently returns a blocked status
 until production drivers are implemented explicitly.
 
+Build the live preflight plan without running commands:
+
+```bash
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode preflight --output /tmp/production-full-matrix-preflight-plan.json"
+```
+
+Run the live non-mutating preflight only after reviewing the plan:
+
+```bash
+PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM=run-production-preflight \
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode preflight --execute --output /tmp/production-full-matrix-preflight-result.json"
+```
+
+The preflight checks git state, manifest generation, local foreign compose
+status, Iran compose status, Iran public config, isolation status, and cleanup
+dry-run on both servers. It must not create users, offers, trades,
+notifications, receipts, or Telegram messages.
+
 ## Schema
 
 Top-level fields:
@@ -159,7 +177,8 @@ Current runner status:
   per-`manifest_id` run plan.
 - It supports section filters, scenario-id filters, policy filters, surface,
   outage, actor, offer-type, shape filters, and deterministic sharding.
-- It is safe to run for planning because `mutates_production=false`.
+- It can execute a live non-mutating preflight only with
+  `PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM=run-production-preflight`.
 - It intentionally fails closed for real execution until the per-section
   production drivers are implemented.
 
