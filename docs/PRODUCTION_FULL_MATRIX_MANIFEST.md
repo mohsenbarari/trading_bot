@@ -21,6 +21,17 @@ write anything except the optional output artifact.
 When `--output` is provided, stdout prints only a compact summary by default.
 Use `--print-full` only when the full JSON must be streamed to stdout.
 
+Build the runner plan from a generated manifest:
+
+```bash
+make production-full-matrix-run ARGS="--manifest /tmp/production-full-matrix-manifest.json --output /tmp/production-full-matrix-run-plan.json"
+```
+
+The current runner is fail-closed and manifest-driven. It can select sections,
+filter scenarios, shard large runs, and write a run plan. It does not execute
+production writes yet. Passing `--execute` currently returns a blocked status
+until production drivers are implemented explicitly.
+
 ## Schema
 
 Top-level fields:
@@ -141,6 +152,16 @@ A runner that consumes this manifest must:
 - stop on safety-contract violations;
 - run pre-run dry-run cleanup, post-run dry-run cleanup, hard-delete cleanup,
   and post-delete zero-count verification on both servers.
+
+Current runner status:
+
+- `scripts/run_production_full_matrix.py` consumes the manifest and emits a
+  per-`manifest_id` run plan.
+- It supports section filters, scenario-id filters, policy filters, surface,
+  outage, actor, offer-type, shape filters, and deterministic sharding.
+- It is safe to run for planning because `mutates_production=false`.
+- It intentionally fails closed for real execution until the per-section
+  production drivers are implemented.
 
 ## Completion Criteria
 

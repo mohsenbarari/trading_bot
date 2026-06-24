@@ -160,6 +160,8 @@ It includes:
   `docs/PRODUCTION_FULL_MATRIX_MANIFEST.md`,
 - the generated JSON manifest artifact from
   `scripts/build_production_full_matrix_manifest.py`,
+- the manifest-driven run-plan artifact from
+  `scripts/run_production_full_matrix.py`,
 - post-run dry-run and hard-delete cleanup commands for both servers,
 - isolation disable command.
 
@@ -178,6 +180,11 @@ runner. The runner must consume the manifest and report pass/fail/skip evidence
 by `manifest_id`; hand-built scenario lists are not enough for a production
 full matrix.
 
+Current runner status: `scripts/run_production_full_matrix.py` consumes the
+manifest, applies filters/sharding, and writes a run plan. It does not perform
+production writes yet. This fail-closed behavior is intentional until the
+two-server production drivers are implemented and separately reviewed.
+
 ## Matrix Evidence Required
 
 The production run should collect at least:
@@ -190,6 +197,7 @@ The production run should collect at least:
 - pre-run cleanup dry-run artifacts,
 - scenario catalog artifacts,
 - generated production full-matrix manifest artifact,
+- generated production full-matrix run-plan artifact,
 - execution artifacts for offer creation, concurrent trade, non-concurrent
   trade, manual expiry, time expiry, history/detail views, and trade delivery,
 - post-run cleanup dry-run artifacts,

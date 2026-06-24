@@ -206,6 +206,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                             str(artifact_dir / "production-full-matrix-manifest.json"),
                         ]
                     ),
+                    shell_join(
+                        [
+                            "python3",
+                            "scripts/run_production_full_matrix.py",
+                            "--manifest",
+                            str(artifact_dir / "production-full-matrix-manifest.json"),
+                            "--output",
+                            str(artifact_dir / "production-full-matrix-run-plan.json"),
+                        ]
+                    ),
                     f"{shell_join(['python3', 'scripts/run_bot_webapp_comprehensive_load_matrix.py', '--prefix', prefix, '--list'])} > {shlex.quote(str(artifact_dir / 'comprehensive-catalog.json'))}",
                     shell_join(
                         [
@@ -233,8 +243,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "name": "production_execution_gap",
                 "status": "requires_operator_or_future_executor",
                 "notes": [
-                    "The current one-shot 228-scenario runner is staging-bound.",
-                    "Production execution must use the isolated prefix, real two-server placement, and patched/fake Telegram transport for synthetic users.",
+                    "The manifest-driven runner currently emits a production run plan only.",
+                    "Production execution drivers must use the isolated prefix, real two-server placement, and patched/fake Telegram transport for synthetic users.",
                     "A small manual Telegram E2E pass with the real production bot/channel is still required after automated evidence.",
                 ],
             },
