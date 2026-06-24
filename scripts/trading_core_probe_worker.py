@@ -126,6 +126,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "watch_role_market_action",
     "accountant_market_action",
     "tier2_offer_creation",
+    "tier2_telegram_request",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -3091,6 +3092,7 @@ def assert_negative_guard_evidence(
         "watch_role_market_action",
         "accountant_market_action",
         "tier2_offer_creation",
+        "tier2_telegram_request",
     }
     expired_offer_cases = {
         "already_completed_offer",
@@ -3160,6 +3162,10 @@ def assert_negative_guard_evidence(
         created_offer_delta = int(creation.get("created_offer_delta") or 0)
         if created_offer_delta != 0:
             failures.append(f"{case_id} expected created_offer_delta=0, got {created_offer_delta}")
+    if case_id == "tier2_telegram_request":
+        callback = dict(evidence.get("bot_callback") or {})
+        if not str(callback.get("second_answer_text") or ""):
+            failures.append(f"{case_id} expected a bot callback denial answer")
     return failures
 
 
@@ -3420,6 +3426,41 @@ async def run_negative_guard_case(
                     "before_offer_count": before_offer_count,
                     "after_offer_count": after_offer_count,
                     "created_offer_delta": after_offer_count - before_offer_count,
+                }
+                phase_details.append(details)
+            elif normalized_case_id == "tier2_telegram_request":
+                relation_id = await create_active_customer_relation_for_negative_guard(
+                    owner_user_id=owner.user_id,
+                    customer_user_id=responder_a.user_id,
+                    prefix=prefix,
+                    tier=CustomerTier.TIER_2,
+                )
+                details = {"customer_relation_id": relation_id}
+                harness = AiogramDispatcherHarness()
+                try:
+                    statuses.append(
+                        await execute_bot_trade_with_dispatcher(
+                            harness=harness,
+                            spec=MixedLoadAttemptSpec(
+                                index=0,
+                                surface="telegram",
+                                user_id=responder_a.user_id,
+                                telegram_id=responder_a.telegram_id,
+                            ),
+                            offer=await load_offer_snapshot(offer_id),
+                            amount=5,
+                            prefix=f"{prefix}{normalized_case_id}-",
+                            phase_details=details,
+                        )
+                    )
+                finally:
+                    await harness.close()
+                extra_evidence["bot_callback"] = {
+                    "first_answer_text": details.get("first_answer_text"),
+                    "first_answer_alert": details.get("first_answer_alert"),
+                    "second_answer_text": details.get("second_answer_text"),
+                    "second_answer_alert": details.get("second_answer_alert"),
+                    "telegram_update_count": details.get("telegram_update_count"),
                 }
                 phase_details.append(details)
             else:

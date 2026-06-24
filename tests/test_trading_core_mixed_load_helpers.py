@@ -1467,6 +1467,46 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertTrue(any("expected created_offer_delta=0" in failure for failure in failures))
 
+    def test_negative_guard_evidence_acceptance_for_tier2_telegram_request_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+            "bot_callback": {
+                "second_answer_text": "⚠️ دسترسی این حساب به ربات تلگرام فعال نیست.",
+                "second_answer_alert": True,
+                "telegram_update_count": 2,
+            },
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="tier2_telegram_request",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_detects_missing_tier2_telegram_denial_answer(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+            "bot_callback": {},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="tier2_telegram_request",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertTrue(any("expected a bot callback denial answer" in failure for failure in failures))
+
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {
             "offer": {"remaining_quantity": 5},
