@@ -72,6 +72,9 @@ implemented production driver. The current implemented command plan covers:
 - `24` manual-expiry/trade-race scenarios across WebApp and Telegram request
   surfaces, WebApp and Telegram offer origins, both offer types, and all
   current offer shapes;
+- `24` time-expiry/trade-race scenarios across WebApp and Telegram request
+  surfaces, WebApp and Telegram offer origins, both offer types, and all
+  current offer shapes;
 - ten production negative-guard probes on Iran/WebApp:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
@@ -79,12 +82,13 @@ implemented production driver. The current implemented command plan covers:
   `watch_role_market_action`, and `accountant_market_action`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`122` command-plannable scenarios with these drivers:
+`146` command-plannable scenarios with these drivers:
 
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios;
 - `24` user-to-user stable duplicate replay stress overlay scenarios;
 - `24` user-to-user stable manual-expiry/trade-race stress overlay scenarios;
+- `24` user-to-user stable time-expiry/trade-race stress overlay scenarios;
 - `10` negative business-guard scenarios with explicit no-partial-mutation
   assertions.
 
@@ -114,7 +118,7 @@ selected scenario is command-plannable.
 Current full-manifest gap buckets are expected to be:
 
 - `negative_guard_driver`: `589`
-- `specialized_user_stress_driver`: `48`
+- `specialized_user_stress_driver`: `24`
 - `market_behavior_driver`: `228`
 - `delivery_contract_driver`: `204`
 - `targeted_join_driver`: `204`
@@ -268,6 +272,9 @@ Role-worker execution plan safety:
   real cross-server forwarding.
 - `run-manual-expiry-race` uses the same external-side-effect boundary while
   racing the authoritative manual-expire path against the role workers.
+- `run-time-expiry-race` uses the same external-side-effect boundary and a
+  prefix-scoped targeted time-limit expiry command; it must not run the broad
+  production stale-offer scanner.
 - `--patch-boundaries` is only for local/staging smoke runs and must not be used
   for real two-server production execution because it patches cross-server
   forwarding to local helpers.

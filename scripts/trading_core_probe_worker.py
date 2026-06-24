@@ -19,7 +19,7 @@ import sys
 import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping
@@ -99,7 +99,10 @@ DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
 DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
 DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
 MANUAL_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "manual_expiry_trade_race_result_v1"
+TIME_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "time_expiry_trade_race_result_v1"
 NEGATIVE_GUARD_RESULT_SCHEMA_VERSION = "production_negative_guard_result_v1"
+TIME_EXPIRY_RACE_DELAY_SECONDS = 0.3
+TIME_EXPIRY_RACE_STALE_SKEW_SECONDS = 0.05
 MIN_CLEANUP_PREFIX_LENGTH = 5
 PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
 PRODUCTION_CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
@@ -2358,6 +2361,29 @@ async def age_offer_for_time_expiry(*, offer_id: int, age_minutes: int = 10) -> 
         await db.commit()
 
 
+async def schedule_offer_for_time_expiry_race(*, offer_id: int, stale_epoch: float) -> dict[str, Any]:
+    from core.trading_settings import get_trading_settings_async
+
+    trading_settings = await get_trading_settings_async()
+    expiry_minutes = int(getattr(trading_settings, "offer_expiry_minutes", 0) or 0)
+    if expiry_minutes <= 0:
+        raise TradingProbeError("time-expiry race requires positive offer_expiry_minutes")
+    stale_at = datetime.fromtimestamp(float(stale_epoch), tz=timezone.utc).replace(tzinfo=None)
+    created_at = stale_at - timedelta(minutes=expiry_minutes)
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, offer_id)
+        if offer is None:
+            raise TradingProbeError(f"offer {offer_id} disappeared before time-expiry race scheduling")
+        offer.created_at = created_at
+        offer.updated_at = created_at
+        await db.commit()
+    return {
+        "offer_expiry_minutes": expiry_minutes,
+        "created_at": created_at.isoformat(),
+        "stale_epoch": round(float(stale_epoch), 6),
+    }
+
+
 async def update_synthetic_user_for_negative_guard(user_id: int, **values: Any) -> None:
     async with AsyncSessionLocal() as db:
         user = await db.get(User, user_id)
@@ -2371,6 +2397,55 @@ async def update_synthetic_user_for_negative_guard(user_id: int, **values: Any) 
 async def run_offer_expiry_cycle_for_server(server: str) -> int:
     with override_current_server(server):
         return int(await offer_expiry_worker.expire_stale_offers())
+
+
+async def expire_time_limit_offer_for_race(*, offer_id: int, stale_epoch: float) -> int:
+    from core.services.offer_expiry_service import (
+        OfferAlreadyInactiveError,
+        OfferExpiryCommand,
+        OfferExpiryReason,
+        OfferExpirySourceSurface,
+        OfferNotAuthoritativeError,
+        expire_offer_authoritatively,
+    )
+
+    stale_at = datetime.fromtimestamp(float(stale_epoch), tz=timezone.utc).replace(tzinfo=None)
+    for attempt in range(2):
+        async with AsyncSessionLocal() as db:
+            offer = await db.get(Offer, offer_id)
+            if offer is None:
+                raise TradingProbeError(f"time-expiry race offer {offer_id} disappeared")
+            if getattr(offer, "status", None) != OfferStatus.ACTIVE:
+                return 0
+            created_at = getattr(offer, "created_at", None)
+            if created_at is None:
+                return 0
+            normalized_created_at = created_at.astimezone(timezone.utc).replace(tzinfo=None) if created_at.tzinfo else created_at
+            if normalized_created_at > stale_at:
+                return 0
+            try:
+                await expire_offer_authoritatively(
+                    db,
+                    offer,
+                    OfferExpiryCommand(
+                        reason=OfferExpiryReason.TIME_LIMIT,
+                        source_surface=OfferExpirySourceSurface.SYSTEM,
+                        source_server=current_server(),
+                        expired_by_user_id=None,
+                        expired_by_actor_user_id=None,
+                    ),
+                    now=datetime.utcnow(),
+                )
+                return 1
+            except StaleDataError:
+                await db.rollback()
+                if attempt == 0:
+                    continue
+                return 0
+            except (OfferAlreadyInactiveError, OfferNotAuthoritativeError):
+                await db.rollback()
+                return 0
+    return 0
 
 
 async def execute_trade_for_user(
@@ -4048,6 +4123,62 @@ def assert_manual_expiry_trade_race_acceptance(
         )
 
 
+def assert_time_expiry_trade_race_acceptance(
+    *,
+    response_success_count: int,
+    error_count: int,
+    persistence: HotOfferPersistenceSnapshot,
+    expected_winner_count: int,
+    time_expiry_result: Mapping[str, Any] | None,
+) -> None:
+    if time_expiry_result is None:
+        raise TradingProbeError("time-expiry race expected time expiry result artifact")
+    expiry_status = str(time_expiry_result.get("status") or "unknown")
+    if expiry_status == "error":
+        detail = time_expiry_result.get("detail") or time_expiry_result.get("error_details") or "unknown"
+        raise TradingProbeError(f"time-expiry race expiry command errored: {detail}")
+    if expiry_status not in {"success", "rejected"}:
+        raise TradingProbeError(f"time-expiry race got invalid expiry status={expiry_status!r}")
+    if error_count:
+        raise TradingProbeError(f"time-expiry race expected zero internal request errors, got {error_count}")
+    if persistence.persisted_trade_count < 0 or persistence.persisted_trade_count > expected_winner_count:
+        raise TradingProbeError(
+            "time-expiry race persisted trade count outside expected winner bound: "
+            f"{persistence.persisted_trade_count} > {expected_winner_count}"
+        )
+    if response_success_count != persistence.persisted_trade_count:
+        raise TradingProbeError(
+            "time-expiry race successful responses do not match persisted trades: "
+            f"{response_success_count} != {persistence.persisted_trade_count}"
+        )
+    if persistence.remaining_quantity is None or persistence.remaining_quantity < 0:
+        raise TradingProbeError(f"time-expiry race produced invalid remaining_quantity={persistence.remaining_quantity}")
+    if persistence.completed_trade_quantity > persistence.original_quantity:
+        raise TradingProbeError(
+            f"time-expiry race over-traded quantity {persistence.completed_trade_quantity} > {persistence.original_quantity}"
+        )
+    expected_remaining = persistence.original_quantity - persistence.completed_trade_quantity
+    if persistence.remaining_quantity != expected_remaining:
+        raise TradingProbeError(
+            "time-expiry race quantity mismatch: "
+            f"remaining={persistence.remaining_quantity}, expected={expected_remaining}"
+        )
+    if persistence.offer_status not in {OfferStatus.COMPLETED.value, OfferStatus.EXPIRED.value}:
+        raise TradingProbeError(f"time-expiry race expected terminal completed/expired offer, got {persistence.offer_status}")
+    if persistence.offer_status == OfferStatus.COMPLETED.value and persistence.remaining_quantity != 0:
+        raise TradingProbeError(
+            f"time-expiry race completed offer still has remaining_quantity={persistence.remaining_quantity}"
+        )
+    if persistence.completed_ledger_count < persistence.persisted_trade_count:
+        raise TradingProbeError("time-expiry race has persisted trades without completed request ledger rows")
+    if persistence.trades_without_completed_ledger_count:
+        raise TradingProbeError("time-expiry race has persisted trades without successful request ledger rows")
+    if persistence.failed_internal_ledger_count:
+        raise TradingProbeError(
+            f"time-expiry race expected zero failed_internal ledgers, got {persistence.failed_internal_ledger_count}"
+        )
+
+
 async def run_duplicate_replay_probe(
     *,
     prefix: str,
@@ -4643,6 +4774,13 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     )
     require_terminal_completed = bool(args.require_terminal_completed)
     barrier_epoch = time.time() + args.barrier_delay_seconds
+    is_time_expiry_race = str(args.scenario_name or "") == "time_expire_trade_race"
+    time_expiry_epoch = None
+    time_expiry_stale_epoch = None
+    time_expiry_schedule = None
+    if is_time_expiry_race:
+        time_expiry_epoch = barrier_epoch + float(args.time_expiry_race_delay_seconds)
+        time_expiry_stale_epoch = time_expiry_epoch - float(args.time_expiry_race_stale_skew_seconds)
 
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=args.user_count)
@@ -4674,6 +4812,14 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
                 price=args.price,
                 is_wholesale=is_wholesale,
                 lot_sizes=lot_sizes,
+            )
+
+        if is_time_expiry_race:
+            if time_expiry_stale_epoch is None:
+                raise TradingProbeError("time-expiry race scheduling failed to compute stale epoch")
+            time_expiry_schedule = await schedule_offer_for_time_expiry_race(
+                offer_id=offer_id,
+                stale_epoch=time_expiry_stale_epoch,
             )
 
     offer = await load_offer_snapshot(offer_id)
@@ -4719,6 +4865,9 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         request_surface=args.request_surface,
         idempotency_mode=args.idempotency_mode,
         barrier_epoch=barrier_epoch,
+        time_expiry_epoch=time_expiry_epoch,
+        time_expiry_stale_epoch=time_expiry_stale_epoch,
+        time_expiry_schedule=time_expiry_schedule,
         plan_result=plan_result,
     )
     prepare_path = output_dir / "prepare.json"
@@ -4820,17 +4969,86 @@ async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
     return 0 if status in {"success", "rejected"} else 1
 
 
+async def run_time_expiry_race_command(args: argparse.Namespace) -> int:
+    prepare = read_json_artifact(Path(args.prepare))
+    prefix = str(prepare.get("prefix") or "")
+    scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
+    offer = _require_mapping(prepare.get("offer"), "prepare offer")
+    offer_origin = str(scenario.get("offer_origin") or "").strip().lower()
+    assert_dual_role_prepare_runtime(
+        offer_origin,
+        allow_production=bool(args.allow_production_execution),
+        prefix=prefix,
+    )
+    offer_id = int(offer["id"])
+    owner_user_id = int(offer["owner_user_id"])
+    expiry_epoch_value = prepare.get("time_expiry_epoch")
+    stale_epoch_value = prepare.get("time_expiry_stale_epoch")
+    if expiry_epoch_value is None or stale_epoch_value is None:
+        raise TradingProbeError("time-expiry race requires time_expiry_epoch and time_expiry_stale_epoch")
+    expiry_epoch = float(expiry_epoch_value)
+    stale_epoch = float(stale_epoch_value)
+    if not math.isfinite(expiry_epoch) or not math.isfinite(stale_epoch):
+        raise TradingProbeError(
+            f"time-expiry race got invalid epochs expiry={expiry_epoch_value!r} stale={stale_epoch_value!r}"
+        )
+
+    start_delay = expiry_epoch - time.time()
+    if start_delay > 0:
+        await asyncio.sleep(start_delay)
+
+    started_epoch = time.time()
+    started_monotonic = time.perf_counter()
+    status = "error"
+    detail = ""
+    error_details: list[str] = []
+    expired_count = 0
+    async with patched_external_side_effects():
+        try:
+            expired_count = await expire_time_limit_offer_for_race(
+                offer_id=offer_id,
+                stale_epoch=stale_epoch,
+            )
+            status = "success" if expired_count > 0 else "rejected"
+        except Exception as exc:
+            status = "error"
+            detail = f"{type(exc).__name__}: {exc}"
+            error_details.append(detail)
+
+    payload = {
+        "schema_version": TIME_EXPIRY_RACE_RESULT_SCHEMA_VERSION,
+        "status": status,
+        "expired_count": int(expired_count),
+        "offer_origin": offer_origin,
+        "offer_id": offer_id,
+        "owner_user_id": owner_user_id,
+        "prefix": prefix,
+        "expiry_epoch": round(expiry_epoch, 6),
+        "stale_epoch": round(stale_epoch, 6),
+        "started_epoch": round(started_epoch, 6),
+        "duration_ms": round((time.perf_counter() - started_monotonic) * 1000.0, 3),
+        "detail": detail,
+        "error_details": error_details,
+    }
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0 if status in {"success", "rejected"} else 1
+
+
 async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
     prepare = read_json_artifact(Path(args.prepare))
     merged_result = read_json_artifact(Path(args.merged_result))
     offer = _require_mapping(prepare.get("offer"), "prepare offer")
     persistence = await inspect_hot_offer_persistence(int(offer["id"]))
     manual_expiry_result = read_json_artifact(Path(args.manual_expiry_result)) if args.manual_expiry_result else None
+    time_expiry_result = read_json_artifact(Path(args.time_expiry_result)) if args.time_expiry_result else None
     report = build_dual_role_final_report(
         prepare=prepare,
         merged_result=merged_result,
         persistence=persistence,
         manual_expiry_result=manual_expiry_result,
+        time_expiry_result=time_expiry_result,
     )
     if args.output:
         write_json_artifact(Path(args.output), report)
@@ -5010,6 +5228,9 @@ def build_dual_role_prepare_artifact(
     request_surface: str = "mixed",
     idempotency_mode: str = "unique",
     barrier_epoch: float | None = None,
+    time_expiry_epoch: float | None = None,
+    time_expiry_stale_epoch: float | None = None,
+    time_expiry_schedule: Mapping[str, Any] | None = None,
     plan_result: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -5058,6 +5279,11 @@ def build_dual_role_prepare_artifact(
         "plan_manifest_path": plan_result["manifest_path"],
         "plan_paths": dict((plan_result.get("manifest") or {}).get("plan_paths") or {}),
         "barrier_epoch": round(float(barrier_epoch), 6) if barrier_epoch is not None else None,
+        "time_expiry_epoch": round(float(time_expiry_epoch), 6) if time_expiry_epoch is not None else None,
+        "time_expiry_stale_epoch": (
+            round(float(time_expiry_stale_epoch), 6) if time_expiry_stale_epoch is not None else None
+        ),
+        "time_expiry_schedule": dict(time_expiry_schedule or {}),
         "created_epoch": round(time.time(), 6),
     }
 
@@ -5080,6 +5306,7 @@ def build_dual_role_final_report(
     merged_result: Mapping[str, Any],
     persistence: HotOfferPersistenceSnapshot,
     manual_expiry_result: Mapping[str, Any] | None = None,
+    time_expiry_result: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
     scenario_name = str(scenario.get("name") or "hot_offer")
@@ -5110,6 +5337,7 @@ def build_dual_role_final_report(
                 "role_start_skew": dict(merged_result.get("role_start_skew") or {}),
                 "attempt_error_details": summarize_attempt_error_details(merged_result),
                 "manual_expiry_result": dict(manual_expiry_result or {}),
+                "time_expiry_result": dict(time_expiry_result or {}),
             }
         },
     }
@@ -5121,6 +5349,14 @@ def build_dual_role_final_report(
                 persistence=persistence,
                 expected_winner_count=expected_winner_count,
                 manual_expiry_result=manual_expiry_result,
+            )
+        elif scenario_name == "time_expire_trade_race":
+            assert_time_expiry_trade_race_acceptance(
+                response_success_count=int(summary.get("success") or 0),
+                error_count=int(summary.get("error") or 0),
+                persistence=persistence,
+                expected_winner_count=expected_winner_count,
+                time_expiry_result=time_expiry_result,
             )
         elif idempotency_mode == "duplicate_replay":
             statuses = [
@@ -5310,6 +5546,12 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--retail", action="store_true")
     prepare_parser.add_argument("--lot-sizes", default="")
     prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=20.0)
+    prepare_parser.add_argument("--time-expiry-race-delay-seconds", type=float, default=TIME_EXPIRY_RACE_DELAY_SECONDS)
+    prepare_parser.add_argument(
+        "--time-expiry-race-stale-skew-seconds",
+        type=float,
+        default=TIME_EXPIRY_RACE_STALE_SKEW_SECONDS,
+    )
     prepare_parser.add_argument(
         "--skip-initial-cleanup",
         action="store_true",
@@ -5360,6 +5602,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow this manual expiry race worker inside production only with the production full-matrix confirmation env.",
     )
 
+    time_expiry_parser = subparsers.add_parser("run-time-expiry-race")
+    time_expiry_parser.add_argument("--prepare", required=True)
+    time_expiry_parser.add_argument("--output")
+    time_expiry_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow this time expiry race worker inside production only with the production full-matrix confirmation env.",
+    )
+
     merge_parser = subparsers.add_parser("merge-role-results")
     merge_parser.add_argument("--output")
     merge_parser.add_argument("results", nargs="+")
@@ -5368,6 +5619,7 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser.add_argument("--prepare", required=True)
     finalize_parser.add_argument("--merged-result", required=True)
     finalize_parser.add_argument("--manual-expiry-result")
+    finalize_parser.add_argument("--time-expiry-result")
     finalize_parser.add_argument("--output")
     finalize_parser.add_argument("--check", action="store_true")
 
@@ -5434,6 +5686,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_role_plan_command(args)
     if args.command == "run-manual-expiry-race":
         return await run_manual_expiry_race_command(args)
+    if args.command == "run-time-expiry-race":
+        return await run_time_expiry_race_command(args)
     if args.command == "merge-role-results":
         return await merge_role_results_command(args)
     if args.command == "finalize-dual-role-run":

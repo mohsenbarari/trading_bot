@@ -1081,6 +1081,88 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 manual_expiry_result={"status": "rejected"},
             )
 
+    def test_dual_role_final_report_accepts_time_expiry_race_with_in_flight_completion(self):
+        prepare = {
+            "run_id": "run-5d",
+            "prefix": "probe-",
+            "topology": "single-db staging role-worker smoke",
+            "telegram_gateway_boundary": "mock",
+            "scenario": {
+                "name": "time_expire_trade_race",
+                "expected_winner_count": 1,
+                "idempotency_mode": "unique",
+            },
+            "offer": {
+                "id": 42,
+                "owner_user_id": 7,
+            },
+        }
+        merged_result = {
+            "schema_version": worker.DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
+            "summary": {
+                "total": 8,
+                "success": 1,
+                "rejected": 7,
+                "error": 0,
+                "business_request_rps": 20.0,
+                "telegram_update_rps": 0.0,
+                "latency": {},
+                "surfaces": {},
+            },
+            "roles": {},
+            "role_start_skew": {},
+            "attempts": [],
+        }
+        persistence = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=20,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=1,
+            completed_trade_quantity=20,
+            completed_ledger_count=1,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+
+        report = worker.build_dual_role_final_report(
+            prepare=prepare,
+            merged_result=merged_result,
+            persistence=persistence,
+            time_expiry_result={"schema_version": worker.TIME_EXPIRY_RACE_RESULT_SCHEMA_VERSION, "status": "success"},
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["correctness_failures"], [])
+        self.assertEqual(
+            report["reports"]["time_expire_trade_race"]["time_expiry_result"]["status"],
+            "success",
+        )
+
+    def test_time_expiry_race_acceptance_fails_closed_on_overtrade(self):
+        snapshot = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=20,
+            remaining_quantity=0,
+            offer_status="completed",
+            persisted_trade_count=2,
+            completed_trade_quantity=25,
+            completed_ledger_count=2,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+
+        with self.assertRaises(worker.TradingProbeError):
+            worker.assert_time_expiry_trade_race_acceptance(
+                response_success_count=2,
+                error_count=0,
+                persistence=snapshot,
+                expected_winner_count=2,
+                time_expiry_result={"status": "success"},
+            )
+
     def test_dual_role_final_report_fails_closed_on_request_errors(self):
         prepare = {
             "run_id": "run-6",

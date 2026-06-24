@@ -53,6 +53,7 @@ DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES = {
 }
 DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES = {"telegram", "webapp"}
 DUAL_ROLE_EXECUTABLE_MANUAL_EXPIRE_RACE_REQUEST_SURFACES = {"telegram", "webapp"}
+DUAL_ROLE_EXECUTABLE_TIME_EXPIRE_RACE_REQUEST_SURFACES = {"telegram", "webapp"}
 
 NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "own_offer_request",
@@ -87,8 +88,7 @@ DRIVER_GAP_BUCKETS: dict[str, dict[str, Any]] = {
         "title": "Specialized user-to-user stable stress drivers",
         "difficulty": "medium",
         "implementation_note": (
-            "Extend the dual-role worker for time expiry races and read-during-write without changing "
-            "cross-server forwarding semantics."
+            "Extend the dual-role worker for read-during-write without changing cross-server forwarding semantics."
         ),
     },
     "market_behavior_driver": {
@@ -409,7 +409,12 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
                 and str(record.get("request_surface") or "")
                 in DUAL_ROLE_EXECUTABLE_MANUAL_EXPIRE_RACE_REQUEST_SURFACES
             )
-            if not duplicate_replay_supported and not manual_expire_race_supported:
+            time_expire_race_supported = (
+                family == "time_expire_trade_race"
+                and str(record.get("request_surface") or "")
+                in DUAL_ROLE_EXECUTABLE_TIME_EXPIRE_RACE_REQUEST_SURFACES
+            )
+            if not duplicate_replay_supported and not manual_expire_race_supported and not time_expire_race_supported:
                 return "stress_family_requires_specialized_race_or_read_driver"
     if record.get("offer_surface") not in {"webapp", "telegram"}:
         return "unsupported_offer_surface_for_dual_role_worker"
@@ -445,13 +450,14 @@ def dual_role_scenario_commands(
     family = str(record.get("family") or "")
     is_duplicate_replay = family == "duplicate_idempotency_replay"
     is_manual_expire_trade_race = family == "manual_expire_trade_race"
+    is_time_expire_trade_race = family == "time_expire_trade_race"
     if is_duplicate_replay:
         total_requests = 2
         expected_winner_count = 1
         expected_remaining_quantity = max(0, int(profile["quantity"]) - int(profile["request_amount"]))
         require_terminal_completed = expected_remaining_quantity == 0
         request_surface = str(record.get("request_surface") or "webapp")
-    elif is_manual_expire_trade_race:
+    elif is_manual_expire_trade_race or is_time_expire_trade_race:
         total_requests = max(int(record.get("min_parallel_requests") or 0), int(profile["expected_winner_count"]) + 2)
         expected_winner_count = int(profile["expected_winner_count"])
         expected_remaining_quantity = 0
@@ -605,6 +611,24 @@ def dual_role_scenario_commands(
                 timeout_seconds=180,
             )
         )
+    if is_time_expire_trade_race:
+        role_commands.append(
+            container_python_command(
+                "run_time_expiry_race_on_offer_home_server",
+                server=offer_home_server,
+                python_args=[
+                    "scripts/trading_core_probe_worker.py",
+                    "run-time-expiry-race",
+                    "--prepare",
+                    f"{remote_dir}/prepare.json",
+                    "--output",
+                    f"{remote_dir}/time_expiry.result.json",
+                    "--allow-production-execution",
+                ],
+                env=production_env,
+                timeout_seconds=180,
+            )
+        )
 
     finalize_args = [
         "scripts/trading_core_probe_worker.py",
@@ -619,6 +643,8 @@ def dual_role_scenario_commands(
     ]
     if is_manual_expire_trade_race:
         finalize_args.extend(["--manual-expiry-result", f"{remote_dir}/manual_expiry.result.json"])
+    if is_time_expire_trade_race:
+        finalize_args.extend(["--time-expiry-result", f"{remote_dir}/time_expiry.result.json"])
 
     post_role_commands = [
         copy_between_servers_command(
@@ -812,6 +838,7 @@ def build_execution_plan(
             "manual_expire_race_request_surfaces": sorted(
                 DUAL_ROLE_EXECUTABLE_MANUAL_EXPIRE_RACE_REQUEST_SURFACES
             ),
+            "time_expire_race_request_surfaces": sorted(DUAL_ROLE_EXECUTABLE_TIME_EXPIRE_RACE_REQUEST_SURFACES),
             "surfaces": ["webapp", "telegram"],
             "offer_types": ["buy", "sell"],
             "shapes": sorted(manifest_builder.market_matrix.SHAPES),
