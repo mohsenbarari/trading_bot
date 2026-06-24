@@ -6,7 +6,7 @@ from core.config import settings
 from core.audit_logger import audit_log
 from core.metrics import record_offer_publication_health, record_sync_conflict, record_sync_health
 from core.redis import get_redis_client
-from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.server_routing import SERVER_FOREIGN, current_server, default_peer_server_url, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
@@ -750,12 +750,139 @@ def _result_scalar_first(result):
         return None
 
 
+def _result_first(result):
+    try:
+        return result.first()
+    except AttributeError:
+        pass
+    return _result_scalar_first(result)
+
+
 def _result_scalar_one_or_none(result):
     try:
         return result.scalar_one_or_none()
     except AttributeError:
         pass
     return _result_scalar_first(result)
+
+
+def _sync_truthy(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _row_value(row, key: str, index: int):
+    if row is None:
+        return None
+    mapping = getattr(row, "_mapping", None)
+    if mapping is not None and key in mapping:
+        return mapping[key]
+    if hasattr(row, key):
+        return getattr(row, key)
+    try:
+        return row[index]
+    except (TypeError, KeyError, IndexError):
+        return None
+
+
+async def _synced_deleted_user_telegram_effect(
+    db: AsyncSession,
+    *,
+    table: str,
+    operation: str,
+    record_id,
+    data: dict,
+) -> tuple[int, int] | None:
+    """Capture Telegram cleanup data before a synced user delete clears telegram_id."""
+    if current_server() != SERVER_FOREIGN:
+        return None
+    if table != "users" or operation not in {"INSERT", "UPDATE"}:
+        return None
+    if not _sync_truthy(data.get("is_deleted")):
+        return None
+
+    user_id = coerce_positive_int(record_id or data.get("id"))
+    if user_id is None:
+        return None
+
+    try:
+        result = await db.execute(
+            select(User.is_deleted, User.telegram_id)
+            .where(User.id == user_id)
+            .limit(1)
+        )
+        row = _result_first(result)
+    except Exception as exc:
+        logger.warning(
+            "Could not inspect local user before synced deletion cleanup",
+            extra={
+                "event": "sync.deleted_user_telegram_cleanup_probe_failed",
+                "user_id": user_id,
+                **_summarize_exception(exc),
+            },
+        )
+        return None
+
+    if row is not None and _sync_truthy(_row_value(row, "is_deleted", 0)):
+        return None
+
+    telegram_id = _row_value(row, "telegram_id", 1) if row is not None else data.get("telegram_id")
+    telegram_id = coerce_positive_int(telegram_id)
+    if telegram_id is None:
+        return None
+    return user_id, telegram_id
+
+
+async def _run_synced_deleted_user_telegram_effects(effects: list[tuple[int, int]]) -> None:
+    if current_server() != SERVER_FOREIGN or not effects:
+        return
+
+    from bot.utils.redis_helpers import mark_deleted_telegram_user
+    from core.services.user_deletion_service import REMOVAL_TELEGRAM_MESSAGE, remove_user_from_telegram_channel
+    from core.utils import send_telegram_notification
+
+    seen_telegram_ids: set[int] = set()
+    for user_id, telegram_id in effects:
+        if telegram_id in seen_telegram_ids:
+            continue
+        seen_telegram_ids.add(telegram_id)
+
+        try:
+            await mark_deleted_telegram_user(telegram_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not mark synced deleted Telegram user",
+                extra={
+                    "event": "sync.deleted_user_telegram_mark_failed",
+                    "user_id": user_id,
+                    **_summarize_exception(exc),
+                },
+            )
+
+        try:
+            await send_telegram_notification(telegram_id, REMOVAL_TELEGRAM_MESSAGE)
+        except Exception as exc:
+            logger.warning(
+                "Could not notify synced deleted Telegram user",
+                extra={
+                    "event": "sync.deleted_user_telegram_notify_failed",
+                    "user_id": user_id,
+                    **_summarize_exception(exc),
+                },
+            )
+
+        try:
+            await remove_user_from_telegram_channel(telegram_id)
+        except Exception as exc:
+            logger.warning(
+                "Could not remove synced deleted Telegram user from channel",
+                extra={
+                    "event": "sync.deleted_user_telegram_channel_remove_failed",
+                    "user_id": user_id,
+                    **_summarize_exception(exc),
+                },
+            )
 
 
 def _nonempty_text(value) -> str | None:
@@ -1707,6 +1834,7 @@ async def receive_sync_data(
     new_offers = []
     terminal_offers = []
     completed_trade_offer_ids = []
+    synced_deleted_user_telegram_effects: list[tuple[int, int]] = []
     user_changes_applied = False
     notification_user_ids = _notification_user_ids_from_items(sorted_items)
 
@@ -1779,12 +1907,21 @@ async def receive_sync_data(
             table, operation, model, data, record_id = parsed
 
             try:
+                deleted_user_telegram_effect = await _synced_deleted_user_telegram_effect(
+                    db,
+                    table=table,
+                    operation=operation,
+                    record_id=record_id,
+                    data=data,
+                )
                 result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
                 if result in {'ok', 'ignored'}:
                     processed_count += 1
                     if table == "users":
                         user_changes_applied = True
                     if result == 'ok':
+                        if deleted_user_telegram_effect is not None:
+                            synced_deleted_user_telegram_effects.append(deleted_user_telegram_effect)
                         completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
                         if completed_trade_offer_id:
                             completed_trade_offer_ids.append(completed_trade_offer_id)
@@ -1820,12 +1957,21 @@ async def receive_sync_data(
             logger.info(f"🔄 Retrying {len(deferred_items)} deferred items...")
             for table, operation, model, data, record_id in deferred_items:
                 try:
+                    deleted_user_telegram_effect = await _synced_deleted_user_telegram_effect(
+                        db,
+                        table=table,
+                        operation=operation,
+                        record_id=record_id,
+                        data=data,
+                    )
                     result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
                     if result in {'ok', 'ignored'}:
                         processed_count += 1
                         if table == "users":
                             user_changes_applied = True
                         if result == 'ok':
+                            if deleted_user_telegram_effect is not None:
+                                synced_deleted_user_telegram_effects.append(deleted_user_telegram_effect)
                             completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
                             if completed_trade_offer_id:
                                 completed_trade_offer_ids.append(completed_trade_offer_id)
@@ -1902,6 +2048,8 @@ async def receive_sync_data(
                         },
                     )
         await db.commit()
+
+        await _run_synced_deleted_user_telegram_effects(synced_deleted_user_telegram_effects)
 
         # Refresh caches for affected tables
 

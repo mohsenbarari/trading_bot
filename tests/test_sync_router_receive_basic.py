@@ -42,6 +42,30 @@ class FakeTerminalOfferRows:
         return SimpleNamespace(all=lambda: list(self._offers))
 
 
+class FirstRowResult:
+    def __init__(self, row):
+        self._row = row
+
+    def first(self):
+        return self._row
+
+
+class DeletedUserSyncDB(FakeDB):
+    def __init__(self, row):
+        super().__init__()
+        self._deleted_user_rows = [row]
+
+    async def execute(self, stmt, *args, **kwargs):
+        self.execute_calls.append((stmt, args, kwargs))
+        stmt_text = str(stmt)
+        if "FROM users" in stmt_text and "telegram_id" in stmt_text:
+            row = self._deleted_user_rows.pop(0) if self._deleted_user_rows else None
+            return FirstRowResult(row)
+        if "setval(" in stmt_text:
+            return SimpleNamespace()
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(first=lambda: None))
+
+
 class TerminalOfferRealtimeDB(FakeDB):
     def __init__(self, offers):
         super().__init__()
@@ -98,6 +122,49 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         apply_mock.assert_awaited_once()
         rollout_mock.assert_awaited_once_with(db)
         self.assertEqual(result, {"status": "success", "processed": 1})
+
+    async def test_receive_sync_data_cleans_up_deleted_user_telegram_on_foreign_after_commit(self):
+        db = DeletedUserSyncDB(SimpleNamespace(is_deleted=False, telegram_id=998877))
+        items = [{"table": "users", "operation": "UPDATE", "id": 4, "data": {"is_deleted": True, "telegram_id": None}}]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch("api.routers.sync.settings.server_mode", "foreign"), patch(
+            "bot.utils.redis_helpers.mark_deleted_telegram_user", new=AsyncMock()
+        ) as mark_deleted, patch(
+            "core.utils.send_telegram_notification", new=AsyncMock()
+        ) as send_notification, patch(
+            "core.services.user_deletion_service.remove_user_from_telegram_channel", new=AsyncMock()
+        ) as remove_from_channel:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_awaited_once()
+        rollout_mock.assert_awaited_once_with(db)
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        self.assertGreaterEqual(db.commits, 2)
+        mark_deleted.assert_awaited_once_with(998877)
+        send_notification.assert_awaited_once()
+        remove_from_channel.assert_awaited_once_with(998877)
+
+    async def test_receive_sync_data_skips_deleted_user_telegram_cleanup_when_already_deleted(self):
+        db = DeletedUserSyncDB(SimpleNamespace(is_deleted=True, telegram_id=998877))
+        items = [{"table": "users", "operation": "UPDATE", "id": 4, "data": {"is_deleted": True, "telegram_id": None}}]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")), patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ), patch("api.routers.sync.settings.server_mode", "foreign"), patch(
+            "bot.utils.redis_helpers.mark_deleted_telegram_user", new=AsyncMock()
+        ) as mark_deleted, patch(
+            "core.utils.send_telegram_notification", new=AsyncMock()
+        ) as send_notification, patch(
+            "core.services.user_deletion_service.remove_user_from_telegram_channel", new=AsyncMock()
+        ) as remove_from_channel:
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        mark_deleted.assert_not_awaited()
+        send_notification.assert_not_awaited()
+        remove_from_channel.assert_not_awaited()
 
     async def test_receive_sync_data_retries_deferred_items_and_invalidates_commodity_caches(self):
         db = FakeDB()

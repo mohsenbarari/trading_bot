@@ -11,7 +11,7 @@ from sqlalchemy.orm import joinedload
 from bot.utils.redis_helpers import mark_deleted_telegram_user
 from core import telegram_gateway
 from core.config import settings
-from core.server_routing import current_server
+from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.offer_expiry_service import OfferExpiryReason, OfferExpirySourceSurface
 from core.services.session_service import deactivate_active_sessions, publish_session_revocation
@@ -50,6 +50,15 @@ class _DeletedUserEffect:
 
 async def remove_user_from_telegram_channel(telegram_id: int) -> None:
     """Remove a linked user from the Telegram channel without leaving them banned."""
+    if current_server() != SERVER_FOREIGN:
+        logger.info(
+            "Skipping Telegram channel removal outside foreign server",
+            extra={
+                "event": "user.telegram_channel_remove_skipped_non_foreign",
+                "server_mode": current_server(),
+            },
+        )
+        return
     if not settings.channel_id or not settings.bot_token:
         return
 
@@ -316,14 +325,15 @@ async def delete_user_account(db: AsyncSession, user: User) -> DeletedUserResult
             except Exception as exc:
                 logger.warning(f"Failed to mark deleted telegram user {effect.telegram_id}: {exc}")
 
-            try:
-                await send_telegram_notification(effect.telegram_id, REMOVAL_TELEGRAM_MESSAGE)
-            except Exception as exc:
-                logger.warning(f"Failed to send deletion notice to telegram user {effect.telegram_id}: {exc}")
+            if current_server() == SERVER_FOREIGN:
+                try:
+                    await send_telegram_notification(effect.telegram_id, REMOVAL_TELEGRAM_MESSAGE)
+                except Exception as exc:
+                    logger.warning(f"Failed to send deletion notice to telegram user {effect.telegram_id}: {exc}")
 
         await publish_session_revocation(effect.user_id, effect.revoked_sessions)
 
-        if effect.telegram_id:
+        if effect.telegram_id and current_server() == SERVER_FOREIGN:
             try:
                 await remove_user_from_telegram_channel(effect.telegram_id)
             except Exception as exc:

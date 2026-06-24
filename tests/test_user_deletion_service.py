@@ -41,7 +41,9 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         client_factory.assert_not_called()
 
         client = _HttpClientContext()
-        with patch("core.services.user_deletion_service.settings", SimpleNamespace(channel_id=-100123, bot_token="bot-token")), patch(
+        with patch("core.services.user_deletion_service.current_server", return_value="foreign"), patch(
+            "core.services.user_deletion_service.settings", SimpleNamespace(channel_id=-100123, bot_token="bot-token")
+        ), patch(
             "core.telegram_gateway.httpx.AsyncClient",
             return_value=client,
         ):
@@ -50,6 +52,12 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.post.await_count, 2)
         self.assertIn("banChatMember", client.post.await_args_list[0].args[0])
         self.assertIn("unbanChatMember", client.post.await_args_list[1].args[0])
+
+        with patch("core.services.user_deletion_service.current_server", return_value="iran"), patch(
+            "core.services.user_deletion_service.settings", SimpleNamespace(channel_id=-100123, bot_token="bot-token")
+        ), patch("core.telegram_gateway.httpx.AsyncClient") as client_factory:
+            await remove_user_from_telegram_channel(123)
+        client_factory.assert_not_called()
 
     async def test_accountant_relation_helpers_cover_pending_active_and_skip_paths(self):
         user = SimpleNamespace(id=31, is_deleted=False)
@@ -176,6 +184,40 @@ class DeleteUserAccountTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.user_id, user.id)
         self.assertEqual(result.telegram_id, user.telegram_id)
         self.assertEqual(result.revoked_session_count, 2)
+
+    async def test_linked_user_deletion_on_iran_skips_direct_telegram_api_cleanup(self):
+        user = SimpleNamespace(
+            id=117,
+            telegram_id=44112234,
+            mobile_number="09120000001",
+            account_name="reza",
+            is_deleted=False,
+            soft_delete=Mock(),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[scalar_result([]), scalar_result([]), scalar_result([]), scalar_result([]), Mock(), Mock(), Mock(), scalar_result([])]),
+            delete=AsyncMock(),
+            commit=AsyncMock(),
+            rollback=AsyncMock(),
+        )
+        revoked_sessions = [SimpleNamespace(id="iran-s1")]
+
+        with patch("core.services.user_deletion_service.current_server", return_value="iran"), \
+            patch("core.services.user_deletion_service.deactivate_active_sessions", AsyncMock(return_value=revoked_sessions)), \
+            patch("core.services.user_deletion_service.sync_mandatory_channel_for_user_state_change", AsyncMock()), \
+            patch("core.services.user_deletion_service.mark_deleted_telegram_user", AsyncMock()) as mark_deleted_telegram_user, \
+            patch("core.services.user_deletion_service.send_telegram_notification", AsyncMock(return_value=True)) as send_telegram_notification, \
+            patch("core.services.user_deletion_service.publish_session_revocation", AsyncMock()) as publish_session_revocation, \
+            patch("core.services.user_deletion_service.remove_user_from_telegram_channel", AsyncMock()) as remove_user_from_channel:
+            result = await delete_user_account(db, user)
+
+        db.commit.assert_awaited_once()
+        user.soft_delete.assert_called_once_with()
+        mark_deleted_telegram_user.assert_awaited_once_with(user.telegram_id)
+        send_telegram_notification.assert_not_awaited()
+        remove_user_from_channel.assert_not_awaited()
+        publish_session_revocation.assert_awaited_once_with(user.id, revoked_sessions)
+        self.assertEqual(result.telegram_id, user.telegram_id)
 
     async def test_unlinked_user_deletion_only_revokes_sessions(self):
         user = SimpleNamespace(
