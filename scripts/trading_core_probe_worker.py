@@ -133,6 +133,9 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "remote_authority_unavailable",
     "bad_internal_signature",
     "wrong_authoritative_server",
+    "stale_telegram_button",
+    "missing_public_offer_id",
+    "cleanup_scope_violation",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -3193,6 +3196,8 @@ def assert_negative_guard_evidence(
         "remote_authority_unavailable",
         "bad_internal_signature",
         "wrong_authoritative_server",
+        "missing_public_offer_id",
+        "cleanup_scope_violation",
     }
     expired_offer_cases = {
         "already_completed_offer",
@@ -3237,6 +3242,12 @@ def assert_negative_guard_evidence(
             expected_remaining_quantity = 0
         required_status = OfferRequestStatus.REJECTED_OFFER_EXPIRED.value
         required_code = "offer_not_active"
+    elif case_id == "stale_telegram_button":
+        expected_trade_count = 1
+        expected_remaining_quantity = 0
+        expected_offer_request_count = 1
+        required_status = None
+        required_code = None
     else:
         failures.append(f"unsupported negative guard case assertion: {case_id}")
 
@@ -3255,7 +3266,7 @@ def assert_negative_guard_evidence(
     if required_code and int(code_counts.get(required_code, 0) or 0) < 1:
         failures.append(f"{case_id} missing offer_request public_failure_code {required_code}: {code_counts}")
     completed_requests = int(status_counts.get(OfferRequestStatus.COMPLETED_TRADE.value, 0) or 0)
-    if case_id != "already_completed_offer" and completed_requests:
+    if case_id not in {"already_completed_offer", "stale_telegram_button"} and completed_requests:
         failures.append(f"{case_id} unexpectedly has completed offer_request rows: {status_counts}")
     if case_id in {"tier2_offer_creation", "daily_request_limit_exceeded", "active_commodity_limit_exceeded"}:
         creation = dict(evidence.get("offer_creation") or {})
@@ -3274,6 +3285,7 @@ def assert_negative_guard_evidence(
     expected_internal_status = {
         "bad_internal_signature": 401,
         "wrong_authoritative_server": 409,
+        "missing_public_offer_id": 404,
     }.get(case_id)
     if expected_internal_status is not None:
         internal_execute = dict(evidence.get("internal_execute") or {})
@@ -3282,6 +3294,18 @@ def assert_negative_guard_evidence(
             failures.append(
                 f"{case_id} expected internal execute status {expected_internal_status}, got {status_code}"
             )
+    if case_id == "stale_telegram_button":
+        callback = dict(evidence.get("bot_callback") or {})
+        if not str(callback.get("second_answer_text") or ""):
+            failures.append(f"{case_id} expected stale bot callback denial answer")
+    if case_id == "cleanup_scope_violation":
+        guard = dict(evidence.get("cleanup_scope_guard") or {})
+        rejected_values = guard.get("rejected_values") or []
+        accepted_values = guard.get("accepted_values") or []
+        if not rejected_values:
+            failures.append(f"{case_id} expected cleanup scope guard rejections")
+        if accepted_values:
+            failures.append(f"{case_id} unexpectedly accepted cleanup prefixes: {accepted_values}")
     return failures
 
 
@@ -3717,6 +3741,110 @@ async def run_negative_guard_case(
                     "offer_home_server": details.get("offer_home_server"),
                 }
                 phase_details.append(details)
+            elif normalized_case_id == "stale_telegram_button":
+                first_details: dict[str, Any] = {}
+                stale_callback_details: dict[str, Any] = {}
+                stale_offer_snapshot = await load_offer_snapshot(offer_id)
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-complete",
+                        phase_details=first_details,
+                    )
+                )
+                harness = AiogramDispatcherHarness()
+                try:
+                    statuses.append(
+                        await execute_bot_trade_with_dispatcher(
+                            harness=harness,
+                            spec=MixedLoadAttemptSpec(
+                                index=0,
+                                surface="telegram",
+                                user_id=responder_b.user_id,
+                                telegram_id=responder_b.telegram_id,
+                            ),
+                            offer=stale_offer_snapshot,
+                            amount=5,
+                            prefix=f"{prefix}{normalized_case_id}-",
+                            phase_details=stale_callback_details,
+                        )
+                    )
+                finally:
+                    await harness.close()
+                extra_evidence["bot_callback"] = {
+                    "first_answer_text": stale_callback_details.get("first_answer_text"),
+                    "first_answer_alert": stale_callback_details.get("first_answer_alert"),
+                    "second_answer_text": stale_callback_details.get("second_answer_text"),
+                    "second_answer_alert": stale_callback_details.get("second_answer_alert"),
+                    "telegram_update_count": stale_callback_details.get("telegram_update_count"),
+                }
+                phase_details.extend([first_details, stale_callback_details])
+            elif normalized_case_id == "missing_public_offer_id":
+                local_server = current_server()
+                remote_source_server = SERVER_FOREIGN if local_server == SERVER_IRAN else SERVER_IRAN
+                missing_public_id = f"ofr_missing_{str(offer_id)[-24:]}"
+                details = {
+                    "source_server": remote_source_server,
+                    "missing_offer_public_id": missing_public_id,
+                }
+                headers = {
+                    "x-timestamp": "1",
+                    "x-signature": "valid-for-negative-guard",
+                    "x-api-key": "valid-for-negative-guard",
+                    "x-source-server": remote_source_server,
+                }
+                statuses.append(
+                    await execute_internal_trade_for_negative_guard(
+                        offer_id=offer_id,
+                        offer_public_id=missing_public_id,
+                        responder_user_id=responder_a.user_id,
+                        source_server=remote_source_server,
+                        headers=headers,
+                        body=b'{"negative_guard":"missing_public_offer_id"}',
+                        patch_signature_result=True,
+                        phase_details=details,
+                    )
+                )
+                extra_evidence["internal_execute"] = {
+                    "status_code": details.get("http_status_code"),
+                    "detail": details.get("http_detail"),
+                    "source_server": remote_source_server,
+                    "missing_offer_public_id": missing_public_id,
+                }
+                phase_details.append(details)
+            elif normalized_case_id == "cleanup_scope_violation":
+                rejected_values: list[dict[str, str]] = []
+                accepted_values: list[str] = []
+                cleanup_scope_checks = (
+                    ("cleanup_prefix", "prod"),
+                    ("cleanup_prefix", "bad%prefix"),
+                    ("production_cleanup_prefix", "SAFE_CLEANUP_PREFIX"),
+                    ("production_cleanup_prefix", "PFM_bad"),
+                )
+                for check_name, value in cleanup_scope_checks:
+                    try:
+                        if check_name == "production_cleanup_prefix":
+                            validate_production_cleanup_prefix(value)
+                        else:
+                            validate_cleanup_prefix(value)
+                    except TradingProbeError as exc:
+                        rejected_values.append(
+                            {
+                                "check": check_name,
+                                "value": value,
+                                "reason": str(exc),
+                            }
+                        )
+                    else:
+                        accepted_values.append(value)
+                statuses.append("rejected" if rejected_values and not accepted_values else "error")
+                extra_evidence["cleanup_scope_guard"] = {
+                    "rejected_values": rejected_values,
+                    "accepted_values": accepted_values,
+                }
+                phase_details.append(dict(extra_evidence["cleanup_scope_guard"]))
             else:
                 raise TradingProbeError(f"negative guard case branch is missing: {normalized_case_id}")
 

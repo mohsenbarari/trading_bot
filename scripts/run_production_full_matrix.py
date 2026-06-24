@@ -77,6 +77,9 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "remote_authority_unavailable",
     "bad_internal_signature",
     "wrong_authoritative_server",
+    "stale_telegram_button",
+    "missing_public_offer_id",
+    "cleanup_scope_violation",
 }
 
 DUAL_ROLE_ROLE_BY_SERVER = {

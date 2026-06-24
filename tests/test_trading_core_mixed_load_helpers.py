@@ -1588,6 +1588,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         for case_id, status_code in (
             ("bad_internal_signature", 401),
             ("wrong_authoritative_server", 409),
+            ("missing_public_offer_id", 404),
         ):
             with self.subTest(case_id=case_id):
                 evidence = {
@@ -1624,6 +1625,51 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         )
 
         self.assertTrue(any("expected internal execute status 401" in failure for failure in failures))
+
+    def test_negative_guard_evidence_acceptance_for_stale_telegram_button_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 0},
+            "trade_count": 1,
+            "offer_request_count": 1,
+            "offer_request_status_counts": {
+                worker.OfferRequestStatus.COMPLETED_TRADE.value: 1,
+            },
+            "offer_request_public_failure_code_counts": {"none": 1},
+            "bot_callback": {
+                "second_answer_text": "این لفظ دیگر فعال نیست.",
+                "second_answer_alert": True,
+                "telegram_update_count": 2,
+            },
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="stale_telegram_button",
+            status_sequence=["success", "rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_acceptance_for_cleanup_scope_violation_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+            "cleanup_scope_guard": {
+                "rejected_values": [{"check": "cleanup_prefix", "value": "prod", "reason": "too broad"}],
+                "accepted_values": [],
+            },
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="cleanup_scope_violation",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
 
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {

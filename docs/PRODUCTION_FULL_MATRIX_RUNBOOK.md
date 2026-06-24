@@ -253,8 +253,9 @@ Current execution-plan limitation:
   `tier2_telegram_request`, `daily_trade_limit_exceeded`,
   `daily_request_limit_exceeded`, `active_commodity_limit_exceeded`,
   `remote_authority_unavailable`, `bad_internal_signature`, and
-  `wrong_authoritative_server`;
-- current whole-manifest command-plannable count: `180` of `5555` scenarios;
+  `wrong_authoritative_server`, `stale_telegram_button`,
+  `missing_public_offer_id`, and `cleanup_scope_violation`;
+- current whole-manifest command-plannable count: `183` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
   short/medium outage orchestration, targeted delivery join production driver,
   and the remaining negative business guard production driver cases.
@@ -266,7 +267,7 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `negative_guard_driver`: `579` gaps. Add explicit production reject-path
+1. `negative_guard_driver`: `576` gaps. Add explicit production reject-path
    probes and no-partial-mutation assertions.
 2. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
    to production-safe two-server execution.
