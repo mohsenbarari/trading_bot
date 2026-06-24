@@ -1008,6 +1008,8 @@ describe('PublicProfile.vue', () => {
 
     await flushPromises()
 
+    expect(wrapper.get('.header-title h2').text()).toBe('مشتری ویژه')
+    expect(wrapper.get('[data-test="profile-avatar-trigger"]').text()).toContain('م')
     expect(wrapper.text()).not.toContain('لیست همکاران')
     expect(wrapper.findAll('button').some((button) => button.text().includes('حسابداران'))).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text().includes('مشتریان'))).toBe(false)

@@ -216,6 +216,11 @@ const viewerIsCustomer = computed(() => {
 });
 const viewerIsAccountant = computed(() => currentUserSummary.value?.is_accountant === true);
 const profileAvatarUrl = computed(() => buildChatFileUrl(profileData.value?.avatar_file_id ?? null, props.apiBaseUrl));
+const profileDisplayName = computed(() => (
+  profileData.value?.customer_management_name?.trim()
+  || profileData.value?.account_name
+  || ''
+));
 const profilePresenceStatus = computed(() => formatLastSeenStatus(profileData.value?.last_seen_at, { emptyText: null }));
 const profileIsOnline = computed(() => isPresenceOnline(profileData.value?.last_seen_at));
 const accountantRelations = computed<PublicAccountantRelationSummary[]>(() => {
@@ -1390,16 +1395,16 @@ function handleHistoryPresetChipChange(value: string) {
             :aria-label="profileAvatarUrl ? 'تغییر آواتار' : 'افزودن آواتار'"
             @click="triggerAvatarPicker"
           >
-            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
-            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileDisplayName" class="profile-avatar-image" />
+            <template v-else>{{ getAvatarInitial(profileDisplayName) }}</template>
             <span class="profile-avatar-edit-indicator" aria-hidden="true">
               <Pencil :size="12" />
             </span>
             <div v-if="avatarBusy" class="profile-avatar-busy">در حال ذخیره...</div>
           </button>
           <div v-else class="profile-avatar profile-avatar--readonly" data-test="profile-avatar-readonly">
-            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileData.account_name" class="profile-avatar-image" />
-            <template v-else>{{ getAvatarInitial(profileData.account_name) }}</template>
+            <img v-if="profileAvatarUrl" :src="profileAvatarUrl" :alt="profileDisplayName" class="profile-avatar-image" />
+            <template v-else>{{ getAvatarInitial(profileDisplayName) }}</template>
           </div>
           <p
             v-if="profilePresenceStatus"
@@ -1414,7 +1419,7 @@ function handleHistoryPresetChipChange(value: string) {
         </div>
       </div>
       <div class="header-title">
-         <h2 v-if="profileData">{{ profileData.account_name }}</h2>
+         <h2 v-if="profileData">{{ profileDisplayName }}</h2>
          <h2 v-else-if="isLoading" class="skeleton-text-header">
            <!-- Skeleton for Title -->
            <div class="skeleton-box" style="width: 120px; height: 24px;"></div>

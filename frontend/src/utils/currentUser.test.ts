@@ -27,6 +27,7 @@ describe('currentUser utils', () => {
       is_accountant: true,
       is_customer: true,
       customer_tier: 'tier2',
+      customer_management_name: 'مشتری ویژه',
     })
 
     expect(result).toMatchObject({
@@ -40,6 +41,7 @@ describe('currentUser utils', () => {
       is_accountant: true,
       is_customer: true,
       customer_tier: 'tier2',
+      customer_management_name: 'مشتری ویژه',
     })
     expect(readCachedCurrentUserSummary()).toMatchObject({
       account_status: 'inactive',
@@ -48,6 +50,7 @@ describe('currentUser utils', () => {
       is_accountant: true,
       is_customer: true,
       customer_tier: 'tier2',
+      customer_management_name: 'مشتری ویژه',
     })
   })
 
@@ -65,6 +68,7 @@ describe('currentUser utils', () => {
         is_accountant: false,
         is_customer: true,
         customer_tier: 'tier1',
+        customer_management_name: 'مشتری بازار',
       }),
     })
 
@@ -81,6 +85,7 @@ describe('currentUser utils', () => {
       is_accountant: false,
       is_customer: true,
       customer_tier: 'tier1',
+      customer_management_name: 'مشتری بازار',
     })
   })
 

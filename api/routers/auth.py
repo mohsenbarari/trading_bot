@@ -370,6 +370,7 @@ def _serialize_current_user_response(
     customer_tier: CustomerTier | None = None,
     customer_owner_user_id: int | None = None,
     customer_owner_account_name: str | None = None,
+    customer_management_name: str | None = None,
     telegram_linked: bool = False,
     can_connect_telegram: bool = False,
     telegram_link_denial_reason: str | None = None,
@@ -383,6 +384,7 @@ def _serialize_current_user_response(
             "customer_tier": customer_tier,
             "customer_owner_user_id": customer_owner_user_id,
             "customer_owner_account_name": customer_owner_account_name,
+            "customer_management_name": customer_management_name,
             "telegram_linked": telegram_linked,
             "can_connect_telegram": can_connect_telegram,
             "telegram_link_denial_reason": telegram_link_denial_reason,
@@ -407,6 +409,7 @@ async def _load_current_user_relation_context(
             "customer_tier": customer_relation.customer_tier if customer_relation else None,
             "customer_owner_user_id": getattr(customer_relation, "owner_user_id", None) if customer_relation else None,
             "customer_owner_account_name": None,
+            "customer_management_name": getattr(customer_relation, "management_name", None) if customer_relation else None,
             "telegram_linked": telegram_linked,
             "can_connect_telegram": bool(bot_access.allowed and not telegram_linked),
             "telegram_link_denial_reason": None if bot_access.allowed else bot_access.reason,
@@ -432,10 +435,24 @@ async def _load_current_user_relation_context(
             if customer_relation and customer_relation.owner_user and not customer_relation.owner_user.is_deleted
             else None
         ),
+        "customer_management_name": getattr(customer_relation, "management_name", None) if customer_relation else None,
         "telegram_linked": telegram_linked,
         "can_connect_telegram": bool(bot_access.allowed and not telegram_linked),
         "telegram_link_denial_reason": None if bot_access.allowed else bot_access.reason,
     }
+
+
+def _registration_full_name(invitation: Invitation, accountant_relation, customer_relation) -> str:
+    candidate = None
+    if customer_relation is not None:
+        candidate = getattr(customer_relation, "management_name", None)
+    elif accountant_relation is not None:
+        candidate = getattr(accountant_relation, "relation_display_name", None)
+
+    normalized = str(candidate or "").strip()
+    if normalized:
+        return normalized
+    return invitation.account_name
 
 @router.get("/me", response_model=schemas.UserRead)
 async def read_users_me(
@@ -616,7 +633,7 @@ async def register_complete(
         account_name=inv.account_name,
         mobile_number=inv.mobile_number,
         role=inv.role,
-        full_name=inv.account_name, # Temporary full name
+        full_name=_registration_full_name(inv, accountant_relation, customer_relation),
         address=req.address,
         telegram_id=None, # Web only user
         home_server=_login_home_server(raw_request),

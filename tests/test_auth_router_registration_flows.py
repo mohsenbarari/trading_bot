@@ -464,6 +464,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         relation = SimpleNamespace(
             customer_user_id=None,
+            management_name="mohsen",
             status="pending",
             activated_at=None,
             deleted_at=None,
@@ -498,6 +499,7 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         new_user = db.added[0]
+        self.assertEqual(new_user.full_name, "mohsen")
         self.assertFalse(new_user.has_bot_access)
         self.assertEqual(relation.customer_user_id, 77)
         self.assertEqual(relation.status, "active")

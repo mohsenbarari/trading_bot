@@ -177,9 +177,14 @@ const greeting = computed(() => {
   return 'عصر بخیر'
 })
 
+const currentUserDisplayName = computed(() => {
+  if (!user.value) return ''
+  return user.value.customer_management_name || user.value.full_name || user.value.account_name || ''
+})
+
 const userInitial = computed(() => {
   if (!user.value) return ''
-  const name = user.value.full_name || user.value.account_name
+  const name = currentUserDisplayName.value
   return name ? name[0] : '?'
 })
 
@@ -559,14 +564,14 @@ onMounted(fetchUser)
           type="button"
           class="user-info-center"
           @click="router.push('/profile')"
-          :aria-label="`مشاهده پروفایل ${user.full_name || user.account_name}`"
+          :aria-label="`مشاهده پروفایل ${currentUserDisplayName}`"
         >
           <div class="avatar">
             <span>{{ userInitial }}</span>
           </div>
           <div class="user-text">
             <span class="greeting">{{ greeting }}</span>
-            <span class="user-name">{{ user.full_name || user.account_name }}</span>
+            <span class="user-name">{{ currentUserDisplayName }}</span>
           </div>
         </button>
 

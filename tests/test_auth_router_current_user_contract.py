@@ -79,7 +79,11 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(return_value=False),
         ) as accountant_mock, patch(
             "api.routers.auth.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=SimpleNamespace(customer_tier=CustomerTier.TIER_2)),
+            new=AsyncMock(return_value=SimpleNamespace(
+                customer_tier=CustomerTier.TIER_2,
+                owner_user_id=20,
+                management_name="مشتری ویژه",
+            )),
         ) as customer_relation_mock:
             result = await update_my_avatar(
                 payload=SimpleNamespace(avatar_file_id="avatar-1"),
@@ -100,6 +104,8 @@ class AuthRouterCurrentUserContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.is_accountant)
         self.assertTrue(result.is_customer)
         self.assertEqual(result.customer_tier, CustomerTier.TIER_2)
+        self.assertEqual(result.customer_owner_user_id, 20)
+        self.assertEqual(result.customer_management_name, "مشتری ویژه")
         self.assertEqual(result.avatar_file_id, "avatar-1")
 
     async def test_update_my_address_persists_trimmed_address(self):

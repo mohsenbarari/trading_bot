@@ -370,9 +370,11 @@ describe('DashboardView.vue', () => {
     mockDashboardApi({
       user: {
         id: 22,
-        full_name: 'مشتری سطح دو',
-        account_name: 'customer22',
+        full_name: 'customer_09120000022',
+        account_name: 'customer_09120000022',
+        customer_management_name: 'محسن',
         customer_tier: 'tier2',
+        is_customer: true,
         account_status: 'active',
         global_lock_grace_expires_at: null,
         global_web_locked_at: null,
@@ -386,6 +388,9 @@ describe('DashboardView.vue', () => {
 
     const wrapper = await mountView()
 
+    expect(wrapper.get('.user-name').text()).toBe('محسن')
+    expect(wrapper.get('.avatar').text()).toContain('م')
+    expect(wrapper.get('.user-info-center').attributes('aria-label')).toBe('مشاهده پروفایل محسن')
     expect(wrapper.find('.dashboard-commodities-card').exists()).toBe(false)
     expect(wrapper.find('.dashboard-project-users-card').exists()).toBe(false)
     expect(dashboardViewMocks.apiFetchMock).not.toHaveBeenCalledWith('/api/commodities/')
