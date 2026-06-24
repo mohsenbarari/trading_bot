@@ -235,7 +235,7 @@ def summarize_catalog(scenarios: list[TargetedJoinScenario]) -> dict[str, Any]:
 def planned_payload(args: argparse.Namespace, scenarios: list[TargetedJoinScenario]) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
-        "environment": "staging",
+        "environment": str(getattr(settings, "environment", "") or "staging"),
         "branch": run_git_value(["branch", "--show-current"]),
         "commit": run_git_value(["rev-parse", "HEAD"]),
         "dry_run": bool(args.dry_run),
@@ -969,6 +969,30 @@ async def execute_matrix(args: argparse.Namespace, scenarios: list[TargetedJoinS
             },
         }
 
+    cleanup_before = None
+    cleanup_after = None
+    if worker.is_production_runtime():
+        try:
+            worker.assert_production_full_matrix_allowed(
+                args.prefix,
+                allow_flag=bool(args.allow_production_execution),
+            )
+            worker.allow_production_cleanup_hard_delete(
+                args.prefix,
+                allow_flag=bool(args.allow_production_cleanup),
+            )
+            cleanup_before = await worker.cleanup_prefix(args.prefix)
+        except Exception as exc:
+            return {
+                **planned_payload(args, scenarios),
+                "execution": {
+                    "status": "blocked",
+                    "reason": "production_gate_failed",
+                    "error_class": type(exc).__name__,
+                    "error": str(exc),
+                },
+            }
+
     results: list[dict[str, Any]] = []
     for index, scenario in enumerate(scenarios, start=1):
         results.append(
@@ -984,9 +1008,11 @@ async def execute_matrix(args: argparse.Namespace, scenarios: list[TargetedJoinS
         status = str(result.get("status") or "unknown")
         result_counts[status] = result_counts.get(status, 0) + 1
     status_value = "passed" if result_counts.get("failed", 0) == 0 else "failed"
+    if worker.is_production_runtime() and not args.keep_data:
+        cleanup_after = await worker.cleanup_prefix(args.prefix)
     return {
         "schema_version": SCHEMA_VERSION,
-        "environment": "staging",
+        "environment": str(getattr(settings, "environment", "") or "staging"),
         "branch": run_git_value(["branch", "--show-current"]),
         "commit": run_git_value(["rev-parse", "HEAD"]),
         "settings_server_mode": settings.server_mode,
@@ -997,7 +1023,13 @@ async def execute_matrix(args: argparse.Namespace, scenarios: list[TargetedJoinS
             "status": status_value,
             "result_counts": result_counts,
             "telegram_network_calls": "disabled_by_injected_gateway",
-            "production_gate": "blocked_until_owner_staging_validation",
+            "production_gate": (
+                "production_execution_allowed"
+                if worker.is_production_runtime() and args.allow_production_execution
+                else "blocked_until_owner_staging_validation"
+            ),
+            "cleanup_before": cleanup_before,
+            "cleanup_after": cleanup_after,
         },
         "results": results,
     }
@@ -1014,6 +1046,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-scenarios", type=int)
     parser.add_argument("--scenario", action="append", default=[])
     parser.add_argument("--outage", action="append", default=[])
+    parser.add_argument("--keep-data", action="store_true")
+    parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow production targeted-join fixture creation only with the production full-matrix confirmation env.",
+    )
+    parser.add_argument(
+        "--allow-production-cleanup",
+        action="store_true",
+        help="Allow production targeted-join cleanup only with the cleanup confirmation env.",
+    )
     args = parser.parse_args(argv)
     if args.output is None:
         args.output = Path("/tmp/trading-bot-staging-candidate-full") / args.prefix / "trade-delivery-targeted-join-matrix.json"
@@ -1041,9 +1084,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.check:
         return 0
     if args.dry_run:
-        expected = len(delivery_matrix.build_actor_pairs()) * len(delivery_matrix.build_surface_pairs()) * len(
-            delivery_matrix.build_outage_classes()
-        )
+        if args.scenario:
+            expected = len(set(args.scenario or []))
+        elif args.outage or args.max_scenarios is not None:
+            expected = len(scenarios)
+        else:
+            expected = len(delivery_matrix.build_actor_pairs()) * len(delivery_matrix.build_surface_pairs()) * len(
+                delivery_matrix.build_outage_classes()
+            )
         return 0 if payload.get("catalog", {}).get("scenario_count") == expected else 1
     return 0 if (payload.get("execution") or {}).get("status") == "passed" else 1
 

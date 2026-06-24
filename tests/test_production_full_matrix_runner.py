@@ -126,6 +126,60 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--allow-production-execution", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
 
+    def test_execution_plan_builds_delivery_contract_catalog_commands(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "delivery_contract",
+                "--manifest-id",
+                "DC-TDN-004",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "delivery_contract_catalog_assertion")
+        self.assertEqual(scenario_plan["source_scenario_id"], "TDN-004")
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("report_trade_notification_delivery_matrix.py", rendered)
+        self.assertIn("--scenario", rendered)
+        self.assertIn("TDN-004", rendered)
+        self.assertTrue(all(command["mutates_production"] is False for command in scenario_plan["commands"]))
+
+    def test_execution_plan_builds_targeted_join_probe_commands(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "targeted_trade_delivery_join",
+                "--manifest-id",
+                "TJ-TDN-004",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "targeted_trade_delivery_join_probe")
+        self.assertEqual(scenario_plan["server"], "iran")
+        self.assertEqual(scenario_plan["source_scenario_id"], "TDN-004")
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("run_trade_delivery_targeted_join_matrix.py", rendered)
+        self.assertIn("--allow-production-execution", rendered)
+        self.assertIn("--allow-production-cleanup", rendered)
+        self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertIn("cleanup_targeted_trade_delivery_join_scenario", rendered)
+
     def test_sharding_is_deterministic_and_non_overlapping(self):
         first = runner.build_plan(
             self.build_args("--section", "production_base_trade_shape", "--shard-count", "2", "--shard-index", "1")
@@ -249,25 +303,21 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 987)
-        self.assertEqual(execution_plan["driver_gap_count"], 4568)
-        self.assertEqual(summary["total"], 4568)
+        self.assertEqual(execution_plan["executable_count"], 1395)
+        self.assertEqual(execution_plan["driver_gap_count"], 4160)
+        self.assertEqual(summary["total"], 4160)
         self.assertEqual(
             summary["by_section"],
             {
-                "delivery_contract": 204,
                 "production_base_trade_shape": 624,
                 "production_stress_overlay": 3536,
-                "targeted_trade_delivery_join": 204,
             },
         )
         self.assertEqual(
             summary["by_driver_gap_bucket"],
             {
                 "customer_accountant_actor_driver": 3840,
-                "delivery_contract_driver": 204,
                 "outage_orchestration_driver": 320,
-                "targeted_join_driver": 204,
             },
         )
         self.assertEqual(
@@ -276,8 +326,6 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 for item in execution_plan["driver_gap_roadmap"]
             ],
             [
-                ("delivery_contract_driver", 204),
-                ("targeted_join_driver", 204),
                 ("outage_orchestration_driver", 320),
                 ("customer_accountant_actor_driver", 3840),
             ],
@@ -306,7 +354,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 4568)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 4160)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:

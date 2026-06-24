@@ -41,8 +41,8 @@ IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 
 SECTION_DRIVER_STATUS = {
     "market_behavior": "pending_production_market_driver",
-    "delivery_contract": "pending_delivery_assertion_driver",
-    "targeted_trade_delivery_join": "pending_targeted_join_production_driver",
+    "delivery_contract": "delivery_contract_catalog_assertion_driver",
+    "targeted_trade_delivery_join": "targeted_join_delivery_probe_driver",
     "production_base_trade_shape": "two_server_dual_role_driver_plannable_for_user_stable_cases",
     "production_stress_overlay": "two_server_dual_role_driver_plannable_for_hot_user_stable_cases",
     "negative_business_guard": "pending_negative_guard_driver",
@@ -410,7 +410,7 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
         if record.get("case_id") in NEGATIVE_GUARD_EXECUTABLE_CASES:
             return None
         return "negative_business_guard_case_driver_not_implemented"
-    if section == "market_behavior":
+    if section in {"market_behavior", "delivery_contract", "targeted_trade_delivery_join"}:
         return None
     if section not in {"production_base_trade_shape", "production_stress_overlay"}:
         return f"{section}_production_driver_not_implemented"
@@ -904,6 +904,167 @@ def negative_guard_scenario_commands(
     }
 
 
+def delivery_contract_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "delivery_contract")
+    source_scenario_id = str(record.get("source_scenario_id") or "")
+    if not source_scenario_id:
+        raise RunnerError(f"{manifest_id}: missing source_scenario_id")
+    scenario_run_prefix = scenario_prefix(prefix, manifest_id)
+    scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
+    remote_dir = f"/tmp/{scenario_run_prefix}delivery-contract"
+    commands = [
+        host_mkdir_command(
+            "ensure_delivery_contract_artifact_dir",
+            server="foreign",
+            path=remote_dir,
+        ),
+        container_python_command(
+            "assert_delivery_contract_catalog_scenario",
+            server="foreign",
+            python_args=[
+                "scripts/report_trade_notification_delivery_matrix.py",
+                "--scenario",
+                source_scenario_id,
+                "--output",
+                f"{remote_dir}/delivery-contract.result.json",
+                "--check",
+            ],
+            timeout_seconds=60,
+            mutates_production=False,
+        ),
+    ]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "delivery_contract_catalog_assertion",
+        "scenario_prefix": scenario_run_prefix,
+        "artifact_dir": str(scenario_dir),
+        "remote_artifact_dir": remote_dir,
+        "source_scenario_id": source_scenario_id,
+        "actor_pair_id": record.get("actor_pair_id"),
+        "surface_pair": record.get("surface_pair"),
+        "outage_id": record.get("outage_id"),
+        "commands": [command_payload(command) for command in commands],
+        "execution_groups": [
+            {
+                "name": "assert_delivery_contract_catalog",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in commands],
+            },
+        ],
+        "safety_note": (
+            "This driver is catalog-only and mutation-free. Runtime delivery evidence is produced by the "
+            "targeted trade-delivery join driver for the same TDN scenario id."
+        ),
+    }
+
+
+def targeted_join_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "targeted_join")
+    source_scenario_id = str(record.get("source_scenario_id") or "")
+    if not source_scenario_id:
+        raise RunnerError(f"{manifest_id}: missing source_scenario_id")
+    offer_home_server = str(record.get("offer_home_server") or "")
+    if offer_home_server not in DUAL_ROLE_ROLE_BY_SERVER:
+        raise RunnerError(f"{manifest_id}: unsupported offer_home_server={offer_home_server!r}")
+    scenario_run_prefix = scenario_prefix(prefix, manifest_id)
+    scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
+    remote_dir = f"/tmp/{scenario_run_prefix}targeted-join"
+    production_env = {
+        EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
+        "TRADING_BOT_SERVICE": "load_runner",
+        "BOT_TOKEN": "",
+    }
+    cleanup_env = {
+        CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
+        "TRADING_BOT_SERVICE": "load_runner",
+        "BOT_TOKEN": "",
+    }
+    commands = [
+        host_mkdir_command(
+            f"ensure_{offer_home_server}_targeted_join_artifact_dir",
+            server=offer_home_server,
+            path=remote_dir,
+        ),
+        container_python_command(
+            "run_targeted_trade_delivery_join_scenario",
+            server=offer_home_server,
+            python_args=[
+                "scripts/run_trade_delivery_targeted_join_matrix.py",
+                "--prefix",
+                scenario_run_prefix,
+                "--scenario",
+                source_scenario_id,
+                "--output",
+                f"{remote_dir}/targeted-join.result.json",
+                "--check",
+                "--allow-any-branch",
+                "--allow-production-execution",
+                "--allow-production-cleanup",
+            ],
+            env=production_env,
+            timeout_seconds=900,
+        ),
+        container_python_command(
+            "cleanup_targeted_trade_delivery_join_scenario",
+            server=offer_home_server,
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "cleanup",
+                "--prefix",
+                scenario_run_prefix,
+                "--allow-production-hard-delete",
+                "--artifact",
+                f"{remote_dir}/targeted-join.cleanup-post.json",
+            ],
+            env=cleanup_env,
+            timeout_seconds=180,
+        ),
+    ]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "targeted_trade_delivery_join_probe",
+        "scenario_prefix": scenario_run_prefix,
+        "artifact_dir": str(scenario_dir),
+        "remote_artifact_dir": remote_dir,
+        "source_scenario_id": source_scenario_id,
+        "server": offer_home_server,
+        "actor_pair_id": record.get("actor_pair_id"),
+        "source_kind": record.get("source_kind"),
+        "responder_kind": record.get("responder_kind"),
+        "group_relation": record.get("group_relation"),
+        "offer_surface": record.get("offer_surface"),
+        "request_surface": record.get("request_surface"),
+        "outage_id": record.get("outage_id"),
+        "policy_supported": record.get("policy_supported"),
+        "unsupported_reasons": record.get("unsupported_reasons") or [],
+        "commands": [command_payload(command) for command in commands],
+        "execution_groups": [
+            {
+                "name": "run_targeted_join",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in commands],
+            },
+        ],
+        "safety_note": (
+            "The targeted join probe creates only prefixed synthetic fixtures, injects a fake Telegram gateway, "
+            "asserts receipt terminal states, and runs exact-prefix cleanup after the scenario."
+        ),
+    }
+
+
 def unsupported_policy_scenario_commands(
     record: dict[str, Any],
     *,
@@ -1155,6 +1316,22 @@ def build_execution_plan(
                     telegram_ratio=telegram_ratio,
                 )
             )
+        elif record.get("section") == "delivery_contract":
+            scenario_plans.append(
+                delivery_contract_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                )
+            )
+        elif record.get("section") == "targeted_trade_delivery_join":
+            scenario_plans.append(
+                targeted_join_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                )
+            )
         elif record.get("section") == "negative_business_guard":
             scenario_plans.append(
                 negative_guard_scenario_commands(
@@ -1187,9 +1364,17 @@ def build_execution_plan(
         "status": "planned",
         "implemented_driver": "two_server_dual_role_hot_offer_and_negative_guard_webapp_iran_probe",
         "implemented_scope": {
-            "sections": ["negative_business_guard", "production_base_trade_shape", "production_stress_overlay"],
-            "actor_pair_id": "user__user",
-            "outage_id": "stable",
+            "sections": [
+                "delivery_contract",
+                "negative_business_guard",
+                "production_base_trade_shape",
+                "production_stress_overlay",
+                "targeted_trade_delivery_join",
+            ],
+            "dual_role_actor_pair_id": "user__user",
+            "dual_role_outage_id": "stable",
+            "delivery_contract_catalog": "all_delivery_contract_scenarios",
+            "targeted_join_scenarios": "all_targeted_join_scenarios_with_fake_telegram_gateway",
             "stress_families": sorted(DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES),
             "duplicate_replay_request_surfaces": sorted(DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES),
             "manual_expire_race_request_surfaces": sorted(

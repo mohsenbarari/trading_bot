@@ -90,10 +90,16 @@ implemented production driver. The current implemented command plan covers:
   `missing_public_offer_id`, and `cleanup_scope_violation`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`987` command-plannable scenarios with these drivers:
+`1395` command-plannable scenarios with these drivers:
 
 - `228` market behavior scenarios using the comprehensive CLM market matrix
   with production confirmation and exact synthetic cleanup;
+- `204` delivery-contract scenarios using a mutation-free catalog assertion.
+  Runtime receipt and notification evidence for the same `TDN-*` ids is
+  produced by the targeted join driver;
+- `204` targeted trade-delivery join scenarios using production confirmation,
+  exact synthetic cleanup, and a fake Telegram gateway so no real Telegram
+  network call is made by this driver;
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios;
 - `24` user-to-user stable duplicate replay stress overlay scenarios;
@@ -106,9 +112,9 @@ With the current manifest count of `5555`, selecting the whole manifest yields
   creation and tier2 Telegram request paths reject without partial mutation.
 
 It intentionally does not yet implement production execution drivers for
-customer/accountant actor pairs, short/medium outage simulation, or targeted
-delivery join. Those must remain visible as `driver_gaps` and cannot be treated
-as passed.
+customer/accountant actor pairs in the base/stress layers or real short/medium
+outage orchestration. Those must remain visible as `driver_gaps` and cannot be
+treated as passed.
 The execution-plan output also includes `driver_gap_summary.by_driver_gap_bucket`
 and `driver_gap_roadmap`, which group the raw gap reasons into implementation
 buckets sorted from easier to harder.
@@ -129,8 +135,6 @@ selected scenario is command-plannable.
 
 Current full-manifest gap buckets are expected to be:
 
-- `delivery_contract_driver`: `204`
-- `targeted_join_driver`: `204`
 - `outage_orchestration_driver`: `320`
 - `customer_accountant_actor_driver`: `3840`
 

@@ -259,9 +259,14 @@ Current execution-plan limitation:
   through explicit tier2 no-partial-mutation probes;
 - all `228` market behavior scenarios are command-plannable through the
   comprehensive CLM market matrix with production confirmation and exact cleanup;
-- current whole-manifest command-plannable count: `987` of `5555` scenarios;
+- all `204` delivery-contract scenarios are command-plannable through
+  mutation-free catalog assertions;
+- all `204` targeted trade-delivery join scenarios are command-plannable
+  through production-gated synthetic fixtures, exact cleanup, and fake Telegram
+  transport;
+- current whole-manifest command-plannable count: `1395` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
-  short/medium outage orchestration, and targeted delivery join production driver.
+  and short/medium outage orchestration.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
@@ -270,13 +275,9 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
-   notifications after real trade evidence exists.
-2. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
-   staging/patched execution to production two-server execution.
-3. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
+1. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
    outage control with distinct expected outcomes.
-4. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
+2. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
    assertions for customer, owner, accountant, same-owner, and different-owner
    actor pairs.
 

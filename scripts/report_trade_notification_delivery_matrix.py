@@ -127,16 +127,46 @@ def build_delivery_scenarios() -> list[DeliveryScenario]:
     return scenarios
 
 
-def build_matrix_payload() -> dict[str, Any]:
+def filter_delivery_scenarios(
+    scenarios: list[DeliveryScenario],
+    *,
+    scenario_ids: set[str],
+    outage_ids: set[str],
+    max_scenarios: int | None,
+) -> list[DeliveryScenario]:
+    selected = [
+        scenario
+        for scenario in scenarios
+        if (not scenario_ids or scenario.scenario_id in scenario_ids)
+        and (not outage_ids or scenario.outage_id in outage_ids)
+    ]
+    if max_scenarios is not None:
+        selected = selected[: max(0, max_scenarios)]
+    return selected
+
+
+def build_matrix_payload(
+    *,
+    scenario_ids: set[str] | None = None,
+    outage_ids: set[str] | None = None,
+    max_scenarios: int | None = None,
+) -> dict[str, Any]:
     actor_pairs = build_actor_pairs()
     surface_pairs = build_surface_pairs()
     outage_classes = build_outage_classes()
-    scenarios = build_delivery_scenarios()
+    all_scenarios = build_delivery_scenarios()
+    scenarios = filter_delivery_scenarios(
+        all_scenarios,
+        scenario_ids=scenario_ids or set(),
+        outage_ids=outage_ids or set(),
+        max_scenarios=max_scenarios,
+    )
     return {
         "schema_version": MATRIX_SCHEMA_VERSION,
         "actor_pair_count": len(actor_pairs),
         "surface_pair_count": len(surface_pairs),
         "outage_class_count": len(outage_classes),
+        "total_scenario_count": len(all_scenarios),
         "scenario_count": len(scenarios),
         "actor_pairs": [asdict(item) for item in actor_pairs],
         "surface_pairs": [
@@ -160,18 +190,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Report the trade notification delivery scenario matrix.")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--scenario", action="append", default=[])
+    parser.add_argument("--outage", action="append", default=[])
+    parser.add_argument("--max-scenarios", type=int)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    payload = build_matrix_payload()
+    scenario_ids = set(args.scenario or [])
+    payload = build_matrix_payload(
+        scenario_ids=scenario_ids,
+        outage_ids=set(args.outage or []),
+        max_scenarios=args.max_scenarios,
+    )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     if args.check:
         expected = len(build_actor_pairs()) * len(build_surface_pairs()) * len(build_outage_classes())
+        if scenario_ids:
+            return 0 if payload["scenario_count"] == len(scenario_ids) else 1
         return 0 if payload["scenario_count"] == expected else 1
     return 0
 
