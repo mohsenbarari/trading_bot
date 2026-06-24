@@ -968,6 +968,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         evidence = {
             "offer": {"remaining_quantity": 5},
             "trade_count": 0,
+            "offer_request_count": 1,
             "offer_request_status_counts": {
                 worker.OfferRequestStatus.REJECTED_BUSINESS_RULE.value: 1,
             },
@@ -982,10 +983,47 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
+    def test_negative_guard_evidence_acceptance_for_pre_ledger_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="watch_role_market_action",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 1,
+            "offer_request_status_counts": {
+                worker.OfferRequestStatus.REJECTED_OFFER_EXPIRED.value: 1,
+            },
+            "offer_request_public_failure_code_counts": {"offer_not_active": 1},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="manually_expired_offer",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
     def test_negative_guard_evidence_detects_partial_mutation(self):
         evidence = {
             "offer": {"remaining_quantity": 0},
             "trade_count": 1,
+            "offer_request_count": 2,
             "offer_request_status_counts": {
                 worker.OfferRequestStatus.REJECTED_BUSINESS_RULE.value: 1,
                 worker.OfferRequestStatus.COMPLETED_TRADE.value: 1,

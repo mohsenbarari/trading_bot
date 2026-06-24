@@ -111,6 +111,12 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "invalid_request_amount",
     "retail_lot_unavailable",
     "already_completed_offer",
+    "manually_expired_offer",
+    "time_expired_offer",
+    "inactive_requester",
+    "trading_restricted_user",
+    "watch_role_market_action",
+    "accountant_market_action",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -2309,6 +2315,16 @@ async def age_offer_for_time_expiry(*, offer_id: int, age_minutes: int = 10) -> 
         await db.commit()
 
 
+async def update_synthetic_user_for_negative_guard(user_id: int, **values: Any) -> None:
+    async with AsyncSessionLocal() as db:
+        user = await db.get(User, user_id)
+        if user is None:
+            raise TradingProbeError(f"negative guard synthetic user {user_id} disappeared")
+        for key, value in values.items():
+            setattr(user, key, value)
+        await db.commit()
+
+
 async def run_offer_expiry_cycle_for_server(server: str) -> int:
     with override_current_server(server):
         return int(await offer_expiry_worker.expire_stale_offers())
@@ -2715,6 +2731,88 @@ async def execute_webapp_trade_for_user(
     return "success"
 
 
+async def execute_accountant_context_trade_for_user(
+    *,
+    owner_user_id: int,
+    actor_user_id: int,
+    offer_id: int,
+    offer_public_id: str | None = None,
+    quantity: int,
+    idempotency_key: str,
+    error_details: list[str] | None = None,
+    phase_details: dict[str, Any] | None = None,
+) -> str:
+    background_tasks = BackgroundTasks()
+    create_started = time.perf_counter()
+    try:
+        async with AsyncSessionLocal() as db:
+            owner = await load_user(db, owner_user_id)
+            actor = await load_user(db, actor_user_id)
+            response = await trades_router._execute_trade_authoritatively(
+                trade_data=trades_router.TradeCreate(
+                    offer_id=offer_id,
+                    offer_public_id=offer_public_id,
+                    quantity=quantity,
+                    idempotency_key=idempotency_key,
+                ),
+                background_tasks=background_tasks,
+                db=db,
+                context=EffectiveOwnerActor(
+                    owner_user=owner,
+                    actor_user=actor,
+                    relation=None,
+                    is_accountant_context=True,
+                ),
+                edge_received_at=datetime.utcnow(),
+            )
+        if phase_details is not None:
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["execute_trade_ms"] = business_latency_ms
+        background_started = time.perf_counter()
+        await background_tasks()
+        if phase_details is not None:
+            phase_details["background_tasks_ms"] = round((time.perf_counter() - background_started) * 1000.0, 3)
+    except HTTPException as exc:
+        status_code = int(exc.status_code or 500)
+        if status_code >= 500 and error_details is not None:
+            error_details.append(f"HTTPException {status_code}: {exc.detail}")
+        if phase_details is not None:
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["execute_trade_ms"] = business_latency_ms
+            phase_details["exception"] = f"HTTPException {status_code}"
+            phase_details["http_status_code"] = status_code
+            phase_details["http_detail"] = str(exc.detail)
+        return "rejected" if status_code < 500 else "error"
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"{type(exc).__name__}: {exc}")
+        if phase_details is not None:
+            business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
+            phase_details["business_latency_ms"] = business_latency_ms
+            phase_details["execute_trade_ms"] = business_latency_ms
+            phase_details["exception"] = type(exc).__name__
+        return "error"
+
+    if isinstance(response, JSONResponse):
+        if phase_details is not None and response.status_code >= 400:
+            try:
+                body = json.loads(response.body.decode("utf-8") or "{}")
+            except Exception:
+                body = {"detail": "invalid JSONResponse body"}
+            phase_details["json_response_status_code"] = int(response.status_code)
+            phase_details["json_response_detail"] = str(body.get("detail") or body)
+        if response.status_code >= 500 and error_details is not None:
+            try:
+                body = json.loads(response.body.decode("utf-8") or "{}")
+            except Exception:
+                body = {"detail": "invalid JSONResponse body"}
+            error_details.append(f"JSONResponse {response.status_code}: {body.get('detail') or body}")
+        return "success" if response.status_code < 400 else ("rejected" if response.status_code < 500 else "error")
+    return "success"
+
+
 async def negative_guard_offer_evidence(offer_id: int) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
         offer = await db.get(Offer, offer_id)
@@ -2774,6 +2872,17 @@ def assert_negative_guard_evidence(
     status_sequence: list[str],
     evidence: Mapping[str, Any],
 ) -> list[str]:
+    pre_ledger_cases = {
+        "inactive_requester",
+        "trading_restricted_user",
+        "watch_role_market_action",
+        "accountant_market_action",
+    }
+    expired_offer_cases = {
+        "already_completed_offer",
+        "manually_expired_offer",
+        "time_expired_offer",
+    }
     failures: list[str] = []
     if any(status == "error" for status in status_sequence):
         failures.append(f"{case_id} produced internal error status sequence {status_sequence}")
@@ -2783,14 +2892,20 @@ def assert_negative_guard_evidence(
     status_counts = dict(evidence.get("offer_request_status_counts") or {})
     code_counts = dict(evidence.get("offer_request_public_failure_code_counts") or {})
     trade_count = int(evidence.get("trade_count") or 0)
+    offer_request_count = int(evidence.get("offer_request_count") or 0)
     offer = dict(evidence.get("offer") or {})
     remaining_quantity = offer.get("remaining_quantity")
 
     expected_trade_count = 0
     expected_remaining_quantity = 5
+    expected_offer_request_count: int | None = None
     required_status: str | None = OfferRequestStatus.REJECTED_BUSINESS_RULE.value
     required_code: str | None = None
-    if case_id == "own_offer_request":
+    if case_id in pre_ledger_cases:
+        required_status = None
+        required_code = None
+        expected_offer_request_count = 0
+    elif case_id == "own_offer_request":
         required_code = "own_offer"
     elif case_id == "invalid_request_amount":
         required_code = "invalid_quantity"
@@ -2798,9 +2913,10 @@ def assert_negative_guard_evidence(
         required_status = OfferRequestStatus.REJECTED_LOT_UNAVAILABLE.value
         required_code = "lot_unavailable"
         expected_remaining_quantity = 10
-    elif case_id == "already_completed_offer":
-        expected_trade_count = 1
-        expected_remaining_quantity = 0
+    elif case_id in expired_offer_cases:
+        if case_id == "already_completed_offer":
+            expected_trade_count = 1
+            expected_remaining_quantity = 0
         required_status = OfferRequestStatus.REJECTED_OFFER_EXPIRED.value
         required_code = "offer_not_active"
     else:
@@ -2811,6 +2927,10 @@ def assert_negative_guard_evidence(
     if remaining_quantity != expected_remaining_quantity:
         failures.append(
             f"{case_id} expected remaining_quantity={expected_remaining_quantity}, got {remaining_quantity}"
+        )
+    if expected_offer_request_count is not None and offer_request_count != expected_offer_request_count:
+        failures.append(
+            f"{case_id} expected offer_request_count={expected_offer_request_count}, got {offer_request_count}"
         )
     if required_status and int(status_counts.get(required_status, 0) or 0) < 1:
         failures.append(f"{case_id} missing offer_request status {required_status}: {status_counts}")
@@ -2929,6 +3049,95 @@ async def run_negative_guard_case(
                     )
                 )
                 phase_details.extend([first_details, second_details])
+            elif normalized_case_id == "manually_expired_offer":
+                await expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "time_expired_offer":
+                await age_offer_for_time_expiry(offer_id=offer_id, age_minutes=24 * 60)
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "inactive_requester":
+                await update_synthetic_user_for_negative_guard(
+                    responder_a.user_id,
+                    account_status=UserAccountStatus.INACTIVE,
+                )
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "trading_restricted_user":
+                await update_synthetic_user_for_negative_guard(
+                    responder_a.user_id,
+                    trading_restricted_until=datetime.utcnow() + timedelta(days=1),
+                )
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "watch_role_market_action":
+                await update_synthetic_user_for_negative_guard(
+                    responder_a.user_id,
+                    role=UserRole.WATCH,
+                )
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "accountant_market_action":
+                details = {}
+                statuses.append(
+                    await execute_accountant_context_trade_for_user(
+                        owner_user_id=responder_a.user_id,
+                        actor_user_id=responder_b.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            else:
+                raise TradingProbeError(f"negative guard case branch is missing: {normalized_case_id}")
 
     evidence = await negative_guard_offer_evidence(offer_id)
     failures = assert_negative_guard_evidence(

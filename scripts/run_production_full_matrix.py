@@ -57,6 +57,12 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "invalid_request_amount",
     "retail_lot_unavailable",
     "already_completed_offer",
+    "manually_expired_offer",
+    "time_expired_offer",
+    "inactive_requester",
+    "trading_restricted_user",
+    "watch_role_market_action",
+    "accountant_market_action",
 }
 
 DUAL_ROLE_ROLE_BY_SERVER = {
