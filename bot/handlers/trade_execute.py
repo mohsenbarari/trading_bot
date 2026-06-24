@@ -21,6 +21,7 @@ from bot.utils.redis_helpers import check_double_click
 from core.utils import check_user_limits, to_jalali_str, utc_now
 from core.enums import UserRole
 from core.services.bot_access_policy import bot_access_denial_message, evaluate_bot_access, evaluate_bot_access_local_state
+from core.services.block_service import is_trade_blocked_by_principals
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively
@@ -609,7 +610,9 @@ async def _handle_channel_trade(
             # The authoritative trade command acquires the hot-offer advisory lock
             # before the row lock. Keep callback lookup lock-free to preserve that order.
             await session.refresh(offer, ["user", "commodity"])
-            await attach_customer_management_names(session, [offer.user])
+            offer_user = getattr(offer, "user", None)
+            if offer_user is not None:
+                await attach_customer_management_names(session, [offer_user])
         
         if not offer:
             await callback.answer(OFFER_UNAVAILABLE_CALLBACK_MESSAGE, show_alert=True)
@@ -628,8 +631,11 @@ async def _handle_channel_trade(
             return
         
         # ===== بررسی بلاک =====
-        from core.services.block_service import is_blocked
-        is_blocked_check, blocker_id = await is_blocked(session, offer.user_id, user.id)
+        is_blocked_check, blocker_id, _, _ = await is_trade_blocked_by_principals(
+            session,
+            offer.user_id,
+            user.id,
+        )
         if is_blocked_check:
             if blocker_id == user.id:
                 # کاربر فعلی این لفظ‌دهنده را بلاک کرده

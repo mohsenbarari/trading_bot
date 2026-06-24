@@ -18,6 +18,14 @@ def rows_result(values):
 
 
 class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        customer_relation_patcher = patch(
+            "core.services.block_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=None),
+        )
+        customer_relation_patcher.start()
+        self.addCleanup(customer_relation_patcher.stop)
+
     async def test_can_user_block_returns_not_found_when_user_missing(self):
         db = SimpleNamespace(get=AsyncMock(return_value=None), scalar=AsyncMock())
 
@@ -129,6 +137,40 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         db.add.assert_not_called()
         db.commit.assert_not_awaited()
 
+    async def test_block_user_rejects_non_group_customer_target(self):
+        db = SimpleNamespace(scalar=AsyncMock(return_value=None), add=Mock(), commit=AsyncMock())
+        relation = SimpleNamespace(owner_user_id=70)
+
+        with patch(
+            "core.services.block_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=relation),
+        ), patch(
+            "core.services.block_service.get_active_accountant_relation_for_accountant",
+            new=AsyncMock(return_value=None),
+        ), patch("core.services.block_service.can_user_block", AsyncMock(return_value=(True, "", {"remaining": 2}))):
+            success, message = await block_service.block_user(db, 19, 20)
+
+        self.assertFalse(success)
+        self.assertEqual(message, block_service.NON_GROUP_CUSTOMER_BLOCK_MESSAGE)
+        db.add.assert_not_called()
+        db.commit.assert_not_awaited()
+
+    async def test_block_user_allows_owner_to_block_own_customer_target(self):
+        db = SimpleNamespace(scalar=AsyncMock(return_value=None), add=Mock(), commit=AsyncMock())
+        relation = SimpleNamespace(owner_user_id=19)
+
+        with patch(
+            "core.services.block_service.get_active_customer_relation_for_customer",
+            new=AsyncMock(return_value=relation),
+        ), patch("core.services.block_service.can_user_block", AsyncMock(return_value=(True, "", {"remaining": 2}))):
+            success, message = await block_service.block_user(db, 19, 20)
+
+        self.assertTrue(success)
+        self.assertIn("موفقیت", message)
+        new_block = db.add.call_args.args[0]
+        self.assertEqual(new_block.blocker_id, 19)
+        self.assertEqual(new_block.blocked_id, 20)
+
     async def test_block_user_creates_record_and_commits(self):
         db = SimpleNamespace(scalar=AsyncMock(return_value=None), add=Mock(), commit=AsyncMock())
 
@@ -174,6 +216,29 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
         blocked, blocker_id = await block_service.is_blocked(db_none, 30, 31)
         self.assertFalse(blocked)
         self.assertIsNone(blocker_id)
+
+    async def test_is_trade_blocked_by_principals_checks_customer_owner_pair(self):
+        db = SimpleNamespace()
+        customer_relation = SimpleNamespace(owner_user_id=90)
+        block_mock = AsyncMock(side_effect=[(False, None), (True, 90)])
+
+        with patch("core.services.block_service.is_blocked", new=block_mock):
+            blocked, blocker_id, user_a_principal_id, user_b_principal_id = (
+                await block_service.is_trade_blocked_by_principals(
+                    db,
+                    30,
+                    40,
+                    user_a_customer_relation=customer_relation,
+                    user_b_customer_relation=None,
+                )
+            )
+
+        self.assertTrue(blocked)
+        self.assertEqual(blocker_id, 90)
+        self.assertEqual(user_a_principal_id, 90)
+        self.assertEqual(user_b_principal_id, 40)
+        self.assertEqual(block_mock.await_args_list[0].args, (db, 30, 40))
+        self.assertEqual(block_mock.await_args_list[1].args, (db, 30, 90))
 
     async def test_get_blocked_users_shapes_joined_rows(self):
         block = SimpleNamespace(created_at="2026-05-07T20:00:00")
@@ -281,6 +346,9 @@ class BlockServiceTests(unittest.IsolatedAsyncioTestCase):
             },
         ])
         self.assertEqual(is_blocked_by.await_count, 2)
+        stmt_text = str(db.execute.await_args_list[0].args[0]).lower()
+        self.assertIn("customer_relations", stmt_text)
+        self.assertIn("owner_user_id", stmt_text)
 
 
 if __name__ == "__main__":

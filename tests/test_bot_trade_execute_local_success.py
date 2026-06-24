@@ -136,9 +136,10 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["actual_amount"], 2)
         self.assertEqual(session.commits, 0)
         self.assertEqual(session.added, [])
-        self.assertEqual(len(session.statements), 1)
+        self.assertGreaterEqual(len(session.statements), 1)
         self.assertIn("offers.id", session.statements[0])
-        self.assertNotIn("FOR UPDATE", session.statements[0].upper())
+        for statement in session.statements:
+            self.assertNotIn("FOR UPDATE", statement.upper())
 
     async def test_handle_channel_trade_preconfirmed_local_trade_skips_double_click(self):
         user = make_bot_user()

@@ -46,6 +46,7 @@ from core.services.trade_service import (
     get_available_trade_amounts,
     validate_offer_trade_amount,
 )
+from core.services.block_service import is_trade_blocked_by_principals
 from core.services.trade_contention_gate import (
     TradeContentionLease,
     trade_contention_lease_was_pre_gated,
@@ -2593,9 +2594,24 @@ async def _execute_trade_authoritatively(
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
     
-    # بررسی بلاک بین کاربران (پنهان - کاربر نباید متوجه بلاک شدن بشه)
-    from core.services.block_service import is_blocked
-    blocked, _ = await is_blocked(db, owner_user.id, offer.user_id)
+    responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
+    _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)
+    responder_customer_tier = getattr(
+        getattr(responder_customer_relation, "customer_tier", None),
+        "value",
+        getattr(responder_customer_relation, "customer_tier", None),
+    )
+    source_customer_relation = await get_active_customer_relation_for_customer(db, offer.user_id)
+
+    # بررسی بلاک بین سرگروه‌های واقعی دو طرف. اگر یک طرف مشتری باشد،
+    # بلاک سرگروه همان مشتری باید روی معامله او هم اثر بگذارد.
+    blocked, _, responder_principal_user_id, source_principal_user_id = await is_trade_blocked_by_principals(
+        db,
+        owner_user.id,
+        offer.user_id,
+        user_a_customer_relation=responder_customer_relation,
+        user_b_customer_relation=source_customer_relation,
+    )
     if blocked:
         await _commit_rejected_offer_request_ledger(
             db,
@@ -2603,7 +2619,11 @@ async def _execute_trade_authoritatively(
             result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
             public_failure_code="business_rule",
             public_failure_message="امکان انجام این معامله وجود ندارد.",
-            internal_failure_code="blocked_user_pair",
+            internal_failure_code="blocked_principal_pair",
+            internal_failure_context={
+                "source_principal_user_id": source_principal_user_id,
+                "responder_principal_user_id": responder_principal_user_id,
+            },
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2670,26 +2690,10 @@ async def _execute_trade_authoritatively(
     await db.refresh(offer, ["user", "commodity"])
     mark_trade_phase("validated_amount")
 
-    responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
-    _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)
-    responder_customer_tier = getattr(
-        getattr(responder_customer_relation, "customer_tier", None),
-        "value",
-        getattr(responder_customer_relation, "customer_tier", None),
-    )
     is_tier2_customer_responder = (
         responder_customer_relation is not None
         and responder_customer_tier == CustomerTier.TIER_2.value
     )
-    responder_owner_user_id = _coerce_trade_user_id(
-        getattr(responder_customer_relation, "owner_user_id", None)
-    )
-    source_customer_relation = await get_active_customer_relation_for_customer(db, offer.user_id)
-    source_customer_owner_user_id = _coerce_trade_user_id(
-        getattr(source_customer_relation, "owner_user_id", None)
-    )
-    source_principal_user_id = source_customer_owner_user_id or offer.user_id
-    responder_principal_user_id = responder_owner_user_id or owner_user.id
 
     executed_trade_price = offer.price
     if is_tier2_customer_responder:

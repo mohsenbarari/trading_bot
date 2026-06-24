@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
 
@@ -11,12 +11,22 @@ from api.routers.users import read_user
 
 
 class FakeDB:
-    def __init__(self, user):
+    def __init__(self, user, execute_results=None):
         self.user = user
-        self.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None))
+        self.execute_results = list(execute_results or [])
+        self.execute = AsyncMock(side_effect=self._execute)
 
     async def get(self, model, user_id):
         return self.user
+
+    async def _execute(self, _stmt):
+        if self.execute_results:
+            return self.execute_results.pop(0)
+        return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+
+
+def relation_result(items):
+    return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: list(items)))
 
 
 def make_user(**overrides):
@@ -77,17 +87,15 @@ class UsersRouterReadOneTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_user_enriches_customer_context_when_target_is_active_customer(self):
         owner_user = SimpleNamespace(id=20, account_name="owner20", is_deleted=False)
         relation = SimpleNamespace(
+            customer_user_id=7,
             owner_user=owner_user,
+            owner_user_id=20,
             management_name="مشتری ویژه",
             customer_tier="tier2",
         )
         user = make_user(is_deleted=False)
 
-        with patch(
-            "api.routers.users.get_active_customer_relation_for_customer",
-            new=AsyncMock(return_value=relation),
-        ):
-            result = await read_user(7, db=FakeDB(user))
+        result = await read_user(7, db=FakeDB(user, execute_results=[relation_result([relation]), relation_result([])]))
 
         self.assertTrue(user.is_customer)
         self.assertEqual(user.customer_owner_user_id, 20)

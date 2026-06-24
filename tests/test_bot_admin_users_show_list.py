@@ -70,7 +70,7 @@ class BotAdminUsersShowListTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch(
             "bot.handlers.admin_users.AsyncSessionLocal",
-            return_value=FakeSession([FakeScalarResult(1), FakeUsersResult(users)]),
+            return_value=FakeSession([FakeScalarResult(1), FakeUsersResult(users), FakeUsersResult([]), FakeUsersResult([])]),
         ), patch("bot.handlers.admin_users.get_users_list_inline_keyboard", return_value="KB") as keyboard_mock, patch(
             "bot.handlers.admin_users.update_anchor", new=AsyncMock()
         ) as anchor_mock:

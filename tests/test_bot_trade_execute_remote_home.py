@@ -340,7 +340,8 @@ class BotTradeExecuteRemoteHomeTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.handlers.trade_execute.current_server", return_value="foreign"):
             await handle_channel_trade(callback, SimpleNamespace(offer_id=7, amount=2), user=user, bot=bot)
 
-        self.assertEqual(session.for_update_flags, [False])
+        self.assertGreaterEqual(len(session.for_update_flags), 1)
+        self.assertTrue(all(flag is False for flag in session.for_update_flags))
         self.assertEqual(session.rollbacks, 1)
         forward_mock.assert_awaited_once()
         self.assertNotIn("request_pre_gated", forward_mock.await_args.args[1])

@@ -55,12 +55,30 @@ describe('UserManager.vue', () => {
 
   it('loads users on mount and emits the selected user profile navigation payload', async () => {
     const user = makeUser()
-    userManagerMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([user]))
+    const customer = makeUser({
+      id: 2,
+      account_name: 'customer_raw',
+      customer_management_name: 'مشتری بازار',
+      is_customer: true,
+      customer_owner_account_name: 'owner_a',
+    })
+    const accountant = makeUser({
+      id: 3,
+      account_name: 'accountant_raw',
+      is_accountant: true,
+      accountant_owner_account_name: 'owner_b',
+    })
+    userManagerMocks.apiFetchMock.mockResolvedValue(makeJsonResponse([user, customer, accountant]))
 
     const wrapper = await mountView()
 
     expect(userManagerMocks.apiFetchMock).toHaveBeenCalledWith('/api/users/')
     expect(wrapper.text()).toContain('alireza')
+    expect(wrapper.text()).toContain('مشتری بازار')
+    expect(wrapper.text()).toContain('مشتری')
+    expect(wrapper.text()).toContain('حسابدار')
+    expect(wrapper.text()).toContain('سرگروه: owner_a')
+    expect(wrapper.text()).toContain('سرگروه: owner_b')
     expect(wrapper.text()).toContain('09123456789')
 
     await wrapper.get('.user-item').trigger('click')

@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 from api.routers.trades import TradeCreate, _execute_trade_authoritatively, _is_time_limit_expired_offer
 from core.enums import UserAccountStatus, UserRole
 from core.services.offer_expiry_service import OfferExpiryReason
+from models.customer_relation import CustomerTier
 from models.offer import OfferStatus, OfferType
 from models.offer_request import OfferRequest, OfferRequestStatus
 
@@ -285,6 +286,38 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "امکان انجام این معامله وجود ندارد.")
+
+    async def test_execute_trade_authoritatively_uses_customer_owner_principals_for_block_check(self):
+        trade_data = TradeCreate(offer_id=7, quantity=4)
+        locked_user = make_user(id=5)
+        offer = make_offer(user_id=9)
+        responder_relation = SimpleNamespace(owner_user_id=50, customer_tier=CustomerTier.TIER_1)
+        source_relation = SimpleNamespace(owner_user_id=90, customer_tier=CustomerTier.TIER_1)
+        block_mock = AsyncMock(side_effect=[
+            (False, None),
+            (False, None),
+            (False, None),
+            (True, None),
+        ])
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch(
+            "api.routers.trades.get_active_customer_relation_for_customer",
+            new=AsyncMock(side_effect=[responder_relation, source_relation]),
+        ), patch("core.services.block_service.is_blocked", new=block_mock):
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    trade_data,
+                    BackgroundTasks(),
+                    db=FakeDB(execute_results=[FakeExecuteResult(single=locked_user)], get_results=[offer]),
+                    context=make_context(locked_user),
+                )
+
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "امکان انجام این معامله وجود ندارد.")
+        self.assertEqual(block_mock.await_args_list[-1].args, (unittest.mock.ANY, 50, 90))
 
     async def test_execute_trade_authoritatively_returns_lot_suggestion_payload(self):
         locked_user = make_user()

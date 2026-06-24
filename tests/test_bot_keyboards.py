@@ -42,13 +42,16 @@ class BotKeyboardsTests(unittest.TestCase):
     def test_users_list_and_profile_keyboards(self):
         users = [
             type('User', (), {'id': 1, 'account_name': 'one', 'full_name': 'One', 'mobile_number': '1'})(),
-            type('User', (), {'id': 2, 'account_name': 'two', 'full_name': 'Two', 'mobile_number': '2'})(),
-            type('User', (), {'id': 3, 'account_name': 'three', 'full_name': 'Three', 'mobile_number': '3'})(),
+            type('User', (), {'id': 2, 'account_name': 'two', 'full_name': 'Two', 'mobile_number': '2', 'is_customer': True, 'customer_management_name': 'مشتری دو', 'customer_owner_account_name': 'owner2'})(),
+            type('User', (), {'id': 3, 'account_name': 'three', 'full_name': 'Three', 'mobile_number': '3', 'is_accountant': True, 'accountant_owner_account_name': 'owner3'})(),
             type('User', (), {'id': 4, 'account_name': 'four', 'full_name': 'Four', 'mobile_number': '4'})(),
         ]
         keyboard = keyboards.get_users_list_inline_keyboard(users, page=2, total_count=25, limit=10)
         self.assertEqual(keyboard.inline_keyboard[-1][1].text, '2/3')
         self.assertEqual(keyboard.inline_keyboard[0][0].callback_data, 'user_profile_1')
+        button_texts = [button.text for row in keyboard.inline_keyboard[:-1] for button in row]
+        self.assertIn('مشتری دو | مشتری | سرگروه: owner2', button_texts)
+        self.assertIn('three | حسابدار | سرگروه: owner3', button_texts)
 
         profile_keyboard = keyboards.get_user_profile_return_keyboard(7, back_to_page=3, is_restricted=True, has_limitations=True)
         first_row = profile_keyboard.inline_keyboard[0]

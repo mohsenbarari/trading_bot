@@ -15,6 +15,10 @@ from core.admin_authority import admin_write_rejection_message, check_shared_adm
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import get_user_account_status, transition_user_account_status
+from core.services.user_management_context_service import (
+    apply_user_management_order,
+    attach_user_management_relation_context,
+)
 from models.user import User
 from core.enums import UserRole, NotificationLevel, NotificationCategory, UserAccountStatus
 from core.utils import normalize_account_name, normalize_persian_numerals, to_jalali_str, create_user_notification, send_telegram_notification
@@ -235,11 +239,11 @@ async def show_users_list(
             total_count = (await session.execute(count_stmt)).scalar()
             
             offset = (page - 1) * USERS_PER_PAGE
-            stmt = select(User).where(User.is_deleted == False).order_by(User.id.desc())
+            stmt = select(User).where(User.is_deleted == False)
             stmt = _apply_user_management_scope(stmt, actor)
-            stmt = stmt.offset(offset).limit(USERS_PER_PAGE)
+            stmt = apply_user_management_order(stmt).offset(offset).limit(USERS_PER_PAGE)
             users = (await session.execute(stmt)).scalars().all()
-            await attach_customer_management_names(session, users)
+            await attach_user_management_relation_context(session, users)
 
         if not users:
             text = "📭 هیچ کاربری یافت نشد."

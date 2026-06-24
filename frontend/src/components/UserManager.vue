@@ -19,7 +19,11 @@ interface User {
   account_name: string;
   role: string;
   mobile_number: string;
+  is_customer?: boolean;
+  customer_owner_account_name?: string | null;
   customer_management_name?: string | null;
+  is_accountant?: boolean;
+  accountant_owner_account_name?: string | null;
 }
 
 const users = ref<User[]>([]);
@@ -112,11 +116,25 @@ onMounted(fetchUsers);
             <div class="user-details">
               <span class="user-name">
                 <CustomerNameWithBadge
-                  v-if="user.customer_management_name"
+                  v-if="user.is_customer || user.customer_management_name"
                   :name="getUserDisplayName(user)"
                   compact
                 />
                 <template v-else>{{ getUserDisplayName(user) }}</template>
+              </span>
+              <span
+                v-if="user.customer_owner_account_name || user.is_accountant || user.accountant_owner_account_name"
+                class="user-relation-tags"
+              >
+                <span v-if="user.customer_owner_account_name" class="relation-badge relation-badge--owner">
+                  سرگروه: {{ user.customer_owner_account_name }}
+                </span>
+                <span v-if="user.is_accountant" class="relation-badge relation-badge--accountant">
+                  حسابدار
+                </span>
+                <span v-if="user.accountant_owner_account_name" class="relation-badge relation-badge--owner">
+                  سرگروه: {{ user.accountant_owner_account_name }}
+                </span>
               </span>
               <span class="user-subtext ltr">{{ user.mobile_number }}</span>
             </div>
@@ -230,6 +248,7 @@ onMounted(fetchUsers);
   display: flex;
   align-items: center;
   gap: 1rem;
+  min-width: 0;
 }
 
 .user-avatar {
@@ -249,12 +268,44 @@ onMounted(fetchUsers);
 .user-details {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .user-name {
   font-weight: 700;
   color: var(--ds-text-primary);
   font-size: 0.95rem;
+}
+
+.user-relation-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.relation-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.relation-badge--owner {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.09);
+  color: #1d4ed8;
+}
+
+.relation-badge--accountant {
+  border: 1px solid rgba(124, 58, 237, 0.2);
+  background: rgba(124, 58, 237, 0.09);
+  color: #6d28d9;
 }
 
 .user-subtext {

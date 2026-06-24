@@ -61,15 +61,32 @@ def get_users_management_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 # ------------------------------------------
 
+
+def _user_management_list_label(user) -> str:
+    display_name = user_display_name(user, getattr(user, "mobile_number", None) or f"User {user.id}")
+    tags: list[str] = []
+    if getattr(user, "is_customer", False):
+        tags.append("مشتری")
+        owner_name = getattr(user, "customer_owner_account_name", None)
+        if owner_name:
+            tags.append(f"سرگروه: {owner_name}")
+    elif getattr(user, "is_accountant", False):
+        tags.append("حسابدار")
+        owner_name = getattr(user, "accountant_owner_account_name", None)
+        if owner_name:
+            tags.append(f"سرگروه: {owner_name}")
+    if tags:
+        return f"{display_name} | {' | '.join(tags)}"
+    return display_name
+
+
 def get_users_list_inline_keyboard(users: list, page: int, total_count: int, limit: int = 10) -> InlineKeyboardMarkup:
     keyboard_rows = []
     
     # 1. ساخت دکمه‌ها برای کاربران
     user_buttons = []
     for user in users:
-        display_name = user_display_name(user, user.mobile_number or f"User {user.id}")
-        
-        user_buttons.append(InlineKeyboardButton(text=display_name, callback_data=f"user_profile_{user.id}"))
+        user_buttons.append(InlineKeyboardButton(text=_user_management_list_label(user), callback_data=f"user_profile_{user.id}"))
     
     # 2. تقسیم دکمه‌ها به ردیف‌های 3 تایی (3 ستونه)
     # این کار باعث می‌شود دکمه‌ها کوچکتر و فشرده‌تر دیده شوند

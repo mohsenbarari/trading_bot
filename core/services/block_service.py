@@ -11,8 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.user import User
 from models.user_block import UserBlock
 from models.customer_relation import CustomerRelation, CustomerRelationStatus
-from core.services.accountant_relation_service import is_user_accountant
-from core.services.customer_relation_service import is_user_customer
+from core.services.accountant_relation_service import (
+    get_active_accountant_relation_for_accountant,
+    is_user_accountant,
+)
+from core.services.customer_relation_service import get_active_customer_relation_for_customer, is_user_customer
 
 
 BLOCK_STATUS_REASON_CAPABILITY_DISABLED = "capability_disabled"
@@ -20,6 +23,8 @@ BLOCK_STATUS_REASON_LIMIT_REACHED = "limit_reached"
 BLOCK_STATUS_REASON_CUSTOMER_DELEGATED = "customer_block_delegated"
 BLOCK_STATUS_REASON_ACCOUNTANT_DELEGATED = "accountant_block_delegated"
 ACCOUNTANT_BLOCK_MANAGEMENT_MESSAGE = "قابلیت بلاک کاربران فقط در اختیار سرگروه است."
+NON_GROUP_CUSTOMER_BLOCK_MESSAGE = "برای مسدودسازی این مسیر، سرگروه مشتری را مسدود کنید."
+_RELATION_NOT_PROVIDED = object()
 
 
 async def _load_customer_display_name_map(db: AsyncSession, user_ids: List[int]) -> dict[int, str]:
@@ -50,6 +55,20 @@ async def _is_user_accountant_for_block(db: AsyncSession, user_id: int) -> bool:
     if not hasattr(db, "execute"):
         return False
     return await is_user_accountant(db, user_id)
+
+
+async def _is_same_customer_group_member(
+    db: AsyncSession,
+    user_id: int,
+    relation: CustomerRelation,
+) -> bool:
+    if user_id == relation.owner_user_id:
+        return True
+    accountant_relation = await get_active_accountant_relation_for_accountant(db, user_id)
+    return bool(
+        accountant_relation is not None
+        and accountant_relation.owner_user_id == relation.owner_user_id
+    )
 
 
 def _build_customer_block_status_payload(user: User) -> dict:
@@ -154,6 +173,14 @@ async def block_user(db: AsyncSession, blocker_id: int, blocked_id: int) -> Tupl
     )
     if existing:
         return False, "این کاربر قبلاً مسدود شده است."
+
+    target_customer_relation = await get_active_customer_relation_for_customer(db, blocked_id)
+    if target_customer_relation is not None and not await _is_same_customer_group_member(
+        db,
+        blocker_id,
+        target_customer_relation,
+    ):
+        return False, NON_GROUP_CUSTOMER_BLOCK_MESSAGE
     
     # چک محدودیت
     can_block, error_msg, _ = await can_user_block(db, blocker_id)
@@ -222,6 +249,67 @@ async def is_blocked(db: AsyncSession, user_a_id: int, user_b_id: int) -> Tuple[
         return True, user_b_id
     
     return False, None
+
+
+def trade_block_principal_user_id(user_id: int, customer_relation: CustomerRelation | None) -> int:
+    owner_user_id = getattr(customer_relation, "owner_user_id", None)
+    try:
+        normalized_owner_user_id = int(owner_user_id) if owner_user_id is not None else None
+    except (TypeError, ValueError):
+        normalized_owner_user_id = None
+    return normalized_owner_user_id or int(user_id)
+
+
+def _append_unique_block_pair(pairs: list[tuple[int, int]], user_a_id: int, user_b_id: int) -> None:
+    try:
+        normalized_a = int(user_a_id)
+        normalized_b = int(user_b_id)
+    except (TypeError, ValueError):
+        return
+    if normalized_a == normalized_b:
+        return
+    pair_key = frozenset((normalized_a, normalized_b))
+    existing_keys = {frozenset(pair) for pair in pairs}
+    if pair_key not in existing_keys:
+        pairs.append((normalized_a, normalized_b))
+
+
+async def is_trade_blocked_by_principals(
+    db: AsyncSession,
+    user_a_id: int,
+    user_b_id: int,
+    *,
+    user_a_customer_relation: CustomerRelation | None | object = _RELATION_NOT_PROVIDED,
+    user_b_customer_relation: CustomerRelation | None | object = _RELATION_NOT_PROVIDED,
+) -> Tuple[bool, Optional[int], int, int]:
+    """
+    Check blocks through the real trade principals.
+
+    Customer trades are delegated to the owner's account. A block between owners
+    must therefore affect the customer's trades as well.
+    """
+    if user_a_customer_relation is _RELATION_NOT_PROVIDED:
+        user_a_customer_relation = await get_active_customer_relation_for_customer(db, user_a_id)
+    if user_b_customer_relation is _RELATION_NOT_PROVIDED:
+        user_b_customer_relation = await get_active_customer_relation_for_customer(db, user_b_id)
+
+    user_a_principal_id = trade_block_principal_user_id(user_a_id, user_a_customer_relation)
+    user_b_principal_id = trade_block_principal_user_id(user_b_id, user_b_customer_relation)
+
+    pairs_to_check: list[tuple[int, int]] = []
+    _append_unique_block_pair(pairs_to_check, user_a_id, user_b_id)
+    if user_a_customer_relation is not None:
+        _append_unique_block_pair(pairs_to_check, user_a_id, user_a_principal_id)
+    if user_b_customer_relation is not None:
+        _append_unique_block_pair(pairs_to_check, user_b_id, user_b_principal_id)
+    _append_unique_block_pair(pairs_to_check, user_a_principal_id, user_b_principal_id)
+
+    for left_user_id, right_user_id in pairs_to_check:
+        blocked, blocker_id = await is_blocked(db, left_user_id, right_user_id)
+        if blocked:
+            return True, blocker_id, user_a_principal_id, user_b_principal_id
+
+    return False, None, user_a_principal_id, user_b_principal_id
 
 
 async def get_blocked_users(db: AsyncSession, user_id: int) -> List[dict]:
@@ -313,23 +401,30 @@ async def search_users_for_block(
         return []
     
     search_pattern = f"%{query}%"
-    
-    matching_customer_ids = select(CustomerRelation.customer_user_id).where(
+
+    own_customer_ids = select(CustomerRelation.customer_user_id).where(
         CustomerRelation.status == CustomerRelationStatus.ACTIVE,
         CustomerRelation.deleted_at.is_(None),
-        CustomerRelation.management_name.ilike(search_pattern),
+        CustomerRelation.owner_user_id == current_user_id,
         CustomerRelation.customer_user_id.is_not(None),
     )
+    active_customer_ids = select(CustomerRelation.customer_user_id).where(
+        CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+        CustomerRelation.deleted_at.is_(None),
+        CustomerRelation.customer_user_id.is_not(None),
+    )
+    matching_own_customer_ids = own_customer_ids.where(CustomerRelation.management_name.ilike(search_pattern))
 
     stmt = (
         select(User)
         .where(
             User.id != current_user_id,
             User.is_deleted == False,
+            or_(~User.id.in_(active_customer_ids), User.id.in_(own_customer_ids)),
             or_(
                 User.mobile_number.ilike(search_pattern),
                 User.account_name.ilike(search_pattern),
-                User.id.in_(matching_customer_ids),
+                User.id.in_(matching_own_customer_ids),
             )
         )
         .limit(limit)

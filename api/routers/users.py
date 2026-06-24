@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 import asyncio
@@ -10,11 +10,15 @@ from api.admin_authority import require_shared_admin_write_authority
 from core.db import get_db
 from core.audit_logger import audit_log
 from core.services.accountant_relation_service import is_user_accountant
-from core.services.customer_relation_service import get_active_customer_relation_for_customer
 from core.services.user_account_status_service import transition_user_account_status
 from core.services.chat_room_service import sync_mandatory_channel_for_user_state_change
 from core.services.session_service import force_clear_sessions
 from core.services.user_deletion_service import delete_user_account
+from core.services.user_management_context_service import (
+    apply_user_management_order,
+    attach_user_management_relation_context,
+    build_user_management_search_filter,
+)
 from models.user import User
 from api.deps import verify_admin_or_dev_key
 
@@ -29,20 +33,7 @@ IRAN_TZ = pytz.timezone('Asia/Tehran')
 
 
 async def attach_customer_user_context(db: AsyncSession, user: User) -> User:
-    relation = None
-    if hasattr(db, "execute"):
-        relation = await get_active_customer_relation_for_customer(db, user.id)
-
-    owner_user = getattr(relation, "owner_user", None) if relation else None
-    setattr(user, "is_customer", relation is not None)
-    setattr(user, "customer_tier", getattr(relation, "customer_tier", None) if relation else None)
-    setattr(user, "customer_owner_user_id", owner_user.id if owner_user and not owner_user.is_deleted else None)
-    setattr(
-        user,
-        "customer_owner_account_name",
-        owner_user.account_name if owner_user and not owner_user.is_deleted else None,
-    )
-    setattr(user, "customer_management_name", getattr(relation, "management_name", None) if relation else None)
+    await attach_user_management_relation_context(db, [user])
     return user
 
 
@@ -261,7 +252,7 @@ async def read_all_users(
     actor = Depends(verify_admin_or_dev_key),
 ):
     """دریافت لیست کاربران با قابلیت جستجو."""
-    query = select(User).order_by(User.id.desc())
+    query = select(User)
     actor = _normalize_actor(actor)
     
     if not include_deleted:
@@ -272,18 +263,13 @@ async def read_all_users(
     
     if search:
         search_pattern = f"%{search}%"
-        query = query.where(
-            or_(
-                User.full_name.ilike(search_pattern),
-                User.account_name.ilike(search_pattern),
-                User.mobile_number.ilike(search_pattern)
-            )
-        )
-        
-    query = query.offset(skip).limit(limit)
+        query = query.where(build_user_management_search_filter(search_pattern))
+
+    query = apply_user_management_order(query).offset(skip).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    return users
+    await attach_user_management_relation_context(db, users)
+    return [serialize_user_read(user) for user in users]
 
 @router.get("/{user_id}", response_model=schemas.UserRead)
 async def read_user(
