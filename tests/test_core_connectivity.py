@@ -24,6 +24,18 @@ class CoreConnectivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         client.get.assert_awaited_once_with('https://foreign.example')
 
+    async def test_check_connectivity_never_falls_back_to_telegram_on_iran_without_peer_url(self):
+        with patch.object(connectivity.settings, 'server_mode', 'iran'), patch.object(
+            connectivity.settings, 'foreign_server_url', None
+        ), patch.object(connectivity.settings, 'peer_server_url', None), patch.object(
+            connectivity.settings, 'germany_server_url', None
+        ), patch('core.connectivity.httpx.AsyncClient') as client_ctor, patch.object(connectivity, 'logger') as logger:
+            result = await connectivity.check_connectivity()
+
+        self.assertFalse(result)
+        client_ctor.assert_not_called()
+        logger.warning.assert_called_once()
+
     async def test_check_connectivity_returns_false_on_timeout(self):
         client = AsyncMock()
         client.get = AsyncMock(side_effect=httpx.ConnectTimeout('boom'))

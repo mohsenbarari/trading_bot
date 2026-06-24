@@ -1,10 +1,9 @@
 # core/connectivity.py
-"""
-Global Internet Connectivity Monitor (Iran Server)
+"""Global Internet Connectivity Monitor.
 
-Periodically checks connectivity to Telegram API to determine if
-Iran's internet has access to global networks.
-Stores status in Redis key 'connectivity:global'.
+Iran never probes Telegram directly. On Iran, this monitor checks the configured
+foreign peer reachability and stores the result in Redis key
+``connectivity:global``.
 """
 import asyncio
 import logging
@@ -19,17 +18,37 @@ REDIS_KEY_CONNECTIVITY = "connectivity:global"
 CHECK_INTERVAL = 30  # seconds
 TELEGRAM_API_URL = "https://api.telegram.org"
 
+
+def _iran_connectivity_target_url() -> str | None:
+    for value in (
+        getattr(settings, "foreign_server_url", None),
+        getattr(settings, "peer_server_url", None),
+        getattr(settings, "germany_server_url", None),
+    ):
+        target = str(value or "").strip().rstrip("/")
+        if target:
+            return target
+    return None
+
 async def check_connectivity():
     """
     Check internet connectivity.
-    - Foreign Server: Pings Telegram API directly.
-    - Iran Server: Pings Foreign Server (to verify relay path).
+    - Foreign Server: may ping Telegram API directly.
+    - Iran Server: only pings the foreign peer and never falls back to Telegram.
     """
     try:
         # Determine target based on server mode
-        if settings.server_mode == "iran" and settings.foreign_server_url:
-            # Check connection to Foreign Server
-            target_url = settings.foreign_server_url
+        if settings.server_mode == "iran":
+            target_url = _iran_connectivity_target_url()
+            if not target_url:
+                logger.warning(
+                    "Iran connectivity monitor has no foreign peer URL; marking disconnected",
+                    extra={
+                        "event": "connectivity.iran_peer_url_missing",
+                        "server_mode": settings.server_mode,
+                    },
+                )
+                return False
         else:
             # Check connection to Telegram API
             target_url = TELEGRAM_API_URL
