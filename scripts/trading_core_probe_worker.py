@@ -2944,6 +2944,11 @@ class AiogramDispatcherHarness:
     async def close(self) -> None:
         for router in PROBE_DISPATCHER_ROUTERS:
             detach_probe_router(router, expected_parent=self.dp)
+        storage_close = getattr(getattr(self.dp, "storage", None), "close", None)
+        if callable(storage_close):
+            maybe_coro = storage_close()
+            if asyncio.iscoroutine(maybe_coro):
+                await maybe_coro
         await self.telegram.close()
 
 

@@ -23,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.db import engine
+from core.redis import close_redis
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, override_current_server
 from models.offer import OfferStatus
 from scripts import trading_core_probe_worker as worker
@@ -1099,10 +1101,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def run_matrix_with_shutdown(args: argparse.Namespace) -> int:
+    try:
+        return await run_matrix(args)
+    finally:
+        try:
+            await close_redis()
+        finally:
+            await engine.dispose()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return asyncio.run(run_matrix(args))
+        return asyncio.run(run_matrix_with_shutdown(args))
     except Exception as exc:
         print(
             json.dumps(
