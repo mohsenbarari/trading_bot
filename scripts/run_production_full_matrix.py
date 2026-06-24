@@ -52,6 +52,13 @@ DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES = {
     "hot_retail_mixed_lot_concurrent",
 }
 
+NEGATIVE_GUARD_EXECUTABLE_CASES = {
+    "own_offer_request",
+    "invalid_request_amount",
+    "retail_lot_unavailable",
+    "already_completed_offer",
+}
+
 DUAL_ROLE_ROLE_BY_SERVER = {
     "foreign": "telegram_foreign",
     "iran": "webapp_iran",
@@ -131,6 +138,7 @@ DRIVER_GAP_BUCKETS: dict[str, dict[str, Any]] = {
 
 DRIVER_GAP_REASON_TO_BUCKET = {
     "negative_business_guard_production_driver_not_implemented": "negative_guard_driver",
+    "negative_business_guard_case_driver_not_implemented": "negative_guard_driver",
     "policy_unsupported_scenario_requires_negative_guard_driver": "negative_guard_driver",
     "stress_family_requires_specialized_race_or_read_driver": "specialized_user_stress_driver",
     "market_behavior_production_driver_not_implemented": "market_behavior_driver",
@@ -369,6 +377,10 @@ def scenario_prefix(prefix: str, manifest_id: str) -> str:
 
 def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
     section = str(record.get("section") or "")
+    if section == "negative_business_guard":
+        if record.get("case_id") in NEGATIVE_GUARD_EXECUTABLE_CASES:
+            return None
+        return "negative_business_guard_case_driver_not_implemented"
     if section not in {"production_base_trade_shape", "production_stress_overlay"}:
         return f"{section}_production_driver_not_implemented"
     if record.get("policy_supported") is not True:
@@ -455,6 +467,8 @@ def dual_role_scenario_commands(
 
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        "TRADING_BOT_SERVICE": "load_runner",
+        "BOT_TOKEN": "",
     }
     pre_role_commands = [
         container_python_command(
@@ -600,6 +614,70 @@ def dual_role_scenario_commands(
     }
 
 
+def negative_guard_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "negative_guard")
+    case_id = str(record.get("case_id") or "")
+    scenario_run_prefix = scenario_prefix(prefix, manifest_id)
+    scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
+    remote_dir = f"/tmp/{scenario_run_prefix}negative-guard"
+    production_env = {
+        EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        "TRADING_BOT_SERVICE": "load_runner",
+        "BOT_TOKEN": "",
+    }
+    commands = [
+        host_mkdir_command(
+            "ensure_iran_negative_guard_artifact_dir",
+            server="iran",
+            path=remote_dir,
+        ),
+        container_python_command(
+            "run_negative_guard_case_iran",
+            server="iran",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "run-negative-guard-case",
+                "--prefix",
+                scenario_run_prefix,
+                "--case-id",
+                case_id,
+                "--output",
+                f"{remote_dir}/negative-guard.result.json",
+                "--skip-initial-cleanup",
+                "--allow-production-execution",
+            ],
+            env=production_env,
+            timeout_seconds=360,
+        ),
+    ]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "negative_guard_webapp_iran_probe",
+        "scenario_prefix": scenario_run_prefix,
+        "artifact_dir": str(scenario_dir),
+        "remote_artifact_dir": remote_dir,
+        "case_id": case_id,
+        "commands": [command_payload(command) for command in commands],
+        "execution_groups": [
+            {
+                "name": "run_negative_guard",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in commands],
+            },
+        ],
+        "safety_note": (
+            "The worker asserts explicit rejection, no unexpected trade creation, terminal offer_request "
+            "ledger state, and exact prefix cleanup compatibility."
+        ),
+    }
+
+
 def build_execution_plan(
     records: list[dict[str, Any]],
     *,
@@ -625,28 +703,38 @@ def build_execution_plan(
                 }
             )
             continue
-        scenario_plans.append(
-            dual_role_scenario_commands(
-                record,
-                prefix=prefix,
-                artifact_dir=artifact_dir,
-                user_count=user_count,
-                hot_offer_requests=hot_offer_requests,
-                target_rps=target_rps,
-                telegram_ratio=telegram_ratio,
+        if record.get("section") == "negative_business_guard":
+            scenario_plans.append(
+                negative_guard_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                )
             )
-        )
+        else:
+            scenario_plans.append(
+                dual_role_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                    user_count=user_count,
+                    hot_offer_requests=hot_offer_requests,
+                    target_rps=target_rps,
+                    telegram_ratio=telegram_ratio,
+                )
+            )
     return {
         "status": "planned",
-        "implemented_driver": "two_server_dual_role_hot_offer",
+        "implemented_driver": "two_server_dual_role_hot_offer_and_negative_guard_webapp_iran_probe",
         "implemented_scope": {
-            "sections": ["production_base_trade_shape", "production_stress_overlay"],
+            "sections": ["negative_business_guard", "production_base_trade_shape", "production_stress_overlay"],
             "actor_pair_id": "user__user",
             "outage_id": "stable",
             "stress_families": sorted(DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES),
             "surfaces": ["webapp", "telegram"],
             "offer_types": ["buy", "sell"],
             "shapes": sorted(manifest_builder.market_matrix.SHAPES),
+            "negative_guard_cases": sorted(NEGATIVE_GUARD_EXECUTABLE_CASES),
         },
         "selected_count": len(records),
         "executable_count": len(scenario_plans),

@@ -59,25 +59,30 @@ make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execu
 The execution-plan mode is still side-effect free. It expands selected
 `manifest_id` rows into reviewed commands where a production driver exists, and
 records `driver_gaps` for every selected row that does not yet have an
-implemented production driver. The current implemented command plan covers only
-the two-server dual-role hot-offer worker for:
+implemented production driver. The current implemented command plan covers:
 
 - `production_base_trade_shape` user-to-user stable scenarios;
 - `production_stress_overlay` user-to-user stable hot-offer concurrent
   families;
 - all four WebApp/Telegram surface quadrants inside that scope;
-- both offer types and all current offer shapes.
+- both offer types and all current offer shapes;
+- four production negative-guard probes on Iran/WebApp:
+  `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`, and
+  `already_completed_offer`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`64` command-plannable scenarios with this driver:
+`68` command-plannable scenarios with these drivers:
 
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios.
+- `4` negative business-guard scenarios with explicit no-partial-mutation
+  assertions.
 
 It intentionally does not yet implement production execution drivers for
 customer/accountant actor pairs, short/medium outage simulation, market
-behavior reads/expiry, targeted delivery join, or negative business guards.
-Those must remain visible as `driver_gaps` and cannot be treated as passed.
+behavior reads/expiry, targeted delivery join, or the remaining negative
+business guards. Those must remain visible as `driver_gaps` and cannot be
+treated as passed.
 The execution-plan output also includes `driver_gap_summary.by_driver_gap_bucket`
 and `driver_gap_roadmap`, which group the raw gap reasons into implementation
 buckets sorted from easier to harder.
@@ -98,7 +103,7 @@ selected scenario is command-plannable.
 
 Current full-manifest gap buckets are expected to be:
 
-- `negative_guard_driver`: `599`
+- `negative_guard_driver`: `595`
 - `specialized_user_stress_driver`: `96`
 - `market_behavior_driver`: `228`
 - `delivery_contract_driver`: `204`

@@ -964,6 +964,44 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(callback_answers["callback-1"]["text"], "ok")
 
+    def test_negative_guard_evidence_acceptance_for_own_offer_reject(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_status_counts": {
+                worker.OfferRequestStatus.REJECTED_BUSINESS_RULE.value: 1,
+            },
+            "offer_request_public_failure_code_counts": {"own_offer": 1},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="own_offer_request",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_detects_partial_mutation(self):
+        evidence = {
+            "offer": {"remaining_quantity": 0},
+            "trade_count": 1,
+            "offer_request_status_counts": {
+                worker.OfferRequestStatus.REJECTED_BUSINESS_RULE.value: 1,
+                worker.OfferRequestStatus.COMPLETED_TRADE.value: 1,
+            },
+            "offer_request_public_failure_code_counts": {"invalid_quantity": 1},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="invalid_request_amount",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertTrue(any("expected trade_count=0" in failure for failure in failures))
+        self.assertTrue(any("unexpectedly has completed offer_request" in failure for failure in failures))
+
 
 if __name__ == "__main__":
     unittest.main()

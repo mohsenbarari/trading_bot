@@ -232,11 +232,14 @@ Current execution-plan limitation:
 - implemented: user-to-user stable hot-offer paths for the base trade shape
   section and hot-offer stress overlays, across WebApp/WebApp, WebApp/Telegram,
   Telegram/WebApp, and Telegram/Telegram quadrants;
-- current whole-manifest command-plannable count: `64` of `5555` scenarios;
+- implemented: four Iran/WebApp negative-guard probes:
+  `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`, and
+  `already_completed_offer`;
+- current whole-manifest command-plannable count: `68` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
   short/medium outage orchestration, manual/time expiry races, read-during-write
-  production driver, targeted delivery join production driver, and negative
-  business guard production driver.
+  production driver, targeted delivery join production driver, and the remaining
+  negative business guard production driver cases.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
@@ -245,7 +248,7 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `negative_guard_driver`: `599` gaps. Add explicit production reject-path
+1. `negative_guard_driver`: `595` gaps. Add explicit production reject-path
    probes and no-partial-mutation assertions.
 2. `specialized_user_stress_driver`: `96` gaps. Extend the dual-role worker for
    duplicate replay, expiry races, and read-during-write.

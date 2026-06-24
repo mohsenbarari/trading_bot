@@ -98,6 +98,7 @@ DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1
 DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
 DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
 DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
+NEGATIVE_GUARD_RESULT_SCHEMA_VERSION = "production_negative_guard_result_v1"
 MIN_CLEANUP_PREFIX_LENGTH = 5
 PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
 PRODUCTION_CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
@@ -105,6 +106,12 @@ PRODUCTION_CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
 PRODUCTION_ROLE_WORKER_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
 PRODUCTION_ROLE_WORKER_CONFIRM_VALUE = "execute-production-full-matrix"
+NEGATIVE_GUARD_EXECUTABLE_CASES = {
+    "own_offer_request",
+    "invalid_request_amount",
+    "retail_lot_unavailable",
+    "already_completed_offer",
+}
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
     "admin",
@@ -2708,6 +2715,240 @@ async def execute_webapp_trade_for_user(
     return "success"
 
 
+async def negative_guard_offer_evidence(offer_id: int) -> dict[str, Any]:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, offer_id)
+        if offer is None:
+            raise TradingProbeError(f"negative guard offer {offer_id} disappeared")
+        trade_count = int(await db.scalar(select(func.count(Trade.id)).where(Trade.offer_id == offer_id)) or 0)
+        request_rows = list(
+            (
+                await db.execute(
+                    select(OfferRequest)
+                    .where(OfferRequest.local_offer_id == offer_id)
+                    .order_by(OfferRequest.id.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    request_payloads: list[dict[str, Any]] = []
+    for row in request_rows:
+        request_payloads.append(
+            {
+                "id": int(row.id),
+                "requester_user_id": int(row.requester_user_id) if row.requester_user_id is not None else None,
+                "actor_user_id": int(row.actor_user_id) if row.actor_user_id is not None else None,
+                "requested_quantity": int(row.requested_quantity),
+                "result_status": getattr(getattr(row, "result_status", None), "value", row.result_status),
+                "public_failure_code": row.public_failure_code,
+                "internal_failure_code": row.internal_failure_code,
+                "resulting_trade_id": int(row.resulting_trade_id) if row.resulting_trade_id is not None else None,
+            }
+        )
+    status_counts: dict[str, int] = {}
+    code_counts: dict[str, int] = {}
+    for payload in request_payloads:
+        status_value = str(payload.get("result_status") or "unknown")
+        code_value = str(payload.get("public_failure_code") or "none")
+        status_counts[status_value] = status_counts.get(status_value, 0) + 1
+        code_counts[code_value] = code_counts.get(code_value, 0) + 1
+    return {
+        "offer": {
+            "id": int(offer.id),
+            "status": getattr(getattr(offer, "status", None), "value", offer.status),
+            "quantity": int(offer.quantity),
+            "remaining_quantity": int(offer.remaining_quantity) if offer.remaining_quantity is not None else None,
+        },
+        "trade_count": trade_count,
+        "offer_request_count": len(request_payloads),
+        "offer_request_status_counts": dict(sorted(status_counts.items())),
+        "offer_request_public_failure_code_counts": dict(sorted(code_counts.items())),
+        "offer_requests": request_payloads,
+    }
+
+
+def assert_negative_guard_evidence(
+    *,
+    case_id: str,
+    status_sequence: list[str],
+    evidence: Mapping[str, Any],
+) -> list[str]:
+    failures: list[str] = []
+    if any(status == "error" for status in status_sequence):
+        failures.append(f"{case_id} produced internal error status sequence {status_sequence}")
+    if "rejected" not in status_sequence:
+        failures.append(f"{case_id} did not produce a rejected attempt")
+
+    status_counts = dict(evidence.get("offer_request_status_counts") or {})
+    code_counts = dict(evidence.get("offer_request_public_failure_code_counts") or {})
+    trade_count = int(evidence.get("trade_count") or 0)
+    offer = dict(evidence.get("offer") or {})
+    remaining_quantity = offer.get("remaining_quantity")
+
+    expected_trade_count = 0
+    expected_remaining_quantity = 5
+    required_status: str | None = OfferRequestStatus.REJECTED_BUSINESS_RULE.value
+    required_code: str | None = None
+    if case_id == "own_offer_request":
+        required_code = "own_offer"
+    elif case_id == "invalid_request_amount":
+        required_code = "invalid_quantity"
+    elif case_id == "retail_lot_unavailable":
+        required_status = OfferRequestStatus.REJECTED_LOT_UNAVAILABLE.value
+        required_code = "lot_unavailable"
+        expected_remaining_quantity = 10
+    elif case_id == "already_completed_offer":
+        expected_trade_count = 1
+        expected_remaining_quantity = 0
+        required_status = OfferRequestStatus.REJECTED_OFFER_EXPIRED.value
+        required_code = "offer_not_active"
+    else:
+        failures.append(f"unsupported negative guard case assertion: {case_id}")
+
+    if trade_count != expected_trade_count:
+        failures.append(f"{case_id} expected trade_count={expected_trade_count}, got {trade_count}")
+    if remaining_quantity != expected_remaining_quantity:
+        failures.append(
+            f"{case_id} expected remaining_quantity={expected_remaining_quantity}, got {remaining_quantity}"
+        )
+    if required_status and int(status_counts.get(required_status, 0) or 0) < 1:
+        failures.append(f"{case_id} missing offer_request status {required_status}: {status_counts}")
+    if required_code and int(code_counts.get(required_code, 0) or 0) < 1:
+        failures.append(f"{case_id} missing offer_request public_failure_code {required_code}: {code_counts}")
+    completed_requests = int(status_counts.get(OfferRequestStatus.COMPLETED_TRADE.value, 0) or 0)
+    if case_id != "already_completed_offer" and completed_requests:
+        failures.append(f"{case_id} unexpectedly has completed offer_request rows: {status_counts}")
+    return failures
+
+
+async def run_negative_guard_case(
+    *,
+    prefix: str,
+    case_id: str,
+    allow_production_execution: bool = False,
+    skip_initial_cleanup: bool = False,
+    allow_production_cleanup: bool = False,
+) -> dict[str, Any]:
+    normalized_case_id = str(case_id or "").strip()
+    if normalized_case_id not in NEGATIVE_GUARD_EXECUTABLE_CASES:
+        raise TradingProbeError(f"negative guard case is not implemented: {case_id}")
+    assert_production_full_matrix_allowed(prefix, allow_flag=allow_production_execution)
+    if not skip_initial_cleanup:
+        if is_production_runtime():
+            allow_production_cleanup_hard_delete(prefix, allow_flag=allow_production_cleanup)
+        await cleanup_prefix(prefix)
+
+    setup_event_listeners()
+    commodity_id, _commodity_name = await resolve_commodity()
+    statuses: list[str] = []
+    phase_details: list[dict[str, Any]] = []
+
+    async with patched_external_side_effects():
+        users = await create_load_fixture_users(prefix, user_count=4)
+        owner = users[0]
+        responder_a = users[1]
+        responder_b = users[2]
+
+        if normalized_case_id == "retail_lot_unavailable":
+            offer_id = await create_offer_for_user(
+                user_id=owner.user_id,
+                commodity_id=commodity_id,
+                prefix=prefix,
+                index=1,
+                offer_type="sell",
+                quantity=10,
+                price=100000,
+                is_wholesale=False,
+                lot_sizes=[5, 5],
+            )
+            details: dict[str, Any] = {}
+            statuses.append(
+                await execute_webapp_trade_for_user(
+                    user_id=responder_a.user_id,
+                    offer_id=offer_id,
+                    quantity=3,
+                    idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                    phase_details=details,
+                )
+            )
+            phase_details.append(details)
+        else:
+            offer_id = await create_offer_for_user(
+                user_id=owner.user_id,
+                commodity_id=commodity_id,
+                prefix=prefix,
+                index=1,
+                offer_type="sell",
+                quantity=5,
+                price=100000,
+            )
+            if normalized_case_id == "own_offer_request":
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=owner.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "invalid_request_amount":
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=999,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id == "already_completed_offer":
+                first_details: dict[str, Any] = {}
+                second_details: dict[str, Any] = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-complete",
+                        phase_details=first_details,
+                    )
+                )
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_b.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=second_details,
+                    )
+                )
+                phase_details.extend([first_details, second_details])
+
+    evidence = await negative_guard_offer_evidence(offer_id)
+    failures = assert_negative_guard_evidence(
+        case_id=normalized_case_id,
+        status_sequence=statuses,
+        evidence=evidence,
+    )
+    return {
+        "schema_version": NEGATIVE_GUARD_RESULT_SCHEMA_VERSION,
+        "status": "passed" if not failures else "failed",
+        "server_mode": settings.server_mode,
+        "prefix": prefix,
+        "case_id": normalized_case_id,
+        "status_sequence": statuses,
+        "phase_details": phase_details,
+        "evidence": evidence,
+        "assertion_failures": failures,
+    }
+
+
 async def inspect_hot_offer_persistence(offer_id: int) -> HotOfferPersistenceSnapshot:
     async with AsyncSessionLocal() as db:
         offer = await db.get(Offer, offer_id)
@@ -4030,6 +4271,20 @@ async def load_runner_ready_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def run_negative_guard_case_command(args: argparse.Namespace) -> int:
+    payload = await run_negative_guard_case(
+        prefix=args.prefix,
+        case_id=args.case_id,
+        allow_production_execution=bool(args.allow_production_execution),
+        skip_initial_cleanup=bool(args.skip_initial_cleanup),
+        allow_production_cleanup=bool(args.allow_production_cleanup),
+    )
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0 if payload["status"] == "passed" else 1
+
+
 async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     setup_event_listeners()
     prefix = args.prefix
@@ -4547,6 +4802,22 @@ def build_parser() -> argparse.ArgumentParser:
     ready_parser = subparsers.add_parser("load-runner-ready")
     ready_parser.add_argument("--role", choices=tuple(LOAD_RUNNER_ROLES), required=True)
 
+    negative_guard_parser = subparsers.add_parser("run-negative-guard-case")
+    negative_guard_parser.add_argument("--prefix", required=True)
+    negative_guard_parser.add_argument("--case-id", choices=tuple(sorted(NEGATIVE_GUARD_EXECUTABLE_CASES)), required=True)
+    negative_guard_parser.add_argument("--output")
+    negative_guard_parser.add_argument("--skip-initial-cleanup", action="store_true")
+    negative_guard_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow production negative-guard fixture creation only with the production full-matrix confirmation env.",
+    )
+    negative_guard_parser.add_argument(
+        "--allow-production-cleanup",
+        action="store_true",
+        help="Allow initial cleanup in production only with the cleanup confirmation env.",
+    )
+
     prepare_parser = subparsers.add_parser("prepare-dual-role-run")
     prepare_parser.add_argument("--output-dir", required=True)
     prepare_parser.add_argument("--prefix", required=True)
@@ -4666,6 +4937,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await cleanup_command(args)
     if args.command == "load-runner-ready":
         return await load_runner_ready_command(args)
+    if args.command == "run-negative-guard-case":
+        return await run_negative_guard_case_command(args)
     if args.command == "prepare-dual-role-run":
         return await prepare_dual_role_run_command(args)
     if args.command == "write-dual-role-plan":

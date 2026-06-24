@@ -196,29 +196,29 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 64)
-        self.assertEqual(execution_plan["driver_gap_count"], 5491)
-        self.assertEqual(summary["total"], 5491)
+        self.assertEqual(execution_plan["executable_count"], 68)
+        self.assertEqual(execution_plan["driver_gap_count"], 5487)
+        self.assertEqual(summary["total"], 5487)
         self.assertEqual(
             summary["by_section"],
             {
                 "delivery_contract": 204,
                 "market_behavior": 228,
-                "negative_business_guard": 23,
+                "negative_business_guard": 19,
                 "production_base_trade_shape": 1200,
                 "production_stress_overlay": 3632,
                 "targeted_trade_delivery_join": 204,
             },
         )
         self.assertEqual(summary["by_driver_gap"]["market_behavior_production_driver_not_implemented"], 228)
-        self.assertEqual(summary["by_driver_gap"]["negative_business_guard_production_driver_not_implemented"], 23)
+        self.assertEqual(summary["by_driver_gap"]["negative_business_guard_case_driver_not_implemented"], 19)
         self.assertEqual(
             summary["by_driver_gap_bucket"],
             {
                 "customer_accountant_actor_driver": 3840,
                 "delivery_contract_driver": 204,
                 "market_behavior_driver": 228,
-                "negative_guard_driver": 599,
+                "negative_guard_driver": 595,
                 "outage_orchestration_driver": 320,
                 "specialized_user_stress_driver": 96,
                 "targeted_join_driver": 204,
@@ -230,7 +230,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 for item in execution_plan["driver_gap_roadmap"]
             ],
             [
-                ("negative_guard_driver", 599),
+                ("negative_guard_driver", 595),
                 ("specialized_user_stress_driver", 96),
                 ("market_behavior_driver", 228),
                 ("delivery_contract_driver", 204),
@@ -263,7 +263,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5491)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5487)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -296,6 +296,32 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "execution_plan_built")
         self.assertEqual(payload["execution_plan"]["driver_gap_count"], 0)
         self.assertTrue(payload["execution_plan"]["coverage_gate"]["passed"])
+
+    def test_execution_plan_builds_negative_guard_commands_for_implemented_case(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "negative_business_guard",
+                "--manifest-id",
+                "NBG-001",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "negative_guard_webapp_iran_probe")
+        self.assertEqual(scenario_plan["case_id"], "own_offer_request")
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("run-negative-guard-case", rendered)
+        self.assertIn("--skip-initial-cleanup", rendered)
+        self.assertIn("TRADING_BOT_SERVICE=load_runner", rendered)
+        self.assertIn("BOT_TOKEN=", rendered)
 
     def test_preflight_execute_requires_separate_confirmation(self):
         with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
