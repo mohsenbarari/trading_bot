@@ -600,7 +600,9 @@ describe('ChatGroupManagerModal.vue', () => {
     expect(wrapper.emitted('updated')).toHaveLength(4)
     expect(wrapper.text()).toContain('Member Three')
 
-    const removeButton = wrapper.findAll('.chat-user-row__action-btn--danger').find((button) => button.text().includes('حذف'))
+    const memberTwoRow = wrapper.findAll('.chat-user-row').find((row) => row.text().includes('Member Two'))
+    expect(memberTwoRow).toBeTruthy()
+    const removeButton = memberTwoRow!.findAll('.chat-user-row__action-btn--danger').find((button) => button.text().includes('حذف'))
     expect(removeButton).toBeTruthy()
     await removeButton!.trigger('click')
     await flushPromises()

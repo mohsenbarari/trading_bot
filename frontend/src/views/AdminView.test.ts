@@ -97,7 +97,7 @@ describe('AdminView.vue', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('مرکز مدیریت')
-    await wrapper.get('.admin-action-btn.primary').trigger('click')
+    await wrapper.get('.admin-panel-action.primary').trigger('click')
     await flushPromises()
 
     expect(adminViewMocks.pushBackStateMock).toHaveBeenCalledTimes(1)
@@ -116,7 +116,7 @@ describe('AdminView.vue', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    const usersButton = wrapper.findAll('.admin-action-btn').find((button) => button.text().includes('مدیریت کاربران'))
+    const usersButton = wrapper.findAll('.admin-panel-action').find((button) => button.text().includes('مدیریت کاربران'))
     expect(usersButton).toBeTruthy()
     await usersButton!.trigger('click')
     await flushPromises()
@@ -370,7 +370,7 @@ describe('AdminView.vue', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('بخش مورد نظر خود را انتخاب کنید')
 
-    const usersButton = wrapper.findAll('.admin-action-btn').find((button) => button.text().includes('مدیریت کاربران'))
+    const usersButton = wrapper.findAll('.admin-panel-action').find((button) => button.text().includes('مدیریت کاربران'))
     expect(usersButton).toBeTruthy()
     await usersButton!.trigger('click')
     await flushPromises()

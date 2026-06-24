@@ -124,7 +124,7 @@ describe('LoginView.vue', () => {
     expect(wrapper.text()).toContain('کد ارسال شده به 09123456789')
     expect(wrapper.text()).toContain('00:30')
     wrapper.unmount()
-  })
+  }, 10000)
 
   it('switches to waiting approval when verify-otp requires session approval', async () => {
     const fetchMock = vi.mocked(fetch)

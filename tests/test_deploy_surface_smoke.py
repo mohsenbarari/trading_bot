@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -174,6 +175,22 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
 
         self.assertNotIn('eval "\\$compose_cmd -f docker-compose.iran.yml up -d \\$wait_args"', production_script)
         self.assertNotIn('up -d --wait --wait-timeout 180"', legacy_script)
+
+    def test_production_preseed_backlog_covers_all_shared_sync_tables(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+        shared_match = re.search(r'^SHARED_SYNC_TABLES_SQL="([^"]+)"', production_script, re.MULTILINE)
+        self.assertIsNotNone(shared_match)
+        shared_tables = {
+            table.strip()
+            for table in shared_match.group(1).split(',')
+            if table.strip()
+        }
+
+        mark_function = production_script.split('mark_foreign_preseed_backlog_synced() {', 1)[1]
+        mark_function = mark_function.split('\n}', 1)[0]
+        preseed_tables = set(re.findall(r"'([a-z_]+)'", mark_function))
+
+        self.assertEqual(preseed_tables, shared_tables)
 
     def test_nginx_setup_scripts_keep_api_proxy_off_websocket_upgrade(self):
         for script_name in ("scripts/setup_iran_nginx.sh", "scripts/setup_foreign_nginx.sh"):

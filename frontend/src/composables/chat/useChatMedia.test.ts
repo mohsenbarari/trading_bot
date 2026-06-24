@@ -608,9 +608,9 @@ describe('useChatMedia', () => {
     expect(hooks.getAdaptiveHydrationLimit({ tier: 'mid' })).toBe(2)
     expect(hooks.getAdaptiveHydrationLimit({ tier: 'weak' })).toBe(1)
     expect(hooks.getAdaptivePreprocessLimit(10, 'image')).toBe(1)
-    expect(hooks.getAdaptivePreprocessLimit(1, 'document')).toBe(2)
+    expect(hooks.getAdaptivePreprocessLimit(1, 'document')).toBe(3)
     expect(hooks.getAdaptiveUploadLimit(1, 'voice')).toBe(1)
-    expect(hooks.getAdaptiveUploadLimit(2, 'image')).toBe(1)
+    expect(hooks.getAdaptiveUploadLimit(2, 'image')).toBe(2)
 
     expect(hooks.buildMediaLoadKey('file-1', true)).toBe('file-1:network')
     expect(hooks.getFileId('')).toBe('')

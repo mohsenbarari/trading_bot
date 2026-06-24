@@ -60,6 +60,10 @@ class OfferRequestLedgerModelTests(unittest.TestCase):
         self.assertIn("idempotency_key IS NOT NULL", str(unique_index.dialect_options["postgresql"]["where"]))
         self.assertIn("ix_offer_requests_offer_public_id", index_names)
         self.assertIn("ix_offer_requests_result_status", index_names)
+        self.assertEqual(
+            sum(1 for index in OfferRequest.__table__.indexes if index.name == "ix_offer_requests_result_status"),
+            1,
+        )
 
 
 if __name__ == "__main__":

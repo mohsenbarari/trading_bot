@@ -99,7 +99,6 @@ class OfferRequest(Base):
         ),
         nullable=False,
         default=OfferRequestStatus.RECEIVED,
-        index=True,
     )
 
     public_failure_code = Column(String(64), nullable=True)
