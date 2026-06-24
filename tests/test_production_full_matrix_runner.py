@@ -80,6 +80,11 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual([group["status"] for group in result["groups"]], ["passed", "passed"])
 
+    def test_truncate_text_accepts_timeout_bytes_output(self):
+        output = runner.truncate_text("خطا ".encode("utf-8"))
+
+        self.assertEqual(output, "خطا ")
+
     def test_execute_mode_requires_explicit_production_confirmation(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "blocked.json"
@@ -195,6 +200,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["source_scenario_id"], "CLM-001")
         rendered = json.dumps(scenario_plan, ensure_ascii=False)
         self.assertIn("run_bot_webapp_comprehensive_load_matrix.py", rendered)
+        self.assertIn("timeout", rendered)
+        self.assertIn("--kill-after=10s", rendered)
         self.assertIn("--allow-production-execution", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
 

@@ -211,7 +211,16 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def truncate_text(value: str, limit: int = 12000) -> str:
+def normalize_command_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def truncate_text(value: str | bytes | None, limit: int = 12000) -> str:
+    value = normalize_command_output(value)
     if len(value) <= limit:
         return value
     return value[:limit] + "\n...[truncated]"
@@ -247,26 +256,28 @@ def container_python_command(
     timeout_seconds: int = 300,
     mutates_production: bool = True,
 ) -> CommandSpec:
+    outer_timeout_seconds = timeout_seconds + 30
+    timeout_args = ["timeout", "--kill-after=10s", f"{timeout_seconds}s", "python", *python_args]
     if server == "foreign":
         args = ["docker", "compose", "exec", "-T"]
         for key, value in sorted((env or {}).items()):
             args.extend(["-e", f"{key}={value}"])
-        args.extend(["app", "python", *python_args])
+        args.extend(["app", *timeout_args])
         return CommandSpec(
             name=name,
             args=args,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=outer_timeout_seconds,
             mutates_production=mutates_production,
         )
     if server == "iran":
         remote_parts = ["docker-compose", "exec", "-T"]
         for key, value in sorted((env or {}).items()):
             remote_parts.extend(["-e", f"{key}={value}"])
-        remote_parts.extend(["app", "python", *python_args])
+        remote_parts.extend(["app", *timeout_args])
         return CommandSpec(
             name=name,
             args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=outer_timeout_seconds,
             mutates_production=mutates_production,
         )
     raise RunnerError(f"unsupported server for container command: {server}")
@@ -1757,14 +1768,16 @@ def concurrent_command_results(commands: list[CommandSpec], *, cwd: Path) -> lis
         except subprocess.TimeoutExpired as exc:
             process.kill()
             stdout, stderr = process.communicate()
+            combined_stdout = normalize_command_output(exc.stdout) + normalize_command_output(stdout)
+            combined_stderr = normalize_command_output(exc.stderr) + normalize_command_output(stderr)
             results.append(
                 {
                     **command_payload(command),
                     "status": "timeout",
                     "returncode": None,
                     "elapsed_seconds": round(time.perf_counter() - started_by_name[command.name], 3),
-                    "stdout": truncate_text((exc.stdout or "") + (stdout or "")),
-                    "stderr": truncate_text((exc.stderr or "") + (stderr or "")),
+                    "stdout": truncate_text(combined_stdout),
+                    "stderr": truncate_text(combined_stderr),
                 }
             )
     return results
