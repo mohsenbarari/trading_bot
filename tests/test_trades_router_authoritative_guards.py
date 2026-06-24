@@ -272,6 +272,38 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "نمی‌توانید روی لفظ خودتان معامله کنید.")
 
+        inactive_owner_offer = make_offer(
+            user=make_user(
+                id=9,
+                account_status=UserAccountStatus.INACTIVE,
+                account_name="inactive-owner",
+                mobile_number="09125555555",
+                telegram_id=999,
+            )
+        )
+        inactive_owner_db = FakeDB(
+            execute_results=[FakeExecuteResult(single=locked_user)],
+            get_results=[inactive_owner_offer],
+        )
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ), patch("core.services.block_service.is_blocked", new=AsyncMock(return_value=(False, None))) as block_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await _execute_trade_authoritatively(
+                    trade_data,
+                    BackgroundTasks(),
+                    db=inactive_owner_db,
+                    context=make_context(locked_user),
+                )
+        self.assertEqual(exc_info.exception.status_code, 400)
+        self.assertEqual(exc_info.exception.detail, "این لفظ در حال حاضر قابل معامله نیست.")
+        self.assertEqual(len(inactive_owner_db.offer_requests), 1)
+        self.assertEqual(inactive_owner_db.offer_requests[0].result_status, OfferRequestStatus.REJECTED_BUSINESS_RULE)
+        self.assertEqual(inactive_owner_db.offer_requests[0].public_failure_code, "offer_owner_inactive")
+        block_mock.assert_not_awaited()
+        inactive_owner_db.commit.assert_awaited_once()
+
         blocked_offer = make_offer()
         with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
             "api.routers.trades._is_offer_expired_for_trade",
@@ -341,7 +373,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 context=make_context(locked_user),
             )
 
-        db.refresh.assert_awaited_once_with(offer, ["commodity"])
+        db.refresh.assert_any_await(offer, ["commodity"])
         self.assertEqual(response.status_code, 409)
         self.assertEqual(json.loads(response.body), {"kind": "lot_suggestion", "available_amounts": [6, 4]})
         self.assertEqual(len(db.offer_requests), 1)
@@ -429,7 +461,7 @@ class TradesRouterAuthoritativeGuardTests(unittest.IsolatedAsyncioTestCase):
                 context=make_context(locked_user),
             )
 
-        db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
+        db.refresh.assert_any_await(offer, ["user", "commodity"])
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(result, {"id": 88})
 

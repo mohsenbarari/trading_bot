@@ -2593,6 +2593,23 @@ async def _execute_trade_authoritatively(
             internal_failure_code="requester_owns_offer",
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="نمی‌توانید روی لفظ خودتان معامله کنید.")
+
+    await db.refresh(offer, ["user"])
+    offer_owner_user = getattr(offer, "user", None)
+    if offer_owner_user is None or is_user_trade_blocked(offer_owner_user):
+        await _commit_rejected_offer_request_ledger(
+            db,
+            offer_request_ledger,
+            result_status=OfferRequestStatus.REJECTED_BUSINESS_RULE,
+            public_failure_code="offer_owner_inactive",
+            public_failure_message="این لفظ در حال حاضر قابل معامله نیست.",
+            internal_failure_code="offer_owner_inactive_or_missing",
+            internal_failure_context={
+                "offer_user_id": getattr(offer, "user_id", None),
+                "offer_owner_missing": offer_owner_user is None,
+            },
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="این لفظ در حال حاضر قابل معامله نیست.")
     
     responder_customer_relation = await get_active_customer_relation_for_customer(db, owner_user.id)
     _apply_offer_request_customer_snapshot(offer_request_ledger, responder_customer_relation)

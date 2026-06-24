@@ -120,6 +120,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "manually_expired_offer",
     "time_expired_offer",
     "market_closed",
+    "inactive_offer_owner",
     "inactive_requester",
     "trading_restricted_user",
     "watch_role_market_action",
@@ -3044,6 +3045,8 @@ def assert_negative_guard_evidence(
         required_code = "own_offer"
     elif case_id == "invalid_request_amount":
         required_code = "invalid_quantity"
+    elif case_id == "inactive_offer_owner":
+        required_code = "offer_owner_inactive"
     elif case_id == "retail_lot_unavailable":
         required_status = OfferRequestStatus.REJECTED_LOT_UNAVAILABLE.value
         required_code = "lot_unavailable"
@@ -3226,6 +3229,22 @@ async def run_negative_guard_case(
                     )
                 finally:
                     trades_router.evaluate_current_market_schedule = previous_evaluator
+                phase_details.append(details)
+            elif normalized_case_id == "inactive_offer_owner":
+                await update_synthetic_user_for_negative_guard(
+                    owner.user_id,
+                    account_status=UserAccountStatus.INACTIVE,
+                )
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
                 phase_details.append(details)
             elif normalized_case_id == "inactive_requester":
                 await update_synthetic_user_for_negative_guard(
