@@ -74,6 +74,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "daily_trade_limit_exceeded",
     "daily_request_limit_exceeded",
     "active_commodity_limit_exceeded",
+    "remote_authority_unavailable",
 }
 
 DUAL_ROLE_ROLE_BY_SERVER = {

@@ -130,6 +130,7 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "daily_trade_limit_exceeded",
     "daily_request_limit_exceeded",
     "active_commodity_limit_exceeded",
+    "remote_authority_unavailable",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -2452,6 +2453,15 @@ async def count_offers_for_user(user_id: int) -> int:
         return int(await db.scalar(select(func.count(Offer.id)).where(Offer.user_id == int(user_id))) or 0)
 
 
+async def set_offer_home_server_for_negative_guard(offer_id: int, home_server: str) -> None:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, int(offer_id))
+        if offer is None:
+            raise TradingProbeError(f"negative guard offer {offer_id} disappeared before home_server update")
+        offer.home_server = normalize_server(home_server, current_server())
+        await db.commit()
+
+
 async def execute_offer_creation_for_user(
     *,
     user_id: int,
@@ -3099,6 +3109,7 @@ def assert_negative_guard_evidence(
         "daily_trade_limit_exceeded",
         "daily_request_limit_exceeded",
         "active_commodity_limit_exceeded",
+        "remote_authority_unavailable",
     }
     expired_offer_cases = {
         "already_completed_offer",
@@ -3172,6 +3183,11 @@ def assert_negative_guard_evidence(
         callback = dict(evidence.get("bot_callback") or {})
         if not str(callback.get("second_answer_text") or ""):
             failures.append(f"{case_id} expected a bot callback denial answer")
+    if case_id == "remote_authority_unavailable":
+        remote_forward = dict(evidence.get("remote_forward") or {})
+        status_code = int(remote_forward.get("status_code") or 0)
+        if status_code < 500:
+            failures.append(f"{case_id} expected remote forward status >=500, got {status_code}")
     return failures
 
 
@@ -3530,6 +3546,40 @@ async def run_negative_guard_case(
                     "before_offer_count": before_offer_count,
                     "after_offer_count": after_offer_count,
                     "created_offer_delta": after_offer_count - before_offer_count,
+                }
+                phase_details.append(details)
+            elif normalized_case_id == "remote_authority_unavailable":
+                remote_home_server = SERVER_FOREIGN if current_server() == SERVER_IRAN else SERVER_IRAN
+                await set_offer_home_server_for_negative_guard(offer_id, remote_home_server)
+
+                async def unavailable_forward(
+                    _target_server: str,
+                    _payload: dict[str, Any],
+                    *,
+                    timeout_seconds: float | None = None,
+                ) -> tuple[int, Any]:
+                    return 503, {"detail": "سرور مرجع معامله در دسترس نیست."}
+
+                details = {"remote_home_server": remote_home_server}
+                previous_forward = trades_router.forward_trade_to_home_server
+                trades_router.forward_trade_to_home_server = unavailable_forward
+                try:
+                    status_value = await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                    if status_value == "error" and int(details.get("json_response_status_code") or 0) >= 500:
+                        status_value = "rejected"
+                    statuses.append(status_value)
+                finally:
+                    trades_router.forward_trade_to_home_server = previous_forward
+                extra_evidence["remote_forward"] = {
+                    "target_server": remote_home_server,
+                    "status_code": details.get("json_response_status_code"),
+                    "detail": details.get("json_response_detail"),
                 }
                 phase_details.append(details)
             else:
