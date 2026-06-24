@@ -312,6 +312,33 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(telegram_plan["barrier_epoch"], webapp_plan["barrier_epoch"])
         self.assertEqual(worker.assert_role_plan_barrier_skew(plans, max_skew_seconds=0.001)["observed_skew_seconds"], 0.0)
 
+    def test_dual_role_worker_plan_can_force_webapp_duplicate_replay_attempts(self):
+        users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 6)]
+
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-1b",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id="offer-public-42",
+            total_requests=2,
+            telegram_ratio=0.6,
+            target_rps=600.0,
+            amount=10,
+            barrier_epoch=1234.5,
+            request_surface="webapp",
+            idempotency_mode="duplicate_replay",
+        )
+
+        telegram_plan = worker.validate_role_plan_artifact(plans["telegram_foreign"])
+        webapp_plan = worker.validate_role_plan_artifact(plans["webapp_iran"])
+        self.assertEqual(telegram_plan["attempts"], [])
+        self.assertEqual(len(webapp_plan["attempts"]), 2)
+        self.assertEqual(webapp_plan["attempts"][0]["user_id"], webapp_plan["attempts"][1]["user_id"])
+        self.assertEqual(webapp_plan["attempts"][0]["idempotency_key"], webapp_plan["attempts"][1]["idempotency_key"])
+        self.assertTrue(str(webapp_plan["attempts"][0]["idempotency_key"]).startswith("load:duplicate-re"))
+
     def test_role_plan_artifact_validation_fails_closed(self):
         users = [worker.LoadUserRef(user_id=1, telegram_id=9001), worker.LoadUserRef(user_id=2, telegram_id=9002)]
         plans = worker.build_dual_role_worker_plans(
@@ -884,6 +911,66 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(report["status"], "ok")
         self.assertEqual(report["correctness_failures"], [])
         self.assertEqual(report["reports"]["webapp_hot_offer"]["persisted_trade_count"], 1)
+
+    def test_dual_role_final_report_accepts_partial_duplicate_replay_persistence(self):
+        prepare = {
+            "run_id": "run-5b",
+            "prefix": "probe-",
+            "topology": "single-db staging role-worker smoke",
+            "telegram_gateway_boundary": "mock",
+            "scenario": {
+                "name": "duplicate_idempotency_replay",
+                "expected_winner_count": 1,
+                "expected_remaining_quantity": 10,
+                "require_terminal_completed": False,
+                "idempotency_mode": "duplicate_replay",
+            },
+            "offer": {
+                "id": 42,
+                "owner_user_id": 7,
+            },
+        }
+        merged_result = {
+            "schema_version": worker.DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION,
+            "summary": {
+                "total": 2,
+                "success": 2,
+                "rejected": 0,
+                "error": 0,
+                "business_request_rps": 20.0,
+                "telegram_update_rps": 0.0,
+                "latency": {},
+                "surfaces": {},
+            },
+            "roles": {},
+            "role_start_skew": {},
+            "attempts": [
+                {"outcome": "success"},
+                {"outcome": "success"},
+            ],
+        }
+        persistence = worker.HotOfferPersistenceSnapshot(
+            offer_id=42,
+            original_quantity=20,
+            remaining_quantity=10,
+            offer_status="active",
+            persisted_trade_count=1,
+            completed_trade_quantity=10,
+            completed_ledger_count=1,
+            trades_without_completed_ledger_count=0,
+            failed_internal_ledger_count=0,
+            duplicate_replay_ledger_count=0,
+        )
+
+        report = worker.build_dual_role_final_report(
+            prepare=prepare,
+            merged_result=merged_result,
+            persistence=persistence,
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["correctness_failures"], [])
+        self.assertEqual(report["reports"]["duplicate_idempotency_replay"]["offer_remaining_quantity"], 10)
 
     def test_dual_role_final_report_fails_closed_on_request_errors(self):
         prepare = {

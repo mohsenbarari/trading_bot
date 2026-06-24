@@ -51,6 +51,7 @@ DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES = {
     "hot_retail_same_lot_concurrent",
     "hot_retail_mixed_lot_concurrent",
 }
+DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES = {"webapp"}
 
 NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "own_offer_request",
@@ -395,8 +396,15 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
         return "dual_role_worker_currently_supports_standard_user_to_standard_user_only"
     if record.get("outage_id") != "stable":
         return "outage_simulation_driver_not_implemented_for_role_worker"
-    if section == "production_stress_overlay" and record.get("family") not in DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES:
-        return "stress_family_requires_specialized_race_or_read_driver"
+    if section == "production_stress_overlay":
+        family = str(record.get("family") or "")
+        if family not in DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES:
+            duplicate_replay_supported = (
+                family == "duplicate_idempotency_replay"
+                and str(record.get("request_surface") or "") in DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES
+            )
+            if not duplicate_replay_supported:
+                return "stress_family_requires_specialized_race_or_read_driver"
     if record.get("offer_surface") not in {"webapp", "telegram"}:
         return "unsupported_offer_surface_for_dual_role_worker"
     if record.get("request_surface") not in {"webapp", "telegram"}:
@@ -428,11 +436,24 @@ def dual_role_scenario_commands(
     if offer_home_server not in DUAL_ROLE_ROLE_BY_SERVER:
         raise RunnerError(f"{manifest_id}: unsupported offer_home_server={offer_home_server!r}")
     profile = shape_profile(str(record.get("shape") or ""))
-    total_requests = max(
-        int(hot_offer_requests),
-        int(record.get("min_parallel_requests") or 0),
-        int(profile["expected_winner_count"]) + 36,
-    )
+    family = str(record.get("family") or "")
+    is_duplicate_replay = family == "duplicate_idempotency_replay"
+    if is_duplicate_replay:
+        total_requests = 2
+        expected_winner_count = 1
+        expected_remaining_quantity = max(0, int(profile["quantity"]) - int(profile["request_amount"]))
+        require_terminal_completed = expected_remaining_quantity == 0
+        request_surface = str(record.get("request_surface") or "webapp")
+    else:
+        total_requests = max(
+            int(hot_offer_requests),
+            int(record.get("min_parallel_requests") or 0),
+            int(profile["expected_winner_count"]) + 36,
+        )
+        expected_winner_count = int(profile["expected_winner_count"])
+        expected_remaining_quantity = 0
+        require_terminal_completed = True
+        request_surface = "mixed"
     prepare_args = [
         "scripts/trading_core_probe_worker.py",
         "prepare-dual-role-run",
@@ -444,6 +465,10 @@ def dual_role_scenario_commands(
         scenario_run_prefix.rstrip("_"),
         "--offer-origin",
         offer_origin,
+        "--request-surface",
+        request_surface,
+        "--idempotency-mode",
+        "duplicate_replay" if is_duplicate_replay else "unique",
         "--user-count",
         str(user_count),
         "--hot-offer-requests",
@@ -457,7 +482,9 @@ def dual_role_scenario_commands(
         "--request-amount",
         str(profile["request_amount"]),
         "--expected-winner-count",
-        str(profile["expected_winner_count"]),
+        str(expected_winner_count),
+        "--expected-remaining-quantity",
+        str(expected_remaining_quantity),
         "--price",
         "100000",
         "--offer-type",
@@ -467,9 +494,13 @@ def dual_role_scenario_commands(
         "--skip-initial-cleanup",
         "--allow-production-execution",
     ]
+    if family:
+        prepare_args.extend(["--scenario-name", family])
     if not profile["is_wholesale"]:
         prepare_args.append("--retail")
         prepare_args.extend(["--lot-sizes", " ".join(str(item) for item in profile["lot_sizes"])])
+    if not require_terminal_completed:
+        prepare_args.append("--allow-nonterminal-offer")
 
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
@@ -598,6 +629,10 @@ def dual_role_scenario_commands(
         "offer_origin": offer_origin,
         "shape_profile": profile,
         "total_requests": total_requests,
+        "request_surface": request_surface,
+        "idempotency_mode": "duplicate_replay" if is_duplicate_replay else "unique",
+        "expected_winner_count": expected_winner_count,
+        "expected_remaining_quantity": expected_remaining_quantity,
         "commands": [command_payload(command) for command in commands],
         "execution_groups": [
             {
@@ -737,6 +772,7 @@ def build_execution_plan(
             "actor_pair_id": "user__user",
             "outage_id": "stable",
             "stress_families": sorted(DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES),
+            "duplicate_replay_request_surfaces": sorted(DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES),
             "surfaces": ["webapp", "telegram"],
             "offer_types": ["buy", "sell"],
             "shapes": sorted(manifest_builder.market_matrix.SHAPES),

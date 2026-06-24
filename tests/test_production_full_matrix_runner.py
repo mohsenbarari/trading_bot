@@ -196,9 +196,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 74)
-        self.assertEqual(execution_plan["driver_gap_count"], 5481)
-        self.assertEqual(summary["total"], 5481)
+        self.assertEqual(execution_plan["executable_count"], 86)
+        self.assertEqual(execution_plan["driver_gap_count"], 5469)
+        self.assertEqual(summary["total"], 5469)
         self.assertEqual(
             summary["by_section"],
             {
@@ -206,7 +206,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "market_behavior": 228,
                 "negative_business_guard": 13,
                 "production_base_trade_shape": 1200,
-                "production_stress_overlay": 3632,
+                "production_stress_overlay": 3620,
                 "targeted_trade_delivery_join": 204,
             },
         )
@@ -220,7 +220,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "market_behavior_driver": 228,
                 "negative_guard_driver": 589,
                 "outage_orchestration_driver": 320,
-                "specialized_user_stress_driver": 96,
+                "specialized_user_stress_driver": 84,
                 "targeted_join_driver": 204,
             },
         )
@@ -231,7 +231,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ],
             [
                 ("negative_guard_driver", 589),
-                ("specialized_user_stress_driver", 96),
+                ("specialized_user_stress_driver", 84),
                 ("market_behavior_driver", 228),
                 ("delivery_contract_driver", 204),
                 ("targeted_join_driver", 204),
@@ -263,7 +263,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5481)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5469)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -322,6 +322,57 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--skip-initial-cleanup", rendered)
         self.assertIn("TRADING_BOT_SERVICE=load_runner", rendered)
         self.assertIn("BOT_TOKEN=", rendered)
+
+    def test_execution_plan_builds_duplicate_replay_commands_for_webapp_request_case(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_stress_overlay",
+                "--manifest-id",
+                "PO-1082",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "two_server_dual_role_hot_offer")
+        self.assertEqual(scenario_plan["idempotency_mode"], "duplicate_replay")
+        self.assertEqual(scenario_plan["request_surface"], "webapp")
+        self.assertEqual(scenario_plan["total_requests"], 2)
+        self.assertEqual(scenario_plan["expected_winner_count"], 1)
+        self.assertEqual(scenario_plan["expected_remaining_quantity"], 10)
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("--scenario-name", rendered)
+        self.assertIn("duplicate_idempotency_replay", rendered)
+        self.assertIn("--idempotency-mode", rendered)
+        self.assertIn("duplicate_replay", rendered)
+        self.assertIn("--allow-nonterminal-offer", rendered)
+
+    def test_execution_plan_keeps_telegram_duplicate_replay_as_driver_gap(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_stress_overlay",
+                "--manifest-id",
+                "PO-1099",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(execution_plan["executable_count"], 0)
+        self.assertEqual(execution_plan["driver_gap_count"], 1)
+        self.assertEqual(
+            execution_plan["driver_gaps"][0]["driver_gap"],
+            "stress_family_requires_specialized_race_or_read_driver",
+        )
 
     def test_execution_plan_builds_negative_guard_commands_for_pre_ledger_case(self):
         plan = runner.build_plan(

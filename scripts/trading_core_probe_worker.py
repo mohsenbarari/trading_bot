@@ -190,6 +190,7 @@ class MixedLoadAttemptSpec:
     surface: str
     user_id: int
     telegram_id: int
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -379,27 +380,44 @@ def build_mixed_surface_plan(
     owner_user_id: int,
     total_requests: int,
     telegram_ratio: float,
+    request_surface: str | None = None,
+    idempotency_mode: str = "unique",
+    duplicate_idempotency_key: str | None = None,
 ) -> list[MixedLoadAttemptSpec]:
     if total_requests <= 0:
         raise TradingProbeError("mixed load total_requests must be positive")
-    if not 0 < telegram_ratio < 1:
+    forced_surface = str(request_surface or "").strip().lower() or None
+    if forced_surface is not None and forced_surface not in SURFACE_TO_LOAD_RUNNER_ROLE:
+        raise TradingProbeError(f"unsupported request_surface: {request_surface}")
+    normalized_idempotency_mode = str(idempotency_mode or "unique").strip().lower()
+    if normalized_idempotency_mode not in {"unique", "duplicate_replay"}:
+        raise TradingProbeError(f"unsupported idempotency_mode: {idempotency_mode}")
+    if forced_surface is None and not 0 < telegram_ratio < 1:
         raise TradingProbeError("mixed load telegram_ratio must be between 0 and 1")
     responders = [user for user in users if user.user_id != owner_user_id]
     if not responders:
         raise TradingProbeError("mixed load requires at least one responder distinct from the owner")
+    if normalized_idempotency_mode == "duplicate_replay" and not duplicate_idempotency_key:
+        raise TradingProbeError("duplicate_replay idempotency mode requires duplicate_idempotency_key")
 
     telegram_slots_per_ten = int(round(telegram_ratio * 10))
     telegram_slots_per_ten = max(1, min(9, telegram_slots_per_ten))
     plan: list[MixedLoadAttemptSpec] = []
     for index in range(total_requests):
-        responder = responders[index % len(responders)]
-        surface = "telegram" if index % 10 < telegram_slots_per_ten else "webapp"
+        if normalized_idempotency_mode == "duplicate_replay":
+            responder = responders[0]
+            idempotency_key = duplicate_idempotency_key
+        else:
+            responder = responders[index % len(responders)]
+            idempotency_key = None
+        surface = forced_surface or ("telegram" if index % 10 < telegram_slots_per_ten else "webapp")
         plan.append(
             MixedLoadAttemptSpec(
                 index=index,
                 surface=surface,
                 user_id=responder.user_id,
                 telegram_id=responder.telegram_id,
+                idempotency_key=idempotency_key,
             )
         )
     return plan
@@ -440,13 +458,24 @@ def mixed_attempt_from_artifact_dict(raw: Mapping[str, Any]) -> MixedLoadAttempt
         telegram_id = int(raw["telegram_id"])
     except (KeyError, TypeError, ValueError) as exc:
         raise TradingProbeError(f"invalid mixed load attempt artifact: {exc}") from exc
+    idempotency_key = raw.get("idempotency_key")
+    if idempotency_key is not None:
+        idempotency_key = str(idempotency_key).strip()
+        if not idempotency_key:
+            idempotency_key = None
     if index < 0:
         raise TradingProbeError(f"invalid mixed load attempt index: {index}")
     if surface not in SURFACE_TO_LOAD_RUNNER_ROLE:
         raise TradingProbeError(f"unsupported mixed load attempt surface: {surface}")
     if user_id <= 0 or telegram_id <= 0:
         raise TradingProbeError("mixed load attempt user ids must be positive")
-    return MixedLoadAttemptSpec(index=index, surface=surface, user_id=user_id, telegram_id=telegram_id)
+    return MixedLoadAttemptSpec(
+        index=index,
+        surface=surface,
+        user_id=user_id,
+        telegram_id=telegram_id,
+        idempotency_key=idempotency_key,
+    )
 
 
 def split_mixed_plan_by_role(plan: list[MixedLoadAttemptSpec]) -> dict[str, list[MixedLoadAttemptSpec]]:
@@ -472,6 +501,8 @@ def build_dual_role_worker_plans(
     target_rps: float,
     amount: int,
     barrier_epoch: float,
+    request_surface: str | None = None,
+    idempotency_mode: str = "unique",
 ) -> dict[str, dict[str, Any]]:
     normalized_run_id = str(run_id or "").strip()
     normalized_prefix = str(prefix or "").strip()
@@ -488,11 +519,22 @@ def build_dual_role_worker_plans(
     if not math.isfinite(float(barrier_epoch)):
         raise TradingProbeError("dual-role barrier_epoch must be finite")
 
+    duplicate_idempotency_key = None
+    if str(idempotency_mode or "unique").strip().lower() == "duplicate_replay":
+        duplicate_idempotency_key = build_role_attempt_idempotency_key(
+            prefix=normalized_prefix,
+            role="duplicate_replay",
+            offer_id=offer_id,
+            attempt_index=0,
+        )
     plan = build_mixed_surface_plan(
         users=users,
         owner_user_id=owner_user_id,
         total_requests=total_requests,
         telegram_ratio=telegram_ratio,
+        request_surface=request_surface,
+        idempotency_mode=idempotency_mode,
+        duplicate_idempotency_key=duplicate_idempotency_key,
     )
     split = split_mixed_plan_by_role(plan)
     artifact_plans: dict[str, dict[str, Any]] = {}
@@ -3508,7 +3550,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         attempt_started = time.perf_counter()
         status_value = "error"
         detail: str | None = None
-        idempotency_key: str | None = build_role_attempt_idempotency_key(
+        idempotency_key: str | None = spec.idempotency_key or build_role_attempt_idempotency_key(
             prefix=prefix,
             role=role,
             offer_id=offer_id,
@@ -3619,7 +3661,7 @@ def build_dry_role_result_artifact(plan_payload: Mapping[str, Any], *, started_e
     attempt_artifacts: list[dict[str, Any]] = []
     results: list[MixedLoadAttemptResult] = []
     for offset, spec in enumerate(attempts):
-        idempotency_key = build_role_attempt_idempotency_key(
+        idempotency_key = spec.idempotency_key or build_role_attempt_idempotency_key(
             prefix=str(plan["prefix"]),
             role=role,
             offer_id=offer_id,
@@ -3892,6 +3934,9 @@ def assert_duplicate_replay_acceptance(
     *,
     statuses: list[str],
     persistence: HotOfferPersistenceSnapshot,
+    expected_completed_quantity: int | None = None,
+    expected_remaining_quantity: int = 0,
+    require_terminal_completed: bool = True,
 ) -> None:
     if not statuses:
         raise TradingProbeError("duplicate/replay probe did not execute any attempts")
@@ -3909,17 +3954,27 @@ def assert_duplicate_replay_acceptance(
             "duplicate/replay probe over-traded quantity "
             f"{persistence.completed_trade_quantity} > {persistence.original_quantity}"
         )
-    if persistence.completed_trade_quantity != persistence.original_quantity:
+    expected_completed = (
+        int(expected_completed_quantity)
+        if expected_completed_quantity is not None
+        else persistence.original_quantity - int(expected_remaining_quantity)
+    )
+    if persistence.completed_trade_quantity != expected_completed:
         raise TradingProbeError(
             "duplicate/replay probe expected completed quantity "
-            f"{persistence.original_quantity}, got {persistence.completed_trade_quantity}"
+            f"{expected_completed}, got {persistence.completed_trade_quantity}"
         )
-    if persistence.remaining_quantity != 0:
+    if persistence.remaining_quantity != expected_remaining_quantity:
         raise TradingProbeError(
-            f"duplicate/replay probe expected remaining_quantity=0, got {persistence.remaining_quantity}"
+            "duplicate/replay probe expected "
+            f"remaining_quantity={expected_remaining_quantity}, got {persistence.remaining_quantity}"
         )
-    if persistence.offer_status != OfferStatus.COMPLETED.value:
+    if require_terminal_completed and persistence.offer_status != OfferStatus.COMPLETED.value:
         raise TradingProbeError(f"duplicate/replay probe expected completed status, got {persistence.offer_status}")
+    if not require_terminal_completed and persistence.offer_status not in {OfferStatus.ACTIVE.value, OfferStatus.COMPLETED.value}:
+        raise TradingProbeError(
+            f"duplicate/replay probe expected active or completed status, got {persistence.offer_status}"
+        )
     if persistence.trades_without_completed_ledger_count:
         raise TradingProbeError("duplicate/replay probe persisted a trade without completed request ledger")
     if persistence.failed_internal_ledger_count:
@@ -4515,6 +4570,13 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     topology = "single-db staging role-worker smoke"
     is_wholesale = not bool(args.retail)
     lot_sizes = parse_lot_sizes_argument(args.lot_sizes)
+    request_surface = None if args.request_surface == "mixed" else str(args.request_surface)
+    expected_remaining_quantity = (
+        int(args.expected_remaining_quantity)
+        if args.expected_remaining_quantity is not None
+        else max(0, int(args.hot_offer_quantity) - int(args.request_amount) * int(args.expected_winner_count))
+    )
+    require_terminal_completed = bool(args.require_terminal_completed)
 
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=args.user_count)
@@ -4561,6 +4623,8 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         target_rps=args.target_rps,
         amount=args.request_amount,
         barrier_epoch=time.time() + args.barrier_delay_seconds,
+        request_surface=request_surface,
+        idempotency_mode=args.idempotency_mode,
     )
     output_dir = Path(args.output_dir)
     plan_result = _write_dual_role_plan_files(output_dir, plans, mode="staging_dual_role_run")
@@ -4568,6 +4632,7 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         run_id=run_id,
         prefix=prefix,
         topology=topology,
+        scenario_name=args.scenario_name,
         offer_origin=offer_origin,
         telegram_gateway_boundary="mock",
         commodity_id=commodity_id,
@@ -4583,6 +4648,10 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         hot_offer_lot_sizes=lot_sizes,
         request_amount=args.request_amount,
         expected_winner_count=args.expected_winner_count,
+        expected_remaining_quantity=expected_remaining_quantity,
+        require_terminal_completed=require_terminal_completed,
+        request_surface=args.request_surface,
+        idempotency_mode=args.idempotency_mode,
         plan_result=plan_result,
     )
     prepare_path = output_dir / "prepare.json"
@@ -4767,6 +4836,7 @@ def build_dual_role_prepare_artifact(
     run_id: str,
     prefix: str,
     topology: str,
+    scenario_name: str | None = None,
     offer_origin: str,
     telegram_gateway_boundary: str,
     commodity_id: int,
@@ -4782,6 +4852,10 @@ def build_dual_role_prepare_artifact(
     hot_offer_lot_sizes: tuple[int, ...] | list[int],
     request_amount: int,
     expected_winner_count: int,
+    expected_remaining_quantity: int = 0,
+    require_terminal_completed: bool = True,
+    request_surface: str = "mixed",
+    idempotency_mode: str = "unique",
     plan_result: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -4792,8 +4866,9 @@ def build_dual_role_prepare_artifact(
         "topology": topology,
         "telegram_gateway_boundary": telegram_gateway_boundary,
         "scenario": {
-            "name": dual_role_scenario_name(offer_origin),
+            "name": scenario_name or dual_role_scenario_name(offer_origin),
             "offer_origin": offer_origin,
+            "request_surface": request_surface,
             "hot_offer_requests": int(hot_offer_requests),
             "telegram_ratio": float(telegram_ratio),
             "target_rps": float(target_rps),
@@ -4802,6 +4877,9 @@ def build_dual_role_prepare_artifact(
             "hot_offer_lot_sizes": [int(item) for item in hot_offer_lot_sizes],
             "request_amount": int(request_amount),
             "expected_winner_count": int(expected_winner_count),
+            "expected_remaining_quantity": int(expected_remaining_quantity),
+            "require_terminal_completed": bool(require_terminal_completed),
+            "idempotency_mode": idempotency_mode,
         },
         "commodity": {
             "id": int(commodity_id),
@@ -4850,6 +4928,9 @@ def build_dual_role_final_report(
     scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
     scenario_name = str(scenario.get("name") or "hot_offer")
     expected_winner_count = int(scenario.get("expected_winner_count") or 0)
+    expected_remaining_quantity = int(scenario.get("expected_remaining_quantity") or 0)
+    require_terminal_completed = bool(scenario.get("require_terminal_completed", True))
+    idempotency_mode = str(scenario.get("idempotency_mode") or "unique")
     summary = _require_mapping(merged_result.get("summary"), "merged result summary")
     report = {
         "schema_version": DUAL_ROLE_FINAL_SCHEMA_VERSION,
@@ -4876,19 +4957,33 @@ def build_dual_role_final_report(
         },
     }
     try:
-        assert_hot_offer_contention_acceptance(
-            persisted_trade_count=persistence.persisted_trade_count,
-            response_success_count=int(summary.get("success") or 0),
-            error_count=int(summary.get("error") or 0),
-            remaining_quantity=persistence.remaining_quantity,
-            status=persistence.offer_status,
-            expected_winner_count=expected_winner_count,
-            original_quantity=persistence.original_quantity,
-            completed_trade_quantity=persistence.completed_trade_quantity,
-            completed_ledger_count=persistence.completed_ledger_count,
-            trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
-            failed_internal_ledger_count=persistence.failed_internal_ledger_count,
-        )
+        if idempotency_mode == "duplicate_replay":
+            statuses = [
+                str(attempt.get("outcome") or "unknown")
+                for attempt in (merged_result.get("attempts") or [])
+                if isinstance(attempt, Mapping)
+            ]
+            assert_duplicate_replay_acceptance(
+                statuses=statuses,
+                persistence=persistence,
+                expected_completed_quantity=persistence.original_quantity - expected_remaining_quantity,
+                expected_remaining_quantity=expected_remaining_quantity,
+                require_terminal_completed=require_terminal_completed,
+            )
+        else:
+            assert_hot_offer_contention_acceptance(
+                persisted_trade_count=persistence.persisted_trade_count,
+                response_success_count=int(summary.get("success") or 0),
+                error_count=int(summary.get("error") or 0),
+                remaining_quantity=persistence.remaining_quantity,
+                status=persistence.offer_status,
+                expected_winner_count=expected_winner_count,
+                original_quantity=persistence.original_quantity,
+                completed_trade_quantity=persistence.completed_trade_quantity,
+                completed_ledger_count=persistence.completed_ledger_count,
+                trades_without_completed_ledger_count=persistence.trades_without_completed_ledger_count,
+                failed_internal_ledger_count=persistence.failed_internal_ledger_count,
+            )
         report["correctness_failures"] = []
     except TradingProbeError as exc:
         report["status"] = "failed"
@@ -5032,6 +5127,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--prefix", required=True)
     prepare_parser.add_argument("--run-id")
     prepare_parser.add_argument("--offer-origin", choices=("webapp", "bot"), default="webapp")
+    prepare_parser.add_argument("--scenario-name")
+    prepare_parser.add_argument("--request-surface", choices=("mixed", "webapp", "telegram"), default="mixed")
+    prepare_parser.add_argument("--idempotency-mode", choices=("unique", "duplicate_replay"), default="unique")
     prepare_parser.add_argument("--user-count", type=int, default=1000)
     prepare_parser.add_argument("--hot-offer-requests", type=int, default=1000)
     prepare_parser.add_argument("--telegram-ratio", type=float, default=0.6)
@@ -5039,6 +5137,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--hot-offer-quantity", type=int, default=5)
     prepare_parser.add_argument("--request-amount", type=int, default=5)
     prepare_parser.add_argument("--expected-winner-count", type=int, default=1)
+    prepare_parser.add_argument("--expected-remaining-quantity", type=int)
+    prepare_parser.add_argument("--require-terminal-completed", action="store_true", default=True)
+    prepare_parser.add_argument("--allow-nonterminal-offer", dest="require_terminal_completed", action="store_false")
     prepare_parser.add_argument("--price", type=int, default=100000)
     prepare_parser.add_argument("--offer-type", choices=("buy", "sell"), default="sell")
     prepare_parser.add_argument("--retail", action="store_true")
