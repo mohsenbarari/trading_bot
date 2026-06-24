@@ -562,6 +562,7 @@ def build_execution_plan(
         "selected_count": len(records),
         "executable_count": len(scenario_plans),
         "driver_gap_count": len(driver_gaps),
+        "driver_gap_summary": driver_gap_summary(driver_gaps),
         "scenario_plans": scenario_plans,
         "driver_gaps": driver_gaps,
         "safety": {
@@ -695,6 +696,36 @@ def count_by(records: Iterable[dict[str, Any]], key: str) -> dict[str, int]:
     return dict(sorted(counter.items()))
 
 
+def driver_gap_summary(driver_gaps: list[dict[str, Any]]) -> dict[str, Any]:
+    by_section: Counter[str] = Counter()
+    by_driver_gap: Counter[str] = Counter()
+    by_section_and_gap: Counter[tuple[str, str]] = Counter()
+    examples_by_gap: dict[str, list[str]] = {}
+
+    for gap_record in driver_gaps:
+        section = str(gap_record.get("section") or "unknown")
+        reason = str(gap_record.get("driver_gap") or "unknown")
+        manifest_id = str(gap_record.get("manifest_id") or "")
+        by_section[section] += 1
+        by_driver_gap[reason] += 1
+        by_section_and_gap[(section, reason)] += 1
+        if manifest_id:
+            examples = examples_by_gap.setdefault(reason, [])
+            if len(examples) < 5:
+                examples.append(manifest_id)
+
+    return {
+        "total": len(driver_gaps),
+        "by_section": dict(sorted(by_section.items())),
+        "by_driver_gap": dict(sorted(by_driver_gap.items())),
+        "by_section_and_driver_gap": [
+            {"section": section, "driver_gap": reason, "count": count}
+            for (section, reason), count in sorted(by_section_and_gap.items())
+        ],
+        "example_manifest_ids_by_driver_gap": dict(sorted(examples_by_gap.items())),
+    }
+
+
 def selected_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
     policy_counter: Counter[str] = Counter()
     for record in records:
@@ -775,6 +806,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             target_rps=args.target_rps,
             telegram_ratio=args.telegram_ratio,
         )
+        driver_gap_count = int(execution_plan.get("driver_gap_count") or 0)
+        coverage_passed = driver_gap_count == 0
+        execution_plan["coverage_gate"] = {
+            "required": bool(args.require_full_driver_coverage),
+            "passed": coverage_passed,
+            "reason": None
+            if coverage_passed
+            else "selected scenarios still have unimplemented production drivers",
+        }
+        if args.require_full_driver_coverage and not coverage_passed:
+            status = "blocked_driver_gaps"
+            execution_plan["status"] = "blocked_driver_gaps"
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": utc_now_iso(),
@@ -814,6 +857,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "production_drivers_implemented": False,
             "execution_command_plan_implemented": True,
             "preflight_driver_implemented": True,
+            "full_driver_coverage_gate_available": True,
+            "full_driver_coverage_required": bool(args.require_full_driver_coverage),
             "reason": (
                 "This runner can execute live non-mutating preflight and can build guarded production "
                 "execution command plans; automatic production write execution is not implemented."
@@ -846,6 +891,15 @@ def compact_stdout(plan: dict[str, Any], output: Path | None) -> dict[str, Any]:
             "status": (plan.get("execution_plan") or {}).get("status"),
             "executable_count": (plan.get("execution_plan") or {}).get("executable_count"),
             "driver_gap_count": (plan.get("execution_plan") or {}).get("driver_gap_count"),
+            "coverage_gate": (plan.get("execution_plan") or {}).get("coverage_gate"),
+            "driver_gap_summary": {
+                "by_section": ((plan.get("execution_plan") or {}).get("driver_gap_summary") or {}).get(
+                    "by_section", {}
+                ),
+                "by_driver_gap": ((plan.get("execution_plan") or {}).get("driver_gap_summary") or {}).get(
+                    "by_driver_gap", {}
+                ),
+            },
         }
         if plan.get("execution_plan") is not None
         else None,
@@ -882,6 +936,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--hot-offer-requests", type=int, default=1000)
     parser.add_argument("--target-rps", type=float, default=600.0)
     parser.add_argument("--telegram-ratio", type=float, default=0.6)
+    parser.add_argument(
+        "--require-full-driver-coverage",
+        action="store_true",
+        help=(
+            "In execution-plan mode, exit with code 2 unless every selected manifest row has an "
+            "implemented production command driver."
+        ),
+    )
     parser.add_argument("--execute", action="store_true", help="Request production execution. Currently fail-closed.")
     parser.add_argument("--print-full", action="store_true")
     return parser.parse_args(argv)
@@ -918,6 +980,8 @@ def main(argv: list[str] | None = None) -> int:
             plan["preflight"]["results"] = results
             exit_code = 1 if failed else 0
     elif args.execute:
+        exit_code = 2
+    if args.mode == "execution-plan" and args.require_full_driver_coverage and plan["status"] == "blocked_driver_gaps":
         exit_code = 2
 
     if args.output:

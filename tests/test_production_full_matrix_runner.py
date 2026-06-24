@@ -185,6 +185,90 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             execution_plan["driver_gaps"][0]["driver_gap"],
             "dual_role_worker_currently_supports_standard_user_to_standard_user_only",
         )
+        self.assertEqual(
+            execution_plan["driver_gap_summary"]["by_driver_gap"],
+            {"dual_role_worker_currently_supports_standard_user_to_standard_user_only": 1},
+        )
+
+    def test_execution_plan_summarizes_whole_manifest_driver_gaps(self):
+        plan = runner.build_plan(self.build_args("--mode", "execution-plan"))
+        execution_plan = plan["execution_plan"]
+        summary = execution_plan["driver_gap_summary"]
+
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 64)
+        self.assertEqual(execution_plan["driver_gap_count"], 5491)
+        self.assertEqual(summary["total"], 5491)
+        self.assertEqual(
+            summary["by_section"],
+            {
+                "delivery_contract": 204,
+                "market_behavior": 228,
+                "negative_business_guard": 23,
+                "production_base_trade_shape": 1200,
+                "production_stress_overlay": 3632,
+                "targeted_trade_delivery_join": 204,
+            },
+        )
+        self.assertEqual(summary["by_driver_gap"]["market_behavior_production_driver_not_implemented"], 228)
+        self.assertEqual(summary["by_driver_gap"]["negative_business_guard_production_driver_not_implemented"], 23)
+
+    def test_execution_plan_full_coverage_gate_blocks_when_any_driver_gap_remains(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "execution-plan.json"
+            with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                exit_code = runner.main(
+                    [
+                        "--prefix",
+                        "PFM_20260624_180000_",
+                        "--mode",
+                        "execution-plan",
+                        "--require-full-driver-coverage",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            full_payload = json.loads(output.read_text(encoding="utf-8"))
+            stdout_payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
+        self.assertEqual(full_payload["status"], "blocked_driver_gaps")
+        self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5491)
+
+    def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(
+                [
+                    "--prefix",
+                    "PFM_20260624_180000_",
+                    "--mode",
+                    "execution-plan",
+                    "--section",
+                    "production_base_trade_shape",
+                    "--policy",
+                    "supported",
+                    "--actor-pair-id",
+                    "user__user",
+                    "--outage-id",
+                    "stable",
+                    "--surface-pair",
+                    "webapp_offer__telegram_request",
+                    "--offer-type",
+                    "sell",
+                    "--shape",
+                    "retail_two_lot",
+                    "--require-full-driver-coverage",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "execution_plan_built")
+        self.assertEqual(payload["execution_plan"]["driver_gap_count"], 0)
+        self.assertTrue(payload["execution_plan"]["coverage_gate"]["passed"])
 
     def test_preflight_execute_requires_separate_confirmation(self):
         with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:

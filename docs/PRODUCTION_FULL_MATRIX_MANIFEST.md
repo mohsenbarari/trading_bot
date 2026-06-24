@@ -79,6 +79,20 @@ customer/accountant actor pairs, short/medium outage simulation, market
 behavior reads/expiry, targeted delivery join, or negative business guards.
 Those must remain visible as `driver_gaps` and cannot be treated as passed.
 
+For a production release gate, build the execution plan with full-driver
+coverage required:
+
+```bash
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execution-plan --require-full-driver-coverage --output /tmp/production-full-matrix-execution-plan.json"
+```
+
+This remains side-effect free. It exits with code `2` and status
+`blocked_driver_gaps` if any selected `manifest_id` still lacks an implemented
+production driver. Use this gate before any real production full-matrix run so
+an incomplete driver set cannot be mistaken for a complete pass. For intentionally
+small rehearsals, apply filters first; the gate should pass only when every
+selected scenario is command-plannable.
+
 ## Schema
 
 Top-level fields:
@@ -210,6 +224,9 @@ Current runner status:
   `PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM=run-production-preflight`.
 - It can build a guarded production execution command plan with
   `--mode execution-plan`.
+- It can enforce full command-driver coverage for the selected scope with
+  `--require-full-driver-coverage`; this blocks with `blocked_driver_gaps`
+  until every selected scenario has an implemented production driver.
 - It intentionally fails closed for automatic real execution until the
   per-section production drivers are implemented and reviewed.
 

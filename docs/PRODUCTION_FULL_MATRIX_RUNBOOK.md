@@ -211,6 +211,17 @@ This command still does not mutate production. It produces:
 - role-worker commands using `--patch-external-side-effects`, not
   `--patch-boundaries`.
 
+For the production release gate, require complete command-driver coverage:
+
+```bash
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execution-plan --require-full-driver-coverage --output /tmp/production-full-matrix-execution-plan.json"
+```
+
+This command is still side-effect free. It must exit with status
+`blocked_driver_gaps` and exit code `2` while any selected scenario lacks a
+production driver. A real full-matrix execution must not start unless this
+coverage gate passes for the selected scope.
+
 Current execution-plan limitation:
 
 - implemented: user-to-user stable hot-offer paths for the base trade shape
@@ -223,7 +234,9 @@ Current execution-plan limitation:
   business guard production driver.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
-Those gaps are intentionally emitted so missing coverage cannot be hidden.
+Those gaps are intentionally emitted and summarized by section and reason so
+missing coverage cannot be hidden. Use `--require-full-driver-coverage` as the
+machine-enforced gate for release readiness.
 
 ## Matrix Evidence Required
 
