@@ -50,6 +50,17 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('offer_request_status.create(bind, checkfirst=True)', migration)
         self.assertIn('offer_request_source_surface.create(bind, checkfirst=True)', migration)
 
+    def test_offer_publication_state_enum_migration_is_idempotent(self):
+        migration = (REPO_ROOT / 'migrations/versions/d0e1f2a3b4c6_add_offer_publication_states.py').read_text(
+            encoding='utf-8'
+        )
+
+        self.assertIn('from sqlalchemy.dialects import postgresql', migration)
+        self.assertGreaterEqual(migration.count('postgresql.ENUM('), 2)
+        self.assertGreaterEqual(migration.count('create_type=False'), 2)
+        self.assertIn('offer_publication_surface.create(bind, checkfirst=True)', migration)
+        self.assertIn('offer_publication_status.create(bind, checkfirst=True)', migration)
+
 
 if __name__ == '__main__':
     unittest.main()

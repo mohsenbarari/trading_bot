@@ -7,6 +7,7 @@ Create Date: 2026-06-19 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "d0e1f2a3b4c6"
@@ -15,12 +16,13 @@ branch_labels = None
 depends_on = None
 
 
-offer_publication_surface = sa.Enum(
+offer_publication_surface = postgresql.ENUM(
     "telegram_channel",
     "webapp_market",
     name="offerpublicationsurface",
+    create_type=False,
 )
-offer_publication_status = sa.Enum(
+offer_publication_status = postgresql.ENUM(
     "pending",
     "sent",
     "visible",
@@ -28,10 +30,14 @@ offer_publication_status = sa.Enum(
     "disabled",
     "lagged",
     name="offerpublicationstatus",
+    create_type=False,
 )
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    offer_publication_surface.create(bind, checkfirst=True)
+    offer_publication_status.create(bind, checkfirst=True)
     op.create_table(
         "offer_publication_states",
         sa.Column("id", sa.Integer(), nullable=False),
