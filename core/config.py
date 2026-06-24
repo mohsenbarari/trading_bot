@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     trade_delivery_worker_batch_limit: int = 50
     trade_delivery_worker_lease_seconds: int = 30
     trade_delivery_worker_recover_limit: int = 100
+    offer_publication_worker_interval_seconds: float = 1.0
+    offer_publication_worker_batch_limit: int = 25
 
     database_url: str
     sync_database_url: str

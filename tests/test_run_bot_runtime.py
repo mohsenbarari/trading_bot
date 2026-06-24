@@ -10,6 +10,10 @@ async def _listener_forever(_bot):
     await asyncio.sleep(3600)
 
 
+async def _worker_forever():
+    await asyncio.sleep(3600)
+
+
 class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_fails_closed_without_bot_token(self):
         with patch.object(run_bot.settings, 'server_mode', 'foreign'), patch.object(
@@ -63,7 +67,9 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.AuthMiddleware', return_value=auth_middleware
         ) as auth_ctor, patch(
             'run_bot.TradeContentionGateMiddleware', return_value=trade_gate_middleware
-        ) as gate_ctor, patch('run_bot.listen_trade_suggestion_events', _listener_forever):
+        ) as gate_ctor, patch('run_bot.listen_trade_suggestion_events', _listener_forever), patch(
+            'run_bot.offer_telegram_publication_loop', _worker_forever
+        ):
             await run_bot.main()
 
         init_db.assert_awaited_once()
@@ -96,7 +102,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.Dispatcher', return_value=fake_dp
         ), patch('run_bot.AuthMiddleware', return_value=object()), patch(
             'run_bot.listen_trade_suggestion_events', _listener_forever
-        ), patch.object(run_bot, 'logger') as logger:
+        ), patch('run_bot.offer_telegram_publication_loop', _worker_forever), patch.object(run_bot, 'logger') as logger:
             await run_bot.main()
 
         logger.error.assert_called_once()

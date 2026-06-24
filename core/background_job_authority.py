@@ -19,6 +19,7 @@ JOB_CONNECTIVITY_MONITOR = "connectivity_monitor"
 JOB_SYNC_WORKER = "sync_worker"
 JOB_TRADE_WEBAPP_DELIVERY = "trade_webapp_delivery"
 JOB_TRADE_TELEGRAM_DELIVERY = "trade_telegram_delivery"
+JOB_OFFER_TELEGRAM_PUBLICATION = "offer_telegram_publication"
 
 REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
     {
@@ -29,6 +30,7 @@ REQUIRED_BACKGROUND_JOBS: frozenset[str] = frozenset(
         JOB_CONNECTIVITY_MONITOR,
         JOB_TRADE_WEBAPP_DELIVERY,
         JOB_TRADE_TELEGRAM_DELIVERY,
+        JOB_OFFER_TELEGRAM_PUBLICATION,
     }
 )
 
@@ -197,6 +199,26 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         ),
         external_state=("Telegram Bot API",),
         side_effects=("Telegram private trade message",),
+    ),
+    JOB_OFFER_TELEGRAM_PUBLICATION: BackgroundJobAuthorityEntry(
+        job_name=JOB_OFFER_TELEGRAM_PUBLICATION,
+        mutated_tables=("offers", "offer_publication_states"),
+        allowed_servers=(SERVER_FOREIGN,),
+        authority_rule=(
+            "foreign-only Telegram channel publication reconciler; publishes active offers missing "
+            "Telegram publication state through the idempotent offer_publication_states gate"
+        ),
+        outage_behavior=(
+            "skip active publication while the medium/long outage active-publication gate is enabled; "
+            "otherwise repair missing Telegram channel posts after sync or staging shared-DB creation"
+        ),
+        sync_outbox_behavior=(
+            "offer_publication_states and the legacy offers.channel_message_id backfill are sync-visible "
+            "product surface state and must converge through the existing change_log path"
+        ),
+        offer_impacting=True,
+        external_state=("Telegram Bot API",),
+        side_effects=("Telegram channel offer post",),
     ),
 }
 

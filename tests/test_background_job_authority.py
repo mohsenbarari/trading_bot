@@ -5,6 +5,7 @@ from core.background_job_authority import (
     JOB_CONNECTIVITY_MONITOR,
     JOB_MARKET_SCHEDULE,
     JOB_OFFER_EXPIRY,
+    JOB_OFFER_TELEGRAM_PUBLICATION,
     JOB_SESSION_EXPIRY,
     JOB_SYNC_WORKER,
     JOB_TRADE_TELEGRAM_DELIVERY,
@@ -56,10 +57,13 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertEqual(connectivity_decision.reason, "background_job_not_allowed_on_server")
         webapp_delivery_decision = check_background_job_authority(JOB_TRADE_WEBAPP_DELIVERY, server_mode="foreign")
         telegram_delivery_decision = check_background_job_authority(JOB_TRADE_TELEGRAM_DELIVERY, server_mode="iran")
+        offer_publication_decision = check_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION, server_mode="iran")
         self.assertFalse(webapp_delivery_decision.ok)
         self.assertEqual(webapp_delivery_decision.reason, "background_job_not_allowed_on_server")
         self.assertFalse(telegram_delivery_decision.ok)
         self.assertEqual(telegram_delivery_decision.reason, "background_job_not_allowed_on_server")
+        self.assertFalse(offer_publication_decision.ok)
+        self.assertEqual(offer_publication_decision.reason, "background_job_not_allowed_on_server")
 
         with self.assertRaises(BackgroundJobAuthorityError):
             assert_background_job_authority(JOB_USER_ACCOUNT_STATUS, server_mode="foreign")
@@ -79,6 +83,7 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertTrue(check_background_job_authority(JOB_CONNECTIVITY_MONITOR, server_mode="iran").ok)
         self.assertTrue(check_background_job_authority(JOB_TRADE_WEBAPP_DELIVERY, server_mode="iran").ok)
         self.assertTrue(check_background_job_authority(JOB_TRADE_TELEGRAM_DELIVERY, server_mode="foreign").ok)
+        self.assertTrue(check_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION, server_mode="foreign").ok)
 
     def test_unknown_jobs_fail_closed_when_filtering_factories(self):
         rejected = []
@@ -136,6 +141,10 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertEqual(telegram.allowed_servers, ("foreign",))
         self.assertNotIn("notifications", telegram.mutated_tables)
         self.assertIn("Telegram Bot API", telegram.external_state)
+        offer_publication = entries[JOB_OFFER_TELEGRAM_PUBLICATION]
+        self.assertEqual(offer_publication.allowed_servers, ("foreign",))
+        self.assertIn("offer_publication_states", offer_publication.mutated_tables)
+        self.assertIn("Telegram Bot API", offer_publication.external_state)
 
     def test_current_server_is_used_when_server_mode_is_not_explicit(self):
         with patch("core.background_job_authority.current_server", return_value="foreign"):
