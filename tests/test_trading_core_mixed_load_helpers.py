@@ -662,9 +662,19 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         plan = worker.CleanupPlan(
             prefix="P7_TRADING_1405_",
             user_ids=[1, 2],
+            invitation_ids=[],
+            accountant_relation_ids=[],
+            customer_relation_ids=[],
+            user_session_ids=[],
+            session_login_request_ids=[],
+            recovery_request_ids=[],
+            recovery_admin_target_ids=[],
+            telegram_link_token_ids=[],
+            push_subscription_ids=[],
             offer_ids=[10],
             offer_public_ids=["ofr_10"],
             trade_ids=[20],
+            trade_delivery_receipt_ids=[],
             offer_request_ids=[30, 31],
             publication_state_ids=[40, 41],
             notification_ids=[50],
@@ -721,6 +731,95 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn("TRADING_BOT_SERVICE must be load_runner", message)
         self.assertIn("SERVER_MODE must be foreign", message)
         self.assertIn("BOT_TOKEN must be empty", message)
+
+    def test_load_runner_runtime_surface_guard_allows_confirmed_production_runner(self):
+        with patch.dict(
+            "os.environ",
+            {worker.PRODUCTION_ROLE_WORKER_CONFIRM_ENV: worker.PRODUCTION_ROLE_WORKER_CONFIRM_VALUE},
+            clear=True,
+        ), patch.object(worker.settings, "environment", "production"), patch.object(
+            worker.settings, "trading_bot_service", "load_runner"
+        ), patch.object(worker.settings, "server_mode", "foreign"), patch.object(worker.settings, "bot_token", ""):
+            payload = worker.assert_load_runner_runtime_surface(
+                "telegram_foreign",
+                allow_production=True,
+                prefix="PFM_20260624_180000_",
+            )
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["environment"], "production")
+        self.assertTrue(payload["production_execution_allowed"])
+
+    def test_dual_role_prepare_runtime_requires_offer_home_server(self):
+        with patch.object(worker.settings, "environment", "staging"), patch.object(
+            worker.settings, "server_mode", "foreign"
+        ):
+            payload = worker.assert_dual_role_prepare_runtime(
+                "bot",
+                allow_production=False,
+                prefix="PFM_20260624_180000_",
+            )
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["server_mode"], "foreign")
+
+        with patch.object(worker.settings, "environment", "staging"), patch.object(
+            worker.settings, "server_mode", "foreign"
+        ):
+            with self.assertRaises(worker.TradingProbeError) as exc_info:
+                worker.assert_dual_role_prepare_runtime(
+                    "webapp",
+                    allow_production=False,
+                    prefix="PFM_20260624_180000_",
+                )
+
+        self.assertIn("SERVER_MODE must be iran", str(exc_info.exception))
+
+    def test_role_plan_parser_accepts_external_side_effect_patch(self):
+        args = worker.build_parser().parse_args(
+            [
+                "run-role-plan",
+                "--plan",
+                "/tmp/role.plan.json",
+                "--patch-external-side-effects",
+            ]
+        )
+
+        self.assertTrue(args.patch_external_side_effects)
+        self.assertFalse(args.patch_boundaries)
+        self.assertFalse(args.allow_production_execution)
+
+    def test_role_worker_patch_options_reject_ambiguous_combination(self):
+        async def run_probe():
+            async with worker.optional_role_worker_patches(
+                patch_boundaries=True,
+                patch_external_side_effects=True,
+            ):
+                return None
+
+        with self.assertRaises(worker.TradingProbeError) as exc_info:
+            asyncio.run(run_probe())
+
+        self.assertIn("cannot be used together", str(exc_info.exception))
+
+    def test_external_side_effect_patch_preserves_cross_server_forwarders(self):
+        original_trade_forward = worker.trades_router.forward_trade_to_home_server
+        original_bot_trade_forward = worker.bot_trade_execute.forward_trade_to_home_server
+        original_offer_expiry_forward = worker.offers_router.forward_offer_expiry_to_home_server
+        original_bot_expiry_forward = worker.bot_trade_manage.forward_offer_expiry_to_home_server
+
+        async def run_probe():
+            async with worker.patched_external_side_effects():
+                self.assertIs(worker.trades_router.forward_trade_to_home_server, original_trade_forward)
+                self.assertIs(worker.bot_trade_execute.forward_trade_to_home_server, original_bot_trade_forward)
+                self.assertIs(worker.offers_router.forward_offer_expiry_to_home_server, original_offer_expiry_forward)
+                self.assertIs(worker.bot_trade_manage.forward_offer_expiry_to_home_server, original_bot_expiry_forward)
+
+        asyncio.run(run_probe())
+        self.assertIs(worker.trades_router.forward_trade_to_home_server, original_trade_forward)
+        self.assertIs(worker.bot_trade_execute.forward_trade_to_home_server, original_bot_trade_forward)
+        self.assertIs(worker.offers_router.forward_offer_expiry_to_home_server, original_offer_expiry_forward)
+        self.assertIs(worker.bot_trade_manage.forward_offer_expiry_to_home_server, original_bot_expiry_forward)
 
     def test_aiogram_dispatcher_harness_can_be_recreated(self):
         async def _build_twice():

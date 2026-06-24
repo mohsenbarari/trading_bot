@@ -41,9 +41,20 @@ SECTION_DRIVER_STATUS = {
     "market_behavior": "pending_production_market_driver",
     "delivery_contract": "pending_delivery_assertion_driver",
     "targeted_trade_delivery_join": "pending_targeted_join_production_driver",
-    "production_base_trade_shape": "pending_two_server_trade_driver",
-    "production_stress_overlay": "pending_two_server_stress_driver",
+    "production_base_trade_shape": "two_server_dual_role_driver_plannable_for_user_stable_cases",
+    "production_stress_overlay": "two_server_dual_role_driver_plannable_for_hot_user_stable_cases",
     "negative_business_guard": "pending_negative_guard_driver",
+}
+
+DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES = {
+    "hot_wholesale_concurrent",
+    "hot_retail_same_lot_concurrent",
+    "hot_retail_mixed_lot_concurrent",
+}
+
+DUAL_ROLE_ROLE_BY_SERVER = {
+    "foreign": "telegram_foreign",
+    "iran": "webapp_iran",
 }
 
 
@@ -101,6 +112,76 @@ def iran_command(name: str, remote_command: str, *, timeout_seconds: int = 30) -
         args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {remote_command}"],
         timeout_seconds=timeout_seconds,
     )
+
+
+def shell_join(parts: Iterable[Any]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def container_python_command(
+    name: str,
+    *,
+    server: str,
+    python_args: list[str],
+    env: dict[str, str] | None = None,
+    timeout_seconds: int = 300,
+    mutates_production: bool = True,
+) -> CommandSpec:
+    if server == "foreign":
+        args = ["docker", "compose", "exec", "-T"]
+        for key, value in sorted((env or {}).items()):
+            args.extend(["-e", f"{key}={value}"])
+        args.extend(["app", "python", *python_args])
+        return CommandSpec(
+            name=name,
+            args=args,
+            timeout_seconds=timeout_seconds,
+            mutates_production=mutates_production,
+        )
+    if server == "iran":
+        remote_parts = ["docker-compose", "exec", "-T"]
+        for key, value in sorted((env or {}).items()):
+            remote_parts.extend(["-e", f"{key}={value}"])
+        remote_parts.extend(["app", "python", *python_args])
+        return CommandSpec(
+            name=name,
+            args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
+            timeout_seconds=timeout_seconds,
+            mutates_production=mutates_production,
+        )
+    raise RunnerError(f"unsupported server for container command: {server}")
+
+
+def host_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
+    if server == "foreign":
+        return CommandSpec(name=name, args=["mkdir", "-p", path], timeout_seconds=30)
+    if server == "iran":
+        return iran_command(name, f"mkdir -p {shlex.quote(path)}", timeout_seconds=30)
+    raise RunnerError(f"unsupported server for mkdir command: {server}")
+
+
+def copy_between_servers_command(name: str, *, source_server: str, target_server: str, path: str) -> CommandSpec:
+    if source_server == target_server:
+        return CommandSpec(name=name, args=["test", "-f", path], timeout_seconds=30)
+    if source_server == "foreign" and target_server == "iran":
+        return CommandSpec(
+            name=name,
+            args=["scp", path, f"{IRAN_HOST}:{path}"],
+            timeout_seconds=120,
+            mutates_production=False,
+        )
+    if source_server == "iran" and target_server == "foreign":
+        return CommandSpec(
+            name=name,
+            args=["scp", f"{IRAN_HOST}:{path}", path],
+            timeout_seconds=120,
+            mutates_production=False,
+        )
+    raise RunnerError(f"unsupported server copy: {source_server} -> {target_server}")
+
+
+def safe_token(value: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in str(value)).strip("_") or "scenario"
 
 
 def build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[CommandSpec]:
@@ -183,6 +264,314 @@ def build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[Command
             timeout_seconds=120,
         ),
     ]
+
+
+def shape_profile(shape_name: str) -> dict[str, Any]:
+    try:
+        shape = manifest_builder.market_matrix.SHAPES[shape_name]
+    except KeyError as exc:
+        raise RunnerError(f"unknown offer shape for execution plan: {shape_name}") from exc
+    return {
+        "quantity": int(shape.quantity),
+        "request_amount": int(shape.request_amount),
+        "expected_winner_count": int(shape.expected_winner_count),
+        "is_wholesale": bool(shape.is_wholesale),
+        "lot_sizes": list(shape.lot_sizes),
+    }
+
+
+def scenario_prefix(prefix: str, manifest_id: str) -> str:
+    return f"{prefix}{safe_token(manifest_id)}_"
+
+
+def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
+    section = str(record.get("section") or "")
+    if section not in {"production_base_trade_shape", "production_stress_overlay"}:
+        return f"{section}_production_driver_not_implemented"
+    if record.get("policy_supported") is not True:
+        return "policy_unsupported_scenario_requires_negative_guard_driver"
+    if record.get("actor_pair_id") != "user__user":
+        return "dual_role_worker_currently_supports_standard_user_to_standard_user_only"
+    if record.get("outage_id") != "stable":
+        return "outage_simulation_driver_not_implemented_for_role_worker"
+    if section == "production_stress_overlay" and record.get("family") not in DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES:
+        return "stress_family_requires_specialized_race_or_read_driver"
+    if record.get("offer_surface") not in {"webapp", "telegram"}:
+        return "unsupported_offer_surface_for_dual_role_worker"
+    if record.get("request_surface") not in {"webapp", "telegram"}:
+        return "unsupported_request_surface_for_dual_role_worker"
+    return None
+
+
+def dual_role_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+    user_count: int,
+    hot_offer_requests: int,
+    target_rps: float,
+    telegram_ratio: float,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "scenario")
+    scenario_run_prefix = scenario_prefix(prefix, manifest_id)
+    scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
+    remote_dir = f"/tmp/{scenario_run_prefix}dual-role"
+    offer_surface = str(record.get("offer_surface") or "")
+    offer_origin = "bot" if offer_surface == "telegram" else "webapp"
+    offer_home_server = str(record.get("offer_home_server") or "")
+    if offer_home_server not in DUAL_ROLE_ROLE_BY_SERVER:
+        raise RunnerError(f"{manifest_id}: unsupported offer_home_server={offer_home_server!r}")
+    profile = shape_profile(str(record.get("shape") or ""))
+    total_requests = max(
+        int(hot_offer_requests),
+        int(record.get("min_parallel_requests") or 0),
+        int(profile["expected_winner_count"]) + 36,
+    )
+    prepare_args = [
+        "scripts/trading_core_probe_worker.py",
+        "prepare-dual-role-run",
+        "--output-dir",
+        remote_dir,
+        "--prefix",
+        scenario_run_prefix,
+        "--run-id",
+        scenario_run_prefix.rstrip("_"),
+        "--offer-origin",
+        offer_origin,
+        "--user-count",
+        str(user_count),
+        "--hot-offer-requests",
+        str(total_requests),
+        "--telegram-ratio",
+        str(telegram_ratio),
+        "--target-rps",
+        str(target_rps),
+        "--hot-offer-quantity",
+        str(profile["quantity"]),
+        "--request-amount",
+        str(profile["request_amount"]),
+        "--expected-winner-count",
+        str(profile["expected_winner_count"]),
+        "--price",
+        "100000",
+        "--offer-type",
+        str(record.get("offer_type") or "sell"),
+        "--barrier-delay-seconds",
+        "25",
+        "--skip-initial-cleanup",
+        "--allow-production-execution",
+    ]
+    if not profile["is_wholesale"]:
+        prepare_args.append("--retail")
+        prepare_args.extend(["--lot-sizes", " ".join(str(item) for item in profile["lot_sizes"])])
+
+    production_env = {
+        EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+    }
+    pre_role_commands = [
+        container_python_command(
+            "prepare_on_offer_home_server",
+            server=offer_home_server,
+            python_args=prepare_args,
+            env=production_env,
+            timeout_seconds=600,
+        ),
+        CommandSpec("sync_health_after_prepare_foreign", ["make", "sync-health"], timeout_seconds=90),
+        iran_command("sync_health_after_prepare_iran", "make sync-health", timeout_seconds=90),
+        host_mkdir_command(
+            "ensure_foreign_artifact_dir",
+            server="foreign",
+            path=remote_dir,
+        ),
+        host_mkdir_command(
+            "ensure_iran_artifact_dir",
+            server="iran",
+            path=remote_dir,
+        ),
+        copy_between_servers_command(
+            "distribute_telegram_role_plan",
+            source_server=offer_home_server,
+            target_server="foreign",
+            path=f"{remote_dir}/telegram_foreign.plan.json",
+        ),
+        copy_between_servers_command(
+            "distribute_webapp_role_plan",
+            source_server=offer_home_server,
+            target_server="iran",
+            path=f"{remote_dir}/webapp_iran.plan.json",
+        ),
+    ]
+    role_commands = [
+        container_python_command(
+            "run_role_telegram_foreign",
+            server="foreign",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "run-role-plan",
+                "--plan",
+                f"{remote_dir}/telegram_foreign.plan.json",
+                "--output",
+                f"{remote_dir}/telegram_foreign.result.json",
+                "--patch-external-side-effects",
+                "--allow-production-execution",
+            ],
+            env=production_env,
+            timeout_seconds=900,
+        ),
+        container_python_command(
+            "run_role_webapp_iran",
+            server="iran",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "run-role-plan",
+                "--plan",
+                f"{remote_dir}/webapp_iran.plan.json",
+                "--output",
+                f"{remote_dir}/webapp_iran.result.json",
+                "--patch-external-side-effects",
+                "--allow-production-execution",
+            ],
+            env=production_env,
+            timeout_seconds=900,
+        ),
+    ]
+    post_role_commands = [
+        copy_between_servers_command(
+            "collect_telegram_role_result",
+            source_server="foreign",
+            target_server=offer_home_server,
+            path=f"{remote_dir}/telegram_foreign.result.json",
+        ),
+        copy_between_servers_command(
+            "collect_webapp_role_result",
+            source_server="iran",
+            target_server=offer_home_server,
+            path=f"{remote_dir}/webapp_iran.result.json",
+        ),
+        container_python_command(
+            "merge_role_results_on_offer_home_server",
+            server=offer_home_server,
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "merge-role-results",
+                "--output",
+                f"{remote_dir}/merged.result.json",
+                f"{remote_dir}/telegram_foreign.result.json",
+                f"{remote_dir}/webapp_iran.result.json",
+            ],
+            timeout_seconds=120,
+        ),
+        container_python_command(
+            "finalize_on_offer_home_server",
+            server=offer_home_server,
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "finalize-dual-role-run",
+                "--prepare",
+                f"{remote_dir}/prepare.json",
+                "--merged-result",
+                f"{remote_dir}/merged.result.json",
+                "--output",
+                f"{remote_dir}/final.json",
+                "--check",
+            ],
+            timeout_seconds=180,
+        ),
+    ]
+    commands = [*pre_role_commands, *role_commands, *post_role_commands]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "two_server_dual_role_hot_offer",
+        "scenario_prefix": scenario_run_prefix,
+        "artifact_dir": str(scenario_dir),
+        "remote_artifact_dir": remote_dir,
+        "offer_home_server": offer_home_server,
+        "offer_origin": offer_origin,
+        "shape_profile": profile,
+        "total_requests": total_requests,
+        "commands": [command_payload(command) for command in commands],
+        "execution_groups": [
+            {
+                "name": "prepare_and_distribute",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in pre_role_commands],
+            },
+            {
+                "name": "role_workers",
+                "mode": "concurrent",
+                "commands": [command_payload(command) for command in role_commands],
+            },
+            {
+                "name": "collect_merge_finalize",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in post_role_commands],
+            },
+        ],
+        "concurrency_note": "run_role_telegram_foreign and run_role_webapp_iran must be started concurrently after prepare.",
+    }
+
+
+def build_execution_plan(
+    records: list[dict[str, Any]],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+    user_count: int,
+    hot_offer_requests: int,
+    target_rps: float,
+    telegram_ratio: float,
+) -> dict[str, Any]:
+    scenario_plans: list[dict[str, Any]] = []
+    driver_gaps: list[dict[str, Any]] = []
+    for record in records:
+        gap = dual_role_driver_gap(record)
+        if gap:
+            driver_gaps.append(
+                {
+                    "manifest_id": record.get("manifest_id"),
+                    "section": record.get("section"),
+                    "driver_gap": gap,
+                }
+            )
+            continue
+        scenario_plans.append(
+            dual_role_scenario_commands(
+                record,
+                prefix=prefix,
+                artifact_dir=artifact_dir,
+                user_count=user_count,
+                hot_offer_requests=hot_offer_requests,
+                target_rps=target_rps,
+                telegram_ratio=telegram_ratio,
+            )
+        )
+    return {
+        "status": "planned",
+        "implemented_driver": "two_server_dual_role_hot_offer",
+        "implemented_scope": {
+            "sections": ["production_base_trade_shape", "production_stress_overlay"],
+            "actor_pair_id": "user__user",
+            "outage_id": "stable",
+            "stress_families": sorted(DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES),
+            "surfaces": ["webapp", "telegram"],
+            "offer_types": ["buy", "sell"],
+            "shapes": sorted(manifest_builder.market_matrix.SHAPES),
+        },
+        "selected_count": len(records),
+        "executable_count": len(scenario_plans),
+        "driver_gap_count": len(driver_gaps),
+        "scenario_plans": scenario_plans,
+        "driver_gaps": driver_gaps,
+        "safety": {
+            "preserves_real_cross_server_forwarding": True,
+            "role_workers_use_patch_external_side_effects": True,
+            "requires_concurrent_role_start": True,
+            "requires_production_isolation_before_execution": True,
+            "requires_pre_and_post_cleanup": True,
+        },
+    }
 
 
 def run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
@@ -371,8 +760,21 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     preflight_commands = build_preflight_commands(prefix=prefix, artifact_dir=artifact_dir)
     if args.mode == "preflight":
         status = "preflight_execution_requested" if args.execute else "preflight_planned"
+    elif args.mode == "execution-plan":
+        status = "blocked_not_implemented" if args.execute else "execution_plan_built"
     elif args.execute:
         status = "blocked_not_implemented"
+    execution_plan = None
+    if args.mode == "execution-plan":
+        execution_plan = build_execution_plan(
+            selected,
+            prefix=prefix,
+            artifact_dir=artifact_dir,
+            user_count=args.users,
+            hot_offer_requests=args.hot_offer_requests,
+            target_rps=args.target_rps,
+            telegram_ratio=args.telegram_ratio,
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": utc_now_iso(),
@@ -410,14 +812,19 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "preflight_confirmation_env": PREFLIGHT_CONFIRM_ENV,
             "preflight_confirmation_value": PREFLIGHT_CONFIRM_VALUE,
             "production_drivers_implemented": False,
+            "execution_command_plan_implemented": True,
             "preflight_driver_implemented": True,
-            "reason": "This runner can execute live non-mutating preflight; production write drivers are not implemented.",
+            "reason": (
+                "This runner can execute live non-mutating preflight and can build guarded production "
+                "execution command plans; automatic production write execution is not implemented."
+            ),
         },
         "preflight": {
             "artifact_dir": str(artifact_dir),
             "status": "planned",
             "commands": [command_payload(command) for command in preflight_commands],
         },
+        "execution_plan": execution_plan,
         "steps": steps,
     }
 
@@ -435,6 +842,13 @@ def compact_stdout(plan: dict[str, Any], output: Path | None) -> dict[str, Any]:
             "status": (plan.get("preflight") or {}).get("status"),
             "command_count": len((plan.get("preflight") or {}).get("commands") or []),
         },
+        "execution_plan": {
+            "status": (plan.get("execution_plan") or {}).get("status"),
+            "executable_count": (plan.get("execution_plan") or {}).get("executable_count"),
+            "driver_gap_count": (plan.get("execution_plan") or {}).get("driver_gap_count"),
+        }
+        if plan.get("execution_plan") is not None
+        else None,
     }
 
 
@@ -446,9 +860,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument(
         "--mode",
-        choices=["plan", "preflight"],
+        choices=["plan", "preflight", "execution-plan"],
         default="plan",
-        help="plan builds scenario steps; preflight builds/runs non-mutating live readiness checks.",
+        help=(
+            "plan builds scenario steps; preflight builds/runs non-mutating live readiness checks; "
+            "execution-plan builds guarded two-server command plans without executing them."
+        ),
     )
     parser.add_argument("--section", action="append", default=[])
     parser.add_argument("--manifest-id", action="append", default=[])
@@ -461,6 +878,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-scenarios", type=int)
     parser.add_argument("--shard-index", type=int, default=1)
     parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--users", type=int, default=1000)
+    parser.add_argument("--hot-offer-requests", type=int, default=1000)
+    parser.add_argument("--target-rps", type=float, default=600.0)
+    parser.add_argument("--telegram-ratio", type=float, default=0.6)
     parser.add_argument("--execute", action="store_true", help="Request production execution. Currently fail-closed.")
     parser.add_argument("--print-full", action="store_true")
     return parser.parse_args(argv)

@@ -196,6 +196,35 @@ make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode prefl
 This preflight is allowed to read live service status and run cleanup dry-run
 queries. It must not create or mutate production market data.
 
+Generate the guarded execution command plan:
+
+```bash
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execution-plan --output /tmp/production-full-matrix-execution-plan.json"
+```
+
+This command still does not mutate production. It produces:
+
+- per-scenario command groups for implemented production drivers;
+- explicit `driver_gaps` for unimplemented production drivers;
+- separate `prepare_and_distribute`, concurrent `role_workers`, and
+  `collect_merge_finalize` groups for two-server role-worker scenarios;
+- role-worker commands using `--patch-external-side-effects`, not
+  `--patch-boundaries`.
+
+Current execution-plan limitation:
+
+- implemented: user-to-user stable hot-offer paths for the base trade shape
+  section and hot-offer stress overlays, across WebApp/WebApp, WebApp/Telegram,
+  Telegram/WebApp, and Telegram/Telegram quadrants;
+- current whole-manifest command-plannable count: `64` of `5555` scenarios;
+- not implemented yet: customer/accountant actor-pair production drivers,
+  short/medium outage orchestration, manual/time expiry races, read-during-write
+  production driver, targeted delivery join production driver, and negative
+  business guard production driver.
+
+Do not treat a run as a full production pass while `driver_gap_count > 0`.
+Those gaps are intentionally emitted so missing coverage cannot be hidden.
+
 ## Matrix Evidence Required
 
 The production run should collect at least:
@@ -210,6 +239,7 @@ The production run should collect at least:
 - generated production full-matrix manifest artifact,
 - generated production full-matrix run-plan artifact,
 - generated production full-matrix preflight-plan artifact,
+- generated production full-matrix execution-plan artifact,
 - execution artifacts for offer creation, concurrent trade, non-concurrent
   trade, manual expiry, time expiry, history/detail views, and trade delivery,
 - post-run cleanup dry-run artifacts,

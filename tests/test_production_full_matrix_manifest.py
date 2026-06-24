@@ -82,6 +82,11 @@ class ProductionFullMatrixManifestTests(unittest.TestCase):
         for overlay in manifest["sections"]["production_stress_overlay"]:
             base = base_by_id[overlay["base_manifest_id"]]
             self.assertTrue(base["policy_supported"])
+            self.assertTrue(overlay["policy_supported"])
+            self.assertEqual(overlay["offer_surface"], base["offer_surface"])
+            self.assertEqual(overlay["request_surface"], base["request_surface"])
+            self.assertEqual(overlay["offer_home_server"], base["offer_home_server"])
+            self.assertEqual(overlay["request_source_server"], base["request_source_server"])
             self.assertGreaterEqual(overlay["target_rps_floor"], 600)
             self.assertGreaterEqual(overlay["min_parallel_requests"], 2)
 

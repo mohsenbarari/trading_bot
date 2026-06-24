@@ -80,6 +80,12 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
                 for item in by_name["catalog_dry_run"]["commands"]
             )
         )
+        self.assertTrue(
+            any(
+                "production-full-matrix-execution-plan.json" in item
+                for item in by_name["catalog_dry_run"]["commands"]
+            )
+        )
         self.assertEqual(len(by_name["pre_run_cleanup_dry_run"]["commands"]), 2)
         self.assertTrue(any("docker compose exec -T app" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"]))
         self.assertTrue(any("ssh root@87.107.3.22" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"]))

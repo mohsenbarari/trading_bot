@@ -115,6 +115,77 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(len(plan["preflight"]["commands"]), 8)
         self.assertTrue(all(not item["mutates_production"] for item in plan["preflight"]["commands"]))
 
+    def test_execution_plan_builds_two_server_dual_role_commands_for_user_stable_case(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_base_trade_shape",
+                "--policy",
+                "supported",
+                "--actor-pair-id",
+                "user__user",
+                "--outage-id",
+                "stable",
+                "--surface-pair",
+                "webapp_offer__telegram_request",
+                "--offer-type",
+                "sell",
+                "--shape",
+                "retail_two_lot",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(plan["selected_summary"]["selected_count"], 1)
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+
+        scenario_plan = execution_plan["scenario_plans"][0]
+        command_names = [command["name"] for command in scenario_plan["commands"]]
+        groups_by_name = {group["name"]: group for group in scenario_plan["execution_groups"]}
+        self.assertEqual(scenario_plan["offer_home_server"], "iran")
+        self.assertIn("prepare_on_offer_home_server", command_names)
+        self.assertIn("distribute_telegram_role_plan", command_names)
+        self.assertIn("run_role_telegram_foreign", command_names)
+        self.assertIn("run_role_webapp_iran", command_names)
+        self.assertIn("collect_telegram_role_result", command_names)
+        self.assertIn("finalize_on_offer_home_server", command_names)
+        self.assertEqual(groups_by_name["role_workers"]["mode"], "concurrent")
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("--patch-external-side-effects", rendered)
+        self.assertIn("--allow-production-execution", rendered)
+        self.assertIn("PRODUCTION_FULL_MATRIX_CONFIRM", rendered)
+        self.assertIn("--retail", rendered)
+
+    def test_execution_plan_keeps_customer_cases_as_explicit_driver_gaps(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_base_trade_shape",
+                "--policy",
+                "supported",
+                "--actor-pair-id",
+                "user__tier1_same_owner",
+                "--outage-id",
+                "stable",
+                "--max-scenarios",
+                "1",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(execution_plan["executable_count"], 0)
+        self.assertEqual(execution_plan["driver_gap_count"], 1)
+        self.assertEqual(
+            execution_plan["driver_gaps"][0]["driver_gap"],
+            "dual_role_worker_currently_supports_standard_user_to_standard_user_only",
+        )
+
     def test_preflight_execute_requires_separate_confirmation(self):
         with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
             exit_code = runner.main(

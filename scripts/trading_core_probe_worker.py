@@ -103,6 +103,8 @@ PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
 PRODUCTION_CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
 PRODUCTION_CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
+PRODUCTION_ROLE_WORKER_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
+PRODUCTION_ROLE_WORKER_CONFIRM_VALUE = "execute-production-full-matrix"
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
     "admin",
@@ -966,7 +968,12 @@ def assert_hot_offer_contention_acceptance(
         raise TradingProbeError(f"hot-offer contention expected completed status, got {status}")
 
 
-def assert_load_runner_runtime_surface(role: str) -> dict[str, Any]:
+def assert_load_runner_runtime_surface(
+    role: str,
+    *,
+    allow_production: bool = False,
+    prefix: str | None = None,
+) -> dict[str, Any]:
     role_config = LOAD_RUNNER_ROLES.get(role)
     if role_config is None:
         raise TradingProbeError(f"unsupported load runner role: {role}")
@@ -976,14 +983,24 @@ def assert_load_runner_runtime_surface(role: str) -> dict[str, Any]:
     configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
     reasons: list[str] = []
 
-    if configured_environment != "staging":
+    production_allowed = configured_environment == "production" and allow_production
+    if configured_environment != "staging" and not production_allowed:
         reasons.append("ENVIRONMENT must be staging for load runner runtime")
     if configured_service != "load_runner":
         reasons.append("TRADING_BOT_SERVICE must be load_runner for load runner runtime")
     if configured_server_mode != role_config["server_mode"]:
         reasons.append(f"SERVER_MODE must be {role_config['server_mode']} for {role} load runner")
     if getattr(settings, "bot_token", None):
-        reasons.append("BOT_TOKEN must be empty for staging load runner runtime")
+        reasons.append("BOT_TOKEN must be empty for load runner runtime")
+    if production_allowed:
+        try:
+            validate_production_cleanup_prefix(prefix or "")
+        except TradingProbeError as exc:
+            reasons.append(str(exc))
+        if os.getenv(PRODUCTION_ROLE_WORKER_CONFIRM_ENV) != PRODUCTION_ROLE_WORKER_CONFIRM_VALUE:
+            reasons.append(
+                f"{PRODUCTION_ROLE_WORKER_CONFIRM_ENV}={PRODUCTION_ROLE_WORKER_CONFIRM_VALUE} is required"
+            )
 
     if reasons:
         raise TradingProbeError("; ".join(reasons))
@@ -995,7 +1012,37 @@ def assert_load_runner_runtime_surface(role: str) -> dict[str, Any]:
         "environment": configured_environment,
         "server_mode": configured_server_mode,
         "service": configured_service,
+        "production_execution_allowed": production_allowed,
         "telegram_credential_configured": False,
+    }
+
+
+def assert_production_full_matrix_allowed(prefix: str, *, allow_flag: bool) -> None:
+    if not is_production_runtime():
+        return
+    validate_production_cleanup_prefix(prefix)
+    if not allow_flag or os.getenv(PRODUCTION_ROLE_WORKER_CONFIRM_ENV) != PRODUCTION_ROLE_WORKER_CONFIRM_VALUE:
+        raise TradingProbeError(
+            "production full-matrix execution requires --allow-production-execution and "
+            f"{PRODUCTION_ROLE_WORKER_CONFIRM_ENV}={PRODUCTION_ROLE_WORKER_CONFIRM_VALUE}"
+        )
+
+
+def assert_dual_role_prepare_runtime(offer_origin: str, *, allow_production: bool, prefix: str) -> dict[str, Any]:
+    normalized_origin = str(offer_origin or "").strip().lower()
+    expected_server = SERVER_FOREIGN if normalized_origin == "bot" else SERVER_IRAN
+    configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
+    if configured_server_mode != expected_server:
+        raise TradingProbeError(
+            f"SERVER_MODE must be {expected_server} for {normalized_origin} dual-role prepare"
+        )
+    assert_production_full_matrix_allowed(prefix, allow_flag=allow_production)
+    return {
+        "status": "ok",
+        "offer_origin": normalized_origin,
+        "server_mode": configured_server_mode,
+        "environment": str(getattr(settings, "environment", "") or "").strip().lower(),
+        "production_execution_allowed": is_production_runtime() and allow_production,
     }
 
 
@@ -2029,6 +2076,71 @@ async def patched_trading_boundaries():
         bot_trade_execute.forward_trade_to_home_server = original["bot_forward_trade_to_home_server"]
         offers_router.forward_offer_expiry_to_home_server = original["offer_expiry_forward"]
         bot_trade_manage.forward_offer_expiry_to_home_server = original["bot_offer_expiry_forward"]
+        offer_expiry_worker.apply_offer_channel_state = original["offer_expiry_apply_channel_state"]
+        bot_trade_manage.apply_offer_channel_state = original["bot_manage_apply_channel_state"]
+        realtime_router.publish_event = original["realtime_publish"]
+        realtime_router.publish_user_event = original["realtime_publish_user"]
+        bot_trade_create._bot_market_is_open = original["bot_market_open"]
+        web_push.schedule_market_offer_web_push = original["schedule_market_offer_web_push"]
+        web_push.schedule_notification_web_push = original["schedule_notification_web_push"]
+        trade_service.validate_competitive_price = original["validate_competitive_price"]
+        trade_service.detect_offer_price_warning = original["detect_offer_price_warning"]
+
+
+@asynccontextmanager
+async def patched_external_side_effects():
+    """Disable external side effects while preserving real cross-server forwarding."""
+    import core.services.trade_service as trade_service
+    import core.web_push as web_push
+
+    original = {
+        "offers_evaluate": offers_router.evaluate_current_market_schedule,
+        "trades_evaluate": trades_router.evaluate_current_market_schedule,
+        "send_offer": offers_router.send_offer_to_channel,
+        "register_market_offer_created": offers_router.register_market_offer_created,
+        "update_channel_buttons": trades_router.update_channel_buttons,
+        "send_telegram_message_sync": trades_router.send_telegram_message_sync,
+        "offer_expiry_apply_channel_state": offer_expiry_worker.apply_offer_channel_state,
+        "bot_manage_apply_channel_state": bot_trade_manage.apply_offer_channel_state,
+        "realtime_publish": realtime_router.publish_event,
+        "realtime_publish_user": realtime_router.publish_user_event,
+        "bot_market_open": bot_trade_create._bot_market_is_open,
+        "schedule_market_offer_web_push": web_push.schedule_market_offer_web_push,
+        "schedule_notification_web_push": web_push.schedule_notification_web_push,
+        "validate_competitive_price": trade_service.validate_competitive_price,
+        "detect_offer_price_warning": trade_service.detect_offer_price_warning,
+    }
+
+    async def always_valid_price(**_kwargs: Any) -> tuple[bool, str]:
+        return True, ""
+
+    async def no_price_warning(**_kwargs: Any) -> None:
+        return None
+
+    offers_router.evaluate_current_market_schedule = fake_market_open
+    trades_router.evaluate_current_market_schedule = fake_market_open
+    offers_router.send_offer_to_channel = noop_send_offer
+    offers_router.register_market_offer_created = noop_register_market_offer_created
+    trades_router.update_channel_buttons = noop_update_channel_buttons
+    trades_router.send_telegram_message_sync = lambda *_args, **_kwargs: None
+    offer_expiry_worker.apply_offer_channel_state = noop_update_channel_buttons
+    bot_trade_manage.apply_offer_channel_state = noop_update_channel_buttons
+    realtime_router.publish_event = noop_async
+    realtime_router.publish_user_event = noop_async
+    bot_trade_create._bot_market_is_open = lambda: asyncio.sleep(0, result=True)
+    web_push.schedule_market_offer_web_push = noop_schedule_web_push
+    web_push.schedule_notification_web_push = noop_schedule_web_push
+    trade_service.validate_competitive_price = always_valid_price
+    trade_service.detect_offer_price_warning = no_price_warning
+    try:
+        yield
+    finally:
+        offers_router.evaluate_current_market_schedule = original["offers_evaluate"]
+        trades_router.evaluate_current_market_schedule = original["trades_evaluate"]
+        offers_router.send_offer_to_channel = original["send_offer"]
+        offers_router.register_market_offer_created = original["register_market_offer_created"]
+        trades_router.update_channel_buttons = original["update_channel_buttons"]
+        trades_router.send_telegram_message_sync = original["send_telegram_message_sync"]
         offer_expiry_worker.apply_offer_channel_state = original["offer_expiry_apply_channel_state"]
         bot_trade_manage.apply_offer_channel_state = original["bot_manage_apply_channel_state"]
         realtime_router.publish_event = original["realtime_publish"]
@@ -3921,7 +4033,18 @@ async def load_runner_ready_command(args: argparse.Namespace) -> int:
 async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     setup_event_listeners()
     prefix = args.prefix
-    await cleanup_prefix(prefix)
+    assert_dual_role_prepare_runtime(
+        str(args.offer_origin),
+        allow_production=bool(args.allow_production_execution),
+        prefix=prefix,
+    )
+    if not bool(args.skip_initial_cleanup):
+        if is_production_runtime():
+            allow_production_cleanup_hard_delete(
+                prefix,
+                allow_flag=bool(args.allow_production_cleanup),
+            )
+        await cleanup_prefix(prefix)
     commodity_id, commodity_name = await resolve_commodity()
     offer_origin = str(args.offer_origin)
     run_id = _dual_role_run_id(prefix, getattr(args, "run_id", None))
@@ -4347,9 +4470,15 @@ async def run_dual_role_artifact_smoke_command(args: argparse.Namespace) -> int:
 
 
 @asynccontextmanager
-async def optional_patched_boundaries(enabled: bool):
-    if enabled:
+async def optional_role_worker_patches(*, patch_boundaries: bool, patch_external_side_effects: bool):
+    if patch_boundaries and patch_external_side_effects:
+        raise TradingProbeError("--patch-boundaries and --patch-external-side-effects cannot be used together")
+    if patch_boundaries:
         async with patched_trading_boundaries():
+            yield
+        return
+    if patch_external_side_effects:
+        async with patched_external_side_effects():
             yield
         return
     yield
@@ -4358,9 +4487,16 @@ async def optional_patched_boundaries(enabled: bool):
 async def run_role_plan_command(args: argparse.Namespace) -> int:
     plan = read_json_artifact(Path(args.plan))
     validated = validate_role_plan_artifact(plan)
-    assert_load_runner_runtime_surface(str(validated["role"]))
+    assert_load_runner_runtime_surface(
+        str(validated["role"]),
+        allow_production=bool(args.allow_production_execution),
+        prefix=str(validated["prefix"]),
+    )
     setup_event_listeners()
-    async with optional_patched_boundaries(bool(args.patch_boundaries)):
+    async with optional_role_worker_patches(
+        patch_boundaries=bool(args.patch_boundaries),
+        patch_external_side_effects=bool(args.patch_external_side_effects),
+    ):
         result = await run_role_worker_plan(validated)
     if args.output:
         write_json_artifact(Path(args.output), result)
@@ -4428,6 +4564,21 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--retail", action="store_true")
     prepare_parser.add_argument("--lot-sizes", default="")
     prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=20.0)
+    prepare_parser.add_argument(
+        "--skip-initial-cleanup",
+        action="store_true",
+        help="Skip the prefix cleanup that normally runs before fixture creation.",
+    )
+    prepare_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow production fixture creation only with the production full-matrix confirmation env.",
+    )
+    prepare_parser.add_argument(
+        "--allow-production-cleanup",
+        action="store_true",
+        help="Allow the initial cleanup in production only with the cleanup confirmation env.",
+    )
 
     plan_parser = subparsers.add_parser("write-dual-role-plan")
     add_dual_role_plan_arguments(plan_parser)
@@ -4442,6 +4593,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--patch-boundaries",
         action="store_true",
         help="Use local no-op market/realtime/Telegram boundaries for local DB smoke runs.",
+    )
+    role_parser.add_argument(
+        "--patch-external-side-effects",
+        action="store_true",
+        help="Disable Telegram/realtime/web-push side effects while preserving real cross-server forwarding.",
+    )
+    role_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow this role worker inside production only with the production full-matrix confirmation env.",
     )
 
     merge_parser = subparsers.add_parser("merge-role-results")

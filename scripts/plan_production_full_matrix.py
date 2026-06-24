@@ -228,6 +228,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                             str(artifact_dir / "production-full-matrix-preflight-plan.json"),
                         ]
                     ),
+                    shell_join(
+                        [
+                            "python3",
+                            "scripts/run_production_full_matrix.py",
+                            "--manifest",
+                            str(artifact_dir / "production-full-matrix-manifest.json"),
+                            "--mode",
+                            "execution-plan",
+                            "--output",
+                            str(artifact_dir / "production-full-matrix-execution-plan.json"),
+                        ]
+                    ),
                     f"{shell_join(['python3', 'scripts/run_bot_webapp_comprehensive_load_matrix.py', '--prefix', prefix, '--list'])} > {shlex.quote(str(artifact_dir / 'comprehensive-catalog.json'))}",
                     shell_join(
                         [
@@ -252,10 +264,12 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 ],
             },
             {
-                "name": "production_execution_gap",
+                "name": "production_execution_driver_status",
                 "status": "requires_operator_or_future_executor",
                 "notes": [
-                    "The manifest-driven runner currently emits a production run plan only.",
+                    "The manifest-driven runner now emits a guarded production execution command plan.",
+                    "The current executable command plan covers only user-to-user stable dual-role hot-offer paths.",
+                    "Customer/accountant actors, outage orchestration, targeted delivery join, read/expiry races, and negative guards remain explicit driver_gaps.",
                     "Production execution drivers must use the isolated prefix, real two-server placement, and patched/fake Telegram transport for synthetic users.",
                     "A small manual Telegram E2E pass with the real production bot/channel is still required after automated evidence.",
                 ],

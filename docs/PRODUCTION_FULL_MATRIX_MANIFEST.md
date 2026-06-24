@@ -50,6 +50,35 @@ status, Iran compose status, Iran public config, isolation status, and cleanup
 dry-run on both servers. It must not create users, offers, trades,
 notifications, receipts, or Telegram messages.
 
+Build the guarded two-server execution command plan without running it:
+
+```bash
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execution-plan --output /tmp/production-full-matrix-execution-plan.json"
+```
+
+The execution-plan mode is still side-effect free. It expands selected
+`manifest_id` rows into reviewed commands where a production driver exists, and
+records `driver_gaps` for every selected row that does not yet have an
+implemented production driver. The current implemented command plan covers only
+the two-server dual-role hot-offer worker for:
+
+- `production_base_trade_shape` user-to-user stable scenarios;
+- `production_stress_overlay` user-to-user stable hot-offer concurrent
+  families;
+- all four WebApp/Telegram surface quadrants inside that scope;
+- both offer types and all current offer shapes.
+
+With the current manifest count of `5555`, selecting the whole manifest yields
+`64` command-plannable scenarios with this driver:
+
+- `24` base user-to-user stable trade-shape scenarios;
+- `40` user-to-user stable hot-offer stress overlay scenarios.
+
+It intentionally does not yet implement production execution drivers for
+customer/accountant actor pairs, short/medium outage simulation, market
+behavior reads/expiry, targeted delivery join, or negative business guards.
+Those must remain visible as `driver_gaps` and cannot be treated as passed.
+
 ## Schema
 
 Top-level fields:
@@ -179,8 +208,23 @@ Current runner status:
   outage, actor, offer-type, shape filters, and deterministic sharding.
 - It can execute a live non-mutating preflight only with
   `PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM=run-production-preflight`.
-- It intentionally fails closed for real execution until the per-section
-  production drivers are implemented.
+- It can build a guarded production execution command plan with
+  `--mode execution-plan`.
+- It intentionally fails closed for automatic real execution until the
+  per-section production drivers are implemented and reviewed.
+
+Role-worker execution plan safety:
+
+- `run-role-plan --patch-external-side-effects` disables Telegram, realtime,
+  Web Push, channel edit, and market schedule side effects while preserving
+  real cross-server forwarding.
+- `--patch-boundaries` is only for local/staging smoke runs and must not be used
+  for real two-server production execution because it patches cross-server
+  forwarding to local helpers.
+- Production role workers require
+  `PRODUCTION_FULL_MATRIX_CONFIRM=execute-production-full-matrix`,
+  `--allow-production-execution`, `TRADING_BOT_SERVICE=load_runner`, the
+  correct `SERVER_MODE`, and an empty `BOT_TOKEN`.
 
 ## Completion Criteria
 
