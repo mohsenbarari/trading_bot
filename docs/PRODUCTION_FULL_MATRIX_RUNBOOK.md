@@ -222,6 +222,11 @@ This command is still side-effect free. It must exit with status
 production driver. A real full-matrix execution must not start unless this
 coverage gate passes for the selected scope.
 
+The execution-plan artifact includes `driver_gap_summary` and
+`driver_gap_roadmap`. The roadmap groups missing production drivers into
+implementation buckets so the next work item can be chosen by remaining count
+and difficulty rather than by raw `manifest_id` lists.
+
 Current execution-plan limitation:
 
 - implemented: user-to-user stable hot-offer paths for the base trade shape
@@ -237,6 +242,24 @@ Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
 missing coverage cannot be hidden. Use `--require-full-driver-coverage` as the
 machine-enforced gate for release readiness.
+
+Current driver-gap roadmap for the full manifest:
+
+1. `negative_guard_driver`: `599` gaps. Add explicit production reject-path
+   probes and no-partial-mutation assertions.
+2. `specialized_user_stress_driver`: `96` gaps. Extend the dual-role worker for
+   duplicate replay, expiry races, and read-during-write.
+3. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
+   to production-safe two-server execution.
+4. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
+   notifications after real trade evidence exists.
+5. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
+   staging/patched execution to production two-server execution.
+6. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
+   outage control with distinct expected outcomes.
+7. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
+   assertions for customer, owner, accountant, same-owner, and different-owner
+   actor pairs.
 
 ## Matrix Evidence Required
 

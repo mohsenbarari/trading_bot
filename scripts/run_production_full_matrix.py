@@ -57,6 +57,89 @@ DUAL_ROLE_ROLE_BY_SERVER = {
     "iran": "webapp_iran",
 }
 
+DRIVER_GAP_BUCKETS: dict[str, dict[str, Any]] = {
+    "negative_guard_driver": {
+        "order": 1,
+        "title": "Negative business-policy production guard driver",
+        "difficulty": "medium",
+        "implementation_note": (
+            "Run explicit reject-path probes with exact prefix cleanup and assert no partial trade, "
+            "quantity, publication, notification, or receipt mutation leaks."
+        ),
+    },
+    "specialized_user_stress_driver": {
+        "order": 2,
+        "title": "Specialized user-to-user stable stress drivers",
+        "difficulty": "medium",
+        "implementation_note": (
+            "Extend the dual-role worker for duplicate replay, manual expiry races, time expiry races, "
+            "and read-during-write without changing cross-server forwarding semantics."
+        ),
+    },
+    "market_behavior_driver": {
+        "order": 3,
+        "title": "Market behavior production driver",
+        "difficulty": "medium",
+        "implementation_note": (
+            "Port the staging comprehensive market matrix to production-safe two-server execution with "
+            "real authority routing and no patched cross-server boundaries."
+        ),
+    },
+    "delivery_contract_driver": {
+        "order": 4,
+        "title": "Delivery contract assertion driver",
+        "difficulty": "hard",
+        "implementation_note": (
+            "Verify WebApp and Telegram delivery receipts/notifications for every actor, surface, and "
+            "outage policy after the trade driver has created real production evidence."
+        ),
+    },
+    "targeted_join_driver": {
+        "order": 5,
+        "title": "Targeted trade-delivery join production driver",
+        "difficulty": "hard",
+        "implementation_note": (
+            "Convert the targeted join matrix from staging/patched boundaries to production two-server "
+            "execution while preserving customer-owner routing and fake Telegram transport boundaries."
+        ),
+    },
+    "outage_orchestration_driver": {
+        "order": 6,
+        "title": "Short and medium outage orchestration driver",
+        "difficulty": "hard",
+        "implementation_note": (
+            "Add reversible app-to-app and sync outage control with different expected outcomes for "
+            "short replay and medium skip/finalization behavior."
+        ),
+    },
+    "customer_accountant_actor_driver": {
+        "order": 7,
+        "title": "Customer/accountant actor-pair production driver",
+        "difficulty": "hardest",
+        "implementation_note": (
+            "Build production fixtures for tier1/tier2 customers, owners, accountants, same-owner and "
+            "different-owner paths, then assert owner-channel routing and counterparty privacy."
+        ),
+    },
+    "unknown_driver_gap": {
+        "order": 99,
+        "title": "Unclassified production driver gap",
+        "difficulty": "unknown",
+        "implementation_note": "Classify this gap before execution is allowed.",
+    },
+}
+
+DRIVER_GAP_REASON_TO_BUCKET = {
+    "negative_business_guard_production_driver_not_implemented": "negative_guard_driver",
+    "policy_unsupported_scenario_requires_negative_guard_driver": "negative_guard_driver",
+    "stress_family_requires_specialized_race_or_read_driver": "specialized_user_stress_driver",
+    "market_behavior_production_driver_not_implemented": "market_behavior_driver",
+    "delivery_contract_production_driver_not_implemented": "delivery_contract_driver",
+    "targeted_trade_delivery_join_production_driver_not_implemented": "targeted_join_driver",
+    "outage_simulation_driver_not_implemented_for_role_worker": "outage_orchestration_driver",
+    "dual_role_worker_currently_supports_standard_user_to_standard_user_only": "customer_accountant_actor_driver",
+}
+
 
 class RunnerError(ValueError):
     pass
@@ -303,6 +386,10 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
     return None
 
 
+def driver_gap_bucket_for_reason(reason: str) -> str:
+    return DRIVER_GAP_REASON_TO_BUCKET.get(str(reason), "unknown_driver_gap")
+
+
 def dual_role_scenario_commands(
     record: dict[str, Any],
     *,
@@ -528,11 +615,13 @@ def build_execution_plan(
     for record in records:
         gap = dual_role_driver_gap(record)
         if gap:
+            bucket = driver_gap_bucket_for_reason(gap)
             driver_gaps.append(
                 {
                     "manifest_id": record.get("manifest_id"),
                     "section": record.get("section"),
                     "driver_gap": gap,
+                    "driver_gap_bucket": bucket,
                 }
             )
             continue
@@ -563,6 +652,7 @@ def build_execution_plan(
         "executable_count": len(scenario_plans),
         "driver_gap_count": len(driver_gaps),
         "driver_gap_summary": driver_gap_summary(driver_gaps),
+        "driver_gap_roadmap": driver_gap_roadmap(driver_gaps),
         "scenario_plans": scenario_plans,
         "driver_gaps": driver_gaps,
         "safety": {
@@ -699,15 +789,18 @@ def count_by(records: Iterable[dict[str, Any]], key: str) -> dict[str, int]:
 def driver_gap_summary(driver_gaps: list[dict[str, Any]]) -> dict[str, Any]:
     by_section: Counter[str] = Counter()
     by_driver_gap: Counter[str] = Counter()
+    by_driver_gap_bucket: Counter[str] = Counter()
     by_section_and_gap: Counter[tuple[str, str]] = Counter()
     examples_by_gap: dict[str, list[str]] = {}
 
     for gap_record in driver_gaps:
         section = str(gap_record.get("section") or "unknown")
         reason = str(gap_record.get("driver_gap") or "unknown")
+        bucket = str(gap_record.get("driver_gap_bucket") or driver_gap_bucket_for_reason(reason))
         manifest_id = str(gap_record.get("manifest_id") or "")
         by_section[section] += 1
         by_driver_gap[reason] += 1
+        by_driver_gap_bucket[bucket] += 1
         by_section_and_gap[(section, reason)] += 1
         if manifest_id:
             examples = examples_by_gap.setdefault(reason, [])
@@ -718,12 +811,41 @@ def driver_gap_summary(driver_gaps: list[dict[str, Any]]) -> dict[str, Any]:
         "total": len(driver_gaps),
         "by_section": dict(sorted(by_section.items())),
         "by_driver_gap": dict(sorted(by_driver_gap.items())),
+        "by_driver_gap_bucket": dict(sorted(by_driver_gap_bucket.items())),
         "by_section_and_driver_gap": [
             {"section": section, "driver_gap": reason, "count": count}
             for (section, reason), count in sorted(by_section_and_gap.items())
         ],
         "example_manifest_ids_by_driver_gap": dict(sorted(examples_by_gap.items())),
     }
+
+
+def driver_gap_roadmap(driver_gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary = driver_gap_summary(driver_gaps)
+    bucket_counts = summary["by_driver_gap_bucket"]
+    by_reason = summary["by_driver_gap"]
+    roadmap: list[dict[str, Any]] = []
+    for bucket, definition in sorted(DRIVER_GAP_BUCKETS.items(), key=lambda item: int(item[1]["order"])):
+        count = int(bucket_counts.get(bucket, 0) or 0)
+        if count <= 0:
+            continue
+        reasons = sorted(
+            reason
+            for reason in by_reason
+            if driver_gap_bucket_for_reason(reason) == bucket
+        )
+        roadmap.append(
+            {
+                "bucket": bucket,
+                "order": int(definition["order"]),
+                "title": definition["title"],
+                "difficulty": definition["difficulty"],
+                "remaining_gap_count": count,
+                "driver_gap_reasons": reasons,
+                "implementation_note": definition["implementation_note"],
+            }
+        )
+    return roadmap
 
 
 def selected_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -899,7 +1021,11 @@ def compact_stdout(plan: dict[str, Any], output: Path | None) -> dict[str, Any]:
                 "by_driver_gap": ((plan.get("execution_plan") or {}).get("driver_gap_summary") or {}).get(
                     "by_driver_gap", {}
                 ),
+                "by_driver_gap_bucket": ((plan.get("execution_plan") or {}).get("driver_gap_summary") or {}).get(
+                    "by_driver_gap_bucket", {}
+                ),
             },
+            "driver_gap_roadmap": (plan.get("execution_plan") or {}).get("driver_gap_roadmap"),
         }
         if plan.get("execution_plan") is not None
         else None,

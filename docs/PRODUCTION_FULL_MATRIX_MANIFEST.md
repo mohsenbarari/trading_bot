@@ -78,6 +78,9 @@ It intentionally does not yet implement production execution drivers for
 customer/accountant actor pairs, short/medium outage simulation, market
 behavior reads/expiry, targeted delivery join, or negative business guards.
 Those must remain visible as `driver_gaps` and cannot be treated as passed.
+The execution-plan output also includes `driver_gap_summary.by_driver_gap_bucket`
+and `driver_gap_roadmap`, which group the raw gap reasons into implementation
+buckets sorted from easier to harder.
 
 For a production release gate, build the execution plan with full-driver
 coverage required:
@@ -92,6 +95,16 @@ production driver. Use this gate before any real production full-matrix run so
 an incomplete driver set cannot be mistaken for a complete pass. For intentionally
 small rehearsals, apply filters first; the gate should pass only when every
 selected scenario is command-plannable.
+
+Current full-manifest gap buckets are expected to be:
+
+- `negative_guard_driver`: `599`
+- `specialized_user_stress_driver`: `96`
+- `market_behavior_driver`: `228`
+- `delivery_contract_driver`: `204`
+- `targeted_join_driver`: `204`
+- `outage_orchestration_driver`: `320`
+- `customer_accountant_actor_driver`: `3840`
 
 ## Schema
 
@@ -227,6 +240,9 @@ Current runner status:
 - It can enforce full command-driver coverage for the selected scope with
   `--require-full-driver-coverage`; this blocks with `blocked_driver_gaps`
   until every selected scenario has an implemented production driver.
+- It emits a machine-readable driver-gap roadmap so the next driver work can
+  be prioritized by bucket instead of scanning thousands of raw `manifest_id`
+  rows manually.
 - It intentionally fails closed for automatic real execution until the
   per-section production drivers are implemented and reviewed.
 

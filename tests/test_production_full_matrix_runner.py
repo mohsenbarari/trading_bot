@@ -212,6 +212,33 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         )
         self.assertEqual(summary["by_driver_gap"]["market_behavior_production_driver_not_implemented"], 228)
         self.assertEqual(summary["by_driver_gap"]["negative_business_guard_production_driver_not_implemented"], 23)
+        self.assertEqual(
+            summary["by_driver_gap_bucket"],
+            {
+                "customer_accountant_actor_driver": 3840,
+                "delivery_contract_driver": 204,
+                "market_behavior_driver": 228,
+                "negative_guard_driver": 599,
+                "outage_orchestration_driver": 320,
+                "specialized_user_stress_driver": 96,
+                "targeted_join_driver": 204,
+            },
+        )
+        self.assertEqual(
+            [
+                (item["bucket"], item["remaining_gap_count"])
+                for item in execution_plan["driver_gap_roadmap"]
+            ],
+            [
+                ("negative_guard_driver", 599),
+                ("specialized_user_stress_driver", 96),
+                ("market_behavior_driver", 228),
+                ("delivery_contract_driver", 204),
+                ("targeted_join_driver", 204),
+                ("outage_orchestration_driver", 320),
+                ("customer_accountant_actor_driver", 3840),
+            ],
+        )
 
     def test_execution_plan_full_coverage_gate_blocks_when_any_driver_gap_remains(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
