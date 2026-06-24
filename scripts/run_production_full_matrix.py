@@ -82,6 +82,11 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "cleanup_scope_violation",
 }
 
+UNSUPPORTED_POLICY_EXECUTABLE_REASONS = {
+    "tier2_cannot_create_offer",
+    "tier2_cannot_use_telegram_request",
+}
+
 DUAL_ROLE_ROLE_BY_SERVER = {
     "foreign": "telegram_foreign",
     "iran": "webapp_iran",
@@ -406,6 +411,9 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
     if section not in {"production_base_trade_shape", "production_stress_overlay"}:
         return f"{section}_production_driver_not_implemented"
     if record.get("policy_supported") is not True:
+        reasons = {str(reason) for reason in (record.get("unsupported_reasons") or [])}
+        if section == "production_base_trade_shape" and reasons and reasons <= UNSUPPORTED_POLICY_EXECUTABLE_REASONS:
+            return None
         return "policy_unsupported_scenario_requires_negative_guard_driver"
     if record.get("actor_pair_id") != "user__user":
         return "dual_role_worker_currently_supports_standard_user_to_standard_user_only"
@@ -892,6 +900,131 @@ def negative_guard_scenario_commands(
     }
 
 
+def unsupported_policy_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "unsupported_policy")
+    scenario_run_prefix = scenario_prefix(prefix, manifest_id)
+    scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
+    remote_dir = f"/tmp/{scenario_run_prefix}unsupported-policy"
+    offer_home_server = str(record.get("offer_home_server") or "")
+    if offer_home_server not in DUAL_ROLE_ROLE_BY_SERVER:
+        raise RunnerError(f"{manifest_id}: unsupported offer_home_server={offer_home_server!r}")
+    profile = shape_profile(str(record.get("shape") or ""))
+    reasons = [str(reason) for reason in (record.get("unsupported_reasons") or [])]
+    unknown_reasons = sorted(set(reasons) - UNSUPPORTED_POLICY_EXECUTABLE_REASONS)
+    if unknown_reasons:
+        raise RunnerError(f"{manifest_id}: unsupported policy reasons are not executable: {unknown_reasons}")
+
+    production_env = {
+        EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        "TRADING_BOT_SERVICE": "load_runner",
+        "BOT_TOKEN": "",
+    }
+    command_servers: list[str] = []
+    probe_commands: list[CommandSpec] = []
+    for reason in reasons:
+        if reason == "tier2_cannot_create_offer":
+            server = offer_home_server
+            command_prefix = f"{scenario_run_prefix}create_"
+            output_name = "tier2_create.result.json"
+        elif reason == "tier2_cannot_use_telegram_request":
+            server = "foreign"
+            command_prefix = f"{scenario_run_prefix}telegram_request_"
+            output_name = "tier2_telegram_request.result.json"
+        else:
+            continue
+        command_servers.append(server)
+        python_args = [
+            "scripts/trading_core_probe_worker.py",
+            "run-unsupported-policy-case",
+            "--prefix",
+            command_prefix,
+            "--actor-pair-id",
+            str(record.get("actor_pair_id") or ""),
+            "--source-kind",
+            str(record.get("source_kind") or ""),
+            "--responder-kind",
+            str(record.get("responder_kind") or ""),
+            "--group-relation",
+            str(record.get("group_relation") or ""),
+            "--offer-surface",
+            str(record.get("offer_surface") or ""),
+            "--request-surface",
+            str(record.get("request_surface") or ""),
+            "--offer-type",
+            str(record.get("offer_type") or "sell"),
+            "--quantity",
+            str(profile["quantity"]),
+            "--request-amount",
+            str(profile["request_amount"]),
+            "--price",
+            "100000",
+            "--unsupported-reason",
+            reason,
+            "--output",
+            f"{remote_dir}/{output_name}",
+            "--skip-initial-cleanup",
+            "--allow-production-execution",
+        ]
+        if not profile["is_wholesale"]:
+            python_args.append("--retail")
+            python_args.extend(["--lot-sizes", " ".join(str(item) for item in profile["lot_sizes"])])
+        probe_commands.append(
+            container_python_command(
+                f"run_unsupported_policy_{safe_token(reason)}",
+                server=server,
+                python_args=python_args,
+                env=production_env,
+                timeout_seconds=360,
+            )
+        )
+
+    mkdir_commands = [
+        host_mkdir_command(
+            f"ensure_{server}_unsupported_policy_artifact_dir",
+            server=server,
+            path=remote_dir,
+        )
+        for server in sorted(set(command_servers))
+    ]
+    commands = [*mkdir_commands, *probe_commands]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "unsupported_policy_negative_probe",
+        "scenario_prefix": scenario_run_prefix,
+        "artifact_dir": str(scenario_dir),
+        "remote_artifact_dir": remote_dir,
+        "actor_pair_id": record.get("actor_pair_id"),
+        "unsupported_reasons": reasons,
+        "offer_home_server": offer_home_server,
+        "offer_surface": record.get("offer_surface"),
+        "request_surface": record.get("request_surface"),
+        "shape_profile": profile,
+        "commands": [command_payload(command) for command in commands],
+        "execution_groups": [
+            {
+                "name": "prepare_artifact_dirs",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in mkdir_commands],
+            },
+            {
+                "name": "run_unsupported_policy_probes",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in probe_commands],
+            },
+        ],
+        "safety_note": (
+            "Each unsupported policy probe asserts explicit rejection and zero partial offer/trade/request mutation "
+            "for the exact prefixed synthetic cohort."
+        ),
+    }
+
+
 def build_execution_plan(
     records: list[dict[str, Any]],
     *,
@@ -925,6 +1058,14 @@ def build_execution_plan(
                     artifact_dir=artifact_dir,
                 )
             )
+        elif record.get("section") == "production_base_trade_shape" and record.get("policy_supported") is False:
+            scenario_plans.append(
+                unsupported_policy_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                )
+            )
         else:
             scenario_plans.append(
                 dual_role_scenario_commands(
@@ -951,6 +1092,7 @@ def build_execution_plan(
             ),
             "time_expire_race_request_surfaces": sorted(DUAL_ROLE_EXECUTABLE_TIME_EXPIRE_RACE_REQUEST_SURFACES),
             "read_during_write_request_surfaces": sorted(DUAL_ROLE_EXECUTABLE_READ_DURING_WRITE_REQUEST_SURFACES),
+            "unsupported_policy_reasons": sorted(UNSUPPORTED_POLICY_EXECUTABLE_REASONS),
             "surfaces": ["webapp", "telegram"],
             "offer_types": ["buy", "sell"],
             "shapes": sorted(manifest_builder.market_matrix.SHAPES),

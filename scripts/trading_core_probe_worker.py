@@ -103,6 +103,7 @@ MANUAL_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "manual_expiry_trade_race_result_v1"
 TIME_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "time_expiry_trade_race_result_v1"
 READ_DURING_WRITE_RESULT_SCHEMA_VERSION = "read_during_write_result_v1"
 NEGATIVE_GUARD_RESULT_SCHEMA_VERSION = "production_negative_guard_result_v1"
+UNSUPPORTED_POLICY_RESULT_SCHEMA_VERSION = "production_unsupported_policy_result_v1"
 TIME_EXPIRY_RACE_DELAY_SECONDS = 0.3
 TIME_EXPIRY_RACE_STALE_SKEW_SECONDS = 0.05
 MIN_CLEANUP_PREFIX_LENGTH = 5
@@ -136,6 +137,10 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "stale_telegram_button",
     "missing_public_offer_id",
     "cleanup_scope_violation",
+}
+UNSUPPORTED_POLICY_EXECUTABLE_REASONS = {
+    "tier2_cannot_create_offer",
+    "tier2_cannot_use_telegram_request",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -2552,6 +2557,11 @@ async def execute_offer_creation_for_user(
     commodity_id: int,
     prefix: str,
     index: int,
+    offer_type: str = "sell",
+    quantity: int = 5,
+    price: int = 100000,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
     phase_details: dict[str, Any] | None = None,
 ) -> str:
     create_started = time.perf_counter()
@@ -2561,9 +2571,11 @@ async def execute_offer_creation_for_user(
             commodity_id=commodity_id,
             prefix=prefix,
             index=index,
-            offer_type="sell",
-            quantity=5,
-            price=100000,
+            offer_type=offer_type,
+            quantity=quantity,
+            price=price,
+            is_wholesale=is_wholesale,
+            lot_sizes=lot_sizes,
         )
     except HTTPException as exc:
         status_code = int(exc.status_code or 500)
@@ -2949,6 +2961,84 @@ async def run_bot_text_handler_probe(*, user_id: int, text_value: str) -> dict[s
         }
 
 
+def offer_text_for_probe(
+    *,
+    commodity_name: str,
+    prefix: str,
+    user_id: int,
+    offer_type: str,
+    quantity: int,
+    price: int,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
+) -> str:
+    verb = "خ" if offer_type == "buy" else "ف"
+    marker = f"{prefix} bot policy {user_id}"
+    lots_text = ""
+    if not is_wholesale and lot_sizes:
+        lots_text = " " + " ".join(str(item) for item in lot_sizes)
+    return f"{verb} {commodity_name} {quantity} عدد {price}{lots_text}: {marker}"
+
+
+async def execute_bot_offer_creation_for_user(
+    *,
+    user: LoadUserRef,
+    commodity_name: str,
+    prefix: str,
+    offer_type: str,
+    quantity: int,
+    price: int,
+    is_wholesale: bool = True,
+    lot_sizes: list[int] | tuple[int, ...] | None = None,
+    phase_details: dict[str, Any] | None = None,
+) -> str:
+    started = time.perf_counter()
+    before_offer_count = await count_offers_for_user(user.user_id)
+    text_value = offer_text_for_probe(
+        commodity_name=commodity_name,
+        prefix=prefix,
+        user_id=user.user_id,
+        offer_type=offer_type,
+        quantity=quantity,
+        price=price,
+        is_wholesale=is_wholesale,
+        lot_sizes=lot_sizes,
+    )
+    harness = AiogramDispatcherHarness()
+    callback_answer: dict[str, Any] | None = None
+    sent_messages: list[dict[str, Any]] = []
+    try:
+        await harness.feed_private_text(telegram_id=user.telegram_id, text_value=text_value)
+        callback_answer = await harness.feed_private_callback(
+            telegram_id=user.telegram_id,
+            callback_data=TextOfferActionCallback(action="confirm").pack(),
+            callback_id=f"{prefix}bot-create-confirm-{user.user_id}",
+        )
+        sent_messages = list(harness.telegram.sent_messages)
+    except Exception as exc:
+        if phase_details is not None:
+            phase_details["exception"] = type(exc).__name__
+            phase_details["business_latency_ms"] = round((time.perf_counter() - started) * 1000.0, 3)
+        return "error"
+    finally:
+        await harness.close()
+    after_offer_count = await count_offers_for_user(user.user_id)
+    created_offer_delta = after_offer_count - before_offer_count
+    if phase_details is not None:
+        phase_details.update(
+            {
+                "business_latency_ms": round((time.perf_counter() - started) * 1000.0, 3),
+                "before_offer_count": before_offer_count,
+                "after_offer_count": after_offer_count,
+                "created_offer_delta": created_offer_delta,
+                "sent_message_count": len(sent_messages),
+                "sent_message_texts": [str(item.get("text") or "") for item in sent_messages[-3:]],
+                "confirm_callback_answer_text": str((callback_answer or {}).get("text") or ""),
+            }
+        )
+    return "success" if created_offer_delta > 0 else "rejected"
+
+
 async def execute_webapp_trade_for_user(
     *,
     user_id: int,
@@ -3307,6 +3397,328 @@ def assert_negative_guard_evidence(
         if accepted_values:
             failures.append(f"{case_id} unexpectedly accepted cleanup prefixes: {accepted_values}")
     return failures
+
+
+def customer_tier_for_actor_kind(kind: str) -> CustomerTier | None:
+    if kind == "tier1":
+        return CustomerTier.TIER_1
+    if kind == "tier2":
+        return CustomerTier.TIER_2
+    return None
+
+
+def offer_source_surface_for_manifest_surface(surface: str) -> OfferSourceSurface:
+    if surface == "webapp":
+        return OfferSourceSurface.WEBAPP
+    if surface == "telegram":
+        return OfferSourceSurface.TELEGRAM_BOT
+    raise TradingProbeError(f"unsupported manifest offer surface: {surface!r}")
+
+
+async def prepare_unsupported_policy_actor_fixture(
+    *,
+    prefix: str,
+    source_kind: str,
+    responder_kind: str,
+    group_relation: str,
+) -> dict[str, Any]:
+    users = await create_load_fixture_users(prefix, user_count=5)
+    source_owner = users[0]
+    responder_owner = source_owner if group_relation == "same_owner" else users[1]
+    source_actor = users[2]
+    responder_actor = users[3]
+    control_owner = users[4]
+    relation_ids: list[int] = []
+
+    source_tier = customer_tier_for_actor_kind(source_kind)
+    if source_tier is not None:
+        relation_ids.append(
+            await create_active_customer_relation_for_negative_guard(
+                owner_user_id=source_owner.user_id,
+                customer_user_id=source_actor.user_id,
+                prefix=prefix,
+                tier=source_tier,
+            )
+        )
+    responder_tier = customer_tier_for_actor_kind(responder_kind)
+    if responder_tier is not None:
+        relation_ids.append(
+            await create_active_customer_relation_for_negative_guard(
+                owner_user_id=responder_owner.user_id,
+                customer_user_id=responder_actor.user_id,
+                prefix=prefix,
+                tier=responder_tier,
+            )
+        )
+
+    return {
+        "users": users,
+        "source_owner": source_owner,
+        "responder_owner": responder_owner,
+        "source_actor": source_actor,
+        "responder_actor": responder_actor,
+        "control_owner": control_owner,
+        "relation_ids": relation_ids,
+    }
+
+
+async def execute_unsupported_tier2_offer_creation_probe(
+    *,
+    prefix: str,
+    source_actor: LoadUserRef,
+    offer_surface: str,
+    commodity_id: int,
+    commodity_name: str,
+    offer_type: str,
+    quantity: int,
+    price: int,
+    is_wholesale: bool,
+    lot_sizes: list[int] | tuple[int, ...] | None,
+) -> dict[str, Any]:
+    before_offer_count = await count_offers_for_user(source_actor.user_id)
+    details: dict[str, Any] = {
+        "reason": "tier2_cannot_create_offer",
+        "offer_surface": offer_surface,
+        "before_offer_count": before_offer_count,
+    }
+    if offer_surface == "telegram":
+        status_value = await execute_bot_offer_creation_for_user(
+            user=source_actor,
+            commodity_name=commodity_name,
+            prefix=prefix,
+            offer_type=offer_type,
+            quantity=quantity,
+            price=price,
+            is_wholesale=is_wholesale,
+            lot_sizes=lot_sizes,
+            phase_details=details,
+        )
+    else:
+        status_value = await execute_offer_creation_for_user(
+            user_id=source_actor.user_id,
+            commodity_id=commodity_id,
+            prefix=prefix,
+            index=1,
+            offer_type=offer_type,
+            quantity=quantity,
+            price=price,
+            is_wholesale=is_wholesale,
+            lot_sizes=lot_sizes,
+            phase_details=details,
+        )
+    after_offer_count = await count_offers_for_user(source_actor.user_id)
+    details["after_offer_count"] = after_offer_count
+    details["created_offer_delta"] = after_offer_count - before_offer_count
+    details["status"] = status_value
+    return details
+
+
+async def execute_unsupported_tier2_telegram_request_probe(
+    *,
+    prefix: str,
+    source_actor: LoadUserRef,
+    responder_actor: LoadUserRef,
+    control_owner: LoadUserRef,
+    source_kind: str,
+    offer_surface: str,
+    commodity_id: int,
+    offer_type: str,
+    quantity: int,
+    request_amount: int,
+    price: int,
+    is_wholesale: bool,
+    lot_sizes: list[int] | tuple[int, ...] | None,
+) -> dict[str, Any]:
+    offer_owner = control_owner if source_kind == "tier2" else source_actor
+    source_surface = offer_source_surface_for_manifest_surface(offer_surface)
+    offer_id = await create_offer_for_user(
+        user_id=offer_owner.user_id,
+        commodity_id=commodity_id,
+        prefix=prefix,
+        index=2,
+        offer_type=offer_type,
+        quantity=quantity,
+        price=price,
+        is_wholesale=is_wholesale,
+        lot_sizes=lot_sizes,
+        source_surface=source_surface,
+    )
+    details: dict[str, Any] = {
+        "reason": "tier2_cannot_use_telegram_request",
+        "offer_surface": offer_surface,
+        "request_surface": "telegram",
+        "offer_owner_user_id": offer_owner.user_id,
+        "offer_owner_is_control": source_kind == "tier2",
+        "offer_id": offer_id,
+    }
+    harness = AiogramDispatcherHarness()
+    try:
+        status_value = await execute_bot_trade_with_dispatcher(
+            harness=harness,
+            spec=MixedLoadAttemptSpec(
+                index=0,
+                surface="telegram",
+                user_id=responder_actor.user_id,
+                telegram_id=responder_actor.telegram_id,
+            ),
+            offer=await load_offer_snapshot(offer_id),
+            amount=request_amount,
+            prefix=f"{prefix}tier2-telegram-request-",
+            phase_details=details,
+        )
+    finally:
+        await harness.close()
+    evidence = await negative_guard_offer_evidence(offer_id)
+    details["status"] = status_value
+    details["offer_evidence"] = evidence
+    return details
+
+
+def assert_unsupported_policy_evidence(
+    *,
+    expected_reasons: set[str],
+    probe_results: list[Mapping[str, Any]],
+) -> list[str]:
+    failures: list[str] = []
+    executed_reasons = {str(item.get("reason") or "") for item in probe_results}
+    missing_reasons = expected_reasons - executed_reasons
+    if missing_reasons:
+        failures.append(f"unsupported policy probes did not execute reasons: {sorted(missing_reasons)}")
+    for result in probe_results:
+        reason = str(result.get("reason") or "")
+        status_value = str(result.get("status") or "")
+        if status_value != "rejected":
+            failures.append(f"{reason} expected rejected status, got {status_value!r}")
+        if reason == "tier2_cannot_create_offer":
+            created_offer_delta = int(result.get("created_offer_delta") or 0)
+            if created_offer_delta != 0:
+                failures.append(f"{reason} expected created_offer_delta=0, got {created_offer_delta}")
+        elif reason == "tier2_cannot_use_telegram_request":
+            if not str(result.get("second_answer_text") or ""):
+                failures.append(f"{reason} expected Telegram denial callback answer")
+            evidence = dict(result.get("offer_evidence") or {})
+            trade_count = int(evidence.get("trade_count") or 0)
+            offer_request_count = int(evidence.get("offer_request_count") or 0)
+            remaining_quantity = (dict(evidence.get("offer") or {})).get("remaining_quantity")
+            if trade_count != 0:
+                failures.append(f"{reason} expected trade_count=0, got {trade_count}")
+            if offer_request_count != 0:
+                failures.append(f"{reason} expected offer_request_count=0, got {offer_request_count}")
+            expected_remaining_quantity = int(result.get("expected_remaining_quantity") or 0)
+            if remaining_quantity != expected_remaining_quantity:
+                failures.append(
+                    f"{reason} expected remaining_quantity={expected_remaining_quantity}, got {remaining_quantity}"
+                )
+        else:
+            failures.append(f"unsupported policy probe reason is not supported: {reason}")
+    return failures
+
+
+async def run_unsupported_policy_case(
+    *,
+    prefix: str,
+    actor_pair_id: str,
+    source_kind: str,
+    responder_kind: str,
+    group_relation: str,
+    offer_surface: str,
+    request_surface: str,
+    offer_type: str,
+    quantity: int,
+    request_amount: int,
+    price: int,
+    is_wholesale: bool,
+    lot_sizes: list[int] | tuple[int, ...] | None,
+    unsupported_reasons: list[str] | tuple[str, ...],
+    allow_production_execution: bool = False,
+    skip_initial_cleanup: bool = False,
+    allow_production_cleanup: bool = False,
+) -> dict[str, Any]:
+    normalized_reasons = {str(reason).strip() for reason in unsupported_reasons if str(reason).strip()}
+    unsupported = normalized_reasons - UNSUPPORTED_POLICY_EXECUTABLE_REASONS
+    if unsupported:
+        raise TradingProbeError(f"unsupported policy reasons are not implemented: {sorted(unsupported)}")
+    if not normalized_reasons:
+        raise TradingProbeError("unsupported policy case requires at least one reason")
+    assert_production_full_matrix_allowed(prefix, allow_flag=allow_production_execution)
+    if not skip_initial_cleanup:
+        if is_production_runtime():
+            allow_production_cleanup_hard_delete(prefix, allow_flag=allow_production_cleanup)
+        await cleanup_prefix(prefix)
+
+    setup_event_listeners()
+    commodity_id, commodity_name = await resolve_commodity()
+    probe_results: list[dict[str, Any]] = []
+
+    async with patched_trading_boundaries():
+        fixture = await prepare_unsupported_policy_actor_fixture(
+            prefix=prefix,
+            source_kind=source_kind,
+            responder_kind=responder_kind,
+            group_relation=group_relation,
+        )
+        source_actor = fixture["source_actor"]
+        responder_actor = fixture["responder_actor"]
+        control_owner = fixture["control_owner"]
+
+        if "tier2_cannot_create_offer" in normalized_reasons:
+            probe_results.append(
+                await execute_unsupported_tier2_offer_creation_probe(
+                    prefix=f"{prefix}create-",
+                    source_actor=source_actor,
+                    offer_surface=offer_surface,
+                    commodity_id=commodity_id,
+                    commodity_name=commodity_name,
+                    offer_type=offer_type,
+                    quantity=quantity,
+                    price=price,
+                    is_wholesale=is_wholesale,
+                    lot_sizes=lot_sizes,
+                )
+            )
+        if "tier2_cannot_use_telegram_request" in normalized_reasons:
+            request_probe = await execute_unsupported_tier2_telegram_request_probe(
+                prefix=f"{prefix}request-",
+                source_actor=source_actor,
+                responder_actor=responder_actor,
+                control_owner=control_owner,
+                source_kind=source_kind,
+                offer_surface=offer_surface,
+                commodity_id=commodity_id,
+                offer_type=offer_type,
+                quantity=quantity,
+                request_amount=request_amount,
+                price=price,
+                is_wholesale=is_wholesale,
+                lot_sizes=lot_sizes,
+            )
+            request_probe["expected_remaining_quantity"] = quantity
+            probe_results.append(request_probe)
+
+    failures = assert_unsupported_policy_evidence(
+        expected_reasons=normalized_reasons,
+        probe_results=probe_results,
+    )
+    return {
+        "schema_version": UNSUPPORTED_POLICY_RESULT_SCHEMA_VERSION,
+        "status": "passed" if not failures else "failed",
+        "server_mode": settings.server_mode,
+        "prefix": prefix,
+        "actor_pair_id": actor_pair_id,
+        "source_kind": source_kind,
+        "responder_kind": responder_kind,
+        "group_relation": group_relation,
+        "offer_surface": offer_surface,
+        "request_surface": request_surface,
+        "offer_type": offer_type,
+        "quantity": quantity,
+        "request_amount": request_amount,
+        "is_wholesale": is_wholesale,
+        "lot_sizes": list(lot_sizes or []),
+        "unsupported_reasons": sorted(normalized_reasons),
+        "probe_results": probe_results,
+        "assertion_failures": failures,
+    }
 
 
 async def run_negative_guard_case(
@@ -5376,6 +5788,32 @@ async def run_negative_guard_case_command(args: argparse.Namespace) -> int:
     return 0 if payload["status"] == "passed" else 1
 
 
+async def run_unsupported_policy_case_command(args: argparse.Namespace) -> int:
+    payload = await run_unsupported_policy_case(
+        prefix=args.prefix,
+        actor_pair_id=args.actor_pair_id,
+        source_kind=args.source_kind,
+        responder_kind=args.responder_kind,
+        group_relation=args.group_relation,
+        offer_surface=args.offer_surface,
+        request_surface=args.request_surface,
+        offer_type=args.offer_type,
+        quantity=int(args.quantity),
+        request_amount=int(args.request_amount),
+        price=int(args.price),
+        is_wholesale=not bool(args.retail),
+        lot_sizes=parse_lot_sizes_argument(args.lot_sizes),
+        unsupported_reasons=list(args.unsupported_reason or []),
+        allow_production_execution=bool(args.allow_production_execution),
+        skip_initial_cleanup=bool(args.skip_initial_cleanup),
+        allow_production_cleanup=bool(args.allow_production_cleanup),
+    )
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0 if payload["status"] == "passed" else 1
+
+
 async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     setup_event_listeners()
     prefix = args.prefix
@@ -6316,6 +6754,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow initial cleanup in production only with the cleanup confirmation env.",
     )
 
+    unsupported_policy_parser = subparsers.add_parser("run-unsupported-policy-case")
+    unsupported_policy_parser.add_argument("--prefix", required=True)
+    unsupported_policy_parser.add_argument("--actor-pair-id", required=True)
+    unsupported_policy_parser.add_argument("--source-kind", choices=("user", "tier1", "tier2"), required=True)
+    unsupported_policy_parser.add_argument("--responder-kind", choices=("user", "tier1", "tier2"), required=True)
+    unsupported_policy_parser.add_argument("--group-relation", choices=("none", "same_owner", "other_owner"), required=True)
+    unsupported_policy_parser.add_argument("--offer-surface", choices=("webapp", "telegram"), required=True)
+    unsupported_policy_parser.add_argument("--request-surface", choices=("webapp", "telegram"), required=True)
+    unsupported_policy_parser.add_argument("--offer-type", choices=("buy", "sell"), required=True)
+    unsupported_policy_parser.add_argument("--quantity", type=int, required=True)
+    unsupported_policy_parser.add_argument("--request-amount", type=int, required=True)
+    unsupported_policy_parser.add_argument("--price", type=int, default=100000)
+    unsupported_policy_parser.add_argument("--retail", action="store_true")
+    unsupported_policy_parser.add_argument("--lot-sizes")
+    unsupported_policy_parser.add_argument(
+        "--unsupported-reason",
+        action="append",
+        choices=tuple(sorted(UNSUPPORTED_POLICY_EXECUTABLE_REASONS)),
+        required=True,
+    )
+    unsupported_policy_parser.add_argument("--output")
+    unsupported_policy_parser.add_argument("--skip-initial-cleanup", action="store_true")
+    unsupported_policy_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow production unsupported-policy fixture creation only with the production full-matrix confirmation env.",
+    )
+    unsupported_policy_parser.add_argument(
+        "--allow-production-cleanup",
+        action="store_true",
+        help="Allow initial cleanup in production only with the cleanup confirmation env.",
+    )
+
     prepare_parser = subparsers.add_parser("prepare-dual-role-run")
     prepare_parser.add_argument("--output-dir", required=True)
     prepare_parser.add_argument("--prefix", required=True)
@@ -6480,6 +6951,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await load_runner_ready_command(args)
     if args.command == "run-negative-guard-case":
         return await run_negative_guard_case_command(args)
+    if args.command == "run-unsupported-policy-case":
+        return await run_unsupported_policy_case_command(args)
     if args.command == "prepare-dual-role-run":
         return await prepare_dual_role_run_command(args)
     if args.command == "write-dual-role-plan":

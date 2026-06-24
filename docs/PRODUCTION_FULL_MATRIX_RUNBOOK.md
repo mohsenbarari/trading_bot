@@ -255,10 +255,12 @@ Current execution-plan limitation:
   `remote_authority_unavailable`, `bad_internal_signature`, and
   `wrong_authoritative_server`, `stale_telegram_button`,
   `missing_public_offer_id`, and `cleanup_scope_violation`;
-- current whole-manifest command-plannable count: `183` of `5555` scenarios;
+- all `576` policy-unsupported base trade-shape scenarios are command-plannable
+  through explicit tier2 no-partial-mutation probes;
+- current whole-manifest command-plannable count: `759` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
   short/medium outage orchestration, targeted delivery join production driver,
-  and the remaining negative business guard production driver cases.
+  and market behavior production driver.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
@@ -267,17 +269,15 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `negative_guard_driver`: `576` gaps. Add explicit production reject-path
-   probes and no-partial-mutation assertions.
-2. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
+1. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
    to production-safe two-server execution.
-3. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
+2. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
    notifications after real trade evidence exists.
-4. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
+3. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
    staging/patched execution to production two-server execution.
-5. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
+4. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
    outage control with distinct expected outcomes.
-6. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
+5. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
    assertions for customer, owner, accountant, same-owner, and different-owner
    actor pairs.
 

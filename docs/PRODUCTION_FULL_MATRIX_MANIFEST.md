@@ -90,7 +90,7 @@ implemented production driver. The current implemented command plan covers:
   `missing_public_offer_id`, and `cleanup_scope_violation`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`183` command-plannable scenarios with these drivers:
+`759` command-plannable scenarios with these drivers:
 
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios;
@@ -100,12 +100,13 @@ With the current manifest count of `5555`, selecting the whole manifest yields
 - `24` user-to-user stable read-during-write stress overlay scenarios;
 - `23` negative business-guard scenarios with explicit no-partial-mutation
   assertions.
+- `576` policy-unsupported base trade-shape scenarios that assert tier2 offer
+  creation and tier2 Telegram request paths reject without partial mutation.
 
 It intentionally does not yet implement production execution drivers for
 customer/accountant actor pairs, short/medium outage simulation, market
-behavior reads/expiry, targeted delivery join, or the remaining negative
-business guards. Those must remain visible as `driver_gaps` and cannot be
-treated as passed.
+behavior reads/expiry, or targeted delivery join. Those must remain visible as
+`driver_gaps` and cannot be treated as passed.
 The execution-plan output also includes `driver_gap_summary.by_driver_gap_bucket`
 and `driver_gap_roadmap`, which group the raw gap reasons into implementation
 buckets sorted from easier to harder.
@@ -126,7 +127,6 @@ selected scenario is command-plannable.
 
 Current full-manifest gap buckets are expected to be:
 
-- `negative_guard_driver`: `576`
 - `market_behavior_driver`: `228`
 - `delivery_contract_driver`: `204`
 - `targeted_join_driver`: `204`

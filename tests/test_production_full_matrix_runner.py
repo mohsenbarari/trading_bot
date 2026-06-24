@@ -73,6 +73,33 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(plan["steps"][0]["policy_supported"], False)
         self.assertIn("no_partial_mutation_on_reject", plan["steps"][0]["assertion_refs"])
 
+    def test_execution_plan_builds_unsupported_policy_probe_commands(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_base_trade_shape",
+                "--policy",
+                "unsupported",
+                "--manifest-id",
+                "PBTS-0163",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "unsupported_policy_negative_probe")
+        self.assertEqual(scenario_plan["unsupported_reasons"], ["tier2_cannot_use_telegram_request"])
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("run-unsupported-policy-case", rendered)
+        self.assertIn("--unsupported-reason", rendered)
+        self.assertIn("tier2_cannot_use_telegram_request", rendered)
+
     def test_sharding_is_deterministic_and_non_overlapping(self):
         first = runner.build_plan(
             self.build_args("--section", "production_base_trade_shape", "--shard-count", "2", "--shard-index", "1")
@@ -196,15 +223,15 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 183)
-        self.assertEqual(execution_plan["driver_gap_count"], 5372)
-        self.assertEqual(summary["total"], 5372)
+        self.assertEqual(execution_plan["executable_count"], 759)
+        self.assertEqual(execution_plan["driver_gap_count"], 4796)
+        self.assertEqual(summary["total"], 4796)
         self.assertEqual(
             summary["by_section"],
             {
                 "delivery_contract": 204,
                 "market_behavior": 228,
-                "production_base_trade_shape": 1200,
+                "production_base_trade_shape": 624,
                 "production_stress_overlay": 3536,
                 "targeted_trade_delivery_join": 204,
             },
@@ -216,7 +243,6 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "customer_accountant_actor_driver": 3840,
                 "delivery_contract_driver": 204,
                 "market_behavior_driver": 228,
-                "negative_guard_driver": 576,
                 "outage_orchestration_driver": 320,
                 "targeted_join_driver": 204,
             },
@@ -227,7 +253,6 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 for item in execution_plan["driver_gap_roadmap"]
             ],
             [
-                ("negative_guard_driver", 576),
                 ("market_behavior_driver", 228),
                 ("delivery_contract_driver", 204),
                 ("targeted_join_driver", 204),
@@ -259,7 +284,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5372)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 4796)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:

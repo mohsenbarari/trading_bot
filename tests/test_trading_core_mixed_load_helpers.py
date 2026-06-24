@@ -1671,6 +1671,61 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
+    def test_unsupported_policy_evidence_acceptance_for_tier2_offer_creation_reject(self):
+        failures = worker.assert_unsupported_policy_evidence(
+            expected_reasons={"tier2_cannot_create_offer"},
+            probe_results=[
+                {
+                    "reason": "tier2_cannot_create_offer",
+                    "status": "rejected",
+                    "created_offer_delta": 0,
+                }
+            ],
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_unsupported_policy_evidence_acceptance_for_tier2_telegram_request_reject(self):
+        failures = worker.assert_unsupported_policy_evidence(
+            expected_reasons={"tier2_cannot_use_telegram_request"},
+            probe_results=[
+                {
+                    "reason": "tier2_cannot_use_telegram_request",
+                    "status": "rejected",
+                    "second_answer_text": "⚠️ دسترسی این حساب به ربات تلگرام فعال نیست.",
+                    "expected_remaining_quantity": 5,
+                    "offer_evidence": {
+                        "offer": {"remaining_quantity": 5},
+                        "trade_count": 0,
+                        "offer_request_count": 0,
+                    },
+                }
+            ],
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_unsupported_policy_evidence_detects_partial_trade_mutation(self):
+        failures = worker.assert_unsupported_policy_evidence(
+            expected_reasons={"tier2_cannot_use_telegram_request"},
+            probe_results=[
+                {
+                    "reason": "tier2_cannot_use_telegram_request",
+                    "status": "rejected",
+                    "second_answer_text": "denied",
+                    "expected_remaining_quantity": 5,
+                    "offer_evidence": {
+                        "offer": {"remaining_quantity": 0},
+                        "trade_count": 1,
+                        "offer_request_count": 1,
+                    },
+                }
+            ],
+        )
+
+        self.assertTrue(any("expected trade_count=0" in failure for failure in failures))
+        self.assertTrue(any("expected offer_request_count=0" in failure for failure in failures))
+
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {
             "offer": {"remaining_quantity": 5},
