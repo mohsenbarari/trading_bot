@@ -15,8 +15,6 @@ TABLES=(
     users
     accountant_relations
     customer_relations
-    chats
-    chat_members
     invitations
     admin_market_messages
     admin_broadcast_messages
@@ -28,7 +26,10 @@ TABLES=(
     market_schedule_overrides
     market_runtime_state
     offers
+    offer_requests
+    offer_publication_states
     trades
+    trade_delivery_receipts
 )
 
 load_shared_deploy_surface() {

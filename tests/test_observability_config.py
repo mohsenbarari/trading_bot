@@ -223,8 +223,16 @@ class ObservabilityConfigTests(unittest.TestCase):
         self.assertIn("$compose_cmd -f docker-compose.iran.yml up -d --no-deps sync_worker", recover_script)
         self.assertIn("read_env_value()", recover_script)
         self.assertNotIn("source \"$PROJECT_DIR/.env\"", recover_script)
-        for expected_table in ("chat_members", "market_runtime_state", "admin_market_messages"):
+        for expected_table in (
+            "market_runtime_state",
+            "admin_market_messages",
+            "offer_requests",
+            "offer_publication_states",
+            "trade_delivery_receipts",
+        ):
             self.assertIn(expected_table, recover_script)
+        self.assertNotIn("chat_members", recover_script)
+        self.assertNotIn("chats", recover_script)
 
     def test_production_docs_and_examples_include_audit_anchor_and_runtime_env_requirements(self):
         hardening = (ROOT / "docs/OBSERVABILITY_PRODUCTION_HARDENING.md").read_text(encoding="utf-8")
