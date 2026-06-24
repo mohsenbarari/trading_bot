@@ -25,6 +25,31 @@ PRIVATE_SUGGESTION_CONFIRM_TIMEOUT = 3.0
 _memory_suggestions: dict[int, dict[str, dict]] = {}
 
 
+def _decode_record(raw_value) -> dict | None:
+    if not raw_value:
+        return None
+    if isinstance(raw_value, bytes):
+        try:
+            raw_value = raw_value.decode("utf-8")
+        except Exception:
+            return None
+    try:
+        record = json.loads(raw_value)
+    except Exception:
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _record_requested_amount(record: dict | None) -> int | None:
+    if not record:
+        return None
+    try:
+        requested_amount = int(record.get("requested_amount") or 0)
+    except (TypeError, ValueError):
+        return None
+    return requested_amount if requested_amount > 0 else None
+
+
 def build_trade_amount_buttons(
     offer_id: int,
     amounts: list[int],
@@ -94,21 +119,29 @@ async def upsert_trade_suggestion_record(
     message_id: int,
     requested_amount: int,
     ttl_seconds: int = TRADE_SUGGESTION_TTL_SECONDS,
+    preserve_requested_amount: bool = False,
 ) -> None:
     now = time.time()
     field = _record_field(chat_id, message_id)
+    stored_requested_amount = int(requested_amount)
+    record_key = _record_key(offer_id)
     payload = {
         "chat_id": chat_id,
         "message_id": message_id,
-        "requested_amount": requested_amount,
+        "requested_amount": stored_requested_amount,
         "expires_at": now + ttl_seconds,
         "offer_id": offer_id,
     }
     redis_client = None
     try:
         redis_client = redis.Redis(connection_pool=pool)
-        await redis_client.hset(_record_key(offer_id), field, json.dumps(payload, ensure_ascii=False))
-        await redis_client.expire(_record_key(offer_id), ttl_seconds + 60)
+        if preserve_requested_amount:
+            existing_amount = _record_requested_amount(_decode_record(await redis_client.hget(record_key, field)))
+            if existing_amount is not None:
+                stored_requested_amount = existing_amount
+                payload["requested_amount"] = stored_requested_amount
+        await redis_client.hset(record_key, field, json.dumps(payload, ensure_ascii=False))
+        await redis_client.expire(record_key, ttl_seconds + 60)
         return
     except Exception as exc:
         logger.debug(f"Failed to persist trade suggestion record in Redis: {exc}")
@@ -117,6 +150,11 @@ async def upsert_trade_suggestion_record(
             await redis_client.aclose()
 
     bucket = _memory_suggestions.setdefault(offer_id, {})
+    if preserve_requested_amount:
+        existing_amount = _record_requested_amount(bucket.get(field))
+        if existing_amount is not None:
+            stored_requested_amount = existing_amount
+            payload["requested_amount"] = stored_requested_amount
     bucket[field] = payload
 
 

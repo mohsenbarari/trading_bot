@@ -21,6 +21,7 @@ class _AsyncSessionContext:
 class _FakeRedisClient:
     def __init__(self):
         self.hset = AsyncMock()
+        self.hget = AsyncMock(return_value=None)
         self.expire = AsyncMock()
         self.hdel = AsyncMock()
         self.hgetall = AsyncMock(return_value={})
@@ -144,6 +145,51 @@ class BotTradeSuggestionMessagesTests(unittest.IsolatedAsyncioTestCase):
         with patch('bot.utils.trade_suggestion_messages.redis.Redis', return_value=broken_redis):
             await suggestion_messages.remove_trade_suggestion_record(6, 3, 3)
         self.assertNotIn(6, suggestion_messages._memory_suggestions)
+
+    async def test_upsert_can_preserve_original_requested_amount_during_pending_refresh(self):
+        existing_payload = {
+            'chat_id': 10,
+            'message_id': 20,
+            'requested_amount': 15,
+            'expires_at': 300.0,
+            'offer_id': 4,
+        }
+        redis_client = _FakeRedisClient()
+        redis_client.hget = AsyncMock(return_value=json.dumps(existing_payload))
+        with patch('bot.utils.trade_suggestion_messages.redis.Redis', return_value=redis_client), patch(
+            'bot.utils.trade_suggestion_messages.time.time', return_value=100.0
+        ):
+            await suggestion_messages.upsert_trade_suggestion_record(
+                4,
+                10,
+                20,
+                25,
+                ttl_seconds=15,
+                preserve_requested_amount=True,
+            )
+
+        redis_client.hget.assert_awaited_once_with('trade_suggestion:offer:4', '10:20')
+        redis_client.hset.assert_awaited_once()
+        stored_payload = json.loads(redis_client.hset.await_args.args[2])
+        self.assertEqual(stored_payload['requested_amount'], 15)
+
+        broken_redis = _FakeRedisClient()
+        broken_redis.hset = AsyncMock(side_effect=RuntimeError('redis down'))
+        suggestion_messages._memory_suggestions[4] = {
+            '10:20': existing_payload,
+        }
+        with patch('bot.utils.trade_suggestion_messages.redis.Redis', return_value=broken_redis), patch(
+            'bot.utils.trade_suggestion_messages.time.time', return_value=200.0
+        ):
+            await suggestion_messages.upsert_trade_suggestion_record(
+                4,
+                10,
+                20,
+                25,
+                ttl_seconds=15,
+                preserve_requested_amount=True,
+            )
+        self.assertEqual(suggestion_messages._memory_suggestions[4]['10:20']['requested_amount'], 15)
 
     async def test_clear_markup_and_sync_for_inactive_offer(self):
         bot = AsyncMock()

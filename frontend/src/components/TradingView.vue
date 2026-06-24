@@ -634,7 +634,7 @@ async function executeTrade() {
       if (data?.error_code === 'TRADE_LOT_UNAVAILABLE' && Array.isArray(data.available_lots) && data.available_lots.length > 0) {
         tradeSuggestion.value = {
           title: data.title || 'پیشنهاد معامله',
-          introText: data.intro_text || data.detail || 'لات انتخابی شما دیگر در دسترس نیست.',
+          introText: data.intro_text || data.detail || 'بخش انتخابی شما دیگر در دسترس نیست.',
           offerId: data.offer_id || selectedOffer.value.id,
           offerType: data.offer_type || selectedOffer.value.offer_type || '',
           offerTypeLabel: data.offer_type_label || ((data.offer_type || selectedOffer.value.offer_type) === 'buy' ? 'خرید' : 'فروش'),

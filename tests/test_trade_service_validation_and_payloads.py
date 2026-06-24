@@ -117,6 +117,8 @@ class TradeServiceValidationAndPayloadTests(unittest.TestCase):
         self.assertEqual(payload["commodity_name"], "طلای آب شده")
         self.assertEqual(payload["lot_summary"], "10 + 5")
         self.assertEqual(payload["available_lots_text"], "10 عدد، 5 عدد")
+        self.assertEqual(payload["intro_text"], "بخش 10 عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد.")
+        self.assertEqual(payload["detail"], "بخش انتخابی شما لحظاتی قبل انجام شد.")
         self.assertIn("اگر مایل هستید", payload["message"])
         self.assertIn("🔴فروش طلای آب شده 20 عدد 75,800", payload["offer_summary"])
 

@@ -106,7 +106,7 @@ class ManualOfferValidationTests(unittest.TestCase):
         self.assertEqual(payload["offer_type_label"], "فروش")
         self.assertEqual(payload["available_lots"], [24, 16, 8])
         self.assertEqual(payload["lot_summary"], "24 + 16 + 8")
-        self.assertIn("لات 10 عددی", payload["message"])
+        self.assertIn("بخش 10 عددی", payload["message"])
         self.assertIn("🔴فروش سکه امامی 24 عدد 75,800", payload["message"])
         self.assertIn("24 + 16 + 8", payload["message"])
 

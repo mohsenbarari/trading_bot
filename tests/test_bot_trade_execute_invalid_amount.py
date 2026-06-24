@@ -74,6 +74,7 @@ def make_offer():
         home_server=None,
         price=150000,
         commodity=SimpleNamespace(name="سکه"),
+        user=SimpleNamespace(id=9, account_name="seller"),
     )
 
 

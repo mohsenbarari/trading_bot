@@ -817,7 +817,7 @@ describe('TradingView.vue', () => {
         json: async () => ({
           error_code: 'TRADE_LOT_UNAVAILABLE',
           title: 'پیشنهاد معامله',
-          intro_text: 'لات انتخابی شما دیگر در دسترس نیست.',
+          intro_text: 'بخش انتخابی شما دیگر در دسترس نیست.',
           offer_id: 101,
           offer_type: 'sell',
           offer_type_label: 'فروش',

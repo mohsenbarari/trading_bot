@@ -297,7 +297,7 @@ function createTradeSuggestionState(data: any, fallbackOffer?: any): TradeLotSug
   const sourceOffer = fallbackOffer || (Array.isArray(props.offers) ? props.offers.find((offer: any) => offer.id === (data.offer_id || 0)) : null);
   return {
     title: data.title || 'پیشنهاد معامله',
-    introText: data.intro_text || data.detail || 'لات انتخابی شما دیگر در دسترس نیست.',
+    introText: data.intro_text || data.detail || 'بخش انتخابی شما دیگر در دسترس نیست.',
     offerId: data.offer_id || sourceOffer?.id || 0,
     offerType: data.offer_type || sourceOffer?.offer_type || '',
     offerTypeLabel: data.offer_type_label || ((data.offer_type || sourceOffer?.offer_type) === 'buy' ? 'خرید' : 'فروش'),

@@ -671,6 +671,7 @@ async def _handle_channel_trade(
                             chat_id=callback.message.chat.id,
                             message_id=callback.message.message_id,
                             requested_amount=actual_amount,
+                            preserve_requested_amount=True,
                         )
                         schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
                         schedule_trade_suggestion_pending_reset(bot, offer.id)
@@ -841,6 +842,7 @@ async def _handle_channel_trade(
                         chat_id=callback.message.chat.id,
                         message_id=callback.message.message_id,
                         requested_amount=actual_amount,
+                        preserve_requested_amount=True,
                     )
                     schedule_trade_suggestion_cleanup(bot, offer.id, callback.message.chat.id, callback.message.message_id)
                     schedule_trade_suggestion_pending_reset(bot, offer.id)

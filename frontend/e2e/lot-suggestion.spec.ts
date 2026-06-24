@@ -253,7 +253,7 @@ test.describe('Lot suggestion regressions', () => {
         body: JSON.stringify({
           error_code: 'TRADE_LOT_UNAVAILABLE',
           title: 'پیشنهاد معامله',
-          intro_text: 'لات 10 عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد.',
+          intro_text: 'بخش 10 عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد.',
           offer_id: fixture.publicOfferId,
           requested_amount: 10,
           offer_type: 'sell',

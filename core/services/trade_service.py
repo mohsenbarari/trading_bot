@@ -339,7 +339,7 @@ def build_lot_unavailable_suggestion_payload(
     lots_button_text = "، ".join(f"{amount} عدد" for amount in normalized_available_amounts) if normalized_available_amounts else "ندارد"
     commodity_label = (commodity_name or "کالا").strip() or "کالا"
     title = "پیشنهاد معامله"
-    intro_text = f"لات {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد."
+    intro_text = f"بخش {normalized_requested_amount} عددی که انتخاب کرده بودید لحظاتی قبل توسط کاربر دیگری انجام شد."
     offer_summary = (
         f"{offer_type_emoji}{offer_type_label} {commodity_label} "
         f"{normalized_remaining} عدد {normalized_price:,}"
@@ -359,7 +359,7 @@ def build_lot_unavailable_suggestion_payload(
 
     return {
         "error_code": "TRADE_LOT_UNAVAILABLE",
-        "detail": "لات انتخابی شما لحظاتی قبل انجام شد.",
+        "detail": "بخش انتخابی شما لحظاتی قبل انجام شد.",
         "title": title,
         "intro_text": intro_text,
         "message": message,
