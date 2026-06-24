@@ -69,6 +69,9 @@ implemented production driver. The current implemented command plan covers:
 - `24` duplicate replay scenarios across WebApp and Telegram request surfaces,
   WebApp and Telegram offer origins, both offer types, and all current offer
   shapes;
+- `24` manual-expiry/trade-race scenarios across WebApp and Telegram request
+  surfaces, WebApp and Telegram offer origins, both offer types, and all
+  current offer shapes;
 - ten production negative-guard probes on Iran/WebApp:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
@@ -76,11 +79,12 @@ implemented production driver. The current implemented command plan covers:
   `watch_role_market_action`, and `accountant_market_action`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`98` command-plannable scenarios with these drivers:
+`122` command-plannable scenarios with these drivers:
 
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios;
 - `24` user-to-user stable duplicate replay stress overlay scenarios;
+- `24` user-to-user stable manual-expiry/trade-race stress overlay scenarios;
 - `10` negative business-guard scenarios with explicit no-partial-mutation
   assertions.
 
@@ -110,7 +114,7 @@ selected scenario is command-plannable.
 Current full-manifest gap buckets are expected to be:
 
 - `negative_guard_driver`: `589`
-- `specialized_user_stress_driver`: `72`
+- `specialized_user_stress_driver`: `48`
 - `market_behavior_driver`: `228`
 - `delivery_contract_driver`: `204`
 - `targeted_join_driver`: `204`
@@ -262,6 +266,8 @@ Role-worker execution plan safety:
 - `run-role-plan --patch-external-side-effects` disables Telegram, realtime,
   Web Push, channel edit, and market schedule side effects while preserving
   real cross-server forwarding.
+- `run-manual-expiry-race` uses the same external-side-effect boundary while
+  racing the authoritative manual-expire path against the role workers.
 - `--patch-boundaries` is only for local/staging smoke runs and must not be used
   for real two-server production execution because it patches cross-server
   forwarding to local helpers.

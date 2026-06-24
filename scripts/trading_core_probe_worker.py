@@ -98,6 +98,7 @@ DUAL_ROLE_MERGED_RESULT_SCHEMA_VERSION = "bot_webapp_mixed_load_merged_result_v1
 DUAL_ROLE_MANIFEST_SCHEMA_VERSION = "bot_webapp_mixed_load_manifest_v1"
 DUAL_ROLE_PREPARE_SCHEMA_VERSION = "bot_webapp_mixed_load_prepare_v1"
 DUAL_ROLE_FINAL_SCHEMA_VERSION = "bot_webapp_mixed_load_final_v1"
+MANUAL_EXPIRY_RACE_RESULT_SCHEMA_VERSION = "manual_expiry_trade_race_result_v1"
 NEGATIVE_GUARD_RESULT_SCHEMA_VERSION = "production_negative_guard_result_v1"
 MIN_CLEANUP_PREFIX_LENGTH = 5
 PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
@@ -3006,7 +3007,7 @@ async def run_negative_guard_case(
     statuses: list[str] = []
     phase_details: list[dict[str, Any]] = []
 
-    async with patched_external_side_effects():
+    async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=4)
         owner = users[0]
         responder_a = users[1]
@@ -3983,6 +3984,70 @@ def assert_duplicate_replay_acceptance(
         )
 
 
+def assert_manual_expiry_trade_race_acceptance(
+    *,
+    response_success_count: int,
+    error_count: int,
+    persistence: HotOfferPersistenceSnapshot,
+    expected_winner_count: int,
+    manual_expiry_result: Mapping[str, Any] | None,
+) -> None:
+    if manual_expiry_result is None:
+        raise TradingProbeError("manual-expiry race expected manual expiry result artifact")
+    expiry_status = str(manual_expiry_result.get("status") or "unknown")
+    if expiry_status == "error":
+        detail = manual_expiry_result.get("detail") or manual_expiry_result.get("error_details") or "unknown"
+        raise TradingProbeError(f"manual-expiry race expiry command errored: {detail}")
+    if expiry_status not in {"success", "rejected"}:
+        raise TradingProbeError(f"manual-expiry race got invalid expiry status={expiry_status!r}")
+    if error_count:
+        raise TradingProbeError(f"manual-expiry race expected zero internal request errors, got {error_count}")
+    if persistence.persisted_trade_count < 0 or persistence.persisted_trade_count > expected_winner_count:
+        raise TradingProbeError(
+            "manual-expiry race persisted trade count outside expected winner bound: "
+            f"{persistence.persisted_trade_count} > {expected_winner_count}"
+        )
+    if response_success_count != persistence.persisted_trade_count:
+        raise TradingProbeError(
+            "manual-expiry race successful responses do not match persisted trades: "
+            f"{response_success_count} != {persistence.persisted_trade_count}"
+        )
+    if persistence.remaining_quantity is None or persistence.remaining_quantity < 0:
+        raise TradingProbeError(
+            f"manual-expiry race produced invalid remaining_quantity={persistence.remaining_quantity}"
+        )
+    if persistence.completed_trade_quantity > persistence.original_quantity:
+        raise TradingProbeError(
+            "manual-expiry race over-traded quantity "
+            f"{persistence.completed_trade_quantity} > {persistence.original_quantity}"
+        )
+    expected_remaining = persistence.original_quantity - persistence.completed_trade_quantity
+    if persistence.remaining_quantity != expected_remaining:
+        raise TradingProbeError(
+            "manual-expiry race quantity mismatch: "
+            f"remaining={persistence.remaining_quantity}, expected={expected_remaining}"
+        )
+    if persistence.offer_status not in {OfferStatus.COMPLETED.value, OfferStatus.EXPIRED.value}:
+        raise TradingProbeError(f"manual-expiry race expected terminal completed/expired offer, got {persistence.offer_status}")
+    if persistence.offer_status == OfferStatus.COMPLETED.value and persistence.remaining_quantity != 0:
+        raise TradingProbeError(
+            f"manual-expiry race completed offer still has remaining_quantity={persistence.remaining_quantity}"
+        )
+    if expiry_status == "success" and persistence.offer_status != OfferStatus.EXPIRED.value:
+        raise TradingProbeError(
+            "manual-expiry race expiry command succeeded but final offer status is "
+            f"{persistence.offer_status}"
+        )
+    if persistence.completed_ledger_count < persistence.persisted_trade_count:
+        raise TradingProbeError("manual-expiry race has persisted trades without completed request ledger rows")
+    if persistence.trades_without_completed_ledger_count:
+        raise TradingProbeError("manual-expiry race has persisted trades without successful request ledger rows")
+    if persistence.failed_internal_ledger_count:
+        raise TradingProbeError(
+            f"manual-expiry race expected zero failed_internal ledgers, got {persistence.failed_internal_ledger_count}"
+        )
+
+
 async def run_duplicate_replay_probe(
     *,
     prefix: str,
@@ -4185,7 +4250,7 @@ async def run_benchmark(args: argparse.Namespace) -> int:
     prefix = args.prefix
     await cleanup_prefix(prefix)
     commodity_id, commodity_name = await resolve_commodity()
-    async with patched_trading_boundaries():
+    async with patched_external_side_effects():
         fixture = await create_fixture_users(prefix)
         parse_samples: list[float] = []
         bot_samples: list[float] = []
@@ -4326,7 +4391,7 @@ async def run_mixed_load_benchmark(args: argparse.Namespace) -> int:
     origins = ["webapp", "bot"] if args.offer_origin == "both" else [args.offer_origin]
     reports: dict[str, Any] = {}
 
-    async with patched_trading_boundaries():
+    async with patched_external_side_effects():
         users = await create_load_fixture_users(prefix, user_count=args.user_count)
         if len(users) < 3:
             raise TradingProbeError("mixed load fixture did not create enough users")
@@ -4577,6 +4642,7 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         else max(0, int(args.hot_offer_quantity) - int(args.request_amount) * int(args.expected_winner_count))
     )
     require_terminal_completed = bool(args.require_terminal_completed)
+    barrier_epoch = time.time() + args.barrier_delay_seconds
 
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=args.user_count)
@@ -4622,7 +4688,7 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         telegram_ratio=args.telegram_ratio,
         target_rps=args.target_rps,
         amount=args.request_amount,
-        barrier_epoch=time.time() + args.barrier_delay_seconds,
+        barrier_epoch=barrier_epoch,
         request_surface=request_surface,
         idempotency_mode=args.idempotency_mode,
     )
@@ -4652,6 +4718,7 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
         require_terminal_completed=require_terminal_completed,
         request_surface=args.request_surface,
         idempotency_mode=args.idempotency_mode,
+        barrier_epoch=barrier_epoch,
         plan_result=plan_result,
     )
     prepare_path = output_dir / "prepare.json"
@@ -4669,15 +4736,101 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
+    prepare = read_json_artifact(Path(args.prepare))
+    prefix = str(prepare.get("prefix") or "")
+    scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
+    offer = _require_mapping(prepare.get("offer"), "prepare offer")
+    offer_origin = str(scenario.get("offer_origin") or "").strip().lower()
+    assert_dual_role_prepare_runtime(
+        offer_origin,
+        allow_production=bool(args.allow_production_execution),
+        prefix=prefix,
+    )
+    offer_id = int(offer["id"])
+    owner_user_id = int(offer["owner_user_id"])
+    barrier_epoch_value = prepare.get("barrier_epoch")
+    if barrier_epoch_value is None:
+        raise TradingProbeError("manual-expiry race requires barrier_epoch in prepare artifact")
+    barrier_epoch = float(barrier_epoch_value)
+    if not math.isfinite(barrier_epoch):
+        raise TradingProbeError(f"manual-expiry race got invalid barrier_epoch={barrier_epoch_value!r}")
+
+    start_delay = barrier_epoch - time.time()
+    if start_delay > 0:
+        await asyncio.sleep(start_delay)
+
+    started_epoch = time.time()
+    started_monotonic = time.perf_counter()
+    status = "error"
+    detail = ""
+    error_details: list[str] = []
+    async with patched_external_side_effects():
+        if offer_origin == "bot":
+            async with AsyncSessionLocal() as db:
+                owner_user = await load_user(db, owner_user_id)
+                telegram_id = getattr(owner_user, "telegram_id", None)
+                if telegram_id is None:
+                    raise TradingProbeError(f"bot offer owner {owner_user_id} has no telegram_id")
+                owner = LoadUserRef(user_id=owner_user_id, telegram_id=int(telegram_id))
+            harness = AiogramDispatcherHarness()
+            try:
+                status = await expire_bot_offer_with_dispatcher(
+                    harness=harness,
+                    owner=owner,
+                    offer_id=offer_id,
+                    prefix=prefix,
+                    index=0,
+                    error_details=error_details,
+                )
+            finally:
+                await harness.close()
+        elif offer_origin == "webapp":
+            try:
+                await expire_offer_for_user(user_id=owner_user_id, offer_id=offer_id)
+                status = "success"
+            except HTTPException as exc:
+                detail = str(exc.detail)
+                status = "error" if int(exc.status_code) >= 500 else "rejected"
+                if status == "error":
+                    error_details.append(f"HTTPException {exc.status_code}: {detail}")
+            except Exception as exc:
+                status = "error"
+                detail = f"{type(exc).__name__}: {exc}"
+                error_details.append(detail)
+        else:
+            raise TradingProbeError(f"unsupported manual-expiry race offer_origin={offer_origin!r}")
+
+    payload = {
+        "schema_version": MANUAL_EXPIRY_RACE_RESULT_SCHEMA_VERSION,
+        "status": status,
+        "offer_origin": offer_origin,
+        "offer_id": offer_id,
+        "owner_user_id": owner_user_id,
+        "prefix": prefix,
+        "barrier_epoch": round(barrier_epoch, 6),
+        "started_epoch": round(started_epoch, 6),
+        "duration_ms": round((time.perf_counter() - started_monotonic) * 1000.0, 3),
+        "detail": detail,
+        "error_details": error_details,
+    }
+    if args.output:
+        write_json_artifact(Path(args.output), payload)
+    print_json(payload)
+    return 0 if status in {"success", "rejected"} else 1
+
+
 async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
     prepare = read_json_artifact(Path(args.prepare))
     merged_result = read_json_artifact(Path(args.merged_result))
     offer = _require_mapping(prepare.get("offer"), "prepare offer")
     persistence = await inspect_hot_offer_persistence(int(offer["id"]))
+    manual_expiry_result = read_json_artifact(Path(args.manual_expiry_result)) if args.manual_expiry_result else None
     report = build_dual_role_final_report(
         prepare=prepare,
         merged_result=merged_result,
         persistence=persistence,
+        manual_expiry_result=manual_expiry_result,
     )
     if args.output:
         write_json_artifact(Path(args.output), report)
@@ -4856,6 +5009,7 @@ def build_dual_role_prepare_artifact(
     require_terminal_completed: bool = True,
     request_surface: str = "mixed",
     idempotency_mode: str = "unique",
+    barrier_epoch: float | None = None,
     plan_result: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -4903,6 +5057,7 @@ def build_dual_role_prepare_artifact(
         },
         "plan_manifest_path": plan_result["manifest_path"],
         "plan_paths": dict((plan_result.get("manifest") or {}).get("plan_paths") or {}),
+        "barrier_epoch": round(float(barrier_epoch), 6) if barrier_epoch is not None else None,
         "created_epoch": round(time.time(), 6),
     }
 
@@ -4924,6 +5079,7 @@ def build_dual_role_final_report(
     prepare: Mapping[str, Any],
     merged_result: Mapping[str, Any],
     persistence: HotOfferPersistenceSnapshot,
+    manual_expiry_result: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     scenario = _require_mapping(prepare.get("scenario"), "prepare scenario")
     scenario_name = str(scenario.get("name") or "hot_offer")
@@ -4953,11 +5109,20 @@ def build_dual_role_final_report(
                 "roles": dict(merged_result.get("roles") or {}),
                 "role_start_skew": dict(merged_result.get("role_start_skew") or {}),
                 "attempt_error_details": summarize_attempt_error_details(merged_result),
+                "manual_expiry_result": dict(manual_expiry_result or {}),
             }
         },
     }
     try:
-        if idempotency_mode == "duplicate_replay":
+        if scenario_name == "manual_expire_trade_race":
+            assert_manual_expiry_trade_race_acceptance(
+                response_success_count=int(summary.get("success") or 0),
+                error_count=int(summary.get("error") or 0),
+                persistence=persistence,
+                expected_winner_count=expected_winner_count,
+                manual_expiry_result=manual_expiry_result,
+            )
+        elif idempotency_mode == "duplicate_replay":
             statuses = [
                 str(attempt.get("outcome") or "unknown")
                 for attempt in (merged_result.get("attempts") or [])
@@ -5186,6 +5351,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow this role worker inside production only with the production full-matrix confirmation env.",
     )
 
+    manual_expiry_parser = subparsers.add_parser("run-manual-expiry-race")
+    manual_expiry_parser.add_argument("--prepare", required=True)
+    manual_expiry_parser.add_argument("--output")
+    manual_expiry_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow this manual expiry race worker inside production only with the production full-matrix confirmation env.",
+    )
+
     merge_parser = subparsers.add_parser("merge-role-results")
     merge_parser.add_argument("--output")
     merge_parser.add_argument("results", nargs="+")
@@ -5193,6 +5367,7 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser = subparsers.add_parser("finalize-dual-role-run")
     finalize_parser.add_argument("--prepare", required=True)
     finalize_parser.add_argument("--merged-result", required=True)
+    finalize_parser.add_argument("--manual-expiry-result")
     finalize_parser.add_argument("--output")
     finalize_parser.add_argument("--check", action="store_true")
 
@@ -5257,6 +5432,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_dual_role_artifact_smoke_command(args)
     if args.command == "run-role-plan":
         return await run_role_plan_command(args)
+    if args.command == "run-manual-expiry-race":
+        return await run_manual_expiry_race_command(args)
     if args.command == "merge-role-results":
         return await merge_role_results_command(args)
     if args.command == "finalize-dual-role-run":

@@ -235,14 +235,17 @@ Current execution-plan limitation:
 - implemented: duplicate replay stress paths for user-to-user stable scenarios
   across WebApp and Telegram request surfaces, WebApp and Telegram offer
   origins, both offer types, and all current offer shapes;
+- implemented: manual-expiry/trade-race stress paths for user-to-user stable
+  scenarios across WebApp and Telegram request surfaces, WebApp and Telegram
+  offer origins, both offer types, and all current offer shapes;
 - implemented: ten Iran/WebApp negative-guard probes:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
   `inactive_requester`, `trading_restricted_user`,
   `watch_role_market_action`, and `accountant_market_action`;
-- current whole-manifest command-plannable count: `98` of `5555` scenarios;
+- current whole-manifest command-plannable count: `122` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
-  short/medium outage orchestration, expiry-race stress cases, read-during-write
+  short/medium outage orchestration, time-expiry race stress cases, read-during-write
   production driver, targeted delivery join production driver, and the remaining
   negative business guard production driver cases.
 
@@ -255,8 +258,8 @@ Current driver-gap roadmap for the full manifest:
 
 1. `negative_guard_driver`: `589` gaps. Add explicit production reject-path
    probes and no-partial-mutation assertions.
-2. `specialized_user_stress_driver`: `72` gaps. Extend the dual-role worker for
-   expiry races and read-during-write.
+2. `specialized_user_stress_driver`: `48` gaps. Extend the dual-role worker for
+   time-expiry races and read-during-write.
 3. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
    to production-safe two-server execution.
 4. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and

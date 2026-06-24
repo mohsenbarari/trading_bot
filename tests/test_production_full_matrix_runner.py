@@ -196,9 +196,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 98)
-        self.assertEqual(execution_plan["driver_gap_count"], 5457)
-        self.assertEqual(summary["total"], 5457)
+        self.assertEqual(execution_plan["executable_count"], 122)
+        self.assertEqual(execution_plan["driver_gap_count"], 5433)
+        self.assertEqual(summary["total"], 5433)
         self.assertEqual(
             summary["by_section"],
             {
@@ -206,7 +206,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "market_behavior": 228,
                 "negative_business_guard": 13,
                 "production_base_trade_shape": 1200,
-                "production_stress_overlay": 3608,
+                "production_stress_overlay": 3584,
                 "targeted_trade_delivery_join": 204,
             },
         )
@@ -220,7 +220,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 "market_behavior_driver": 228,
                 "negative_guard_driver": 589,
                 "outage_orchestration_driver": 320,
-                "specialized_user_stress_driver": 72,
+                "specialized_user_stress_driver": 48,
                 "targeted_join_driver": 204,
             },
         )
@@ -231,7 +231,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ],
             [
                 ("negative_guard_driver", 589),
-                ("specialized_user_stress_driver", 72),
+                ("specialized_user_stress_driver", 48),
                 ("market_behavior_driver", 228),
                 ("delivery_contract_driver", 204),
                 ("targeted_join_driver", 204),
@@ -263,7 +263,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
         self.assertEqual(full_payload["status"], "blocked_driver_gaps")
         self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5457)
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 5433)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -381,6 +381,36 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--request-surface", rendered)
         self.assertIn("telegram", rendered)
         self.assertIn("duplicate_replay", rendered)
+
+    def test_execution_plan_builds_manual_expire_trade_race_commands(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_stress_overlay",
+                "--manifest-id",
+                "PO-1729",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        execution_plan = plan["execution_plan"]
+        self.assertEqual(plan["status"], "execution_plan_built")
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        groups_by_name = {group["name"]: group for group in scenario_plan["execution_groups"]}
+        command_names = [command["name"] for command in scenario_plan["commands"]]
+        self.assertEqual(scenario_plan["request_surface"], "webapp")
+        self.assertEqual(scenario_plan["idempotency_mode"], "unique")
+        self.assertEqual(scenario_plan["total_requests"], 8)
+        self.assertIn("run_manual_expiry_race_on_offer_home_server", command_names)
+        self.assertEqual(len(groups_by_name["role_workers"]["commands"]), 3)
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("manual_expire_trade_race", rendered)
+        self.assertIn("run-manual-expiry-race", rendered)
+        self.assertIn("--manual-expiry-result", rendered)
 
     def test_execution_plan_builds_negative_guard_commands_for_pre_ledger_case(self):
         plan = runner.build_plan(
