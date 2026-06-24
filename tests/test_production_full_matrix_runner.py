@@ -296,7 +296,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("PRODUCTION_FULL_MATRIX_CONFIRM", rendered)
         self.assertIn("--retail", rendered)
 
-    def test_execution_plan_keeps_customer_cases_as_explicit_driver_gaps(self):
+    def test_execution_plan_builds_customer_actor_composed_commands(self):
         plan = runner.build_plan(
             self.build_args(
                 "--mode",
@@ -315,16 +315,18 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         )
 
         execution_plan = plan["execution_plan"]
-        self.assertEqual(execution_plan["executable_count"], 0)
-        self.assertEqual(execution_plan["driver_gap_count"], 1)
-        self.assertEqual(
-            execution_plan["driver_gaps"][0]["driver_gap"],
-            "dual_role_worker_currently_supports_standard_user_to_standard_user_only",
-        )
-        self.assertEqual(
-            execution_plan["driver_gap_summary"]["by_driver_gap"],
-            {"dual_role_worker_currently_supports_standard_user_to_standard_user_only": 1},
-        )
+        self.assertEqual(execution_plan["executable_count"], 1)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        scenario_plan = execution_plan["scenario_plans"][0]
+        self.assertEqual(scenario_plan["driver"], "customer_accountant_actor_composed_probe")
+        self.assertEqual(scenario_plan["actor_pair_id"], "user__tier1_same_owner")
+        self.assertEqual(scenario_plan["delivery_scenario_id"], "TDN-013")
+        self.assertEqual(scenario_plan["actor_policy_driver"], "targeted_trade_delivery_join_probe")
+        self.assertEqual(scenario_plan["shape_stress_driver"], "two_server_dual_role_hot_offer")
+        self.assertNotEqual(scenario_plan["actor_policy_prefix"], scenario_plan["shape_stress_prefix"])
+        rendered = json.dumps(scenario_plan, ensure_ascii=False)
+        self.assertIn("run_trade_delivery_targeted_join_matrix.py", rendered)
+        self.assertIn("run-role-plan", rendered)
 
     def test_execution_plan_summarizes_whole_manifest_driver_gaps(self):
         plan = runner.build_plan(self.build_args("--mode", "execution-plan"))
@@ -332,33 +334,20 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         summary = execution_plan["driver_gap_summary"]
 
         self.assertEqual(plan["status"], "execution_plan_built")
-        self.assertEqual(execution_plan["executable_count"], 1715)
-        self.assertEqual(execution_plan["driver_gap_count"], 3840)
-        self.assertEqual(summary["total"], 3840)
-        self.assertEqual(
-            summary["by_section"],
-            {
-                "production_base_trade_shape": 576,
-                "production_stress_overlay": 3264,
-            },
-        )
-        self.assertEqual(
-            summary["by_driver_gap_bucket"],
-            {
-                "customer_accountant_actor_driver": 3840,
-            },
-        )
+        self.assertEqual(execution_plan["executable_count"], 5555)
+        self.assertEqual(execution_plan["driver_gap_count"], 0)
+        self.assertEqual(summary["total"], 0)
+        self.assertEqual(summary["by_section"], {})
+        self.assertEqual(summary["by_driver_gap_bucket"], {})
         self.assertEqual(
             [
                 (item["bucket"], item["remaining_gap_count"])
                 for item in execution_plan["driver_gap_roadmap"]
             ],
-            [
-                ("customer_accountant_actor_driver", 3840),
-            ],
+            [],
         )
 
-    def test_execution_plan_full_coverage_gate_blocks_when_any_driver_gap_remains(self):
+    def test_execution_plan_full_coverage_gate_passes_for_whole_manifest(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "execution-plan.json"
             with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -377,11 +366,11 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             full_payload = json.loads(output.read_text(encoding="utf-8"))
             stdout_payload = json.loads(stdout.getvalue())
 
-        self.assertEqual(exit_code, 2)
-        self.assertEqual(stdout_payload["status"], "blocked_driver_gaps")
-        self.assertEqual(full_payload["status"], "blocked_driver_gaps")
-        self.assertFalse(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 3840)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout_payload["status"], "execution_plan_built")
+        self.assertEqual(full_payload["status"], "execution_plan_built")
+        self.assertTrue(full_payload["execution_plan"]["coverage_gate"]["passed"])
+        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 0)
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
         with patch("sys.stdout", new_callable=io.StringIO) as stdout:

@@ -437,7 +437,7 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
             return None
         return "policy_unsupported_scenario_requires_negative_guard_driver"
     if record.get("actor_pair_id") != "user__user":
-        return "dual_role_worker_currently_supports_standard_user_to_standard_user_only"
+        return None
     if record.get("outage_id") not in {"stable", "short_under_2m", "medium_around_60m"}:
         return "outage_simulation_driver_not_implemented_for_role_worker"
     if section == "production_stress_overlay":
@@ -1174,6 +1174,106 @@ def outage_policy_scenario_commands(
     }
 
 
+def customer_accountant_actor_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+    user_count: int,
+    hot_offer_requests: int,
+    target_rps: float,
+    telegram_ratio: float,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "customer_actor")
+    delivery_scenario_id = delivery_scenario_id_for_record(record)
+    actor_policy_record = {
+        "manifest_id": f"{manifest_id}_ACTOR_POLICY_{delivery_scenario_id}",
+        "source_scenario_id": delivery_scenario_id,
+        "offer_home_server": record.get("offer_home_server"),
+        "actor_pair_id": record.get("actor_pair_id"),
+        "source_kind": record.get("source_kind"),
+        "responder_kind": record.get("responder_kind"),
+        "group_relation": record.get("group_relation"),
+        "offer_surface": record.get("offer_surface"),
+        "request_surface": record.get("request_surface"),
+        "outage_id": record.get("outage_id"),
+        "policy_supported": record.get("policy_supported"),
+        "unsupported_reasons": record.get("unsupported_reasons") or [],
+    }
+    shape_record = {
+        **record,
+        "manifest_id": f"{manifest_id}_SHAPE_USER_STABLE",
+        "actor_pair_id": "user__user",
+        "source_kind": "user",
+        "responder_kind": "user",
+        "group_relation": "none",
+        "outage_id": "stable",
+        "policy_supported": True,
+        "unsupported_reasons": [],
+    }
+    actor_policy_plan = targeted_join_scenario_commands(
+        actor_policy_record,
+        prefix=prefix,
+        artifact_dir=artifact_dir,
+    )
+    shape_plan = dual_role_scenario_commands(
+        shape_record,
+        prefix=prefix,
+        artifact_dir=artifact_dir,
+        user_count=user_count,
+        hot_offer_requests=hot_offer_requests,
+        target_rps=target_rps,
+        telegram_ratio=telegram_ratio,
+    )
+    commands = [
+        *[dict(command) for command in actor_policy_plan.get("commands") or []],
+        *[dict(command) for command in shape_plan.get("commands") or []],
+    ]
+    execution_groups = [
+        *[
+            {
+                **dict(group),
+                "name": f"actor_policy_{group.get('name')}",
+            }
+            for group in (actor_policy_plan.get("execution_groups") or [])
+        ],
+        *[
+            {
+                **dict(group),
+                "name": f"shape_stress_{group.get('name')}",
+            }
+            for group in (shape_plan.get("execution_groups") or [])
+        ],
+    ]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "customer_accountant_actor_composed_probe",
+        "actor_pair_id": record.get("actor_pair_id"),
+        "source_kind": record.get("source_kind"),
+        "responder_kind": record.get("responder_kind"),
+        "group_relation": record.get("group_relation"),
+        "surface_pair": record.get("surface_pair"),
+        "outage_id": record.get("outage_id"),
+        "offer_type": record.get("offer_type"),
+        "shape": record.get("shape"),
+        "family": record.get("family"),
+        "delivery_scenario_id": delivery_scenario_id,
+        "actor_policy_driver": actor_policy_plan.get("driver"),
+        "shape_stress_driver": shape_plan.get("driver"),
+        "actor_policy_prefix": actor_policy_plan.get("scenario_prefix"),
+        "shape_stress_prefix": shape_plan.get("scenario_prefix"),
+        "commands": commands,
+        "execution_groups": execution_groups,
+        "safety_note": (
+            "This composed driver validates customer/owner/accountant routing and counterparty privacy with "
+            "the targeted join probe, then validates the requested shape/stress/surface behavior with a "
+            "standard user-to-user dual-role probe. It is orthogonal coverage, not a single combined "
+            "customer stress transaction."
+        ),
+    }
+
+
 def unsupported_policy_scenario_commands(
     record: dict[str, Any],
     *,
@@ -1459,6 +1559,21 @@ def build_execution_plan(
             )
         elif (
             record.get("section") in {"production_base_trade_shape", "production_stress_overlay"}
+            and record.get("actor_pair_id") != "user__user"
+        ):
+            scenario_plans.append(
+                customer_accountant_actor_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                    user_count=user_count,
+                    hot_offer_requests=hot_offer_requests,
+                    target_rps=target_rps,
+                    telegram_ratio=telegram_ratio,
+                )
+            )
+        elif (
+            record.get("section") in {"production_base_trade_shape", "production_stress_overlay"}
             and record.get("outage_id") != "stable"
         ):
             scenario_plans.append(
@@ -1498,6 +1613,7 @@ def build_execution_plan(
             "dual_role_actor_pair_id": "user__user",
             "dual_role_outage_id": "stable",
             "outage_policy_probe": "short_and_medium_user_to_user_composed_without_network_cut",
+            "customer_accountant_actor_probe": "all_customer_accountant_actor_pairs_composed_orthogonal_coverage",
             "delivery_contract_catalog": "all_delivery_contract_scenarios",
             "targeted_join_scenarios": "all_targeted_join_scenarios_with_fake_telegram_gateway",
             "stress_families": sorted(DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES),

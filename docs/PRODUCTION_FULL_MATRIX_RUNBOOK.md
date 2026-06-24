@@ -267,24 +267,28 @@ Current execution-plan limitation:
 - all `320` short/medium user-to-user base/stress outage scenarios are
   command-plannable through a composed probe: dual-role trade correctness plus
   targeted join delivery-policy assertions with separate synthetic prefixes;
-- current whole-manifest command-plannable count: `1715` of `5555` scenarios;
-- not implemented yet: customer/accountant actor-pair production drivers.
+- all `3840` customer/accountant actor-pair base/stress scenarios are
+  command-plannable through composed orthogonal coverage: targeted join validates
+  customer, owner, accountant, same-owner, different-owner, and counterparty
+  privacy; dual-role validates the requested shape, stress family, and surface
+  behavior with standard users;
+- current whole-manifest command-plannable count: `5555` of `5555` scenarios;
+- remaining manifest driver gaps: none.
 
 The short/medium outage composed probe does not cut production networking. It
 validates the delivery policy using synthetic timing and fake Telegram transport.
 Do not treat it as a firewall, sync-worker pause, or real peer-disconnect
 rehearsal.
+The customer/accountant actor composed probe does not execute a single combined
+customer stress transaction; it combines actor-policy evidence and shape/stress
+evidence as separate synthetic probes with separate prefixes.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
 missing coverage cannot be hidden. Use `--require-full-driver-coverage` as the
 machine-enforced gate for release readiness.
 
-Current driver-gap roadmap for the full manifest:
-
-1. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
-   assertions for customer, owner, accountant, same-owner, and different-owner
-   actor pairs.
+Current driver-gap roadmap for the full manifest is empty.
 
 ## Matrix Evidence Required
 

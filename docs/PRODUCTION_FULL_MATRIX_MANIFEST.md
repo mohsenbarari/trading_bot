@@ -90,7 +90,7 @@ implemented production driver. The current implemented command plan covers:
   `missing_public_offer_id`, and `cleanup_scope_violation`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`1715` command-plannable scenarios with these drivers:
+`5555` command-plannable scenarios with these drivers:
 
 - `228` market behavior scenarios using the comprehensive CLM market matrix
   with production confirmation and exact synthetic cleanup;
@@ -113,13 +113,19 @@ With the current manifest count of `5555`, selecting the whole manifest yields
 - `320` short/medium outage user-to-user base/stress scenarios using a composed
   probe: dual-role trade correctness plus targeted join delivery-policy
   assertions with a separate synthetic prefix.
+- `3840` customer/accountant actor-pair base/stress scenarios using composed
+  orthogonal coverage: targeted join validates customer, owner, accountant,
+  same-owner, different-owner, and counterparty-privacy behavior; dual-role
+  validates the requested shape, stress family, and surface behavior with
+  standard users.
 
-It intentionally does not yet implement production execution drivers for
-customer/accountant actor pairs in the base/stress layers. Those must remain
-visible as `driver_gaps` and cannot be treated as passed.
+All manifest rows are now command-plannable, so `--require-full-driver-coverage`
+is expected to pass for the whole manifest.
 The short/medium outage driver is not a real production network-cut rehearsal;
 it validates the policy with synthetic delivery timing and must not be described
 as proof that firewall or sync-worker outage controls are safe.
+The customer/accountant actor driver is orthogonal composed coverage; it is not
+a single combined customer stress transaction.
 The execution-plan output also includes `driver_gap_summary.by_driver_gap_bucket`
 and `driver_gap_roadmap`, which group the raw gap reasons into implementation
 buckets sorted from easier to harder.
@@ -138,9 +144,7 @@ an incomplete driver set cannot be mistaken for a complete pass. For intentional
 small rehearsals, apply filters first; the gate should pass only when every
 selected scenario is command-plannable.
 
-Current full-manifest gap buckets are expected to be:
-
-- `customer_accountant_actor_driver`: `3840`
+Current full-manifest gap buckets are expected to be empty.
 
 ## Schema
 
