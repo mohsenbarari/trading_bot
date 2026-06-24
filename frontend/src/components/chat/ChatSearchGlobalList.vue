@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { type Conversation } from '../../types/chat'
 import { formatIranDate, formatIranTime, isTodayInIran } from '../../utils/iranTime'
+import CustomerNameWithBadge from '../CustomerNameWithBadge.vue'
 
 const props = defineProps<{
   searchResults: any[]
@@ -27,9 +27,22 @@ function formatTime(dateStr: string) {
 function getOtherUserInfo(msg: any) {
   const otherId = msg.sender_id === props.currentUserId ? msg.receiver_id : msg.sender_id
   const conv = props.conversations.find(c => c.other_user_id === otherId)
+  if (conv) {
+    return {
+      name: conv.other_user_name,
+      isDeleted: conv.other_user_is_deleted,
+      isCustomer: conv.chat_role_kind === 'customer',
+    }
+  }
+  const customerName = typeof msg.sender?.customer_management_name === 'string'
+    ? msg.sender.customer_management_name.trim()
+    : ''
   return {
-      name: conv ? conv.other_user_name : (msg.sender_id === props.currentUserId ? 'ناشناس' : (msg.sender_name || msg.sender?.customer_management_name || msg.sender?.account_name || 'ناشناس')),
-      isDeleted: conv ? conv.other_user_is_deleted : false
+      name: msg.sender_id === props.currentUserId
+        ? 'ناشناس'
+        : (customerName || msg.sender_name || msg.sender?.account_name || 'ناشناس'),
+      isDeleted: false,
+      isCustomer: Boolean(customerName),
   }
 }
 
@@ -69,7 +82,12 @@ function highlightText(text: string | undefined) {
       <div class="conv-content">
         <div class="conv-header">
           <span class="conv-name">
-            {{ getOtherUserInfo(msg).name }}
+            <CustomerNameWithBadge
+              v-if="getOtherUserInfo(msg).isCustomer"
+              :name="getOtherUserInfo(msg).name"
+              compact
+            />
+            <template v-else>{{ getOtherUserInfo(msg).name }}</template>
             <span v-if="getOtherUserInfo(msg).isDeleted" class="deleted-badge-list">غیرفعال</span>
           </span>
           <span class="conv-time">

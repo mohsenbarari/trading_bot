@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { apiFetch } from '../utils/auth';
 import LoadingSkeleton from './LoadingSkeleton.vue';
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import { Search, X, ChevronLeft } from 'lucide-vue-next';
 
 const props = defineProps<{
@@ -109,7 +110,14 @@ onMounted(fetchUsers);
               {{ getUserDisplayName(user)[0] || '?' }}
             </div>
             <div class="user-details">
-              <span class="user-name">{{ getUserDisplayName(user) }}</span>
+              <span class="user-name">
+                <CustomerNameWithBadge
+                  v-if="user.customer_management_name"
+                  :name="getUserDisplayName(user)"
+                  compact
+                />
+                <template v-else>{{ getUserDisplayName(user) }}</template>
+              </span>
               <span class="user-subtext ltr">{{ user.mobile_number }}</span>
             </div>
           </div>

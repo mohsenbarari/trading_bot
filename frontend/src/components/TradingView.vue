@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, onUnmounted, nextTick } from 'vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import OfferPreviewModal from './OfferPreviewModal.vue'
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue'
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useTradingSort } from '../composables/useTradingSort'
 import { resolveTradeParticipantProfileTarget } from '../utils/accountantChatIdentity'
@@ -1000,8 +1001,12 @@ watch(activeTab, (val) => {
               <span class="price">{{ getOfferDisplayPrice(offer).toLocaleString() }}</span>
             </div>
             <div v-if="offer.customer_badge_visible" class="customer-context-row">
-              <span class="customer-context-badge">مشتری</span>
-              <span v-if="offer.customer_management_name" class="customer-context-name">{{ offer.customer_management_name }}</span>
+              <CustomerNameWithBadge
+                v-if="offer.customer_management_name"
+                :name="offer.customer_management_name"
+                compact
+              />
+              <span v-else class="customer-context-badge">مشتری</span>
               <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
             <div v-if="offer.notes" class="offer-notes">
@@ -1142,8 +1147,12 @@ watch(activeTab, (val) => {
             <div v-if="showTradeCustomerContext(trade) && !viewerIsCustomer" class="trade-info-row">
               <span class="info-label">🪪 مشتری:</span>
               <span class="info-value trade-customer-context-value">
-                <span class="customer-context-badge">مشتری</span>
-                <span v-if="trade.customer_context_management_name" class="customer-context-name">{{ trade.customer_context_management_name }}</span>
+                <CustomerNameWithBadge
+                  v-if="trade.customer_context_management_name"
+                  :name="trade.customer_context_management_name"
+                  compact
+                />
+                <span v-else class="customer-context-badge">مشتری</span>
                 <span v-if="trade.customer_context_tier" class="customer-context-tier">{{ getCustomerTierLabel(trade.customer_context_tier) }}</span>
               </span>
             </div>

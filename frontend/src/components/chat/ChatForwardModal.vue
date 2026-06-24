@@ -52,6 +52,7 @@ const isLoading = ref(false)
 const loadError = ref('')
 const allUsers = ref<ForwardUser[]>([])
 const selectedTargets = ref<Map<string, ChatForwardTarget>>(new Map())
+const selectedTargetBadges = ref<Map<string, { kind?: ChatRoleKind | string | null; label?: string | null }>>(new Map())
 const limitFlash = ref(false)
 let fetchSequence = 0
 let limitFlashTimer: ReturnType<typeof setTimeout> | null = null
@@ -78,6 +79,7 @@ function getForwardUserTitle(user: ForwardUser) {
 function getTargetBadge(target: ForwardTargetCandidate) {
   if (target.kind === 'channel') return 'کانال'
   if (target.kind === 'group') return 'گروه'
+  if (target.chatRoleKind === 'customer') return target.chatRoleLabel || 'مشتری'
   if (target.chatRoleLabel) return target.chatRoleLabel
   return target.isConversation ? 'گفتگو' : 'کاربر'
 }
@@ -85,9 +87,9 @@ function getTargetBadge(target: ForwardTargetCandidate) {
 function getTargetBadgeClass(target: ForwardTargetCandidate) {
   if (target.kind === 'channel') return 'kind-channel'
   if (target.kind === 'group') return 'kind-group'
-  if (target.chatRoleLabel) return getChatRoleBadgeClass({
+  if (target.chatRoleKind === 'customer' || target.chatRoleLabel) return getChatRoleBadgeClass({
     chat_role_kind: target.chatRoleKind,
-    chat_role_label: target.chatRoleLabel,
+    chat_role_label: target.chatRoleLabel || (target.chatRoleKind === 'customer' ? 'مشتری' : null),
   })
   return 'kind-user'
 }
@@ -133,6 +135,7 @@ watch(
     if (visible) {
       searchQuery.value = ''
       selectedTargets.value = new Map()
+      selectedTargetBadges.value = new Map()
       limitFlash.value = false
       void loadForwardUsers()
       return
@@ -141,6 +144,7 @@ watch(
     searchQuery.value = ''
     loadError.value = ''
     selectedTargets.value = new Map()
+    selectedTargetBadges.value = new Map()
     limitFlash.value = false
     if (limitFlashTimer) {
       clearTimeout(limitFlashTimer)
@@ -270,8 +274,10 @@ function flashLimit() {
 
 function toggleTarget(target: ForwardTargetCandidate) {
   const next = new Map(selectedTargets.value)
+  const nextBadges = new Map(selectedTargetBadges.value)
   if (next.has(target.key)) {
     next.delete(target.key)
+    nextBadges.delete(target.key)
   } else {
     if (next.size >= MAX_FORWARD_TARGETS) {
       flashLimit()
@@ -283,15 +289,23 @@ function toggleTarget(target: ForwardTargetCandidate) {
       title: target.title,
       subtitle: target.subtitle,
     })
+    nextBadges.set(target.key, {
+      kind: target.chatRoleKind,
+      label: getTargetBadge(target),
+    })
   }
   selectedTargets.value = next
+  selectedTargetBadges.value = nextBadges
 }
 
 function removeSelected(key: string) {
   if (!selectedTargets.value.has(key)) return
   const next = new Map(selectedTargets.value)
+  const nextBadges = new Map(selectedTargetBadges.value)
   next.delete(key)
+  nextBadges.delete(key)
   selectedTargets.value = next
+  selectedTargetBadges.value = nextBadges
 }
 
 function confirmForward() {
@@ -326,6 +340,12 @@ function confirmForward() {
               @click="removeSelected(target.kind + '-' + target.id)"
             >
               <span class="chip-title">{{ target.title }}</span>
+              <span
+                v-if="selectedTargetBadges.get(target.kind + '-' + target.id)?.kind === 'customer'"
+                class="target-chip role-customer selected-chip-role"
+              >
+                {{ selectedTargetBadges.get(target.kind + '-' + target.id)?.label || 'مشتری' }}
+              </span>
               <span class="chip-remove">✕</span>
             </button>
           </div>

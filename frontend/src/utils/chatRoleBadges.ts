@@ -8,15 +8,17 @@ type ChatRoleSource = {
 }
 
 export function getChatRoleBadge(source: ChatRoleSource): ChatUserListRowBadge | null {
-  const label = (source.chat_role_label || '').trim()
-  if (!label) return null
-
   if (source.chat_role_kind === 'accountant') {
+    const label = (source.chat_role_label || '').trim()
+    if (!label) return null
     return { label, tone: 'target' }
   }
   if (source.chat_role_kind === 'customer') {
+    const label = (source.chat_role_label || '').trim() || 'مشتری'
     return { label, tone: 'creator' }
   }
+  const label = (source.chat_role_label || '').trim()
+  if (!label) return null
   return { label, tone: 'member' }
 }
 

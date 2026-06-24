@@ -279,8 +279,9 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    expect(wrapper.findAll('.pending-invitation-card strong').map((node) => node.text())).toEqual(['مشتری ویژه'])
-    const titles = wrapper.findAll('.customer-card h5').map((node) => node.text())
+    expect(wrapper.findAll('.pending-invitation-card .customer-name-with-badge__name').map((node) => node.text())).toEqual(['مشتری ویژه'])
+    expect(wrapper.findAll('.pending-invitation-card .customer-name-with-badge__badge').map((node) => node.text())).toEqual(['مشتری'])
+    const titles = wrapper.findAll('.customer-card h5 .customer-name-with-badge__name').map((node) => node.text())
     expect(titles).toEqual(['مشتری ویژه', 'مشتری منقضی', 'مشتری حذف‌شده'])
     expect(wrapper.text()).toContain('مهلت این دعوت تمام شده و در انتظار همگام سازی وضعیت است.')
     expect(wrapper.text()).not.toContain('این مشتری با @customer18 در سطح 2 فعال است.')
@@ -289,14 +290,14 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(wrapper.text()).toContain('منقضی‌شده')
     expect(wrapper.text()).toContain('حذف‌شده')
 
-    await openCustomerDetail(wrapper, '@customer18')
+    await openCustomerDetail(wrapper)
     await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
     expect(wrapper.text()).toContain('در حال حاضر نشست فعالی برای این مشتری ثبت نشده است.')
     await backToCategories(wrapper)
 
     expect(wrapper.text()).not.toContain('نشست‌های فعال مشتری')
-    expect(wrapper.findAll('.customer-card h5')[0]!.text()).toBe('مشتری ویژه')
+    expect(wrapper.findAll('.customer-card h5 .customer-name-with-badge__name')[0]!.text()).toBe('مشتری ویژه')
     expect(wrapper.text()).toContain('دعوت‌نامه‌های در انتظار')
 
     wrapper.unmount()
@@ -762,7 +763,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     await flushPromises()
     await openRelationsPanel(wrapper)
 
-    await openCustomerDetail(wrapper, '@customer18')
+    await openCustomerDetail(wrapper)
     await openDetailAccordion(wrapper, 'نشست مشتری')
     await flushPromises()
     expect(wrapper.text()).toContain('نشست‌های مشتری در دسترس نیست.')
@@ -790,7 +791,7 @@ describe('OwnerCustomerManagerModal.vue', () => {
     expect(confirmMock).toHaveBeenCalledWith('دعوت مشتری ویژه لغو شود؟')
     expect(wrapper.text()).toContain('لغو دعوت مشتری ناموفق بود.')
     await backToCategories(wrapper)
-    expect(wrapper.findAll('.customer-card h5').map((node) => node.text())).toContain('مشتری ویژه')
+    expect(wrapper.findAll('.customer-card h5 .customer-name-with-badge__name').map((node) => node.text())).toContain('مشتری ویژه')
 
     wrapper.unmount()
   })

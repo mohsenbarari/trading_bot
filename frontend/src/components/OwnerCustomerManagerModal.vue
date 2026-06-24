@@ -24,6 +24,7 @@ import {
   type RelationStatus,
 } from '../composables/useOwnerCustomers'
 import { formatIranDateTime, parseIranDisplayDate } from '../utils/iranTime'
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import HelpPopover from './HelpPopover.vue'
 
 const props = withDefaults(defineProps<{
@@ -950,7 +951,7 @@ onBeforeUnmount(() => {
                 <div class="customer-detail-topbar">
                   <button type="button" class="ghost-btn ghost-btn--inline" @click="backToCustomerList">بازگشت به لیست</button>
                   <div>
-                    <h4>{{ selectedRelation.management_name }}</h4>
+                    <h4><CustomerNameWithBadge :name="selectedRelation.management_name" /></h4>
                     <p>{{ getRelationStateText(selectedRelation) }}</p>
                   </div>
                 </div>
@@ -1211,7 +1212,7 @@ onBeforeUnmount(() => {
                     class="pending-invitation-card"
                   >
                     <div class="pending-invitation-main">
-                      <strong>{{ relation.management_name }}</strong>
+                      <strong><CustomerNameWithBadge :name="relation.management_name" compact /></strong>
                       <p>{{ getRelationStateText(relation) }}</p>
                     </div>
                     <div class="pending-invitation-actions">
@@ -1235,7 +1236,7 @@ onBeforeUnmount(() => {
                     <div class="customer-card-main">
                       <div class="customer-card-title-row">
                         <div class="customer-identity-block">
-                          <h5>{{ relation.management_name }}</h5>
+                          <h5><CustomerNameWithBadge :name="relation.management_name" compact /></h5>
                         </div>
                         <div class="customer-card-head-side">
                           <span class="customer-status-badge" :class="`status-${relation.status}`">{{ statusLabel(relation.status) }}</span>

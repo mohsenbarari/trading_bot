@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MessengerLoadingScreen from './chat/MessengerLoadingScreen.vue'
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue'
 import ChatHeader from './chat/ChatHeader.vue'
 import ChatShell from './chat/containers/ChatShell.vue'
 import ConversationListContainer from './chat/containers/ConversationListContainer.vue'
@@ -4214,7 +4215,14 @@ defineExpose({
               {{ getSeenMemberDisplayName(member).slice(0, 1) }}
             </div>
             <div class="seen-list-copy">
-              <strong>{{ getSeenMemberDisplayName(member) }}</strong>
+              <strong>
+                <CustomerNameWithBadge
+                  v-if="member.customer_management_name"
+                  :name="getSeenMemberDisplayName(member)"
+                  compact
+                />
+                <template v-else>{{ getSeenMemberDisplayName(member) }}</template>
+              </strong>
               <span>{{ formatSeenAt(member.seen_at) }}</span>
             </div>
           </div>

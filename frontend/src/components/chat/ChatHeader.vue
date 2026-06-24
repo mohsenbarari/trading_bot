@@ -39,20 +39,20 @@
                 <span v-else-if="selectedRoomKind === 'group' && !isManagementRoom" class="room-badge-small group">گروه</span>
                 <span v-else-if="isManagementRoom" class="room-badge-small system">مدیریت</span>
                 <span
-                  v-if="selectedRoomKind === 'direct' && selectedChatRoleKind !== 'accountant' && selectedChatRoleLabel"
+                  v-if="selectedRoomKind === 'direct' && selectedChatRoleKind !== 'accountant' && selectedDirectRoleLabel"
                   class="room-badge-small direct-role"
                   :class="selectedChatRoleClass"
                 >
-                  {{ selectedChatRoleLabel }}
+                  {{ selectedDirectRoleLabel }}
                 </span>
                 <span v-if="isDeleted" class="deleted-badge-small">غیرفعال</span>
               </div>
               <span
-                v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedChatRoleLabel"
+                v-if="selectedRoomKind === 'direct' && selectedChatRoleKind === 'accountant' && selectedDirectRoleLabel"
                 class="room-badge-small direct-role"
                 :class="selectedChatRoleClass"
               >
-                {{ selectedChatRoleLabel }}
+                {{ selectedDirectRoleLabel }}
               </span>
               <span class="header-name">{{ selectedUserName }}</span>
             </div>
@@ -299,6 +299,12 @@ const selectedChatRoleClass = computed(() => getChatRoleBadgeClass({
   chat_role_kind: props.selectedChatRoleKind,
   chat_role_label: props.selectedChatRoleLabel,
 }))
+
+const selectedDirectRoleLabel = computed(() => {
+  const label = (props.selectedChatRoleLabel || '').trim()
+  if (label) return label
+  return props.selectedChatRoleKind === 'customer' ? 'مشتری' : ''
+})
 
 const onSearchInput = () => {
   emit('search', internalSearchQuery.value)

@@ -15,6 +15,7 @@ import {
 } from 'lucide-vue-next';
 import LoadingSkeleton from './LoadingSkeleton.vue';
 import HelpPopover from './HelpPopover.vue';
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import UserProfile from './UserProfile.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 import {
@@ -1431,7 +1432,13 @@ function handleHistoryPresetChipChange(value: string) {
         </div>
       </div>
       <div class="header-title">
-         <h2 v-if="profileData">{{ profileDisplayName }}</h2>
+         <h2 v-if="profileData">
+           <CustomerNameWithBadge
+             v-if="customerProfileContext"
+             :name="profileDisplayName"
+           />
+           <template v-else>{{ profileDisplayName }}</template>
+         </h2>
          <h2 v-else-if="isLoading" class="skeleton-text-header">
            <!-- Skeleton for Title -->
            <div class="skeleton-box" style="width: 120px; height: 24px;"></div>
@@ -1473,7 +1480,7 @@ function handleHistoryPresetChipChange(value: string) {
         <div v-if="customerProfileContext" class="customer-context-banner">
           <div class="customer-context-title">پروفایل مشتری</div>
           <p class="customer-context-copy">
-            <span>{{ customerProfileContext.managementName }}</span>
+            <CustomerNameWithBadge :name="customerProfileContext.managementName" compact />
             <span v-if="customerProfileContext.ownerAccountName"> | سرگروه: {{ customerProfileContext.ownerAccountName }}</span>
             <span v-if="showCustomerTierInProfileBanner"> | {{ getCustomerTierLabel(customerProfileContext.customerTier) }}</span>
           </p>
@@ -1670,10 +1677,12 @@ function handleHistoryPresetChipChange(value: string) {
                       class="profile-link-btn public-customer-profile-link customer-profile-link-btn"
                       @click.stop="openOwnerCustomerProfile(relation)"
                     >
-                      <span class="public-customer-link-title">{{ relation.management_name }}</span>
+                      <CustomerNameWithBadge class="public-customer-link-title" :name="relation.management_name" compact />
+                      <span class="public-customer-handle">@{{ relation.customer_account_name }}</span>
                     </button>
                     <template v-else>
-                      <h4>{{ relation.management_name }}</h4>
+                      <h4><CustomerNameWithBadge :name="relation.management_name" compact /></h4>
+                      <span v-if="relation.customer_account_name" class="public-customer-handle">@{{ relation.customer_account_name }}</span>
                     </template>
                   </div>
                   <AppStatusBadge tone="info">{{ getCustomerTierLabel(relation.customer_tier) }}</AppStatusBadge>
@@ -1894,9 +1903,15 @@ function handleHistoryPresetChipChange(value: string) {
                     <div v-if="showTradeCustomerContext(trade) && !shouldHideCustomerTradeRelationshipDetails" class="trade-counterparty">
                       <span class="label">رابطه:</span>
                       <span class="value trade-customer-context-value">
-                        <span class="customer-context-badge">مشتری</span>
-                        <span v-if="getTradeCustomerContextManagementName(trade)">{{ getTradeCustomerContextManagementName(trade) }}</span>
-                        <span v-else-if="getTradeCustomerContextOwnerAccountName(trade)">سرگروه {{ getTradeCustomerContextOwnerAccountName(trade) }}</span>
+                        <CustomerNameWithBadge
+                          v-if="getTradeCustomerContextManagementName(trade)"
+                          :name="getTradeCustomerContextManagementName(trade)"
+                          compact
+                        />
+                        <template v-else>
+                          <span class="customer-context-badge">مشتری</span>
+                          <span v-if="getTradeCustomerContextOwnerAccountName(trade)">سرگروه {{ getTradeCustomerContextOwnerAccountName(trade) }}</span>
+                        </template>
                         <span v-if="getTradeCustomerContextTier(trade)">{{ getCustomerTierLabel(getTradeCustomerContextTier(trade)) }}</span>
                       </span>
                     </div>
@@ -2830,6 +2845,7 @@ function handleHistoryPresetChipChange(value: string) {
 
 .public-accountant-handle,
 .public-customer-handle {
+  display: block;
   margin: 6px 0 0;
   color: var(--ds-text-muted);
   font-size: var(--ds-font-xs);

@@ -25,7 +25,7 @@ const emit = defineEmits<{
       <slot name="leading" />
     </span>
     <span class="ui-list-item__copy">
-      <strong>{{ title }}</strong>
+      <strong><slot name="title">{{ title }}</slot></strong>
       <span v-if="description">{{ description }}</span>
     </span>
     <span v-if="meta || $slots.trailing" class="ui-list-item__trailing">

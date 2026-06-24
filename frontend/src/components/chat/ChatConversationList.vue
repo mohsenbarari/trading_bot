@@ -191,6 +191,12 @@ function getConversationActivityText(conv: Conversation) {
   return ''
 }
 
+function getConversationRoleLabel(conv: Conversation) {
+  const label = (conv.chat_role_label || '').trim()
+  if (label) return label
+  return conv.chat_role_kind === 'customer' ? 'مشتری' : ''
+}
+
 const conversationRows = computed<ConversationRowVm[]>(() => {
   return displayedConversations.value.map((conv) => {
     const isRoom = isRoomConversation(conv)
@@ -606,11 +612,11 @@ onBeforeUnmount(() => {
                     <div class="conv-name-row">
                       <span class="conv-name">{{ row.conv.other_user_name }}</span>
                       <span
-                        v-if="!row.isRoom && row.conv.chat_role_label"
+                        v-if="!row.isRoom && getConversationRoleLabel(row.conv)"
                         class="conv-role-badge"
                         :class="getChatRoleBadgeClass(row.conv)"
                       >
-                        {{ row.conv.chat_role_label }}
+                        {{ getConversationRoleLabel(row.conv) }}
                       </span>
                       <span
                         v-if="!row.isRoom && row.conv.chat_role_kind === 'accountant' && row.conv.chat_accountant_owner_label"

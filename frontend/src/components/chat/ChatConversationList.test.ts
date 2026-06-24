@@ -98,6 +98,35 @@ describe('ChatConversationList.vue', () => {
     expect(discardBackStateMock).toHaveBeenCalledTimes(1)
   })
 
+  it('shows the customer badge for direct conversations when the role label is missing', async () => {
+    const ChatConversationList = (await import('./ChatConversationList.vue')).default
+    const customerConversation = makeConversation({
+      other_user_name: 'مشتری بازار تهران',
+      chat_role_kind: 'customer',
+      chat_role_label: null,
+    })
+    const wrapper = mount(ChatConversationList, {
+      props: {
+        conversations: [customerConversation],
+        selectedUserId: null,
+        typingUsers: {},
+        apiBaseUrl: '',
+      },
+      global: {
+        directives: {
+          ripple: {},
+        },
+        stubs: {
+          teleport: true,
+          transition: false,
+        },
+      },
+    })
+
+    expect(wrapper.get('.conv-name').text()).toBe('مشتری بازار تهران')
+    expect(wrapper.get('.conv-role-badge').text()).toBe('مشتری')
+  })
+
   it('shows optional-channel specific menu actions without direct delete actions', async () => {
     const ChatConversationList = (await import('./ChatConversationList.vue')).default
     const optionalChannel = makeConversation({

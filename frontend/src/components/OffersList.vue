@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { Search, Loader2 } from 'lucide-vue-next';
 import { apiFetch } from '../utils/auth';
 import { createHttpErrorFromResponse, getUserFacingErrorMessage } from '../utils/httpErrorPolicy';
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import TradeLotSuggestionAlert from './TradeLotSuggestionAlert.vue';
 
 interface TradeLotSuggestionState {
@@ -526,8 +527,12 @@ async function cancelOwnOffer(offerId: number) {
               <span class="price">{{ getDisplayedOfferPrice(offer) ? getDisplayedOfferPrice(offer).toLocaleString() : '---' }}</span>
             </div>
             <div v-if="offer.customer_badge_visible" class="customer-context-row">
-              <span class="customer-context-badge">مشتری</span>
-              <span v-if="offer.customer_management_name" class="customer-context-name">{{ offer.customer_management_name }}</span>
+              <CustomerNameWithBadge
+                v-if="offer.customer_management_name"
+                :name="offer.customer_management_name"
+                compact
+              />
+              <span v-else class="customer-context-badge">مشتری</span>
               <span v-if="offer.customer_tier" class="customer-context-tier">{{ getCustomerTierLabel(offer.customer_tier) }}</span>
             </div>
             <p v-if="offer.notes" class="offer-notes">

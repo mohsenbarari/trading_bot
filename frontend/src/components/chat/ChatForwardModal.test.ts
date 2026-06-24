@@ -62,4 +62,27 @@ describe('ChatForwardModal.vue', () => {
       }],
     ]])
   })
+
+  it('shows the customer badge for forward targets and selected customer chips without a backend label', async () => {
+    chatForwardModalMocks.apiFetchJson.mockResolvedValue([
+      {
+        id: 91,
+        account_name: 'customer91',
+        full_name: null,
+        mobile_number: '09125555555',
+        chat_role_kind: 'customer',
+        chat_role_label: null,
+        customer_management_name: 'مشتری بازار تهران',
+      },
+    ])
+
+    const wrapper = mountForwardModal()
+    await flushPromises()
+
+    expect(wrapper.get('.forward-target-item .target-chip.role-customer').text()).toBe('مشتری')
+
+    await wrapper.find('.forward-target-item').trigger('click')
+
+    expect(wrapper.get('.selected-chip .target-chip.role-customer').text()).toBe('مشتری')
+  })
 })

@@ -21,6 +21,7 @@ import { apiFetch } from '../utils/auth';
 import { useUserProfileTiming } from '../composables/useUserProfileTiming';
 import { isCachedMiddleManager } from '../utils/adminAccess';
 import { formatIranDateTime } from '../utils/iranTime';
+import CustomerNameWithBadge from './CustomerNameWithBadge.vue';
 import HelpPopover from './HelpPopover.vue';
 import JalaliDatePicker from './JalaliDatePicker.vue';
 
@@ -733,7 +734,14 @@ async function deleteUser() {
     <div class="profile-details">
       <div class="detail-item">
         <span class="label">نام کاربری</span>
-        <span class="value">{{ userDisplayName }}</span>
+        <span class="value">
+          <CustomerNameWithBadge
+            v-if="showCustomerContext && user.customer_management_name"
+            :name="userDisplayName"
+            compact
+          />
+          <template v-else>{{ userDisplayName }}</template>
+        </span>
       </div>
       <div class="detail-item">
         <span class="label">موبایل</span>
@@ -790,7 +798,14 @@ async function deleteUser() {
             <h4><Users :size="17" aria-hidden="true" /> اطلاعات مشتری</h4>
             <div class="limit-item">
               <span>نام مدیریتی:</span>
-              <span>{{ user.customer_management_name || '---' }}</span>
+              <span>
+                <CustomerNameWithBadge
+                  v-if="user.customer_management_name"
+                  :name="user.customer_management_name"
+                  compact
+                />
+                <template v-else>---</template>
+              </span>
             </div>
             <div class="limit-item">
               <span>مالک:</span>

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { BarChart3, Clock, Copy, ReceiptText, ShieldAlert, UserPlus, Users } from 'lucide-vue-next'
 import OwnerCustomerManagerModal from '../components/OwnerCustomerManagerModal.vue'
+import CustomerNameWithBadge from '../components/CustomerNameWithBadge.vue'
 import { WorkspaceNotice, WorkspaceSection, WorkspaceShell } from '../components/workspace'
 import {
   AppActionCard,
@@ -673,7 +674,7 @@ onBeforeUnmount(() => {
           <div v-else-if="activeRelation" class="customer-detail-shell">
             <header class="customer-detail-header">
               <div>
-                <h2>{{ getRelationTitle(activeRelation) }}</h2>
+                <h2><CustomerNameWithBadge :name="getRelationTitle(activeRelation)" /></h2>
                 <p>{{ getRelationDescription(activeRelation) }}</p>
               </div>
               <div class="customer-detail-badges">
@@ -691,7 +692,14 @@ onBeforeUnmount(() => {
             <div v-if="detailTab === 'profile'" class="customer-detail-grid">
               <AppCard>
                 <span class="customer-meta-label">نام مدیریتی</span>
-                <strong>{{ activeRelation.management_name || 'ثبت نشده' }}</strong>
+                <strong>
+                  <CustomerNameWithBadge
+                    v-if="activeRelation.management_name"
+                    :name="activeRelation.management_name"
+                    compact
+                  />
+                  <template v-else>ثبت نشده</template>
+                </strong>
               </AppCard>
               <AppCard>
                 <span class="customer-meta-label">شماره موبایل</span>
@@ -983,7 +991,7 @@ onBeforeUnmount(() => {
                   >
                     <div class="customer-pending-card__header">
                       <div>
-                        <strong>{{ getRelationTitle(relation) }}</strong>
+                        <strong><CustomerNameWithBadge :name="getRelationTitle(relation)" compact /></strong>
                         <p>{{ getRelationDescription(relation) }}</p>
                       </div>
                       <AppStatusBadge tone="warning">دعوت</AppStatusBadge>
@@ -1017,6 +1025,9 @@ onBeforeUnmount(() => {
                     interactive
                     @select="openRelation(relation.id)"
                   >
+                    <template #title>
+                      <CustomerNameWithBadge :name="getRelationTitle(relation)" compact />
+                    </template>
                     <template #leading>
                       <Users :size="18" />
                     </template>
@@ -1043,7 +1054,7 @@ onBeforeUnmount(() => {
               />
               <AppCard v-else tone="primary" class="customer-selection-card">
                 <span class="customer-meta-label">مشتری انتخاب‌شده</span>
-                <strong>{{ getRelationTitle(activeRelation) }}</strong>
+                <strong><CustomerNameWithBadge :name="getRelationTitle(activeRelation)" compact /></strong>
                 <p>{{ getRelationDescription(activeRelation) }}</p>
                 <div class="customer-inline-actions">
                   <AppButton size="sm" variant="secondary" @click="openRelation(activeRelation.id)">
