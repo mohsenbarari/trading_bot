@@ -22,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from api.routers.sync import TABLE_ORDER
+from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.db import AsyncSessionLocal
 
 
@@ -109,7 +110,11 @@ async def inspect_state() -> dict[str, object]:
         **classification,
         "signals": signals,
         "baseline": baseline,
-        "shared_tables": [table for table, _order in sorted(TABLE_ORDER.items(), key=lambda item: item[1])],
+        "shared_tables": [
+            table
+            for table, _order in sorted(TABLE_ORDER.items(), key=lambda item: item[1])
+            if (entry := get_sync_registry_entry(table)) is not None and entry.policy == SyncPolicy.SYNC
+        ],
     }
 
 

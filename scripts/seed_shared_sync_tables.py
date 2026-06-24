@@ -33,9 +33,14 @@ from api.routers.sync import TABLE_ORDER, get_model_class
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.sync_registry import SyncPolicy, get_sync_registry_entry
 
 
-DEFAULT_TABLES = tuple(table for table, _order in sorted(TABLE_ORDER.items(), key=lambda item: item[1]))
+DEFAULT_TABLES = tuple(
+    table
+    for table, _order in sorted(TABLE_ORDER.items(), key=lambda item: item[1])
+    if (entry := get_sync_registry_entry(table)) is not None and entry.policy == SyncPolicy.SYNC
+)
 
 SKIP_COLUMNS_BY_TABLE = {
     "users": {"avatar_file_id"},
