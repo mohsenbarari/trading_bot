@@ -983,6 +983,9 @@ async def run_matrix(args: argparse.Namespace) -> int:
 
     worker.setup_event_listeners()
     prefix = args.prefix
+    worker.assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
+    if worker.is_production_runtime():
+        worker.allow_production_cleanup_hard_delete(prefix, allow_flag=bool(args.allow_production_cleanup))
     await worker.cleanup_prefix(prefix)
     commodity_id, commodity_name = await worker.resolve_commodity()
     attempts_per_scenario = scenario_attempt_count(args.attempts_per_scenario)
@@ -1046,8 +1049,12 @@ async def run_matrix(args: argparse.Namespace) -> int:
         "cleanup": cleanup_report,
         "reports": scenario_reports,
         "production_gate": {
-            "status": "blocked_until_owner_staging_validation",
-            "reason": "Comprehensive load evidence is staging-only and does not authorize production by itself.",
+            "status": "production_execution_allowed" if args.allow_production_execution else "blocked_until_owner_staging_validation",
+            "reason": (
+                "Production execution was explicitly confirmed for the guarded full-matrix run."
+                if args.allow_production_execution
+                else "Comprehensive load evidence is staging-only and does not authorize production by itself."
+            ),
         },
     }
     if args.output:
@@ -1079,6 +1086,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--keep-data", action="store_true")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow production market matrix fixture creation only with the production full-matrix confirmation env.",
+    )
+    parser.add_argument(
+        "--allow-production-cleanup",
+        action="store_true",
+        help="Allow production market matrix cleanup only with the cleanup confirmation env.",
+    )
     return parser
 
 

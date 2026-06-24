@@ -34,6 +34,8 @@ EXECUTION_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
 EXECUTION_CONFIRM_VALUE = "execute-production-full-matrix"
 PREFLIGHT_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM"
 PREFLIGHT_CONFIRM_VALUE = "run-production-preflight"
+CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
+CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 IRAN_HOST = "root@87.107.3.22"
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 
@@ -408,6 +410,8 @@ def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
         if record.get("case_id") in NEGATIVE_GUARD_EXECUTABLE_CASES:
             return None
         return "negative_business_guard_case_driver_not_implemented"
+    if section == "market_behavior":
+        return None
     if section not in {"production_base_trade_shape", "production_stress_overlay"}:
         return f"{section}_production_driver_not_implemented"
     if record.get("policy_supported") is not True:
@@ -1025,6 +1029,95 @@ def unsupported_policy_scenario_commands(
     }
 
 
+def market_behavior_scenario_commands(
+    record: dict[str, Any],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+    user_count: int,
+    attempts_per_scenario: int,
+    target_rps: float,
+    telegram_ratio: float,
+) -> dict[str, Any]:
+    manifest_id = str(record.get("manifest_id") or "market_behavior")
+    source_scenario_id = str(record.get("source_scenario_id") or "")
+    scenario_run_prefix = scenario_prefix(prefix, manifest_id)
+    scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
+    remote_dir = f"/tmp/{scenario_run_prefix}market-behavior"
+    offer_origin = str(record.get("offer_origin") or "")
+    request_surface = str(record.get("request_surface") or "")
+    expire_surface = str(record.get("expire_surface") or "")
+    server = "foreign" if "telegram" in {offer_origin, request_surface, expire_surface} or offer_origin == "bot" else "iran"
+    production_env = {
+        EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
+        "TRADING_BOT_SERVICE": "load_runner",
+        "BOT_TOKEN": "",
+    }
+    commands = [
+        host_mkdir_command(
+            f"ensure_{server}_market_behavior_artifact_dir",
+            server=server,
+            path=remote_dir,
+        ),
+        container_python_command(
+            "run_market_behavior_scenario",
+            server=server,
+            python_args=[
+                "scripts/run_bot_webapp_comprehensive_load_matrix.py",
+                "--prefix",
+                scenario_run_prefix,
+                "--scenario",
+                source_scenario_id,
+                "--user-count",
+                str(user_count),
+                "--attempts-per-scenario",
+                str(attempts_per_scenario),
+                "--target-rps",
+                str(target_rps),
+                "--telegram-ratio",
+                str(telegram_ratio),
+                "--write-max-concurrency",
+                "24",
+                "--output",
+                f"{remote_dir}/market-behavior.result.json",
+                "--check",
+                "--allow-production-execution",
+                "--allow-production-cleanup",
+            ],
+            env=production_env,
+            timeout_seconds=1200,
+        ),
+    ]
+    return {
+        "manifest_id": manifest_id,
+        "status": "planned",
+        "driver": "market_behavior_comprehensive_probe",
+        "scenario_prefix": scenario_run_prefix,
+        "artifact_dir": str(scenario_dir),
+        "remote_artifact_dir": remote_dir,
+        "server": server,
+        "source_scenario_id": source_scenario_id,
+        "family": record.get("family"),
+        "offer_origin": record.get("offer_origin"),
+        "request_surface": record.get("request_surface"),
+        "expire_surface": record.get("expire_surface"),
+        "terminal_state": record.get("terminal_state"),
+        "commands": [command_payload(command) for command in commands],
+        "execution_groups": [
+            {
+                "name": "run_market_behavior",
+                "mode": "sequential",
+                "commands": [command_payload(command) for command in commands],
+            },
+        ],
+        "safety_note": (
+            "The market behavior probe uses exact synthetic prefixes, production confirmation, cleanup confirmation, "
+            "fake Telegram transport, and patched external side effects."
+        ),
+    }
+
+
 def build_execution_plan(
     records: list[dict[str, Any]],
     *,
@@ -1050,7 +1143,19 @@ def build_execution_plan(
                 }
             )
             continue
-        if record.get("section") == "negative_business_guard":
+        if record.get("section") == "market_behavior":
+            scenario_plans.append(
+                market_behavior_scenario_commands(
+                    record,
+                    prefix=prefix,
+                    artifact_dir=artifact_dir,
+                    user_count=user_count,
+                    attempts_per_scenario=hot_offer_requests,
+                    target_rps=target_rps,
+                    telegram_ratio=telegram_ratio,
+                )
+            )
+        elif record.get("section") == "negative_business_guard":
             scenario_plans.append(
                 negative_guard_scenario_commands(
                     record,

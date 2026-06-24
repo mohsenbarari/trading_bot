@@ -257,10 +257,11 @@ Current execution-plan limitation:
   `missing_public_offer_id`, and `cleanup_scope_violation`;
 - all `576` policy-unsupported base trade-shape scenarios are command-plannable
   through explicit tier2 no-partial-mutation probes;
-- current whole-manifest command-plannable count: `759` of `5555` scenarios;
+- all `228` market behavior scenarios are command-plannable through the
+  comprehensive CLM market matrix with production confirmation and exact cleanup;
+- current whole-manifest command-plannable count: `987` of `5555` scenarios;
 - not implemented yet: customer/accountant actor-pair production drivers,
-  short/medium outage orchestration, targeted delivery join production driver,
-  and market behavior production driver.
+  short/medium outage orchestration, and targeted delivery join production driver.
 
 Do not treat a run as a full production pass while `driver_gap_count > 0`.
 Those gaps are intentionally emitted and summarized by section and reason so
@@ -269,15 +270,13 @@ machine-enforced gate for release readiness.
 
 Current driver-gap roadmap for the full manifest:
 
-1. `market_behavior_driver`: `228` gaps. Port the comprehensive market matrix
-   to production-safe two-server execution.
-2. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
+1. `delivery_contract_driver`: `204` gaps. Assert delivery receipts and
    notifications after real trade evidence exists.
-3. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
+2. `targeted_join_driver`: `204` gaps. Convert the targeted join matrix from
    staging/patched execution to production two-server execution.
-4. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
+3. `outage_orchestration_driver`: `320` gaps. Add reversible short/medium
    outage control with distinct expected outcomes.
-5. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
+4. `customer_accountant_actor_driver`: `3840` gaps. Add production fixtures and
    assertions for customer, owner, accountant, same-owner, and different-owner
    actor pairs.
 
