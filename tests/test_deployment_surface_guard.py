@@ -121,14 +121,33 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
         staging_services = active_compose_services(staging_compose)
+        staging_app = staging_services["app"]
         staging_bot = staging_services["bot"]
         staging_bot_block = compose_service_block(staging_compose, "bot")
 
+        self.assertEqual(staging_app["environment"]["SERVER_MODE"], "iran")
         self.assertIn("profiles:", staging_bot_block)
         self.assertIn("- staging-bot", staging_bot_block)
         self.assertEqual(staging_bot["environment"]["TRADING_BOT_SERVICE"], "bot")
         self.assertEqual(staging_bot["environment"]["SERVER_MODE"], "foreign")
         self.assertIn("run_bot.py", str(staging_bot.get("command", "")))
+
+    def test_staging_bot_profile_includes_internal_foreign_api(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
+        staging_services = active_compose_services(staging_compose)
+        foreign_app = staging_services["foreign_app"]
+        foreign_app_block = compose_service_block(staging_compose, "foreign_app")
+        staging_bot_block = compose_service_block(staging_compose, "bot")
+
+        self.assertIn("profiles:", foreign_app_block)
+        self.assertIn("- staging-bot", foreign_app_block)
+        self.assertEqual(foreign_app["environment"]["TRADING_BOT_SERVICE"], "api")
+        self.assertEqual(foreign_app["environment"]["SERVER_MODE"], "foreign")
+        self.assertIn("uvicorn main:app", str(foreign_app.get("command", "")))
+        self.assertNotIn("ports:", foreign_app_block)
+        self.assertIn("foreign_app:", staging_bot_block)
+        self.assertIn("condition: service_healthy", staging_bot_block)
 
 
 if __name__ == "__main__":

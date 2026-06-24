@@ -69,6 +69,10 @@ return 0
 """
 
 
+def _background_leader_lock_key() -> str:
+    return f"{BACKGROUND_LEADER_LOCK_KEY}:{normalize_server(settings.server_mode)}"
+
+
 def _is_loopback_client(client_host: str | None) -> bool:
     if not client_host:
         return False
@@ -151,6 +155,7 @@ async def _cancel_background_jobs(tasks: list[asyncio.Task]) -> None:
 
 async def _run_background_leader(redis_client) -> None:
     token = f"{os.getpid()}:{uuid.uuid4().hex}"
+    lock_key = _background_leader_lock_key()
     ttl_seconds = max(30, int(settings.background_leader_lock_ttl_seconds))
     refresh_seconds = max(5, int(settings.background_leader_lock_refresh_seconds))
     retry_seconds = max(1, int(settings.background_leader_retry_seconds))
@@ -160,7 +165,7 @@ async def _run_background_leader(redis_client) -> None:
         acquired_lock = False
         try:
             acquired = await redis_client.set(
-                BACKGROUND_LEADER_LOCK_KEY,
+                lock_key,
                 token,
                 ex=ttl_seconds,
                 nx=True,
@@ -177,6 +182,7 @@ async def _run_background_leader(redis_client) -> None:
                     "event": "background.leader.acquired",
                     "worker_pid": os.getpid(),
                     "job_names": [name for name, _ in jobs],
+                    "lock_key": lock_key,
                     "lock_ttl_seconds": ttl_seconds,
                 },
             )
@@ -187,7 +193,7 @@ async def _run_background_leader(redis_client) -> None:
                 refreshed = await redis_client.eval(
                     BACKGROUND_LEADER_REFRESH_SCRIPT,
                     1,
-                    BACKGROUND_LEADER_LOCK_KEY,
+                    lock_key,
                     token,
                     ttl_seconds,
                 )
@@ -197,6 +203,7 @@ async def _run_background_leader(redis_client) -> None:
                         extra={
                             "event": "background.leader.lost",
                             "worker_pid": os.getpid(),
+                            "lock_key": lock_key,
                         },
                     )
                     break
@@ -217,7 +224,7 @@ async def _run_background_leader(redis_client) -> None:
                     await redis_client.eval(
                         BACKGROUND_LEADER_RELEASE_SCRIPT,
                         1,
-                        BACKGROUND_LEADER_LOCK_KEY,
+                        lock_key,
                         token,
                     )
                 except Exception:

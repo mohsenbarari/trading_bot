@@ -48,6 +48,12 @@ STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
 STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
+default_staging_internal_foreign_server_url() {
+    if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
+        printf 'http://foreign_app:8000\n'
+    fi
+}
+STAGING_INTERNAL_FOREIGN_SERVER_URL="${STAGING_INTERNAL_FOREIGN_SERVER_URL:-$(default_staging_internal_foreign_server_url)}"
 STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_BASIC_AUTH_FILE="${STAGING_BASIC_AUTH_FILE:-/etc/nginx/.htpasswd-trading-bot-staging}"
@@ -139,7 +145,7 @@ ensure_env() {
     umask 077
     cat >"$ENV_FILE" <<EOF
 ENVIRONMENT=staging
-SERVER_MODE=foreign
+SERVER_MODE=iran
 FRONTEND_URL=$STAGING_FRONTEND_URL
 BOT_USERNAME=staging_bot_placeholder
 
@@ -184,6 +190,8 @@ ensure_runtime_env_values() {
     ensure_env
     set_env_value FRONTEND_URL "$STAGING_FRONTEND_URL"
     set_env_value IRAN_SERVER_URL "$STAGING_INTERNAL_IRAN_SERVER_URL"
+    set_env_value FOREIGN_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
+    set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
     set_env_value EXTRA_CORS_ORIGINS "$STAGING_FRONTEND_URL"
     set_env_value STAGING_LOG_OTP_CODES true
     ensure_web_push_env
@@ -355,23 +363,36 @@ health() {
     printf '\n'
 }
 
-wait_for_app_health() {
+wait_for_service_health() {
+    local service="$1"
+    local label="$2"
     local attempts="${STAGING_HEALTH_WAIT_ATTEMPTS:-30}"
     local delay="${STAGING_HEALTH_WAIT_DELAY:-2}"
     local cid status
-    log "waiting for staging app health"
-    cid="$(compose ps -q app)"
-    [[ -n "$cid" ]] || die "staging app container was not created"
+    log "waiting for $label health"
+    cid="$(compose ps -q "$service")"
+    [[ -n "$cid" ]] || die "$label container was not created"
     for _ in $(seq 1 "$attempts"); do
         status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
         if [[ "$status" == "healthy" || "$status" == "running" ]]; then
-            log "staging app is $status"
+            log "$label is $status"
             return
         fi
         sleep "$delay"
     done
     compose ps
-    die "staging app did not become healthy"
+    die "$label did not become healthy"
+}
+
+wait_for_app_health() {
+    wait_for_service_health app "staging app"
+}
+
+wait_for_foreign_app_health_if_enabled() {
+    if [[ "$STAGING_ENABLE_BOT" != "1" ]]; then
+        return
+    fi
+    wait_for_service_health foreign_app "staging foreign app"
 }
 
 check() {
@@ -399,6 +420,7 @@ deploy() {
         compose up -d --build
     fi
     wait_for_app_health
+    wait_for_foreign_app_health_if_enabled
     install_nginx
     compose ps
     health

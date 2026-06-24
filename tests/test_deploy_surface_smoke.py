@@ -126,6 +126,8 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('process.env.FRONTEND_BUILD_OUT_DIR', vite_config)
         self.assertIn('FRONTEND_BUILD_OUT_DIR="$STAGING_FRONTEND_DIST_DIR"', staging_script)
         self.assertIn('STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"', staging_script)
+        self.assertIn('STAGING_INTERNAL_FOREIGN_SERVER_URL', staging_script)
+        self.assertIn('set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
         self.assertIn('realpath -m "$STAGING_FRONTEND_DIST_DIR"', staging_script)
         self.assertIn('staging frontend dist must not share production mini_app_dist', staging_script)
         self.assertIn('root __FRONTEND_ROOT__;', staging_nginx)

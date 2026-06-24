@@ -91,9 +91,15 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-        self.assertEqual(redis_client.set_calls[0][0][0], main.BACKGROUND_LEADER_LOCK_KEY)
+        self.assertEqual(redis_client.set_calls[0][0][0], f"{main.BACKGROUND_LEADER_LOCK_KEY}:foreign")
         self.assertTrue(redis_client.set_calls[0][1]["nx"])
         self.assertTrue(any(call[0] == main.BACKGROUND_LEADER_RELEASE_SCRIPT for call in redis_client.eval_calls))
+
+    async def test_background_leader_lock_key_is_scoped_by_server_mode(self):
+        with patch.object(main.settings, "server_mode", "iran"):
+            self.assertEqual(main._background_leader_lock_key(), f"{main.BACKGROUND_LEADER_LOCK_KEY}:iran")
+        with patch.object(main.settings, "server_mode", "foreign"):
+            self.assertEqual(main._background_leader_lock_key(), f"{main.BACKGROUND_LEADER_LOCK_KEY}:foreign")
 
     async def test_lifespan_rolls_back_mandatory_rollout_failures(self):
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())

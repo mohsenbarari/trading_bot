@@ -16,7 +16,16 @@ Defaults:
   `mini_app_dist`
 
 Staging is intentionally isolated from production sync. The default compose file
-does not start `sync_worker`, and `.env.staging` leaves peer URLs empty.
+does not start `sync_worker`, and `.env.staging` leaves peer URLs empty unless
+the staging bot profile is enabled.
+
+When `STAGING_ENABLE_BOT=1` is used, compose also starts an internal-only
+`foreign_app` API service with `SERVER_MODE=foreign`. The public WebApp `app`
+service stays `SERVER_MODE=iran`, and `scripts/deploy_staging.sh` points
+`FOREIGN_SERVER_URL` and `GERMANY_SERVER_URL` to `http://foreign_app:8000`.
+This lets WebApp requests against bot-owned offers forward to the foreign
+authority and lets foreign-owned offers expire through the foreign expiry loop,
+without exposing the foreign WebApp/API surface publicly.
 
 The public staging site is protected with Basic Auth. Credentials are generated
 in `.env.staging` as `STAGING_BASIC_AUTH_USER` and
