@@ -154,12 +154,20 @@ It includes:
 - isolation status and enable commands,
 - pre-run dry-run cleanup commands for both servers,
 - static scenario catalog commands,
+- the human-readable scenario catalog at
+  `docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md`,
 - post-run dry-run and hard-delete cleanup commands for both servers,
 - isolation disable command.
 
 The plan generator does not mutate production. It is intentionally separate
 from the eventual executor so the operator can inspect the commands before any
 production action.
+
+The scenario catalog is part of the safety contract. A production full matrix
+that does not cover the catalog axes, policy-unsupported negative cases,
+outage classes, customer-chain paths, notification recipients, and cleanup
+verification must be treated as incomplete even if the load runner exits
+successfully.
 
 ## Matrix Evidence Required
 
@@ -192,4 +200,3 @@ Stop the run and keep isolation enabled if any of these happens:
 - sync backlog grows without recovery,
 - offers or trades are created without the run prefix,
 - hard-delete verification does not return zero prefixed rows after cleanup.
-

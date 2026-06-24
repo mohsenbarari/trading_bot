@@ -16,6 +16,7 @@ DEFAULT_ARTIFACT_ROOT = Path("/tmp/trading-bot-production-full-matrix")
 IRAN_HOST = "root@87.107.3.22"
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 PRODUCTION_CLEANUP_CONFIRM = "hard-delete-test-data"
+SCENARIO_CATALOG_PATH = Path("docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md")
 
 
 class PlanError(ValueError):
@@ -111,6 +112,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "telegram_ratio": args.telegram_ratio,
             "write_max_concurrency": args.write_max_concurrency,
         },
+        "scenario_catalog": {
+            "path": str(SCENARIO_CATALOG_PATH),
+            "status": "required_before_execution",
+            "baseline_counts": {
+                "market_behavior_scenarios": 228,
+                "notification_delivery_scenarios": 204,
+                "targeted_join_policy_supported": 108,
+                "targeted_join_policy_unsupported": 96,
+            },
+        },
         "safety": {
             "allowed_prefixes": list(ALLOWED_PREFIXES),
             "cleanup_requires_confirmation_env": "PRODUCTION_TEST_CLEANUP_CONFIRM",
@@ -177,6 +188,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "name": "catalog_dry_run",
                 "commands": [
+                    shell_join(["test", "-f", str(SCENARIO_CATALOG_PATH)]),
+                    shell_join(["cp", str(SCENARIO_CATALOG_PATH), str(artifact_dir / "scenario-catalog.md")]),
                     f"{shell_join(['python3', 'scripts/run_bot_webapp_comprehensive_load_matrix.py', '--prefix', prefix, '--list'])} > {shlex.quote(str(artifact_dir / 'comprehensive-catalog.json'))}",
                     shell_join(
                         [
@@ -294,4 +307,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -42,9 +42,24 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
         plan = build_plan(self.make_args())
         by_name = {stage["name"]: stage for stage in plan["stages"]}
 
+        self.assertEqual(
+            plan["scenario_catalog"]["path"],
+            "docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md",
+        )
+        self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["market_behavior_scenarios"], 228)
+        self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["notification_delivery_scenarios"], 204)
+        self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["targeted_join_policy_supported"], 108)
+        self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["targeted_join_policy_unsupported"], 96)
         self.assertIn("enable_isolation", by_name)
         self.assertIn("pre_run_cleanup_dry_run", by_name)
+        self.assertIn("catalog_dry_run", by_name)
         self.assertIn("hard_delete_cleanup", by_name)
+        self.assertTrue(
+            any(
+                "docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md" in item
+                for item in by_name["catalog_dry_run"]["commands"]
+            )
+        )
         self.assertEqual(len(by_name["pre_run_cleanup_dry_run"]["commands"]), 2)
         self.assertTrue(any("docker compose exec -T app" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"]))
         self.assertTrue(any("ssh root@87.107.3.22" in item for item in by_name["pre_run_cleanup_dry_run"]["commands"]))
