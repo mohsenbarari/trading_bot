@@ -339,6 +339,33 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(webapp_plan["attempts"][0]["idempotency_key"], webapp_plan["attempts"][1]["idempotency_key"])
         self.assertTrue(str(webapp_plan["attempts"][0]["idempotency_key"]).startswith("load:duplicate-re"))
 
+    def test_dual_role_worker_plan_can_force_telegram_duplicate_replay_attempts(self):
+        users = [worker.LoadUserRef(user_id=index, telegram_id=9000 + index) for index in range(1, 6)]
+
+        plans = worker.build_dual_role_worker_plans(
+            run_id="run-1c",
+            prefix="probe-",
+            users=users,
+            owner_user_id=1,
+            offer_id=42,
+            offer_public_id="offer-public-42",
+            total_requests=2,
+            telegram_ratio=0.6,
+            target_rps=600.0,
+            amount=5,
+            barrier_epoch=1234.5,
+            request_surface="telegram",
+            idempotency_mode="duplicate_replay",
+        )
+
+        telegram_plan = worker.validate_role_plan_artifact(plans["telegram_foreign"])
+        webapp_plan = worker.validate_role_plan_artifact(plans["webapp_iran"])
+        self.assertEqual(webapp_plan["attempts"], [])
+        self.assertEqual(len(telegram_plan["attempts"]), 2)
+        self.assertEqual(telegram_plan["attempts"][0]["user_id"], telegram_plan["attempts"][1]["user_id"])
+        self.assertEqual(telegram_plan["attempts"][0]["telegram_id"], telegram_plan["attempts"][1]["telegram_id"])
+        self.assertEqual(telegram_plan["attempts"][0]["idempotency_key"], telegram_plan["attempts"][1]["idempotency_key"])
+
     def test_role_plan_artifact_validation_fails_closed(self):
         users = [worker.LoadUserRef(user_id=1, telegram_id=9001), worker.LoadUserRef(user_id=2, telegram_id=9002)]
         plans = worker.build_dual_role_worker_plans(

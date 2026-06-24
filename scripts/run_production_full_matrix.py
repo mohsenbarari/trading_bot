@@ -51,7 +51,7 @@ DUAL_ROLE_EXECUTABLE_STRESS_FAMILIES = {
     "hot_retail_same_lot_concurrent",
     "hot_retail_mixed_lot_concurrent",
 }
-DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES = {"webapp"}
+DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES = {"telegram", "webapp"}
 
 NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "own_offer_request",

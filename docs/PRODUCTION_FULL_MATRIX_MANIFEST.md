@@ -66,8 +66,9 @@ implemented production driver. The current implemented command plan covers:
   families;
 - all four WebApp/Telegram surface quadrants inside that scope;
 - both offer types and all current offer shapes;
-- `12` WebApp-request duplicate idempotency replay scenarios across WebApp and
-  Telegram offer origins, both offer types, and all current offer shapes;
+- `24` duplicate replay scenarios across WebApp and Telegram request surfaces,
+  WebApp and Telegram offer origins, both offer types, and all current offer
+  shapes;
 - ten production negative-guard probes on Iran/WebApp:
   `own_offer_request`, `invalid_request_amount`, `retail_lot_unavailable`,
   `already_completed_offer`, `manually_expired_offer`, `time_expired_offer`,
@@ -75,11 +76,11 @@ implemented production driver. The current implemented command plan covers:
   `watch_role_market_action`, and `accountant_market_action`.
 
 With the current manifest count of `5555`, selecting the whole manifest yields
-`86` command-plannable scenarios with these drivers:
+`98` command-plannable scenarios with these drivers:
 
 - `24` base user-to-user stable trade-shape scenarios;
 - `40` user-to-user stable hot-offer stress overlay scenarios;
-- `12` user-to-user stable WebApp duplicate replay stress overlay scenarios;
+- `24` user-to-user stable duplicate replay stress overlay scenarios;
 - `10` negative business-guard scenarios with explicit no-partial-mutation
   assertions.
 
@@ -109,7 +110,7 @@ selected scenario is command-plannable.
 Current full-manifest gap buckets are expected to be:
 
 - `negative_guard_driver`: `589`
-- `specialized_user_stress_driver`: `84`
+- `specialized_user_stress_driver`: `72`
 - `market_behavior_driver`: `228`
 - `delivery_contract_driver`: `204`
 - `targeted_join_driver`: `204`
