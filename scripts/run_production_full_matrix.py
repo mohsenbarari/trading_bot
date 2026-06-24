@@ -75,6 +75,8 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "daily_request_limit_exceeded",
     "active_commodity_limit_exceeded",
     "remote_authority_unavailable",
+    "bad_internal_signature",
+    "wrong_authoritative_server",
 }
 
 DUAL_ROLE_ROLE_BY_SERVER = {

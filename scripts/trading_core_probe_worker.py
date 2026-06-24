@@ -131,6 +131,8 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "daily_request_limit_exceeded",
     "active_commodity_limit_exceeded",
     "remote_authority_unavailable",
+    "bad_internal_signature",
+    "wrong_authoritative_server",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -2462,6 +2464,85 @@ async def set_offer_home_server_for_negative_guard(offer_id: int, home_server: s
         await db.commit()
 
 
+async def load_offer_public_id_for_negative_guard(offer_id: int) -> str:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, int(offer_id))
+        if offer is None:
+            raise TradingProbeError(f"negative guard offer {offer_id} disappeared before public id read")
+        public_id = str(getattr(offer, "offer_public_id", "") or "").strip()
+        if not public_id:
+            raise TradingProbeError(f"negative guard offer {offer_id} has no offer_public_id")
+        return public_id
+
+
+class NegativeGuardRawRequest:
+    def __init__(self, *, body: bytes, headers: Mapping[str, str]) -> None:
+        self._body = body
+        self.headers = dict(headers)
+
+    async def body(self) -> bytes:
+        return self._body
+
+
+async def execute_internal_trade_for_negative_guard(
+    *,
+    offer_id: int,
+    offer_public_id: str,
+    responder_user_id: int,
+    source_server: str,
+    headers: Mapping[str, str],
+    body: bytes = b"{}",
+    patch_signature_result: bool | None = None,
+    phase_details: dict[str, Any] | None = None,
+) -> str:
+    internal_data = trades_router.InternalTradeExecuteRequest(
+        offer_id=int(offer_id),
+        offer_public_id=offer_public_id,
+        quantity=5,
+        responder_user_id=int(responder_user_id),
+        edge_received_at=datetime.utcnow(),
+        source_surface="webapp",
+        source_server=source_server,
+        idempotency_key=f"{offer_public_id}:negative-internal",
+    )
+    started = time.perf_counter()
+
+    async def _call() -> Any:
+        async with AsyncSessionLocal() as db:
+            return await trades_router.execute_trade_internal(
+                internal_data=internal_data,
+                background_tasks=BackgroundTasks(),
+                raw_request=NegativeGuardRawRequest(body=body, headers=headers),
+                db=db,
+            )
+
+    try:
+        if patch_signature_result is None:
+            result = await _call()
+        else:
+            previous_verify = trades_router.verify_internal_signature
+            trades_router.verify_internal_signature = lambda *_args, **_kwargs: bool(patch_signature_result)
+            try:
+                result = await _call()
+            finally:
+                trades_router.verify_internal_signature = previous_verify
+    except HTTPException as exc:
+        status_code = int(exc.status_code or 500)
+        if phase_details is not None:
+            phase_details["business_latency_ms"] = round((time.perf_counter() - started) * 1000.0, 3)
+            phase_details["internal_execute_ms"] = phase_details["business_latency_ms"]
+            phase_details["exception"] = f"HTTPException {status_code}"
+            phase_details["http_status_code"] = status_code
+            phase_details["http_detail"] = str(exc.detail)
+        return "rejected" if status_code < 500 else "error"
+
+    if phase_details is not None:
+        phase_details["business_latency_ms"] = round((time.perf_counter() - started) * 1000.0, 3)
+        phase_details["internal_execute_ms"] = phase_details["business_latency_ms"]
+        phase_details["result_type"] = type(result).__name__
+    return "success"
+
+
 async def execute_offer_creation_for_user(
     *,
     user_id: int,
@@ -3110,6 +3191,8 @@ def assert_negative_guard_evidence(
         "daily_request_limit_exceeded",
         "active_commodity_limit_exceeded",
         "remote_authority_unavailable",
+        "bad_internal_signature",
+        "wrong_authoritative_server",
     }
     expired_offer_cases = {
         "already_completed_offer",
@@ -3188,6 +3271,17 @@ def assert_negative_guard_evidence(
         status_code = int(remote_forward.get("status_code") or 0)
         if status_code < 500:
             failures.append(f"{case_id} expected remote forward status >=500, got {status_code}")
+    expected_internal_status = {
+        "bad_internal_signature": 401,
+        "wrong_authoritative_server": 409,
+    }.get(case_id)
+    if expected_internal_status is not None:
+        internal_execute = dict(evidence.get("internal_execute") or {})
+        status_code = int(internal_execute.get("status_code") or 0)
+        if status_code != expected_internal_status:
+            failures.append(
+                f"{case_id} expected internal execute status {expected_internal_status}, got {status_code}"
+            )
     return failures
 
 
@@ -3580,6 +3674,47 @@ async def run_negative_guard_case(
                     "target_server": remote_home_server,
                     "status_code": details.get("json_response_status_code"),
                     "detail": details.get("json_response_detail"),
+                }
+                phase_details.append(details)
+            elif normalized_case_id in {"bad_internal_signature", "wrong_authoritative_server"}:
+                local_server = current_server()
+                remote_source_server = SERVER_FOREIGN if local_server == SERVER_IRAN else SERVER_IRAN
+                offer_public_id = await load_offer_public_id_for_negative_guard(offer_id)
+                details = {"source_server": remote_source_server}
+                headers = {
+                    "x-timestamp": "1",
+                    "x-signature": "bad-signature",
+                    "x-api-key": "bad-key",
+                    "x-source-server": remote_source_server,
+                }
+                patch_signature_result: bool | None = None
+                if normalized_case_id == "wrong_authoritative_server":
+                    await set_offer_home_server_for_negative_guard(offer_id, remote_source_server)
+                    patch_signature_result = True
+                    headers = {
+                        "x-timestamp": "1",
+                        "x-signature": "valid-for-negative-guard",
+                        "x-api-key": "valid-for-negative-guard",
+                        "x-source-server": remote_source_server,
+                    }
+                    details["offer_home_server"] = remote_source_server
+                statuses.append(
+                    await execute_internal_trade_for_negative_guard(
+                        offer_id=offer_id,
+                        offer_public_id=offer_public_id,
+                        responder_user_id=responder_a.user_id,
+                        source_server=remote_source_server,
+                        headers=headers,
+                        body=b'{"negative_guard":"internal"}',
+                        patch_signature_result=patch_signature_result,
+                        phase_details=details,
+                    )
+                )
+                extra_evidence["internal_execute"] = {
+                    "status_code": details.get("http_status_code"),
+                    "detail": details.get("http_detail"),
+                    "source_server": remote_source_server,
+                    "offer_home_server": details.get("offer_home_server"),
                 }
                 phase_details.append(details)
             else:

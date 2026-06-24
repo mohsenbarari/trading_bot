@@ -1584,6 +1584,47 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertTrue(any("expected remote forward status >=500" in failure for failure in failures))
 
+    def test_negative_guard_evidence_acceptance_for_internal_endpoint_rejects(self):
+        for case_id, status_code in (
+            ("bad_internal_signature", 401),
+            ("wrong_authoritative_server", 409),
+        ):
+            with self.subTest(case_id=case_id):
+                evidence = {
+                    "offer": {"remaining_quantity": 5},
+                    "trade_count": 0,
+                    "offer_request_count": 0,
+                    "offer_request_status_counts": {},
+                    "offer_request_public_failure_code_counts": {},
+                    "internal_execute": {"status_code": status_code},
+                }
+
+                failures = worker.assert_negative_guard_evidence(
+                    case_id=case_id,
+                    status_sequence=["rejected"],
+                    evidence=evidence,
+                )
+
+                self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_detects_wrong_internal_endpoint_status(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+            "internal_execute": {"status_code": 200},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="bad_internal_signature",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertTrue(any("expected internal execute status 401" in failure for failure in failures))
+
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {
             "offer": {"remaining_quantity": 5},
