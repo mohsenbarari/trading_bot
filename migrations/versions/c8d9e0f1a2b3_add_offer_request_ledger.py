@@ -7,6 +7,7 @@ Create Date: 2026-06-19 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "c8d9e0f1a2b3"
@@ -15,7 +16,7 @@ branch_labels = None
 depends_on = None
 
 
-offer_request_status = sa.Enum(
+offer_request_status = postgresql.ENUM(
     "received",
     "authorized",
     "rejected_business_rule",
@@ -26,16 +27,21 @@ offer_request_status = sa.Enum(
     "duplicate_replay",
     "failed_internal",
     name="offerrequeststatus",
+    create_type=False,
 )
-offer_request_source_surface = sa.Enum(
+offer_request_source_surface = postgresql.ENUM(
     "webapp",
     "telegram_bot",
     "internal_forward",
     name="offerrequestsourcesurface",
+    create_type=False,
 )
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    offer_request_status.create(bind, checkfirst=True)
+    offer_request_source_surface.create(bind, checkfirst=True)
     op.create_table(
         "offer_requests",
         sa.Column("id", sa.Integer(), nullable=False),

@@ -39,6 +39,17 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         self.assertTrue(result.stdout.strip(), msg='Expected at least one Alembic head revision')
 
+    def test_offer_request_ledger_enum_migration_is_idempotent(self):
+        migration = (REPO_ROOT / 'migrations/versions/c8d9e0f1a2b3_add_offer_request_ledger.py').read_text(
+            encoding='utf-8'
+        )
+
+        self.assertIn('from sqlalchemy.dialects import postgresql', migration)
+        self.assertGreaterEqual(migration.count('postgresql.ENUM('), 2)
+        self.assertGreaterEqual(migration.count('create_type=False'), 2)
+        self.assertIn('offer_request_status.create(bind, checkfirst=True)', migration)
+        self.assertIn('offer_request_source_surface.create(bind, checkfirst=True)', migration)
+
 
 if __name__ == '__main__':
     unittest.main()
