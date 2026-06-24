@@ -71,6 +71,9 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "accountant_market_action",
     "tier2_offer_creation",
     "tier2_telegram_request",
+    "daily_trade_limit_exceeded",
+    "daily_request_limit_exceeded",
+    "active_commodity_limit_exceeded",
 }
 
 DUAL_ROLE_ROLE_BY_SERVER = {

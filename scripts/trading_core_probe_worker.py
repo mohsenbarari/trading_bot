@@ -127,6 +127,9 @@ NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "accountant_market_action",
     "tier2_offer_creation",
     "tier2_telegram_request",
+    "daily_trade_limit_exceeded",
+    "daily_request_limit_exceeded",
+    "active_commodity_limit_exceeded",
 }
 LIKE_ESCAPE = "\\"
 BROAD_CLEANUP_PREFIXES = {
@@ -3093,6 +3096,9 @@ def assert_negative_guard_evidence(
         "accountant_market_action",
         "tier2_offer_creation",
         "tier2_telegram_request",
+        "daily_trade_limit_exceeded",
+        "daily_request_limit_exceeded",
+        "active_commodity_limit_exceeded",
     }
     expired_offer_cases = {
         "already_completed_offer",
@@ -3157,7 +3163,7 @@ def assert_negative_guard_evidence(
     completed_requests = int(status_counts.get(OfferRequestStatus.COMPLETED_TRADE.value, 0) or 0)
     if case_id != "already_completed_offer" and completed_requests:
         failures.append(f"{case_id} unexpectedly has completed offer_request rows: {status_counts}")
-    if case_id == "tier2_offer_creation":
+    if case_id in {"tier2_offer_creation", "daily_request_limit_exceeded", "active_commodity_limit_exceeded"}:
         creation = dict(evidence.get("offer_creation") or {})
         created_offer_delta = int(creation.get("created_offer_delta") or 0)
         if created_offer_delta != 0:
@@ -3461,6 +3467,69 @@ async def run_negative_guard_case(
                     "second_answer_text": details.get("second_answer_text"),
                     "second_answer_alert": details.get("second_answer_alert"),
                     "telegram_update_count": details.get("telegram_update_count"),
+                }
+                phase_details.append(details)
+            elif normalized_case_id == "daily_trade_limit_exceeded":
+                await update_synthetic_user_for_negative_guard(
+                    responder_a.user_id,
+                    limitations_expire_at=datetime.utcnow() + timedelta(days=1),
+                    max_daily_trades=1,
+                    trades_count=1,
+                    max_active_commodities=None,
+                    max_daily_requests=None,
+                )
+                details = {}
+                statuses.append(
+                    await execute_webapp_trade_for_user(
+                        user_id=responder_a.user_id,
+                        offer_id=offer_id,
+                        quantity=5,
+                        idempotency_key=f"{prefix}{normalized_case_id}-reject",
+                        phase_details=details,
+                    )
+                )
+                phase_details.append(details)
+            elif normalized_case_id in {"daily_request_limit_exceeded", "active_commodity_limit_exceeded"}:
+                if normalized_case_id == "daily_request_limit_exceeded":
+                    await update_synthetic_user_for_negative_guard(
+                        responder_a.user_id,
+                        limitations_expire_at=datetime.utcnow() + timedelta(days=1),
+                        max_daily_trades=None,
+                        trades_count=0,
+                        max_active_commodities=None,
+                        commodities_traded_count=0,
+                        max_daily_requests=1,
+                        channel_messages_count=1,
+                    )
+                else:
+                    await update_synthetic_user_for_negative_guard(
+                        responder_a.user_id,
+                        limitations_expire_at=datetime.utcnow() + timedelta(days=1),
+                        max_daily_trades=None,
+                        trades_count=0,
+                        max_active_commodities=1,
+                        commodities_traded_count=1,
+                        max_daily_requests=None,
+                        channel_messages_count=0,
+                    )
+                before_offer_count = await count_offers_for_user(responder_a.user_id)
+                details = {"before_offer_count": before_offer_count}
+                statuses.append(
+                    await execute_offer_creation_for_user(
+                        user_id=responder_a.user_id,
+                        commodity_id=commodity_id,
+                        prefix=prefix,
+                        index=2,
+                        phase_details=details,
+                    )
+                )
+                after_offer_count = await count_offers_for_user(responder_a.user_id)
+                details["after_offer_count"] = after_offer_count
+                details["created_offer_delta"] = after_offer_count - before_offer_count
+                extra_evidence["offer_creation"] = {
+                    "before_offer_count": before_offer_count,
+                    "after_offer_count": after_offer_count,
+                    "created_offer_delta": after_offer_count - before_offer_count,
                 }
                 phase_details.append(details)
             else:

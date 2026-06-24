@@ -1507,6 +1507,47 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         self.assertTrue(any("expected a bot callback denial answer" in failure for failure in failures))
 
+    def test_negative_guard_evidence_acceptance_for_limit_pre_ledger_rejects(self):
+        evidence = {
+            "offer": {"remaining_quantity": 5},
+            "trade_count": 0,
+            "offer_request_count": 0,
+            "offer_request_status_counts": {},
+            "offer_request_public_failure_code_counts": {},
+        }
+
+        failures = worker.assert_negative_guard_evidence(
+            case_id="daily_trade_limit_exceeded",
+            status_sequence=["rejected"],
+            evidence=evidence,
+        )
+
+        self.assertEqual(failures, [])
+
+    def test_negative_guard_evidence_acceptance_for_offer_creation_limit_rejects(self):
+        for case_id in ("daily_request_limit_exceeded", "active_commodity_limit_exceeded"):
+            with self.subTest(case_id=case_id):
+                evidence = {
+                    "offer": {"remaining_quantity": 5},
+                    "trade_count": 0,
+                    "offer_request_count": 0,
+                    "offer_request_status_counts": {},
+                    "offer_request_public_failure_code_counts": {},
+                    "offer_creation": {
+                        "before_offer_count": 0,
+                        "after_offer_count": 0,
+                        "created_offer_delta": 0,
+                    },
+                }
+
+                failures = worker.assert_negative_guard_evidence(
+                    case_id=case_id,
+                    status_sequence=["rejected"],
+                    evidence=evidence,
+                )
+
+                self.assertEqual(failures, [])
+
     def test_negative_guard_evidence_acceptance_for_expired_offer_reject(self):
         evidence = {
             "offer": {"remaining_quantity": 5},
