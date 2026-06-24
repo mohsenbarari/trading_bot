@@ -461,6 +461,18 @@ use layered coverage:
   - notification delivery for owners, accountants, direct users, linked
     Telegram users, and WebApp-only users.
 
+The layered coverage is materialized by the generated manifest:
+
+```bash
+make production-full-matrix-manifest ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --check --output /tmp/production-full-matrix-manifest.json"
+```
+
+The manifest expands the base trade-shape cross-product into 1224 records,
+preserves the 96 policy-unsupported cases as negative evidence, and adds
+stress overlays for high-contention, duplicate replay, expiry races, and reads
+during writes. The eventual production runner must consume that manifest and
+report by `manifest_id`.
+
 If the owner requests a literal full Cartesian run, the executor must print the
 planned count before starting and must require a second confirmation because
 the matrix size grows quickly:

@@ -17,6 +17,7 @@ IRAN_HOST = "root@87.107.3.22"
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 PRODUCTION_CLEANUP_CONFIRM = "hard-delete-test-data"
 SCENARIO_CATALOG_PATH = Path("docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md")
+SCENARIO_MANIFEST_DOC_PATH = Path("docs/PRODUCTION_FULL_MATRIX_MANIFEST.md")
 
 
 class PlanError(ValueError):
@@ -114,6 +115,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "scenario_catalog": {
             "path": str(SCENARIO_CATALOG_PATH),
+            "manifest_contract_path": str(SCENARIO_MANIFEST_DOC_PATH),
+            "manifest_generator": "scripts/build_production_full_matrix_manifest.py",
             "status": "required_before_execution",
             "baseline_counts": {
                 "market_behavior_scenarios": 228,
@@ -189,7 +192,20 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "name": "catalog_dry_run",
                 "commands": [
                     shell_join(["test", "-f", str(SCENARIO_CATALOG_PATH)]),
+                    shell_join(["test", "-f", str(SCENARIO_MANIFEST_DOC_PATH)]),
                     shell_join(["cp", str(SCENARIO_CATALOG_PATH), str(artifact_dir / "scenario-catalog.md")]),
+                    shell_join(["cp", str(SCENARIO_MANIFEST_DOC_PATH), str(artifact_dir / "manifest-contract.md")]),
+                    shell_join(
+                        [
+                            "python3",
+                            "scripts/build_production_full_matrix_manifest.py",
+                            "--prefix",
+                            prefix,
+                            "--check",
+                            "--output",
+                            str(artifact_dir / "production-full-matrix-manifest.json"),
+                        ]
+                    ),
                     f"{shell_join(['python3', 'scripts/run_bot_webapp_comprehensive_load_matrix.py', '--prefix', prefix, '--list'])} > {shlex.quote(str(artifact_dir / 'comprehensive-catalog.json'))}",
                     shell_join(
                         [

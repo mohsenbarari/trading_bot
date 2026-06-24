@@ -156,6 +156,10 @@ It includes:
 - static scenario catalog commands,
 - the human-readable scenario catalog at
   `docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md`,
+- the runner-consumable manifest contract at
+  `docs/PRODUCTION_FULL_MATRIX_MANIFEST.md`,
+- the generated JSON manifest artifact from
+  `scripts/build_production_full_matrix_manifest.py`,
 - post-run dry-run and hard-delete cleanup commands for both servers,
 - isolation disable command.
 
@@ -169,6 +173,11 @@ outage classes, customer-chain paths, notification recipients, and cleanup
 verification must be treated as incomplete even if the load runner exits
 successfully.
 
+The generated manifest is the bridge between the catalog and the eventual
+runner. The runner must consume the manifest and report pass/fail/skip evidence
+by `manifest_id`; hand-built scenario lists are not enough for a production
+full matrix.
+
 ## Matrix Evidence Required
 
 The production run should collect at least:
@@ -180,6 +189,7 @@ The production run should collect at least:
 - sync health before and after,
 - pre-run cleanup dry-run artifacts,
 - scenario catalog artifacts,
+- generated production full-matrix manifest artifact,
 - execution artifacts for offer creation, concurrent trade, non-concurrent
   trade, manual expiry, time expiry, history/detail views, and trade delivery,
 - post-run cleanup dry-run artifacts,

@@ -46,6 +46,14 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
             plan["scenario_catalog"]["path"],
             "docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md",
         )
+        self.assertEqual(
+            plan["scenario_catalog"]["manifest_contract_path"],
+            "docs/PRODUCTION_FULL_MATRIX_MANIFEST.md",
+        )
+        self.assertEqual(
+            plan["scenario_catalog"]["manifest_generator"],
+            "scripts/build_production_full_matrix_manifest.py",
+        )
         self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["market_behavior_scenarios"], 228)
         self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["notification_delivery_scenarios"], 204)
         self.assertEqual(plan["scenario_catalog"]["baseline_counts"]["targeted_join_policy_supported"], 108)
@@ -57,6 +65,12 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md" in item
+                for item in by_name["catalog_dry_run"]["commands"]
+            )
+        )
+        self.assertTrue(
+            any(
+                "scripts/build_production_full_matrix_manifest.py" in item
                 for item in by_name["catalog_dry_run"]["commands"]
             )
         )
