@@ -214,6 +214,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("run-unsupported-policy-case", rendered)
         self.assertIn("--unsupported-reason", rendered)
         self.assertIn("tier2_cannot_use_telegram_request", rendered)
+        self.assertIn("--allow-production-cleanup", rendered)
+        self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertNotIn("--skip-initial-cleanup", rendered)
 
     def test_execution_plan_builds_market_behavior_probe_commands(self):
         plan = runner.build_plan(
@@ -445,7 +448,10 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         rendered = json.dumps(scenario_plan, ensure_ascii=False)
         self.assertIn("--patch-external-side-effects", rendered)
         self.assertIn("--allow-production-execution", rendered)
+        self.assertIn("--allow-production-cleanup", rendered)
         self.assertIn("PRODUCTION_FULL_MATRIX_CONFIRM", rendered)
+        self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
 
     def test_execution_plan_builds_customer_actor_composed_commands(self):

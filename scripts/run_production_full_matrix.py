@@ -605,8 +605,8 @@ def dual_role_scenario_commands(
         str(record.get("offer_type") or "sell"),
         "--barrier-delay-seconds",
         "25",
-        "--skip-initial-cleanup",
         "--allow-production-execution",
+        "--allow-production-cleanup",
     ]
     if family:
         prepare_args.extend(["--scenario-name", family])
@@ -618,6 +618,7 @@ def dual_role_scenario_commands(
 
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
         "BOT_TOKEN": "",
     }
@@ -1337,6 +1338,7 @@ def unsupported_policy_scenario_commands(
 
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
         "BOT_TOKEN": "",
     }
@@ -1383,8 +1385,8 @@ def unsupported_policy_scenario_commands(
             reason,
             "--output",
             f"{remote_dir}/{output_name}",
-            "--skip-initial-cleanup",
             "--allow-production-execution",
+            "--allow-production-cleanup",
         ]
         if not profile["is_wholesale"]:
             python_args.append("--retail")
