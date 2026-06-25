@@ -321,6 +321,57 @@ def host_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
     raise RunnerError(f"unsupported server for mkdir command: {server}")
 
 
+def container_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
+    if server == "foreign":
+        return CommandSpec(
+            name=name,
+            args=["docker", "compose", "exec", "-T", "app", "mkdir", "-p", path],
+            timeout_seconds=30,
+        )
+    if server == "iran":
+        remote_parts = ["docker-compose", "exec", "-T", "app", "mkdir", "-p", path]
+        return CommandSpec(
+            name=name,
+            args=["ssh", IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {shell_join(remote_parts)}"],
+            timeout_seconds=30,
+        )
+    raise RunnerError(f"unsupported server for container mkdir command: {server}")
+
+
+def copy_container_to_host_command(name: str, *, server: str, path: str) -> CommandSpec:
+    if server == "foreign":
+        return CommandSpec(
+            name=name,
+            args=["docker", "cp", f"trading_bot_app:{path}", path],
+            timeout_seconds=60,
+        )
+    if server == "iran":
+        remote_parts = ["docker", "cp", f"trading_bot_app:{path}", path]
+        return CommandSpec(
+            name=name,
+            args=["ssh", IRAN_HOST, shell_join(remote_parts)],
+            timeout_seconds=60,
+        )
+    raise RunnerError(f"unsupported server for container-to-host copy: {server}")
+
+
+def copy_host_to_container_command(name: str, *, server: str, path: str) -> CommandSpec:
+    if server == "foreign":
+        return CommandSpec(
+            name=name,
+            args=["docker", "cp", path, f"trading_bot_app:{path}"],
+            timeout_seconds=60,
+        )
+    if server == "iran":
+        remote_parts = ["docker", "cp", path, f"trading_bot_app:{path}"]
+        return CommandSpec(
+            name=name,
+            args=["ssh", IRAN_HOST, shell_join(remote_parts)],
+            timeout_seconds=60,
+        )
+    raise RunnerError(f"unsupported server for host-to-container copy: {server}")
+
+
 def copy_between_servers_command(name: str, *, source_server: str, target_server: str, path: str) -> CommandSpec:
     if source_server == target_server:
         return CommandSpec(name=name, args=["test", "-f", path], timeout_seconds=30)
@@ -535,6 +586,17 @@ def dual_role_scenario_commands(
     scenario_run_prefix = scenario_prefix(prefix, manifest_id)
     scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
     remote_dir = f"/tmp/{scenario_run_prefix}dual-role"
+    prepare_path = f"{remote_dir}/prepare.json"
+    telegram_plan_path = f"{remote_dir}/telegram_foreign.plan.json"
+    webapp_plan_path = f"{remote_dir}/webapp_iran.plan.json"
+    telegram_result_path = f"{remote_dir}/telegram_foreign.result.json"
+    webapp_result_path = f"{remote_dir}/webapp_iran.result.json"
+    merged_result_path = f"{remote_dir}/merged.result.json"
+    final_result_path = f"{remote_dir}/final.json"
+    manual_expiry_result_path = f"{remote_dir}/manual_expiry.result.json"
+    time_expiry_result_path = f"{remote_dir}/time_expiry.result.json"
+    read_telegram_result_path = f"{remote_dir}/read_telegram.result.json"
+    read_webapp_result_path = f"{remote_dir}/read_webapp.result.json"
     offer_surface = str(record.get("offer_surface") or "")
     offer_origin = "bot" if offer_surface == "telegram" else "webapp"
     offer_home_server = str(record.get("offer_home_server") or "")
@@ -643,17 +705,52 @@ def dual_role_scenario_commands(
             server="iran",
             path=remote_dir,
         ),
+        copy_container_to_host_command(
+            "publish_prepare_from_offer_home_container",
+            server=offer_home_server,
+            path=prepare_path,
+        ),
+        copy_container_to_host_command(
+            "publish_telegram_role_plan_from_offer_home_container",
+            server=offer_home_server,
+            path=telegram_plan_path,
+        ),
+        copy_container_to_host_command(
+            "publish_webapp_role_plan_from_offer_home_container",
+            server=offer_home_server,
+            path=webapp_plan_path,
+        ),
         copy_between_servers_command(
             "distribute_telegram_role_plan",
             source_server=offer_home_server,
             target_server="foreign",
-            path=f"{remote_dir}/telegram_foreign.plan.json",
+            path=telegram_plan_path,
         ),
         copy_between_servers_command(
             "distribute_webapp_role_plan",
             source_server=offer_home_server,
             target_server="iran",
-            path=f"{remote_dir}/webapp_iran.plan.json",
+            path=webapp_plan_path,
+        ),
+        container_mkdir_command(
+            "ensure_foreign_container_artifact_dir",
+            server="foreign",
+            path=remote_dir,
+        ),
+        container_mkdir_command(
+            "ensure_iran_container_artifact_dir",
+            server="iran",
+            path=remote_dir,
+        ),
+        copy_host_to_container_command(
+            "install_telegram_role_plan_in_foreign_container",
+            server="foreign",
+            path=telegram_plan_path,
+        ),
+        copy_host_to_container_command(
+            "install_webapp_role_plan_in_iran_container",
+            server="iran",
+            path=webapp_plan_path,
         ),
     ]
     if is_read_during_write:
@@ -663,13 +760,23 @@ def dual_role_scenario_commands(
                     "distribute_prepare_to_foreign",
                     source_server=offer_home_server,
                     target_server="foreign",
-                    path=f"{remote_dir}/prepare.json",
+                    path=prepare_path,
                 ),
                 copy_between_servers_command(
                     "distribute_prepare_to_iran",
                     source_server=offer_home_server,
                     target_server="iran",
-                    path=f"{remote_dir}/prepare.json",
+                    path=prepare_path,
+                ),
+                copy_host_to_container_command(
+                    "install_prepare_in_foreign_container",
+                    server="foreign",
+                    path=prepare_path,
+                ),
+                copy_host_to_container_command(
+                    "install_prepare_in_iran_container",
+                    server="iran",
+                    path=prepare_path,
                 ),
             ]
         )
@@ -681,9 +788,9 @@ def dual_role_scenario_commands(
                 "scripts/trading_core_probe_worker.py",
                 "run-role-plan",
                 "--plan",
-                f"{remote_dir}/telegram_foreign.plan.json",
+                telegram_plan_path,
                 "--output",
-                f"{remote_dir}/telegram_foreign.result.json",
+                telegram_result_path,
                 "--patch-external-side-effects",
                 "--allow-production-execution",
             ],
@@ -697,9 +804,9 @@ def dual_role_scenario_commands(
                 "scripts/trading_core_probe_worker.py",
                 "run-role-plan",
                 "--plan",
-                f"{remote_dir}/webapp_iran.plan.json",
+                webapp_plan_path,
                 "--output",
-                f"{remote_dir}/webapp_iran.result.json",
+                webapp_result_path,
                 "--patch-external-side-effects",
                 "--allow-production-execution",
             ],
@@ -716,9 +823,9 @@ def dual_role_scenario_commands(
                     "scripts/trading_core_probe_worker.py",
                     "run-manual-expiry-race",
                     "--prepare",
-                    f"{remote_dir}/prepare.json",
+                    prepare_path,
                     "--output",
-                    f"{remote_dir}/manual_expiry.result.json",
+                    manual_expiry_result_path,
                     "--allow-production-execution",
                 ],
                 env=production_env,
@@ -734,9 +841,9 @@ def dual_role_scenario_commands(
                     "scripts/trading_core_probe_worker.py",
                     "run-time-expiry-race",
                     "--prepare",
-                    f"{remote_dir}/prepare.json",
+                    prepare_path,
                     "--output",
-                    f"{remote_dir}/time_expiry.result.json",
+                    time_expiry_result_path,
                     "--allow-production-execution",
                 ],
                 env=production_env,
@@ -753,11 +860,11 @@ def dual_role_scenario_commands(
                         "scripts/trading_core_probe_worker.py",
                         "run-read-during-write",
                         "--prepare",
-                        f"{remote_dir}/prepare.json",
+                        prepare_path,
                         "--read-surface",
                         "telegram",
                         "--output",
-                        f"{remote_dir}/read_telegram.result.json",
+                        read_telegram_result_path,
                         "--allow-production-execution",
                     ],
                     env=production_env,
@@ -770,11 +877,11 @@ def dual_role_scenario_commands(
                         "scripts/trading_core_probe_worker.py",
                         "run-read-during-write",
                         "--prepare",
-                        f"{remote_dir}/prepare.json",
+                        prepare_path,
                         "--read-surface",
                         "webapp",
                         "--output",
-                        f"{remote_dir}/read_webapp.result.json",
+                        read_webapp_result_path,
                         "--allow-production-execution",
                     ],
                     env=production_env,
@@ -787,55 +894,95 @@ def dual_role_scenario_commands(
         "scripts/trading_core_probe_worker.py",
         "finalize-dual-role-run",
         "--prepare",
-        f"{remote_dir}/prepare.json",
+        prepare_path,
         "--merged-result",
-        f"{remote_dir}/merged.result.json",
+        merged_result_path,
         "--output",
-        f"{remote_dir}/final.json",
+        final_result_path,
         "--check",
     ]
     if is_manual_expire_trade_race:
-        finalize_args.extend(["--manual-expiry-result", f"{remote_dir}/manual_expiry.result.json"])
+        finalize_args.extend(["--manual-expiry-result", manual_expiry_result_path])
     if is_time_expire_trade_race:
-        finalize_args.extend(["--time-expiry-result", f"{remote_dir}/time_expiry.result.json"])
+        finalize_args.extend(["--time-expiry-result", time_expiry_result_path])
     if is_read_during_write:
         finalize_args.extend(
             [
                 "--read-during-write-result",
-                f"{remote_dir}/read_telegram.result.json",
+                read_telegram_result_path,
                 "--read-during-write-result",
-                f"{remote_dir}/read_webapp.result.json",
+                read_webapp_result_path,
             ]
         )
 
     post_role_commands = [
+        copy_container_to_host_command(
+            "publish_telegram_role_result_from_foreign_container",
+            server="foreign",
+            path=telegram_result_path,
+        ),
+        copy_container_to_host_command(
+            "publish_webapp_role_result_from_iran_container",
+            server="iran",
+            path=webapp_result_path,
+        ),
         copy_between_servers_command(
             "collect_telegram_role_result",
             source_server="foreign",
             target_server=offer_home_server,
-            path=f"{remote_dir}/telegram_foreign.result.json",
+            path=telegram_result_path,
         ),
         copy_between_servers_command(
             "collect_webapp_role_result",
             source_server="iran",
             target_server=offer_home_server,
-            path=f"{remote_dir}/webapp_iran.result.json",
+            path=webapp_result_path,
+        ),
+        copy_host_to_container_command(
+            "install_telegram_role_result_in_offer_home_container",
+            server=offer_home_server,
+            path=telegram_result_path,
+        ),
+        copy_host_to_container_command(
+            "install_webapp_role_result_in_offer_home_container",
+            server=offer_home_server,
+            path=webapp_result_path,
         ),
     ]
     if is_read_during_write:
         post_role_commands.extend(
             [
+                copy_container_to_host_command(
+                    "publish_read_telegram_result_from_foreign_container",
+                    server="foreign",
+                    path=read_telegram_result_path,
+                ),
+                copy_container_to_host_command(
+                    "publish_read_webapp_result_from_iran_container",
+                    server="iran",
+                    path=read_webapp_result_path,
+                ),
                 copy_between_servers_command(
                     "collect_read_telegram_result",
                     source_server="foreign",
                     target_server=offer_home_server,
-                    path=f"{remote_dir}/read_telegram.result.json",
+                    path=read_telegram_result_path,
                 ),
                 copy_between_servers_command(
                     "collect_read_webapp_result",
                     source_server="iran",
                     target_server=offer_home_server,
-                    path=f"{remote_dir}/read_webapp.result.json",
+                    path=read_webapp_result_path,
+                ),
+                copy_host_to_container_command(
+                    "install_read_telegram_result_in_offer_home_container",
+                    server=offer_home_server,
+                    path=read_telegram_result_path,
+                ),
+                copy_host_to_container_command(
+                    "install_read_webapp_result_in_offer_home_container",
+                    server=offer_home_server,
+                    path=read_webapp_result_path,
                 ),
             ]
         )
@@ -848,9 +995,9 @@ def dual_role_scenario_commands(
                     "scripts/trading_core_probe_worker.py",
                     "merge-role-results",
                     "--output",
-                    f"{remote_dir}/merged.result.json",
-                    f"{remote_dir}/telegram_foreign.result.json",
-                    f"{remote_dir}/webapp_iran.result.json",
+                    merged_result_path,
+                    telegram_result_path,
+                    webapp_result_path,
                 ],
                 timeout_seconds=120,
             ),
