@@ -4576,10 +4576,13 @@ async def execute_bot_market_view_with_dispatcher(
     *,
     harness: AiogramDispatcherHarness,
     user: LoadUserRef,
+    error_details: list[str] | None = None,
 ) -> str:
     try:
         await harness.feed_private_text(telegram_id=user.telegram_id, text_value="📈 معامله")
-    except Exception:
+    except Exception as exc:
+        if error_details is not None:
+            error_details.append(f"{type(exc).__name__}: {exc}")
         return "error"
     return "success"
 

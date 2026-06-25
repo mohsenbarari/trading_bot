@@ -929,7 +929,11 @@ async def run_scenario(
                     viewer = responder_for_index(users, owner_user_id=owner.user_id, index=index)
                     if scenario.request_surface == "telegram":
                         with override_current_server(SERVER_FOREIGN):
-                            return await worker.execute_bot_market_view_with_dispatcher(harness=harness, user=viewer)
+                            return await worker.execute_bot_market_view_with_dispatcher(
+                                harness=harness,
+                                user=viewer,
+                                error_details=attempt_error_details,
+                            )
                     with override_current_server(SERVER_IRAN):
                         count = await worker.list_active_offers_for_user(user_id=viewer.user_id)
                     return "success" if count >= 1 else "error"
