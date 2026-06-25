@@ -24,7 +24,7 @@ from core.services.bot_access_policy import bot_access_denial_message, evaluate_
 from core.services.block_service import is_trade_blocked_by_principals
 from bot.callbacks import ChannelTradeCallback, ChannelTradePublicCallback
 from api.deps import EffectiveOwnerActor
-from api.routers.trades import TradeCreate, _execute_trade_authoritatively
+from api.routers.trades import TradeCreate, _execute_trade_authoritatively_with_transient_retry
 from core.services.trade_service import (
     build_lot_unavailable_suggestion_payload,
     get_available_trade_amounts,
@@ -469,7 +469,7 @@ async def _execute_confirmed_channel_trade_via_shared_command(
     if callable(expunge_offer):
         expunge_offer(offer)
     try:
-        result = await _execute_trade_authoritatively(
+        result = await _execute_trade_authoritatively_with_transient_retry(
             trade_data=TradeCreate(
                 offer_id=offer_id,
                 offer_public_id=offer_public_id,

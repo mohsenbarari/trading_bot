@@ -2,6 +2,7 @@
 """
 API Router for Trade Management - MiniApp Integration
 """
+import asyncio
 import logging
 import os
 import hashlib
@@ -16,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Background
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from starlette.background import BackgroundTask
@@ -90,6 +92,9 @@ TRADE_CONFLICT_DETAIL = "این لفظ توسط کاربر دیگری در حا�
 TRADE_NUMBER_SEQUENCE_NAME = "trade_number_seq"
 TRADE_IDEMPOTENCY_LOCK_NAMESPACE = 362_514
 TRADE_OFFER_EXECUTION_LOCK_NAMESPACE = 362_515
+TRADE_TRANSIENT_SQLSTATES = frozenset({"40P01", "40001"})
+TRADE_TRANSIENT_RETRY_ATTEMPTS = 3
+TRADE_TRANSIENT_RETRY_BASE_DELAY_SECONDS = 0.05
 
 
 router = APIRouter(
@@ -420,6 +425,46 @@ def _is_stale_trade_commit_error(exc: Exception) -> bool:
 def _is_trade_unique_constraint_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return "unique" in text or "duplicate key" in text or "uniqueviolation" in str(type(exc).__name__).lower()
+
+
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = getattr(current, "orig", None) or current.__cause__ or current.__context__
+
+
+def _extract_sqlstate(exc: BaseException) -> str | None:
+    for item in _iter_exception_chain(exc):
+        for attr in ("sqlstate", "pgcode"):
+            value = getattr(item, attr, None)
+            if value:
+                return str(value)
+        code_value = getattr(item, "code", None)
+        if code_value and len(str(code_value)) == 5:
+            return str(code_value)
+        args = getattr(item, "args", ()) or ()
+        for arg in args:
+            for attr in ("sqlstate", "pgcode"):
+                value = getattr(arg, attr, None)
+                if value:
+                    return str(value)
+            code_value = getattr(arg, "code", None)
+            if code_value and len(str(code_value)) == 5:
+                return str(code_value)
+    return None
+
+
+def _is_retryable_trade_transient_error(exc: BaseException) -> bool:
+    if not isinstance(exc, (DBAPIError, OperationalError)):
+        return False
+    sqlstate = _extract_sqlstate(exc)
+    if sqlstate in TRADE_TRANSIENT_SQLSTATES:
+        return True
+    type_text = " ".join(type(item).__name__.lower() for item in _iter_exception_chain(exc))
+    return "deadlockdetectederror" in type_text or "serializationerror" in type_text
 
 
 async def _commit_trade_execution(db: AsyncSession) -> None:
@@ -3345,6 +3390,74 @@ async def _execute_trade_authoritatively(
     return response
 
 
+async def _execute_trade_authoritatively_with_transient_retry(
+    *,
+    trade_data: TradeCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession,
+    context: EffectiveOwnerActor,
+    edge_received_at: Optional[datetime] = None,
+    request_source_surface: OfferRequestSourceSurface | str = OfferRequestSourceSurface.WEBAPP,
+    request_source_server: str | None = None,
+    request_pre_gated: bool = False,
+    max_attempts: int = TRADE_TRANSIENT_RETRY_ATTEMPTS,
+):
+    attempts = max(1, int(max_attempts or 1))
+    retry_context = context
+    for attempt in range(1, attempts + 1):
+        try:
+            return await _execute_trade_authoritatively(
+                trade_data=trade_data,
+                background_tasks=background_tasks,
+                db=db,
+                context=retry_context,
+                edge_received_at=edge_received_at,
+                request_source_surface=request_source_surface,
+                request_source_server=request_source_server,
+                request_pre_gated=request_pre_gated,
+            )
+        except Exception as exc:
+            if not _is_retryable_trade_transient_error(exc) or attempt >= attempts:
+                raise
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            expunge_all = getattr(db, "expunge_all", None)
+            if callable(expunge_all):
+                expunge_all()
+
+            owner_user_id = getattr(retry_context.owner_user, "id", None)
+            actor_user_id = getattr(retry_context.actor_user, "id", None)
+            owner_user = await db.get(User, int(owner_user_id)) if owner_user_id is not None else retry_context.owner_user
+            actor_user = owner_user
+            if actor_user_id is not None and actor_user_id != owner_user_id:
+                actor_user = await db.get(User, int(actor_user_id))
+            elif actor_user_id is not None:
+                actor_user = owner_user
+            if owner_user is None or actor_user is None:
+                raise
+            retry_context = EffectiveOwnerActor(
+                owner_user=owner_user,
+                actor_user=actor_user,
+                relation=getattr(retry_context, "relation", None),
+                is_accountant_context=getattr(retry_context, "is_accountant_context", False),
+            )
+            log_trading_event(
+                logger,
+                "trade_execute.transient_retry",
+                level="warning",
+                action="trade_execute",
+                result="attempt",
+                offer_id=trade_data.offer_id,
+                error_class=type(exc).__name__,
+                has_idempotency_key=bool(trade_data.idempotency_key),
+            )
+            await asyncio.sleep(TRADE_TRANSIENT_RETRY_BASE_DELAY_SECONDS * attempt)
+
+    raise RuntimeError("unreachable_trade_transient_retry_loop")
+
+
 @router.post("/", response_model=TradeResponse, status_code=status.HTTP_201_CREATED)
 async def create_trade(
     trade_data: TradeCreate,
@@ -3368,7 +3481,7 @@ async def create_trade(
         if forwarded_response is not None:
             return forwarded_response
 
-        return await _execute_trade_authoritatively(
+        return await _execute_trade_authoritatively_with_transient_retry(
             trade_data=trade_data,
             background_tasks=background_tasks,
             db=db,
@@ -3503,7 +3616,7 @@ async def execute_trade_internal(
             )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر اجراکننده یافت نشد")
 
-    return await _execute_trade_authoritatively(
+    return await _execute_trade_authoritatively_with_transient_retry(
         trade_data=TradeCreate(
             offer_id=resolved_offer_id,
             offer_public_id=internal_data.offer_public_id,

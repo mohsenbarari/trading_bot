@@ -1,17 +1,22 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
+from sqlalchemy.exc import OperationalError
 
+from api.deps import EffectiveOwnerActor
 from api.routers.trades import (
     TRADE_NUMBER_SEQUENCE_NAME,
     TradeAtomicityError,
     TradeIdempotencyConflictError,
+    TradeCreate,
     _allocate_next_trade_number,
     _allocate_trade_numbers,
     _apply_offer_trade_mutation,
     _commit_trade_execution,
+    _execute_trade_authoritatively_with_transient_retry,
+    _is_retryable_trade_transient_error,
     _lock_trade_idempotency_key,
     _try_lock_trade_offer_execution,
     _validate_idempotent_trade_replay,
@@ -31,6 +36,8 @@ class FakeDB:
         self.scalar = AsyncMock(return_value=scalar_result)
         self.commit = AsyncMock(side_effect=commit_side_effect)
         self.rollback = AsyncMock()
+        self.get = AsyncMock()
+        self.expunge_all = unittest.mock.Mock()
 
     def get_bind(self):
         return self._bind
@@ -218,6 +225,65 @@ class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
             await _commit_trade_execution(db)
 
         db.rollback.assert_awaited_once()
+
+    def test_retryable_trade_transient_error_detects_safe_postgresql_sqlstates(self):
+        class FakeDeadlock(Exception):
+            sqlstate = "40P01"
+
+        class FakeSerialization(Exception):
+            sqlstate = "40001"
+
+        class FakeUnavailable(Exception):
+            sqlstate = "08006"
+
+        self.assertTrue(
+            _is_retryable_trade_transient_error(OperationalError("stmt", {}, FakeDeadlock()))
+        )
+        self.assertTrue(
+            _is_retryable_trade_transient_error(OperationalError("stmt", {}, FakeSerialization()))
+        )
+        self.assertFalse(
+            _is_retryable_trade_transient_error(OperationalError("stmt", {}, FakeUnavailable()))
+        )
+        self.assertFalse(_is_retryable_trade_transient_error(RuntimeError("deadlock detected")))
+
+    async def test_authoritative_retry_replays_transient_database_abort_with_fresh_context(self):
+        class FakeDeadlock(Exception):
+            sqlstate = "40P01"
+
+        db = FakeDB()
+        original_owner = SimpleNamespace(id=10)
+        original_actor = SimpleNamespace(id=11)
+        refreshed_owner = SimpleNamespace(id=10)
+        refreshed_actor = SimpleNamespace(id=11)
+        db.get = AsyncMock(side_effect=[refreshed_owner, refreshed_actor])
+        transient_error = OperationalError("stmt", {}, FakeDeadlock())
+
+        with patch(
+            "api.routers.trades._execute_trade_authoritatively",
+            new=AsyncMock(side_effect=[transient_error, "ok"]),
+        ) as execute_mock, patch("api.routers.trades.asyncio.sleep", new=AsyncMock()) as sleep_mock:
+            result = await _execute_trade_authoritatively_with_transient_retry(
+                trade_data=TradeCreate(offer_id=7, quantity=3, idempotency_key="idem-deadlock"),
+                background_tasks=BackgroundTasks(),
+                db=db,
+                context=EffectiveOwnerActor(
+                    owner_user=original_owner,
+                    actor_user=original_actor,
+                    relation=None,
+                    is_accountant_context=False,
+                ),
+            )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(execute_mock.await_count, 2)
+        db.rollback.assert_awaited_once()
+        db.expunge_all.assert_called_once()
+        self.assertEqual([call.args[1] for call in db.get.await_args_list], [10, 11])
+        retry_context = execute_mock.await_args_list[1].kwargs["context"]
+        self.assertIs(retry_context.owner_user, refreshed_owner)
+        self.assertIs(retry_context.actor_user, refreshed_actor)
+        sleep_mock.assert_awaited_once()
 
 
 if __name__ == "__main__":

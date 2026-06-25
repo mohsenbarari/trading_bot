@@ -2026,7 +2026,7 @@ async def patched_trading_boundaries():
                     if not isinstance(edge_received_at, datetime):
                         edge_received_at = datetime.utcnow()
 
-                    response = await trades_router._execute_trade_authoritatively(
+                    response = await trades_router._execute_trade_authoritatively_with_transient_retry(
                         trade_data=trades_router.TradeCreate(
                             offer_id=resolved_offer_id,
                             offer_public_id=offer_public_id,
@@ -2669,7 +2669,7 @@ async def execute_trade_for_user(
 ) -> Any:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
-        return await trades_router._execute_trade_authoritatively(
+        return await trades_router._execute_trade_authoritatively_with_transient_retry(
             trade_data=trades_router.TradeCreate(
                 offer_id=offer_id,
                 quantity=quantity,
@@ -3161,7 +3161,7 @@ async def execute_accountant_context_trade_for_user(
         async with AsyncSessionLocal() as db:
             owner = await load_user(db, owner_user_id)
             actor = await load_user(db, actor_user_id)
-            response = await trades_router._execute_trade_authoritatively(
+            response = await trades_router._execute_trade_authoritatively_with_transient_retry(
                 trade_data=trades_router.TradeCreate(
                     offer_id=offer_id,
                     offer_public_id=offer_public_id,

@@ -609,7 +609,7 @@ async def execute_scenario_trade(
             raise RuntimeError("responder actor disappeared")
         background_tasks = BackgroundTasks()
         with override_current_server(scenario.offer_home_server):
-            response = await trades_router._execute_trade_authoritatively(
+            response = await trades_router._execute_trade_authoritatively_with_transient_retry(
                 trade_data=trades_router.TradeCreate(
                     offer_id=offer_id,
                     quantity=market_matrix.SHAPES["wholesale_full"].request_amount,

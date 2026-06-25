@@ -219,7 +219,7 @@ class BotTradeExecuteLocalSuccessTests(unittest.IsolatedAsyncioTestCase):
             return {"id": 88}
 
         with patch(
-            "bot.handlers.trade_execute._execute_trade_authoritatively",
+            "bot.handlers.trade_execute._execute_trade_authoritatively_with_transient_retry",
             new=AsyncMock(side_effect=execute_trade_side_effect),
         ) as execute_mock, patch(
             "bot.handlers.trade_execute.remove_trade_suggestion_record",
