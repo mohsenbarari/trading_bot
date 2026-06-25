@@ -441,6 +441,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         commands_by_name = {command["name"]: command for command in scenario_plan["commands"]}
         groups_by_name = {group["name"]: group for group in scenario_plan["execution_groups"]}
         self.assertEqual(scenario_plan["offer_home_server"], "iran")
+        self.assertIn("cleanup_foreign_scenario_prefix_before_prepare", command_names)
+        self.assertIn("cleanup_iran_scenario_prefix_before_prepare", command_names)
         self.assertIn("prepare_on_offer_home_server", command_names)
         self.assertIn("publish_telegram_role_plan_from_offer_home_container", command_names)
         self.assertIn("distribute_telegram_role_plan", command_names)
@@ -471,6 +473,16 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("sync-health-iran", rendered)
         self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
+        catchup_args = commands_by_name["sync_prefix_catchup_from_offer_home_server"]["args"]
+        self.assertIn("--batch-size 50", " ".join(catchup_args))
+        self.assertLess(
+            command_names.index("cleanup_foreign_scenario_prefix_before_prepare"),
+            command_names.index("prepare_on_offer_home_server"),
+        )
+        self.assertLess(
+            command_names.index("cleanup_iran_scenario_prefix_before_prepare"),
+            command_names.index("prepare_on_offer_home_server"),
+        )
         self.assertLess(
             command_names.index("install_webapp_role_plan_in_iran_container"),
             command_names.index("sync_prefix_catchup_from_offer_home_server"),

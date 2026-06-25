@@ -692,6 +692,32 @@ def dual_role_scenario_commands(
     }
     pre_role_commands = [
         container_python_command(
+            "cleanup_foreign_scenario_prefix_before_prepare",
+            server="foreign",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "cleanup",
+                "--prefix",
+                scenario_run_prefix,
+                "--allow-production-hard-delete",
+            ],
+            env=production_env,
+            timeout_seconds=240,
+        ),
+        container_python_command(
+            "cleanup_iran_scenario_prefix_before_prepare",
+            server="iran",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "cleanup",
+                "--prefix",
+                scenario_run_prefix,
+                "--allow-production-hard-delete",
+            ],
+            env=production_env,
+            timeout_seconds=240,
+        ),
+        container_python_command(
             "prepare_on_offer_home_server",
             server=offer_home_server,
             python_args=prepare_args,
@@ -768,7 +794,7 @@ def dual_role_scenario_commands(
                 "--output",
                 sync_catchup_result_path,
                 "--batch-size",
-                "200",
+                "50",
                 "--allow-production-execution",
             ],
             env=production_env,
