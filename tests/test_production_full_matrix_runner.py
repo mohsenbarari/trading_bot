@@ -227,11 +227,11 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         command = scenario_plan["commands"][1]
         self.assertEqual(scenario_plan["family"], "trade_non_concurrent")
         self.assertEqual(scenario_plan["market_behavior_timeout_seconds"], 3600)
-        self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 128)
+        self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 48)
         self.assertEqual(command["timeout_seconds"], 3630)
         self.assertIn("3600s", command["args"])
         self.assertIn("--write-max-concurrency", command["args"])
-        self.assertIn("128", command["args"])
+        self.assertIn("48", command["args"])
         self.assertIn("DB_POOL_SIZE=96", command["args"])
         self.assertIn("DB_MAX_OVERFLOW=64", command["args"])
 
