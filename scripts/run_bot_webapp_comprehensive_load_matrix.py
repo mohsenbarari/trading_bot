@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -1124,9 +1125,10 @@ def stdout_payload_for_matrix(payload: dict[str, Any], *, output_path: str | Non
 
 
 async def run_shutdown_step(label: str, awaitable: Awaitable[Any]) -> None:
-    try:
-        await asyncio.wait_for(awaitable, timeout=SHUTDOWN_TIMEOUT_SECONDS)
-    except TimeoutError:
+    task = asyncio.create_task(awaitable)
+    done, _pending = await asyncio.wait({task}, timeout=SHUTDOWN_TIMEOUT_SECONDS)
+    if not done:
+        task.cancel()
         print(
             json.dumps(
                 {
@@ -1139,6 +1141,9 @@ async def run_shutdown_step(label: str, awaitable: Awaitable[Any]) -> None:
             ),
             file=sys.stderr,
         )
+        return
+    try:
+        task.result()
     except Exception as exc:
         print(
             json.dumps(
@@ -1173,7 +1178,7 @@ def run_async_entrypoint(args: argparse.Namespace) -> int:
         for task in pending:
             task.cancel()
         if pending:
-            loop.run_until_complete(asyncio.wait(pending, timeout=SHUTDOWN_TIMEOUT_SECONDS))
+            loop.run_until_complete(asyncio.sleep(0))
         loop.close()
         asyncio.set_event_loop(None)
 
@@ -1194,4 +1199,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(exit_code)
