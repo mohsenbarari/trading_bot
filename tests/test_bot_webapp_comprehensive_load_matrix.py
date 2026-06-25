@@ -280,6 +280,51 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(asyncio.run(run_probe()), "success")
         self.assertEqual(attempts, 2)
 
+    def test_manual_expiry_reconcile_retries_only_non_terminal_offers(self):
+        statuses = {
+            1: "active",
+            2: matrix_runner.OfferStatus.EXPIRED.value,
+            3: "active",
+        }
+        attempted_offer_ids = []
+
+        async def fake_load_offer_snapshot(offer_id):
+            return SimpleNamespace(status=SimpleNamespace(value=statuses[offer_id]))
+
+        async def fake_expire_attempt(**kwargs):
+            offer_id = kwargs["offer_id"]
+            attempted_offer_ids.append(offer_id)
+            statuses[offer_id] = matrix_runner.OfferStatus.EXPIRED.value
+            return "success"
+
+        async def run_probe():
+            with patch.object(matrix_runner.worker, "load_offer_snapshot", fake_load_offer_snapshot):
+                with patch.object(matrix_runner, "expire_attempt", fake_expire_attempt):
+                    with patch.object(matrix_runner.asyncio, "sleep", AsyncMock()):
+                        return await matrix_runner.reconcile_manual_expiry_terminal_state(
+                            surface="telegram",
+                            harness=AsyncMock(),
+                            offer_refs=[
+                                matrix_runner.OfferExecutionRef(id=1, offer_public_id=None),
+                                matrix_runner.OfferExecutionRef(id=2, offer_public_id=None),
+                                matrix_runner.OfferExecutionRef(id=3, offer_public_id=None),
+                            ],
+                            offer_owners=[
+                                matrix_runner.worker.LoadUserRef(user_id=10, telegram_id=1010),
+                                matrix_runner.worker.LoadUserRef(user_id=20, telegram_id=2020),
+                                matrix_runner.worker.LoadUserRef(user_id=30, telegram_id=3030),
+                            ],
+                            prefix="PFM_reconcile_",
+                            error_details=[],
+                        )
+
+        report = asyncio.run(run_probe())
+
+        self.assertEqual(attempted_offer_ids, [1, 3])
+        self.assertEqual(report["initial_non_terminal_count"], 2)
+        self.assertEqual(report["remaining_non_terminal_count"], 0)
+        self.assertEqual(report["rounds"], 1)
+
     def test_non_contention_offer_seed_honors_max_concurrency_and_order(self):
         running = 0
         peak_running = 0

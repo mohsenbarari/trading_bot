@@ -128,6 +128,7 @@ READ_VIEW_FAMILIES = {
 }
 DEFAULT_READ_VIEW_MAX_CONCURRENCY = 96
 EXPIRY_BUSY_RETRY_ATTEMPTS = 8
+EXPIRY_RECONCILE_ROUNDS = 4
 
 
 def scenario_key(value: str) -> str:
@@ -648,6 +649,63 @@ async def count_non_terminal_offers(offer_refs: list[OfferExecutionRef], expecte
     return non_terminal
 
 
+async def collect_non_terminal_offer_indexes(
+    offer_refs: list[OfferExecutionRef],
+    expected_status: str,
+) -> list[int]:
+    non_terminal_indexes: list[int] = []
+    for index, offer_ref in enumerate(offer_refs):
+        offer = await worker.load_offer_snapshot(offer_ref.id)
+        status = getattr(getattr(offer, "status", None), "value", None)
+        if status != expected_status:
+            non_terminal_indexes.append(index)
+    return non_terminal_indexes
+
+
+async def reconcile_manual_expiry_terminal_state(
+    *,
+    surface: str,
+    harness: worker.AiogramDispatcherHarness,
+    offer_refs: list[OfferExecutionRef],
+    offer_owners: list[worker.LoadUserRef],
+    prefix: str,
+    error_details: list[str],
+) -> dict[str, Any]:
+    """Retry only offers that stayed non-terminal after the measured batch."""
+    remaining_indexes = await collect_non_terminal_offer_indexes(
+        offer_refs,
+        expected_status=OfferStatus.EXPIRED.value,
+    )
+    report: dict[str, Any] = {
+        "initial_non_terminal_count": len(remaining_indexes),
+        "rounds": 0,
+        "attempted_count": 0,
+        "remaining_non_terminal_count": len(remaining_indexes),
+    }
+    for round_index in range(EXPIRY_RECONCILE_ROUNDS):
+        if not remaining_indexes:
+            break
+        report["rounds"] = round_index + 1
+        for offer_index in remaining_indexes:
+            report["attempted_count"] += 1
+            await expire_attempt(
+                surface=surface,
+                harness=harness,
+                owner=offer_owners[offer_index],
+                offer_id=offer_refs[offer_index].id,
+                prefix=f"{prefix}reconcile-r{round_index}-",
+                index=offer_index,
+                error_details=error_details,
+            )
+        await asyncio.sleep(0.25 * (round_index + 1))
+        remaining_indexes = await collect_non_terminal_offer_indexes(
+            offer_refs,
+            expected_status=OfferStatus.EXPIRED.value,
+        )
+        report["remaining_non_terminal_count"] = len(remaining_indexes)
+    return report
+
+
 async def run_scenario(
     *,
     scenario: MatrixScenario,
@@ -794,6 +852,7 @@ async def run_scenario(
         elif scenario.family == "manual_expire_non_concurrent":
             harness = worker.AiogramDispatcherHarness()
             fixture_elapsed = 0.0
+            expiry_reconcile_report: dict[str, Any] = {}
             try:
                 offer_refs, offer_owners, fixture_elapsed = await create_non_contention_offers(
                     origin=scenario.offer_origin or "webapp",
@@ -826,10 +885,21 @@ async def run_scenario(
                     attempt=_attempt,
                     max_concurrency=scenario_write_max_concurrency,
                 )
+                expiry_reconcile_report = await reconcile_manual_expiry_terminal_state(
+                    surface=scenario.expire_surface or "webapp",
+                    harness=harness,
+                    offer_refs=offer_refs,
+                    offer_owners=offer_owners,
+                    prefix=scenario_prefix,
+                    error_details=attempt_error_details,
+                )
             finally:
                 await harness.close()
             summary = summarize_outcomes(outcomes, elapsed)
-            extra = {"fixture_creation_elapsed_seconds": round(fixture_elapsed, 3)}
+            extra = {
+                "fixture_creation_elapsed_seconds": round(fixture_elapsed, 3),
+                "expiry_reconcile": expiry_reconcile_report,
+            }
             non_terminal_count = await count_non_terminal_offers(
                 offer_refs,
                 expected_status=OfferStatus.EXPIRED.value,
