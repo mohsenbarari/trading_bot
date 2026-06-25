@@ -24,6 +24,7 @@ from datetime import date as date_cls, datetime, time as time_cls, timezone
 router = APIRouter()
 logger = logging.getLogger(__name__)
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
+PRODUCTION_FULL_MATRIX_SYNC_MARKERS = ("PFM_", "PRODTEST_", "FMX_")
 
 
 def _require_dev_key(request: Request) -> None:
@@ -127,6 +128,25 @@ def _summarize_payload(data) -> dict[str, object]:
         "data_kind": "dict",
         "data_key_count": len(data),
     }
+
+
+def _contains_production_full_matrix_marker(value) -> bool:
+    if isinstance(value, str):
+        return any(marker in value for marker in PRODUCTION_FULL_MATRIX_SYNC_MARKERS)
+    if isinstance(value, dict):
+        return any(_contains_production_full_matrix_marker(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_production_full_matrix_marker(item) for item in value)
+    return False
+
+
+def _sync_batch_has_production_full_matrix_users(items: list[dict]) -> bool:
+    for item in items:
+        if not isinstance(item, dict) or item.get("table") != "users":
+            continue
+        if _contains_production_full_matrix_marker(item.get("data")):
+            return True
+    return False
 
 
 def _enum_value(value) -> str:
@@ -2015,7 +2035,15 @@ async def receive_sync_data(
 
         if user_changes_applied:
             try:
-                await ensure_mandatory_channel_rollout(db)
+                if _sync_batch_has_production_full_matrix_users(sorted_items):
+                    logger.info(
+                        "Skipping mandatory channel rollout for production full-matrix synthetic users",
+                        extra={
+                            "event": "sync.mandatory_channel_rollout_skipped_for_full_matrix",
+                        },
+                    )
+                else:
+                    await ensure_mandatory_channel_rollout(db)
             except Exception as exc:
                 logger.error(
                     "Failed to refresh mandatory channel rollout after sync",

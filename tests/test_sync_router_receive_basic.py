@@ -123,6 +123,30 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         rollout_mock.assert_awaited_once_with(db)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    async def test_receive_sync_data_skips_mandatory_channel_for_full_matrix_user_sync(self):
+        db = FakeDB()
+        items = [
+            {
+                "table": "users",
+                "operation": "INSERT",
+                "id": 4,
+                "data": {
+                    "account_name": "PFM_20260625_121700_FULL_PBTS_0025_load_0001",
+                    "telegram_id": 1234,
+                    "role": "عادی",
+                },
+            }
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch("api.routers.sync.settings.server_mode", "iran"):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_awaited_once()
+        rollout_mock.assert_not_awaited()
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
     async def test_receive_sync_data_cleans_up_deleted_user_telegram_on_foreign_after_commit(self):
         db = DeletedUserSyncDB(SimpleNamespace(is_deleted=False, telegram_id=998877))
         items = [{"table": "users", "operation": "UPDATE", "id": 4, "data": {"is_deleted": True, "telegram_id": None}}]
