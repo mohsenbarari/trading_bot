@@ -632,7 +632,7 @@ def dual_role_scenario_commands(
             timeout_seconds=600,
         ),
         CommandSpec("sync_health_after_prepare_foreign", ["make", "sync-health"], timeout_seconds=90),
-        iran_command("sync_health_after_prepare_iran", "make sync-health", timeout_seconds=90),
+        CommandSpec("sync_health_after_prepare_iran", ["make", "sync-health-iran"], timeout_seconds=90),
         host_mkdir_command(
             "ensure_foreign_artifact_dir",
             server="foreign",

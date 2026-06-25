@@ -454,6 +454,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("PRODUCTION_FULL_MATRIX_CONFIRM", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
         self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
+        self.assertIn("sync-health-iran", rendered)
         self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
 
