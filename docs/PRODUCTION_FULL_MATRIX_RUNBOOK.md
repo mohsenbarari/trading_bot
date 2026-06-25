@@ -233,6 +233,20 @@ make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execu
 The executor runs live preflight first. If preflight fails, no scenario commands
 are executed.
 
+For long production campaigns, use the resumable executor so an interrupted run
+does not restart from scenario 1:
+
+```bash
+PRODUCTION_FULL_MATRIX_CONFIRM=execute-production-full-matrix \
+make production-full-matrix-run ARGS="--prefix PFM_YYYYMMDD_HHMMSS_ --mode execution-plan --require-full-driver-coverage --execute --resume --continue-on-failure --scenario-retries 2 --retry-mode transient --retry-backoff-seconds 20 --output /tmp/trading-bot-production-full-matrix/PFM_YYYYMMDD_HHMMSS_/production-full-matrix-execution-result.json"
+```
+
+With `--resume`, the runner keeps `execution-results.jsonl`, skips manifest IDs
+whose latest result is already `passed`, and writes a compact
+`campaign-ledger.json` beside the JSONL. `--scenario-retries` is intended for
+transient operational failures only; business-assertion failures remain final
+unless `--retry-mode all` is explicitly used for a narrow investigation.
+
 The execution-plan artifact includes `driver_gap_summary` and
 `driver_gap_roadmap`. The roadmap groups missing production drivers into
 implementation buckets so the next work item can be chosen by remaining count

@@ -24,6 +24,44 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
     def build_args(self, *extra: str):
         return runner.parse_args(["--prefix", "PFM_20260624_180000_", *extra])
 
+    def build_execution_test_plan(self, artifact_dir: Path, scenario_plans: list[dict[str, object]]):
+        return {
+            "schema_version": runner.SCHEMA_VERSION,
+            "status": "execution_requested",
+            "prefix": "PFM_UNIT_",
+            "mutates_production": False,
+            "preflight": {
+                "artifact_dir": str(artifact_dir),
+                "status": "planned",
+                "commands": [],
+            },
+            "execution_plan": {
+                "coverage_gate": {"passed": True},
+                "scenario_plans": scenario_plans,
+            },
+        }
+
+    def build_local_scenario(self, manifest_id: str) -> dict[str, object]:
+        return {
+            "manifest_id": manifest_id,
+            "driver": "unit_driver",
+            "execution_groups": [
+                {
+                    "name": "main",
+                    "mode": "sequential",
+                    "commands": [
+                        runner.command_payload(
+                            runner.CommandSpec(
+                                name=f"command_{manifest_id.lower()}",
+                                args=[sys.executable, "-c", "print('ok')"],
+                                timeout_seconds=5,
+                            )
+                        )
+                    ],
+                }
+            ],
+        }
+
     def test_default_plan_selects_entire_manifest_without_mutating_production(self):
         plan = runner.build_plan(self.build_args())
 
@@ -924,6 +962,165 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(full_payload["preflight"]["status"], "preflight_passed")
         self.assertEqual(run_mock.call_count, len(full_payload["preflight"]["commands"]))
         self.assertTrue(all(item["status"] == "passed" for item in full_payload["preflight"]["results"]))
+
+    def test_execution_resume_skips_previously_passed_scenarios(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_dir = Path(tmp_dir)
+            results_path = artifact_dir / "execution-results.jsonl"
+            runner.append_jsonl(
+                results_path,
+                {
+                    "event": "scenario_result",
+                    "manifest_id": "UNIT-A",
+                    "driver": "unit_driver",
+                    "index": 1,
+                    "total": 2,
+                    "status": "passed",
+                    "groups": [],
+                },
+            )
+            plan = self.build_execution_test_plan(
+                artifact_dir,
+                [self.build_local_scenario("UNIT-A"), self.build_local_scenario("UNIT-B")],
+            )
+
+            def fake_command_result(command, *, cwd):
+                return {
+                    **runner.command_payload(command),
+                    "status": "passed",
+                    "returncode": 0,
+                    "elapsed_seconds": 0.01,
+                    "stdout": "ok",
+                    "stderr": "",
+                }
+
+            with patch.dict(
+                os.environ,
+                {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
+                clear=True,
+            ), patch.object(runner, "command_result", side_effect=fake_command_result) as command_mock:
+                result_plan, exit_code = runner.execute_command_plan(
+                    plan,
+                    cwd=REPO_ROOT,
+                    resume=True,
+                )
+
+            events = [
+                json.loads(line)
+                for line in results_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            ledger = json.loads((artifact_dir / "campaign-ledger.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(command_mock.call_count, 1)
+        self.assertEqual(result_plan["status"], "execution_passed")
+        execution = result_plan["execution_plan"]["execution"]
+        self.assertEqual(execution["scenario_passed"], 2)
+        self.assertEqual(execution["scenario_skipped_passed"], 1)
+        self.assertEqual(execution["scenario_failed"], 0)
+        self.assertIn("execution_resumed", [event["event"] for event in events])
+        self.assertIn("scenario_skipped", [event["event"] for event in events])
+        self.assertEqual(ledger["counts"], {"passed": 2})
+
+    def test_execution_retries_transient_scenario_failure(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_dir = Path(tmp_dir)
+            results_path = artifact_dir / "execution-results.jsonl"
+            plan = self.build_execution_test_plan(artifact_dir, [self.build_local_scenario("UNIT-RETRY")])
+
+            def fake_command_result(command, *, cwd):
+                call_number = fake_command_result.call_count
+                fake_command_result.call_count += 1
+                if call_number == 0:
+                    return {
+                        **runner.command_payload(command),
+                        "status": "timeout",
+                        "returncode": None,
+                        "elapsed_seconds": 5.0,
+                        "stdout": "",
+                        "stderr": "timed out",
+                    }
+                return {
+                    **runner.command_payload(command),
+                    "status": "passed",
+                    "returncode": 0,
+                    "elapsed_seconds": 0.01,
+                    "stdout": "ok",
+                    "stderr": "",
+                }
+
+            fake_command_result.call_count = 0
+            with patch.dict(
+                os.environ,
+                {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
+                clear=True,
+            ), patch.object(runner, "command_result", side_effect=fake_command_result):
+                result_plan, exit_code = runner.execute_command_plan(
+                    plan,
+                    cwd=REPO_ROOT,
+                    scenario_retries=1,
+                    retry_backoff_seconds=0,
+                )
+
+            events = [
+                json.loads(line)
+                for line in results_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(fake_command_result.call_count, 2)
+        self.assertEqual(result_plan["status"], "execution_passed")
+        self.assertIn("scenario_retry_scheduled", [event["event"] for event in events])
+        scenario_results = [event for event in events if event["event"] == "scenario_result"]
+        self.assertEqual([event["status"] for event in scenario_results], ["failed", "passed"])
+        self.assertTrue(scenario_results[0]["retryable"])
+
+    def test_execution_continue_on_failure_records_all_final_failures(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_dir = Path(tmp_dir)
+            plan = self.build_execution_test_plan(
+                artifact_dir,
+                [self.build_local_scenario("UNIT-FAIL"), self.build_local_scenario("UNIT-PASS")],
+            )
+
+            def fake_command_result(command, *, cwd):
+                if command.name == "command_unit-fail":
+                    return {
+                        **runner.command_payload(command),
+                        "status": "failed",
+                        "returncode": 1,
+                        "elapsed_seconds": 0.01,
+                        "stdout": "",
+                        "stderr": "business assertion failed",
+                    }
+                return {
+                    **runner.command_payload(command),
+                    "status": "passed",
+                    "returncode": 0,
+                    "elapsed_seconds": 0.01,
+                    "stdout": "ok",
+                    "stderr": "",
+                }
+
+            with patch.dict(
+                os.environ,
+                {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
+                clear=True,
+            ), patch.object(runner, "command_result", side_effect=fake_command_result) as command_mock:
+                result_plan, exit_code = runner.execute_command_plan(
+                    plan,
+                    cwd=REPO_ROOT,
+                    continue_on_failure=True,
+                )
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(command_mock.call_count, 2)
+        execution = result_plan["execution_plan"]["execution"]
+        self.assertEqual(execution["scenario_passed"], 1)
+        self.assertEqual(execution["scenario_failed"], 1)
+        self.assertEqual(execution["failed_manifest_ids"], ["UNIT-FAIL"])
 
     def test_cli_writes_output_and_prints_compact_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

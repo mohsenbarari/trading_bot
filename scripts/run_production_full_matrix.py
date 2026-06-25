@@ -38,6 +38,25 @@ CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
 CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 IRAN_HOST = "root@87.107.3.22"
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
+CAMPAIGN_LEDGER_SCHEMA_VERSION = "production_full_matrix_campaign_ledger_v1"
+RETRYABLE_SCENARIO_TOKENS = (
+    "timeout",
+    "timed out",
+    "queuepool",
+    "staledataerror",
+    "uniqueviolationerror",
+    "integrityerror",
+    "operationalerror",
+    "dbapierror",
+    "connection refused",
+    "connection reset",
+    "temporary failure",
+    "could not connect",
+    "read operation timed out",
+    "trade_forward.remote_home_failed",
+    "remote authority",
+    "سرور مرجع معامله در دسترس نیست",
+)
 
 SECTION_DRIVER_STATUS = {
     "market_behavior": "pending_production_market_driver",
@@ -1822,6 +1841,114 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def load_latest_scenario_results(path: Path) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    if not path.exists():
+        return latest
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                latest[f"__invalid_jsonl_line_{line_number}"] = {
+                    "event": "invalid_jsonl_line",
+                    "line_number": line_number,
+                    "status": "failed",
+                }
+                continue
+            if payload.get("event") != "scenario_result":
+                continue
+            manifest_id = str(payload.get("manifest_id") or "")
+            if not manifest_id:
+                continue
+            latest[manifest_id] = payload
+    return latest
+
+
+def scenario_manifest_id(scenario_plan: dict[str, Any], *, index: int) -> str:
+    return str(scenario_plan.get("manifest_id") or f"scenario_{index}")
+
+
+def iter_scenario_command_results(result: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    for group in result.get("groups") or []:
+        for command in group.get("commands") or []:
+            if isinstance(command, dict):
+                yield command
+
+
+def is_retryable_scenario_result(result: dict[str, Any]) -> bool:
+    if result.get("status") == "passed":
+        return False
+    for command in iter_scenario_command_results(result):
+        if command.get("status") == "timeout":
+            return True
+    result_text = json.dumps(result, ensure_ascii=False, default=str).lower()
+    return any(token.lower() in result_text for token in RETRYABLE_SCENARIO_TOKENS)
+
+
+def build_campaign_ledger(
+    scenario_plans: list[dict[str, Any]],
+    latest_results: dict[str, dict[str, Any]],
+    *,
+    prefix: str | None,
+    results_path: Path,
+    resume_enabled: bool,
+) -> dict[str, Any]:
+    counts: Counter[str] = Counter()
+    scenario_records: list[dict[str, Any]] = []
+    invalid_result_count = sum(1 for key in latest_results if key.startswith("__invalid_jsonl_line_"))
+    for index, scenario_plan in enumerate(scenario_plans, start=1):
+        manifest_id = scenario_manifest_id(scenario_plan, index=index)
+        result = latest_results.get(manifest_id)
+        status = str((result or {}).get("status") or "pending")
+        counts[status] += 1
+        scenario_records.append(
+            {
+                "index": index,
+                "manifest_id": manifest_id,
+                "driver": scenario_plan.get("driver"),
+                "status": status,
+                "attempt": (result or {}).get("attempt"),
+                "elapsed_seconds": (result or {}).get("elapsed_seconds"),
+            }
+        )
+    return {
+        "schema_version": CAMPAIGN_LEDGER_SCHEMA_VERSION,
+        "generated_at": utc_now_iso(),
+        "prefix": prefix,
+        "results_path": str(results_path),
+        "resume_enabled": resume_enabled,
+        "scenario_total": len(scenario_plans),
+        "counts": dict(sorted(counts.items())),
+        "invalid_result_count": invalid_result_count,
+        "scenarios": scenario_records,
+    }
+
+
+def write_campaign_ledger(
+    ledger_path: Path,
+    scenario_plans: list[dict[str, Any]],
+    latest_results: dict[str, dict[str, Any]],
+    *,
+    prefix: str | None,
+    results_path: Path,
+    resume_enabled: bool,
+) -> None:
+    write_json(
+        ledger_path,
+        build_campaign_ledger(
+            scenario_plans,
+            latest_results,
+            prefix=prefix,
+            results_path=results_path,
+            resume_enabled=resume_enabled,
+        ),
+    )
+
+
 def execute_scenario_plan(
     scenario_plan: dict[str, Any],
     *,
@@ -1869,11 +1996,23 @@ def execute_scenario_plan(
     }
 
 
-def execute_command_plan(plan: dict[str, Any], *, cwd: Path) -> tuple[dict[str, Any], int]:
+def execute_command_plan(
+    plan: dict[str, Any],
+    *,
+    cwd: Path,
+    resume: bool = False,
+    continue_on_failure: bool = False,
+    scenario_retries: int = 0,
+    retry_backoff_seconds: float = 15.0,
+    retry_mode: str = "transient",
+) -> tuple[dict[str, Any], int]:
     execution_plan = plan.get("execution_plan") or {}
     artifact_dir = Path((plan.get("preflight") or {}).get("artifact_dir") or "/tmp/trading-bot-production-full-matrix")
     results_path = artifact_dir / "execution-results.jsonl"
+    ledger_path = artifact_dir / "campaign-ledger.json"
     scenario_plans = list(execution_plan.get("scenario_plans") or [])
+    scenario_retries = max(0, int(scenario_retries))
+    retry_backoff_seconds = max(0.0, float(retry_backoff_seconds))
     if os.environ.get(EXECUTION_CONFIRM_ENV) != EXECUTION_CONFIRM_VALUE:
         execution_plan["execution"] = {
             "status": "blocked",
@@ -1910,60 +2049,154 @@ def execute_command_plan(plan: dict[str, Any], *, cwd: Path) -> tuple[dict[str, 
         return plan, 1
 
     results_path.parent.mkdir(parents=True, exist_ok=True)
-    if results_path.exists():
+    latest_results = load_latest_scenario_results(results_path) if resume else {}
+    if not resume and results_path.exists():
         results_path.unlink()
+        latest_results = {}
     append_jsonl(
         results_path,
         {
-            "event": "execution_started",
+            "event": "execution_resumed" if resume else "execution_started",
             "generated_at": utc_now_iso(),
             "prefix": plan.get("prefix"),
             "scenario_count": len(scenario_plans),
+            "resume": resume,
+            "continue_on_failure": continue_on_failure,
+            "scenario_retries": scenario_retries,
+            "retry_backoff_seconds": retry_backoff_seconds,
+            "retry_mode": retry_mode,
+            "previous_passed_count": sum(1 for result in latest_results.values() if result.get("status") == "passed"),
+            "previous_result_count": sum(1 for key in latest_results if not key.startswith("__invalid_jsonl_line_")),
         },
+    )
+    write_campaign_ledger(
+        ledger_path,
+        scenario_plans,
+        latest_results,
+        prefix=plan.get("prefix"),
+        results_path=results_path,
+        resume_enabled=resume,
     )
 
     passed = 0
-    failed_result: dict[str, Any] | None = None
+    skipped_passed = 0
+    failed_results: list[dict[str, Any]] = []
     for index, scenario_plan in enumerate(scenario_plans, start=1):
-        print(
-            json.dumps(
+        manifest_id = scenario_manifest_id(scenario_plan, index=index)
+        previous_result = latest_results.get(manifest_id)
+        if resume and previous_result and previous_result.get("status") == "passed":
+            passed += 1
+            skipped_passed += 1
+            append_jsonl(
+                results_path,
                 {
-                    "event": "scenario_started",
+                    "event": "scenario_skipped",
+                    "generated_at": utc_now_iso(),
+                    "reason": "already_passed",
                     "index": index,
                     "total": len(scenario_plans),
-                    "manifest_id": scenario_plan.get("manifest_id"),
+                    "manifest_id": manifest_id,
                     "driver": scenario_plan.get("driver"),
                 },
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-            file=sys.stderr,
-            flush=True,
-        )
-        result = execute_scenario_plan(
-            scenario_plan,
-            index=index,
-            total=len(scenario_plans),
-            cwd=cwd,
-        )
-        append_jsonl(results_path, {"event": "scenario_result", **result})
-        if result["status"] != "passed":
-            failed_result = result
-            break
-        passed += 1
+            )
+            continue
 
-    status = "execution_passed" if failed_result is None else "execution_failed"
+        final_result: dict[str, Any] | None = None
+        for attempt in range(1, scenario_retries + 2):
+            print(
+                json.dumps(
+                    {
+                        "event": "scenario_started",
+                        "index": index,
+                        "total": len(scenario_plans),
+                        "manifest_id": manifest_id,
+                        "driver": scenario_plan.get("driver"),
+                        "attempt": attempt,
+                        "max_attempts": scenario_retries + 1,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            result = execute_scenario_plan(
+                scenario_plan,
+                index=index,
+                total=len(scenario_plans),
+                cwd=cwd,
+            )
+            retryable = is_retryable_scenario_result(result)
+            result = {
+                **result,
+                "attempt": attempt,
+                "max_attempts": scenario_retries + 1,
+                "retryable": retryable,
+                "retry_mode": retry_mode,
+            }
+            append_jsonl(results_path, {"event": "scenario_result", **result})
+            latest_results[manifest_id] = {"event": "scenario_result", **result}
+            write_campaign_ledger(
+                ledger_path,
+                scenario_plans,
+                latest_results,
+                prefix=plan.get("prefix"),
+                results_path=results_path,
+                resume_enabled=resume,
+            )
+            final_result = result
+            if result["status"] == "passed":
+                passed += 1
+                break
+            should_retry = attempt <= scenario_retries and (
+                retry_mode == "all" or (retry_mode == "transient" and retryable)
+            )
+            if not should_retry:
+                break
+            append_jsonl(
+                results_path,
+                {
+                    "event": "scenario_retry_scheduled",
+                    "generated_at": utc_now_iso(),
+                    "index": index,
+                    "total": len(scenario_plans),
+                    "manifest_id": manifest_id,
+                    "driver": scenario_plan.get("driver"),
+                    "attempt": attempt,
+                    "next_attempt": attempt + 1,
+                    "retry_backoff_seconds": retry_backoff_seconds,
+                    "retry_mode": retry_mode,
+                    "retryable": retryable,
+                },
+            )
+            if retry_backoff_seconds:
+                time.sleep(retry_backoff_seconds)
+
+        if final_result and final_result["status"] != "passed":
+            failed_results.append(final_result)
+            if not continue_on_failure:
+                break
+
+    status = "execution_passed" if not failed_results and passed == len(scenario_plans) else "execution_failed"
     execution_plan["execution"] = {
         "status": status,
         "results_path": str(results_path),
+        "ledger_path": str(ledger_path),
         "scenario_total": len(scenario_plans),
         "scenario_passed": passed,
-        "scenario_failed": 0 if failed_result is None else 1,
-        "failed_manifest_id": (failed_result or {}).get("manifest_id"),
+        "scenario_skipped_passed": skipped_passed,
+        "scenario_failed": len(failed_results),
+        "failed_manifest_id": (failed_results[0] if failed_results else {}).get("manifest_id"),
+        "failed_manifest_ids": [str(item.get("manifest_id")) for item in failed_results],
+        "resume": resume,
+        "continue_on_failure": continue_on_failure,
+        "scenario_retries": scenario_retries,
+        "retry_backoff_seconds": retry_backoff_seconds,
+        "retry_mode": retry_mode,
     }
     plan["status"] = status
     plan["mutates_production"] = True
-    return plan, 0 if failed_result is None else 1
+    return plan, 0 if status == "execution_passed" else 1
 
 
 def load_manifest(args: argparse.Namespace) -> dict[str, Any]:
@@ -2294,6 +2527,7 @@ def compact_stdout(plan: dict[str, Any], output: Path | None) -> dict[str, Any]:
                 ),
             },
             "driver_gap_roadmap": (plan.get("execution_plan") or {}).get("driver_gap_roadmap"),
+            "execution": (plan.get("execution_plan") or {}).get("execution"),
         }
         if plan.get("execution_plan") is not None
         else None,
@@ -2346,6 +2580,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "only with the explicit production confirmation env."
         ),
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="In execution-plan --execute mode, keep existing results and skip scenarios already marked passed.",
+    )
+    parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="In execution-plan --execute mode, keep running after a scenario reaches final failed status.",
+    )
+    parser.add_argument(
+        "--scenario-retries",
+        type=int,
+        default=0,
+        help="Retry a failed scenario this many times before recording final failure.",
+    )
+    parser.add_argument(
+        "--retry-backoff-seconds",
+        type=float,
+        default=15.0,
+        help="Seconds to wait between scenario retries.",
+    )
+    parser.add_argument(
+        "--retry-mode",
+        choices=["transient", "all"],
+        default="transient",
+        help="Retry only detected transient failures, or every failed scenario.",
+    )
     parser.add_argument("--print-full", action="store_true")
     return parser.parse_args(argv)
 
@@ -2381,7 +2643,15 @@ def main(argv: list[str] | None = None) -> int:
             plan["preflight"]["results"] = results
             exit_code = 1 if failed else 0
     elif args.execute and args.mode == "execution-plan":
-        plan, exit_code = execute_command_plan(plan, cwd=REPO_ROOT)
+        plan, exit_code = execute_command_plan(
+            plan,
+            cwd=REPO_ROOT,
+            resume=args.resume,
+            continue_on_failure=args.continue_on_failure,
+            scenario_retries=args.scenario_retries,
+            retry_backoff_seconds=args.retry_backoff_seconds,
+            retry_mode=args.retry_mode,
+        )
     elif args.execute:
         exit_code = 2
     if args.mode == "execution-plan" and args.require_full_driver_coverage and plan["status"] == "blocked_driver_gaps":
