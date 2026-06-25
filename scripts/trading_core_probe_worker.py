@@ -2581,12 +2581,13 @@ async def mark_offer_completed_for_negative_guard(
         responder = await db.get(User, int(responder_user_id))
         if responder is None:
             raise TradingProbeError(f"negative guard responder {responder_user_id} disappeared")
+        offer_owner = await db.get(User, int(offer.user_id)) if offer.user_id is not None else None
         trade_number = int(await db.scalar(select(func.max(Trade.trade_number))) or 9999) + 1
         trade = Trade(
             trade_number=trade_number,
             offer_id=int(offer.id),
             offer_user_id=int(offer.user_id),
-            offer_user_mobile=getattr(getattr(offer, "user", None), "mobile_number", None),
+            offer_user_mobile=getattr(offer_owner, "mobile_number", None),
             responder_user_id=int(responder.id),
             responder_user_mobile=getattr(responder, "mobile_number", None),
             actor_user_id=int(actor_user_id),
