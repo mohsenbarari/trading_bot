@@ -40,6 +40,10 @@ CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 IRAN_HOST = "root@87.107.3.22"
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 CAMPAIGN_LEDGER_SCHEMA_VERSION = "production_full_matrix_campaign_ledger_v1"
+RESUME_SKIPPABLE_PREFLIGHT_COMMAND_NAMES = {
+    "foreign_cleanup_dry_run",
+    "iran_cleanup_dry_run",
+}
 RETRYABLE_SCENARIO_TOKENS = (
     "timeout",
     "timed out",
@@ -2137,6 +2141,39 @@ def run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[di
     return results
 
 
+def run_execution_preflight_commands(
+    commands: list[CommandSpec],
+    *,
+    cwd: Path,
+    resume_skip_campaign_cleanup: bool,
+) -> list[dict[str, Any]]:
+    if not resume_skip_campaign_cleanup:
+        return run_preflight_commands(commands, cwd=cwd)
+
+    results: list[dict[str, Any]] = []
+    for command in commands:
+        if command.name in RESUME_SKIPPABLE_PREFLIGHT_COMMAND_NAMES:
+            results.append(
+                {
+                    **command_payload(command),
+                    "status": "passed",
+                    "returncode": 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "skipped": True,
+                    "skip_reason": (
+                        "resume_skips_campaign_wide_cleanup_dry_run_after_exact_scenario_cleanup"
+                    ),
+                }
+            )
+            continue
+        command_results = run_preflight_commands([command], cwd=cwd)
+        results.extend(command_results)
+        if command_results and command_results[-1].get("status") == "timeout":
+            break
+    return results
+
+
 def command_spec_from_payload(payload: dict[str, Any]) -> CommandSpec:
     return CommandSpec(
         name=str(payload.get("name") or "command"),
@@ -2428,7 +2465,11 @@ def execute_command_plan(
         command_spec_from_payload(item)
         for item in (plan.get("preflight") or {}).get("commands") or []
     ]
-    preflight_results = run_preflight_commands(preflight_commands, cwd=cwd)
+    preflight_results = run_execution_preflight_commands(
+        preflight_commands,
+        cwd=cwd,
+        resume_skip_campaign_cleanup=resume and (results_path.exists() or ledger_path.exists()),
+    )
     preflight_failed = [item for item in preflight_results if item.get("status") != "passed"]
     plan["preflight"]["status"] = "preflight_failed" if preflight_failed else "preflight_passed"
     plan["preflight"]["results"] = preflight_results

@@ -149,6 +149,59 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "blocked_execution_confirmation_missing")
         self.assertEqual(payload["execution_plan"]["execution"]["reason"], "confirmation_missing")
 
+    def test_resume_execution_skips_campaign_wide_cleanup_preflight_when_results_exist(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_dir = Path(tmp_dir)
+            plan = self.build_execution_test_plan(artifact_dir, [])
+            plan["preflight"]["commands"] = [
+                runner.command_payload(
+                    runner.CommandSpec(
+                        name="quick_preflight",
+                        args=[sys.executable, "-c", "print('quick-ok')"],
+                        timeout_seconds=5,
+                    )
+                ),
+                runner.command_payload(
+                    runner.CommandSpec(
+                        name="foreign_cleanup_dry_run",
+                        args=[sys.executable, "-c", "raise SystemExit(99)"],
+                        timeout_seconds=5,
+                    )
+                ),
+                runner.command_payload(
+                    runner.CommandSpec(
+                        name="iran_cleanup_dry_run",
+                        args=[sys.executable, "-c", "raise SystemExit(99)"],
+                        timeout_seconds=5,
+                    )
+                ),
+            ]
+            (artifact_dir / "execution-results.jsonl").write_text("", encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
+                clear=True,
+            ):
+                executed_plan, exit_code = runner.execute_command_plan(plan, cwd=REPO_ROOT, resume=True)
+
+        self.assertEqual(exit_code, 0)
+        results = executed_plan["preflight"]["results"]
+        self.assertEqual(
+            [item["name"] for item in results],
+            ["quick_preflight", "foreign_cleanup_dry_run", "iran_cleanup_dry_run"],
+        )
+        self.assertEqual(results[0]["status"], "passed")
+        self.assertFalse(results[0].get("skipped", False))
+        for result in results[1:]:
+            self.assertEqual(result["status"], "passed")
+            self.assertTrue(result["skipped"])
+            self.assertEqual(result["returncode"], 0)
+            self.assertEqual(
+                result["skip_reason"],
+                "resume_skips_campaign_wide_cleanup_dry_run_after_exact_scenario_cleanup",
+            )
+
     def test_filters_supported_base_trade_shape_scenarios(self):
         plan = runner.build_plan(
             self.build_args(
