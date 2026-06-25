@@ -620,6 +620,7 @@ def dual_role_scenario_commands(
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
         CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
+        "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "1",
         "BOT_TOKEN": "",
     }
     pre_role_commands = [
@@ -914,6 +915,7 @@ def negative_guard_scenario_commands(
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
         CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
+        "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "1",
         "BOT_TOKEN": "",
     }
     commands = [
@@ -1044,6 +1046,7 @@ def targeted_join_scenario_commands(
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
         CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
+        "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "1",
         "BOT_TOKEN": "",
     }
     cleanup_env = {
@@ -1340,6 +1343,7 @@ def unsupported_policy_scenario_commands(
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
         CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
+        "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "1",
         "BOT_TOKEN": "",
     }
     command_servers: list[str] = []
@@ -1477,6 +1481,7 @@ def market_behavior_scenario_commands(
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
         CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
+        "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "1",
         "DB_POOL_SIZE": str(MARKET_BEHAVIOR_LOAD_RUNNER_DB_POOL_SIZE),
         "DB_MAX_OVERFLOW": str(MARKET_BEHAVIOR_LOAD_RUNNER_DB_MAX_OVERFLOW),
         "BOT_TOKEN": "",

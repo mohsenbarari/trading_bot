@@ -216,6 +216,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("tier2_cannot_use_telegram_request", rendered)
         self.assertIn("--allow-production-cleanup", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
         self.assertNotIn("--skip-initial-cleanup", rendered)
 
     def test_execution_plan_builds_market_behavior_probe_commands(self):
@@ -252,6 +253,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--read-view-max-concurrency", rendered)
         self.assertIn("--allow-production-execution", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
 
     def test_execution_plan_extends_timeout_for_heavy_market_behavior_families(self):
         plan = runner.build_plan(
@@ -451,6 +453,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--allow-production-cleanup", rendered)
         self.assertIn("PRODUCTION_FULL_MATRIX_CONFIRM", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
         self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
 
@@ -586,6 +589,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("run-negative-guard-case", rendered)
         self.assertIn("--allow-production-cleanup", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
+        self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
         self.assertIn("TRADING_BOT_SERVICE=load_runner", rendered)
         self.assertIn("BOT_TOKEN=", rendered)
 
