@@ -84,6 +84,13 @@ class AttemptOutcome:
     admission_wait_ms: float | None = None
 
 
+@dataclass(frozen=True)
+class OfferExecutionRef:
+    id: int
+    offer_public_id: str | None
+    channel_message_id: int | None = None
+
+
 SHAPES: dict[str, OfferShape] = {
     "wholesale_full": OfferShape(
         name="wholesale_full",
@@ -363,16 +370,16 @@ async def create_non_contention_offers(
     index_offset: int,
     bot_harness: worker.AiogramDispatcherHarness,
     max_concurrency: int | None,
-) -> tuple[list[int], list[worker.LoadUserRef], float]:
+) -> tuple[list[OfferExecutionRef], list[worker.LoadUserRef], float]:
     """Seed independent offers before the measured non-contention attempt phase."""
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency and max_concurrency > 0 else None
     started = time.perf_counter()
 
-    async def _create(index: int) -> tuple[int, worker.LoadUserRef, int]:
+    async def _create(index: int) -> tuple[int, worker.LoadUserRef, OfferExecutionRef]:
         owner = users[index % len(users)]
 
-        async def _run() -> int:
-            return await create_offer(
+        async def _run() -> OfferExecutionRef:
+            offer_id = await create_offer(
                 origin=origin,
                 owner=owner,
                 commodity_id=commodity_id,
@@ -385,18 +392,24 @@ async def create_non_contention_offers(
                 fast_seed_bot_offer=True,
                 time_limit_buffer_minutes=60,
             )
+            offer = await worker.load_offer_snapshot(offer_id)
+            return OfferExecutionRef(
+                id=int(getattr(offer, "id")),
+                offer_public_id=getattr(offer, "offer_public_id", None),
+                channel_message_id=getattr(offer, "channel_message_id", None),
+            )
 
         if semaphore is None:
-            offer_id = await _run()
+            offer_ref = await _run()
         else:
             async with semaphore:
-                offer_id = await _run()
-        return index, owner, offer_id
+                offer_ref = await _run()
+        return index, owner, offer_ref
 
     results = await asyncio.gather(*(_create(index) for index in range(attempts_per_scenario)))
     results.sort(key=lambda item: item[0])
     return (
-        [offer_id for _, _, offer_id in results],
+        [offer_ref for _, _, offer_ref in results],
         [owner for _, owner, _ in results],
         time.perf_counter() - started,
     )
@@ -414,8 +427,9 @@ async def execute_trade_attempt(
     error_details: list[str] | None = None,
     preconfirm_telegram: bool = False,
     record_rejected_details: bool = False,
+    offer_ref: OfferExecutionRef | None = None,
 ) -> str:
-    offer = await worker.load_offer_snapshot(offer_id)
+    offer = offer_ref or await worker.load_offer_snapshot(offer_id)
     if surface == "telegram":
         with override_current_server(SERVER_FOREIGN):
             spec = worker.MixedLoadAttemptSpec(
@@ -685,7 +699,7 @@ async def run_scenario(
             harness = worker.AiogramDispatcherHarness()
             fixture_elapsed = 0.0
             try:
-                offer_ids, offer_owners, fixture_elapsed = await create_non_contention_offers(
+                offer_refs, offer_owners, fixture_elapsed = await create_non_contention_offers(
                     origin=scenario.offer_origin or "webapp",
                     users=users,
                     commodity_id=commodity_id,
@@ -707,13 +721,14 @@ async def run_scenario(
                         surface=surface,
                         harness=harness,
                         user=responder,
-                        offer_id=offer_ids[index],
+                        offer_id=offer_refs[index].id,
                         amount=shape.request_amount,
                         prefix=scenario_prefix,
                         index=index,
                         error_details=attempt_error_details,
                         preconfirm_telegram=True,
                         record_rejected_details=True,
+                        offer_ref=offer_refs[index],
                     )
 
                 outcomes, elapsed = await run_scheduled_attempts(
@@ -733,7 +748,7 @@ async def run_scenario(
             harness = worker.AiogramDispatcherHarness()
             fixture_elapsed = 0.0
             try:
-                offer_ids, offer_owners, fixture_elapsed = await create_non_contention_offers(
+                offer_refs, offer_owners, fixture_elapsed = await create_non_contention_offers(
                     origin=scenario.offer_origin or "webapp",
                     users=users,
                     commodity_id=commodity_id,
@@ -752,7 +767,7 @@ async def run_scenario(
                         surface=scenario.expire_surface or "webapp",
                         harness=harness,
                         owner=offer_owners[index],
-                        offer_id=offer_ids[index],
+                        offer_id=offer_refs[index].id,
                         prefix=scenario_prefix,
                         index=index,
                         error_details=attempt_error_details,

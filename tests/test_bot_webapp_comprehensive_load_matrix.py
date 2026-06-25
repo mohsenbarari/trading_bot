@@ -233,8 +233,19 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
             running -= 1
             return kwargs["index"]
 
+        async def fake_load_offer_snapshot(offer_id):
+            return SimpleNamespace(
+                id=offer_id,
+                offer_public_id=f"ofr_{offer_id}",
+                channel_message_id=900000 + offer_id,
+            )
+
         async def run_probe():
-            with patch.object(matrix_runner, "create_offer", side_effect=fake_create_offer):
+            with patch.object(matrix_runner, "create_offer", side_effect=fake_create_offer), patch.object(
+                matrix_runner.worker,
+                "load_offer_snapshot",
+                new=fake_load_offer_snapshot,
+            ):
                 return await matrix_runner.create_non_contention_offers(
                     origin="webapp",
                     users=users,
@@ -249,10 +260,14 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
                     max_concurrency=2,
                 )
 
-        offer_ids, owners, elapsed = asyncio.run(run_probe())
+        offer_refs, owners, elapsed = asyncio.run(run_probe())
 
         self.assertEqual(peak_running, 2)
-        self.assertEqual(offer_ids, [5000, 5001, 5002, 5003, 5004, 5005])
+        self.assertEqual([offer_ref.id for offer_ref in offer_refs], [5000, 5001, 5002, 5003, 5004, 5005])
+        self.assertEqual(
+            [offer_ref.offer_public_id for offer_ref in offer_refs],
+            ["ofr_5000", "ofr_5001", "ofr_5002", "ofr_5003", "ofr_5004", "ofr_5005"],
+        )
         self.assertEqual([owner.user_id for owner in owners], [10, 20, 30, 10, 20, 30])
         self.assertGreater(elapsed, 0)
 
@@ -352,6 +367,59 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(calls["preconfirm_server"], matrix_runner.SERVER_FOREIGN)
         self.assertEqual(calls["bot_trade_server"], matrix_runner.SERVER_FOREIGN)
         self.assertTrue(calls["bot_trade"]["preconfirmed"])
+
+    def test_trade_attempt_can_use_preloaded_offer_ref_without_db_snapshot(self):
+        calls = {}
+        user = matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=7007)
+        offer_ref = matrix_runner.OfferExecutionRef(
+            id=42,
+            offer_public_id="ofr_42",
+            channel_message_id=900042,
+        )
+
+        async def fail_load_offer_snapshot(_offer_id):
+            raise AssertionError("preloaded offer ref should avoid per-attempt DB snapshot")
+
+        async def fake_preconfirm_bot_trade_callback(**kwargs):
+            calls["preconfirm_offer"] = kwargs["offer"]
+            return False
+
+        async def fake_execute_bot_trade_with_dispatcher(**kwargs):
+            calls["bot_trade_offer"] = kwargs["offer"]
+            kwargs["phase_details"]["second_answer_text"] = "معامله ثبت شد"
+            return "success"
+
+        async def run_probe():
+            with patch.object(
+                matrix_runner.worker,
+                "load_offer_snapshot",
+                new=fail_load_offer_snapshot,
+            ), patch.object(
+                matrix_runner.worker,
+                "preconfirm_bot_trade_callback",
+                new=fake_preconfirm_bot_trade_callback,
+            ), patch.object(
+                matrix_runner.worker,
+                "execute_bot_trade_with_dispatcher",
+                new=fake_execute_bot_trade_with_dispatcher,
+            ):
+                return await matrix_runner.execute_trade_attempt(
+                    surface="telegram",
+                    harness=SimpleNamespace(),
+                    user=user,
+                    offer_id=42,
+                    amount=5,
+                    prefix="probe-",
+                    index=3,
+                    preconfirm_telegram=True,
+                    offer_ref=offer_ref,
+                )
+
+        status = asyncio.run(run_probe())
+
+        self.assertEqual(status, "success")
+        self.assertIs(calls["preconfirm_offer"], offer_ref)
+        self.assertIs(calls["bot_trade_offer"], offer_ref)
 
     def test_telegram_trade_attempt_records_rejection_answer_text(self):
         error_details = []
