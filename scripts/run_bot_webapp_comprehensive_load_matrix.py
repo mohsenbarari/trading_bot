@@ -589,20 +589,26 @@ async def finalize_offer_for_terminal_state(
         if terminal_state == "active":
             return offer_id
         if terminal_state == "completed":
-            terminal_setup_surface = "telegram" if origin == "bot" else "webapp"
+            target_server = SERVER_FOREIGN if origin == "bot" else SERVER_IRAN
             for index in range(shape.expected_winner_count):
                 responder = responder_for_index(users, owner_user_id=owner.user_id, index=index)
-                status = await execute_trade_attempt(
-                    surface=terminal_setup_surface,
-                    harness=harness,
-                    user=responder,
-                    offer_id=offer_id,
-                    amount=shape.request_amount,
-                    prefix=f"{prefix}complete-",
-                    index=index,
-                )
-                if status != "success":
-                    raise worker.TradingProbeError(f"terminal setup trade failed with status={status}")
+                try:
+                    with override_current_server(target_server):
+                        await worker.execute_trade_for_user(
+                            user_id=responder.user_id,
+                            offer_id=offer_id,
+                            quantity=shape.request_amount,
+                            idempotency_key=worker.build_role_attempt_idempotency_key(
+                                prefix=f"{prefix}complete-",
+                                role="terminal_setup",
+                                offer_id=offer_id,
+                                attempt_index=index,
+                            ),
+                        )
+                except Exception as exc:
+                    raise worker.TradingProbeError(
+                        f"terminal setup trade failed: {type(exc).__name__}: {exc}"
+                    ) from exc
             await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.COMPLETED.value)
             return offer_id
         if terminal_state == "manual_expired":

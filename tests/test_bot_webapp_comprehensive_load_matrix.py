@@ -326,7 +326,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(report["rounds"], 1)
 
     def test_bot_origin_terminal_setup_uses_authoritative_paths(self):
-        calls = {"trade_surfaces": [], "expire_servers": []}
+        calls = {"trade_servers": [], "expire_servers": []}
         owner = matrix_runner.worker.LoadUserRef(user_id=10, telegram_id=1010)
         responder = matrix_runner.worker.LoadUserRef(user_id=20, telegram_id=2020)
 
@@ -337,9 +337,8 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         async def fake_create_offer(**_kwargs):
             return 42
 
-        async def fake_execute_trade_attempt(**kwargs):
-            calls["trade_surfaces"].append(kwargs["surface"])
-            return "success"
+        async def fake_execute_trade_for_user(**_kwargs):
+            calls["trade_servers"].append(matrix_runner.worker.current_server())
 
         async def fake_expire_offer_for_user(**_kwargs):
             calls["expire_servers"].append(matrix_runner.worker.current_server())
@@ -350,7 +349,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         async def run_probe():
             with patch.object(matrix_runner.worker, "AiogramDispatcherHarness", FakeHarness):
                 with patch.object(matrix_runner, "create_offer", fake_create_offer):
-                    with patch.object(matrix_runner, "execute_trade_attempt", fake_execute_trade_attempt):
+                    with patch.object(matrix_runner.worker, "execute_trade_for_user", fake_execute_trade_for_user):
                         with patch.object(matrix_runner.worker, "expire_offer_for_user", fake_expire_offer_for_user):
                             with patch.object(matrix_runner, "assert_offer_terminal", fake_assert_offer_terminal):
                                 completed_id = await matrix_runner.finalize_offer_for_terminal_state(
@@ -380,7 +379,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         completed_id, expired_id = asyncio.run(run_probe())
 
         self.assertEqual((completed_id, expired_id), (42, 42))
-        self.assertEqual(calls["trade_surfaces"], ["telegram"])
+        self.assertEqual(calls["trade_servers"], [matrix_runner.SERVER_FOREIGN])
         self.assertEqual(calls["expire_servers"], [matrix_runner.SERVER_FOREIGN])
 
     def test_non_contention_offer_seed_honors_max_concurrency_and_order(self):
