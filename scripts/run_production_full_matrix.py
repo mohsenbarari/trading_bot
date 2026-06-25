@@ -756,6 +756,40 @@ def dual_role_scenario_commands(
             server="iran",
             path=webapp_plan_path,
         ),
+        container_python_command(
+            "wait_telegram_offer_visible_on_foreign",
+            server="foreign",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "wait-offer-visible",
+                "--plan",
+                telegram_plan_path,
+                "--timeout-seconds",
+                "120",
+                "--poll-seconds",
+                "0.25",
+            ],
+            env=production_env,
+            timeout_seconds=150,
+            mutates_production=False,
+        ),
+        container_python_command(
+            "wait_webapp_offer_visible_on_iran",
+            server="iran",
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "wait-offer-visible",
+                "--plan",
+                webapp_plan_path,
+                "--timeout-seconds",
+                "120",
+                "--poll-seconds",
+                "0.25",
+            ],
+            env=production_env,
+            timeout_seconds=150,
+            mutates_production=False,
+        ),
     ]
     if is_read_during_write:
         pre_role_commands.extend(

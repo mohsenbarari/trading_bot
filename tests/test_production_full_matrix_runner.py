@@ -447,6 +447,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(commands_by_name["distribute_webapp_role_plan"]["args"][0], "ssh")
         self.assertIn("test -f", commands_by_name["distribute_webapp_role_plan"]["args"][2])
         self.assertIn("install_telegram_role_plan_in_foreign_container", command_names)
+        self.assertIn("wait_telegram_offer_visible_on_foreign", command_names)
+        self.assertIn("wait_webapp_offer_visible_on_iran", command_names)
         self.assertIn("run_role_telegram_foreign", command_names)
         self.assertIn("run_role_webapp_iran", command_names)
         self.assertIn("publish_telegram_role_result_from_foreign_container", command_names)
@@ -463,9 +465,18 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("PRODUCTION_FULL_MATRIX_CONFIRM", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
         self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
+        self.assertIn("wait-offer-visible", rendered)
         self.assertIn("sync-health-iran", rendered)
         self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
+        self.assertLess(
+            command_names.index("install_webapp_role_plan_in_iran_container"),
+            command_names.index("wait_webapp_offer_visible_on_iran"),
+        )
+        self.assertLess(
+            command_names.index("wait_telegram_offer_visible_on_foreign"),
+            command_names.index("run_role_telegram_foreign"),
+        )
 
     def test_execution_plan_builds_customer_actor_composed_commands(self):
         plan = runner.build_plan(

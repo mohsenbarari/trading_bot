@@ -4433,6 +4433,46 @@ async def load_offer_snapshot(offer_id: int) -> Offer:
         return offer
 
 
+async def wait_for_offer_visibility(
+    *,
+    offer_id: int,
+    offer_public_id: str | None,
+    timeout_seconds: float,
+    poll_seconds: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    attempts = 0
+    last_seen_id: int | None = None
+    normalized_public_id = str(offer_public_id or "").strip() or None
+    while True:
+        attempts += 1
+        async with AsyncSessionLocal() as db:
+            condition = Offer.id == int(offer_id)
+            if normalized_public_id:
+                condition = condition | (Offer.offer_public_id == normalized_public_id)
+            result = await db.execute(select(Offer).where(condition))
+            offer = result.scalars().first()
+            if offer is not None:
+                last_seen_id = int(offer.id)
+                if last_seen_id == int(offer_id):
+                    return {
+                        "status": "ok",
+                        "offer_id": int(offer_id),
+                        "offer_public_id": normalized_public_id,
+                        "attempts": attempts,
+                        "visible_status": getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None)),
+                    }
+                raise TradingProbeError(
+                    f"offer public id {normalized_public_id} is visible with mismatched local id {last_seen_id}; expected {offer_id}"
+                )
+        if time.monotonic() >= deadline:
+            raise TradingProbeError(
+                f"offer {offer_id} was not visible after {timeout_seconds}s"
+                + (f" (public_id={normalized_public_id})" if normalized_public_id else "")
+            )
+        await asyncio.sleep(max(0.05, float(poll_seconds)))
+
+
 async def preconfirm_bot_trade_callbacks(
     *,
     attempts: list[MixedLoadAttemptSpec],
@@ -6739,6 +6779,26 @@ async def run_role_plan_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def wait_offer_visible_command(args: argparse.Namespace) -> int:
+    offer_id = args.offer_id
+    offer_public_id = args.offer_public_id
+    if args.plan:
+        plan = validate_role_plan_artifact(read_json_artifact(Path(args.plan)))
+        offer = _require_mapping(plan["offer"], "role plan offer")
+        offer_id = int(offer["id"])
+        offer_public_id = str(offer["public_id"]) if offer.get("public_id") else offer_public_id
+    if offer_id is None:
+        raise TradingProbeError("--offer-id is required when --plan is not provided")
+    payload = await wait_for_offer_visibility(
+        offer_id=int(offer_id),
+        offer_public_id=offer_public_id,
+        timeout_seconds=float(args.timeout_seconds),
+        poll_seconds=float(args.poll_seconds),
+    )
+    print_json(payload)
+    return 0
+
+
 async def merge_role_results_command(args: argparse.Namespace) -> int:
     results = [read_json_artifact(Path(path)) for path in args.results]
     merged = merge_role_result_artifacts(results)
@@ -6899,6 +6959,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow this role worker inside production only with the production full-matrix confirmation env.",
     )
 
+    wait_offer_parser = subparsers.add_parser("wait-offer-visible")
+    wait_offer_parser.add_argument("--plan")
+    wait_offer_parser.add_argument("--offer-id", type=int)
+    wait_offer_parser.add_argument("--offer-public-id")
+    wait_offer_parser.add_argument("--timeout-seconds", type=float, default=90.0)
+    wait_offer_parser.add_argument("--poll-seconds", type=float, default=0.25)
+
     manual_expiry_parser = subparsers.add_parser("run-manual-expiry-race")
     manual_expiry_parser.add_argument("--prepare", required=True)
     manual_expiry_parser.add_argument("--output")
@@ -7003,6 +7070,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_dual_role_artifact_smoke_command(args)
     if args.command == "run-role-plan":
         return await run_role_plan_command(args)
+    if args.command == "wait-offer-visible":
+        return await wait_offer_visible_command(args)
     if args.command == "run-manual-expiry-race":
         return await run_manual_expiry_race_command(args)
     if args.command == "run-time-expiry-race":
