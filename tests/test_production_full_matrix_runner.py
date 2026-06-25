@@ -438,11 +438,14 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         scenario_plan = execution_plan["scenario_plans"][0]
         command_names = [command["name"] for command in scenario_plan["commands"]]
+        commands_by_name = {command["name"]: command for command in scenario_plan["commands"]}
         groups_by_name = {group["name"]: group for group in scenario_plan["execution_groups"]}
         self.assertEqual(scenario_plan["offer_home_server"], "iran")
         self.assertIn("prepare_on_offer_home_server", command_names)
         self.assertIn("publish_telegram_role_plan_from_offer_home_container", command_names)
         self.assertIn("distribute_telegram_role_plan", command_names)
+        self.assertEqual(commands_by_name["distribute_webapp_role_plan"]["args"][0], "ssh")
+        self.assertIn("test -f", commands_by_name["distribute_webapp_role_plan"]["args"][2])
         self.assertIn("install_telegram_role_plan_in_foreign_container", command_names)
         self.assertIn("run_role_telegram_foreign", command_names)
         self.assertIn("run_role_webapp_iran", command_names)

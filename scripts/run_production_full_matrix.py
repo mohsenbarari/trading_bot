@@ -374,7 +374,11 @@ def copy_host_to_container_command(name: str, *, server: str, path: str) -> Comm
 
 def copy_between_servers_command(name: str, *, source_server: str, target_server: str, path: str) -> CommandSpec:
     if source_server == target_server:
-        return CommandSpec(name=name, args=["test", "-f", path], timeout_seconds=30)
+        if source_server == "foreign":
+            return CommandSpec(name=name, args=["test", "-f", path], timeout_seconds=30)
+        if source_server == "iran":
+            return iran_command(name, f"test -f {shlex.quote(path)}", timeout_seconds=30)
+        raise RunnerError(f"unsupported server copy: {source_server} -> {target_server}")
     if source_server == "foreign" and target_server == "iran":
         return CommandSpec(
             name=name,
