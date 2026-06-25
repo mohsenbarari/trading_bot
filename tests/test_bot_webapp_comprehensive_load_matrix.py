@@ -104,6 +104,29 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
 
         asyncio.run(run_probe())
 
+    def test_stdout_payload_omits_large_reports_when_output_file_is_used(self):
+        payload = {
+            "schema_version": "probe",
+            "status": "ok",
+            "prefix": "PFM_probe_",
+            "scenario_count": 1,
+            "total_business_requests": 1000,
+            "elapsed_seconds": 3.5,
+            "aggregate_business_request_rps": 285.7,
+            "min_attempt_start_rps": 600.0,
+            "failed_scenarios": [],
+            "cleanup": {"planned_counts": {"users": 10}},
+            "reports": [{"large": "payload"}],
+            "production_gate": {"status": "production_execution_allowed"},
+        }
+
+        stdout_payload = matrix_runner.stdout_payload_for_matrix(payload, output_path="/tmp/result.json")
+
+        self.assertEqual(stdout_payload["result_path"], "/tmp/result.json")
+        self.assertEqual(stdout_payload["cleanup_counts"], {"users": 10})
+        self.assertNotIn("reports", stdout_payload)
+        self.assertNotIn("cleanup", stdout_payload)
+
     def test_filter_scenarios_by_family_and_id(self):
         scenarios = matrix_runner.build_comprehensive_scenarios()
 

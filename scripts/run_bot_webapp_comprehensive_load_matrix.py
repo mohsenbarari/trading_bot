@@ -1062,7 +1062,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
     }
     if args.output:
         worker.write_json_artifact(Path(args.output), payload)
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    print(json.dumps(stdout_payload_for_matrix(payload, output_path=args.output), ensure_ascii=False, sort_keys=True))
     return 0 if payload["status"] == "ok" or not args.check else 1
 
 
@@ -1100,6 +1100,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow production market matrix cleanup only with the cleanup confirmation env.",
     )
     return parser
+
+
+def stdout_payload_for_matrix(payload: dict[str, Any], *, output_path: str | None) -> dict[str, Any]:
+    if not output_path:
+        return payload
+    cleanup = payload.get("cleanup")
+    cleanup_counts = cleanup.get("planned_counts") if isinstance(cleanup, dict) else None
+    return {
+        "schema_version": payload.get("schema_version"),
+        "status": payload.get("status"),
+        "prefix": payload.get("prefix"),
+        "result_path": output_path,
+        "scenario_count": payload.get("scenario_count"),
+        "total_business_requests": payload.get("total_business_requests"),
+        "elapsed_seconds": payload.get("elapsed_seconds"),
+        "aggregate_business_request_rps": payload.get("aggregate_business_request_rps"),
+        "min_attempt_start_rps": payload.get("min_attempt_start_rps"),
+        "failed_scenarios": payload.get("failed_scenarios"),
+        "cleanup_counts": cleanup_counts,
+        "production_gate": payload.get("production_gate"),
+    }
 
 
 async def run_shutdown_step(label: str, awaitable: Awaitable[Any]) -> None:
