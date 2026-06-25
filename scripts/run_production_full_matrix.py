@@ -794,11 +794,11 @@ def dual_role_scenario_commands(
                 "--output",
                 sync_catchup_result_path,
                 "--batch-size",
-                "50",
+                "200",
                 "--allow-production-execution",
             ],
             env=production_env,
-            timeout_seconds=180,
+            timeout_seconds=600,
         ),
         container_python_command(
             "wait_telegram_offer_visible_on_foreign",

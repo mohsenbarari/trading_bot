@@ -474,7 +474,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
         catchup_args = commands_by_name["sync_prefix_catchup_from_offer_home_server"]["args"]
-        self.assertIn("--batch-size 50", " ".join(catchup_args))
+        self.assertIn("--batch-size 200", " ".join(catchup_args))
+        self.assertEqual(commands_by_name["sync_prefix_catchup_from_offer_home_server"]["timeout_seconds"], 630)
         self.assertLess(
             command_names.index("cleanup_foreign_scenario_prefix_before_prepare"),
             command_names.index("prepare_on_offer_home_server"),
