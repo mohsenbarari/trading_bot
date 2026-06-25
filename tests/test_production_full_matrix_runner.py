@@ -198,6 +198,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["driver"], "market_behavior_comprehensive_probe")
         self.assertEqual(scenario_plan["server"], "foreign")
         self.assertEqual(scenario_plan["source_scenario_id"], "CLM-001")
+        self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 24)
         rendered = json.dumps(scenario_plan, ensure_ascii=False)
         self.assertIn("run_bot_webapp_comprehensive_load_matrix.py", rendered)
         self.assertIn("timeout", rendered)
@@ -222,8 +223,11 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         command = scenario_plan["commands"][1]
         self.assertEqual(scenario_plan["family"], "trade_non_concurrent")
         self.assertEqual(scenario_plan["market_behavior_timeout_seconds"], 3600)
+        self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 128)
         self.assertEqual(command["timeout_seconds"], 3630)
         self.assertIn("3600s", command["args"])
+        self.assertIn("--write-max-concurrency", command["args"])
+        self.assertIn("128", command["args"])
 
     def test_execution_plan_builds_delivery_contract_catalog_commands(self):
         plan = runner.build_plan(

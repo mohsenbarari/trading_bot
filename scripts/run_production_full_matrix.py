@@ -59,6 +59,8 @@ DUAL_ROLE_EXECUTABLE_TIME_EXPIRE_RACE_REQUEST_SURFACES = {"telegram", "webapp"}
 DUAL_ROLE_EXECUTABLE_READ_DURING_WRITE_REQUEST_SURFACES = {"telegram", "webapp"}
 MARKET_BEHAVIOR_DEFAULT_TIMEOUT_SECONDS = 1200
 MARKET_BEHAVIOR_HEAVY_TIMEOUT_SECONDS = 3600
+MARKET_BEHAVIOR_DEFAULT_WRITE_MAX_CONCURRENCY = 24
+MARKET_BEHAVIOR_HEAVY_WRITE_MAX_CONCURRENCY = 128
 MARKET_BEHAVIOR_HEAVY_FAMILIES = {
     "trade_non_concurrent",
     "manual_expire_non_concurrent",
@@ -1440,6 +1442,11 @@ def market_behavior_scenario_commands(
         if family in MARKET_BEHAVIOR_HEAVY_FAMILIES
         else MARKET_BEHAVIOR_DEFAULT_TIMEOUT_SECONDS
     )
+    scenario_write_max_concurrency = (
+        MARKET_BEHAVIOR_HEAVY_WRITE_MAX_CONCURRENCY
+        if family in MARKET_BEHAVIOR_HEAVY_FAMILIES
+        else MARKET_BEHAVIOR_DEFAULT_WRITE_MAX_CONCURRENCY
+    )
     server = "foreign" if "telegram" in {offer_origin, request_surface, expire_surface} or offer_origin == "bot" else "iran"
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
@@ -1471,7 +1478,7 @@ def market_behavior_scenario_commands(
                 "--telegram-ratio",
                 str(telegram_ratio),
                 "--write-max-concurrency",
-                "24",
+                str(scenario_write_max_concurrency),
                 "--output",
                 f"{remote_dir}/market-behavior.result.json",
                 "--check",
@@ -1493,6 +1500,7 @@ def market_behavior_scenario_commands(
         "source_scenario_id": source_scenario_id,
         "family": family,
         "market_behavior_timeout_seconds": scenario_timeout_seconds,
+        "market_behavior_write_max_concurrency": scenario_write_max_concurrency,
         "offer_origin": record.get("offer_origin"),
         "request_surface": record.get("request_surface"),
         "expire_surface": record.get("expire_surface"),
