@@ -162,6 +162,7 @@ BROAD_CLEANUP_PREFIXES = {
     "user",
 }
 CLEANUP_DB_RETRY_ATTEMPTS = 3
+CLEANUP_SQL_IN_BATCH_SIZE = 5000
 RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001"}
 _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = False
 
@@ -1192,6 +1193,24 @@ def in_filter(column: Any, values: list[int] | list[str]):
     return column.in_(values) if values else false()
 
 
+def cleanup_in_batches(values: list[int] | list[str], *, batch_size: int = CLEANUP_SQL_IN_BATCH_SIZE):
+    if batch_size <= 0:
+        raise ValueError("cleanup SQL batch size must be positive")
+    for offset in range(0, len(values), batch_size):
+        yield values[offset : offset + batch_size]
+
+
+def stable_unique(values: list[Any]) -> list[Any]:
+    seen: set[Any] = set()
+    unique: list[Any] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
 def cleanup_mutating_statement(statement: Any) -> Any:
     if is_production_runtime() and not _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED:
         raise TradingProbeError("synthetic cleanup is disabled in production runtime")
@@ -1318,6 +1337,50 @@ async def cleanup_redis_for_user_ids(user_ids: list[int], *, dry_run: bool = Fal
     return deleted
 
 
+async def collect_int_ids(db: Any, statement: Any) -> list[int]:
+    return [int(item) for item in (await db.execute(statement)).scalars().all()]
+
+
+async def collect_int_ids_by_batched_filters(
+    db: Any,
+    id_column: Any,
+    filters: list[tuple[Any, list[int] | list[str]]],
+) -> list[int]:
+    ids: list[int] = []
+    for column, values in filters:
+        for batch in cleanup_in_batches(values):
+            ids.extend(await collect_int_ids(db, select(id_column).where(column.in_(batch))))
+    return stable_unique(ids)
+
+
+async def collect_int_ids_by_statement_and_batched_filters(
+    db: Any,
+    prefix_statement: Any,
+    id_column: Any,
+    filters: list[tuple[Any, list[int] | list[str]]],
+) -> list[int]:
+    ids = await collect_int_ids(db, prefix_statement)
+    ids.extend(await collect_int_ids_by_batched_filters(db, id_column, filters))
+    return stable_unique(ids)
+
+
+async def collect_offer_cleanup_rows(
+    db: Any,
+    *,
+    prefix_statement: Any,
+    user_ids: list[int],
+) -> list[Any]:
+    rows_by_id: dict[int, Any] = {}
+    for row in (await db.execute(prefix_statement)).all():
+        rows_by_id[int(row.id)] = row
+    for batch in cleanup_in_batches(user_ids):
+        for row in (
+            await db.execute(select(Offer.id, Offer.offer_public_id).where(Offer.user_id.in_(batch)))
+        ).all():
+            rows_by_id[int(row.id)] = row
+    return list(rows_by_id.values())
+
+
 async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
     normalized_prefix = validate_cleanup_prefix(prefix)
     pattern, contains_pattern = cleanup_prefix_patterns(normalized_prefix)
@@ -1333,177 +1396,146 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                 )
             ).scalars().all()
         ]
-        invitation_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(Invitation.id).where(
-                        (Invitation.account_name.like(pattern, escape=LIKE_ESCAPE))
-                        | (Invitation.mobile_number.like(pattern, escape=LIKE_ESCAPE))
-                        | in_filter(Invitation.created_by_id, user_ids)
-                    )
-                )
-            ).scalars().all()
-        ]
-        accountant_relation_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(AccountantRelation.id).where(
-                        in_filter(AccountantRelation.owner_user_id, user_ids)
-                        | in_filter(AccountantRelation.accountant_user_id, user_ids)
-                        | in_filter(AccountantRelation.created_by_user_id, user_ids)
-                        | AccountantRelation.global_account_name.like(pattern, escape=LIKE_ESCAPE)
-                        | AccountantRelation.relation_display_name.like(contains_pattern, escape=LIKE_ESCAPE)
-                        | AccountantRelation.mobile_number.like(pattern, escape=LIKE_ESCAPE)
-                    )
-                )
-            ).scalars().all()
-        ]
-        customer_relation_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(CustomerRelation.id).where(
-                        in_filter(CustomerRelation.owner_user_id, user_ids)
-                        | in_filter(CustomerRelation.customer_user_id, user_ids)
-                        | in_filter(CustomerRelation.created_by_user_id, user_ids)
-                        | CustomerRelation.management_name.like(contains_pattern, escape=LIKE_ESCAPE)
-                        | CustomerRelation.invitation_token.like(contains_pattern, escape=LIKE_ESCAPE)
-                    )
-                )
-            ).scalars().all()
-        ]
-        user_session_ids = list(
-            (
-                await db.execute(select(UserSession.id).where(in_filter(UserSession.user_id, user_ids)))
-            ).scalars().all()
+        invitation_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(Invitation.id).where(
+                (Invitation.account_name.like(pattern, escape=LIKE_ESCAPE))
+                | (Invitation.mobile_number.like(pattern, escape=LIKE_ESCAPE))
+            ),
+            Invitation.id,
+            [(Invitation.created_by_id, user_ids)],
         )
-        session_login_request_ids = list(
-            (
-                await db.execute(
-                    select(SessionLoginRequest.id).where(in_filter(SessionLoginRequest.user_id, user_ids))
-                )
-            ).scalars().all()
+        accountant_relation_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(AccountantRelation.id).where(
+                AccountantRelation.global_account_name.like(pattern, escape=LIKE_ESCAPE)
+                | AccountantRelation.relation_display_name.like(contains_pattern, escape=LIKE_ESCAPE)
+                | AccountantRelation.mobile_number.like(pattern, escape=LIKE_ESCAPE)
+            ),
+            AccountantRelation.id,
+            [
+                (AccountantRelation.owner_user_id, user_ids),
+                (AccountantRelation.accountant_user_id, user_ids),
+                (AccountantRelation.created_by_user_id, user_ids),
+            ],
         )
-        recovery_request_ids = list(
-            (
-                await db.execute(
-                    select(SingleSessionRecoveryRequest.id).where(
-                        in_filter(SingleSessionRecoveryRequest.user_id, user_ids)
-                        | in_filter(SingleSessionRecoveryRequest.session_login_request_id, session_login_request_ids)
-                    )
-                )
-            ).scalars().all()
+        customer_relation_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(CustomerRelation.id).where(
+                CustomerRelation.management_name.like(contains_pattern, escape=LIKE_ESCAPE)
+                | CustomerRelation.invitation_token.like(contains_pattern, escape=LIKE_ESCAPE)
+            ),
+            CustomerRelation.id,
+            [
+                (CustomerRelation.owner_user_id, user_ids),
+                (CustomerRelation.customer_user_id, user_ids),
+                (CustomerRelation.created_by_user_id, user_ids),
+            ],
         )
-        recovery_admin_target_ids = list(
-            (
-                await db.execute(
-                    select(SingleSessionRecoveryAdminTarget.id).where(
-                        in_filter(SingleSessionRecoveryAdminTarget.recovery_request_id, recovery_request_ids)
-                        | in_filter(SingleSessionRecoveryAdminTarget.admin_user_id, user_ids)
-                    )
-                )
-            ).scalars().all()
+        user_session_ids = await collect_int_ids_by_batched_filters(
+            db, UserSession.id, [(UserSession.user_id, user_ids)]
         )
-        telegram_link_token_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(TelegramLinkToken.id).where(in_filter(TelegramLinkToken.user_id, user_ids))
-                )
-            ).scalars().all()
-        ]
-        push_subscription_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(PushSubscription.id).where(in_filter(PushSubscription.user_id, user_ids))
-                )
-            ).scalars().all()
-        ]
-        offer_rows = (
-            await db.execute(
-                select(Offer.id, Offer.offer_public_id).where(
-                    (Offer.notes.like(contains_pattern, escape=LIKE_ESCAPE))
-                    | (Offer.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
-                    | in_filter(Offer.user_id, user_ids)
-                )
-            )
-        ).all()
+        session_login_request_ids = await collect_int_ids_by_batched_filters(
+            db, SessionLoginRequest.id, [(SessionLoginRequest.user_id, user_ids)]
+        )
+        recovery_request_ids = await collect_int_ids_by_batched_filters(
+            db,
+            SingleSessionRecoveryRequest.id,
+            [
+                (SingleSessionRecoveryRequest.user_id, user_ids),
+                (SingleSessionRecoveryRequest.session_login_request_id, session_login_request_ids),
+            ],
+        )
+        recovery_admin_target_ids = await collect_int_ids_by_batched_filters(
+            db,
+            SingleSessionRecoveryAdminTarget.id,
+            [
+                (SingleSessionRecoveryAdminTarget.recovery_request_id, recovery_request_ids),
+                (SingleSessionRecoveryAdminTarget.admin_user_id, user_ids),
+            ],
+        )
+        telegram_link_token_ids = await collect_int_ids_by_batched_filters(
+            db, TelegramLinkToken.id, [(TelegramLinkToken.user_id, user_ids)]
+        )
+        push_subscription_ids = await collect_int_ids_by_batched_filters(
+            db, PushSubscription.id, [(PushSubscription.user_id, user_ids)]
+        )
+        offer_rows = await collect_offer_cleanup_rows(
+            db,
+            prefix_statement=select(Offer.id, Offer.offer_public_id).where(
+                (Offer.notes.like(contains_pattern, escape=LIKE_ESCAPE))
+                | (Offer.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
+            ),
+            user_ids=user_ids,
+        )
         offer_ids = [int(row.id) for row in offer_rows]
         offer_public_ids = sorted({str(row.offer_public_id) for row in offer_rows if row.offer_public_id})
-        offer_request_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(OfferRequest.id).where(
-                        (OfferRequest.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
-                        | in_filter(OfferRequest.local_offer_id, offer_ids)
-                        | in_filter(OfferRequest.offer_public_id, offer_public_ids)
-                        | in_filter(OfferRequest.requester_user_id, user_ids)
-                        | in_filter(OfferRequest.actor_user_id, user_ids)
-                    )
-                )
-            ).scalars().all()
-        ]
-        publication_state_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(OfferPublicationState.id).where(
-                        (OfferPublicationState.dedupe_key.like(pattern, escape=LIKE_ESCAPE))
-                        | in_filter(OfferPublicationState.offer_id, offer_ids)
-                        | in_filter(OfferPublicationState.offer_public_id, offer_public_ids)
-                    )
-                )
-            ).scalars().all()
-        ]
-        trade_rows = (
-            await db.execute(
-                select(Trade.id, Trade.trade_number).where(
-                    (Trade.idempotency_key.like(pattern, escape=LIKE_ESCAPE))
-                    | in_filter(Trade.offer_id, offer_ids)
-                    | in_filter(Trade.offer_user_id, user_ids)
-                    | in_filter(Trade.responder_user_id, user_ids)
-                    | in_filter(Trade.actor_user_id, user_ids)
-                )
-            )
-        ).all()
+        offer_request_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(OfferRequest.id).where(OfferRequest.idempotency_key.like(pattern, escape=LIKE_ESCAPE)),
+            OfferRequest.id,
+            [
+                (OfferRequest.local_offer_id, offer_ids),
+                (OfferRequest.offer_public_id, offer_public_ids),
+                (OfferRequest.requester_user_id, user_ids),
+                (OfferRequest.actor_user_id, user_ids),
+            ],
+        )
+        publication_state_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(OfferPublicationState.id).where(
+                OfferPublicationState.dedupe_key.like(pattern, escape=LIKE_ESCAPE)
+            ),
+            OfferPublicationState.id,
+            [
+                (OfferPublicationState.offer_id, offer_ids),
+                (OfferPublicationState.offer_public_id, offer_public_ids),
+            ],
+        )
+        trade_rows_by_id: dict[int, Any] = {}
+        for row in (
+            await db.execute(select(Trade.id, Trade.trade_number).where(Trade.idempotency_key.like(pattern, escape=LIKE_ESCAPE)))
+        ).all():
+            trade_rows_by_id[int(row.id)] = row
+        for column, values in [
+            (Trade.offer_id, offer_ids),
+            (Trade.offer_user_id, user_ids),
+            (Trade.responder_user_id, user_ids),
+            (Trade.actor_user_id, user_ids),
+        ]:
+            for batch in cleanup_in_batches(values):
+                for row in (
+                    await db.execute(select(Trade.id, Trade.trade_number).where(column.in_(batch)))
+                ).all():
+                    trade_rows_by_id[int(row.id)] = row
+        trade_rows = list(trade_rows_by_id.values())
         trade_ids = [int(row.id) for row in trade_rows]
         trade_numbers = [int(row.trade_number) for row in trade_rows if row.trade_number is not None]
-        trade_delivery_receipt_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(TradeDeliveryReceipt.id).where(
-                        in_filter(TradeDeliveryReceipt.trade_id, trade_ids)
-                        | in_filter(TradeDeliveryReceipt.trade_number, trade_numbers)
-                        | in_filter(TradeDeliveryReceipt.offer_id, offer_ids)
-                        | in_filter(TradeDeliveryReceipt.recipient_user_id, user_ids)
-                        | TradeDeliveryReceipt.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
-                    )
-                )
-            ).scalars().all()
-        ]
-        notification_ids = [
-            int(item)
-            for item in (
-                await db.execute(
-                    select(Notification.id).where(
-                        in_filter(Notification.user_id, user_ids)
-                        | Notification.message.like(contains_pattern, escape=LIKE_ESCAPE)
-                        | Notification.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
-                    )
-                )
-            ).scalars().all()
-        ]
-        chat_member_ids = [
-            int(item)
-            for item in (
-                await db.execute(select(ChatMember.id).where(in_filter(ChatMember.user_id, user_ids)))
-            ).scalars().all()
-        ]
+        trade_delivery_receipt_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(TradeDeliveryReceipt.id).where(
+                TradeDeliveryReceipt.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
+            ),
+            TradeDeliveryReceipt.id,
+            [
+                (TradeDeliveryReceipt.trade_id, trade_ids),
+                (TradeDeliveryReceipt.trade_number, trade_numbers),
+                (TradeDeliveryReceipt.offer_id, offer_ids),
+                (TradeDeliveryReceipt.recipient_user_id, user_ids),
+            ],
+        )
+        notification_ids = await collect_int_ids_by_statement_and_batched_filters(
+            db,
+            select(Notification.id).where(
+                Notification.message.like(contains_pattern, escape=LIKE_ESCAPE)
+                | Notification.dedupe_key.like(contains_pattern, escape=LIKE_ESCAPE)
+            ),
+            Notification.id,
+            [(Notification.user_id, user_ids)],
+        )
+        chat_member_ids = await collect_int_ids_by_batched_filters(
+            db, ChatMember.id, [(ChatMember.user_id, user_ids)]
+        )
     return CleanupPlan(
         prefix=normalized_prefix,
         user_ids=user_ids,
@@ -1548,6 +1580,21 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
     raise TradingProbeError("cleanup retry loop exited unexpectedly")
 
 
+async def lock_cleanup_users(db: Any, user_ids: list[int]) -> None:
+    for batch in cleanup_in_batches(user_ids):
+        await db.execute(
+            cleanup_mutating_statement(select(User.id).where(User.id.in_(batch)).with_for_update())
+        )
+
+
+async def delete_in_batches(db: Any, model: Any, column: Any, values: list[int] | list[str]) -> int:
+    deleted = 0
+    for batch in cleanup_in_batches(values):
+        result = await db.execute(cleanup_mutating_statement(delete(model).where(column.in_(batch))))
+        deleted += int(result.rowcount or 0)
+    return deleted
+
+
 async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
     async with AsyncSessionLocal() as db:
         deleted_invitations = 0
@@ -1567,197 +1614,46 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_users = 0
         deleted_offer_requests = 0
         deleted_publication_states = 0
-        if plan.user_ids:
-            await db.execute(
-                cleanup_mutating_statement(
-                    select(User.id).where(User.id.in_(plan.user_ids)).with_for_update()
-                )
-            )
-        if plan.recovery_admin_target_ids:
-            deleted_recovery_admin_targets = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(SingleSessionRecoveryAdminTarget).where(
-                                SingleSessionRecoveryAdminTarget.id.in_(plan.recovery_admin_target_ids)
-                            )
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.recovery_request_ids:
-            deleted_recovery_requests = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(SingleSessionRecoveryRequest).where(
-                                SingleSessionRecoveryRequest.id.in_(plan.recovery_request_ids)
-                            )
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.session_login_request_ids:
-            deleted_session_login_requests = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(SessionLoginRequest).where(
-                                SessionLoginRequest.id.in_(plan.session_login_request_ids)
-                            )
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.user_session_ids:
-            deleted_user_sessions = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(delete(UserSession).where(UserSession.id.in_(plan.user_session_ids)))
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.telegram_link_token_ids:
-            deleted_telegram_link_tokens = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(TelegramLinkToken).where(TelegramLinkToken.id.in_(plan.telegram_link_token_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.push_subscription_ids:
-            deleted_push_subscriptions = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(PushSubscription).where(PushSubscription.id.in_(plan.push_subscription_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.trade_delivery_receipt_ids:
-            deleted_trade_delivery_receipts = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(TradeDeliveryReceipt).where(
-                                TradeDeliveryReceipt.id.in_(plan.trade_delivery_receipt_ids)
-                            )
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.notification_ids:
-            deleted_notifications = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(Notification).where(Notification.id.in_(plan.notification_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.publication_state_ids:
-            deleted_publication_states = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(OfferPublicationState).where(OfferPublicationState.id.in_(plan.publication_state_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.offer_request_ids:
-            deleted_offer_requests = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(OfferRequest).where(OfferRequest.id.in_(plan.offer_request_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.chat_member_ids:
-            deleted_chat_members = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(delete(ChatMember).where(ChatMember.id.in_(plan.chat_member_ids)))
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.accountant_relation_ids:
-            deleted_accountant_relations = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(AccountantRelation).where(AccountantRelation.id.in_(plan.accountant_relation_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.customer_relation_ids:
-            deleted_customer_relations = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(
-                            delete(CustomerRelation).where(CustomerRelation.id.in_(plan.customer_relation_ids))
-                        )
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.invitation_ids:
-            deleted_invitations = int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(delete(Invitation).where(Invitation.id.in_(plan.invitation_ids)))
-                    )
-                ).rowcount
-                or 0
-            )
-        if plan.trade_ids:
-            deleted_trades = int(
-                (
-                    await db.execute(cleanup_mutating_statement(delete(Trade).where(Trade.id.in_(plan.trade_ids))))
-                ).rowcount
-                or 0
-            )
-        if plan.offer_ids:
-            deleted_offers = int(
-                (
-                    await db.execute(cleanup_mutating_statement(delete(Offer).where(Offer.id.in_(plan.offer_ids))))
-                ).rowcount
-                or 0
-            )
-        if plan.user_ids:
-            deleted_chat_members += int(
-                (
-                    await db.execute(
-                        cleanup_mutating_statement(delete(ChatMember).where(ChatMember.user_id.in_(plan.user_ids)))
-                    )
-                ).rowcount
-                or 0
-            )
-            deleted_users = int(
-                (
-                    await db.execute(cleanup_mutating_statement(delete(User).where(User.id.in_(plan.user_ids))))
-                ).rowcount
-                or 0
-            )
+        await lock_cleanup_users(db, plan.user_ids)
+        deleted_recovery_admin_targets = await delete_in_batches(
+            db,
+            SingleSessionRecoveryAdminTarget,
+            SingleSessionRecoveryAdminTarget.id,
+            plan.recovery_admin_target_ids,
+        )
+        deleted_recovery_requests = await delete_in_batches(
+            db, SingleSessionRecoveryRequest, SingleSessionRecoveryRequest.id, plan.recovery_request_ids
+        )
+        deleted_session_login_requests = await delete_in_batches(
+            db, SessionLoginRequest, SessionLoginRequest.id, plan.session_login_request_ids
+        )
+        deleted_user_sessions = await delete_in_batches(db, UserSession, UserSession.id, plan.user_session_ids)
+        deleted_telegram_link_tokens = await delete_in_batches(
+            db, TelegramLinkToken, TelegramLinkToken.id, plan.telegram_link_token_ids
+        )
+        deleted_push_subscriptions = await delete_in_batches(
+            db, PushSubscription, PushSubscription.id, plan.push_subscription_ids
+        )
+        deleted_trade_delivery_receipts = await delete_in_batches(
+            db, TradeDeliveryReceipt, TradeDeliveryReceipt.id, plan.trade_delivery_receipt_ids
+        )
+        deleted_notifications = await delete_in_batches(db, Notification, Notification.id, plan.notification_ids)
+        deleted_publication_states = await delete_in_batches(
+            db, OfferPublicationState, OfferPublicationState.id, plan.publication_state_ids
+        )
+        deleted_offer_requests = await delete_in_batches(db, OfferRequest, OfferRequest.id, plan.offer_request_ids)
+        deleted_chat_members = await delete_in_batches(db, ChatMember, ChatMember.id, plan.chat_member_ids)
+        deleted_accountant_relations = await delete_in_batches(
+            db, AccountantRelation, AccountantRelation.id, plan.accountant_relation_ids
+        )
+        deleted_customer_relations = await delete_in_batches(
+            db, CustomerRelation, CustomerRelation.id, plan.customer_relation_ids
+        )
+        deleted_invitations = await delete_in_batches(db, Invitation, Invitation.id, plan.invitation_ids)
+        deleted_trades = await delete_in_batches(db, Trade, Trade.id, plan.trade_ids)
+        deleted_offers = await delete_in_batches(db, Offer, Offer.id, plan.offer_ids)
+        deleted_chat_members += await delete_in_batches(db, ChatMember, ChatMember.user_id, plan.user_ids)
+        deleted_users = await delete_in_batches(db, User, User.id, plan.user_ids)
 
         change_log_result = await db.execute(
             cleanup_mutating_statement(

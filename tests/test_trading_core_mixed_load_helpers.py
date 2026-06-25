@@ -790,6 +790,16 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(prefix_pattern, r"P7\_TRADING\_1405\_%")
         self.assertEqual(contains_pattern, r"%P7\_TRADING\_1405\_%")
 
+    def test_cleanup_in_batches_splits_large_id_lists(self):
+        batches = list(worker.cleanup_in_batches(list(range(12001)), batch_size=5000))
+
+        self.assertEqual([len(batch) for batch in batches], [5000, 5000, 2001])
+        self.assertEqual(batches[0][0], 0)
+        self.assertEqual(batches[-1][-1], 12000)
+
+    def test_stable_unique_preserves_cleanup_id_order(self):
+        self.assertEqual(worker.stable_unique([3, 1, 3, 2, 1]), [3, 1, 2])
+
     def test_cleanup_dry_run_report_lists_request_and_publication_scope(self):
         plan = worker.CleanupPlan(
             prefix="P7_TRADING_1405_",
@@ -835,9 +845,9 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
     def test_cleanup_deletes_late_chat_members_by_user_id_before_users(self):
         source = inspect.getsource(worker.delete_cleanup_plan)
 
-        user_lock = "select(User.id).where(User.id.in_(plan.user_ids)).with_for_update()"
-        late_chat_member_delete = "delete(ChatMember).where(ChatMember.user_id.in_(plan.user_ids))"
-        user_delete = "delete(User).where(User.id.in_(plan.user_ids))"
+        user_lock = "await lock_cleanup_users(db, plan.user_ids)"
+        late_chat_member_delete = "delete_in_batches(db, ChatMember, ChatMember.user_id, plan.user_ids)"
+        user_delete = "delete_in_batches(db, User, User.id, plan.user_ids)"
         self.assertIn(user_lock, source)
         self.assertIn(late_chat_member_delete, source)
         self.assertLess(source.index(user_lock), source.index(late_chat_member_delete))
