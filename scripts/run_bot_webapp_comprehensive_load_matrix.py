@@ -638,6 +638,16 @@ async def assert_offer_terminal(
         raise worker.TradingProbeError(f"offer {offer_id} expected status {expected_status}, got {status}")
 
 
+async def count_non_terminal_offers(offer_refs: list[OfferExecutionRef], expected_status: str) -> int:
+    non_terminal = 0
+    for offer_ref in offer_refs:
+        offer = await worker.load_offer_snapshot(offer_ref.id)
+        status = getattr(getattr(offer, "status", None), "value", None)
+        if status != expected_status:
+            non_terminal += 1
+    return non_terminal
+
+
 async def run_scenario(
     *,
     scenario: MatrixScenario,
@@ -820,7 +830,16 @@ async def run_scenario(
                 await harness.close()
             summary = summarize_outcomes(outcomes, elapsed)
             extra = {"fixture_creation_elapsed_seconds": round(fixture_elapsed, 3)}
-            if summary["success"] != attempts_per_scenario:
+            non_terminal_count = await count_non_terminal_offers(
+                offer_refs,
+                expected_status=OfferStatus.EXPIRED.value,
+            )
+            extra["non_terminal_offer_count"] = non_terminal_count
+            if non_terminal_count:
+                correctness_failures.append(
+                    f"non-concurrent manual expiry left {non_terminal_count} offer(s) non-terminal"
+                )
+            elif summary.get("error"):
                 correctness_failures.append("non-concurrent manual expiry expected every request to succeed")
 
         elif scenario.family == "manual_expire_contention":
