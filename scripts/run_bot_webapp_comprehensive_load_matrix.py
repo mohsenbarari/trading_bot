@@ -121,6 +121,7 @@ WRITE_HEAVY_NON_CONTENTION_FAMILIES = {
     "trade_non_concurrent",
     "manual_expire_non_concurrent",
 }
+DEFAULT_TELEGRAM_READ_MAX_CONCURRENCY = 96
 
 
 def scenario_key(value: str) -> str:
@@ -221,6 +222,16 @@ def write_admission_max_concurrency_for_scenario(
     configured_max_concurrency: int,
 ) -> int | None:
     if scenario.family not in WRITE_HEAVY_NON_CONTENTION_FAMILIES:
+        return None
+    max_concurrency = int(configured_max_concurrency or 0)
+    return max_concurrency if max_concurrency > 0 else None
+
+
+def telegram_read_admission_max_concurrency_for_scenario(
+    scenario: MatrixScenario,
+    configured_max_concurrency: int,
+) -> int | None:
+    if scenario.family != "active_view" or scenario.request_surface != "telegram":
         return None
     max_concurrency = int(configured_max_concurrency or 0)
     return max_concurrency if max_concurrency > 0 else None
@@ -617,12 +628,17 @@ async def run_scenario(
     target_rps: float,
     run_prefix: str,
     write_max_concurrency: int,
+    telegram_read_max_concurrency: int,
 ) -> dict[str, Any]:
     shape = SHAPES[scenario.shape]
     scenario_prefix = f"{run_prefix}{scenario.scenario_id}_"
     scenario_write_max_concurrency = write_admission_max_concurrency_for_scenario(
         scenario,
         write_max_concurrency,
+    )
+    scenario_telegram_read_max_concurrency = telegram_read_admission_max_concurrency_for_scenario(
+        scenario,
+        telegram_read_max_concurrency,
     )
     await worker.cleanup_prefix(scenario_prefix)
     started = time.perf_counter()
@@ -942,6 +958,7 @@ async def run_scenario(
                     total=attempts_per_scenario,
                     target_rps=target_rps,
                     attempt=_attempt,
+                    max_concurrency=scenario_telegram_read_max_concurrency,
                 )
             finally:
                 await harness.close()
@@ -1007,6 +1024,11 @@ async def run_scenario(
             "max_concurrency": scenario_write_max_concurrency,
             "scope": "write_heavy_non_contention",
         }
+    if scenario_telegram_read_max_concurrency is not None:
+        summary["admission_control"] = {
+            "max_concurrency": scenario_telegram_read_max_concurrency,
+            "scope": "telegram_active_view_read",
+        }
     if attempt_error_details:
         summary["attempt_error_details"] = sorted(set(attempt_error_details))[:20]
 
@@ -1070,6 +1092,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
                     target_rps=args.target_rps,
                     run_prefix=prefix,
                     write_max_concurrency=args.write_max_concurrency,
+                    telegram_read_max_concurrency=args.telegram_read_max_concurrency,
                 )
             )
 
@@ -1097,6 +1120,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
         "target_rps": args.target_rps,
         "attempts_per_scenario": attempts_per_scenario,
         "write_max_concurrency": args.write_max_concurrency,
+        "telegram_read_max_concurrency": args.telegram_read_max_concurrency,
         "scenario_count": len(selected),
         "family_counts": dict(sorted(family_counts.items())),
         "total_business_requests": total_attempts,
@@ -1141,6 +1165,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=24,
         help=(
             "Admission-control limit for write-heavy non-contention scenarios. "
+            "Set <=0 to disable."
+        ),
+    )
+    parser.add_argument(
+        "--telegram-read-max-concurrency",
+        type=int,
+        default=DEFAULT_TELEGRAM_READ_MAX_CONCURRENCY,
+        help=(
+            "Admission-control limit for Telegram Dispatcher read/view scenarios. "
             "Set <=0 to disable."
         ),
     )

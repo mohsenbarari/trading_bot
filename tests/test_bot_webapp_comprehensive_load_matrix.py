@@ -159,10 +159,18 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(summary["attempt_start_rps"], 150.0)
 
     def test_write_admission_limit_only_applies_to_write_heavy_non_contention_families(self):
-        scenarios = {
-            scenario.family: scenario
-            for scenario in matrix_runner.build_comprehensive_scenarios()
-        }
+        all_scenarios = matrix_runner.build_comprehensive_scenarios()
+        scenarios = {scenario.family: scenario for scenario in all_scenarios}
+        telegram_active_view = next(
+            scenario
+            for scenario in all_scenarios
+            if scenario.family == "active_view" and scenario.request_surface == "telegram"
+        )
+        webapp_active_view = next(
+            scenario
+            for scenario in all_scenarios
+            if scenario.family == "active_view" and scenario.request_surface == "webapp"
+        )
 
         self.assertEqual(
             matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["create_offer"], 24),
@@ -190,6 +198,16 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         )
         self.assertIsNone(
             matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["create_offer"], 0)
+        )
+        self.assertEqual(
+            matrix_runner.telegram_read_admission_max_concurrency_for_scenario(telegram_active_view, 96),
+            96,
+        )
+        self.assertIsNone(
+            matrix_runner.telegram_read_admission_max_concurrency_for_scenario(webapp_active_view, 96)
+        )
+        self.assertIsNone(
+            matrix_runner.telegram_read_admission_max_concurrency_for_scenario(telegram_active_view, 0)
         )
 
     def test_run_scheduled_attempts_honors_max_concurrency(self):
