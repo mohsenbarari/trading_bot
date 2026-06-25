@@ -127,7 +127,7 @@ READ_VIEW_FAMILIES = {
     "market_history_view",
 }
 DEFAULT_READ_VIEW_MAX_CONCURRENCY = 96
-EXPIRY_BUSY_RETRY_ATTEMPTS = 4
+EXPIRY_BUSY_RETRY_ATTEMPTS = 8
 
 
 def scenario_key(value: str) -> str:
@@ -528,7 +528,7 @@ async def expire_attempt(
                 return "success"
             recent_details = (error_details or [])[details_before:]
             if attempt < EXPIRY_BUSY_RETRY_ATTEMPTS - 1 and any(busy_detail in str(item) for item in recent_details):
-                await asyncio.sleep(0.05 * (attempt + 1))
+                await asyncio.sleep(0.15 * (attempt + 1))
                 continue
             return status
         try:
@@ -538,7 +538,7 @@ async def expire_attempt(
         except Exception as exc:
             detail = str(getattr(exc, "detail", "") or exc)
             if attempt < EXPIRY_BUSY_RETRY_ATTEMPTS - 1 and busy_detail in detail:
-                await asyncio.sleep(0.05 * (attempt + 1))
+                await asyncio.sleep(0.15 * (attempt + 1))
                 continue
             if error_details is not None:
                 error_details.append(f"{type(exc).__name__}: {exc}")
