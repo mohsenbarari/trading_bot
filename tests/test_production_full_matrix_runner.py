@@ -199,7 +199,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["server"], "foreign")
         self.assertEqual(scenario_plan["source_scenario_id"], "CLM-001")
         self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 24)
-        self.assertEqual(scenario_plan["market_behavior_telegram_read_max_concurrency"], 96)
+        self.assertEqual(scenario_plan["market_behavior_read_view_max_concurrency"], 96)
         self.assertEqual(
             scenario_plan["market_behavior_load_runner_db_pool"],
             {"pool_size": 96, "max_overflow": 64},
@@ -208,7 +208,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("run_bot_webapp_comprehensive_load_matrix.py", rendered)
         self.assertIn("timeout", rendered)
         self.assertIn("--kill-after=10s", rendered)
-        self.assertIn("--telegram-read-max-concurrency", rendered)
+        self.assertIn("--read-view-max-concurrency", rendered)
         self.assertIn("--allow-production-execution", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
 
@@ -230,12 +230,12 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["family"], "trade_non_concurrent")
         self.assertEqual(scenario_plan["market_behavior_timeout_seconds"], 3600)
         self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 48)
-        self.assertEqual(scenario_plan["market_behavior_telegram_read_max_concurrency"], 96)
+        self.assertEqual(scenario_plan["market_behavior_read_view_max_concurrency"], 96)
         self.assertEqual(command["timeout_seconds"], 3630)
         self.assertIn("3600s", command["args"])
         self.assertIn("--write-max-concurrency", command["args"])
         self.assertIn("48", command["args"])
-        self.assertIn("--telegram-read-max-concurrency", command["args"])
+        self.assertIn("--read-view-max-concurrency", command["args"])
         self.assertIn("96", command["args"])
         self.assertIn("DB_POOL_SIZE=96", command["args"])
         self.assertIn("DB_MAX_OVERFLOW=64", command["args"])

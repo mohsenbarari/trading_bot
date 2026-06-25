@@ -171,6 +171,8 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
             for scenario in all_scenarios
             if scenario.family == "active_view" and scenario.request_surface == "webapp"
         )
+        public_detail_view = scenarios["public_detail_view"]
+        market_history_view = scenarios["market_history_view"]
 
         self.assertEqual(
             matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["create_offer"], 24),
@@ -200,14 +202,26 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
             matrix_runner.write_admission_max_concurrency_for_scenario(scenarios["create_offer"], 0)
         )
         self.assertEqual(
-            matrix_runner.telegram_read_admission_max_concurrency_for_scenario(telegram_active_view, 96),
+            matrix_runner.read_view_admission_max_concurrency_for_scenario(telegram_active_view, 96),
+            96,
+        )
+        self.assertEqual(
+            matrix_runner.read_view_admission_max_concurrency_for_scenario(webapp_active_view, 96),
+            96,
+        )
+        self.assertEqual(
+            matrix_runner.read_view_admission_max_concurrency_for_scenario(public_detail_view, 96),
+            96,
+        )
+        self.assertEqual(
+            matrix_runner.read_view_admission_max_concurrency_for_scenario(market_history_view, 96),
             96,
         )
         self.assertIsNone(
-            matrix_runner.telegram_read_admission_max_concurrency_for_scenario(webapp_active_view, 96)
+            matrix_runner.read_view_admission_max_concurrency_for_scenario(scenarios["create_offer"], 96)
         )
         self.assertIsNone(
-            matrix_runner.telegram_read_admission_max_concurrency_for_scenario(telegram_active_view, 0)
+            matrix_runner.read_view_admission_max_concurrency_for_scenario(telegram_active_view, 0)
         )
 
     def test_run_scheduled_attempts_honors_max_concurrency(self):

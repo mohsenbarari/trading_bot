@@ -121,7 +121,12 @@ WRITE_HEAVY_NON_CONTENTION_FAMILIES = {
     "trade_non_concurrent",
     "manual_expire_non_concurrent",
 }
-DEFAULT_TELEGRAM_READ_MAX_CONCURRENCY = 96
+READ_VIEW_FAMILIES = {
+    "active_view",
+    "public_detail_view",
+    "market_history_view",
+}
+DEFAULT_READ_VIEW_MAX_CONCURRENCY = 96
 
 
 def scenario_key(value: str) -> str:
@@ -227,11 +232,11 @@ def write_admission_max_concurrency_for_scenario(
     return max_concurrency if max_concurrency > 0 else None
 
 
-def telegram_read_admission_max_concurrency_for_scenario(
+def read_view_admission_max_concurrency_for_scenario(
     scenario: MatrixScenario,
     configured_max_concurrency: int,
 ) -> int | None:
-    if scenario.family != "active_view" or scenario.request_surface != "telegram":
+    if scenario.family not in READ_VIEW_FAMILIES:
         return None
     max_concurrency = int(configured_max_concurrency or 0)
     return max_concurrency if max_concurrency > 0 else None
@@ -628,7 +633,7 @@ async def run_scenario(
     target_rps: float,
     run_prefix: str,
     write_max_concurrency: int,
-    telegram_read_max_concurrency: int,
+    read_view_max_concurrency: int,
 ) -> dict[str, Any]:
     shape = SHAPES[scenario.shape]
     scenario_prefix = f"{run_prefix}{scenario.scenario_id}_"
@@ -636,9 +641,9 @@ async def run_scenario(
         scenario,
         write_max_concurrency,
     )
-    scenario_telegram_read_max_concurrency = telegram_read_admission_max_concurrency_for_scenario(
+    scenario_read_view_max_concurrency = read_view_admission_max_concurrency_for_scenario(
         scenario,
-        telegram_read_max_concurrency,
+        read_view_max_concurrency,
     )
     await worker.cleanup_prefix(scenario_prefix)
     started = time.perf_counter()
@@ -958,7 +963,7 @@ async def run_scenario(
                     total=attempts_per_scenario,
                     target_rps=target_rps,
                     attempt=_attempt,
-                    max_concurrency=scenario_telegram_read_max_concurrency,
+                    max_concurrency=scenario_read_view_max_concurrency,
                 )
             finally:
                 await harness.close()
@@ -1005,6 +1010,7 @@ async def run_scenario(
                 total=attempts_per_scenario,
                 target_rps=target_rps,
                 attempt=_attempt,
+                max_concurrency=scenario_read_view_max_concurrency,
             )
             summary = summarize_outcomes(outcomes, elapsed)
             extra = {"seed_offer_id": offer_id, "offer_public_id": public_id}
@@ -1024,10 +1030,10 @@ async def run_scenario(
             "max_concurrency": scenario_write_max_concurrency,
             "scope": "write_heavy_non_contention",
         }
-    if scenario_telegram_read_max_concurrency is not None:
+    if scenario_read_view_max_concurrency is not None:
         summary["admission_control"] = {
-            "max_concurrency": scenario_telegram_read_max_concurrency,
-            "scope": "telegram_active_view_read",
+            "max_concurrency": scenario_read_view_max_concurrency,
+            "scope": "read_view",
         }
     if attempt_error_details:
         summary["attempt_error_details"] = sorted(set(attempt_error_details))[:20]
@@ -1092,7 +1098,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
                     target_rps=args.target_rps,
                     run_prefix=prefix,
                     write_max_concurrency=args.write_max_concurrency,
-                    telegram_read_max_concurrency=args.telegram_read_max_concurrency,
+                    read_view_max_concurrency=args.read_view_max_concurrency,
                 )
             )
 
@@ -1120,7 +1126,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
         "target_rps": args.target_rps,
         "attempts_per_scenario": attempts_per_scenario,
         "write_max_concurrency": args.write_max_concurrency,
-        "telegram_read_max_concurrency": args.telegram_read_max_concurrency,
+        "read_view_max_concurrency": args.read_view_max_concurrency,
         "scenario_count": len(selected),
         "family_counts": dict(sorted(family_counts.items())),
         "total_business_requests": total_attempts,
@@ -1169,11 +1175,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--read-view-max-concurrency",
         "--telegram-read-max-concurrency",
+        dest="read_view_max_concurrency",
         type=int,
-        default=DEFAULT_TELEGRAM_READ_MAX_CONCURRENCY,
+        default=DEFAULT_READ_VIEW_MAX_CONCURRENCY,
         help=(
-            "Admission-control limit for Telegram Dispatcher read/view scenarios. "
+            "Admission-control limit for read/view scenarios. "
             "Set <=0 to disable."
         ),
     )

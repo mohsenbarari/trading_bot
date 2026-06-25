@@ -61,7 +61,7 @@ MARKET_BEHAVIOR_DEFAULT_TIMEOUT_SECONDS = 1200
 MARKET_BEHAVIOR_HEAVY_TIMEOUT_SECONDS = 3600
 MARKET_BEHAVIOR_DEFAULT_WRITE_MAX_CONCURRENCY = 24
 MARKET_BEHAVIOR_HEAVY_WRITE_MAX_CONCURRENCY = 48
-MARKET_BEHAVIOR_TELEGRAM_READ_MAX_CONCURRENCY = 96
+MARKET_BEHAVIOR_READ_VIEW_MAX_CONCURRENCY = 96
 MARKET_BEHAVIOR_LOAD_RUNNER_DB_POOL_SIZE = 96
 MARKET_BEHAVIOR_LOAD_RUNNER_DB_MAX_OVERFLOW = 64
 MARKET_BEHAVIOR_HEAVY_FAMILIES = {
@@ -1484,8 +1484,8 @@ def market_behavior_scenario_commands(
                 str(telegram_ratio),
                 "--write-max-concurrency",
                 str(scenario_write_max_concurrency),
-                "--telegram-read-max-concurrency",
-                str(MARKET_BEHAVIOR_TELEGRAM_READ_MAX_CONCURRENCY),
+                "--read-view-max-concurrency",
+                str(MARKET_BEHAVIOR_READ_VIEW_MAX_CONCURRENCY),
                 "--output",
                 f"{remote_dir}/market-behavior.result.json",
                 "--check",
@@ -1508,7 +1508,7 @@ def market_behavior_scenario_commands(
         "family": family,
         "market_behavior_timeout_seconds": scenario_timeout_seconds,
         "market_behavior_write_max_concurrency": scenario_write_max_concurrency,
-        "market_behavior_telegram_read_max_concurrency": MARKET_BEHAVIOR_TELEGRAM_READ_MAX_CONCURRENCY,
+        "market_behavior_read_view_max_concurrency": MARKET_BEHAVIOR_READ_VIEW_MAX_CONCURRENCY,
         "market_behavior_load_runner_db_pool": {
             "pool_size": MARKET_BEHAVIOR_LOAD_RUNNER_DB_POOL_SIZE,
             "max_overflow": MARKET_BEHAVIOR_LOAD_RUNNER_DB_MAX_OVERFLOW,
