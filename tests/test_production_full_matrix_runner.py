@@ -576,8 +576,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("wait-offer-visible", rendered)
         self.assertIn("sync-prefix-catchup", rendered)
         self.assertIn("sync-health-iran", rendered)
-        self.assertNotIn("--skip-initial-cleanup", rendered)
+        self.assertIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
+        self.assertEqual(groups_by_name["visibility_waits"]["mode"], "concurrent")
         prepare_args = commands_by_name["prepare_on_offer_home_server"]["args"]
         self.assertIn("--offer-time-limit-buffer-minutes 60", " ".join(prepare_args))
         catchup_args = commands_by_name["sync_prefix_catchup_from_offer_home_server"]["args"]

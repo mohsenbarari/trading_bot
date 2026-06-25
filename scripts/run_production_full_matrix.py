@@ -789,6 +789,7 @@ def dual_role_scenario_commands(
         "25",
         "--offer-time-limit-buffer-minutes",
         "60",
+        "--skip-initial-cleanup",
         "--allow-production-execution",
         "--allow-production-cleanup",
     ]
@@ -917,6 +918,8 @@ def dual_role_scenario_commands(
             env=production_env,
             timeout_seconds=600,
         ),
+    ]
+    visibility_wait_commands = [
         container_python_command(
             "wait_telegram_offer_visible_on_foreign",
             server="foreign",
@@ -1208,7 +1211,7 @@ def dual_role_scenario_commands(
             ),
         ]
     )
-    commands = [*pre_role_commands, *role_commands, *post_role_commands]
+    commands = [*pre_role_commands, *visibility_wait_commands, *role_commands, *post_role_commands]
     return {
         "manifest_id": manifest_id,
         "status": "planned",
@@ -1230,6 +1233,11 @@ def dual_role_scenario_commands(
                 "name": "prepare_and_distribute",
                 "mode": "sequential",
                 "commands": [command_payload(command) for command in pre_role_commands],
+            },
+            {
+                "name": "visibility_waits",
+                "mode": "concurrent",
+                "commands": [command_payload(command) for command in visibility_wait_commands],
             },
             {
                 "name": "role_workers",
