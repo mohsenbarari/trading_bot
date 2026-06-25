@@ -419,6 +419,32 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("run_trade_delivery_targeted_join_matrix.py", rendered)
         self.assertIn("TDN-002", rendered)
 
+    def test_outage_policy_reuses_prior_stable_trade_correctness_component(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_base_trade_shape",
+                "--manifest-id",
+                "PBTS-0001",
+                "--manifest-id",
+                "PBTS-0007",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        source, outage = plan["execution_plan"]["scenario_plans"]
+
+        self.assertEqual(source["driver"], "two_server_dual_role_hot_offer")
+        self.assertEqual(outage["driver"], "outage_policy_composed_probe")
+        trade_plan = outage["component_plans"]["trade_correctness"]
+        self.assertEqual(trade_plan["component_cache"]["status"], "hit")
+        self.assertEqual(trade_plan["component_cache"]["source_manifest_id"], "PBTS-0001")
+        rendered = json.dumps(trade_plan, ensure_ascii=False)
+        self.assertIn("component_cache_hit_outage_trade_correctness", rendered)
+        self.assertNotIn("run-role-plan", rendered)
+
     def test_outage_policy_reuses_duplicate_delivery_policy_component(self):
         plan = runner.build_plan(
             self.build_args(

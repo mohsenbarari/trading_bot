@@ -555,6 +555,11 @@ def dual_role_shape_component_key(record: dict[str, Any]) -> str:
     )
 
 
+def stable_equivalent_dual_role_shape_component_key(record: dict[str, Any]) -> str:
+    stable_record = {**record, "outage_id": "stable"}
+    return dual_role_shape_component_key(stable_record)
+
+
 def component_cache_gate_command(
     *,
     component_kind: str,
@@ -1494,6 +1499,14 @@ def outage_policy_scenario_commands(
         hot_offer_requests=hot_offer_requests,
         target_rps=target_rps,
         telegram_ratio=telegram_ratio,
+    )
+    dual_role_plan = cache_component_plan(
+        dual_role_plan,
+        component_kind="outage_trade_correctness",
+        component_key=stable_equivalent_dual_role_shape_component_key(record),
+        source_manifest_id=manifest_id,
+        cache_sources=component_cache_sources,
+        ledger_path=ledger_path,
     )
     targeted_record = {
         "manifest_id": f"{manifest_id}_OUTAGE_POLICY_{delivery_scenario_id}",
