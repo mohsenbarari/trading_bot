@@ -1199,7 +1199,12 @@ def is_retryable_cleanup_database_error(exc: BaseException) -> bool:
     if code in RETRYABLE_CLEANUP_SQLSTATES:
         return True
     message = str(exc).lower()
-    return "deadlock detected" in message or "could not serialize access" in message
+    if "deadlock detected" in message or "could not serialize access" in message:
+        return True
+    return (
+        (code == "23503" or "foreignkeyviolation" in message or "foreign key violation" in message)
+        and "fk_chat_members_user" in message
+    )
 
 
 def cleanup_plan_counts(plan: CleanupPlan) -> dict[str, int]:
@@ -1557,6 +1562,12 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
         deleted_users = 0
         deleted_offer_requests = 0
         deleted_publication_states = 0
+        if plan.user_ids:
+            await db.execute(
+                cleanup_mutating_statement(
+                    select(User.id).where(User.id.in_(plan.user_ids)).with_for_update()
+                )
+            )
         if plan.recovery_admin_target_ids:
             deleted_recovery_admin_targets = int(
                 (

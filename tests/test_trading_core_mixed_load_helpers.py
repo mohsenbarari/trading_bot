@@ -758,10 +758,22 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
     def test_cleanup_deletes_late_chat_members_by_user_id_before_users(self):
         source = inspect.getsource(worker.delete_cleanup_plan)
 
+        user_lock = "select(User.id).where(User.id.in_(plan.user_ids)).with_for_update()"
         late_chat_member_delete = "delete(ChatMember).where(ChatMember.user_id.in_(plan.user_ids))"
         user_delete = "delete(User).where(User.id.in_(plan.user_ids))"
+        self.assertIn(user_lock, source)
         self.assertIn(late_chat_member_delete, source)
+        self.assertLess(source.index(user_lock), source.index(late_chat_member_delete))
         self.assertLess(source.index(late_chat_member_delete), source.index(user_delete))
+
+    def test_cleanup_retries_late_chat_member_fk_violation(self):
+        exc = worker.DBAPIError(
+            "DELETE FROM users",
+            {},
+            Exception("ForeignKeyViolationError fk_chat_members_user"),
+        )
+
+        self.assertTrue(worker.is_retryable_cleanup_database_error(exc))
 
     def test_load_runner_runtime_surface_guard_accepts_expected_roles(self):
         with patch.object(worker.settings, "environment", "staging"), patch.object(
