@@ -1728,6 +1728,14 @@ async def delete_cleanup_plan(plan: CleanupPlan) -> dict[str, Any]:
                 or 0
             )
         if plan.user_ids:
+            deleted_chat_members += int(
+                (
+                    await db.execute(
+                        cleanup_mutating_statement(delete(ChatMember).where(ChatMember.user_id.in_(plan.user_ids)))
+                    )
+                ).rowcount
+                or 0
+            )
             deleted_users = int(
                 (
                     await db.execute(cleanup_mutating_statement(delete(User).where(User.id.in_(plan.user_ids))))

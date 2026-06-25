@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -753,6 +754,14 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         with patch.object(worker.settings, "environment", "production"):
             with self.assertRaises(worker.TradingProbeError):
                 worker.cleanup_mutating_statement(worker.delete(worker.Offer).where(worker.Offer.id == 1))
+
+    def test_cleanup_deletes_late_chat_members_by_user_id_before_users(self):
+        source = inspect.getsource(worker.delete_cleanup_plan)
+
+        late_chat_member_delete = "delete(ChatMember).where(ChatMember.user_id.in_(plan.user_ids))"
+        user_delete = "delete(User).where(User.id.in_(plan.user_ids))"
+        self.assertIn(late_chat_member_delete, source)
+        self.assertLess(source.index(late_chat_member_delete), source.index(user_delete))
 
     def test_load_runner_runtime_surface_guard_accepts_expected_roles(self):
         with patch.object(worker.settings, "environment", "staging"), patch.object(
