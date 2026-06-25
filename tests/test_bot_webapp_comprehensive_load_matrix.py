@@ -94,6 +94,16 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(deleted, 3)
         cleanup.assert_awaited_once_with([7, 9])
 
+    def test_shutdown_step_is_bounded(self):
+        async def never_finishes():
+            await asyncio.sleep(3600)
+
+        async def run_probe():
+            with patch.object(matrix_runner, "SHUTDOWN_TIMEOUT_SECONDS", 0.01):
+                await matrix_runner.run_shutdown_step("probe", never_finishes())
+
+        asyncio.run(run_probe())
+
     def test_filter_scenarios_by_family_and_id(self):
         scenarios = matrix_runner.build_comprehensive_scenarios()
 

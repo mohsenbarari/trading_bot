@@ -32,6 +32,7 @@ from scripts import trading_core_probe_worker as worker
 
 MATRIX_SCHEMA_VERSION = "bot_webapp_comprehensive_load_matrix_v1"
 DEFAULT_MIN_ATTEMPTS_PER_SCENARIO = 40
+SHUTDOWN_TIMEOUT_SECONDS = 5.0
 SURFACES = ("telegram", "webapp")
 ORIGINS = ("bot", "webapp")
 OFFER_TYPES = ("buy", "sell")
@@ -1101,20 +1102,65 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def run_shutdown_step(label: str, awaitable: Awaitable[Any]) -> None:
+    try:
+        await asyncio.wait_for(awaitable, timeout=SHUTDOWN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        print(
+            json.dumps(
+                {
+                    "event": "shutdown_step_timeout",
+                    "label": label,
+                    "timeout_seconds": SHUTDOWN_TIMEOUT_SECONDS,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "event": "shutdown_step_failed",
+                    "error_type": type(exc).__name__,
+                    "label": label,
+                    "message": str(exc),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+
+
 async def run_matrix_with_shutdown(args: argparse.Namespace) -> int:
     try:
         return await run_matrix(args)
     finally:
-        try:
-            await close_redis()
-        finally:
-            await engine.dispose()
+        await run_shutdown_step("redis", close_redis())
+        await run_shutdown_step("database_engine", engine.dispose())
+
+
+def run_async_entrypoint(args: argparse.Namespace) -> int:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(run_matrix_with_shutdown(args))
+    finally:
+        pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.wait(pending, timeout=SHUTDOWN_TIMEOUT_SECONDS))
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return asyncio.run(run_matrix_with_shutdown(args))
+        return run_async_entrypoint(args)
     except Exception as exc:
         print(
             json.dumps(
