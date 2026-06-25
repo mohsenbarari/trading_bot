@@ -911,6 +911,7 @@ def negative_guard_scenario_commands(
     remote_dir = f"/tmp/{scenario_run_prefix}negative-guard"
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
+        CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
         "BOT_TOKEN": "",
     }
@@ -932,8 +933,8 @@ def negative_guard_scenario_commands(
                 case_id,
                 "--output",
                 f"{remote_dir}/negative-guard.result.json",
-                "--skip-initial-cleanup",
                 "--allow-production-execution",
+                "--allow-production-cleanup",
             ],
             env=production_env,
             timeout_seconds=360,

@@ -578,7 +578,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["case_id"], "own_offer_request")
         rendered = json.dumps(scenario_plan, ensure_ascii=False)
         self.assertIn("run-negative-guard-case", rendered)
-        self.assertIn("--skip-initial-cleanup", rendered)
+        self.assertIn("--allow-production-cleanup", rendered)
+        self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
         self.assertIn("TRADING_BOT_SERVICE=load_runner", rendered)
         self.assertIn("BOT_TOKEN=", rendered)
 

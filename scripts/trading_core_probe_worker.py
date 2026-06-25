@@ -3900,15 +3900,24 @@ async def run_negative_guard_case(
             elif normalized_case_id == "already_completed_offer":
                 first_details: dict[str, Any] = {}
                 second_details: dict[str, Any] = {}
-                statuses.append(
-                    await execute_webapp_trade_for_user(
+                first_started = time.perf_counter()
+                try:
+                    await execute_trade_for_user(
                         user_id=responder_a.user_id,
                         offer_id=offer_id,
                         quantity=5,
                         idempotency_key=f"{prefix}{normalized_case_id}-complete",
-                        phase_details=first_details,
                     )
-                )
+                except Exception as exc:
+                    first_details["business_latency_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
+                    first_details["execute_trade_ms"] = first_details["business_latency_ms"]
+                    first_details["exception"] = type(exc).__name__
+                    statuses.append("error")
+                else:
+                    first_details["business_latency_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
+                    first_details["execute_trade_ms"] = first_details["business_latency_ms"]
+                    first_details["fixture_completion"] = "authoritative_without_external_background_tasks"
+                    statuses.append("success")
                 statuses.append(
                     await execute_webapp_trade_for_user(
                         user_id=responder_b.user_id,
