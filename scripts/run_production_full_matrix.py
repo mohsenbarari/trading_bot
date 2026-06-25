@@ -10,6 +10,7 @@ environment variable is present.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -515,6 +516,111 @@ def delivery_scenario_id_for_record(record: dict[str, Any]) -> str:
 
 def scenario_prefix(prefix: str, manifest_id: str) -> str:
     return f"{prefix}{safe_token(manifest_id)}_"
+
+
+def stable_component_key(kind: str, payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
+    return f"{kind}:{digest}"
+
+
+def targeted_join_component_key(record: dict[str, Any]) -> str:
+    source_scenario_id = str(record.get("source_scenario_id") or delivery_scenario_id_for_record(record))
+    return stable_component_key(
+        "targeted_join",
+        {
+            "source_scenario_id": source_scenario_id,
+            "offer_home_server": str(record.get("offer_home_server") or ""),
+        },
+    )
+
+
+def dual_role_shape_component_key(record: dict[str, Any]) -> str:
+    return stable_component_key(
+        "dual_role_shape",
+        {
+            "offer_home_server": str(record.get("offer_home_server") or ""),
+            "offer_surface": str(record.get("offer_surface") or ""),
+            "request_surface": str(record.get("request_surface") or ""),
+            "outage_id": str(record.get("outage_id") or ""),
+            "offer_type": str(record.get("offer_type") or ""),
+            "shape": str(record.get("shape") or ""),
+            "family": str(record.get("family") or ""),
+            "min_parallel_requests": int(record.get("min_parallel_requests") or 0),
+        },
+    )
+
+
+def component_cache_gate_command(
+    *,
+    component_kind: str,
+    component_key: str,
+    source_manifest_id: str,
+    ledger_path: Path,
+) -> CommandSpec:
+    script = (
+        "import json, sys; "
+        "from pathlib import Path; "
+        "ledger = Path(sys.argv[1]); source = sys.argv[2]; key = sys.argv[3]; kind = sys.argv[4]; "
+        "payload = json.loads(ledger.read_text(encoding='utf-8')); "
+        "statuses = {str(item.get('manifest_id')): item.get('status') for item in payload.get('scenarios', [])}; "
+        "status = statuses.get(source); "
+        "print(json.dumps({'component_cache': 'hit', 'kind': kind, 'key': key, "
+        "'source_manifest_id': source, 'source_status': status}, ensure_ascii=False, sort_keys=True)); "
+        "raise SystemExit(0 if status == 'passed' else 1)"
+    )
+    return CommandSpec(
+        name=f"component_cache_hit_{safe_token(component_kind)}",
+        args=[sys.executable, "-c", script, str(ledger_path), source_manifest_id, component_key, component_kind],
+        timeout_seconds=30,
+        mutates_production=False,
+    )
+
+
+def cache_component_plan(
+    component_plan: dict[str, Any],
+    *,
+    component_kind: str,
+    component_key: str,
+    source_manifest_id: str,
+    cache_sources: dict[str, str],
+    ledger_path: Path,
+) -> dict[str, Any]:
+    existing_source = cache_sources.get(component_key)
+    if not existing_source:
+        cache_sources[component_key] = source_manifest_id
+        return {
+            **component_plan,
+            "component_cache": {
+                "status": "source",
+                "kind": component_kind,
+                "key": component_key,
+                "source_manifest_id": source_manifest_id,
+            },
+        }
+    gate = component_cache_gate_command(
+        component_kind=component_kind,
+        component_key=component_key,
+        source_manifest_id=existing_source,
+        ledger_path=ledger_path,
+    )
+    return {
+        **component_plan,
+        "component_cache": {
+            "status": "hit",
+            "kind": component_kind,
+            "key": component_key,
+            "source_manifest_id": existing_source,
+        },
+        "commands": [command_payload(gate)],
+        "execution_groups": [
+            {
+                "name": f"component_cache_hit_{safe_token(component_kind)}",
+                "mode": "sequential",
+                "commands": [command_payload(gate)],
+            }
+        ],
+    }
 
 
 def dual_role_driver_gap(record: dict[str, Any]) -> str | None:
@@ -1364,6 +1470,8 @@ def outage_policy_scenario_commands(
     *,
     prefix: str,
     artifact_dir: Path,
+    component_cache_sources: dict[str, str],
+    ledger_path: Path,
     user_count: int,
     hot_offer_requests: int,
     target_rps: float,
@@ -1401,6 +1509,14 @@ def outage_policy_scenario_commands(
         targeted_record,
         prefix=prefix,
         artifact_dir=artifact_dir,
+    )
+    targeted_plan = cache_component_plan(
+        targeted_plan,
+        component_kind="outage_delivery_policy",
+        component_key=targeted_join_component_key(targeted_record),
+        source_manifest_id=manifest_id,
+        cache_sources=component_cache_sources,
+        ledger_path=ledger_path,
     )
     commands = [
         *[dict(command) for command in dual_role_plan.get("commands") or []],
@@ -1456,6 +1572,8 @@ def customer_accountant_actor_scenario_commands(
     *,
     prefix: str,
     artifact_dir: Path,
+    component_cache_sources: dict[str, str],
+    ledger_path: Path,
     user_count: int,
     hot_offer_requests: int,
     target_rps: float,
@@ -1493,6 +1611,14 @@ def customer_accountant_actor_scenario_commands(
         prefix=prefix,
         artifact_dir=artifact_dir,
     )
+    actor_policy_plan = cache_component_plan(
+        actor_policy_plan,
+        component_kind="customer_actor_policy",
+        component_key=targeted_join_component_key(actor_policy_record),
+        source_manifest_id=manifest_id,
+        cache_sources=component_cache_sources,
+        ledger_path=ledger_path,
+    )
     shape_plan = dual_role_scenario_commands(
         shape_record,
         prefix=prefix,
@@ -1501,6 +1627,14 @@ def customer_accountant_actor_scenario_commands(
         hot_offer_requests=hot_offer_requests,
         target_rps=target_rps,
         telegram_ratio=telegram_ratio,
+    )
+    shape_plan = cache_component_plan(
+        shape_plan,
+        component_kind="customer_shape_stress",
+        component_key=dual_role_shape_component_key(shape_record),
+        source_manifest_id=manifest_id,
+        cache_sources=component_cache_sources,
+        ledger_path=ledger_path,
     )
     commands = [
         *[dict(command) for command in actor_policy_plan.get("commands") or []],
@@ -1542,6 +1676,10 @@ def customer_accountant_actor_scenario_commands(
         "shape_stress_prefix": shape_plan.get("scenario_prefix"),
         "commands": commands,
         "execution_groups": execution_groups,
+        "component_plans": {
+            "actor_policy": actor_policy_plan,
+            "shape_stress": shape_plan,
+        },
         "safety_note": (
             "This composed driver validates customer/owner/accountant routing and counterparty privacy with "
             "the targeted join probe, then validates the requested shape/stress/surface behavior with a "
@@ -1802,6 +1940,8 @@ def build_execution_plan(
 ) -> dict[str, Any]:
     scenario_plans: list[dict[str, Any]] = []
     driver_gaps: list[dict[str, Any]] = []
+    component_cache_sources: dict[str, str] = {}
+    ledger_path = artifact_dir / "campaign-ledger.json"
     for record in records:
         gap = dual_role_driver_gap(record)
         if gap:
@@ -1868,6 +2008,8 @@ def build_execution_plan(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
+                    component_cache_sources=component_cache_sources,
+                    ledger_path=ledger_path,
                     user_count=user_count,
                     hot_offer_requests=hot_offer_requests,
                     target_rps=target_rps,
@@ -1883,6 +2025,8 @@ def build_execution_plan(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
+                    component_cache_sources=component_cache_sources,
+                    ledger_path=ledger_path,
                     user_count=user_count,
                     hot_offer_requests=hot_offer_requests,
                     target_rps=target_rps,
@@ -1890,17 +2034,27 @@ def build_execution_plan(
                 )
             )
         else:
-            scenario_plans.append(
-                dual_role_scenario_commands(
-                    record,
-                    prefix=prefix,
-                    artifact_dir=artifact_dir,
-                    user_count=user_count,
-                    hot_offer_requests=hot_offer_requests,
-                    target_rps=target_rps,
-                    telegram_ratio=telegram_ratio,
-                )
+            scenario_plan = dual_role_scenario_commands(
+                record,
+                prefix=prefix,
+                artifact_dir=artifact_dir,
+                user_count=user_count,
+                hot_offer_requests=hot_offer_requests,
+                target_rps=target_rps,
+                telegram_ratio=telegram_ratio,
             )
+            component_key = dual_role_shape_component_key(record)
+            component_cache_sources.setdefault(
+                component_key,
+                str(record.get("manifest_id") or f"scenario_{len(scenario_plans) + 1}"),
+            )
+            scenario_plan["component_cache"] = {
+                "status": "source",
+                "kind": "dual_role_shape",
+                "key": component_key,
+                "source_manifest_id": component_cache_sources[component_key],
+            }
+            scenario_plans.append(scenario_plan)
     return {
         "status": "planned",
         "implemented_driver": "two_server_dual_role_hot_offer_and_negative_guard_webapp_iran_probe",

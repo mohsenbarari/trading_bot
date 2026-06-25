@@ -366,6 +366,32 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("run_trade_delivery_targeted_join_matrix.py", rendered)
         self.assertIn("TDN-002", rendered)
 
+    def test_outage_policy_reuses_duplicate_delivery_policy_component(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "production_base_trade_shape",
+                "--manifest-id",
+                "PBTS-0007",
+                "--manifest-id",
+                "PBTS-0008",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        first, second = plan["execution_plan"]["scenario_plans"]
+
+        self.assertEqual(first["delivery_scenario_id"], "TDN-002")
+        self.assertEqual(second["delivery_scenario_id"], "TDN-002")
+        self.assertEqual(first["component_plans"]["outage_delivery_policy"]["component_cache"]["status"], "source")
+        self.assertEqual(second["component_plans"]["outage_delivery_policy"]["component_cache"]["status"], "hit")
+        rendered = json.dumps(second["component_plans"]["outage_delivery_policy"], ensure_ascii=False)
+        self.assertIn("component_cache_hit_outage_delivery_policy", rendered)
+        self.assertIn("PBTS-0007", rendered)
+        self.assertNotIn("run_trade_delivery_targeted_join_matrix.py", rendered)
+
     def test_sharding_is_deterministic_and_non_overlapping(self):
         first = runner.build_plan(
             self.build_args("--section", "production_base_trade_shape", "--shard-count", "2", "--shard-index", "1")
@@ -530,6 +556,64 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         rendered = json.dumps(scenario_plan, ensure_ascii=False)
         self.assertIn("run_trade_delivery_targeted_join_matrix.py", rendered)
         self.assertIn("run-role-plan", rendered)
+
+    def test_customer_actor_reuses_prior_user_shape_component(self):
+        records = [
+            {
+                "manifest_id": "UNIT-USER-SHAPE",
+                "section": "production_base_trade_shape",
+                "actor_pair_id": "user__user",
+                "source_kind": "user",
+                "responder_kind": "user",
+                "group_relation": "none",
+                "surface_pair": "webapp_offer__webapp_request",
+                "quadrant": "iran_to_iran",
+                "offer_surface": "webapp",
+                "request_surface": "webapp",
+                "offer_home_server": "iran",
+                "outage_id": "stable",
+                "offer_type": "buy",
+                "shape": "wholesale_full",
+                "policy_supported": True,
+            },
+            {
+                "manifest_id": "UNIT-CUSTOMER-SHAPE",
+                "section": "production_base_trade_shape",
+                "actor_pair_id": "user__tier1_same_owner",
+                "source_kind": "user",
+                "responder_kind": "tier1",
+                "group_relation": "same_owner",
+                "surface_pair": "webapp_offer__webapp_request",
+                "quadrant": "iran_to_iran",
+                "offer_surface": "webapp",
+                "request_surface": "webapp",
+                "offer_home_server": "iran",
+                "outage_id": "stable",
+                "offer_type": "buy",
+                "shape": "wholesale_full",
+                "policy_supported": True,
+            },
+        ]
+
+        execution_plan = runner.build_execution_plan(
+            records,
+            prefix="PFM_UNIT_",
+            artifact_dir=Path("/tmp/pfm-unit"),
+            user_count=200,
+            hot_offer_requests=200,
+            target_rps=600.0,
+            telegram_ratio=0.6,
+        )
+
+        customer_plan = execution_plan["scenario_plans"][1]
+        shape_plan = customer_plan["component_plans"]["shape_stress"]
+
+        self.assertEqual(customer_plan["driver"], "customer_accountant_actor_composed_probe")
+        self.assertEqual(shape_plan["component_cache"]["status"], "hit")
+        self.assertEqual(shape_plan["component_cache"]["source_manifest_id"], "UNIT-USER-SHAPE")
+        rendered = json.dumps(shape_plan, ensure_ascii=False)
+        self.assertIn("component_cache_hit_customer_shape_stress", rendered)
+        self.assertNotIn("run-role-plan", rendered)
 
     def test_execution_plan_summarizes_whole_manifest_driver_gaps(self):
         plan = runner.build_plan(self.build_args("--mode", "execution-plan"))
