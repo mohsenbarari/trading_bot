@@ -597,6 +597,7 @@ def dual_role_scenario_commands(
     webapp_result_path = f"{remote_dir}/webapp_iran.result.json"
     merged_result_path = f"{remote_dir}/merged.result.json"
     final_result_path = f"{remote_dir}/final.json"
+    sync_catchup_result_path = f"{remote_dir}/sync_prefix_catchup.result.json"
     manual_expiry_result_path = f"{remote_dir}/manual_expiry.result.json"
     time_expiry_result_path = f"{remote_dir}/time_expiry.result.json"
     read_telegram_result_path = f"{remote_dir}/read_telegram.result.json"
@@ -755,6 +756,23 @@ def dual_role_scenario_commands(
             "install_webapp_role_plan_in_iran_container",
             server="iran",
             path=webapp_plan_path,
+        ),
+        container_python_command(
+            "sync_prefix_catchup_from_offer_home_server",
+            server=offer_home_server,
+            python_args=[
+                "scripts/trading_core_probe_worker.py",
+                "sync-prefix-catchup",
+                "--prefix",
+                scenario_run_prefix,
+                "--output",
+                sync_catchup_result_path,
+                "--batch-size",
+                "200",
+                "--allow-production-execution",
+            ],
+            env=production_env,
+            timeout_seconds=180,
         ),
         container_python_command(
             "wait_telegram_offer_visible_on_foreign",

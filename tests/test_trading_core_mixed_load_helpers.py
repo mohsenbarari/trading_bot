@@ -53,6 +53,20 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in plan if item.surface == "webapp"), 8)
         self.assertNotIn(1, {item.user_id for item in plan})
 
+    def test_targeted_sync_batches_respects_batch_size(self):
+        entries = [SimpleNamespace(id=index) for index in range(5)]
+
+        batches = worker._targeted_sync_batches(entries, batch_size=2)
+
+        self.assertEqual([[item.id for item in batch] for batch in batches], [[0, 1], [2, 3], [4]])
+
+    def test_peer_sync_response_success_requires_no_errors_and_all_items_processed(self):
+        self.assertTrue(worker._peer_sync_response_is_success({"status": "success", "processed": 3}, 3))
+        self.assertTrue(worker._peer_sync_response_is_success({"status": "ok", "processed": 4, "errors": 0}, 3))
+        self.assertFalse(worker._peer_sync_response_is_success({"status": "partial", "processed": 3, "errors": 0}, 3))
+        self.assertFalse(worker._peer_sync_response_is_success({"status": "success", "processed": 2, "errors": 0}, 3))
+        self.assertFalse(worker._peer_sync_response_is_success({"status": "success", "processed": 3, "errors": 1}, 3))
+
     def test_cleanup_redis_for_user_ids_removes_exact_expire_rate_key(self):
         class FakeRedis:
             def __init__(self):

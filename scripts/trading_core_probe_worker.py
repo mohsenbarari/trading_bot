@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import contextvars
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -31,7 +32,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
-from sqlalchemy import delete, false, func, select, text
+import httpx
+from sqlalchemy import case, delete, false, func, or_, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -1578,6 +1580,142 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
     if last_retryable_error is not None:
         raise last_retryable_error
     raise TradingProbeError("cleanup retry loop exited unexpectedly")
+
+
+TARGETED_SYNC_TABLES = ("users", "offers")
+
+
+def _targeted_sync_batches(entries: list[ChangeLog], *, batch_size: int) -> list[list[ChangeLog]]:
+    normalized_batch_size = max(1, int(batch_size))
+    return [entries[index : index + normalized_batch_size] for index in range(0, len(entries), normalized_batch_size)]
+
+
+def _signed_sync_headers(api_key: str, body: str) -> dict[str, str]:
+    timestamp = str(int(time.time()))
+    signature = hmac.new(api_key.encode(), f"{timestamp}:{body}".encode(), hashlib.sha256).hexdigest()
+    return {
+        "Content-Type": "application/json",
+        "X-API-Key": api_key,
+        "X-Timestamp": timestamp,
+        "X-Signature": signature,
+    }
+
+
+def _peer_sync_response_is_success(response_payload: Mapping[str, Any], expected_count: int) -> bool:
+    status = response_payload.get("status")
+    errors = int(response_payload.get("errors") or 0)
+    processed = int(response_payload.get("processed") or 0)
+    return status in {"success", "ok"} and errors == 0 and processed >= expected_count
+
+
+async def collect_targeted_prefix_change_logs(
+    prefix: str,
+    *,
+    tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
+) -> list[ChangeLog]:
+    plan = await collect_cleanup_plan(prefix)
+    clauses = []
+    normalized_tables = tuple(table for table in tables if table in TARGETED_SYNC_TABLES)
+    if "users" in normalized_tables and plan.user_ids:
+        clauses.append((ChangeLog.table_name == "users") & ChangeLog.record_id.in_(plan.user_ids))
+    if "offers" in normalized_tables and plan.offer_ids:
+        clauses.append((ChangeLog.table_name == "offers") & ChangeLog.record_id.in_(plan.offer_ids))
+    if not clauses:
+        return []
+
+    table_order = case(
+        (ChangeLog.table_name == "users", 0),
+        (ChangeLog.table_name == "offers", 1),
+        else_=99,
+    )
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ChangeLog)
+            .where(ChangeLog.synced.is_(False), or_(*clauses))
+            .order_by(table_order, ChangeLog.id.asc())
+        )
+        return list(result.scalars().all())
+
+
+async def push_prefix_change_logs_to_peer(
+    prefix: str,
+    *,
+    batch_size: int = 200,
+    tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
+) -> dict[str, Any]:
+    from core.server_routing import default_peer_server_url
+    from core.sync_worker import change_log_entry_to_sync_item, refresh_offer_sync_item_from_authoritative_state
+
+    target_url = (default_peer_server_url() or "").rstrip("/")
+    api_key = getattr(settings, "sync_api_key", None)
+    if not target_url or not api_key:
+        raise TradingProbeError("targeted prefix sync requires peer URL and sync API key")
+
+    entries = await collect_targeted_prefix_change_logs(prefix, tables=tables)
+    report: dict[str, Any] = {
+        "status": "ok",
+        "prefix": prefix,
+        "server_mode": settings.server_mode,
+        "target_url_configured": bool(target_url),
+        "tables": list(tables),
+        "entry_count": len(entries),
+        "processed": 0,
+        "batches": [],
+    }
+    if not entries:
+        return report
+
+    async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+        for batch_index, batch in enumerate(_targeted_sync_batches(entries, batch_size=batch_size), start=1):
+            items = []
+            for entry in batch:
+                item = change_log_entry_to_sync_item(entry)
+                if item.get("table") == "offers":
+                    item = await refresh_offer_sync_item_from_authoritative_state(item)
+                items.append(item)
+
+            body = json.dumps(items, sort_keys=True, default=str)
+            response = await client.post(
+                f"{target_url}/api/sync/receive",
+                content=body,
+                headers=_signed_sync_headers(api_key, body),
+            )
+            try:
+                response_payload = response.json()
+            except ValueError:
+                response_payload = {"status": "invalid-json", "body_sha256": hashlib.sha256(response.content).hexdigest()[:16]}
+
+            batch_report = {
+                "batch_index": batch_index,
+                "entry_count": len(batch),
+                "status_code": response.status_code,
+                "response": response_payload,
+                "table_counts": dict(Counter(str(entry.table_name) for entry in batch)),
+            }
+            report["batches"].append(batch_report)
+
+            if response.status_code != 200 or not _peer_sync_response_is_success(response_payload, len(batch)):
+                report["status"] = "failed"
+                report["failed_batch"] = batch_report
+                raise TradingProbeError(f"targeted prefix sync failed: {json.dumps(batch_report, default=str)}")
+
+            async with AsyncSessionLocal() as db:
+                ids = [int(entry.id) for entry in batch]
+                mark_result = await db.execute(
+                    text(
+                        """
+                        UPDATE change_log
+                        SET synced = true, verified = true
+                        WHERE id = ANY(:ids)
+                        """
+                    ),
+                    {"ids": ids},
+                )
+                await db.commit()
+                batch_report["marked_change_logs"] = int(mark_result.rowcount or 0)
+            report["processed"] += len(batch)
+
+    return report
 
 
 async def lock_cleanup_users(db: Any, user_ids: list[int]) -> None:
@@ -6712,6 +6850,17 @@ async def write_dual_role_plan_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
+    prefix = args.prefix
+    assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
+    tables = tuple(args.table or TARGETED_SYNC_TABLES)
+    result = await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=tables)
+    if args.output:
+        write_json_artifact(Path(args.output), result)
+    print_json(result)
+    return 0 if result.get("status") == "ok" else 1
+
+
 async def run_dual_role_artifact_smoke_command(args: argparse.Namespace) -> int:
     plans = _build_dual_role_plans_from_args(args)
     output_dir = Path(args.output_dir)
@@ -6940,6 +7089,17 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_parser = subparsers.add_parser("run-dual-role-artifact-smoke")
     add_dual_role_plan_arguments(smoke_parser)
 
+    catchup_parser = subparsers.add_parser("sync-prefix-catchup")
+    catchup_parser.add_argument("--prefix", required=True)
+    catchup_parser.add_argument("--output")
+    catchup_parser.add_argument("--batch-size", type=int, default=200)
+    catchup_parser.add_argument("--table", action="append", choices=TARGETED_SYNC_TABLES)
+    catchup_parser.add_argument(
+        "--allow-production-execution",
+        action="store_true",
+        help="Allow targeted production prefix sync only with the production full-matrix confirmation env.",
+    )
+
     role_parser = subparsers.add_parser("run-role-plan")
     role_parser.add_argument("--plan", required=True)
     role_parser.add_argument("--output")
@@ -7066,6 +7226,8 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await prepare_dual_role_run_command(args)
     if args.command == "write-dual-role-plan":
         return await write_dual_role_plan_command(args)
+    if args.command == "sync-prefix-catchup":
+        return await sync_prefix_catchup_command(args)
     if args.command == "run-dual-role-artifact-smoke":
         return await run_dual_role_artifact_smoke_command(args)
     if args.command == "run-role-plan":
