@@ -105,6 +105,50 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         with self.assertRaises(worker.TradingProbeError):
             worker.server_for_load_surface("messenger")
 
+    def test_seed_offer_runtime_metadata_retries_stale_update(self):
+        class FakeDb:
+            def __init__(self):
+                self.offer = SimpleNamespace(
+                    channel_message_id=None,
+                    created_at=None,
+                    updated_at=None,
+                )
+                self.commit_calls = 0
+                self.rollback_calls = 0
+                self.get_calls = 0
+
+            async def get(self, *args, **kwargs):
+                self.get_calls += 1
+                return self.offer
+
+            async def commit(self):
+                self.commit_calls += 1
+                if self.commit_calls == 1:
+                    raise worker.StaleDataError("stale offer version")
+
+            async def rollback(self):
+                self.rollback_calls += 1
+
+        fake_db = FakeDb()
+
+        async def run_probe():
+            with patch.object(worker.asyncio, "sleep", AsyncMock()):
+                await worker.seed_offer_runtime_metadata_with_retry(
+                    fake_db,
+                    offer_id=99,
+                    channel_message_id=123456,
+                    time_limit_buffer_minutes=60,
+                )
+
+        asyncio.run(run_probe())
+
+        self.assertEqual(fake_db.commit_calls, 2)
+        self.assertEqual(fake_db.rollback_calls, 1)
+        self.assertEqual(fake_db.get_calls, 2)
+        self.assertEqual(fake_db.offer.channel_message_id, 123456)
+        self.assertIsNotNone(fake_db.offer.created_at)
+        self.assertIsNotNone(fake_db.offer.updated_at)
+
     def test_hot_offer_contention_runs_surfaces_with_architecture_server_roles(self):
         users = [
             worker.LoadUserRef(user_id=1, telegram_id=9001),

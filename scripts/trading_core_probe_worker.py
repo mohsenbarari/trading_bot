@@ -33,6 +33,7 @@ from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
 from sqlalchemy import delete, false, func, select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.orm.exc import StaleDataError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -113,6 +114,7 @@ PRODUCTION_CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
 PRODUCTION_ROLE_WORKER_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
 PRODUCTION_ROLE_WORKER_CONFIRM_VALUE = "execute-production-full-matrix"
+SYNTHETIC_OFFER_SEED_METADATA_STALE_RETRY_ATTEMPTS = 5
 NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "own_offer_request",
     "invalid_request_amount",
@@ -2274,6 +2276,33 @@ async def load_user_ref(user_id: int) -> LoadUserRef:
         return LoadUserRef(user_id=int(user_id), telegram_id=int(telegram_id))
 
 
+async def seed_offer_runtime_metadata_with_retry(
+    db,
+    *,
+    offer_id: int,
+    channel_message_id: int | None = None,
+    time_limit_buffer_minutes: int | None = None,
+) -> None:
+    for attempt in range(SYNTHETIC_OFFER_SEED_METADATA_STALE_RETRY_ATTEMPTS):
+        offer = await db.get(Offer, offer_id, populate_existing=True)
+        if offer is None:
+            raise TradingProbeError(f"created offer {offer_id} disappeared before runtime metadata seed")
+        if channel_message_id is not None:
+            offer.channel_message_id = int(channel_message_id)
+        if time_limit_buffer_minutes is not None:
+            buffered_created_at = datetime.utcnow() + timedelta(minutes=int(time_limit_buffer_minutes))
+            offer.created_at = buffered_created_at
+            offer.updated_at = buffered_created_at
+        try:
+            await db.commit()
+            return
+        except StaleDataError:
+            await db.rollback()
+            if attempt >= SYNTHETIC_OFFER_SEED_METADATA_STALE_RETRY_ATTEMPTS - 1:
+                raise
+            await asyncio.sleep(0.05 * (attempt + 1))
+
+
 async def create_offer_for_user(
     *,
     user_id: int,
@@ -2334,16 +2363,12 @@ async def create_offer_for_user(
             )
             offer_id = int(offer.id)
         if channel_message_id is not None or time_limit_buffer_minutes is not None:
-            offer = await db.get(Offer, offer_id)
-            if offer is None:
-                raise TradingProbeError(f"created offer {offer_id} disappeared before channel id seed")
-            if channel_message_id is not None:
-                offer.channel_message_id = int(channel_message_id)
-            if time_limit_buffer_minutes is not None:
-                buffered_created_at = datetime.utcnow() + timedelta(minutes=int(time_limit_buffer_minutes))
-                offer.created_at = buffered_created_at
-                offer.updated_at = buffered_created_at
-            await db.commit()
+            await seed_offer_runtime_metadata_with_retry(
+                db,
+                offer_id=offer_id,
+                channel_message_id=channel_message_id,
+                time_limit_buffer_minutes=time_limit_buffer_minutes,
+            )
         return offer_id
 
 
