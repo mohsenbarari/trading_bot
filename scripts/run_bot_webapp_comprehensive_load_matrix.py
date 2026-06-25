@@ -606,17 +606,14 @@ async def finalize_offer_for_terminal_state(
             await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.COMPLETED.value)
             return offer_id
         if terminal_state == "manual_expired":
-            terminal_setup_surface = "telegram" if origin == "bot" else "webapp"
-            status = await expire_attempt(
-                surface=terminal_setup_surface,
-                harness=harness,
-                owner=owner,
-                offer_id=offer_id,
-                prefix=f"{prefix}manual-terminal-",
-                index=0,
-            )
-            if status != "success":
-                raise worker.TradingProbeError(f"terminal manual expiry setup failed with status={status}")
+            target_server = SERVER_FOREIGN if origin == "bot" else SERVER_IRAN
+            try:
+                with override_current_server(target_server):
+                    await worker.expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
+            except Exception as exc:
+                raise worker.TradingProbeError(
+                    f"terminal manual expiry setup failed: {type(exc).__name__}: {exc}"
+                ) from exc
             await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.EXPIRED.value)
             return offer_id
         if terminal_state == "time_expired":

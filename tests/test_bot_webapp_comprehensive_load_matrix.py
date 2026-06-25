@@ -325,8 +325,8 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(report["remaining_non_terminal_count"], 0)
         self.assertEqual(report["rounds"], 1)
 
-    def test_bot_origin_terminal_setup_uses_telegram_surface(self):
-        calls = {"trade_surfaces": [], "expire_surfaces": []}
+    def test_bot_origin_terminal_setup_uses_authoritative_paths(self):
+        calls = {"trade_surfaces": [], "expire_servers": []}
         owner = matrix_runner.worker.LoadUserRef(user_id=10, telegram_id=1010)
         responder = matrix_runner.worker.LoadUserRef(user_id=20, telegram_id=2020)
 
@@ -341,9 +341,8 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
             calls["trade_surfaces"].append(kwargs["surface"])
             return "success"
 
-        async def fake_expire_attempt(**kwargs):
-            calls["expire_surfaces"].append(kwargs["surface"])
-            return "success"
+        async def fake_expire_offer_for_user(**_kwargs):
+            calls["expire_servers"].append(matrix_runner.worker.current_server())
 
         async def fake_assert_offer_terminal(**_kwargs):
             return None
@@ -352,7 +351,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
             with patch.object(matrix_runner.worker, "AiogramDispatcherHarness", FakeHarness):
                 with patch.object(matrix_runner, "create_offer", fake_create_offer):
                     with patch.object(matrix_runner, "execute_trade_attempt", fake_execute_trade_attempt):
-                        with patch.object(matrix_runner, "expire_attempt", fake_expire_attempt):
+                        with patch.object(matrix_runner.worker, "expire_offer_for_user", fake_expire_offer_for_user):
                             with patch.object(matrix_runner, "assert_offer_terminal", fake_assert_offer_terminal):
                                 completed_id = await matrix_runner.finalize_offer_for_terminal_state(
                                     terminal_state="completed",
@@ -382,7 +381,7 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
 
         self.assertEqual((completed_id, expired_id), (42, 42))
         self.assertEqual(calls["trade_surfaces"], ["telegram"])
-        self.assertEqual(calls["expire_surfaces"], ["telegram"])
+        self.assertEqual(calls["expire_servers"], [matrix_runner.SERVER_FOREIGN])
 
     def test_non_contention_offer_seed_honors_max_concurrency_and_order(self):
         running = 0
