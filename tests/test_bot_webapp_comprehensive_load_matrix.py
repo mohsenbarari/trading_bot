@@ -325,6 +325,65 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertEqual(report["remaining_non_terminal_count"], 0)
         self.assertEqual(report["rounds"], 1)
 
+    def test_bot_origin_terminal_setup_uses_telegram_surface(self):
+        calls = {"trade_surfaces": [], "expire_surfaces": []}
+        owner = matrix_runner.worker.LoadUserRef(user_id=10, telegram_id=1010)
+        responder = matrix_runner.worker.LoadUserRef(user_id=20, telegram_id=2020)
+
+        class FakeHarness:
+            async def close(self):
+                return None
+
+        async def fake_create_offer(**_kwargs):
+            return 42
+
+        async def fake_execute_trade_attempt(**kwargs):
+            calls["trade_surfaces"].append(kwargs["surface"])
+            return "success"
+
+        async def fake_expire_attempt(**kwargs):
+            calls["expire_surfaces"].append(kwargs["surface"])
+            return "success"
+
+        async def fake_assert_offer_terminal(**_kwargs):
+            return None
+
+        async def run_probe():
+            with patch.object(matrix_runner.worker, "AiogramDispatcherHarness", FakeHarness):
+                with patch.object(matrix_runner, "create_offer", fake_create_offer):
+                    with patch.object(matrix_runner, "execute_trade_attempt", fake_execute_trade_attempt):
+                        with patch.object(matrix_runner, "expire_attempt", fake_expire_attempt):
+                            with patch.object(matrix_runner, "assert_offer_terminal", fake_assert_offer_terminal):
+                                completed_id = await matrix_runner.finalize_offer_for_terminal_state(
+                                    terminal_state="completed",
+                                    origin="bot",
+                                    owner=owner,
+                                    users=[owner, responder],
+                                    commodity_id=11,
+                                    commodity_name="امام",
+                                    shape=matrix_runner.SHAPES["wholesale_full"],
+                                    offer_type="buy",
+                                    prefix="probe-completed-",
+                                )
+                                expired_id = await matrix_runner.finalize_offer_for_terminal_state(
+                                    terminal_state="manual_expired",
+                                    origin="bot",
+                                    owner=owner,
+                                    users=[owner, responder],
+                                    commodity_id=11,
+                                    commodity_name="امام",
+                                    shape=matrix_runner.SHAPES["wholesale_full"],
+                                    offer_type="buy",
+                                    prefix="probe-expired-",
+                                )
+                                return completed_id, expired_id
+
+        completed_id, expired_id = asyncio.run(run_probe())
+
+        self.assertEqual((completed_id, expired_id), (42, 42))
+        self.assertEqual(calls["trade_surfaces"], ["telegram"])
+        self.assertEqual(calls["expire_surfaces"], ["telegram"])
+
     def test_non_contention_offer_seed_honors_max_concurrency_and_order(self):
         running = 0
         peak_running = 0

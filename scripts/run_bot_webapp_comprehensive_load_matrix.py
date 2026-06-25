@@ -589,10 +589,11 @@ async def finalize_offer_for_terminal_state(
         if terminal_state == "active":
             return offer_id
         if terminal_state == "completed":
+            terminal_setup_surface = "telegram" if origin == "bot" else "webapp"
             for index in range(shape.expected_winner_count):
                 responder = responder_for_index(users, owner_user_id=owner.user_id, index=index)
                 status = await execute_trade_attempt(
-                    surface="webapp",
+                    surface=terminal_setup_surface,
                     harness=harness,
                     user=responder,
                     offer_id=offer_id,
@@ -605,8 +606,9 @@ async def finalize_offer_for_terminal_state(
             await assert_offer_terminal(offer_id=offer_id, expected_status=OfferStatus.COMPLETED.value)
             return offer_id
         if terminal_state == "manual_expired":
+            terminal_setup_surface = "telegram" if origin == "bot" else "webapp"
             status = await expire_attempt(
-                surface="webapp",
+                surface=terminal_setup_surface,
                 harness=harness,
                 owner=owner,
                 offer_id=offer_id,
