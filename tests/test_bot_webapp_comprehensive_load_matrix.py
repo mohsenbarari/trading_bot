@@ -252,6 +252,34 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertIn("admission_wait", summary)
         self.assertGreater(summary["admission_wait"]["max_ms"], 0)
 
+    def test_expire_attempt_retries_transient_busy_detail(self):
+        attempts = 0
+
+        async def expire_once(*, user_id, offer_id):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise matrix_runner.worker.HTTPException(
+                    status_code=409,
+                    detail=matrix_runner.worker.offers_router.OFFER_EXPIRY_LOCK_BUSY_DETAIL,
+                )
+
+        async def run_probe():
+            with patch.object(matrix_runner.worker, "expire_offer_for_user", expire_once):
+                with patch.object(matrix_runner.asyncio, "sleep", AsyncMock()):
+                    return await matrix_runner.expire_attempt(
+                        surface="webapp",
+                        harness=AsyncMock(),
+                        owner=matrix_runner.worker.LoadUserRef(user_id=10, telegram_id=1010),
+                        offer_id=99,
+                        prefix="PFM_retry_",
+                        index=1,
+                        error_details=[],
+                    )
+
+        self.assertEqual(asyncio.run(run_probe()), "success")
+        self.assertEqual(attempts, 2)
+
     def test_non_contention_offer_seed_honors_max_concurrency_and_order(self):
         running = 0
         peak_running = 0

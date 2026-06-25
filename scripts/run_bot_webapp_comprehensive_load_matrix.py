@@ -127,6 +127,7 @@ READ_VIEW_FAMILIES = {
     "market_history_view",
 }
 DEFAULT_READ_VIEW_MAX_CONCURRENCY = 96
+EXPIRY_BUSY_RETRY_ATTEMPTS = 4
 
 
 def scenario_key(value: str) -> str:
@@ -510,24 +511,39 @@ async def expire_attempt(
     index: int,
     error_details: list[str] | None = None,
 ) -> str:
-    if surface == "telegram":
-        with override_current_server(SERVER_FOREIGN):
-            return await worker.expire_bot_offer_with_dispatcher(
-                harness=harness,
-                owner=owner,
-                offer_id=offer_id,
-                prefix=prefix,
-                index=index,
-                error_details=error_details,
-            )
-    try:
-        with override_current_server(SERVER_IRAN):
-            await worker.expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
-    except Exception as exc:
-        if error_details is not None:
-            error_details.append(f"{type(exc).__name__}: {exc}")
-        return "rejected"
-    return "success"
+    busy_detail = worker.offers_router.OFFER_EXPIRY_LOCK_BUSY_DETAIL
+    for attempt in range(EXPIRY_BUSY_RETRY_ATTEMPTS):
+        details_before = len(error_details or [])
+        if surface == "telegram":
+            with override_current_server(SERVER_FOREIGN):
+                status = await worker.expire_bot_offer_with_dispatcher(
+                    harness=harness,
+                    owner=owner,
+                    offer_id=offer_id,
+                    prefix=prefix,
+                    index=index + attempt,
+                    error_details=error_details,
+                )
+            if status == "success":
+                return "success"
+            recent_details = (error_details or [])[details_before:]
+            if attempt < EXPIRY_BUSY_RETRY_ATTEMPTS - 1 and any(busy_detail in str(item) for item in recent_details):
+                await asyncio.sleep(0.05 * (attempt + 1))
+                continue
+            return status
+        try:
+            with override_current_server(SERVER_IRAN):
+                await worker.expire_offer_for_user(user_id=owner.user_id, offer_id=offer_id)
+            return "success"
+        except Exception as exc:
+            detail = str(getattr(exc, "detail", "") or exc)
+            if attempt < EXPIRY_BUSY_RETRY_ATTEMPTS - 1 and busy_detail in detail:
+                await asyncio.sleep(0.05 * (attempt + 1))
+                continue
+            if error_details is not None:
+                error_details.append(f"{type(exc).__name__}: {exc}")
+            return "rejected"
+    return "rejected"
 
 
 def owner_for_origin(users: list[worker.LoadUserRef], origin: str) -> worker.LoadUserRef:

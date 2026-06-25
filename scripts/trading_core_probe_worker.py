@@ -4580,6 +4580,8 @@ async def expire_bot_offer_with_dispatcher(
     answer_text = str((answer or {}).get("text") or "")
     if "منقضی شد" in answer_text:
         return "success"
+    if answer_text and error_details is not None:
+        error_details.append(f"bot_expire_rejected: {answer_text}")
     return "rejected"
 
 
