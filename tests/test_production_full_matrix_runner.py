@@ -205,6 +205,26 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--allow-production-execution", rendered)
         self.assertIn("PRODUCTION_TEST_CLEANUP_CONFIRM", rendered)
 
+    def test_execution_plan_extends_timeout_for_heavy_market_behavior_families(self):
+        plan = runner.build_plan(
+            self.build_args(
+                "--mode",
+                "execution-plan",
+                "--section",
+                "market_behavior",
+                "--manifest-id",
+                "MB-CLM-004",
+                "--require-full-driver-coverage",
+            )
+        )
+
+        scenario_plan = plan["execution_plan"]["scenario_plans"][0]
+        command = scenario_plan["commands"][1]
+        self.assertEqual(scenario_plan["family"], "trade_non_concurrent")
+        self.assertEqual(scenario_plan["market_behavior_timeout_seconds"], 3600)
+        self.assertEqual(command["timeout_seconds"], 3630)
+        self.assertIn("3600s", command["args"])
+
     def test_execution_plan_builds_delivery_contract_catalog_commands(self):
         plan = runner.build_plan(
             self.build_args(

@@ -220,6 +220,42 @@ class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
         self.assertIn("admission_wait", summary)
         self.assertGreater(summary["admission_wait"]["max_ms"], 0)
 
+    def test_non_contention_offer_seed_honors_max_concurrency_and_order(self):
+        running = 0
+        peak_running = 0
+        users = [SimpleNamespace(user_id=10), SimpleNamespace(user_id=20), SimpleNamespace(user_id=30)]
+
+        async def fake_create_offer(**kwargs):
+            nonlocal running, peak_running
+            running += 1
+            peak_running = max(peak_running, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+            return kwargs["index"]
+
+        async def run_probe():
+            with patch.object(matrix_runner, "create_offer", side_effect=fake_create_offer):
+                return await matrix_runner.create_non_contention_offers(
+                    origin="webapp",
+                    users=users,
+                    commodity_id=1,
+                    commodity_name="امام",
+                    shape=matrix_runner.SHAPES["wholesale_full"],
+                    offer_type="buy",
+                    prefix="TEST_",
+                    attempts_per_scenario=6,
+                    index_offset=5000,
+                    bot_harness=SimpleNamespace(),
+                    max_concurrency=2,
+                )
+
+        offer_ids, owners, elapsed = asyncio.run(run_probe())
+
+        self.assertEqual(peak_running, 2)
+        self.assertEqual(offer_ids, [5000, 5001, 5002, 5003, 5004, 5005])
+        self.assertEqual([owner.user_id for owner in owners], [10, 20, 30, 10, 20, 30])
+        self.assertGreater(elapsed, 0)
+
     def test_fast_seed_bot_offer_uses_foreign_direct_create_with_channel_message_id(self):
         calls = {}
         owner = matrix_runner.worker.LoadUserRef(user_id=7, telegram_id=7007)

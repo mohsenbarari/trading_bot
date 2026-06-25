@@ -57,6 +57,12 @@ DUAL_ROLE_EXECUTABLE_DUPLICATE_REPLAY_REQUEST_SURFACES = {"telegram", "webapp"}
 DUAL_ROLE_EXECUTABLE_MANUAL_EXPIRE_RACE_REQUEST_SURFACES = {"telegram", "webapp"}
 DUAL_ROLE_EXECUTABLE_TIME_EXPIRE_RACE_REQUEST_SURFACES = {"telegram", "webapp"}
 DUAL_ROLE_EXECUTABLE_READ_DURING_WRITE_REQUEST_SURFACES = {"telegram", "webapp"}
+MARKET_BEHAVIOR_DEFAULT_TIMEOUT_SECONDS = 1200
+MARKET_BEHAVIOR_HEAVY_TIMEOUT_SECONDS = 3600
+MARKET_BEHAVIOR_HEAVY_FAMILIES = {
+    "trade_non_concurrent",
+    "manual_expire_non_concurrent",
+}
 
 NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "own_offer_request",
@@ -1428,6 +1434,12 @@ def market_behavior_scenario_commands(
     offer_origin = str(record.get("offer_origin") or "")
     request_surface = str(record.get("request_surface") or "")
     expire_surface = str(record.get("expire_surface") or "")
+    family = str(record.get("family") or "")
+    scenario_timeout_seconds = (
+        MARKET_BEHAVIOR_HEAVY_TIMEOUT_SECONDS
+        if family in MARKET_BEHAVIOR_HEAVY_FAMILIES
+        else MARKET_BEHAVIOR_DEFAULT_TIMEOUT_SECONDS
+    )
     server = "foreign" if "telegram" in {offer_origin, request_surface, expire_surface} or offer_origin == "bot" else "iran"
     production_env = {
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
@@ -1467,7 +1479,7 @@ def market_behavior_scenario_commands(
                 "--allow-production-cleanup",
             ],
             env=production_env,
-            timeout_seconds=1200,
+            timeout_seconds=scenario_timeout_seconds,
         ),
     ]
     return {
@@ -1479,7 +1491,8 @@ def market_behavior_scenario_commands(
         "remote_artifact_dir": remote_dir,
         "server": server,
         "source_scenario_id": source_scenario_id,
-        "family": record.get("family"),
+        "family": family,
+        "market_behavior_timeout_seconds": scenario_timeout_seconds,
         "offer_origin": record.get("offer_origin"),
         "request_surface": record.get("request_surface"),
         "expire_surface": record.get("expire_surface"),

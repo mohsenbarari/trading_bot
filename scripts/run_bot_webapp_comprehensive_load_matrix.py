@@ -350,6 +350,58 @@ async def create_offer(
             await harness.close()
 
 
+async def create_non_contention_offers(
+    *,
+    origin: str,
+    users: list[worker.LoadUserRef],
+    commodity_id: int,
+    commodity_name: str,
+    shape: OfferShape,
+    offer_type: str,
+    prefix: str,
+    attempts_per_scenario: int,
+    index_offset: int,
+    bot_harness: worker.AiogramDispatcherHarness,
+    max_concurrency: int | None,
+) -> tuple[list[int], list[worker.LoadUserRef], float]:
+    """Seed independent offers before the measured non-contention attempt phase."""
+    semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency and max_concurrency > 0 else None
+    started = time.perf_counter()
+
+    async def _create(index: int) -> tuple[int, worker.LoadUserRef, int]:
+        owner = users[index % len(users)]
+
+        async def _run() -> int:
+            return await create_offer(
+                origin=origin,
+                owner=owner,
+                commodity_id=commodity_id,
+                commodity_name=commodity_name,
+                shape=shape,
+                offer_type=offer_type,
+                prefix=prefix,
+                index=index_offset + index,
+                bot_harness=bot_harness,
+                fast_seed_bot_offer=True,
+                time_limit_buffer_minutes=60,
+            )
+
+        if semaphore is None:
+            offer_id = await _run()
+        else:
+            async with semaphore:
+                offer_id = await _run()
+        return index, owner, offer_id
+
+    results = await asyncio.gather(*(_create(index) for index in range(attempts_per_scenario)))
+    results.sort(key=lambda item: item[0])
+    return (
+        [offer_id for _, _, offer_id in results],
+        [owner for _, owner, _ in results],
+        time.perf_counter() - started,
+    )
+
+
 async def execute_trade_attempt(
     *,
     surface: str,
@@ -631,27 +683,21 @@ async def run_scenario(
 
         elif scenario.family == "trade_non_concurrent":
             harness = worker.AiogramDispatcherHarness()
-            offer_ids: list[int] = []
-            offer_owners: list[worker.LoadUserRef] = []
+            fixture_elapsed = 0.0
             try:
-                for index in range(attempts_per_scenario):
-                    owner = users[index % len(users)]
-                    offer_ids.append(
-                        await create_offer(
-                            origin=scenario.offer_origin or "webapp",
-                            owner=owner,
-                            commodity_id=commodity_id,
-                            commodity_name=commodity_name,
-                            shape=shape,
-                            offer_type=scenario.offer_type,
-                            prefix=scenario_prefix,
-                            index=2000 + index,
-                            bot_harness=harness,
-                            fast_seed_bot_offer=True,
-                            time_limit_buffer_minutes=60,
-                        )
-                    )
-                    offer_owners.append(owner)
+                offer_ids, offer_owners, fixture_elapsed = await create_non_contention_offers(
+                    origin=scenario.offer_origin or "webapp",
+                    users=users,
+                    commodity_id=commodity_id,
+                    commodity_name=commodity_name,
+                    shape=shape,
+                    offer_type=scenario.offer_type,
+                    prefix=scenario_prefix,
+                    attempts_per_scenario=attempts_per_scenario,
+                    index_offset=2000,
+                    bot_harness=harness,
+                    max_concurrency=scenario_write_max_concurrency,
+                )
 
                 async def _attempt(index: int) -> str:
                     surface = surface_for_index(index, telegram_ratio)
@@ -679,32 +725,27 @@ async def run_scenario(
             finally:
                 await harness.close()
             summary = summarize_outcomes(outcomes, elapsed)
+            extra = {"fixture_creation_elapsed_seconds": round(fixture_elapsed, 3)}
             if summary["success"] != attempts_per_scenario:
                 correctness_failures.append("non-concurrent trade expected every request to succeed")
 
         elif scenario.family == "manual_expire_non_concurrent":
             harness = worker.AiogramDispatcherHarness()
-            offer_ids: list[int] = []
-            offer_owners: list[worker.LoadUserRef] = []
+            fixture_elapsed = 0.0
             try:
-                for index in range(attempts_per_scenario):
-                    owner = users[index % len(users)]
-                    offer_ids.append(
-                        await create_offer(
-                            origin=scenario.offer_origin or "webapp",
-                            owner=owner,
-                            commodity_id=commodity_id,
-                            commodity_name=commodity_name,
-                            shape=shape,
-                            offer_type=scenario.offer_type,
-                            prefix=scenario_prefix,
-                            index=3000 + index,
-                            bot_harness=harness,
-                            fast_seed_bot_offer=True,
-                            time_limit_buffer_minutes=60,
-                        )
-                    )
-                    offer_owners.append(owner)
+                offer_ids, offer_owners, fixture_elapsed = await create_non_contention_offers(
+                    origin=scenario.offer_origin or "webapp",
+                    users=users,
+                    commodity_id=commodity_id,
+                    commodity_name=commodity_name,
+                    shape=shape,
+                    offer_type=scenario.offer_type,
+                    prefix=scenario_prefix,
+                    attempts_per_scenario=attempts_per_scenario,
+                    index_offset=3000,
+                    bot_harness=harness,
+                    max_concurrency=scenario_write_max_concurrency,
+                )
 
                 async def _attempt(index: int) -> str:
                     return await expire_attempt(
@@ -726,6 +767,7 @@ async def run_scenario(
             finally:
                 await harness.close()
             summary = summarize_outcomes(outcomes, elapsed)
+            extra = {"fixture_creation_elapsed_seconds": round(fixture_elapsed, 3)}
             if summary["success"] != attempts_per_scenario:
                 correctness_failures.append("non-concurrent manual expiry expected every request to succeed")
 
