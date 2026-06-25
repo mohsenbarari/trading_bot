@@ -32,7 +32,7 @@ from aiogram.types import Update
 from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
 from sqlalchemy import delete, false, func, select, text
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm.exc import StaleDataError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -115,6 +115,9 @@ PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
 PRODUCTION_ROLE_WORKER_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
 PRODUCTION_ROLE_WORKER_CONFIRM_VALUE = "execute-production-full-matrix"
 SYNTHETIC_OFFER_SEED_METADATA_STALE_RETRY_ATTEMPTS = 5
+LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS = 8
+LOAD_FIXTURE_MOBILE_PREFIX = "09"
+LOAD_FIXTURE_MOBILE_TOTAL_DIGITS = 11
 NEGATIVE_GUARD_EXECUTABLE_CASES = {
     "own_offer_request",
     "invalid_request_amount",
@@ -1897,19 +1900,38 @@ async def create_fixture_users(prefix: str) -> FixtureUsers:
         return FixtureUsers(seller_id=users[0].id, responder_a_id=users[1].id, responder_b_id=users[2].id)
 
 
-async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[LoadUserRef]:
-    if user_count < 3:
-        raise TradingProbeError("mixed load requires at least 3 synthetic users")
+def load_fixture_identity_for_index(
+    *,
+    prefix: str,
+    index: int,
+    user_count: int,
+    salt: int = 0,
+) -> tuple[str, int]:
+    index_width = max(3, len(str(max(user_count - 1, 0))))
+    namespace_width = LOAD_FIXTURE_MOBILE_TOTAL_DIGITS - len(LOAD_FIXTURE_MOBILE_PREFIX) - index_width
+    if namespace_width < 3:
+        raise TradingProbeError("load fixture user_count leaves too little mobile namespace")
+    digest = hashlib.sha256(f"{prefix}:{salt}".encode("utf-8")).digest()
+    namespace = int.from_bytes(digest[:8], "big") % (10**namespace_width)
+    mobile_number = f"{LOAD_FIXTURE_MOBILE_PREFIX}{namespace:0{namespace_width}d}{index:0{index_width}d}"
+    telegram_id = 8_800_000_000 + namespace * (10**index_width) + index
+    return mobile_number, telegram_id
 
-    setup_event_listeners()
-    prefix_hash = abs(hash(prefix)) % 1000
+
+def build_load_fixture_users(prefix: str, *, user_count: int, salt: int = 0) -> list[User]:
     users: list[User] = []
     for index in range(user_count):
+        mobile_number, telegram_id = load_fixture_identity_for_index(
+            prefix=prefix,
+            index=index,
+            user_count=user_count,
+            salt=salt,
+        )
         users.append(
             User(
                 account_name=f"{prefix}load_{index:04d}",
-                mobile_number=f"0988{prefix_hash:03d}{index:04d}",
-                telegram_id=8800000000 + prefix_hash * 10000 + index,
+                mobile_number=mobile_number,
+                telegram_id=telegram_id,
                 username=None,
                 full_name=f"P7 Mixed Load User {index:04d}",
                 address="P7 mixed load synthetic user",
@@ -1926,15 +1948,34 @@ async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[Loa
                 can_block_users=False,
             )
         )
+    return users
 
-    async with AsyncSessionLocal() as db:
-        db.add_all(users)
-        await db.commit()
-        refs: list[LoadUserRef] = []
-        for user in users:
-            await db.refresh(user)
-            refs.append(LoadUserRef(user_id=int(user.id), telegram_id=int(user.telegram_id)))
-        return refs
+
+async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[LoadUserRef]:
+    if user_count < 3:
+        raise TradingProbeError("mixed load requires at least 3 synthetic users")
+
+    setup_event_listeners()
+    last_error: IntegrityError | None = None
+    for salt in range(LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS):
+        users = build_load_fixture_users(prefix, user_count=user_count, salt=salt)
+        async with AsyncSessionLocal() as db:
+            db.add_all(users)
+            try:
+                await db.commit()
+            except IntegrityError as exc:
+                await db.rollback()
+                last_error = exc
+                continue
+            refs: list[LoadUserRef] = []
+            for user in users:
+                await db.refresh(user)
+                refs.append(LoadUserRef(user_id=int(user.id), telegram_id=int(user.telegram_id)))
+            return refs
+    raise TradingProbeError(
+        f"could not allocate unique synthetic load user identities after "
+        f"{LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS} attempts"
+    ) from last_error
 
 
 async def fake_market_open(*_args: Any, **_kwargs: Any) -> SimpleNamespace:

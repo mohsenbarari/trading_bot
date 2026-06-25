@@ -105,6 +105,39 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         with self.assertRaises(worker.TradingProbeError):
             worker.server_for_load_surface("messenger")
 
+    def test_load_fixture_identity_uses_stable_large_namespace(self):
+        first_mobile, first_telegram = worker.load_fixture_identity_for_index(
+            prefix="PFM_probe_A_",
+            index=0,
+            user_count=1000,
+        )
+        repeated_mobile, repeated_telegram = worker.load_fixture_identity_for_index(
+            prefix="PFM_probe_A_",
+            index=0,
+            user_count=1000,
+        )
+        other_mobile, other_telegram = worker.load_fixture_identity_for_index(
+            prefix="PFM_probe_B_",
+            index=0,
+            user_count=1000,
+        )
+        generated = [
+            worker.load_fixture_identity_for_index(
+                prefix="PFM_probe_A_",
+                index=index,
+                user_count=1000,
+            )
+            for index in range(1000)
+        ]
+
+        self.assertEqual((first_mobile, first_telegram), (repeated_mobile, repeated_telegram))
+        self.assertNotEqual(first_mobile[:8], other_mobile[:8])
+        self.assertNotEqual(first_telegram // 1000, other_telegram // 1000)
+        self.assertEqual(len(first_mobile), 11)
+        self.assertTrue(first_mobile.startswith("09"))
+        self.assertEqual(len({mobile for mobile, _telegram in generated}), 1000)
+        self.assertEqual(len({telegram for _mobile, telegram in generated}), 1000)
+
     def test_seed_offer_runtime_metadata_retries_stale_update(self):
         class FakeDb:
             def __init__(self):
