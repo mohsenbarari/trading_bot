@@ -672,6 +672,8 @@ def dual_role_scenario_commands(
         str(record.get("offer_type") or "sell"),
         "--barrier-delay-seconds",
         "25",
+        "--offer-time-limit-buffer-minutes",
+        "60",
         "--allow-production-execution",
         "--allow-production-cleanup",
     ]

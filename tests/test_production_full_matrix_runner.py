@@ -473,6 +473,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("sync-health-iran", rendered)
         self.assertNotIn("--skip-initial-cleanup", rendered)
         self.assertIn("--retail", rendered)
+        prepare_args = commands_by_name["prepare_on_offer_home_server"]["args"]
+        self.assertIn("--offer-time-limit-buffer-minutes 60", " ".join(prepare_args))
         catchup_args = commands_by_name["sync_prefix_catchup_from_offer_home_server"]["args"]
         self.assertIn("--batch-size 200", " ".join(catchup_args))
         self.assertEqual(commands_by_name["sync_prefix_catchup_from_offer_home_server"]["timeout_seconds"], 630)

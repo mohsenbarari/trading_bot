@@ -4535,6 +4535,7 @@ async def create_bot_offer_with_dispatcher(
     offer_type: str,
     is_wholesale: bool = True,
     lot_sizes: list[int] | tuple[int, ...] | None = None,
+    time_limit_buffer_minutes: int | None = None,
 ) -> int:
     verb = "خ" if offer_type == "buy" else "ف"
     marker = f"{prefix} bot hot {owner.user_id}"
@@ -4559,7 +4560,15 @@ async def create_bot_offer_with_dispatcher(
         ).scalar_one_or_none()
         if offer is None:
             raise TradingProbeError("Dispatcher bot offer creation did not persist an offer")
-        return int(offer.id)
+        offer_id = int(offer.id)
+    if time_limit_buffer_minutes is not None:
+        async with AsyncSessionLocal() as db:
+            await seed_offer_runtime_metadata_with_retry(
+                db,
+                offer_id=offer_id,
+                time_limit_buffer_minutes=time_limit_buffer_minutes,
+            )
+    return offer_id
 
 
 async def load_offer_snapshot(offer_id: int) -> Offer:
@@ -6070,6 +6079,11 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
     if is_time_expiry_race:
         time_expiry_epoch = barrier_epoch + float(args.time_expiry_race_delay_seconds)
         time_expiry_stale_epoch = time_expiry_epoch - float(args.time_expiry_race_stale_skew_seconds)
+    offer_time_limit_buffer_minutes = (
+        None
+        if is_time_expiry_race
+        else int(args.offer_time_limit_buffer_minutes or 0) or None
+    )
 
     async with patched_trading_boundaries():
         users = await create_load_fixture_users(prefix, user_count=args.user_count)
@@ -6087,6 +6101,7 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
                     offer_type=args.offer_type,
                     is_wholesale=is_wholesale,
                     lot_sizes=lot_sizes,
+                    time_limit_buffer_minutes=offer_time_limit_buffer_minutes,
                 )
             finally:
                 await harness.close()
@@ -6101,6 +6116,7 @@ async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
                 price=args.price,
                 is_wholesale=is_wholesale,
                 lot_sizes=lot_sizes,
+                time_limit_buffer_minutes=offer_time_limit_buffer_minutes,
             )
 
         if is_time_expiry_race:
@@ -7061,6 +7077,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_parser.add_argument("--retail", action="store_true")
     prepare_parser.add_argument("--lot-sizes", default="")
     prepare_parser.add_argument("--barrier-delay-seconds", type=float, default=20.0)
+    prepare_parser.add_argument("--offer-time-limit-buffer-minutes", type=int, default=0)
     prepare_parser.add_argument("--time-expiry-race-delay-seconds", type=float, default=TIME_EXPIRY_RACE_DELAY_SECONDS)
     prepare_parser.add_argument(
         "--time-expiry-race-stale-skew-seconds",
