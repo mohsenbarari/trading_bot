@@ -61,6 +61,8 @@ MARKET_BEHAVIOR_DEFAULT_TIMEOUT_SECONDS = 1200
 MARKET_BEHAVIOR_HEAVY_TIMEOUT_SECONDS = 3600
 MARKET_BEHAVIOR_DEFAULT_WRITE_MAX_CONCURRENCY = 24
 MARKET_BEHAVIOR_HEAVY_WRITE_MAX_CONCURRENCY = 128
+MARKET_BEHAVIOR_LOAD_RUNNER_DB_POOL_SIZE = 96
+MARKET_BEHAVIOR_LOAD_RUNNER_DB_MAX_OVERFLOW = 64
 MARKET_BEHAVIOR_HEAVY_FAMILIES = {
     "trade_non_concurrent",
     "manual_expire_non_concurrent",
@@ -1452,6 +1454,8 @@ def market_behavior_scenario_commands(
         EXECUTION_CONFIRM_ENV: EXECUTION_CONFIRM_VALUE,
         CLEANUP_CONFIRM_ENV: CLEANUP_CONFIRM_VALUE,
         "TRADING_BOT_SERVICE": "load_runner",
+        "DB_POOL_SIZE": str(MARKET_BEHAVIOR_LOAD_RUNNER_DB_POOL_SIZE),
+        "DB_MAX_OVERFLOW": str(MARKET_BEHAVIOR_LOAD_RUNNER_DB_MAX_OVERFLOW),
         "BOT_TOKEN": "",
     }
     commands = [
@@ -1501,6 +1505,10 @@ def market_behavior_scenario_commands(
         "family": family,
         "market_behavior_timeout_seconds": scenario_timeout_seconds,
         "market_behavior_write_max_concurrency": scenario_write_max_concurrency,
+        "market_behavior_load_runner_db_pool": {
+            "pool_size": MARKET_BEHAVIOR_LOAD_RUNNER_DB_POOL_SIZE,
+            "max_overflow": MARKET_BEHAVIOR_LOAD_RUNNER_DB_MAX_OVERFLOW,
+        },
         "offer_origin": record.get("offer_origin"),
         "request_surface": record.get("request_surface"),
         "expire_surface": record.get("expire_surface"),

@@ -199,6 +199,10 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["server"], "foreign")
         self.assertEqual(scenario_plan["source_scenario_id"], "CLM-001")
         self.assertEqual(scenario_plan["market_behavior_write_max_concurrency"], 24)
+        self.assertEqual(
+            scenario_plan["market_behavior_load_runner_db_pool"],
+            {"pool_size": 96, "max_overflow": 64},
+        )
         rendered = json.dumps(scenario_plan, ensure_ascii=False)
         self.assertIn("run_bot_webapp_comprehensive_load_matrix.py", rendered)
         self.assertIn("timeout", rendered)
@@ -228,6 +232,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("3600s", command["args"])
         self.assertIn("--write-max-concurrency", command["args"])
         self.assertIn("128", command["args"])
+        self.assertIn("DB_POOL_SIZE=96", command["args"])
+        self.assertIn("DB_MAX_OVERFLOW=64", command["args"])
 
     def test_execution_plan_builds_delivery_contract_catalog_commands(self):
         plan = runner.build_plan(
