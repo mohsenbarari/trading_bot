@@ -85,7 +85,7 @@ from models.session import (
     UserSession,
 )
 from models.telegram_link_token import TelegramLinkToken
-from models.trade import Trade, TradeStatus
+from models.trade import Trade, TradeStatus, TradeType
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User, UserRole
 
@@ -2568,6 +2568,47 @@ async def load_offer_public_id_for_negative_guard(offer_id: int) -> str:
         return public_id
 
 
+async def mark_offer_completed_for_negative_guard(
+    *,
+    offer_id: int,
+    responder_user_id: int,
+    actor_user_id: int,
+) -> int:
+    async with AsyncSessionLocal() as db:
+        offer = await db.get(Offer, int(offer_id), with_for_update=True)
+        if offer is None:
+            raise TradingProbeError(f"negative guard offer {offer_id} disappeared before completed fixture")
+        responder = await db.get(User, int(responder_user_id))
+        if responder is None:
+            raise TradingProbeError(f"negative guard responder {responder_user_id} disappeared")
+        trade_number = int(await db.scalar(select(func.max(Trade.trade_number))) or 9999) + 1
+        trade = Trade(
+            trade_number=trade_number,
+            offer_id=int(offer.id),
+            offer_user_id=int(offer.user_id),
+            offer_user_mobile=getattr(getattr(offer, "user", None), "mobile_number", None),
+            responder_user_id=int(responder.id),
+            responder_user_mobile=getattr(responder, "mobile_number", None),
+            actor_user_id=int(actor_user_id),
+            commodity_id=int(offer.commodity_id),
+            trade_type=TradeType.BUY if offer.offer_type == OfferType.SELL else TradeType.SELL,
+            quantity=int(offer.remaining_quantity or offer.quantity),
+            price=int(offer.price),
+            status=TradeStatus.COMPLETED,
+            idempotency_key=f"{getattr(offer, 'offer_public_id', offer.id)}:ng-complete",
+        )
+        now = datetime.utcnow()
+        trade.completed_at = now
+        trade.confirmed_at = now
+        offer.remaining_quantity = 0
+        offer.lot_sizes = None
+        offer.status = OfferStatus.COMPLETED
+        db.add(trade)
+        await db.commit()
+        await db.refresh(trade)
+        return int(trade.id)
+
+
 class NegativeGuardRawRequest:
     def __init__(self, *, body: bytes, headers: Mapping[str, str]) -> None:
         self._body = body
@@ -3902,11 +3943,10 @@ async def run_negative_guard_case(
                 second_details: dict[str, Any] = {}
                 first_started = time.perf_counter()
                 try:
-                    await execute_trade_for_user(
-                        user_id=responder_a.user_id,
+                    completed_trade_id = await mark_offer_completed_for_negative_guard(
                         offer_id=offer_id,
-                        quantity=5,
-                        idempotency_key=f"{prefix}{normalized_case_id}-complete",
+                        responder_user_id=responder_a.user_id,
+                        actor_user_id=responder_a.user_id,
                     )
                 except Exception as exc:
                     first_details["business_latency_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
@@ -3916,7 +3956,8 @@ async def run_negative_guard_case(
                 else:
                     first_details["business_latency_ms"] = round((time.perf_counter() - first_started) * 1000.0, 3)
                     first_details["execute_trade_ms"] = first_details["business_latency_ms"]
-                    first_details["fixture_completion"] = "authoritative_without_external_background_tasks"
+                    first_details["fixture_completion"] = "direct_completed_offer_state"
+                    first_details["completed_trade_id"] = completed_trade_id
                     statuses.append("success")
                 statuses.append(
                     await execute_webapp_trade_for_user(
