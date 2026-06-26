@@ -4,6 +4,8 @@ import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy.exc import IntegrityError
+
 import main
 
 
@@ -117,6 +119,33 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
 
         session.rollback.assert_awaited_once()
         session.commit.assert_not_awaited()
+
+    async def test_lifespan_continues_on_mandatory_channel_membership_race(self):
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        redis_client = AsyncMock()
+        duplicate_error = IntegrityError(
+            "stmt",
+            {},
+            Exception('duplicate key value violates unique constraint "ux_chat_members_active_membership"'),
+        )
+
+        def start_leader(client):
+            return asyncio.create_task(asyncio.sleep(3600))
+
+        with patch.object(main.settings, "server_mode", "iran"), patch("main.init_db", new=AsyncMock()), patch(
+            "main.init_redis", new=AsyncMock(return_value=redis_client)
+        ), patch("main.close_redis", new=AsyncMock()) as close_redis_mock, patch(
+            "main.setup_event_listeners"
+        ), patch("main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "main.ensure_mandatory_channel_rollout", new=AsyncMock(side_effect=duplicate_error)
+        ), patch("main._start_background_leader_task", side_effect=start_leader) as leader_mock:
+            async with main.lifespan(main.app):
+                pass
+
+        session.rollback.assert_awaited_once()
+        session.commit.assert_not_awaited()
+        close_redis_mock.assert_awaited_once()
+        leader_mock.assert_called_once_with(redis_client)
 
     async def test_main_module_logs_when_frontend_build_directory_is_missing(self):
         with patch("pathlib.Path.exists", return_value=False), patch("logging.getLogger") as get_logger:

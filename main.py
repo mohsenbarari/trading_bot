@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from jose import JWTError, jwt
+from sqlalchemy.exc import IntegrityError
 from api.routers import (
     auth, invitations, commodities, users, notifications, 
     trading_settings, offers, trades, realtime, users_public, chat, blocks, sync, sessions, admin_messages
@@ -312,6 +313,18 @@ def _start_background_leader_task(redis_client) -> asyncio.Task:
     return asyncio.create_task(_run_background_leader(redis_client))
 
 
+def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
+    message = str(exc).lower()
+    return (
+        "ux_chat_members_active_membership" in message
+        or (
+            "duplicate key" in message
+            and "chat_members" in message
+            and "membership" in message
+        )
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -324,6 +337,17 @@ async def lifespan(app: FastAPI):
         try:
             await ensure_mandatory_channel_rollout(session)
             await session.commit()
+        except IntegrityError as exc:
+            await session.rollback()
+            if not _is_mandatory_channel_membership_race(exc):
+                raise
+            logger.warning(
+                "Mandatory channel rollout hit a concurrent active-membership insert; continuing startup.",
+                extra={
+                    "event": "mandatory_channel_rollout.membership_race_ignored",
+                    "error_class": type(exc).__name__,
+                },
+            )
         except Exception:
             await session.rollback()
             raise
