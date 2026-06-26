@@ -2261,6 +2261,149 @@ def _terminal_duplicate_request_http_exception(ledger: OfferRequest | object) ->
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
 
 
+def _is_completed_offer_request_replay(ledger: OfferRequest | object | None) -> bool:
+    raw_status = getattr(ledger, "result_status", None)
+    status_value = getattr(raw_status, "value", raw_status)
+    return status_value == OfferRequestStatus.COMPLETED_TRADE.value
+
+
+async def _load_completed_idempotent_replay_trade(
+    db: AsyncSession,
+    *,
+    ledger: OfferRequest | object,
+    trade_data: TradeCreate,
+) -> Trade | None:
+    resulting_trade_id = getattr(ledger, "resulting_trade_id", None)
+    stmt = (
+        select(Trade)
+        .options(
+            selectinload(Trade.offer_user),
+            selectinload(Trade.responder_user),
+            selectinload(Trade.commodity),
+        )
+    )
+    if resulting_trade_id is not None:
+        stmt = stmt.where(Trade.id == resulting_trade_id)
+    elif trade_data.idempotency_key:
+        stmt = stmt.where(Trade.idempotency_key == trade_data.idempotency_key)
+    else:
+        return None
+
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+def _validate_completed_idempotent_replay_trade(
+    *,
+    existing_trade: Trade | object,
+    ledger: OfferRequest | object,
+    offer: Offer | object,
+    owner_user: User | object,
+    actor_user: User | object,
+    trade_data: TradeCreate,
+) -> None:
+    mismatches: list[str] = []
+    resulting_trade_id = getattr(ledger, "resulting_trade_id", None)
+    if resulting_trade_id is not None and getattr(existing_trade, "id", None) != resulting_trade_id:
+        mismatches.append("resulting_trade_id")
+    if getattr(existing_trade, "offer_id", None) not in (None, getattr(offer, "id", None)):
+        mismatches.append("offer_id")
+    if getattr(existing_trade, "commodity_id", None) != getattr(offer, "commodity_id", None):
+        mismatches.append("commodity_id")
+    if getattr(existing_trade, "quantity", None) != trade_data.quantity:
+        mismatches.append("quantity")
+    if _coerce_trade_user_id(getattr(existing_trade, "responder_user_id", None)) != _coerce_trade_user_id(
+        getattr(owner_user, "id", None)
+    ):
+        mismatches.append("responder_user_id")
+    existing_actor_user_id = _coerce_trade_user_id(getattr(existing_trade, "actor_user_id", None))
+    expected_actor_user_id = _coerce_trade_user_id(getattr(actor_user, "id", None))
+    if existing_actor_user_id is not None and existing_actor_user_id != expected_actor_user_id:
+        mismatches.append("actor_user_id")
+    existing_idempotency_key = getattr(existing_trade, "idempotency_key", None)
+    if (
+        existing_idempotency_key
+        and trade_data.idempotency_key
+        and existing_idempotency_key != trade_data.idempotency_key
+    ):
+        mismatches.append("idempotency_key")
+
+    if mismatches:
+        log_trading_event(
+            logger,
+            "trade_idempotent_replay_conflict",
+            level="warning",
+            action="trade_idempotent_replay",
+            result="conflict",
+            offer_id=trade_data.offer_id,
+            trade_id=getattr(existing_trade, "id", None),
+            mismatches=",".join(mismatches),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="کلید تکرار این معامله با درخواست فعلی همخوانی ندارد.",
+        )
+
+
+async def _try_return_completed_idempotent_replay(
+    *,
+    db: AsyncSession,
+    background_tasks: BackgroundTasks,
+    offer_request_ledger: OfferRequest | object | None,
+    offer: Offer | object,
+    trade_data: TradeCreate,
+    owner_user: User | object,
+    actor_user: User | object,
+) -> TradeResponse | None:
+    if not trade_data.idempotency_key or not _is_completed_offer_request_replay(offer_request_ledger):
+        return None
+
+    existing_trade_obj = await _load_completed_idempotent_replay_trade(
+        db,
+        ledger=offer_request_ledger,
+        trade_data=trade_data,
+    )
+    if existing_trade_obj is None:
+        return None
+
+    _validate_completed_idempotent_replay_trade(
+        existing_trade=existing_trade_obj,
+        ledger=offer_request_ledger,
+        offer=offer,
+        owner_user=owner_user,
+        actor_user=actor_user,
+        trade_data=trade_data,
+    )
+    existing_identity_map = await _load_trade_identity_map_for_user_ids(
+        db,
+        [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
+    )
+    existing_customer_relation_map = await _load_trade_customer_relation_map_for_user_ids(
+        db,
+        [existing_trade_obj.offer_user_id, existing_trade_obj.responder_user_id],
+    )
+    log_trading_event(
+        logger,
+        "trade_idempotent_replay",
+        action="trade_idempotent_replay",
+        result="completed_ledger_replay",
+        offer_id=trade_data.offer_id,
+        trade_id=getattr(existing_trade_obj, "id", None),
+        trade_number=getattr(existing_trade_obj, "trade_number", None),
+        source_server=current_server(),
+        has_idempotency_key=True,
+    )
+    _queue_trade_completion_delivery_repair(background_tasks, existing_trade_obj)
+    existing_response_kwargs = {
+        "identity_map": existing_identity_map,
+        "customer_relation_map": existing_customer_relation_map,
+    }
+    existing_offer_notes = getattr(offer, "notes", None)
+    if existing_offer_notes is not None:
+        existing_response_kwargs["offer_notes"] = existing_offer_notes
+    return trade_to_response(existing_trade_obj, **existing_response_kwargs)
+
+
 def _apply_offer_request_customer_snapshot(
     ledger: OfferRequest | object | None,
     relation: CustomerRelation | object | None,
@@ -2605,6 +2748,18 @@ async def _execute_trade_authoritatively(
         request_source_server=request_source_server,
         edge_received_at=edge_received_at,
     )
+
+    completed_replay_response = await _try_return_completed_idempotent_replay(
+        db=db,
+        background_tasks=background_tasks,
+        offer_request_ledger=offer_request_ledger,
+        offer=offer,
+        trade_data=trade_data,
+        owner_user=owner_user,
+        actor_user=actor_user,
+    )
+    if completed_replay_response is not None:
+        return completed_replay_response
     
     expired_for_trade = await _is_offer_expired_for_trade(offer, edge_received_at)
 

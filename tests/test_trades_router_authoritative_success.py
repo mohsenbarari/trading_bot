@@ -218,7 +218,7 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.offer_requests[0].offer_public_id, "ofr_test_7")
         self.assertEqual(offer.remaining_quantity, 0)
         self.assertEqual(offer.status, OfferStatus.COMPLETED)
-        db.refresh.assert_awaited_once_with(offer, ["user", "commodity"])
+        db.refresh.assert_any_await(offer, ["user", "commodity"])
         db.commit.assert_awaited_once()
         update_buttons_mock.assert_awaited_once_with(offer)
         self.assertEqual(len(background_tasks.tasks), 1)
@@ -272,6 +272,72 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
             history_target_user_id=locked_user.id,
         )
         self.assertEqual(result, {"id": 88, "trade_number": 10000})
+
+    async def test_execute_trade_authoritatively_replays_completed_idempotent_request_after_offer_completion(self):
+        locked_user = make_user()
+        offer = make_offer(
+            status=OfferStatus.COMPLETED,
+            remaining_quantity=0,
+            quantity=5,
+            user=SimpleNamespace(id=9, account_name="seller", mobile_number="09125555555", telegram_id=999),
+        )
+        existing_ledger = SimpleNamespace(
+            result_status=OfferRequestStatus.COMPLETED_TRADE,
+            resulting_trade_id=88,
+        )
+        existing_trade = SimpleNamespace(
+            id=88,
+            trade_number=10020,
+            offer_id=offer.id,
+            offer_user_id=offer.user_id,
+            responder_user_id=locked_user.id,
+            actor_user_id=locked_user.id,
+            commodity_id=offer.commodity_id,
+            quantity=5,
+            price=offer.price,
+            idempotency_key="idem-completed-replay",
+            offer_user=offer.user,
+            responder_user=locked_user,
+            commodity=offer.commodity,
+        )
+        db = FakeDB(
+            get_results=[offer],
+            execute_results=[
+                FakeExecuteResult(single=locked_user),
+                FakeExecuteResult(single_or_none=existing_ledger),
+                FakeExecuteResult(single_or_none=existing_trade),
+            ],
+        )
+        background_tasks = BackgroundTasks()
+
+        with patch("api.routers.trades.check_user_limits", return_value=(True, None)), patch(
+            "api.routers.trades._is_offer_expired_for_trade",
+            new=AsyncMock(return_value=False),
+        ) as expired_mock, patch(
+            "api.routers.trades.validate_offer_trade_amount",
+            return_value=(False, "این لات دیگر موجود نیست.", None, []),
+        ) as validate_mock, patch(
+            "api.routers.trades.load_accountant_chat_identity_map",
+            new=AsyncMock(return_value={}),
+        ), patch(
+            "api.routers.trades.trade_to_response",
+            return_value={"id": 88, "trade_number": 10020},
+        ) as response_mock:
+            result = await _execute_trade_authoritatively(
+                TradeCreate(offer_id=7, quantity=5, idempotency_key="idem-completed-replay"),
+                background_tasks,
+                db=db,
+                context=make_context(locked_user),
+            )
+
+        self.assertEqual(result, {"id": 88, "trade_number": 10020})
+        self.assertEqual(db.added, [])
+        self.assertEqual(db.offer_requests, [])
+        db.commit.assert_not_awaited()
+        expired_mock.assert_not_awaited()
+        validate_mock.assert_not_called()
+        response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
+        self.assertEqual(len(background_tasks.tasks), 1)
 
     async def test_execute_trade_authoritatively_allows_time_limit_expired_offer_inside_edge_grace(self):
         locked_user = make_user()
