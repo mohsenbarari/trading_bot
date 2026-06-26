@@ -113,7 +113,7 @@ MIN_CLEANUP_PREFIX_LENGTH = 5
 PRODUCTION_CLEANUP_MIN_PREFIX_LENGTH = 8
 PRODUCTION_CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
 PRODUCTION_CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
-PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
+PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_", "P7 Mixed Load User")
 PRODUCTION_ROLE_WORKER_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
 PRODUCTION_ROLE_WORKER_CONFIRM_VALUE = "execute-production-full-matrix"
 SYNTHETIC_OFFER_SEED_METADATA_STALE_RETRY_ATTEMPTS = 5
@@ -1394,6 +1394,7 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
                     select(User.id).where(
                         (User.account_name.like(pattern, escape=LIKE_ESCAPE))
                         | (User.mobile_number.like(pattern, escape=LIKE_ESCAPE))
+                        | (User.full_name.like(pattern, escape=LIKE_ESCAPE))
                     )
                 )
             ).scalars().all()

@@ -982,6 +982,12 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 with self.assertRaises(worker.TradingProbeError):
                     worker.validate_cleanup_prefix(value)
 
+    def test_production_cleanup_prefix_allows_legacy_p7_mixed_load_users(self):
+        self.assertEqual(
+            worker.validate_production_cleanup_prefix("P7 Mixed Load User"),
+            "P7 Mixed Load User",
+        )
+
     def test_cleanup_prefix_patterns_escape_sql_like_wildcards(self):
         prefix_pattern, contains_pattern = worker.cleanup_prefix_patterns("P7_TRADING_1405_")
 
