@@ -1,5 +1,7 @@
 import asyncio
 import inspect
+import json
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -10,6 +12,188 @@ from scripts import trading_core_probe_worker as worker
 
 
 class TradingCoreMixedLoadHelperTests(unittest.TestCase):
+    def test_read_during_write_webapp_detail_uses_owner_visibility(self):
+        class NoopAsyncContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        calls = []
+
+        async def list_active(*, user_id):
+            calls.append(("active_offers", user_id))
+            return 1
+
+        async def load_detail(*, user_id, offer_public_id):
+            calls.append(("public_detail", user_id, offer_public_id))
+            return 1
+
+        async def list_history(*, user_id):
+            calls.append(("market_history", user_id))
+            return 1
+
+        async def run_probe():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                prepare_path = f"{tmpdir}/prepare.json"
+                output_path = f"{tmpdir}/result.json"
+                with open(prepare_path, "w", encoding="utf-8") as fh:
+                    json.dump(
+                        {
+                            "prefix": "PFM_probe_",
+                            "barrier_epoch": 0,
+                            "scenario": {
+                                "target_rps": 1000,
+                                "hot_offer_requests": 3,
+                            },
+                            "offer": {
+                                "id": 42,
+                                "public_id": "ofr_public",
+                                "owner_user_id": 7,
+                            },
+                            "users": {
+                                "owner_user_id": 7,
+                                "user_ids": [7, 11, 12],
+                            },
+                        },
+                        fh,
+                    )
+
+                args = SimpleNamespace(
+                    prepare=prepare_path,
+                    read_surface="webapp",
+                    output=output_path,
+                    allow_production_execution=True,
+                )
+                with patch.object(worker, "assert_load_runner_runtime_surface"), patch.object(
+                    worker,
+                    "warm_load_runner_dependencies",
+                    new=AsyncMock(return_value={}),
+                ), patch.object(
+                    worker,
+                    "patched_external_side_effects",
+                    return_value=NoopAsyncContext(),
+                ), patch.object(
+                    worker,
+                    "list_active_offers_for_user",
+                    new=list_active,
+                ), patch.object(
+                    worker,
+                    "load_public_offer_detail_for_user",
+                    new=load_detail,
+                ), patch.object(
+                    worker,
+                    "list_market_history_for_user",
+                    new=list_history,
+                ), patch.object(
+                    worker,
+                    "print_json",
+                ):
+                    exit_code = await worker.run_read_during_write_command(args)
+                with open(output_path, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                return exit_code, payload
+
+        exit_code, payload = asyncio.run(run_probe())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(calls[0], ("active_offers", 11))
+        self.assertEqual(calls[1], ("public_detail", 7, "ofr_public"))
+        self.assertEqual(calls[2], ("market_history", 11))
+
+    def test_read_during_write_telegram_skips_unsynced_reader(self):
+        class NoopAsyncContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        class NoopHarness:
+            async def close(self):
+                return None
+
+        calls = []
+
+        async def load_ref(user_id):
+            if user_id == 11:
+                raise worker.TradingProbeError("synthetic user 11 disappeared")
+            return worker.LoadUserRef(user_id=user_id, telegram_id=9000 + user_id)
+
+        async def market_view(*, harness, user):
+            calls.append(user.user_id)
+            return "success"
+
+        async def run_probe():
+            with tempfile.TemporaryDirectory() as tmpdir:
+                prepare_path = f"{tmpdir}/prepare.json"
+                output_path = f"{tmpdir}/result.json"
+                with open(prepare_path, "w", encoding="utf-8") as fh:
+                    json.dump(
+                        {
+                            "prefix": "PFM_probe_",
+                            "barrier_epoch": 0,
+                            "scenario": {
+                                "target_rps": 1000,
+                                "hot_offer_requests": 2,
+                            },
+                            "offer": {
+                                "id": 42,
+                                "public_id": "ofr_public",
+                                "owner_user_id": 7,
+                            },
+                            "users": {
+                                "owner_user_id": 7,
+                                "user_ids": [7, 11, 12],
+                            },
+                        },
+                        fh,
+                    )
+
+                args = SimpleNamespace(
+                    prepare=prepare_path,
+                    read_surface="telegram",
+                    output=output_path,
+                    allow_production_execution=True,
+                )
+                with patch.object(worker, "assert_load_runner_runtime_surface"), patch.object(
+                    worker,
+                    "warm_load_runner_dependencies",
+                    new=AsyncMock(return_value={}),
+                ), patch.object(
+                    worker,
+                    "patched_external_side_effects",
+                    return_value=NoopAsyncContext(),
+                ), patch.object(
+                    worker,
+                    "load_user_ref",
+                    new=load_ref,
+                ), patch.object(
+                    worker,
+                    "AiogramDispatcherHarness",
+                    return_value=NoopHarness(),
+                ), patch.object(
+                    worker,
+                    "execute_bot_market_view_with_dispatcher",
+                    new=market_view,
+                ), patch.object(
+                    worker,
+                    "print_json",
+                ):
+                    exit_code = await worker.run_read_during_write_command(args)
+                with open(output_path, encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                return exit_code, payload
+
+        exit_code, payload = asyncio.run(run_probe())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(calls, [12, 12])
+        self.assertEqual(payload["summary"]["skipped_telegram_reader_user_ids"], [11])
+
     def test_warm_load_runner_dependencies_initializes_redis_singleton(self):
         class FakeSession:
             async def __aenter__(self):

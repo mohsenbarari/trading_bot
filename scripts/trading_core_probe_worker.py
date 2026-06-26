@@ -1642,6 +1642,7 @@ async def push_prefix_change_logs_to_peer(
     *,
     batch_size: int = 200,
     tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
+    max_attempts: int = 3,
 ) -> dict[str, Any]:
     from core.server_routing import default_peer_server_url
     from core.sync_worker import change_log_entry_to_sync_item, refresh_offer_sync_item_from_authoritative_state
@@ -1667,34 +1668,44 @@ async def push_prefix_change_logs_to_peer(
 
     async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
         for batch_index, batch in enumerate(_targeted_sync_batches(entries, batch_size=batch_size), start=1):
-            items = []
-            for entry in batch:
-                item = change_log_entry_to_sync_item(entry)
-                if item.get("table") == "offers":
-                    item = await refresh_offer_sync_item_from_authoritative_state(item)
-                items.append(item)
+            batch_report: dict[str, Any] | None = None
+            for attempt in range(1, max(1, int(max_attempts)) + 1):
+                items = []
+                for entry in batch:
+                    item = change_log_entry_to_sync_item(entry)
+                    if item.get("table") == "offers":
+                        item = await refresh_offer_sync_item_from_authoritative_state(item)
+                    items.append(item)
 
-            body = json.dumps(items, sort_keys=True, default=str)
-            response = await client.post(
-                f"{target_url}/api/sync/receive",
-                content=body,
-                headers=_signed_sync_headers(api_key, body),
-            )
-            try:
-                response_payload = response.json()
-            except ValueError:
-                response_payload = {"status": "invalid-json", "body_sha256": hashlib.sha256(response.content).hexdigest()[:16]}
+                body = json.dumps(items, sort_keys=True, default=str)
+                response = await client.post(
+                    f"{target_url}/api/sync/receive",
+                    content=body,
+                    headers=_signed_sync_headers(api_key, body),
+                )
+                try:
+                    response_payload = response.json()
+                except ValueError:
+                    response_payload = {
+                        "status": "invalid-json",
+                        "body_sha256": hashlib.sha256(response.content).hexdigest()[:16],
+                    }
 
-            batch_report = {
-                "batch_index": batch_index,
-                "entry_count": len(batch),
-                "status_code": response.status_code,
-                "response": response_payload,
-                "table_counts": dict(Counter(str(entry.table_name) for entry in batch)),
-            }
-            report["batches"].append(batch_report)
+                batch_report = {
+                    "batch_index": batch_index,
+                    "attempt": attempt,
+                    "entry_count": len(batch),
+                    "status_code": response.status_code,
+                    "response": response_payload,
+                    "table_counts": dict(Counter(str(entry.table_name) for entry in batch)),
+                }
+                report["batches"].append(batch_report)
 
-            if response.status_code != 200 or not _peer_sync_response_is_success(response_payload, len(batch)):
+                if response.status_code == 200 and _peer_sync_response_is_success(response_payload, len(batch)):
+                    break
+                if attempt < max(1, int(max_attempts)):
+                    await asyncio.sleep(0.5 * attempt)
+            else:
                 report["status"] = "failed"
                 report["failed_batch"] = batch_report
                 raise TradingProbeError(f"targeted prefix sync failed: {json.dumps(batch_report, default=str)}")
@@ -6383,9 +6394,19 @@ async def run_read_during_write_command(args: argparse.Namespace) -> int:
 
     await warm_load_runner_dependencies(db_connections=min(total_reads, 12))
     telegram_readers: list[LoadUserRef] = []
+    skipped_telegram_reader_user_ids: list[int] = []
     harness: AiogramDispatcherHarness | None = None
     if read_surface == "telegram":
-        telegram_readers = [await load_user_ref(user_id) for user_id in reader_user_ids]
+        for user_id in reader_user_ids:
+            try:
+                telegram_readers.append(await load_user_ref(user_id))
+            except TradingProbeError as exc:
+                if "disappeared" not in str(exc):
+                    raise
+                skipped_telegram_reader_user_ids.append(user_id)
+        if not telegram_readers:
+            raise TradingProbeError("read-during-write telegram read found no synced non-owner readers")
+        reader_user_ids = [reader.user_id for reader in telegram_readers]
         harness = AiogramDispatcherHarness()
 
     start_delay = barrier_epoch - time.time()
@@ -6417,6 +6438,7 @@ async def run_read_during_write_command(args: argparse.Namespace) -> int:
                 if operation == "active_offers":
                     row_count = await list_active_offers_for_user(user_id=reader_user_id)
                 elif operation == "public_detail":
+                    reader_user_id = owner_user_id
                     row_count = await load_public_offer_detail_for_user(
                         user_id=reader_user_id,
                         offer_public_id=offer_public_id,
@@ -6469,6 +6491,7 @@ async def run_read_during_write_command(args: argparse.Namespace) -> int:
             "read_rps": round(len(attempts) / elapsed_seconds, 3),
             "operation_counts": dict(sorted(operation_counts.items())),
             "error_details": error_details,
+            "skipped_telegram_reader_user_ids": skipped_telegram_reader_user_ids,
         },
         "attempts": attempts,
     }
@@ -6870,7 +6893,23 @@ async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
     prefix = args.prefix
     assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
     tables = tuple(args.table or TARGETED_SYNC_TABLES)
-    result = await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=tables)
+    if "users" in tables and "offers" in tables:
+        stage_results = []
+        for stage_tables in (("users",), ("offers",)):
+            stage_results.append(
+                await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=stage_tables)
+            )
+        result = {
+            "status": "ok",
+            "prefix": prefix,
+            "server_mode": settings.server_mode,
+            "tables": list(tables),
+            "entry_count": sum(int(item.get("entry_count") or 0) for item in stage_results),
+            "processed": sum(int(item.get("processed") or 0) for item in stage_results),
+            "stages": stage_results,
+        }
+    else:
+        result = await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=tables)
     if args.output:
         write_json_artifact(Path(args.output), result)
     print_json(result)
