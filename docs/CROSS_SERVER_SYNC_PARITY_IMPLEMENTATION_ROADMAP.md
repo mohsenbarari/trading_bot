@@ -415,6 +415,21 @@ Exit criteria:
 - CI fails if a new synced table lacks receiver coverage, payload coverage, ordering rules, parity hash, or tests.
 - Release matrix catches intentionally injected drift.
 
+Implementation status:
+
+- Completed on `candidate/sync-parity-hardening` in Stage 7.
+- Added `tests/test_sync_guarantee_matrix.py` as the central sync guarantee matrix:
+  - every `SyncPolicy.SYNC` table must have a receiver model, `TABLE_ORDER` entry, payload fixture, merge-rule family, parity identity, and replay identity;
+  - the deep parity table list must exactly match the active synced table list;
+  - dependency order is asserted for users, relations, notifications, settings, offers, requests, trades, and delivery receipts;
+  - reordered full batches are asserted to apply in receiver table order;
+  - delayed/deferred and failed sync items are asserted as safe partial outcomes;
+  - current-state replay payloads are built for every synced table and must drop local-only/runtime fields;
+  - intentional business drift is generated for every synced table and must produce a dry-run repair action;
+  - every table is assigned to an explicit merge-rule family, with SQL compile coverage for receiver upsert rules.
+- This stage intentionally does not run staging/prod full matrix data injection. It provides the CI guardrail that Stage 8 can rely on before realistic two-server staging tests.
+- Covered together with existing parity, repair, receiver, watermark, field-policy, worker, stale-event, fail-closed, and migration smoke suites.
+
 ## Stage 8 - Staging Rollout
 
 Goal: verify under realistic two-server conditions before production.
