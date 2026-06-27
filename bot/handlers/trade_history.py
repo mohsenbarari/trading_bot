@@ -34,6 +34,16 @@ from bot.callbacks import (
 router = Router()
 
 
+def _safe_history_filename_subject(value: object, fallback: str = "history") -> str:
+    subject = str(value or fallback).strip() or fallback
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in subject)
+
+
+def _history_download_filename(subject_name: object, extension: str) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"trade_history_{_safe_history_filename_subject(subject_name)}_{timestamp}.{extension}"
+
+
 def _trade_created_sort_key(trade) -> tuple[float, int]:
     created_at = getattr(trade, "created_at", None)
     timestamp = 0.0
@@ -314,7 +324,7 @@ async def export_excel(callback: types.CallbackQuery, callback_data: ExportHisto
         # ارسال فایل
         doc_msg = await bot.send_document(
             chat_id=callback.message.chat.id,
-            document=FSInputFile(filename, filename=f"trade_history_{display_name}.xlsx"),
+            document=FSInputFile(filename, filename=_history_download_filename(display_name, "xlsx")),
             caption=f"📊 تاریخچه معاملات {display_name}\n📅 {months} ماه اخیر"
         )
         
@@ -351,7 +361,7 @@ async def export_pdf(callback: types.CallbackQuery, callback_data: ExportHistory
         # ارسال فایل
         doc_msg = await bot.send_document(
             chat_id=callback.message.chat.id,
-            document=FSInputFile(filename, filename=f"trade_history_{display_name}.pdf"),
+            document=FSInputFile(filename, filename=_history_download_filename(display_name, "pdf")),
             caption=f"📊 تاریخچه معاملات {display_name}\n📅 {months} ماه اخیر"
         )
         

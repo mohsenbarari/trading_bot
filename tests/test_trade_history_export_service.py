@@ -53,6 +53,15 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         self.assertRegex(rows[0].date_time_label, r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}$")
         self.assertEqual(rows[0].commodity_name, "سکه")
 
+    def test_build_trade_history_export_rows_prefers_canonical_commodity_relation(self):
+        trade = make_trade()
+        trade.commodity_name = "ربع"
+        trade.commodity = SimpleNamespace(name="ربع بهار")
+
+        rows = build_trade_history_export_rows([trade], 2)
+
+        self.assertEqual(rows[0].commodity_name, "ربع بهار")
+
     def test_resolve_counterparty_account_name_from_perspective(self):
         trade = make_trade()
         trade.offer_user = SimpleNamespace(account_name="offer-side")

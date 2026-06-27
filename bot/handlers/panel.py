@@ -245,6 +245,11 @@ def _safe_filename_subject(value: object, fallback: str = "history") -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in subject)
 
 
+def _history_download_filename(subject_name: object, extension: str) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"trade_history_{_safe_filename_subject(subject_name)}_{timestamp}.{extension}"
+
+
 async def _load_recent_user_trades(user_id: int, *, from_date, to_date) -> list[Trade]:
     query = (
         select(Trade)
@@ -284,7 +289,7 @@ async def show_recent_trades_pdf(message: types.Message, state: FSMContext, user
             rows=build_trade_history_export_rows(trades, user.id),
         )
         await message.answer_document(
-            document=FSInputFile(output_path, filename=f"trade_history_{_safe_filename_subject(subject_name)}.pdf"),
+            document=FSInputFile(output_path, filename=_history_download_filename(subject_name, "pdf")),
             caption="📄 معاملات اخیر شما در هفت روز گذشته",
         )
     except Exception as exc:

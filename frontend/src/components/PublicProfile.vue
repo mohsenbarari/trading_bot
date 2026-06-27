@@ -813,6 +813,7 @@ async function downloadHistoryExport(format: 'excel' | 'pdf') {
   historyError.value = '';
   try {
     const params = buildHistoryQueryParams(format);
+    params.set('_download_ts', Date.now().toString());
     const endpoint = `${buildTradeHistoryEndpoint(true)}?${params.toString()}`;
     const response = await apiFetch(endpoint);
     if (!response.ok) {

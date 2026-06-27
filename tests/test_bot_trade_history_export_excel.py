@@ -35,7 +35,9 @@ class BotTradeHistoryExportExcelTests(unittest.IsolatedAsyncioTestCase):
             "bot.handlers.trade_history.os.remove"
         ):
             await export_excel(callback, SimpleNamespace(target_user_id=2), FakeState(), user=SimpleNamespace(id=2), bot=bot)
-        self.assertIn("trade_history_پروفایل من.xlsx", file_mock.call_args.kwargs["filename"])
+        generated_name = file_mock.call_args.kwargs["filename"]
+        self.assertTrue(generated_name.startswith("trade_history_پروفایل_من_"))
+        self.assertTrue(generated_name.endswith(".xlsx"))
 
     async def test_export_excel_warns_when_no_trades_exist(self):
         callback = make_callback()

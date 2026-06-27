@@ -835,6 +835,11 @@ def _build_trade_history_file_response(*, path: str, media_type: str, filename: 
         path,
         media_type=media_type,
         filename=filename,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
         background=BackgroundTask(os.remove, path),
     )
 

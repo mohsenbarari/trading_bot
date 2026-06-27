@@ -86,6 +86,8 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.path, "/tmp/history.xlsx")
         self.assertEqual(response.media_type, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         self.assertIn("trade_history_owner5.xlsx", response.headers.get("content-disposition", ""))
+        self.assertEqual(response.headers.get("cache-control"), "no-store, max-age=0")
+        self.assertEqual(response.headers.get("pragma"), "no-cache")
         self.assertEqual(generate_excel.call_args.kwargs["subject_name"], "owner5")
         self.assertEqual(generate_excel.call_args.kwargs["date_range_label"], "LABEL")
         self.assertIn("ORDER BY trades.created_at ASC, trades.id ASC", str(db.executed_statements[0]))
