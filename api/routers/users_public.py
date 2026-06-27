@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, not_, select, or_
+from sqlalchemy import and_, select, or_
 from sqlalchemy.orm import aliased, joinedload
 from typing import List, Optional
 
@@ -326,10 +326,6 @@ def _build_project_user_directory_stmt(
     limit: int,
     offset: int,
 ):
-    legacy_customer_identity = or_(
-        User.account_name.ilike(r"customer\_%", escape="\\"),
-        User.full_name.ilike(r"customer\_%", escape="\\"),
-    )
     accountant_relation_exists = (
         select(AccountantRelation.id)
         .where(
@@ -349,7 +345,6 @@ def _build_project_user_directory_stmt(
         User.is_deleted == False,
         User.role.in_(PROJECT_DIRECTORY_ROLES),
         User.id != current_user_id,
-        not_(legacy_customer_identity),
         ~accountant_relation_exists,
         ~customer_relation_exists,
     )

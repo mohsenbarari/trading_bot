@@ -9,7 +9,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from fastapi import HTTPException
-from sqlalchemy import not_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from models.user import User
 from models.accountant_relation import AccountantRelation
@@ -250,10 +250,6 @@ async def _can_view_colleagues_list(session, user: User) -> bool:
 
 
 async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
-    legacy_customer_identity = or_(
-        User.account_name.ilike(r"customer\_%", escape="\\"),
-        User.full_name.ilike(r"customer\_%", escape="\\"),
-    )
     customer_relation_exists = (
         select(CustomerRelation.id)
         .where(
@@ -274,7 +270,6 @@ async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
             User.id != user_id,
             User.is_deleted.is_(False),
             User.account_status == UserAccountStatus.ACTIVE,
-            not_(legacy_customer_identity),
             ~customer_relation_exists,
             ~accountant_relation_exists,
         )

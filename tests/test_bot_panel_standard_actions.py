@@ -176,7 +176,6 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("accountant_relations.status", compiled)
         self.assertNotIn("customer_relations.deleted_at", compiled)
         self.assertNotIn("accountant_relations.deleted_at", compiled)
-        self.assertIn("customer\\_%", compiled)
 
 
 if __name__ == "__main__":
