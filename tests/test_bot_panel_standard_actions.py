@@ -105,6 +105,47 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         await panel.user_panel_customer_invite_placeholder(callback, user=SimpleNamespace(id=1))
         callback.answer.assert_awaited_once_with("دعوت مشتری از بات در مرحله بعد اضافه می‌شود.", show_alert=True)
 
+    async def test_colleagues_list_shows_non_relation_users(self):
+        message = SimpleNamespace(answer=AsyncMock())
+        user = SimpleNamespace(
+            id=5,
+            role=UserRole.STANDARD,
+            account_status=None,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
+        colleagues = [
+            SimpleNamespace(id=7, account_name="ali", full_name="Ali"),
+            SimpleNamespace(id=8, account_name="reza", full_name="Reza"),
+        ]
+
+        with patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.panel._can_view_colleagues_list", new=AsyncMock(return_value=True)
+        ), patch("bot.handlers.panel._load_colleagues_for_user", new=AsyncMock(return_value=colleagues)):
+            await panel.show_colleagues_list(message, state=SimpleNamespace(), user=user)
+
+        self.assertIn("لیست همکاران", message.answer.await_args.args[0])
+        self.assertIn("ali", message.answer.await_args.args[0])
+        self.assertIn("reza", message.answer.await_args.args[0])
+
+    async def test_colleagues_list_rejects_non_standard_relation_contexts(self):
+        message = SimpleNamespace(answer=AsyncMock())
+        user = SimpleNamespace(
+            id=5,
+            role=UserRole.STANDARD,
+            account_status=None,
+            messenger_blocked_at=None,
+            messenger_grace_expires_at=None,
+        )
+
+        with patch("bot.handlers.panel.AsyncSessionLocal", return_value=FakeSessionContext()), patch(
+            "bot.handlers.panel._can_view_colleagues_list", new=AsyncMock(return_value=False)
+        ), patch("bot.handlers.panel._load_colleagues_for_user", new=AsyncMock()) as load_mock:
+            await panel.show_colleagues_list(message, state=SimpleNamespace(), user=user)
+
+        self.assertIn("کاربران عادی", message.answer.await_args.args[0])
+        load_mock.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

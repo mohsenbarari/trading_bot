@@ -24,7 +24,9 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
         row_2_buttons.append(KeyboardButton(text="🔐 پنل مدیریت")) 
     if user_role in (UserRole.STANDARD, UserRole.POLICE, UserRole.MIDDLE_MANAGER, UserRole.SUPER_ADMIN):
         row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))
-    if user_role in (UserRole.STANDARD, UserRole.POLICE):
+    if user_role == UserRole.STANDARD:
+        row_2_buttons.append(KeyboardButton(text="👥 لیست همکاران"))
+    elif user_role == UserRole.POLICE:
         row_2_buttons.append(KeyboardButton(text="⚙️ تنظیمات"))
     if not row_2_buttons:
         row_2_buttons.append(KeyboardButton(text="👤 پنل کاربر"))

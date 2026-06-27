@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from models.user import User
+from models.accountant_relation import AccountantRelation, AccountantRelationStatus
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.trade import Trade
 from bot.keyboards import (
@@ -26,7 +27,7 @@ from bot.message_manager import (
 )
 from typing import Optional
 from core.admin_authority import admin_write_rejection_message, check_shared_admin_write_authority
-from core.enums import UserRole
+from core.enums import UserAccountStatus, UserRole
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import is_user_global_web_locked
@@ -53,6 +54,7 @@ class UserPanelCustomerCallback(CallbackData, prefix="user_panel_customer"):
 USER_PANEL_RECENT_TRADES_TEXT = "📄 معاملات اخیر"
 USER_PANEL_BLOCKED_USERS_TEXT = "🚫 کاربران مسدود شده"
 USER_PANEL_CUSTOMERS_TEXT = "👥 مشتریان"
+USER_PANEL_COLLEAGUES_TEXT = "👥 لیست همکاران"
 
 
 def _settings_admin_write_decision(operation: str):
@@ -105,6 +107,7 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
         "⚙️ تنظیمات کاربری": lambda: handle_user_settings_button(message, state, user),
         "⚙️ تنظیمات": lambda: handle_simple_settings_button(message, user),
         "⚙️ تنظیمات سیستم": lambda: handle_admin_settings_button(message, state, user),
+        USER_PANEL_COLLEAGUES_TEXT: lambda: show_colleagues_list(message, state, user),
         "📊 تاریخچه معاملات من": lambda: show_my_trade_history(message, state, user),
         USER_PANEL_RECENT_TRADES_TEXT: lambda: show_recent_trades_pdf(message, state, user),
         USER_PANEL_BLOCKED_USERS_TEXT: lambda: show_user_panel_blocked_users(message, state, user),
@@ -230,6 +233,90 @@ async def handle_simple_settings_button(message: types.Message, user: Optional[U
     if not user: return
     
     await message.answer("🚧 بخش تنظیمات کاربری در حال توسعه است.")
+
+
+async def _can_view_colleagues_list(session, user: User) -> bool:
+    if user.role != UserRole.STANDARD:
+        return False
+
+    from core.services.accountant_relation_service import is_user_accountant
+    from core.services.customer_relation_service import is_user_customer
+
+    if await is_user_customer(session, user.id):
+        return False
+    if await is_user_accountant(session, user.id):
+        return False
+    return True
+
+
+async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
+    active_customer_relation_exists = (
+        select(CustomerRelation.id)
+        .where(
+            CustomerRelation.customer_user_id == User.id,
+            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
+            CustomerRelation.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    active_accountant_relation_exists = (
+        select(AccountantRelation.id)
+        .where(
+            AccountantRelation.accountant_user_id == User.id,
+            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
+            AccountantRelation.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    stmt = (
+        select(User)
+        .where(
+            User.id != user_id,
+            User.is_deleted.is_(False),
+            User.account_status == UserAccountStatus.ACTIVE,
+            ~active_customer_relation_exists,
+            ~active_accountant_relation_exists,
+        )
+        .order_by(User.account_name.asc(), User.id.asc())
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+def _build_colleagues_list_messages(colleagues: list[User]) -> list[str]:
+    if not colleagues:
+        return ["👥 لیست همکاران\n\nهیچ همکاری برای نمایش وجود ندارد."]
+
+    header = f"👥 لیست همکاران\n\nتعداد: {len(colleagues)}"
+    messages: list[str] = []
+    current = header
+    for index, colleague in enumerate(colleagues, start=1):
+        display_name = user_display_name(colleague, getattr(colleague, "account_name", None) or f"کاربر {colleague.id}")
+        line = f"\n{index}. {display_name}"
+        if len(current) + len(line) > 3500:
+            messages.append(current)
+            current = "👥 ادامه لیست همکاران" + line
+        else:
+            current += line
+    messages.append(current)
+    return messages
+
+
+@router.message(F.text == USER_PANEL_COLLEAGUES_TEXT)
+async def show_colleagues_list(message: types.Message, state: FSMContext, user: Optional[User]):
+    if not user:
+        return
+    if is_user_global_web_locked(user):
+        await message.answer("دسترسی شما به دلیل غیرفعال بودن حساب بسته شده است.")
+        return
+
+    async with AsyncSessionLocal() as session:
+        if not await _can_view_colleagues_list(session, user):
+            await message.answer("این بخش فقط برای کاربران عادی فعال است.")
+            return
+        colleagues = await _load_colleagues_for_user(session, user.id)
+
+    for text in _build_colleagues_list_messages(colleagues):
+        await message.answer(text)
 
 
 def _user_panel_back_keyboard() -> InlineKeyboardMarkup:

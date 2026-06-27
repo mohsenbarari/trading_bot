@@ -19,7 +19,12 @@ class BotKeyboardsTests(unittest.TestCase):
 
         standard_menu = keyboards.get_persistent_menu_keyboard(UserRole.STANDARD, 'https://mini-app')
         standard_texts = [button.text for row in standard_menu.keyboard for button in row]
-        self.assertIn('⚙️ تنظیمات', standard_texts)
+        self.assertIn('👥 لیست همکاران', standard_texts)
+        self.assertNotIn('⚙️ تنظیمات', standard_texts)
+
+        police_menu = keyboards.get_persistent_menu_keyboard(UserRole.POLICE, 'https://mini-app')
+        police_texts = [button.text for row in police_menu.keyboard for button in row]
+        self.assertIn('⚙️ تنظیمات', police_texts)
 
         standard_panel = keyboards.get_user_panel_keyboard(UserRole.STANDARD, standard_actions=True)
         standard_panel_texts = [button.text for row in standard_panel.keyboard for button in row]
