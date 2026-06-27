@@ -60,7 +60,7 @@ class BotAdminCommoditiesAddAliasesCreateTests(unittest.IsolatedAsyncioTestCase)
         clear_mock.assert_awaited_once_with(state)
         payload = client.calls[0][1]
         self.assertEqual(payload["commodity_data"], {"name": "سکه"})
-        self.assertEqual(payload["aliases"], ["بهار", "طرح جدید"])
+        self.assertEqual(payload["aliases"], ["سکه", "بهار", "طرح جدید"])
         status_msg.edit_text.assert_awaited_once_with("✅ کالا **'سکه'** ثبت شد.", parse_mode="Markdown")
         show_list_mock.assert_awaited_once_with(message.bot, 1, unittest.mock.ANY, state)
 

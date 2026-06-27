@@ -61,23 +61,6 @@ def ensure_commodity_text_has_no_digits(value: str) -> None:
         )
 
 
-def _clean_commodity_text(value: str | None) -> str:
-    return (value or "").strip()
-
-
-def _canonical_alias_candidates(commodity_name: str, aliases: List[str]) -> List[str]:
-    cleaned_commodity_name = _clean_commodity_text(commodity_name)
-    candidates: List[str] = []
-    seen: set[str] = set()
-    for raw_alias in aliases:
-        alias_name = _clean_commodity_text(raw_alias)
-        if not alias_name or alias_name == cleaned_commodity_name or alias_name in seen:
-            continue
-        seen.add(alias_name)
-        candidates.append(alias_name)
-    return candidates
-
-
 async def ensure_commodity_text_is_available(
     db: AsyncSession,
     value: str,
@@ -86,15 +69,9 @@ async def ensure_commodity_text_is_available(
     current_alias_id: Optional[int] = None,
     allow_same_commodity_alias: bool = False,
 ) -> None:
-    value = _clean_commodity_text(value)
     existing_commodity = (
         await db.execute(select(Commodity).where(Commodity.name == value))
     ).scalar_one_or_none()
-    if existing_commodity and current_commodity_id is not None and existing_commodity.id == current_commodity_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="نام مستعار نمی‌تواند با نام اصلی همان کالا یکسان باشد",
-        )
     if existing_commodity and existing_commodity.id != current_commodity_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -180,21 +157,18 @@ async def create_commodity(
     """
     ایجاد یک کالای جدید به همراه لیستی از نام‌های مستعار.
     """
-    commodity_name = _clean_commodity_text(commodity_data.name)
-    alias_candidates = _canonical_alias_candidates(commodity_name, aliases)
+    logger.info(f"Creating commodity '{commodity_data.name}' via source: {source}") # لاگ کردن منبع
 
-    logger.info(f"Creating commodity '{commodity_name}' via source: {source}") # لاگ کردن منبع
-
-    ensure_commodity_text_has_no_digits(commodity_name)
-    for alias_name in alias_candidates:
+    ensure_commodity_text_has_no_digits(commodity_data.name)
+    for alias_name in set(aliases):
         ensure_commodity_text_has_no_digits(alias_name)
 
-    await ensure_commodity_text_is_available(db, commodity_name)
+    await ensure_commodity_text_is_available(db, commodity_data.name)
 
-    db_commodity = Commodity(name=commodity_name)
+    db_commodity = Commodity(name=commodity_data.name)
     
     # افزودن نام‌های مستعار
-    for alias_name in alias_candidates:
+    for alias_name in set(aliases):
         await ensure_commodity_text_is_available(db, alias_name)
         db_commodity.aliases.append(CommodityAlias(alias=alias_name))
         
@@ -228,8 +202,7 @@ async def update_commodity_name(
     """
     ویرایش نام اصلی یک کالا.
     """
-    commodity_name = _clean_commodity_text(commodity_update.name)
-    logger.info(f"Updating commodity ID {commodity_id} name to '{commodity_name}' via source: {source}")
+    logger.info(f"Updating commodity ID {commodity_id} name to '{commodity_update.name}' via source: {source}")
 
     stmt = select(Commodity).options(selectinload(Commodity.aliases)).where(Commodity.id == commodity_id)
     db_commodity = (await db.execute(stmt)).scalar_one_or_none()
@@ -237,22 +210,23 @@ async def update_commodity_name(
     if not db_commodity:
         raise HTTPException(status_code=404, detail="کالا یافت نشد")
 
-    ensure_commodity_text_has_no_digits(commodity_name)
+    ensure_commodity_text_has_no_digits(commodity_update.name)
 
-    if commodity_name != db_commodity.name and is_locked_imam_commodity_name(db_commodity.name):
+    if commodity_update.name != db_commodity.name and is_locked_imam_commodity_name(db_commodity.name):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="نام کالای پیش فرض امام قابل ویرایش نیست. فقط نام های مستعار را مدیریت کنید.",
         )
 
-    if commodity_name != db_commodity.name:
+    if commodity_update.name != db_commodity.name:
         await ensure_commodity_text_is_available(
             db,
-            commodity_name,
+            commodity_update.name,
             current_commodity_id=db_commodity.id,
+            allow_same_commodity_alias=True,
         )
     
-    db_commodity.name = commodity_name
+    db_commodity.name = commodity_update.name
     await db.commit()
     await db.refresh(db_commodity)
 
@@ -380,18 +354,17 @@ async def add_alias_to_commodity(
     """
     افزودن یک نام مستعار جدید به کالای موجود.
     """
-    alias_name = _clean_commodity_text(alias.alias)
-    logger.info(f"Adding alias '{alias_name}' to commodity ID {commodity_id} via source: {source}")
+    logger.info(f"Adding alias '{alias.alias}' to commodity ID {commodity_id} via source: {source}")
 
-    ensure_commodity_text_has_no_digits(alias_name)
+    ensure_commodity_text_has_no_digits(alias.alias)
 
     await ensure_commodity_text_is_available(
         db,
-        alias_name,
+        alias.alias,
         current_commodity_id=commodity_id,
     )
 
-    db_alias = CommodityAlias(commodity_id=commodity_id, alias=alias_name)
+    db_alias = CommodityAlias(commodity_id=commodity_id, alias=alias.alias)
     db.add(db_alias)
     
     try:
@@ -428,10 +401,9 @@ async def update_alias(
     """
     ویرایش متن یک نام مستعار.
     """
-    alias_name = _clean_commodity_text(alias_update.alias)
-    logger.info(f"Updating alias ID {alias_id} to '{alias_name}' via source: {source}")
+    logger.info(f"Updating alias ID {alias_id} to '{alias_update.alias}' via source: {source}")
 
-    ensure_commodity_text_has_no_digits(alias_name)
+    ensure_commodity_text_has_no_digits(alias_update.alias)
 
     stmt = select(CommodityAlias).where(CommodityAlias.id == alias_id)
     db_alias = (await db.execute(stmt)).scalar_one_or_none()
@@ -439,16 +411,16 @@ async def update_alias(
     if not db_alias:
         raise HTTPException(status_code=404, detail="نام مستعار یافت نشد")
         
-    if alias_name != db_alias.alias:
+    if alias_update.alias != db_alias.alias:
         await ensure_commodity_text_is_available(
             db,
-            alias_name,
+            alias_update.alias,
             current_commodity_id=db_alias.commodity_id,
             current_alias_id=db_alias.id,
             allow_same_commodity_alias=True,
         )
             
-    db_alias.alias = alias_name
+    db_alias.alias = alias_update.alias
     await db.commit()
     await db.refresh(db_alias)
 
