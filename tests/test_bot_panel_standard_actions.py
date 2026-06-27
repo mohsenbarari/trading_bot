@@ -84,10 +84,18 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
             customer_tier=CustomerTier.TIER_1,
             customer_user=SimpleNamespace(account_name="customer_3"),
         )
-        customers_keyboard = panel.get_user_panel_customers_keyboard([relation])
+        tier_2_relation = SimpleNamespace(
+            id=4,
+            management_name="مشتری دوم",
+            status=CustomerRelationStatus.PENDING,
+            customer_tier=CustomerTier.TIER_2,
+            customer_user=SimpleNamespace(account_name="customer_4"),
+        )
+        customers_keyboard = panel.get_user_panel_customers_keyboard([relation, tier_2_relation])
         button_texts = [button.text for row in customers_keyboard.inline_keyboard for button in row]
         self.assertIn("➕ دعوت مشتری", button_texts)
-        self.assertTrue(any("مشتری تست" in text for text in button_texts))
+        self.assertIn("👤 مشتری تست | سطح ۱ | فعال", button_texts)
+        self.assertIn("👤 مشتری دوم | سطح ۲ | در انتظار ثبت‌نام", button_texts)
 
         detail_keyboard = panel.get_customer_detail_keyboard(relation)
         self.assertIn("اخراج مشتری", detail_keyboard.inline_keyboard[0][0].text)

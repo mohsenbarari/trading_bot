@@ -403,12 +403,20 @@ def _customer_relation_name(relation: CustomerRelation) -> str:
     )
 
 
+def _customer_relation_list_label(relation: CustomerRelation) -> str:
+    return (
+        f"👤 {_customer_relation_name(relation)}"
+        f" | {_customer_tier_label(relation.customer_tier)}"
+        f" | {_customer_status_label(relation.status)}"
+    )
+
+
 def get_user_panel_customers_keyboard(relations: list[CustomerRelation]) -> InlineKeyboardMarkup:
     rows = []
     for relation in relations[:10]:
         rows.append([
             InlineKeyboardButton(
-                text=f"👤 {_customer_relation_name(relation)} | {_customer_status_label(relation.status)}",
+                text=_customer_relation_list_label(relation),
                 callback_data=UserPanelCustomerCallback(action="detail", relation_id=relation.id).pack(),
             )
         ])
