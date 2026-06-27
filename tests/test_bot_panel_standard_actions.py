@@ -165,15 +165,17 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("کاربران عادی", message.answer.await_args.args[0])
         load_mock.assert_not_awaited()
 
-    async def test_colleagues_query_excludes_any_non_deleted_customer_or_accountant_relation(self):
+    async def test_colleagues_query_excludes_any_customer_or_accountant_relation_history(self):
         session = CapturingSession()
         await panel._load_colleagues_for_user(session, user_id=5)
 
         compiled = str(session.statement.compile(compile_kwargs={"literal_binds": True}))
-        self.assertIn("customer_relations.deleted_at IS NULL", compiled)
-        self.assertIn("accountant_relations.deleted_at IS NULL", compiled)
+        self.assertIn("customer_relations", compiled)
+        self.assertIn("accountant_relations", compiled)
         self.assertNotIn("customer_relations.status", compiled)
         self.assertNotIn("accountant_relations.status", compiled)
+        self.assertNotIn("customer_relations.deleted_at", compiled)
+        self.assertNotIn("accountant_relations.deleted_at", compiled)
 
 
 if __name__ == "__main__":

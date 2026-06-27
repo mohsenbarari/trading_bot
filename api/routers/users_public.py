@@ -326,21 +326,17 @@ def _build_project_user_directory_stmt(
     limit: int,
     offset: int,
 ):
-    active_accountant_exists = (
+    accountant_relation_exists = (
         select(AccountantRelation.id)
         .where(
             AccountantRelation.accountant_user_id == User.id,
-            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
-            AccountantRelation.deleted_at.is_(None),
         )
         .exists()
     )
-    active_customer_exists = (
+    customer_relation_exists = (
         select(CustomerRelation.id)
         .where(
             CustomerRelation.customer_user_id == User.id,
-            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
-            CustomerRelation.deleted_at.is_(None),
         )
         .exists()
     )
@@ -349,8 +345,8 @@ def _build_project_user_directory_stmt(
         User.is_deleted == False,
         User.role.in_(PROJECT_DIRECTORY_ROLES),
         User.id != current_user_id,
-        ~active_accountant_exists,
-        ~active_customer_exists,
+        ~accountant_relation_exists,
+        ~customer_relation_exists,
     )
 
     normalized_query = (q or "").strip()

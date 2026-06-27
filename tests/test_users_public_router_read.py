@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 
 from api.routers.users_public import (
+    _build_project_user_directory_stmt,
     _can_view_customer_profile,
     _resolve_public_search_rows,
     _serialize_public_accountant_relation,
@@ -56,6 +57,17 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
             current_user=SimpleNamespace(id=99, role=UserRole.STANDARD),
         )
         self.assertEqual(rows, [])
+
+    def test_project_users_directory_excludes_any_customer_or_accountant_relation_history(self):
+        stmt = _build_project_user_directory_stmt(current_user_id=5, q=None, limit=25, offset=0)
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+        self.assertIn("customer_relations", compiled)
+        self.assertIn("accountant_relations", compiled)
+        self.assertNotIn("customer_relations.status", compiled)
+        self.assertNotIn("accountant_relations.status", compiled)
+        self.assertNotIn("customer_relations.deleted_at", compiled)
+        self.assertNotIn("accountant_relations.deleted_at", compiled)
 
     async def test_read_public_user_returns_user_when_present(self):
         user = SimpleNamespace(

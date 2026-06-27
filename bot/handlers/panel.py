@@ -250,19 +250,17 @@ async def _can_view_colleagues_list(session, user: User) -> bool:
 
 
 async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
-    active_customer_relation_exists = (
+    customer_relation_exists = (
         select(CustomerRelation.id)
         .where(
             CustomerRelation.customer_user_id == User.id,
-            CustomerRelation.deleted_at.is_(None),
         )
         .exists()
     )
-    active_accountant_relation_exists = (
+    accountant_relation_exists = (
         select(AccountantRelation.id)
         .where(
             AccountantRelation.accountant_user_id == User.id,
-            AccountantRelation.deleted_at.is_(None),
         )
         .exists()
     )
@@ -272,8 +270,8 @@ async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
             User.id != user_id,
             User.is_deleted.is_(False),
             User.account_status == UserAccountStatus.ACTIVE,
-            ~active_customer_relation_exists,
-            ~active_accountant_relation_exists,
+            ~customer_relation_exists,
+            ~accountant_relation_exists,
         )
         .order_by(User.account_name.asc(), User.id.asc())
     )
