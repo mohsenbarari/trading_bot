@@ -163,6 +163,11 @@ TERMINAL_OFFER_REQUEST_STATUSES = {
     "duplicate_replay",
     "failed_internal",
 }
+RELATION_LINK_FIELDS = {
+    "accountant_relations": "accountant_user_id",
+    "customer_relations": "customer_user_id",
+}
+NON_TERMINAL_RELATION_STATUSES = {"pending", "active"}
 COMPLETED_TRADE_STATUS = "completed"
 COMPLETED_TRADE_PROTECTED_FIELDS = (
     "offer_id",
@@ -754,6 +759,11 @@ def _build_upsert_stmt(model, table, data):
             set_=set_dict,
             where=where_clause,
         )
+    elif table in RELATION_LINK_FIELDS:
+        where_clause = _linked_relation_upsert_where_clause(model, stmt, data, RELATION_LINK_FIELDS[table])
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
+        return stmt.on_conflict_do_update(index_elements=['id'], set_=data, where=where_clause)
     else:
         return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
 
@@ -1215,6 +1225,63 @@ def _offer_request_upsert_where_clause(model, stmt, data: dict):
     return (current_version <= incoming_version) & ~terminal_reactivation & ~same_version_terminal_conflict
 
 
+def _linked_relation_upsert_where_clause(model, stmt, data: dict, link_field: str):
+    if link_field not in data:
+        return None
+    current_link = getattr(model, link_field, None)
+    if current_link is None:
+        return None
+    try:
+        incoming_link = stmt.excluded[link_field]
+    except (AttributeError, KeyError):
+        return None
+
+    # Relation registration can emit an intermediate non-terminal row with a
+    # NULL linked-user id. If that stale payload arrives after the final linked
+    # payload, it must not erase the peer's already-resolved customer/accountant.
+    allow_update = current_link.is_(None) | incoming_link.isnot(None)
+
+    if "deleted_at" in data and getattr(model, "deleted_at", None) is not None:
+        try:
+            allow_update = allow_update | stmt.excluded["deleted_at"].isnot(None)
+        except (AttributeError, KeyError):
+            pass
+
+    if "status" in data and getattr(model, "status", None) is not None:
+        try:
+            allow_update = allow_update | ~stmt.excluded["status"].in_(list(NON_TERMINAL_RELATION_STATUSES))
+        except (AttributeError, KeyError):
+            pass
+
+    return allow_update
+
+
+def _linked_relation_payload_can_clear_active_link(table: str, data: dict) -> bool:
+    link_field = RELATION_LINK_FIELDS.get(table)
+    if not link_field or link_field not in data or data.get(link_field) is not None:
+        return False
+    if data.get("deleted_at") is not None:
+        return False
+    incoming_status = _enum_value(data.get("status"))
+    return not incoming_status or incoming_status in NON_TERMINAL_RELATION_STATUSES
+
+
+def _log_stale_linked_relation_sync_ignored(table: str, record_id, operation: str, data: dict) -> None:
+    metadata = build_sync_metadata(table, record_id, operation, data)
+    record_sync_conflict(server_mode=settings.server_mode, table=table, reason="stale_null_relation_link")
+    logger.warning(
+        "Ignored stale linked relation event",
+        extra={
+            "event": "sync.stale_linked_relation_ignored",
+            "table": table,
+            "record_id": record_id,
+            "reason": "stale_null_relation_link",
+            "incoming_status": _enum_value(data.get("status")),
+            "sync_meta": metadata,
+        },
+    )
+
+
 def _trade_delivery_receipt_upsert_where_clause(model, stmt, data: dict):
     if not _enum_value(data.get("status")):
         return None
@@ -1555,6 +1622,13 @@ async def _apply_item(
                 ):
                     _log_trade_sync_guard_ignored(record_id, operation, persist_data, "atomic_upsert_guard_noop")
                     trade_atomic_guard_noop = True
+                if (
+                    table in RELATION_LINK_FIELDS
+                    and _linked_relation_payload_can_clear_active_link(table, persist_data)
+                    and getattr(execute_result, "rowcount", None) == 0
+                ):
+                    _log_stale_linked_relation_sync_ignored(table, record_id, operation, persist_data)
+                    return 'ignored'
             if trade_atomic_guard_noop:
                 return 'ignored'
             if table == "offers" and (track_new_offer or track_offer_realtime_or_terminal):

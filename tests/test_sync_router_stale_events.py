@@ -73,6 +73,9 @@ class ExpressionProbe:
     def isnot(self, other):
         return ExpressionProbe(f"{self.expression} IS NOT {other}")
 
+    def is_(self, other):
+        return ExpressionProbe(f"{self.expression} IS {other}")
+
     def is_not_distinct_from(self, other):
         return ExpressionProbe(f"{self.expression} IS NOT DISTINCT FROM {self._render(other)}")
 
@@ -121,6 +124,12 @@ class FakeTradeModel:
     status = ExpressionProbe("current_status")
     trade_number = ExpressionProbe("current_trade_number")
     archived = ExpressionProbe("current_archived")
+
+
+class FakeCustomerRelationModel:
+    customer_user_id = ExpressionProbe("current_customer_user_id")
+    status = ExpressionProbe("current_status")
+    deleted_at = ExpressionProbe("current_deleted_at")
 
 
 class FakeOfferInsertBuilder:
@@ -185,6 +194,25 @@ class FakeOfferRequestInsertBuilder:
     def on_conflict_do_update(self, index_elements, set_, index_where=None, where=None):
         self.conflict_payload = (index_elements, set_)
         self.index_where = index_where
+        self.where_clause = where
+        return self
+
+
+class FakeCustomerRelationInsertBuilder:
+    def __init__(self):
+        self.excluded = {
+            "customer_user_id": ExpressionProbe("incoming_customer_user_id"),
+            "status": ExpressionProbe("incoming_status"),
+            "deleted_at": ExpressionProbe("incoming_deleted_at"),
+        }
+        self.where_clause = None
+
+    def values(self, **kwargs):
+        self.values_payload = kwargs
+        return self
+
+    def on_conflict_do_update(self, index_elements, set_, where=None):
+        self.conflict_payload = (index_elements, set_)
         self.where_clause = where
         return self
 
@@ -273,6 +301,51 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         rendered_where = repr(insert_builder.where_clause)
         self.assertIn("current_version <= incoming_version", rendered_where)
         self.assertIn("current_result_status IN", rendered_where)
+
+    async def test_customer_relation_upsert_protects_resolved_link_from_stale_null_link(self):
+        insert_builder = FakeCustomerRelationInsertBuilder()
+
+        with patch("api.routers.sync.pg_insert", return_value=insert_builder):
+            result = _build_upsert_stmt(
+                FakeCustomerRelationModel,
+                "customer_relations",
+                {
+                    "id": 1,
+                    "customer_user_id": None,
+                    "status": "active",
+                    "deleted_at": None,
+                },
+            )
+
+        self.assertIs(result, insert_builder)
+        self.assertIsNotNone(insert_builder.where_clause)
+        rendered_where = repr(insert_builder.where_clause)
+        self.assertIn("current_customer_user_id IS None", rendered_where)
+        self.assertIn("incoming_customer_user_id IS NOT None", rendered_where)
+        self.assertIn("incoming_deleted_at IS NOT None", rendered_where)
+        self.assertIn("incoming_status IN", rendered_where)
+
+    async def test_stale_null_link_relation_upsert_noop_is_ignored_with_audit_metadata(self):
+        db = ApplyDB([SimpleNamespace(rowcount=0)])
+        data = {"id": 1, "customer_user_id": None, "status": "active", "deleted_at": None}
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="CUSTOMER_RELATION_UPSERT"), patch(
+            "api.routers.sync.logger"
+        ) as logger_mock:
+            result = await _apply_item(
+                db,
+                "customer_relations",
+                "UPDATE",
+                1,
+                data,
+                model=SimpleNamespace(),
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("stale_null_relation_link", rendered_log)
+        self.assertIn("sync.stale_linked_relation_ignored", rendered_log)
 
     async def test_trade_upsert_uses_atomic_completed_trade_guard(self):
         insert_builder = FakeTradeInsertBuilder()
