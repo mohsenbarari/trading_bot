@@ -12,7 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.orm import joinedload, selectinload
 from models.user import User
-from models.accountant_relation import AccountantRelation, AccountantRelationStatus
+from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
 from models.trade import Trade
 from bot.keyboards import (
@@ -254,7 +254,6 @@ async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
         select(CustomerRelation.id)
         .where(
             CustomerRelation.customer_user_id == User.id,
-            CustomerRelation.status == CustomerRelationStatus.ACTIVE,
             CustomerRelation.deleted_at.is_(None),
         )
         .exists()
@@ -263,7 +262,6 @@ async def _load_colleagues_for_user(session, user_id: int) -> list[User]:
         select(AccountantRelation.id)
         .where(
             AccountantRelation.accountant_user_id == User.id,
-            AccountantRelation.status == AccountantRelationStatus.ACTIVE,
             AccountantRelation.deleted_at.is_(None),
         )
         .exists()

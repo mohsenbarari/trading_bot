@@ -15,6 +15,25 @@ class FakeSessionContext:
         return False
 
 
+class FakeScalarResult:
+    def all(self):
+        return []
+
+
+class FakeExecuteResult:
+    def scalars(self):
+        return FakeScalarResult()
+
+
+class CapturingSession:
+    def __init__(self):
+        self.statement = None
+
+    async def execute(self, statement):
+        self.statement = statement
+        return FakeExecuteResult()
+
+
 class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
     async def test_standard_user_panel_renders_action_menu_for_non_customer(self):
         message = SimpleNamespace(
@@ -145,6 +164,16 @@ class BotPanelStandardActionsTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("کاربران عادی", message.answer.await_args.args[0])
         load_mock.assert_not_awaited()
+
+    async def test_colleagues_query_excludes_any_non_deleted_customer_or_accountant_relation(self):
+        session = CapturingSession()
+        await panel._load_colleagues_for_user(session, user_id=5)
+
+        compiled = str(session.statement.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("customer_relations.deleted_at IS NULL", compiled)
+        self.assertIn("accountant_relations.deleted_at IS NULL", compiled)
+        self.assertNotIn("customer_relations.status", compiled)
+        self.assertNotIn("accountant_relations.status", compiled)
 
 
 if __name__ == "__main__":
