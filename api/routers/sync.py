@@ -329,17 +329,18 @@ TABLE_ORDER = {
     "admin_market_messages": 7,
     "admin_broadcast_messages": 8,
     "notifications": 9,
-    "user_blocks": 10,
-    "commodities": 11,
-    "commodity_aliases": 12,
-    "trading_settings": 13,
-    "market_schedule_overrides": 14,
-    "market_runtime_state": 15,
-    "offers": 16,
-    "offer_publication_states": 17,
-    "offer_requests": 18,
-    "trades": 19,
-    "trade_delivery_receipts": 20,
+    "user_notification_preferences": 10,
+    "user_blocks": 11,
+    "commodities": 12,
+    "commodity_aliases": 13,
+    "trading_settings": 14,
+    "market_schedule_overrides": 15,
+    "market_runtime_state": 16,
+    "offers": 17,
+    "offer_publication_states": 18,
+    "offer_requests": 19,
+    "trades": 20,
+    "trade_delivery_receipts": 21,
 }
 
 async def verify_signature(request: Request):
@@ -441,6 +442,7 @@ from core.enums import ChatType
 from models.accountant_relation import AccountantRelation
 from models.customer_relation import CustomerRelation
 from models.user import User
+from models.user_notification_preference import UserNotificationPreference
 from models.invitation import Invitation
 from models.notification import Notification
 from models.telegram_link_token import TelegramLinkToken
@@ -472,6 +474,7 @@ NATURAL_KEYS = {
     "users": "telegram_id",
     "telegram_link_tokens": "token_hash",
     "invitations": "token",
+    "user_notification_preferences": "user_id",
     "market_schedule_overrides": "date",
     "trades": "trade_number",
     "offer_publication_states": "dedupe_key",
@@ -512,6 +515,7 @@ SEQUENCE_MAP = {
     "trade_delivery_receipts": ("trade_delivery_receipts_id_seq", "trade_delivery_receipts"),
     "telegram_link_tokens": ("telegram_link_tokens_id_seq", "telegram_link_tokens"),
     "invitations": ("invitations_id_seq", "invitations"),
+    "user_notification_preferences": ("user_notification_preferences_id_seq", "user_notification_preferences"),
     "admin_market_messages": ("admin_market_messages_id_seq", "admin_market_messages"),
     "admin_broadcast_messages": ("admin_broadcast_messages_id_seq", "admin_broadcast_messages"),
     "notifications": ("notifications_id_seq", "notifications"),
@@ -565,6 +569,7 @@ def get_model_class(table_name: str):
         "admin_market_messages": AdminMarketMessage,
         "admin_broadcast_messages": AdminBroadcastMessage,
         "notifications": Notification,
+        "user_notification_preferences": UserNotificationPreference,
         "offers": Offer,
         "offer_publication_states": OfferPublicationState,
         "offer_requests": OfferRequest,
@@ -736,6 +741,15 @@ def _build_upsert_stmt(model, table, data):
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
         return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict, where=where_clause)
+    elif table == "user_notification_preferences" and data.get("user_id") is not None:
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "user_id"}}
+        if "updated_at" in data:
+            return stmt.on_conflict_do_update(
+                index_elements=['user_id'],
+                set_=set_dict,
+                where=model.updated_at <= stmt.excluded["updated_at"],
+            )
+        return stmt.on_conflict_do_update(index_elements=['user_id'], set_=set_dict)
     elif (
         table == "offer_requests"
         and data.get("request_home_server")
@@ -992,6 +1006,20 @@ async def _resolve_offer_request_id_by_idempotency(db: AsyncSession, data: dict)
         return None
 
 
+async def _resolve_user_notification_preference_id_by_user_id(db: AsyncSession, data: dict) -> int | None:
+    user_id = coerce_positive_int(data.get("user_id"))
+    if user_id is None:
+        return None
+    result = await db.execute(
+        select(UserNotificationPreference.id).where(UserNotificationPreference.user_id == user_id)
+    )
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _resolve_local_record_id_by_public_identity(
     db: AsyncSession,
     table: str,
@@ -1007,6 +1035,8 @@ async def _resolve_local_record_id_by_public_identity(
         return await _resolve_trade_delivery_receipt_id_by_dedupe_key(db, data.get("dedupe_key"))
     if table == "offer_requests":
         return await _resolve_offer_request_id_by_idempotency(db, data)
+    if table == "user_notification_preferences":
+        return await _resolve_user_notification_preference_id_by_user_id(db, data)
     return None
 
 
@@ -1021,6 +1051,8 @@ def _sync_table_has_public_identity(table: str, data: dict) -> bool:
         return bool(_nonempty_text(data.get("dedupe_key")))
     if table == "offer_requests":
         return bool(_nonempty_text(data.get("request_home_server")) and _nonempty_text(data.get("idempotency_key")))
+    if table == "user_notification_preferences":
+        return coerce_positive_int(data.get("user_id")) is not None
     return False
 
 

@@ -132,36 +132,24 @@ class SyncRouterFailClosedPolicyTests(unittest.IsolatedAsyncioTestCase):
             [{"table": "messages", "record_id": 55, "reason": "policy_forbidden:no-sync"}],
         )
 
-    async def test_sync_policy_table_without_receiver_model_returns_partial_failure(self):
+    async def test_user_notification_preferences_sync_table_has_receiver_model(self):
         db = FakeDB()
         items = [
             {
                 "table": "user_notification_preferences",
                 "operation": "INSERT",
                 "id": 88,
-                "data": {"user_id": 10, "channel": "web_push", "enabled": True},
+                "data": {"user_id": 10, "market_offer_push_enabled": True},
             }
         ]
 
-        with patch("api.routers.sync._apply_item", new=AsyncMock()) as apply_mock, patch(
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
             "api.routers.sync.settings.server_mode", "iran"
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        apply_mock.assert_not_awaited()
-        self.assertEqual(result["status"], "partial")
-        self.assertEqual(result["processed"], 0)
-        self.assertEqual(result["errors"], 1)
-        self.assertEqual(
-            result["error_items"],
-            [
-                {
-                    "table": "user_notification_preferences",
-                    "record_id": 88,
-                    "reason": "receiver_model_not_registered",
-                }
-            ],
-        )
+        apply_mock.assert_awaited_once()
+        self.assertEqual(result, {"status": "success", "processed": 1})
 
     async def test_mixed_batch_applies_valid_items_and_reports_invalid_item(self):
         db = FakeDB()

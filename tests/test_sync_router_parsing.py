@@ -12,6 +12,7 @@ from models.chat_member import ChatMember
 from models.notification import Notification
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.user import User
+from models.user_notification_preference import UserNotificationPreference
 
 
 class SyncRouterParsingTests(unittest.TestCase):
@@ -20,6 +21,7 @@ class SyncRouterParsingTests(unittest.TestCase):
         self.assertIs(get_model_class("chats"), Chat)
         self.assertIs(get_model_class("chat_members"), ChatMember)
         self.assertIs(get_model_class("notifications"), Notification)
+        self.assertIs(get_model_class("user_notification_preferences"), UserNotificationPreference)
         self.assertIs(get_model_class("trade_delivery_receipts"), TradeDeliveryReceipt)
         self.assertIsNone(get_model_class("missing_table"))
 

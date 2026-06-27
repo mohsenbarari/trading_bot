@@ -1,16 +1,23 @@
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from sqlalchemy.dialects import postgresql
 
-from api.routers.sync import _apply_item, _build_upsert_stmt, _partitioned_sequence_alignment_sql
+from api.routers.sync import (
+    _apply_item,
+    _build_upsert_stmt,
+    _partitioned_sequence_alignment_sql,
+    _resolve_local_record_id_by_public_identity,
+    _sync_table_has_public_identity,
+)
 from models.offer import Offer
 from models.offer_request import OfferRequest
 from models.offer_publication_state import OfferPublicationState
 from models.trade import Trade
 from models.trade_delivery_receipt import TradeDeliveryReceipt
+from models.user_notification_preference import UserNotificationPreference
 
 
 class AsyncNullContext:
@@ -76,6 +83,40 @@ class UpdateBuilder:
 
 
 class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
+    def test_user_notification_preference_upsert_uses_user_id_and_updated_at_guard(self):
+        stmt = _build_upsert_stmt(
+            UserNotificationPreference,
+            "user_notification_preferences",
+            {
+                "id": 41,
+                "user_id": 7,
+                "market_offer_push_enabled": False,
+                "updated_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (user_id)", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertNotIn("user_id = excluded.user_id", compiled)
+        self.assertIn("market_offer_push_enabled = excluded.market_offer_push_enabled", compiled)
+        self.assertIn("updated_at = excluded.updated_at", compiled)
+        self.assertIn("WHERE user_notification_preferences.updated_at <= excluded.updated_at", compiled)
+
+    async def test_user_notification_preference_identity_resolves_by_user_id(self):
+        db = FakeDB([ScalarOneOrNoneResult(91)])
+
+        resolved_id = await _resolve_local_record_id_by_public_identity(
+            db,
+            "user_notification_preferences",
+            {"user_id": "7"},
+        )
+
+        self.assertEqual(resolved_id, 91)
+        self.assertTrue(_sync_table_has_public_identity("user_notification_preferences", {"user_id": "7"}))
+        self.assertFalse(_sync_table_has_public_identity("user_notification_preferences", {"user_id": None}))
+
     def test_trade_delivery_receipt_upsert_uses_dedupe_key_and_preserves_identity_fields(self):
         stmt = _build_upsert_stmt(
             TradeDeliveryReceipt,
