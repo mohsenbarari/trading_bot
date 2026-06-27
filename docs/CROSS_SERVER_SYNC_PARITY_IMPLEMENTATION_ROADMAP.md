@@ -355,6 +355,28 @@ Exit criteria:
 - Known drift can be repaired without ad hoc SQL.
 - Every repair has auditable before/after output.
 
+Implementation status:
+
+- Completed on `candidate/sync-parity-hardening` in Stage 6.
+- Added `core/sync_repair.py` as the shared dry-run-first repair helper layer:
+  - builds repair plans from two redacted parity snapshots;
+  - validates replay identity fields through a per-table allow-list;
+  - builds current-state replay payloads using the receiver's existing sync item contract;
+  - drops local-only/runtime fields before replay, including `offers.channel_message_id`, `users.avatar_file_id`, chat local pointers, and `trade_delivery_receipts.worker_id`/`lease_until`;
+  - emits redacted watermark-repair SQL evidence without executing database writes.
+- Added `scripts/sync_repair_tool.py` with three operator commands:
+  - `plan`: compares local/peer snapshot files and emits a dry-run action plan;
+  - `replay-row`: dry-runs or explicitly applies one current-state replay by table and identity;
+  - `watermark`: emits redacted dry-run payload and SQL for `sync_apply_watermarks` repair.
+- Safety rules implemented:
+  - every command defaults to dry-run;
+  - peer writes require both `--apply` and `--confirm-write`;
+  - replay apply also requires `--source-sequence` so receiver watermark behavior remains auditable;
+  - ambiguous or non-allow-listed identities are rejected before any replay payload is built;
+  - repair output uses hashes/redacted summaries instead of raw sensitive values.
+- Actual production repair execution remains outside this stage. Before any production write, an operator must still have a backup, dry-run output, expected row count, before/after hashes, and explicit approval.
+- Covered by `tests/test_sync_repair.py` and `tests/test_sync_repair_tool.py`, plus the existing sync parity, receiver, metadata, watermark, field-policy, coverage, and migration smoke suites.
+
 ## Stage 7 - Sync Guarantee Test Matrix
 
 Goal: prevent regressions in delivery, ordering, parity, and repair.
