@@ -67,6 +67,44 @@ BOT_MARKET_CLOSED_MESSAGE = (
     "بعلت بسته بودن بازار درخواست شما ثبت نشد\n"
     "لطفا در زمان فعال بودن بازار اقدام به ثبت درخواست کنید."
 )
+INVISIBLE_CHANNEL_PADDING = "\u2800" * 35
+
+
+def _build_channel_offer_text(
+    *,
+    trade_type: object,
+    commodity_name: object,
+    quantity: object,
+    price: object,
+    notes: object = None,
+) -> str:
+    normalized_trade_type = str(trade_type or "buy").strip().lower()
+    trade_emoji = "🟢" if normalized_trade_type == "buy" else "🔴"
+    trade_label = "خرید" if normalized_trade_type == "buy" else "فروش"
+    try:
+        formatted_price = f"{int(price or 0):,}"
+    except (TypeError, ValueError):
+        formatted_price = str(price or 0)
+    normalized_commodity_name = str(commodity_name or "نامشخص").strip() or "نامشخص"
+    message = f"{trade_emoji}{trade_label} {normalized_commodity_name} {quantity} عدد {formatted_price}"
+    normalized_notes = str(notes or "").strip()
+    if normalized_notes:
+        message += f"\nتوضیحات: {normalized_notes}"
+    return f"{message}\n{INVISIBLE_CHANNEL_PADDING}"
+
+
+async def _canonical_commodity_name_from_session(session, commodity_id: object, fallback: object = None) -> str:
+    try:
+        normalized_commodity_id = int(commodity_id)
+    except (TypeError, ValueError):
+        return str(fallback or "نامشخص").strip() or "نامشخص"
+    try:
+        commodity = await session.get(Commodity, normalized_commodity_id)
+    except Exception as exc:
+        logger.debug("canonical_commodity_lookup_failed: %s", exc)
+        commodity = None
+    canonical_name = getattr(commodity, "name", None)
+    return str(canonical_name or fallback or "نامشخص").strip() or "نامشخص"
 
 
 async def _expire_offer_after_publication_failure(session, offer: Offer, user_id: int) -> None:
@@ -510,13 +548,13 @@ async def show_trade_preview(message_or_callback, state: FSMContext, edit: bool 
     price = data.get("price", 0)
     notes = data.get("notes")
 
-    trade_emoji = "🟢" if trade_type == "buy" else "🔴"
-    trade_label = "خرید" if trade_type == "buy" else "فروش"
-    invisible_padding = "\u2800" * 35
-    channel_text = f"{trade_emoji}{trade_label} {commodity_name} {quantity} عدد {price:,}"
-    if notes:
-        channel_text += f"\nتوضیحات: {notes}"
-    channel_text += f"\n{invisible_padding}"
+    channel_text = _build_channel_offer_text(
+        trade_type=trade_type,
+        commodity_name=commodity_name,
+        quantity=quantity,
+        price=price,
+        notes=notes,
+    )
 
     preview = f"**لفظ شما:**\n\n{channel_text}\n\nآیا تایید می‌کنید?"
     if edit:
@@ -667,14 +705,6 @@ async def _handle_trade_confirm_core(
         await callback.answer()
         return
 
-    trade_emoji = "🟢" if trade_type == "buy" else "🔴"
-    trade_label = "خرید" if trade_type == "buy" else "فروش"
-    invisible_padding = "\u2800" * 35
-    channel_message = f"{trade_emoji}{trade_label} {commodity_name} {quantity} عدد {price:,}"
-    if notes:
-        channel_message += f"\nتوضیحات: {notes}"
-    channel_message += f"\n{invisible_padding}"
-
     try:
         async with AsyncSessionLocal() as session:
             new_offer = await create_authoritative_offer(
@@ -746,18 +776,34 @@ async def _handle_trade_confirm_core(
                 ]
             )
 
-        async def send_created_offer_to_channel(_offer, _user):
-            sent_msg = await bot.send_message(
-                chat_id=settings.channel_id,
-                text=channel_message,
-                reply_markup=trade_keyboard,
-            )
-            return sent_msg.message_id
-
+        published_channel_message: str | None = None
         async with AsyncSessionLocal() as session:
             offer = await session.get(Offer, offer_id)
             if not offer:
                 raise RuntimeError("offer_not_found_for_channel_publication")
+            canonical_commodity_name = await _canonical_commodity_name_from_session(
+                session,
+                getattr(offer, "commodity_id", None) or commodity_id,
+                commodity_name,
+            )
+            canonical_channel_message = _build_channel_offer_text(
+                trade_type=getattr(getattr(offer, "offer_type", None), "value", None) or trade_type,
+                commodity_name=canonical_commodity_name,
+                quantity=getattr(offer, "quantity", None) or quantity,
+                price=getattr(offer, "price", None) or price,
+                notes=getattr(offer, "notes", None) or notes,
+            )
+
+            async def send_created_offer_to_channel(_offer, _user):
+                nonlocal published_channel_message
+                published_channel_message = canonical_channel_message
+                sent_msg = await bot.send_message(
+                    chat_id=settings.channel_id,
+                    text=canonical_channel_message,
+                    reply_markup=trade_keyboard,
+                )
+                return sent_msg.message_id
+
             try:
                 publish_result = await publish_offer_to_telegram_channel_once(
                     session,
@@ -777,6 +823,9 @@ async def _handle_trade_confirm_core(
             if db_user:
                 await increment_user_counter_fn(session, db_user, "channel_message")
 
+        if published_channel_message is None:
+            published_channel_message = canonical_channel_message
+
         from core.cache import incr_active_offer_count
 
         await incr_active_offer_count(user.id)
@@ -791,7 +840,7 @@ async def _handle_trade_confirm_core(
         await callback.message.edit_text(success_message_text, parse_mode="Markdown")
         await bot.send_message(
             chat_id=callback.from_user.id,
-            text=f"**لفظ شما:**\n\n{channel_message}",
+            text=f"**لفظ شما:**\n\n{published_channel_message}",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -1134,14 +1183,13 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
     )
     
     # نمایش پیش‌نمایش
-    trade_emoji = "🟢" if result.trade_type == "buy" else "🔴"
-    trade_label = "خرید" if result.trade_type == "buy" else "فروش"
-    invisible_padding = "\u2800" * 35
-    
-    channel_text = f"{trade_emoji}{trade_label} {result.commodity_name} {result.quantity} عدد {result.price:,}"
-    if result.notes:
-        channel_text += f"\nتوضیحات: {result.notes}"
-    channel_text += f"\n{invisible_padding}"
+    channel_text = _build_channel_offer_text(
+        trade_type=result.trade_type,
+        commodity_name=result.commodity_name,
+        quantity=result.quantity,
+        price=result.price,
+        notes=result.notes,
+    )
     
     lot_info = "یکجا" if result.is_wholesale else f"خُرد {result.lot_sizes}"
     
