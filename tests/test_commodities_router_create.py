@@ -125,6 +125,26 @@ class CommoditiesRouterCreateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.refresh_calls[0][1], ["aliases"])
         invalidate_mock.assert_awaited_once()
 
+    async def test_create_commodity_does_not_persist_alias_equal_to_main_name(self):
+        db = FakeDB([
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+            FakeExecuteResult(None),
+        ])
+        with patch("bot.utils.redis_helpers.invalidate_commodity_cache", new=AsyncMock()):
+            result = await create_commodity(
+                commodity_data=schemas.CommodityCreate(name="سکه"),
+                aliases=["سکه", "نیم", "سکه", "ربع"],
+                db=db,
+                source="bot",
+            )
+
+        self.assertEqual(result.name, "سکه")
+        self.assertEqual([alias.alias for alias in result.aliases], ["نیم", "ربع"])
+
     async def test_create_commodity_ignores_cache_invalidation_failures(self):
         db = FakeDB([
             FakeExecuteResult(None),

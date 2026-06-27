@@ -431,11 +431,12 @@ async def handle_add_aliases_and_create(message: types.Message, state: FSMContex
     await update_anchor(state, status_msg.message_id, message.bot, message.chat.id)
     
     aliases_text = message.text.strip()
-    final_aliases = [commodity_name.strip()]
+    normalized_commodity_name = (commodity_name or "").strip()
+    final_aliases = []
     if aliases_text.lower() != "ندارد":
         additional_aliases = [alias.strip() for alias in re.split('[،-]', aliases_text) if alias.strip()]
         for alias in additional_aliases:
-            if alias not in final_aliases:
+            if alias != normalized_commodity_name and alias not in final_aliases:
                 final_aliases.append(alias)
     
     payload = {

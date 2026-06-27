@@ -67,6 +67,13 @@ class CommoditiesRouterAliasAddTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 409)
         self.assertIn("نام اصلی یک کالا", exc_info.exception.detail)
 
+    async def test_add_alias_to_commodity_rejects_own_main_name(self):
+        db = FakeDB([FakeExecuteResult(SimpleNamespace(id=1))])
+        with self.assertRaises(HTTPException) as exc_info:
+            await add_alias_to_commodity(1, alias=schemas.CommodityAliasCreate(alias="سکه"), db=db, source="miniapp")
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("نام اصلی همان کالا", exc_info.exception.detail)
+
     async def test_add_alias_to_commodity_maps_commit_failure_to_404_and_success_refreshes_cache(self):
         db = FakeDB([FakeExecuteResult(None), FakeExecuteResult(None)], commit_exception=RuntimeError("missing commodity"))
         with self.assertRaises(HTTPException) as exc_info:
