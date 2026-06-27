@@ -12,11 +12,17 @@ from api.routers.sync import (
     _resolve_local_record_id_by_public_identity,
     _sync_table_has_public_identity,
 )
+from models.invitation import Invitation
+from models.market_runtime_state import MarketRuntimeState
+from models.notification import Notification
 from models.offer import Offer
 from models.offer_request import OfferRequest
 from models.offer_publication_state import OfferPublicationState
+from models.telegram_link_token import TelegramLinkToken
 from models.trade import Trade
 from models.trade_delivery_receipt import TradeDeliveryReceipt
+from models.user import User
+from models.user_block import UserBlock
 from models.user_notification_preference import UserNotificationPreference
 
 
@@ -139,6 +145,176 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_sync_table_has_public_identity("user_notification_preferences", {"user_id": "7"}))
         self.assertFalse(_sync_table_has_public_identity("user_notification_preferences", {"user_id": None}))
 
+    def test_user_upsert_uses_recency_guard_and_monotonic_fields(self):
+        stmt = _build_upsert_stmt(
+            User,
+            "users",
+            {
+                "id": 7,
+                "telegram_id": None,
+                "full_name": "Updated User",
+                "is_deleted": False,
+                "deleted_at": None,
+                "trades_count": 3,
+                "last_seen_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2026, 6, 27, 12, 5, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (id)", compiled)
+        self.assertIn("greatest(coalesce(users.trades_count", compiled)
+        self.assertIn("users.updated_at <= excluded.updated_at", compiled)
+        self.assertIn("users.updated_at IS NULL", compiled)
+        self.assertIn("excluded.updated_at IS NULL", compiled)
+        self.assertIn("coalesce(users.is_deleted", compiled)
+        self.assertIn("coalesce(excluded.is_deleted", compiled)
+        self.assertIn("WHEN (excluded.telegram_id IS NOT NULL) THEN excluded.telegram_id ELSE users.telegram_id", compiled)
+
+    def test_notification_upsert_uses_dedupe_key_and_read_state_monotonic(self):
+        stmt = _build_upsert_stmt(
+            Notification,
+            "notifications",
+            {
+                "id": 5,
+                "user_id": 1,
+                "message": "trade completed",
+                "is_read": False,
+                "level": "INFO",
+                "category": "TRADE",
+                "dedupe_key": "trade_completed:webapp:10025:1",
+                "extra_payload": {"trade_number": 10025},
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertNotIn("dedupe_key = excluded.dedupe_key", compiled)
+        self.assertIn("is_read = (coalesce(notifications.is_read", compiled)
+        self.assertIn("OR coalesce(excluded.is_read", compiled)
+
+    def test_invitation_upsert_preserves_used_terminal_and_earliest_expiry(self):
+        stmt = _build_upsert_stmt(
+            Invitation,
+            "invitations",
+            {
+                "id": 4,
+                "account_name": "new-user",
+                "mobile_number": "09120000000",
+                "token": "invite-token",
+                "role": "عادی",
+                "created_by_id": 1,
+                "is_used": False,
+                "expires_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (token)", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertNotIn("token = excluded.token", compiled)
+        self.assertIn("is_used = (coalesce(invitations.is_used", compiled)
+        self.assertIn("OR coalesce(excluded.is_used", compiled)
+        self.assertIn("least(invitations.expires_at, excluded.expires_at)", compiled)
+
+    def test_telegram_link_token_upsert_keeps_terminal_status_terminal(self):
+        stmt = _build_upsert_stmt(
+            TelegramLinkToken,
+            "telegram_link_tokens",
+            {
+                "id": 8,
+                "user_id": 7,
+                "token_hash": "a" * 64,
+                "status": "pending",
+                "issued_by_server": "iran",
+                "expires_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (token_hash)", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertNotIn("token_hash = excluded.token_hash", compiled)
+        self.assertIn("telegram_link_tokens.status NOT IN", compiled)
+        self.assertIn("telegram_link_tokens.status = excluded.status", compiled)
+
+    def test_market_runtime_state_upsert_uses_transition_timestamp_guard(self):
+        stmt = _build_upsert_stmt(
+            MarketRuntimeState,
+            "market_runtime_state",
+            {
+                "id": 1,
+                "is_open": True,
+                "active_web_notice_visible": False,
+                "offers_since_last_open": 3,
+                "last_transition_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (id)", compiled)
+        self.assertIn("market_runtime_state.last_transition_at IS NULL", compiled)
+        self.assertIn("excluded.last_transition_at IS NULL", compiled)
+        self.assertIn("market_runtime_state.last_transition_at <= excluded.last_transition_at", compiled)
+
+    def test_offer_publication_state_upsert_uses_version_and_status_precedence_guard(self):
+        stmt = _build_upsert_stmt(
+            OfferPublicationState,
+            "offer_publication_states",
+            {
+                "id": 41,
+                "offer_public_id": "ofr_41",
+                "offer_home_server": "foreign",
+                "surface": "telegram_channel",
+                "publication_owner_server": "foreign",
+                "status": "sent",
+                "dedupe_key": "offer-publication:telegram_channel:ofr_41",
+                "offer_version_id": 3,
+                "version_id": 2,
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (dedupe_key)", compiled)
+        self.assertIn("offer_publication_states.offer_version_id <= excluded.offer_version_id", compiled)
+        self.assertIn("offer_publication_states.offer_version_id < excluded.offer_version_id", compiled)
+        self.assertIn("CASE WHEN (excluded.status =", compiled)
+        self.assertIn("CASE WHEN (offer_publication_states.status =", compiled)
+
+    async def test_user_block_uses_pair_identity_for_upsert_and_delete_resolution(self):
+        stmt = _build_upsert_stmt(
+            UserBlock,
+            "user_blocks",
+            {
+                "id": 11,
+                "blocker_id": 1,
+                "blocked_id": 2,
+                "created_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("ON CONFLICT (blocker_id, blocked_id)", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertTrue(_sync_table_has_public_identity("user_blocks", {"blocker_id": "1", "blocked_id": "2"}))
+        self.assertFalse(_sync_table_has_public_identity("user_blocks", {"blocker_id": "1"}))
+
+        db = FakeDB([ScalarOneOrNoneResult(44)])
+        resolved_id = await _resolve_local_record_id_by_public_identity(
+            db,
+            "user_blocks",
+            {"blocker_id": "1", "blocked_id": "2"},
+        )
+
+        self.assertEqual(resolved_id, 44)
+
     def test_trade_delivery_receipt_upsert_uses_dedupe_key_and_preserves_identity_fields(self):
         stmt = _build_upsert_stmt(
             TradeDeliveryReceipt,
@@ -154,6 +330,8 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "destination_server": "iran",
                 "status": "pending",
                 "reason": "webapp_required",
+                "worker_id": "foreign-worker-1",
+                "lease_until": datetime(2026, 6, 27, 12, 30, tzinfo=timezone.utc),
             },
         )
 
@@ -165,6 +343,8 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("recipient_user_id = excluded.recipient_user_id", compiled)
         self.assertNotIn("channel = excluded.channel", compiled)
         self.assertNotIn("destination_server = excluded.destination_server", compiled)
+        self.assertNotIn("worker_id = excluded.worker_id", compiled)
+        self.assertNotIn("lease_until = excluded.lease_until", compiled)
         self.assertIn("status = excluded.status", compiled)
 
     async def test_apply_item_handles_trading_settings_and_offer_insert_success(self):

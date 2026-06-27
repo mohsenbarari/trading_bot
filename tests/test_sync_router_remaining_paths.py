@@ -211,11 +211,17 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.sync.pg_insert", return_value=builder), patch(
             "api.routers.sync.sa_func.greatest",
             side_effect=lambda left, right: ("greatest", left, right),
+        ), patch(
+            "api.routers.sync.sa_func.coalesce",
+            side_effect=lambda left, fallback: ("coalesce", left, fallback),
         ):
             result = _build_upsert_stmt(user_model, "users", {"trades_count": 8, "full_name": "Ali"})
 
         self.assertEqual(result[0], ["id"])
-        self.assertEqual(result[1]["trades_count"], ("greatest", "current-trades", "excluded-trades"))
+        self.assertEqual(
+            result[1]["trades_count"],
+            ("greatest", ("coalesce", "current-trades", 0), ("coalesce", "excluded-trades", 0)),
+        )
         self.assertEqual(result[1]["full_name"], "excluded-name")
 
         other_builder = FakeInsertBuilder()

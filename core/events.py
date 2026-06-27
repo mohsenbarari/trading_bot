@@ -948,7 +948,12 @@ def setup_user_block_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {"id": target.id}
+            data = {
+                "id": target.id,
+                "blocker_id": target.blocker_id,
+                "blocked_id": target.blocked_id,
+                "created_at": target.created_at.isoformat() if target.created_at else None,
+            }
             log_change(connection, "user_blocks", target.id, "DELETE", data)
         except Exception as e:
             logger.error(f"Error in user_block after_delete event: {e}")

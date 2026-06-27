@@ -244,6 +244,22 @@ Exit criteria:
 - Every synced table has an explicit merge rule.
 - Dangerous generic overwrite paths are limited to append-only or watermarked tables.
 
+Implementation status:
+
+- Completed on `candidate/sync-parity-hardening` in Stage 4.
+- Receiver upsert rules now protect table-specific business invariants beyond the generic source-sequence watermark:
+  - `users`: counter fields merge with null-safe `greatest`; `is_deleted` is terminal/monotonic; `deleted_at` is not cleared by stale payloads; `telegram_id` is not cleared by an active stale payload; `last_seen_at` keeps the latest timestamp; `updated_at` guards stale non-delete updates.
+  - `accountant_relations` and `customer_relations`: existing no-null-link guards remain in place and are covered by regression tests.
+  - `invitations`: token-based upsert keeps `is_used` monotonic and preserves the earliest expiry.
+  - `telegram_link_tokens`: `used`, `revoked`, and `expired` are terminal states; duplicate same-terminal replays are allowed, but terminal-to-pending or terminal-to-different-terminal updates are blocked atomically.
+  - `notifications`: dedupe-key upsert uses the partial unique key and keeps `is_read` monotonic so read notifications cannot become unread through stale sync.
+  - `user_blocks`: implemented the lower-risk pair-identity model using `(blocker_id, blocked_id)` for upsert, delete resolution, and watermark aggregate identity. `after_delete` now emits the pair fields. A separate tombstone table is deferred unless later tests prove hard-delete ordering still needs it.
+  - `market_runtime_state`: transition updates are guarded by `last_transition_at` so an older open/close state cannot overwrite a newer one.
+  - `offer_publication_states`: dedupe-key upsert now requires non-regressing `offer_version_id` and status precedence (`pending < failed < lagged < disabled < sent < visible`) for same-version or versionless updates.
+  - `trade_delivery_receipts`: dedupe-key upsert preserves identity fields and also protects local lease fields `worker_id` and `lease_until` from peer overwrite; sanitize policy already keeps those fields local-only.
+- Added regression tests for SQL merge guards, user-block pair identity, metadata aggregate identity, and user-block delete payload completeness.
+- No schema migration was added in this stage.
+
 ## Stage 5 - Runtime Parity Checker
 
 Goal: prove database parity instead of relying on delivery health.

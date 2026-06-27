@@ -155,6 +155,15 @@ def _enum_value(value) -> str:
 
 
 TERMINAL_OFFER_STATUSES = {"completed", "expired", "cancelled"}
+TERMINAL_TELEGRAM_LINK_TOKEN_STATUSES = {"used", "revoked", "expired"}
+OFFER_PUBLICATION_STATUS_PRECEDENCE = {
+    "pending": 10,
+    "failed": 20,
+    "lagged": 30,
+    "disabled": 40,
+    "sent": 50,
+    "visible": 60,
+}
 TERMINAL_OFFER_REQUEST_STATUSES = {
     "rejected_business_rule",
     "rejected_offer_expired",
@@ -453,6 +462,7 @@ async def verify_signature(request: Request):
         )
         raise HTTPException(status_code=401, detail="Verification failed")
 
+from sqlalchemy import case as sa_case
 from sqlalchemy import insert, update, delete, select, text as sa_text
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -714,18 +724,199 @@ async def _resolve_existing_chat_member_id(db: AsyncSession, *, chat_id: int | N
     return result.scalar_one_or_none()
 
 
+def _nullable_greatest(current_value, incoming_value):
+    return sa_case(
+        (current_value.is_(None), incoming_value),
+        (incoming_value.is_(None), current_value),
+        else_=sa_func.greatest(current_value, incoming_value),
+    )
+
+
+def _nullable_least(current_value, incoming_value):
+    return sa_case(
+        (current_value.is_(None), incoming_value),
+        (incoming_value.is_(None), current_value),
+        else_=sa_func.least(current_value, incoming_value),
+    )
+
+
+def _user_upsert_set_dict(model, stmt, data: dict) -> dict:
+    set_dict = {}
+    incoming_is_deleted = stmt.excluded["is_deleted"] if "is_deleted" in data else None
+
+    for key in data:
+        if key == "id":
+            set_dict[key] = stmt.excluded[key]
+        elif key in USER_COUNTER_FIELDS:
+            set_dict[key] = sa_func.greatest(
+                sa_func.coalesce(getattr(model, key), 0),
+                sa_func.coalesce(stmt.excluded[key], 0),
+            )
+        elif key == "is_deleted":
+            set_dict[key] = sa_func.coalesce(getattr(model, key), False) | sa_func.coalesce(stmt.excluded[key], False)
+        elif key == "deleted_at":
+            set_dict[key] = sa_func.coalesce(stmt.excluded[key], getattr(model, key))
+        elif key == "created_at":
+            set_dict[key] = sa_func.coalesce(getattr(model, key), stmt.excluded[key])
+        elif key == "last_seen_at":
+            set_dict[key] = _nullable_greatest(getattr(model, key), stmt.excluded[key])
+        elif key == "telegram_id":
+            cases = []
+            if incoming_is_deleted is not None:
+                cases.append((incoming_is_deleted.is_(True), None))
+            cases.append((stmt.excluded[key].isnot(None), stmt.excluded[key]))
+            set_dict[key] = sa_case(*cases, else_=getattr(model, key))
+        else:
+            if incoming_is_deleted is not None:
+                set_dict[key] = sa_case(
+                    (
+                        sa_func.coalesce(getattr(model, "is_deleted"), False)
+                        & ~sa_func.coalesce(incoming_is_deleted, False),
+                        getattr(model, key),
+                    ),
+                    else_=stmt.excluded[key],
+                )
+            else:
+                set_dict[key] = stmt.excluded[key]
+
+    return set_dict
+
+
+def _user_upsert_where_clause(model, stmt, data: dict):
+    where_clause = None
+
+    if "updated_at" in data:
+        recency_clause = (
+            model.updated_at.is_(None)
+            | stmt.excluded["updated_at"].is_(None)
+            | (model.updated_at <= stmt.excluded["updated_at"])
+        )
+        if "is_deleted" in data:
+            recency_clause = recency_clause | stmt.excluded["is_deleted"].is_(True)
+        where_clause = recency_clause
+
+    if "is_deleted" in data:
+        deletion_clause = (
+            ~sa_func.coalesce(model.is_deleted, False)
+            | sa_func.coalesce(stmt.excluded["is_deleted"], False)
+        )
+        where_clause = deletion_clause if where_clause is None else where_clause & deletion_clause
+
+    return where_clause
+
+
+def _notification_upsert_set_dict(model, stmt, data: dict) -> dict:
+    set_dict = {}
+    for key in data:
+        if key in {"id", "dedupe_key"}:
+            continue
+        if key == "is_read":
+            set_dict[key] = sa_func.coalesce(getattr(model, key), False) | sa_func.coalesce(stmt.excluded[key], False)
+        else:
+            set_dict[key] = stmt.excluded[key]
+    return set_dict
+
+
+def _invitation_upsert_set_dict(model, stmt, data: dict) -> dict:
+    set_dict = {}
+    for key in data:
+        if key in {"id", "token"}:
+            continue
+        if key == "is_used":
+            set_dict[key] = sa_func.coalesce(getattr(model, key), False) | sa_func.coalesce(stmt.excluded[key], False)
+        elif key == "expires_at":
+            set_dict[key] = _nullable_least(getattr(model, key), stmt.excluded[key])
+        else:
+            set_dict[key] = stmt.excluded[key]
+    return set_dict
+
+
+def _telegram_link_token_upsert_where_clause(model, stmt, data: dict):
+    if "status" not in data:
+        return None
+    try:
+        incoming_status = stmt.excluded["status"]
+    except (AttributeError, KeyError):
+        return None
+    current_status = getattr(model, "status", None)
+    if current_status is None:
+        return None
+    return (~current_status.in_(list(TERMINAL_TELEGRAM_LINK_TOKEN_STATUSES))) | (current_status == incoming_status)
+
+
+def _market_runtime_state_upsert_where_clause(model, stmt, data: dict):
+    if "last_transition_at" not in data:
+        return None
+    current_transition = getattr(model, "last_transition_at", None)
+    if current_transition is None:
+        return None
+    try:
+        incoming_transition = stmt.excluded["last_transition_at"]
+    except (AttributeError, KeyError):
+        return None
+    return current_transition.is_(None) | incoming_transition.is_(None) | (current_transition <= incoming_transition)
+
+
+def _offer_publication_status_rank(expression):
+    whens = [
+        (expression == status, rank)
+        for status, rank in OFFER_PUBLICATION_STATUS_PRECEDENCE.items()
+    ]
+    return sa_case(*whens, else_=0)
+
+
+def _offer_publication_state_upsert_where_clause(model, stmt, data: dict):
+    where_clause = None
+
+    if "offer_version_id" in data:
+        current_version = getattr(model, "offer_version_id", None)
+        if current_version is not None:
+            try:
+                incoming_version = stmt.excluded["offer_version_id"]
+            except (AttributeError, KeyError):
+                incoming_version = None
+            if incoming_version is not None:
+                where_clause = current_version.is_(None) | incoming_version.is_(None) | (current_version <= incoming_version)
+
+    if "status" in data:
+        current_status = getattr(model, "status", None)
+        if current_status is not None:
+            try:
+                incoming_status = stmt.excluded["status"]
+            except (AttributeError, KeyError):
+                incoming_status = None
+            if incoming_status is not None:
+                current_rank = _offer_publication_status_rank(current_status)
+                incoming_rank = _offer_publication_status_rank(incoming_status)
+                precedence_clause = incoming_rank >= current_rank
+
+                if "offer_version_id" in data and getattr(model, "offer_version_id", None) is not None:
+                    incoming_version = stmt.excluded["offer_version_id"]
+                    version_clause = (
+                        model.offer_version_id.is_(None)
+                        | (model.offer_version_id < incoming_version)
+                        | (
+                            (incoming_version.is_(None) | (model.offer_version_id == incoming_version))
+                            & precedence_clause
+                        )
+                    )
+                    where_clause = version_clause if where_clause is None else where_clause & version_clause
+                else:
+                    where_clause = precedence_clause if where_clause is None else where_clause & precedence_clause
+
+    return where_clause
+
+
 def _build_upsert_stmt(model, table, data):
     """Build the INSERT ON CONFLICT statement for a given model and data."""
     stmt = pg_insert(model).values(**data)
 
     if table == "users":
-        set_dict = {}
-        for k in data:
-            if k in USER_COUNTER_FIELDS:
-                set_dict[k] = sa_func.greatest(getattr(model, k), stmt.excluded[k])
-            else:
-                set_dict[k] = stmt.excluded[k]
-        return stmt.on_conflict_do_update(index_elements=['id'], set_=set_dict)
+        set_dict = _user_upsert_set_dict(model, stmt, data)
+        where_clause = _user_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['id'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['id'], set_=set_dict, where=where_clause)
     elif table == "offers":
         if data.get("offer_public_id"):
             set_dict = {key: value for key, value in data.items() if key not in {"id", "offer_public_id"}}
@@ -745,7 +936,10 @@ def _build_upsert_stmt(model, table, data):
         return stmt.on_conflict_do_update(index_elements=['trade_number'], set_=set_dict, where=where_clause)
     elif table == "offer_publication_states" and data.get("dedupe_key"):
         set_dict = {key: value for key, value in data.items() if key not in {"id", "dedupe_key"}}
-        return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
+        where_clause = _offer_publication_state_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['dedupe_key'], set_=set_dict, where=where_clause)
     elif table == "trade_delivery_receipts" and data.get("dedupe_key"):
         immutable_fields = {
             "id",
@@ -755,6 +949,8 @@ def _build_upsert_stmt(model, table, data):
             "recipient_user_id",
             "channel",
             "destination_server",
+            "worker_id",
+            "lease_until",
         }
         set_dict = {key: value for key, value in data.items() if key not in immutable_fields}
         where_clause = _trade_delivery_receipt_upsert_where_clause(model, stmt, data)
@@ -793,6 +989,30 @@ def _build_upsert_stmt(model, table, data):
             set_=set_dict,
             where=where_clause,
         )
+    elif table == "notifications" and data.get("dedupe_key"):
+        set_dict = _notification_upsert_set_dict(model, stmt, data)
+        return stmt.on_conflict_do_update(
+            index_elements=['dedupe_key'],
+            index_where=model.dedupe_key.isnot(None),
+            set_=set_dict,
+        )
+    elif table == "invitations" and data.get("token"):
+        set_dict = _invitation_upsert_set_dict(model, stmt, data)
+        return stmt.on_conflict_do_update(index_elements=['token'], set_=set_dict)
+    elif table == "telegram_link_tokens" and data.get("token_hash"):
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "token_hash"}}
+        where_clause = _telegram_link_token_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['token_hash'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['token_hash'], set_=set_dict, where=where_clause)
+    elif table == "market_runtime_state":
+        where_clause = _market_runtime_state_upsert_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
+        return stmt.on_conflict_do_update(index_elements=['id'], set_=data, where=where_clause)
+    elif table == "user_blocks" and data.get("blocker_id") is not None and data.get("blocked_id") is not None:
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "blocker_id", "blocked_id"}}
+        return stmt.on_conflict_do_update(index_elements=['blocker_id', 'blocked_id'], set_=set_dict)
     elif table in RELATION_LINK_FIELDS:
         where_clause = _linked_relation_upsert_where_clause(model, stmt, data, RELATION_LINK_FIELDS[table])
         if where_clause is None:
@@ -1040,6 +1260,24 @@ async def _resolve_user_notification_preference_id_by_user_id(db: AsyncSession, 
         return None
 
 
+async def _resolve_user_block_id_by_pair(db: AsyncSession, data: dict) -> int | None:
+    blocker_id = coerce_positive_int(data.get("blocker_id"))
+    blocked_id = coerce_positive_int(data.get("blocked_id"))
+    if blocker_id is None or blocked_id is None:
+        return None
+    result = await db.execute(
+        select(UserBlock.id).where(
+            UserBlock.blocker_id == blocker_id,
+            UserBlock.blocked_id == blocked_id,
+        )
+    )
+    value = _result_scalar_one_or_none(result)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _resolve_local_record_id_by_public_identity(
     db: AsyncSession,
     table: str,
@@ -1057,6 +1295,8 @@ async def _resolve_local_record_id_by_public_identity(
         return await _resolve_offer_request_id_by_idempotency(db, data)
     if table == "user_notification_preferences":
         return await _resolve_user_notification_preference_id_by_user_id(db, data)
+    if table == "user_blocks":
+        return await _resolve_user_block_id_by_pair(db, data)
     return None
 
 
@@ -1073,6 +1313,11 @@ def _sync_table_has_public_identity(table: str, data: dict) -> bool:
         return bool(_nonempty_text(data.get("request_home_server")) and _nonempty_text(data.get("idempotency_key")))
     if table == "user_notification_preferences":
         return coerce_positive_int(data.get("user_id")) is not None
+    if table == "user_blocks":
+        return (
+            coerce_positive_int(data.get("blocker_id")) is not None
+            and coerce_positive_int(data.get("blocked_id")) is not None
+        )
     return False
 
 

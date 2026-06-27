@@ -67,6 +67,11 @@ def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -
         channel = _string_or_none(data.get("channel"))
         if event_type and trade_number and recipient_user_id and channel:
             return f"{event_type}:{channel}:{trade_number}:{recipient_user_id}"
+    if table_name == "user_blocks":
+        blocker_id = coerce_positive_int(data.get("blocker_id"))
+        blocked_id = coerce_positive_int(data.get("blocked_id"))
+        if blocker_id and blocked_id:
+            return f"{blocker_id}:{blocked_id}"
     if table_name in {"offers", "offer_requests"}:
         public_id = _string_or_none(data.get("offer_public_id"))
         if public_id:

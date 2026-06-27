@@ -1061,6 +1061,14 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(telegram_link_payloads[0]['token_hash'], 'hashed-token-value')
         self.assertEqual(telegram_link_payloads[0]['status'], 'pending')
         self.assertNotIn('raw_token', telegram_link_payloads[0])
+        user_block_delete_payloads = [
+            call.args[4]
+            for call in log_change.call_args_list
+            if call.args[1] == 'user_blocks' and call.args[3] == 'DELETE'
+        ]
+        self.assertEqual(user_block_delete_payloads[0]['blocker_id'], 8)
+        self.assertEqual(user_block_delete_payloads[0]['blocked_id'], 9)
+        self.assertIn('created_at', user_block_delete_payloads[0])
         logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
         logger.info.assert_any_call('✅ CustomerRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')

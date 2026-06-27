@@ -113,6 +113,25 @@ class SyncMetadataTests(unittest.TestCase):
             },
         )
 
+    def test_user_block_metadata_uses_pair_identity(self):
+        metadata = build_sync_metadata(
+            "user_blocks",
+            7,
+            "DELETE",
+            {
+                "id": 7,
+                "blocker_id": 11,
+                "blocked_id": 12,
+            },
+            change_log_id=113,
+            source_server="iran",
+        )
+
+        self.assertEqual(metadata["aggregate_id"], "11:12")
+        self.assertEqual(metadata["aggregate_db_id"], 7)
+        self.assertEqual(metadata["source_server"], "iran")
+        self.assertEqual(metadata["source_sequence"], 113)
+
     def test_public_identity_payloads_prefer_stable_cross_server_keys(self):
         self.assertEqual(
             build_sync_public_identity("offers", 12, {"offer_public_id": "ofr_12"}),
