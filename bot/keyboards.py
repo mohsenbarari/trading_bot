@@ -31,8 +31,15 @@ def get_persistent_menu_keyboard(user_role: UserRole, mini_app_url: str) -> Repl
     keyboard_layout.append(row_2_buttons)
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
 
-def get_user_panel_keyboard(user_role: UserRole = None) -> ReplyKeyboardMarkup:
+def get_user_panel_keyboard(user_role: UserRole = None, *, standard_actions: bool = False) -> ReplyKeyboardMarkup:
     keyboard_layout = []
+    if user_role == UserRole.STANDARD and standard_actions:
+        keyboard_layout.append([KeyboardButton(text="📄 معاملات اخیر")])
+        keyboard_layout.append([KeyboardButton(text="🚫 کاربران مسدود شده")])
+        keyboard_layout.append([KeyboardButton(text="👥 مشتریان")])
+        keyboard_layout.append([KeyboardButton(text="🔙 بازگشت")])
+        return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
+
     # دکمه تنظیمات فقط برای نقش‌های غیر عادی (مدیر ارشد، مدیر میانی، پلیس)
     if user_role and user_role != UserRole.STANDARD:
         keyboard_layout.append([KeyboardButton(text="⚙️ تنظیمات کاربری")])

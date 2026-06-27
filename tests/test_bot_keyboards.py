@@ -21,6 +21,13 @@ class BotKeyboardsTests(unittest.TestCase):
         standard_texts = [button.text for row in standard_menu.keyboard for button in row]
         self.assertIn('⚙️ تنظیمات', standard_texts)
 
+        standard_panel = keyboards.get_user_panel_keyboard(UserRole.STANDARD, standard_actions=True)
+        standard_panel_texts = [button.text for row in standard_panel.keyboard for button in row]
+        self.assertEqual(
+            standard_panel_texts,
+            ['📄 معاملات اخیر', '🚫 کاربران مسدود شده', '👥 مشتریان', '🔙 بازگشت'],
+        )
+
         user_panel = keyboards.get_user_panel_keyboard(UserRole.MIDDLE_MANAGER)
         user_panel_texts = [button.text for row in user_panel.keyboard for button in row]
         self.assertIn('⚙️ تنظیمات کاربری', user_panel_texts)

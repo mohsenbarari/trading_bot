@@ -1,10 +1,19 @@
 # bot/handlers/panel.py
 """هندلرهای پنل کاربر و مدیریت"""
 
+import os
+from datetime import datetime, time as dt_time, timedelta, timezone
 from aiogram import Router, types, F
 from aiogram.filters import Command
+from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from fastapi import HTTPException
+from sqlalchemy import or_, select
+from sqlalchemy.orm import joinedload, selectinload
 from models.user import User
+from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
+from models.trade import Trade
 from bot.keyboards import (
     get_user_panel_keyboard, 
     get_admin_panel_keyboard, 
@@ -21,9 +30,29 @@ from core.enums import UserRole
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.services.user_account_status_service import is_user_global_web_locked
+from core.services.trade_history_export_service import (
+    build_trade_history_date_range_label,
+    build_trade_history_export_rows,
+    generate_trade_history_pdf_file,
+)
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 
 router = Router()
+
+
+class UserPanelBlockCallback(CallbackData, prefix="user_panel_block"):
+    action: str
+    user_id: int
+
+
+class UserPanelCustomerCallback(CallbackData, prefix="user_panel_customer"):
+    action: str
+    relation_id: int = 0
+
+
+USER_PANEL_RECENT_TRADES_TEXT = "📄 معاملات اخیر"
+USER_PANEL_BLOCKED_USERS_TEXT = "🚫 کاربران مسدود شده"
+USER_PANEL_CUSTOMERS_TEXT = "👥 مشتریان"
 
 
 def _settings_admin_write_decision(operation: str):
@@ -77,6 +106,9 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
         "⚙️ تنظیمات": lambda: handle_simple_settings_button(message, user),
         "⚙️ تنظیمات سیستم": lambda: handle_admin_settings_button(message, state, user),
         "📊 تاریخچه معاملات من": lambda: show_my_trade_history(message, state, user),
+        USER_PANEL_RECENT_TRADES_TEXT: lambda: show_recent_trades_pdf(message, state, user),
+        USER_PANEL_BLOCKED_USERS_TEXT: lambda: show_user_panel_blocked_users(message, state, user),
+        USER_PANEL_CUSTOMERS_TEXT: lambda: show_user_panel_customers(message, state, user),
         "➕ ارسال لینک دعوت": lambda: start_invitation_creation(message, state, user),
         "📦 مدیریت کالاها": lambda: handle_manage_commodities(message, user, state),
         "👥 مدیریت کاربران": lambda: handle_users_menu(message, user, state),
@@ -106,6 +138,22 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
 
     # حذف پیام کاربر و لنگر قبلی
     await delete_previous_anchor(message.bot, message.chat.id, delay=DeleteDelay.DEFAULT.value)
+
+    is_customer_user = False
+    if user.role == UserRole.STANDARD:
+        from core.services.customer_relation_service import is_user_customer
+
+        async with AsyncSessionLocal() as session:
+            is_customer_user = await is_user_customer(session, user.id)
+
+    if user.role == UserRole.STANDARD and not is_customer_user:
+        anchor_msg = await message.answer(
+            "👤 **پنل کاربر**\n\nگزینه مورد نظر را انتخاب کنید:",
+            parse_mode="Markdown",
+            reply_markup=get_user_panel_keyboard(user.role, standard_actions=True),
+        )
+        set_anchor(message.chat.id, anchor_msg.message_id)
+        return
     
     async with AsyncSessionLocal() as session:
         await attach_customer_management_names(session, [user])
@@ -182,6 +230,387 @@ async def handle_simple_settings_button(message: types.Message, user: Optional[U
     if not user: return
     
     await message.answer("🚧 بخش تنظیمات کاربری در حال توسعه است.")
+
+
+def _user_panel_back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 بازگشت به پنل کاربر", callback_data=UserPanelCustomerCallback(action="back").pack())]
+        ]
+    )
+
+
+def _safe_filename_subject(value: object, fallback: str = "history") -> str:
+    subject = str(value or fallback).strip() or fallback
+    return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in subject)
+
+
+async def _load_recent_user_trades(user_id: int, *, from_date, to_date) -> list[Trade]:
+    query = (
+        select(Trade)
+        .options(
+            selectinload(Trade.offer_user),
+            selectinload(Trade.responder_user),
+            selectinload(Trade.commodity),
+            selectinload(Trade.offer),
+        )
+        .where(or_(Trade.offer_user_id == user_id, Trade.responder_user_id == user_id))
+        .where(Trade.created_at >= datetime.combine(from_date, dt_time.min))
+        .where(Trade.created_at < datetime.combine(to_date + timedelta(days=1), dt_time.min))
+        .order_by(Trade.created_at.desc())
+    )
+    async with AsyncSessionLocal() as session:
+        return list((await session.execute(query)).scalars().all())
+
+
+@router.message(F.text == USER_PANEL_RECENT_TRADES_TEXT)
+async def show_recent_trades_pdf(message: types.Message, state: FSMContext, user: Optional[User]):
+    if not user:
+        return
+
+    today = datetime.now(timezone.utc).date()
+    from_date = today - timedelta(days=6)
+    trades = await _load_recent_user_trades(user.id, from_date=from_date, to_date=today)
+    if not trades:
+        await message.answer("⚠️ در هفت روز گذشته معامله‌ای برای دانلود وجود ندارد.")
+        return
+
+    output_path = None
+    try:
+        subject_name = getattr(user, "account_name", None) or user_display_name(user, "پروفایل من")
+        output_path = generate_trade_history_pdf_file(
+            subject_name=subject_name,
+            date_range_label=build_trade_history_date_range_label(from_date, today),
+            rows=build_trade_history_export_rows(trades, user.id),
+        )
+        await message.answer_document(
+            document=FSInputFile(output_path, filename=f"trade_history_{_safe_filename_subject(subject_name)}.pdf"),
+            caption="📄 معاملات اخیر شما در هفت روز گذشته",
+        )
+    except Exception as exc:
+        await message.answer(f"❌ خطا در ایجاد فایل معاملات اخیر: {exc}")
+    finally:
+        if output_path and os.path.exists(output_path):
+            os.remove(output_path)
+
+
+def get_user_panel_blocked_keyboard(blocked_users: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for blocked_user in blocked_users[:10]:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"رفع مسدودیت: {blocked_user['account_name']}",
+                callback_data=UserPanelBlockCallback(action="unblock", user_id=blocked_user["id"]).pack(),
+            )
+        ])
+    rows.append([
+        InlineKeyboardButton(text="🔙 بازگشت به پنل کاربر", callback_data=UserPanelBlockCallback(action="back", user_id=0).pack())
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _render_user_panel_blocked_users(message: types.Message, user_id: int) -> None:
+    from core.services.block_service import get_blocked_users
+
+    async with AsyncSessionLocal() as session:
+        blocked_users = await get_blocked_users(session, user_id)
+
+    if not blocked_users:
+        await message.answer(
+            "📋 لیست کاربران مسدود شده شما خالی است.",
+            reply_markup=_user_panel_back_keyboard(),
+        )
+        return
+
+    await message.answer(
+        "📋 **کاربران مسدود شده**\n\nبرای رفع مسدودیت روی نام کاربر بزنید:",
+        parse_mode="Markdown",
+        reply_markup=get_user_panel_blocked_keyboard(blocked_users),
+    )
+
+
+@router.message(F.text == USER_PANEL_BLOCKED_USERS_TEXT)
+async def show_user_panel_blocked_users(message: types.Message, state: FSMContext, user: Optional[User]):
+    if not user:
+        return
+    await _render_user_panel_blocked_users(message, user.id)
+
+
+@router.callback_query(UserPanelBlockCallback.filter(F.action == "unblock"))
+async def unblock_user_from_user_panel(
+    callback: types.CallbackQuery,
+    callback_data: UserPanelBlockCallback,
+    user: Optional[User],
+):
+    if not user:
+        await callback.answer()
+        return
+
+    from core.services.block_service import get_blocked_users, unblock_user
+
+    async with AsyncSessionLocal() as session:
+        success, result_message = await unblock_user(session, user.id, callback_data.user_id)
+        blocked_users = await get_blocked_users(session, user.id)
+
+    await callback.answer(result_message, show_alert=not success)
+    if blocked_users:
+        await callback.message.edit_text(
+            "📋 **کاربران مسدود شده**\n\nبرای رفع مسدودیت روی نام کاربر بزنید:",
+            parse_mode="Markdown",
+            reply_markup=get_user_panel_blocked_keyboard(blocked_users),
+        )
+    else:
+        await callback.message.edit_text(
+            "📋 لیست کاربران مسدود شده شما خالی است.",
+            reply_markup=_user_panel_back_keyboard(),
+        )
+
+
+@router.callback_query(UserPanelBlockCallback.filter(F.action == "back"))
+async def back_to_user_panel_from_blocked(callback: types.CallbackQuery, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
+    await callback.answer()
+
+
+def _customer_status_label(status: object) -> str:
+    value = getattr(status, "value", status)
+    return {
+        CustomerRelationStatus.PENDING.value: "در انتظار ثبت‌نام",
+        CustomerRelationStatus.ACTIVE.value: "فعال",
+        CustomerRelationStatus.EXPIRED.value: "منقضی",
+        CustomerRelationStatus.REVOKED.value: "لغو شده",
+        CustomerRelationStatus.DELETED.value: "حذف شده",
+    }.get(str(value), str(value or "نامشخص"))
+
+
+def _customer_tier_label(tier: object) -> str:
+    value = getattr(tier, "value", tier)
+    return {
+        CustomerTier.TIER_1.value: "سطح ۱",
+        CustomerTier.TIER_2.value: "سطح ۲",
+    }.get(str(value), str(value or "نامشخص"))
+
+
+def _customer_relation_name(relation: CustomerRelation) -> str:
+    customer_user = getattr(relation, "customer_user", None)
+    return (
+        getattr(relation, "management_name", None)
+        or getattr(customer_user, "account_name", None)
+        or f"مشتری #{getattr(relation, 'id', '')}"
+    )
+
+
+def get_user_panel_customers_keyboard(relations: list[CustomerRelation]) -> InlineKeyboardMarkup:
+    rows = []
+    for relation in relations[:10]:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"👤 {_customer_relation_name(relation)} | {_customer_status_label(relation.status)}",
+                callback_data=UserPanelCustomerCallback(action="detail", relation_id=relation.id).pack(),
+            )
+        ])
+    rows.append([
+        InlineKeyboardButton(text="➕ دعوت مشتری", callback_data=UserPanelCustomerCallback(action="invite").pack())
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🔙 بازگشت به پنل کاربر", callback_data=UserPanelCustomerCallback(action="back").pack())
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_customer_detail_keyboard(relation: CustomerRelation) -> InlineKeyboardMarkup:
+    rows = []
+    status_value = getattr(relation.status, "value", relation.status)
+    if status_value in (CustomerRelationStatus.PENDING.value, CustomerRelationStatus.ACTIVE.value):
+        action_label = "❌ لغو دعوت مشتری" if status_value == CustomerRelationStatus.PENDING.value else "❌ اخراج مشتری"
+        rows.append([
+            InlineKeyboardButton(
+                text=action_label,
+                callback_data=UserPanelCustomerCallback(action="ask_unlink", relation_id=relation.id).pack(),
+            )
+        ])
+    rows.append([
+        InlineKeyboardButton(text="🔙 بازگشت به مشتریان", callback_data=UserPanelCustomerCallback(action="list").pack())
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def get_customer_unlink_confirm_keyboard(relation: CustomerRelation) -> InlineKeyboardMarkup:
+    status_value = getattr(relation.status, "value", relation.status)
+    confirm_label = "✅ بله، لغو دعوت شود" if status_value == CustomerRelationStatus.PENDING.value else "✅ بله، اخراج شود"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=confirm_label,
+                    callback_data=UserPanelCustomerCallback(action="confirm_unlink", relation_id=relation.id).pack(),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ انصراف",
+                    callback_data=UserPanelCustomerCallback(action="detail", relation_id=relation.id).pack(),
+                )
+            ],
+        ]
+    )
+
+
+async def _load_user_panel_customer_relations(owner_user_id: int) -> list[CustomerRelation]:
+    from core.services.customer_relation_service import list_owner_customer_relations
+
+    async with AsyncSessionLocal() as session:
+        return await list_owner_customer_relations(session, owner_user_id=owner_user_id)
+
+
+async def _load_user_panel_customer_relation(owner_user_id: int, relation_id: int) -> CustomerRelation | None:
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(CustomerRelation)
+            .options(joinedload(CustomerRelation.customer_user))
+            .where(
+                CustomerRelation.id == relation_id,
+                CustomerRelation.owner_user_id == owner_user_id,
+                CustomerRelation.deleted_at.is_(None),
+            )
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+
+def _customer_relation_detail_text(relation: CustomerRelation) -> str:
+    customer_user = getattr(relation, "customer_user", None)
+    lines = [
+        f"👤 **{_customer_relation_name(relation)}**",
+        "",
+        f"وضعیت: {_customer_status_label(relation.status)}",
+        f"سطح مشتری: {_customer_tier_label(relation.customer_tier)}",
+    ]
+    mobile_number = getattr(customer_user, "mobile_number", None)
+    if mobile_number:
+        lines.append(f"شماره: `{mobile_number}`")
+    return "\n".join(lines)
+
+
+async def _edit_or_answer_customers_panel(target, owner_user_id: int, *, edit: bool) -> None:
+    relations = await _load_user_panel_customer_relations(owner_user_id)
+    text = "👥 **مشتریان شما**\n\n"
+    if relations:
+        text += "برای مشاهده جزئیات یا اخراج مشتری، روی نام او بزنید."
+    else:
+        text += "هنوز مشتری ثبت نشده است."
+    keyboard = get_user_panel_customers_keyboard(relations)
+    if edit:
+        await target.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await target.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+@router.message(F.text == USER_PANEL_CUSTOMERS_TEXT)
+async def show_user_panel_customers(message: types.Message, state: FSMContext, user: Optional[User]):
+    if not user:
+        return
+    await _edit_or_answer_customers_panel(message, user.id, edit=False)
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "list"))
+async def show_user_panel_customers_callback(callback: types.CallbackQuery, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
+    await callback.answer()
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "detail"))
+async def show_user_panel_customer_detail(
+    callback: types.CallbackQuery,
+    callback_data: UserPanelCustomerCallback,
+    user: Optional[User],
+):
+    if not user:
+        await callback.answer()
+        return
+    relation = await _load_user_panel_customer_relation(user.id, callback_data.relation_id)
+    if not relation:
+        await callback.answer("مشتری یافت نشد.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        _customer_relation_detail_text(relation),
+        parse_mode="Markdown",
+        reply_markup=get_customer_detail_keyboard(relation),
+    )
+    await callback.answer()
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "ask_unlink"))
+async def ask_unlink_user_panel_customer(
+    callback: types.CallbackQuery,
+    callback_data: UserPanelCustomerCallback,
+    user: Optional[User],
+):
+    if not user:
+        await callback.answer()
+        return
+    relation = await _load_user_panel_customer_relation(user.id, callback_data.relation_id)
+    if not relation:
+        await callback.answer("مشتری یافت نشد.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"آیا از اخراج/قطع ارتباط با **{_customer_relation_name(relation)}** مطمئن هستید؟",
+        parse_mode="Markdown",
+        reply_markup=get_customer_unlink_confirm_keyboard(relation),
+    )
+    await callback.answer()
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "confirm_unlink"))
+async def confirm_unlink_user_panel_customer(
+    callback: types.CallbackQuery,
+    callback_data: UserPanelCustomerCallback,
+    user: Optional[User],
+):
+    if not user:
+        await callback.answer()
+        return
+    from core.services.customer_relation_service import unlink_owner_customer_relation
+
+    try:
+        async with AsyncSessionLocal() as session:
+            relation = await unlink_owner_customer_relation(
+                session,
+                owner_user_id=user.id,
+                relation_id=callback_data.relation_id,
+            )
+            relation_name = _customer_relation_name(relation)
+    except HTTPException as exc:
+        await callback.answer(str(exc.detail), show_alert=True)
+        return
+    except Exception as exc:
+        await callback.answer(f"خطا در اخراج مشتری: {exc}", show_alert=True)
+        return
+
+    await callback.answer(f"{relation_name} از پروژه اخراج شد.", show_alert=True)
+    await _edit_or_answer_customers_panel(callback.message, user.id, edit=True)
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "invite"))
+async def user_panel_customer_invite_placeholder(callback: types.CallbackQuery, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    await callback.answer("دعوت مشتری از بات در مرحله بعد اضافه می‌شود.", show_alert=True)
+
+
+@router.callback_query(UserPanelCustomerCallback.filter(F.action == "back"))
+async def back_to_user_panel_from_customers(callback: types.CallbackQuery, user: Optional[User]):
+    if not user:
+        await callback.answer()
+        return
+    await callback.message.edit_text("👤 **پنل کاربر**\n\nاز دکمه‌های پایین پیام استفاده کنید.", parse_mode="Markdown")
+    await callback.answer()
 
 
 # --- تنظیمات: نام‌های فارسی و کلیدها ---

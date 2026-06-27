@@ -47,9 +47,10 @@ async def attach_customer_management_names(session, users: Iterable[User | None]
         return
 
     for relation in relations:
-        management_name = str(relation.management_name or "").strip()
-        if not relation.customer_user_id or not management_name:
+        management_name = str(getattr(relation, "management_name", None) or "").strip()
+        customer_user_id = getattr(relation, "customer_user_id", None)
+        if not customer_user_id or not management_name:
             continue
-        user = users_by_id.get(int(relation.customer_user_id))
+        user = users_by_id.get(int(customer_user_id))
         if user is not None:
             setattr(user, "customer_management_name", management_name)
