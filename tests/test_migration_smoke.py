@@ -61,6 +61,22 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('offer_publication_surface.create(bind, checkfirst=True)', migration)
         self.assertIn('offer_publication_status.create(bind, checkfirst=True)', migration)
 
+    def test_new_offer_public_id_backfills_cannot_use_independent_random_values(self):
+        allowed_legacy_random_backfills = {
+            'a6b7c8d9e0f1_add_offer_public_id.py',
+        }
+        offenders = []
+
+        for migration_path in (REPO_ROOT / 'migrations' / 'versions').glob('*.py'):
+            source = migration_path.read_text(encoding='utf-8')
+            if 'offer_public_id' not in source:
+                continue
+            uses_independent_randomness = 'random()' in source or 'clock_timestamp()' in source
+            if uses_independent_randomness and migration_path.name not in allowed_legacy_random_backfills:
+                offenders.append(migration_path.name)
+
+        self.assertEqual(offenders, [])
+
 
 if __name__ == '__main__':
     unittest.main()

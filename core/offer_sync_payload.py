@@ -25,6 +25,8 @@ def build_offer_sync_payload(offer: Any) -> dict[str, Any]:
         "quantity": offer.quantity,
         "remaining_quantity": offer.remaining_quantity,
         "price": offer.price,
+        "exclude_from_competitive_price": getattr(offer, "exclude_from_competitive_price", False),
+        "price_warning_type": getattr(offer, "price_warning_type", None),
         "is_wholesale": offer.is_wholesale,
         "lot_sizes": offer.lot_sizes,
         "original_lot_sizes": offer.original_lot_sizes,

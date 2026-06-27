@@ -91,6 +91,12 @@ Exit criteria:
 - No synced table is silently missing receiver coverage.
 - Iran's existing 3 preference rows have a documented dry-run backfill path.
 
+Implementation status - 2026-06-27:
+
+- Completed on `candidate/sync-parity-hardening` in commit `69b75c7d`.
+- `scripts/seed_shared_sync_tables.py --table user_notification_preferences --dry-run` is the documented read-only backfill preflight. On staging after deploy it reported `rows=1`, `sent=0`.
+- Production writes remain forbidden until a separate production repair step has dry-run output, exact row count, backup confirmation, and explicit user approval.
+
 ## Stage 2 - Offer Payload And Legacy Public Identity Drift
 
 Goal: stop new offer drift and define a safe policy for historical offer identity drift.
@@ -128,6 +134,19 @@ Exit criteria:
 - New offers cannot lose competitive-warning state.
 - Historical offer public-id drift is either repaired safely or explicitly classified as inactive historical exemption.
 - The parity checker knows how to compare legacy rows while the historical drift remains unresolved.
+
+Implementation status - 2026-06-27:
+
+- New offer sync payloads now include `exclude_from_competitive_price` and `price_warning_type`.
+- Receiver upsert coverage is guarded so these fields are kept during offer sync apply.
+- A migration guard prevents new migrations from independently random-backfilling `offers.offer_public_id`; the only allowed random backfill is the already-known historical migration `a6b7c8d9e0f1_add_offer_public_id.py`.
+- `scripts/report_offer_public_id_drift.py` provides a dry-run snapshot/compare report for historical `offer_public_id` mismatch. It performs no writes.
+- Dry-run mismatch policy:
+  - active offer public-id drift is repair-blocked;
+  - rows with request/publication/trade dependencies are repair-blocked;
+  - terminal offers without dependent references are classified as inactive historical exemption candidates;
+  - all other shapes require manual review.
+- Actual production repair is intentionally not implemented in this stage.
 
 ## Stage 3 - Source-Sequence Watermark
 

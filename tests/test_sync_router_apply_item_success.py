@@ -83,6 +83,28 @@ class UpdateBuilder:
 
 
 class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
+    def test_offer_upsert_preserves_competitive_warning_fields(self):
+        stmt = _build_upsert_stmt(
+            Offer,
+            "offers",
+            {
+                "id": 8,
+                "offer_public_id": "ofr_warning_8",
+                "version_id": 2,
+                "status": "active",
+                "exclude_from_competitive_price": True,
+                "price_warning_type": "buy_above_highest_active",
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (offer_public_id)", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertNotIn("offer_public_id = excluded.offer_public_id", compiled)
+        self.assertIn("exclude_from_competitive_price =", compiled)
+        self.assertIn("price_warning_type =", compiled)
+
     def test_user_notification_preference_upsert_uses_user_id_and_updated_at_guard(self):
         stmt = _build_upsert_stmt(
             UserNotificationPreference,
