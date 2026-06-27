@@ -9,6 +9,7 @@ from core.redis import get_redis_client
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, default_peer_server_url, normalize_server, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
+from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
@@ -3104,6 +3105,46 @@ async def resync_from_changelog(
     return {"status": "ok", "processed": processed, "errors": errors, "total_entries": len(entries)}
 
 
+def _parity_status_payload() -> dict[str, object]:
+    quick_tables = synced_parity_table_names("quick")
+    deep_tables = synced_parity_table_names("deep")
+    return {
+        "status": "available",
+        "comparison_status": "operator_script_required",
+        "snapshot_endpoint": "/api/sync/parity/snapshot",
+        "quick_table_count": len(quick_tables),
+        "deep_table_count": len(deep_tables),
+    }
+
+
+@router.get("/parity/snapshot")
+async def get_sync_parity_snapshot(
+    request: Request,
+    mode: str = "quick",
+    max_rows_per_table: int = 5000,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a redacted local parity snapshot for operator comparison."""
+    _require_observability_key(request)
+    normalized_mode = str(mode or "quick").strip().lower()
+    if normalized_mode not in {"quick", "deep"}:
+        raise HTTPException(status_code=400, detail="mode must be quick or deep")
+    if max_rows_per_table < 1 or max_rows_per_table > 50000:
+        raise HTTPException(status_code=400, detail="max_rows_per_table must be between 1 and 50000")
+
+    try:
+        snapshot = await build_database_parity_snapshot(
+            db,
+            mode=normalized_mode,
+            max_rows_per_table=max_rows_per_table,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    snapshot["server_mode"] = settings.server_mode
+    return snapshot
+
+
 @router.get("/health")
 async def get_sync_health(
     request: Request,
@@ -3216,6 +3257,7 @@ async def get_sync_health(
         },
         "active_publication_gate": active_publication_gate,
         "publication_reconciliation": publication_reconciliation,
+        "parity_status": _parity_status_payload(),
     }
     logger.info(
         "Sync health sampled",

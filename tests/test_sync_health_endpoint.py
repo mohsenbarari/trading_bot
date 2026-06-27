@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from api.routers.sync import get_sync_health
+from api.routers.sync import get_sync_health, get_sync_parity_snapshot
 
 
 PUBLICATION_SUMMARY = {
@@ -87,6 +87,8 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["publication_reconciliation"], PUBLICATION_SUMMARY)
+        self.assertEqual(payload["parity_status"]["status"], "available")
+        self.assertEqual(payload["parity_status"]["comparison_status"], "operator_script_required")
 
     async def test_sync_health_does_not_trust_host_header_for_loopback_bypass(self):
         request = SimpleNamespace(
@@ -139,8 +141,53 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["active_publication_gate"]["enabled"], True)
         self.assertEqual(payload["active_publication_gate"]["outage_class"], "long")
         self.assertEqual(payload["publication_reconciliation"]["status"], "action_required")
+        self.assertEqual(payload["parity_status"]["snapshot_endpoint"], "/api/sync/parity/snapshot")
         record_sync_health.assert_called_once()
         record_publication_health.assert_called_once()
+
+    async def test_parity_snapshot_requires_observability_key_and_redacted_snapshot_builder(self):
+        request = SimpleNamespace(
+            headers={"X-Observability-Api-Key": "obs-key"},
+            url=SimpleNamespace(path="/api/sync/parity/snapshot"),
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+        expected = {"status": "ok", "mode": "quick", "tables": {}}
+
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch(
+            "api.routers.sync.build_database_parity_snapshot",
+            new=AsyncMock(return_value=dict(expected)),
+        ) as builder:
+            payload = await get_sync_parity_snapshot(
+                request=request,
+                mode="quick",
+                max_rows_per_table=25,
+                db=FakeDB(),
+            )
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["server_mode"], "foreign")
+        builder.assert_awaited_once()
+        self.assertEqual(builder.await_args.kwargs["mode"], "quick")
+        self.assertEqual(builder.await_args.kwargs["max_rows_per_table"], 25)
+
+    async def test_parity_snapshot_rejects_invalid_mode_and_limit(self):
+        request = SimpleNamespace(
+            headers={"X-Observability-Api-Key": "obs-key"},
+            url=SimpleNamespace(path="/api/sync/parity/snapshot"),
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_sync_parity_snapshot(request=request, mode="full", db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 400)
+
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_sync_parity_snapshot(request=request, max_rows_per_table=0, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 400)
 
 
 if __name__ == "__main__":

@@ -297,6 +297,26 @@ Exit criteria:
 - `/api/sync/health` distinguishes delivery health from parity health.
 - Operators can get table-level and record-level mismatch samples.
 
+Implementation status:
+
+- Completed on `candidate/sync-parity-hardening` in Stage 5.
+- Added `core/sync_parity.py` as the reusable parity engine:
+  - builds redacted per-table snapshots for `quick` and `deep` modes;
+  - uses stable identity keys per table such as `offer_public_id`, `trade_number`, `dedupe_key`, `token_hash`, `user_id`, and `(blocker_id, blocked_id)`;
+  - separates `business_hash`, `local_only_hash`, and `volatile_hash`;
+  - never emits raw row values, phone numbers, invitation tokens, token hashes, notification messages, or payload bodies.
+- Added `GET /api/sync/parity/snapshot`, protected by the existing narrow `X-Observability-Api-Key`/loopback access rule. The endpoint is read-only and defaults to quick mode with a bounded `max_rows_per_table`.
+- Added `parity_status` to `GET /api/sync/health` so delivery health and parity capability are reported separately. Health intentionally does not fetch the peer server; cross-server comparison remains operator-driven to avoid adding DB/network load to the health path.
+- Added `scripts/compare_sync_parity.py`:
+  - `snapshot` builds a local redacted snapshot from the current DB;
+  - `compare` compares two snapshot files or two authenticated snapshot URLs and returns non-zero for critical/business drift.
+- Severity model implemented:
+  - missing rows: `critical_drift`;
+  - shared business hash mismatch: `business_drift`;
+  - only local-only hash mismatch: `local_only_difference`;
+  - only volatile hash mismatch: `volatile_difference`.
+- Covered by regression tests for injected business drift, local-only differences, missing rows, volatile differences, sensitive-value redaction, health integration, snapshot endpoint validation, and operator script compare behavior.
+
 ## Stage 6 - Repair And Replay Tools
 
 Goal: make drift recovery safe, repeatable, and auditable.
