@@ -68,6 +68,7 @@ class UsersPublicRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("accountant_relations.status", compiled)
         self.assertNotIn("customer_relations.deleted_at", compiled)
         self.assertNotIn("accountant_relations.deleted_at", compiled)
+        self.assertIn("customer\\_%", compiled)
 
     async def test_read_public_user_returns_user_when_present(self):
         user = SimpleNamespace(
