@@ -198,6 +198,8 @@ class ChangeLogPayloadTests(unittest.TestCase):
                     "aggregate_table": "offers",
                     "aggregate_id": "12",
                     "aggregate_db_id": 12,
+                    "source_server": "foreign",
+                    "source_sequence": 77,
                     "authority_server": None,
                     "operation": "INSERT",
                     "authoritative_version": None,

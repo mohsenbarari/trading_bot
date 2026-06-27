@@ -56,6 +56,7 @@ from .upload_session import (
 )
 from .change_log import ChangeLog
 from .sync_block import SyncBlock
+from .sync_apply_watermark import SyncApplyWatermark
 
 __all__ = [
     # User & Auth
@@ -124,4 +125,5 @@ __all__ = [
     # Sync
     "ChangeLog",
     "SyncBlock",
+    "SyncApplyWatermark",
 ]

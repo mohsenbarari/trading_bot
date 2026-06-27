@@ -31,6 +31,8 @@ class SyncMetadataTests(unittest.TestCase):
                 "aggregate_table": "offers",
                 "aggregate_id": "ofr_12",
                 "aggregate_db_id": 12,
+                "source_server": "foreign",
+                "source_sequence": 77,
                 "authority_server": "iran",
                 "operation": "UPDATE",
                 "authoritative_version": 4,
@@ -51,6 +53,8 @@ class SyncMetadataTests(unittest.TestCase):
 
         self.assertEqual(metadata["aggregate_id"], "5")
         self.assertIsNone(metadata["authoritative_version"])
+        self.assertEqual(metadata["source_server"], "foreign")
+        self.assertEqual(metadata["source_sequence"], 91)
         self.assertEqual(metadata["event_sequence"], 91)
         self.assertEqual(metadata["outbox_id"], 91)
 

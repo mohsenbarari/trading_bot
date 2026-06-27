@@ -27,6 +27,7 @@ from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outb
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity
 from core.sync_protocol import build_sync_protocol_metadata
+from core.server_routing import current_server
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
         operation,
         data,
         change_log_id=change_log_id,
+        source_server=current_server(),
     )
     payload_json = json.dumps(payload, default=str)
 

@@ -12,7 +12,7 @@ from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
 from core.offer_sync_payload import build_offer_sync_payload
-from core.server_routing import default_peer_server_url
+from core.server_routing import current_server, default_peer_server_url
 from core.sync_metadata import (
     build_sync_metadata,
     build_sync_public_identity,
@@ -137,6 +137,7 @@ def change_log_entry_to_sync_item(entry) -> dict:
             entry.operation,
             data,
             change_log_id=entry.id,
+            source_server=current_server(),
         ),
     }
     public_identity = build_sync_public_identity(entry.table_name, entry.record_id, data)
@@ -168,6 +169,7 @@ def _rebuild_sync_item_payload(item: dict, data: dict) -> dict:
         str(refreshed.get("operation") or ""),
         data,
         change_log_id=coerce_positive_int(refreshed.get("change_log_id")),
+        source_server=current_server(),
     )
     public_identity = build_sync_public_identity(str(refreshed.get("table") or ""), refreshed.get("id"), data)
     if public_identity is not None:

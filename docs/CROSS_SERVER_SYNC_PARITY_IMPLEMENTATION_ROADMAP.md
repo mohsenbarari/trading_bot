@@ -186,6 +186,22 @@ Exit criteria:
 - Same-source event ordering is enforced generically.
 - Receiver can run in compatibility mode during rollout and strict mode after both servers are upgraded.
 
+Implementation status:
+
+- Completed on `candidate/sync-parity-hardening` in Stage 3.
+- `sync_meta` now carries explicit `source_server` and `source_sequence`; outgoing event, worker, and resync payload builders set the source from the local `server_mode`.
+- Added `sync_apply_watermarks` with unique `(source_server, aggregate_table, aggregate_key)` and `last_source_sequence`/`last_payload_hash`.
+- Receiver now:
+  - derives watermark identity from `sync_meta.aggregate_*` with metadata fallback;
+  - serializes same-aggregate apply checks with a PostgreSQL advisory transaction lock;
+  - ignores older same-source events before `_apply_item`;
+  - treats same sequence plus same payload hash as idempotent duplicate;
+  - reports same sequence plus different payload hash as a conflict without applying the row;
+  - records the watermark only after `_apply_item` returns `ok` or `ignored`;
+  - does not advance watermarks for deferred items until retry actually resolves.
+- Rollout remains compatibility-safe by default via `SYNC_WATERMARK_STRICT_MODE=false`; if the watermark table/check is unavailable, receiver logs `sync.watermark_compatibility_apply` and applies the item. Strict mode is reserved for after both servers are upgraded and repair tooling exists.
+- Covered by `tests/test_sync_router_watermarks.py`, updated sync metadata/worker tests, and migration smoke tests.
+
 ## Stage 4 - Table-Specific Business Invariants
 
 Goal: protect business truth beyond generic event ordering.

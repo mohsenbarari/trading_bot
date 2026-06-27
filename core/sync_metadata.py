@@ -172,15 +172,26 @@ def build_sync_metadata(
     data: Any,
     *,
     change_log_id: Any = None,
+    source_server: Any = None,
 ) -> dict[str, Any]:
     payload_data = data if isinstance(data, dict) else {}
     authoritative_version = coerce_positive_int(payload_data.get("version_id"))
     outbox_id = coerce_positive_int(change_log_id)
+    source_server_value = _string_or_none(source_server)
+    if source_server_value is None:
+        try:
+            from core.server_routing import current_server
+
+            source_server_value = current_server()
+        except Exception:
+            source_server_value = None
 
     return {
         "aggregate_table": table_name,
         "aggregate_id": _aggregate_identity(table_name, record_id, payload_data),
         "aggregate_db_id": record_id,
+        "source_server": source_server_value,
+        "source_sequence": outbox_id,
         "authority_server": _authority_server(table_name, payload_data),
         "operation": operation,
         "authoritative_version": authoritative_version,

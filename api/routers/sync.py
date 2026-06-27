@@ -6,7 +6,7 @@ from core.config import settings
 from core.audit_logger import audit_log
 from core.metrics import record_offer_publication_health, record_sync_conflict, record_sync_health
 from core.redis import get_redis_client
-from core.server_routing import SERVER_FOREIGN, current_server, default_peer_server_url, peer_server_url_for
+from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, default_peer_server_url, normalize_server, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
@@ -20,6 +20,7 @@ import time
 import json
 import logging
 from datetime import date as date_cls, datetime, time as time_cls, timezone
+from dataclasses import dataclass
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -182,6 +183,24 @@ COMPLETED_TRADE_PROTECTED_FIELDS = (
     "trade_number",
 )
 COMPLETED_TRADE_VISIBILITY_FIELDS = ("archived",)
+SYNC_WATERMARK_KNOWN_SOURCES = {SERVER_FOREIGN, SERVER_IRAN}
+
+
+@dataclass(frozen=True)
+class SyncWatermarkContext:
+    source_server: str
+    aggregate_table: str
+    aggregate_key: str
+    source_sequence: int
+    payload_hash: str
+    operation: str
+    record_id: str | None
+
+
+@dataclass(frozen=True)
+class SyncWatermarkDecision:
+    action: str
+    reason: str | None = None
 
 
 def _completed_trade_offer_id_from_sync(table: str, data: dict) -> int | None:
@@ -455,6 +474,7 @@ from models.trade_delivery_receipt import (
     TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES,
     TradeDeliveryReceipt,
 )
+from models.sync_apply_watermark import SyncApplyWatermark
 from models.commodity import Commodity, CommodityAlias
 from models.chat import Chat
 from models.chat_member import ChatMember
@@ -1939,6 +1959,217 @@ def _parse_item(item: dict):
     return table, operation, model, data, record_id
 
 
+def _sync_item_mapping(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _sync_item_source_server(item: dict) -> str | None:
+    sync_meta = _sync_item_mapping(item.get("sync_meta"))
+    source_server = sync_meta.get("source_server")
+    if not source_server:
+        protocol = _sync_item_mapping(item.get("sync_protocol"))
+        producer = _sync_item_mapping(protocol.get("producer"))
+        source_server = producer.get("server_mode")
+    normalized = normalize_server(source_server, default="")
+    return normalized if normalized in SYNC_WATERMARK_KNOWN_SOURCES else None
+
+
+def _sync_item_source_sequence(item: dict) -> int | None:
+    sync_meta = _sync_item_mapping(item.get("sync_meta"))
+    for value in (
+        sync_meta.get("source_sequence"),
+        sync_meta.get("outbox_id"),
+        item.get("change_log_id"),
+    ):
+        sequence = coerce_positive_int(value)
+        if sequence is not None:
+            return sequence
+    return None
+
+
+def _sync_item_aggregate_key(table: str, operation: str, record_id, data: dict, item: dict) -> tuple[str, str] | None:
+    sync_meta = _sync_item_mapping(item.get("sync_meta"))
+    aggregate_table = str(sync_meta.get("aggregate_table") or table or "").strip()
+    aggregate_key = str(sync_meta.get("aggregate_id") or "").strip()
+    if aggregate_table and aggregate_key:
+        return aggregate_table, aggregate_key
+
+    fallback_meta = build_sync_metadata(table, record_id, operation, data)
+    aggregate_table = str(fallback_meta.get("aggregate_table") or "").strip()
+    aggregate_key = str(fallback_meta.get("aggregate_id") or "").strip()
+    if aggregate_table and aggregate_key:
+        return aggregate_table, aggregate_key
+    return None
+
+
+def _sync_item_payload_hash(table: str, operation: str, record_id, data: dict) -> str:
+    canonical = {
+        "table": table,
+        "operation": operation,
+        "record_id": record_id,
+        "data": data,
+    }
+    encoded = json.dumps(canonical, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _sync_watermark_context_from_item(
+    item: dict,
+    *,
+    table: str,
+    operation: str,
+    record_id,
+    data: dict,
+) -> SyncWatermarkContext | None:
+    source_server = _sync_item_source_server(item)
+    source_sequence = _sync_item_source_sequence(item)
+    aggregate_identity = _sync_item_aggregate_key(table, operation, record_id, data, item)
+    if source_server is None or source_sequence is None or aggregate_identity is None:
+        return None
+
+    aggregate_table, aggregate_key = aggregate_identity
+    return SyncWatermarkContext(
+        source_server=source_server,
+        aggregate_table=aggregate_table,
+        aggregate_key=aggregate_key,
+        source_sequence=source_sequence,
+        payload_hash=_sync_item_payload_hash(table, operation, record_id, data),
+        operation=str(operation or ""),
+        record_id=str(record_id) if record_id is not None else None,
+    )
+
+
+def _sync_watermark_lock_key(context: SyncWatermarkContext) -> str:
+    return f"{context.source_server}:{context.aggregate_table}:{context.aggregate_key}"
+
+
+async def _lock_sync_watermark_context(db: AsyncSession, context: SyncWatermarkContext) -> None:
+    await db.execute(
+        sa_text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": _sync_watermark_lock_key(context)},
+    )
+
+
+async def _evaluate_sync_watermark(db: AsyncSession, context: SyncWatermarkContext | None) -> SyncWatermarkDecision:
+    if context is None:
+        return SyncWatermarkDecision("apply")
+
+    try:
+        await _lock_sync_watermark_context(db, context)
+        result = await db.execute(
+            select(SyncApplyWatermark)
+            .where(
+                SyncApplyWatermark.source_server == context.source_server,
+                SyncApplyWatermark.aggregate_table == context.aggregate_table,
+                SyncApplyWatermark.aggregate_key == context.aggregate_key,
+            )
+            .with_for_update()
+        )
+        watermark = _result_scalar_first(result)
+    except Exception as exc:
+        if getattr(settings, "sync_watermark_strict_mode", False):
+            raise
+        logger.warning(
+            "Sync watermark unavailable; applying in compatibility mode",
+            extra={
+                "event": "sync.watermark_compatibility_apply",
+                "source_server": context.source_server,
+                "aggregate_table": context.aggregate_table,
+                "aggregate_key_hash": hashlib.sha256(context.aggregate_key.encode()).hexdigest()[:16],
+                **_summarize_exception(exc),
+            },
+        )
+        return SyncWatermarkDecision("apply", "watermark_unavailable_compatibility")
+
+    if watermark is None:
+        return SyncWatermarkDecision("apply")
+
+    current_sequence = coerce_positive_int(getattr(watermark, "last_source_sequence", None)) or 0
+    current_hash = str(getattr(watermark, "last_payload_hash", "") or "")
+    if context.source_sequence > current_sequence:
+        return SyncWatermarkDecision("apply")
+    if context.source_sequence < current_sequence:
+        return SyncWatermarkDecision("stale", "older_source_sequence")
+    if context.payload_hash == current_hash:
+        return SyncWatermarkDecision("duplicate", "same_source_sequence_same_payload")
+    return SyncWatermarkDecision("conflict", "same_source_sequence_different_payload")
+
+
+async def _record_sync_watermark_applied(db: AsyncSession, context: SyncWatermarkContext | None) -> None:
+    if context is None:
+        return
+
+    stmt = pg_insert(SyncApplyWatermark).values(
+        source_server=context.source_server,
+        aggregate_table=context.aggregate_table,
+        aggregate_key=context.aggregate_key,
+        last_source_sequence=context.source_sequence,
+        last_payload_hash=context.payload_hash,
+        last_operation=context.operation,
+        last_record_id=context.record_id,
+    )
+    update_values = {
+        "last_source_sequence": stmt.excluded.last_source_sequence,
+        "last_payload_hash": stmt.excluded.last_payload_hash,
+        "last_operation": stmt.excluded.last_operation,
+        "last_record_id": stmt.excluded.last_record_id,
+        "updated_at": sa_func.now(),
+    }
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["source_server", "aggregate_table", "aggregate_key"],
+        set_=update_values,
+        where=SyncApplyWatermark.last_source_sequence <= stmt.excluded.last_source_sequence,
+    )
+
+    try:
+        await db.execute(stmt, execution_options={"is_sync": True})
+    except Exception as exc:
+        if getattr(settings, "sync_watermark_strict_mode", False):
+            raise
+        logger.warning(
+            "Could not persist sync watermark; continuing in compatibility mode",
+            extra={
+                "event": "sync.watermark_persist_failed",
+                "source_server": context.source_server,
+                "aggregate_table": context.aggregate_table,
+                "aggregate_key_hash": hashlib.sha256(context.aggregate_key.encode()).hexdigest()[:16],
+                "source_sequence": context.source_sequence,
+                **_summarize_exception(exc),
+            },
+        )
+
+
+def _log_sync_watermark_decision(context: SyncWatermarkContext, decision: SyncWatermarkDecision) -> None:
+    record_sync_conflict(
+        server_mode=settings.server_mode,
+        table=context.aggregate_table,
+        reason=decision.reason or decision.action,
+    )
+    logger.warning(
+        "Sync item blocked by source-sequence watermark",
+        extra={
+            "event": "sync.watermark_item_blocked",
+            "source_server": context.source_server,
+            "aggregate_table": context.aggregate_table,
+            "aggregate_key_hash": hashlib.sha256(context.aggregate_key.encode()).hexdigest()[:16],
+            "source_sequence": context.source_sequence,
+            "operation": context.operation,
+            "reason": decision.reason,
+            "decision": decision.action,
+        },
+    )
+
+
+def _sync_watermark_error_detail(context: SyncWatermarkContext, decision: SyncWatermarkDecision) -> dict[str, object]:
+    return {
+        "table": context.aggregate_table,
+        "record_id": context.record_id,
+        "reason": decision.reason or decision.action,
+        "source_server": context.source_server,
+        "source_sequence": context.source_sequence,
+    }
+
+
 @router.post("/receive")
 async def receive_sync_data(
     items: list[dict], 
@@ -2038,6 +2269,37 @@ async def receive_sync_data(
             table, operation, model, data, record_id = parsed
 
             try:
+                watermark_context = _sync_watermark_context_from_item(
+                    item,
+                    table=table,
+                    operation=operation,
+                    record_id=record_id,
+                    data=data,
+                )
+                watermark_decision = await _evaluate_sync_watermark(db, watermark_context)
+                if watermark_context is not None and watermark_decision.action == "stale":
+                    _log_sync_watermark_decision(watermark_context, watermark_decision)
+                    processed_count += 1
+                    continue
+                if watermark_context is not None and watermark_decision.action == "duplicate":
+                    processed_count += 1
+                    logger.info(
+                        "Duplicate sync item ignored by source-sequence watermark",
+                        extra={
+                            "event": "sync.watermark_duplicate_ignored",
+                            "source_server": watermark_context.source_server,
+                            "aggregate_table": watermark_context.aggregate_table,
+                            "source_sequence": watermark_context.source_sequence,
+                        },
+                    )
+                    continue
+                if watermark_context is not None and watermark_decision.action == "conflict":
+                    _log_sync_watermark_decision(watermark_context, watermark_decision)
+                    error_detail = _sync_watermark_error_detail(watermark_context, watermark_decision)
+                    errors.append(error_detail)
+                    error_details.append(error_detail)
+                    continue
+
                 deleted_user_telegram_effect = await _synced_deleted_user_telegram_effect(
                     db,
                     table=table,
@@ -2047,6 +2309,7 @@ async def receive_sync_data(
                 )
                 result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
                 if result in {'ok', 'ignored'}:
+                    await _record_sync_watermark_applied(db, watermark_context)
                     processed_count += 1
                     if table == "users":
                         user_changes_applied = True
@@ -2068,7 +2331,7 @@ async def receive_sync_data(
                             },
                         )
                 elif result == 'deferred':
-                    deferred_items.append((table, operation, model, data, record_id))
+                    deferred_items.append((item, table, operation, model, data, record_id, watermark_context))
                 else:
                     errors.append(f"{table}:{record_id}")
             except Exception as e:
@@ -2086,8 +2349,32 @@ async def receive_sync_data(
         # --- Pass 2: Retry deferred items (FK violations) ---
         if deferred_items:
             logger.info(f"🔄 Retrying {len(deferred_items)} deferred items...")
-            for table, operation, model, data, record_id in deferred_items:
+            for item, table, operation, model, data, record_id, watermark_context in deferred_items:
                 try:
+                    watermark_decision = await _evaluate_sync_watermark(db, watermark_context)
+                    if watermark_context is not None and watermark_decision.action == "stale":
+                        _log_sync_watermark_decision(watermark_context, watermark_decision)
+                        processed_count += 1
+                        continue
+                    if watermark_context is not None and watermark_decision.action == "duplicate":
+                        processed_count += 1
+                        logger.info(
+                            "Deferred duplicate sync item ignored by source-sequence watermark",
+                            extra={
+                                "event": "sync.watermark_deferred_duplicate_ignored",
+                                "source_server": watermark_context.source_server,
+                                "aggregate_table": watermark_context.aggregate_table,
+                                "source_sequence": watermark_context.source_sequence,
+                            },
+                        )
+                        continue
+                    if watermark_context is not None and watermark_decision.action == "conflict":
+                        _log_sync_watermark_decision(watermark_context, watermark_decision)
+                        error_detail = _sync_watermark_error_detail(watermark_context, watermark_decision)
+                        errors.append(error_detail)
+                        error_details.append(error_detail)
+                        continue
+
                     deleted_user_telegram_effect = await _synced_deleted_user_telegram_effect(
                         db,
                         table=table,
@@ -2097,6 +2384,7 @@ async def receive_sync_data(
                     )
                     result = await _apply_item(db, table, operation, record_id, data, model, new_offers, terminal_offers)
                     if result in {'ok', 'ignored'}:
+                        await _record_sync_watermark_applied(db, watermark_context)
                         processed_count += 1
                         if table == "users":
                             user_changes_applied = True
@@ -2491,6 +2779,7 @@ async def resync_from_changelog(
                             entry.operation,
                             data,
                             change_log_id=entry.id,
+                            source_server=current_server(),
                         ),
                     }
                     public_identity = build_sync_public_identity(entry.table_name, entry.record_id, data)
