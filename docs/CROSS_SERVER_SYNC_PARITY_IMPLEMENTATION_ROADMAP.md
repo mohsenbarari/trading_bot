@@ -467,6 +467,21 @@ Exit criteria:
 - No unexpected retry backlog remains.
 - Cleanup report confirms no test data leak.
 
+Implementation status:
+
+- Added `scripts/run_sync_parity_stage8_staging_rollout.py` as the Stage 8 rollout gate.
+- The runner is fail-closed:
+  - `--mode plan` writes an auditable rollout plan and creates only local JSON artifacts under `/tmp` or the provided artifact directory.
+  - `--mode preflight` runs only non-mutating checks: local sync guarantee tests, stale/watermark guards, staging `ps`/`health`, quick/deep parity snapshots, delivery matrix catalog, candidate full-matrix dry-run, targeted join dry-run, repair dry-run, and cleanup dry-run.
+  - `--mode execute` is the only mode allowed to create staging data. It requires `SYNC_PARITY_STAGE8_STAGING_CONFIRM=execute-stage8-staging-rollout`.
+- The runner records the exact synthetic prefix and keeps cleanup scoped to that prefix. The mutating plan includes a no-pressure candidate matrix, optional controlled-load matrix, exact-prefix cleanup, post-test parity snapshots, and post-test staging health.
+- Stage 8 does not use production full-matrix commands. Production deploy remains forbidden in this stage.
+- Added `tests/test_sync_parity_stage8_staging_rollout.py` to lock the rollout contract:
+  - default plan is non-mutating;
+  - mutating staging execution is blocked without explicit confirmation;
+  - preflight mode cannot run mutating commands;
+  - plan includes parity, delivery, out-of-order, repair, and cleanup gates.
+
 ## Stage 9 - Production Rollout
 
 Goal: introduce parity guarantees safely.
