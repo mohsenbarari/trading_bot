@@ -257,7 +257,7 @@ async def _load_recent_user_trades(user_id: int, *, from_date, to_date) -> list[
         .where(or_(Trade.offer_user_id == user_id, Trade.responder_user_id == user_id))
         .where(Trade.created_at >= datetime.combine(from_date, dt_time.min))
         .where(Trade.created_at < datetime.combine(to_date + timedelta(days=1), dt_time.min))
-        .order_by(Trade.created_at.desc())
+        .order_by(Trade.created_at.asc(), Trade.id.asc())
     )
     async with AsyncSessionLocal() as session:
         return list((await session.execute(query)).scalars().all())

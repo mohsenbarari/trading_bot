@@ -29,10 +29,12 @@ class FakeDB:
     def __init__(self, execute_results=None, users=None):
         self.execute_results = list(execute_results or [])
         self.users = users or {}
+        self.executed_statements = []
 
     async def execute(self, stmt):
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
+        self.executed_statements.append(stmt)
         return self.execute_results.pop(0)
 
     async def get(self, model, user_id):
@@ -86,6 +88,7 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("trade_history_owner5.xlsx", response.headers.get("content-disposition", ""))
         self.assertEqual(generate_excel.call_args.kwargs["subject_name"], "owner5")
         self.assertEqual(generate_excel.call_args.kwargs["date_range_label"], "LABEL")
+        self.assertIn("ORDER BY trades.created_at ASC, trades.id ASC", str(db.executed_statements[0]))
 
     async def test_export_trades_with_user_uses_target_perspective_for_privileged_target_history(self):
         trade = SimpleNamespace(
@@ -104,7 +107,14 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
         )
         context = self.make_context(owner_id=5, account_name="owner5")
         relation = SimpleNamespace(owner_user_id=5)
-        fake_query = SimpleNamespace(order_by=lambda *args, **kwargs: SimpleNamespace())
+        class FakeQuery:
+            order_by_args = None
+
+            def order_by(self, *args, **kwargs):
+                self.order_by_args = args
+                return self
+
+        fake_query = FakeQuery()
 
         with patch(
             "api.routers.trades._build_trades_with_user_query",
@@ -133,6 +143,7 @@ class TradesRouterHistoryExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.path, "/tmp/history.pdf")
         self.assertEqual(response.media_type, "application/pdf")
         build_rows.assert_called_once_with([trade], 77)
+        self.assertEqual([str(arg) for arg in fake_query.order_by_args], ["trades.created_at ASC", "trades.id ASC"])
 
     async def test_export_endpoints_reject_empty_results(self):
         context = self.make_context()

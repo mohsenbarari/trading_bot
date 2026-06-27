@@ -14,12 +14,12 @@ from models.trade import TradeType
 @dataclass(frozen=True)
 class TradeHistoryExportRow:
     trade_number: int | None
+    date_time_label: str
+    counterparty_name: str
     trade_type_label: str
     commodity_name: str
     quantity: int
     price: int
-    date_label: str
-    time_label: str
 
 
 def _normalize_trade_type_value(value: object | None) -> str | None:
@@ -76,12 +76,12 @@ def build_trade_history_export_rows(trades: Sequence[object], perspective_user_i
         rows.append(
             TradeHistoryExportRow(
                 trade_number=getattr(trade, "trade_number", None),
+                date_time_label=to_jalali_str(getattr(trade, "created_at", None), "%Y/%m/%d %H:%M") or "---",
+                counterparty_name=resolve_counterparty_account_name_for_perspective(trade, perspective_user_id) or "---",
                 trade_type_label=resolve_trade_type_label_for_perspective(trade, perspective_user_id),
                 commodity_name=getattr(getattr(trade, "commodity", None), "name", "---"),
                 quantity=int(getattr(trade, "quantity", 0) or 0),
                 price=int(getattr(trade, "price", 0) or 0),
-                date_label=to_jalali_str(getattr(trade, "created_at", None), "%Y/%m/%d") or "---",
-                time_label=to_jalali_str(getattr(trade, "created_at", None), "%H:%M:%S") or "---",
             )
         )
     return rows
@@ -111,12 +111,12 @@ def _history_table_headers() -> list[str]:
     return [
         "ردیف",
         "شماره معامله",
+        "تاریخ و ساعت",
+        "طرف دیگر معامله",
         "نوع معامله",
         "کالا",
         "تعداد",
         "قیمت",
-        "تاریخ",
-        "ساعت",
     ]
 
 
@@ -164,19 +164,19 @@ def generate_trade_history_excel_file(
         row_values = [
             row_index - 4,
             row.trade_number or "-",
+            row.date_time_label,
+            row.counterparty_name,
             row.trade_type_label,
             row.commodity_name,
             row.quantity,
             row.price,
-            row.date_label,
-            row.time_label,
         ]
         for column_index, value in enumerate(row_values, start=1):
             cell = worksheet.cell(row=row_index, column=column_index, value=value)
             cell.alignment = center
 
     if hasattr(worksheet, "column_dimensions"):
-        widths = {"A": 8, "B": 18, "C": 14, "D": 18, "E": 12, "F": 18, "G": 16, "H": 14}
+        widths = {"A": 8, "B": 18, "C": 20, "D": 24, "E": 14, "F": 18, "G": 12, "H": 18}
         for column_name, width in widths.items():
             worksheet.column_dimensions[column_name].width = width
 
@@ -207,7 +207,10 @@ def generate_trade_history_pdf_file(
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     temp_file.close()
 
-    document = reportlab_platypus.SimpleDocTemplate(temp_file.name, pagesize=reportlab_pagesizes.A4)
+    document = reportlab_platypus.SimpleDocTemplate(
+        temp_file.name,
+        pagesize=reportlab_pagesizes.landscape(reportlab_pagesizes.A4),
+    )
     base_styles = reportlab_styles.getSampleStyleSheet()
     normal_parent = base_styles.get("Normal") if hasattr(base_styles, "get") else None
     title_style = reportlab_styles.ParagraphStyle(
@@ -225,24 +228,23 @@ def generate_trade_history_pdf_file(
         alignment=reportlab_enums.TA_RIGHT,
     )
 
-    table_data = [[_shape_rtl_text(header) for header in _history_table_headers()]]
+    table_data = [[_shape_rtl_text(header) for header in reversed(_history_table_headers())]]
     for index, row in enumerate(rows, start=1):
-        table_data.append(
-            [
-                str(index),
-                str(row.trade_number or "-"),
-                _shape_rtl_text(row.trade_type_label),
-                _shape_rtl_text(row.commodity_name),
-                str(row.quantity),
-                f"{row.price:,}",
-                row.date_label,
-                row.time_label,
-            ]
-        )
+        display_values = [
+            str(index),
+            str(row.trade_number or "-"),
+            row.date_time_label,
+            _shape_rtl_text(row.counterparty_name),
+            _shape_rtl_text(row.trade_type_label),
+            _shape_rtl_text(row.commodity_name),
+            str(row.quantity),
+            f"{row.price:,}",
+        ]
+        table_data.append(list(reversed(display_values)))
 
     table = reportlab_platypus.Table(
         table_data,
-        colWidths=[34, 64, 58, 72, 48, 68, 72, 56],
+        colWidths=[68, 44, 64, 52, 88, 84, 64, 34],
     )
     table.setStyle(
         reportlab_platypus.TableStyle(

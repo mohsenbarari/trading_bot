@@ -21,6 +21,8 @@ def make_trade():
         trade_number=10001,
         responder_user_id=2,
         trade_type=TradeType.BUY,
+        offer_user=SimpleNamespace(account_name="offer-side"),
+        responder_user=SimpleNamespace(account_name="responder-side"),
         commodity=SimpleNamespace(name="سکه"),
         quantity=3,
         price=150000,
@@ -47,6 +49,8 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].trade_number, 10001)
         self.assertEqual(rows[0].trade_type_label, "خرید")
+        self.assertEqual(rows[0].counterparty_name, "offer-side")
+        self.assertRegex(rows[0].date_time_label, r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}$")
         self.assertEqual(rows[0].commodity_name, "سکه")
 
     def test_resolve_counterparty_account_name_from_perspective(self):
@@ -90,8 +94,11 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
                 return cell
 
         class DummyWorkbook:
+            last_instance = None
+
             def __init__(self):
                 self.active = DummySheet()
+                DummyWorkbook.last_instance = self
 
             def save(self, filename):
                 with open(filename, "wb") as handle:
@@ -119,6 +126,16 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         try:
             self.assertTrue(filename.endswith(".xlsx"))
             self.assertTrue(os.path.exists(filename))
+            sheet = DummyWorkbook.last_instance.active
+            headers = [sheet.cell(4, column).value for column in range(1, 9)]
+            self.assertEqual(
+                headers,
+                ["ردیف", "شماره معامله", "تاریخ و ساعت", "طرف دیگر معامله", "نوع معامله", "کالا", "تعداد", "قیمت"],
+            )
+            row_values = [sheet.cell(5, column).value for column in range(1, 9)]
+            self.assertEqual(row_values[0:2], [1, 10001])
+            self.assertRegex(row_values[2], r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}$")
+            self.assertEqual(row_values[3:5], ["offer-side", "خرید"])
         finally:
             if os.path.exists(filename):
                 os.remove(filename)
@@ -133,9 +150,12 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
                     handle.write(b"pdf")
 
         class DummyTable:
+            last_instance = None
+
             def __init__(self, data, colWidths=None):
                 self.data = data
                 self.colWidths = colWidths
+                DummyTable.last_instance = self
 
             def setStyle(self, style):
                 self.style = style
@@ -166,6 +186,7 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         colors_mod.HexColor = lambda value: value
         pagesizes_mod = ModuleType("reportlab.lib.pagesizes")
         pagesizes_mod.A4 = (595, 842)
+        pagesizes_mod.landscape = lambda page_size: (page_size[1], page_size[0])
         platypus_mod = ModuleType("reportlab.platypus")
         platypus_mod.SimpleDocTemplate = DummyDoc
         platypus_mod.Table = DummyTable
@@ -216,6 +237,12 @@ class TradeHistoryExportServiceTests(unittest.TestCase):
         try:
             self.assertTrue(filename.endswith(".pdf"))
             self.assertTrue(os.path.exists(filename))
+            self.assertEqual(
+                DummyTable.last_instance.data[0],
+                ["قیمت", "تعداد", "کالا", "نوع معامله", "طرف دیگر معامله", "تاریخ و ساعت", "شماره معامله", "ردیف"],
+            )
+            self.assertEqual(DummyTable.last_instance.data[1][-1], "1")
+            self.assertEqual(DummyTable.last_instance.data[1][-2], "10001")
         finally:
             if os.path.exists(filename):
                 os.remove(filename)

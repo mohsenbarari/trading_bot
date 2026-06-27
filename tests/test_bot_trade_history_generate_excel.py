@@ -12,8 +12,12 @@ from models.trade import TradeType
 
 def make_trade():
     return SimpleNamespace(
+        id=1,
+        trade_number=10001,
         responder_user_id=2,
         trade_type=TradeType.BUY,
+        offer_user=SimpleNamespace(account_name="offer-owner"),
+        responder_user=SimpleNamespace(account_name="responder"),
         commodity=SimpleNamespace(name="سکه"),
         quantity=3,
         price=150000,
@@ -124,6 +128,8 @@ class BotTradeHistoryGenerateExcelTests(unittest.IsolatedAsyncioTestCase):
         buy_trade.responder_user = SimpleNamespace(account_name="responder")
 
         sell_trade = make_trade()
+        sell_trade.id = 2
+        sell_trade.trade_number = 10002
         sell_trade.responder_user_id = 99
         sell_trade.trade_type = TradeType.BUY
         sell_trade.offer_user = SimpleNamespace(account_name="offer-owner")
@@ -134,10 +140,14 @@ class BotTradeHistoryGenerateExcelTests(unittest.IsolatedAsyncioTestCase):
 
         try:
             sheet = DummyWorkbook.last_instance.active
-            self.assertEqual(sheet.cell(1, 5).value, "طرف معامله")
-            self.assertEqual(sheet.cell(2, 5).value, "offer-owner")
-            self.assertEqual(sheet.cell(3, 4).value, "فروش")
-            self.assertEqual(sheet.cell(3, 5).value, "other-side")
+            headers = [sheet.cell(4, column).value for column in range(1, 9)]
+            self.assertEqual(
+                headers,
+                ["ردیف", "شماره معامله", "تاریخ و ساعت", "طرف دیگر معامله", "نوع معامله", "کالا", "تعداد", "قیمت"],
+            )
+            self.assertEqual(sheet.cell(5, 4).value, "offer-owner")
+            self.assertEqual(sheet.cell(6, 5).value, "فروش")
+            self.assertEqual(sheet.cell(6, 4).value, "other-side")
         finally:
             if os.path.exists(filename):
                 os.remove(filename)

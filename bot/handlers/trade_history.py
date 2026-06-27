@@ -9,9 +9,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import joinedload
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from importlib import import_module
 import os
-import tempfile
 
 from models.user import User
 from models.trade import Trade, TradeType, TradeStatus
@@ -21,6 +19,7 @@ from core.db import AsyncSessionLocal
 from core.services.trade_history_export_service import (
     build_trade_history_date_range_label,
     build_trade_history_export_rows,
+    generate_trade_history_excel_file,
     generate_trade_history_pdf_file,
     resolve_counterparty_account_name_for_perspective,
 )
@@ -33,6 +32,24 @@ from bot.callbacks import (
 )
 
 router = Router()
+
+
+def _trade_created_sort_key(trade) -> tuple[float, int]:
+    created_at = getattr(trade, "created_at", None)
+    timestamp = 0.0
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        timestamp = created_at.timestamp()
+    try:
+        trade_id = int(getattr(trade, "id", 0) or 0)
+    except (TypeError, ValueError):
+        trade_id = 0
+    return timestamp, trade_id
+
+
+def _sort_trades_oldest_first(trades):
+    return sorted(trades, key=_trade_created_sort_key)
 
 
 def get_trade_history_keyboard(target_user_id: int) -> InlineKeyboardMarkup:
@@ -239,66 +256,21 @@ async def filter_trade_history(callback: types.CallbackQuery, callback_data: His
 # --- بقیه هندلرها (Excel, PDF, ...) ---
 
 async def generate_excel(trades, target_user, current_user) -> str:
-    """ایجاد فایل Excel با پشتیبانی RTL"""
-    openpyxl = import_module("openpyxl")
-    openpyxl_styles = import_module("openpyxl.styles")
-
-    Workbook = openpyxl.Workbook
-    Font = openpyxl_styles.Font
-    Alignment = openpyxl_styles.Alignment
-    PatternFill = openpyxl_styles.PatternFill
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Trade History"
-    ws.sheet_view.rightToLeft = True  # راست به چپ
-    
-    # هدر
-    is_self = target_user is None
-    if is_self:
-        headers = ["قیمت", "تعداد", "کالا", "نوع", "طرف معامله", "ساعت", "تاریخ"]
-    else:
-        headers = ["قیمت", "تعداد", "کالا", "نوع", "ساعت", "تاریخ"]
-        
-    header_fill = PatternFill(start_color="2C5282", end_color="2C5282", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF")
-    
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center")
-    
-    export_rows = build_trade_history_export_rows(trades, current_user.id)
-
-    # داده‌ها
-    for row_idx, (trade, export_row) in enumerate(zip(trades, export_rows), 2):
-        row_data = [
-            export_row.price,
-            export_row.quantity,
-            export_row.commodity_name,
-            export_row.trade_type_label,
-        ]
-        if is_self:
-            row_data.append(resolve_counterparty_account_name_for_perspective(trade, current_user.id))
-            
-        row_data.extend([
-            export_row.time_label,
-            export_row.date_label,
-        ])
-        
-        for col_idx, value in enumerate(row_data, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.alignment = Alignment(horizontal="center")
-    
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    wb.save(temp_file.name)
-    return temp_file.name
+    """ایجاد فایل Excel با استفاده از سرویس مشترک خروجی تاریخچه معاملات"""
+    ordered_trades = _sort_trades_oldest_first(trades)
+    export_rows = build_trade_history_export_rows(ordered_trades, current_user.id)
+    display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
+    return generate_trade_history_excel_file(
+        subject_name=display_name,
+        date_range_label=build_trade_history_date_range_label(None, None),
+        rows=export_rows,
+    )
 
 
 async def generate_pdf(trades, target_user, current_user, months: Optional[int] = None) -> str:
     """ایجاد فایل PDF با استفاده از سرویس مشترک خروجی تاریخچه معاملات"""
-    export_rows = build_trade_history_export_rows(trades, current_user.id)
+    ordered_trades = _sort_trades_oldest_first(trades)
+    export_rows = build_trade_history_export_rows(ordered_trades, current_user.id)
     display_name = user_display_name(target_user, "پروفایل من") if target_user else "پروفایل من"
 
     from_date = None

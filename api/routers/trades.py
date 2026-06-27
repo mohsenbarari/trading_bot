@@ -3862,7 +3862,7 @@ async def export_my_trades(
         to_date=to_date,
         commodity_id=commodity_id,
         commodity_query=commodity_query,
-    ).order_by(Trade.created_at.desc())
+    ).order_by(Trade.created_at.asc(), Trade.id.asc())
     trades = (await db.execute(query)).scalars().all()
     if not trades:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="معامله‌ای برای خروجی گرفتن یافت نشد.")
@@ -4030,7 +4030,7 @@ async def export_trades_with_user(
         commodity_id=commodity_id,
         commodity_query=commodity_query,
     )
-    trades = (await db.execute(query.order_by(Trade.created_at.desc()))).scalars().all()
+    trades = (await db.execute(query.order_by(Trade.created_at.asc(), Trade.id.asc()))).scalars().all()
     if not trades:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="معامله‌ای برای خروجی گرفتن یافت نشد.")
 

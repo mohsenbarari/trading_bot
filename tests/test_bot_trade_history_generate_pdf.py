@@ -110,6 +110,7 @@ class BotTradeHistoryGeneratePdfTests(unittest.IsolatedAsyncioTestCase):
         colors_mod.HexColor = lambda value: value
         pagesizes_mod = ModuleType("reportlab.lib.pagesizes")
         pagesizes_mod.A4 = (595, 842)
+        pagesizes_mod.landscape = lambda page_size: (page_size[1], page_size[0])
         platypus_mod = ModuleType("reportlab.platypus")
         platypus_mod.SimpleDocTemplate = DummyDoc
         platypus_mod.Table = DummyTable
