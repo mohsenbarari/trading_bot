@@ -517,6 +517,30 @@ Exit criteria:
 - Both servers report delivery clean and parity clean, excluding documented accepted local-only/legacy exemptions.
 - Repair tooling is available before critical parity alerting is enforced.
 
+Implementation status:
+
+- Added `scripts/run_sync_parity_stage9_production_rollout.py` as the guarded production rollout gate.
+- The runner is fail-closed and separates production access by blast radius:
+  - `--mode plan` only writes an auditable plan.
+  - `--mode local-gates` runs local regression gates without touching production.
+  - `--mode preflight` runs production read-only checks only when `SYNC_PARITY_STAGE9_PRODUCTION_PREFLIGHT_CONFIRM=run-production-readonly-preflight`.
+  - `--mode backup` creates production backup artifacts only when `SYNC_PARITY_STAGE9_PRODUCTION_BACKUP_CONFIRM=create-production-backups`.
+  - `--mode execute` runs the release path only on `main` and only when `SYNC_PARITY_STAGE9_PRODUCTION_RELEASE_CONFIRM=execute-production-rollout`.
+  - `--mode postdeploy` runs post-release read-only checks with the same read-only preflight confirmation.
+- The production release command is intentionally `make production-release`, matching the existing production deployment entry point.
+- The runner plans all Stage 9 evidence:
+  - production backup with DB restore-smoke on both servers;
+  - read-only predeploy health, sync health, production alerts, baseline capture, quick/deep parity snapshots, and parity comparison;
+  - postdeploy health, sync health, deep parity snapshots, parity comparison, and warning-only alert report;
+  - a 24-hour default warning-only alert window before strict critical-drift alerting.
+- Production repair remains manual and dry-run-first. Stage 9 does not auto-apply parity repairs.
+- Strict alert/fail-closed enablement is reserved behind `SYNC_PARITY_STAGE9_STRICT_ALERT_CONFIRM=enable-strict-parity-alerts` after the warning-only window and operator review.
+- Added `tests/test_sync_parity_stage9_production_rollout.py` to lock the rollout contract:
+  - default plan does not mutate production;
+  - production preflight, backup, and release each require separate confirmations;
+  - release execution is blocked on candidate branches even with confirmation;
+  - local-gates mode cannot run production-reading commands.
+
 ## Open Decisions Before Implementation
 
 1. `offer_publication_states`: decide whether Telegram publication rows are shared product state or foreign-local operational state.
