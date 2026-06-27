@@ -1,7 +1,7 @@
 # Cross-Server Sync Parity Audit And Hardening Roadmap
 
 Reviewed on: 2026-06-27
-Reviewed commit: `65cdd3be`
+Reviewed commit: `dad6cd05`
 
 This document audits the current database tables, sync policy, receiver behavior, and remaining risks after the `customer_relations` drift incident where the foreign server kept an older linked-relation state with `customer_user_id = NULL` while Iran had the final linked customer id.
 
@@ -66,6 +66,49 @@ Therefore, the following are still possible in principle:
 - a table can be marked `sync` in registry/events while not being receiver-enabled, as seen with `user_notification_preferences`;
 - sync health can stay green while row parity is broken.
 
+## Stage 0 Production Drift Snapshot - 2026-06-27
+
+This audit was read-only. It compared the current foreign and Iran production databases after both sync queues reported no unsynced backlog.
+
+Important result:
+
+`delivery clean` was true, but `parity clean` was false.
+
+### Clean Invariants
+
+- `customer_relations`: both servers have one row with the same stable hash; no active relation has `customer_user_id IS NULL`.
+- `accountant_relations`: both servers have zero rows; no active relation has `accountant_user_id IS NULL`.
+- `notifications`: both servers have 144 rows with the same stable hash; no duplicate `dedupe_key` was found.
+- `user_blocks`: both servers have zero rows; no duplicate blocker/blocked pair was found.
+- `change_log`: both servers reported zero unsynced rows.
+
+### Tables With Exact Stable Parity In This Snapshot
+
+The following synced tables matched exactly in the spot-check hash:
+
+`accountant_relations`, `admin_broadcast_messages`, `admin_market_messages`, `commodities`, `commodity_aliases`, `customer_relations`, `invitations`, `market_schedule_overrides`, `notifications`, `offer_requests`, `telegram_link_tokens`, `trade_delivery_receipts`, `trades`, `user_blocks`.
+
+### Drift Or Local-Only Differences Found
+
+| Table | Snapshot finding | Classification | Required follow-up |
+| --- | --- | --- | --- |
+| `user_notification_preferences` | Iran has 3 rows; foreign has 0 rows; no `change_log` rows exist for this table on either side | Real sync coverage gap | Stage 1 must receiver-enable this table and provide a safe one-time current-state replay/backfill from Iran to foreign. |
+| `offers.offer_public_id` | Both servers have 115 offers and identical created-at/status distribution, but all 115 `offer_public_id` values differ | Real legacy identity drift | Do not treat `id`/count equality as proof. Add repair tooling that maps legacy offers by deterministic fields and updates dependent public-id references safely, or explicitly archives/exempts historical inactive rows after product approval. Future migrations must not random-backfill shared public identities independently on both servers. |
+| `offers.channel_message_id` | Foreign has 115 non-null values; Iran has 0 | Expected local Telegram runtime field | Keep excluded from sync and from stable parity hash. The parity checker must report it separately as a local-only projection, not as business drift. |
+| `offers.exclude_from_competitive_price` and `offers.price_warning_type` | One offer differs between servers | Real payload gap | `core/offer_sync_payload.py` currently omits these fields. Add them to the canonical offer sync payload and tests. |
+| `offers.expired_at` | 15 inactive offers differ by expiry timestamp while terminal status and quantities match | Real timestamp drift with lower business risk | Add `expired_at` to terminal-state invariant tests and decide whether offer-home-server timestamp wins, or whether stable parity hashes should compare terminal state separately from local expiry execution time. |
+| `offer_publication_states` | Foreign has 97 Telegram publication rows; Iran has 0 | Policy/semantics gap, amplified by `offer_public_id` drift | Decide whether publication rows are shared state or foreign-local Telegram runtime. If shared, repair `offer_public_id` first and sync/replay rows. If local, change registry/parity policy so this table is not falsely treated as globally equal. |
+| `trading_settings` | 15 rows on both servers; value hash matches; `updated_at` hash differs | Non-business timestamp drift | Stable parity should compare setting values first. If `updated_at` is used operationally, enforce Iran-authority timestamp sync. |
+| `market_runtime_state` | Open/notice/count state matches; transition/update timestamps differ by about one second | Runtime timestamp drift | Guard by `last_transition_at` and classify stable business parity separately from local runtime timestamps. |
+| `users` | Count and identity/Telegram/limit/counter/security hashes match; only volatile hash differs | Expected volatile runtime drift | Stable parity hash must exclude or separately classify `last_seen_at`, `updated_at`, and messenger runtime timestamps. |
+
+### Root-Cause Notes From Code Review
+
+- `migrations/versions/a6b7c8d9e0f1_add_offer_public_id.py` random-backfills `offer_public_id` with `random()` and `clock_timestamp()`. Running that migration independently on both servers creates different public identities for the same historical offer rows.
+- `core/offer_sync_payload.py` includes `offer_public_id`, `expired_at`, and `channel_message_id`, but does not include `exclude_from_competitive_price` or `price_warning_type`.
+- `api/routers/sync.py` intentionally removes `channel_message_id` from incoming offer sync data because Telegram publication is foreign-local.
+- `user_notification_preferences` is registered as `SyncPolicy.SYNC` and has SQLAlchemy event listeners, but is missing from `TABLE_ORDER` and `get_model_class()`.
+
 ## Table Inventory And Required Changes
 
 ### Core Shared Identity And Access Tables
@@ -101,7 +144,7 @@ Therefore, the following are still possible in principle:
 
 | Table | Policy | Current protection | Remaining risk | Required change |
 | --- | --- | --- | --- | --- |
-| `offers` | sync | `offer_public_id`, `version_id`, terminal-state guard | Strongest current table. Residual risk is missing parity proof and any payload without version | Require `version_id` for all mutable synced offer payloads. Add parity checker. Keep existing terminal guard. |
+| `offers` | sync | `offer_public_id`, `version_id`, terminal-state guard; `channel_message_id` is intentionally local-only | Historical production rows have divergent `offer_public_id` because a migration random-backfilled the same legacy rows independently on both servers. Current payload also omits `exclude_from_competitive_price` and `price_warning_type`, allowing competitive-warning drift. Residual risk remains for any payload without version. | Require `version_id` for all mutable synced offer payloads. Add missing competitive-warning fields to the canonical payload. Add parity checker. Add safe repair/backfill tooling for legacy public-id drift before relying on public-id parity for historical rows. Keep existing terminal guard and keep `channel_message_id` local-only. |
 | `offer_requests` | sync | `request_home_server + idempotency_key`, `version_id`, terminal-result guard | Strong. Residual risk is payload without idempotency/version and parity proof | Fail closed for mutable payloads missing `idempotency_key` or `version_id`. Add parity checker. |
 | `trades` | sync | `trade_number`, completed-trade business guard | Completed trade protected. Non-completed state still needs generic sequence/order guard | Add source-sequence watermark for all trade events. Keep completed-trade immutability. |
 | `offer_publication_states` | sync | `dedupe_key`, unique offer/surface | Upsert by `dedupe_key` currently lacks version/terminal guard; stale failed/sent/disabled states can overwrite newer state | Add status precedence and `version_id` guard. Terminal/success states should not be overwritten by stale lower-precedence states. |
@@ -304,13 +347,33 @@ Actions:
 - add sequence alignment if needed;
 - add receiver upsert by `user_id`;
 - add tests for registry coverage, receiver model coverage, and event listener coverage.
+- add tests that every `SyncPolicy.SYNC` table is either receiver-enabled or explicitly exempted in one place.
+- add tests that every event listener table is receiver-enabled or explicitly no-sync.
 
 Exit criteria:
 
 - every `SyncPolicy.SYNC` table has receiver coverage or is explicitly exempt with failing test if changed;
 - no-sync tables are rejected by receiver policy except documented mandatory-channel projection.
 
-### Stage 2 - Generic Source-Sequence Watermark
+### Stage 2 - Offer Payload And Legacy Identity Drift Hardening
+
+Goal: stop newly-created offer drift and plan safe historical repair before deeper parity enforcement.
+
+Actions:
+
+- add `exclude_from_competitive_price` and `price_warning_type` to `build_offer_sync_payload()`;
+- add unit tests proving those fields survive sync payload generation and receiver apply;
+- add a parity check that compares offers by stable historical key for legacy rows and by `offer_public_id` for new rows;
+- design a dry-run repair plan for historical `offer_public_id` drift, including dependent tables that may reference offer public ids;
+- ensure future migrations do not random-generate shared identities independently on each server.
+
+Exit criteria:
+
+- new offer payloads cannot lose competitive-warning state across servers;
+- historical `offer_public_id` drift is visible and has a safe repair/exemption plan;
+- `channel_message_id` remains explicitly local-only and excluded from business parity hashes.
+
+### Stage 3 - Generic Source-Sequence Watermark
 
 Goal: prevent out-of-order stale events for every synced table.
 
@@ -329,7 +392,7 @@ Exit criteria:
 - duplicate replay is idempotent;
 - equal sequence with different hash is a conflict.
 
-### Stage 3 - Table-Specific Invariants
+### Stage 4 - Table-Specific Invariants
 
 Goal: protect business truth beyond generic ordering.
 
@@ -350,7 +413,7 @@ Exit criteria:
 - every sync table has an explicit merge rule in code and tests;
 - dangerous `set_=excluded` paths are limited to append-only or watermarked tables.
 
-### Stage 4 - Parity Checker
+### Stage 5 - Parity Checker
 
 Goal: prove row-state parity, not only queue health.
 
@@ -369,7 +432,7 @@ Exit criteria:
 - parity mismatch is visible even when queues are empty;
 - operator can request table-level and record-level mismatch details.
 
-### Stage 5 - Repair And Replay Tools
+### Stage 6 - Repair And Replay Tools
 
 Goal: safe recovery from detected drift.
 
@@ -386,7 +449,7 @@ Exit criteria:
 - detected drift can be repaired without ad hoc SQL;
 - repairs are auditable and replay-safe.
 
-### Stage 6 - Test Matrix For Sync Guarantees
+### Stage 7 - Test Matrix For Sync Guarantees
 
 Goal: prevent regression.
 
@@ -404,7 +467,7 @@ Exit criteria:
 - CI fails if a stale event can overwrite newer state;
 - CI fails if parity checker misses injected drift.
 
-### Stage 7 - Staging Rollout
+### Stage 8 - Staging Rollout
 
 Goal: verify under realistic two-server conditions.
 
@@ -422,7 +485,7 @@ Exit criteria:
 - ignored stale events are expected and audited;
 - no backlog remains after test completion.
 
-### Stage 8 - Production Rollout
+### Stage 9 - Production Rollout
 
 Goal: introduce guarantee safely.
 
@@ -448,6 +511,7 @@ The project can claim real protection against this class of bug only when all ar
 - every synced table has receiver coverage;
 - every synced table has a stale-event ordering rule;
 - every business-sensitive table has a table-specific invariant;
+- every synced table's payload includes all business fields or documents field-level local/volatile exclusion;
 - `/api/sync/health` reports parity status, not only backlog status;
 - parity checker can detect intentionally injected drift;
 - repair tooling can fix targeted drift without manual SQL;
