@@ -21,6 +21,7 @@ from core.sync_protocol import build_sync_protocol_metadata, validate_sync_proto
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
+from core.services.market_transition_service import reconcile_market_channel_notice_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
 import hmac
 import hashlib
@@ -2105,6 +2106,22 @@ async def _apply_item(
                     _log_trade_sync_guard_ignored(record_id, operation, persist_data, "atomic_upsert_guard_noop")
                     trade_atomic_guard_noop = True
                 if (
+                    table == "market_runtime_state"
+                    and "last_transition_at" in persist_data
+                    and getattr(execute_result, "rowcount", None) == 0
+                ):
+                    logger.info(
+                        "Ignored stale synced market runtime state event",
+                        extra={
+                            "event": "sync.stale_market_runtime_state_ignored",
+                            "table": table,
+                            "record_id": record_id,
+                            "operation": operation,
+                            "incoming_last_transition_at": persist_data.get("last_transition_at"),
+                        },
+                    )
+                    return 'ignored'
+                if (
                     table in RELATION_LINK_FIELDS
                     and _linked_relation_payload_can_clear_active_link(table, persist_data)
                     and getattr(execute_result, "rowcount", None) == 0
@@ -2640,6 +2657,7 @@ async def receive_sync_data(
     completed_trade_offer_ids = []
     synced_deleted_user_telegram_effects: list[tuple[int, int]] = []
     user_changes_applied = False
+    market_runtime_state_changed = False
     notification_user_ids = _notification_user_ids_from_items(sorted_items)
 
     try:
@@ -2777,6 +2795,8 @@ async def receive_sync_data(
                     if result == 'ok':
                         if deleted_user_telegram_effect is not None:
                             synced_deleted_user_telegram_effects.append(deleted_user_telegram_effect)
+                        if table == "market_runtime_state" and operation in {"INSERT", "UPDATE"}:
+                            market_runtime_state_changed = True
                         completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
                         if completed_trade_offer_id:
                             completed_trade_offer_ids.append(completed_trade_offer_id)
@@ -2858,6 +2878,8 @@ async def receive_sync_data(
                         if result == 'ok':
                             if deleted_user_telegram_effect is not None:
                                 synced_deleted_user_telegram_effects.append(deleted_user_telegram_effect)
+                            if table == "market_runtime_state" and operation in {"INSERT", "UPDATE"}:
+                                market_runtime_state_changed = True
                             completed_trade_offer_id = _completed_trade_offer_id_from_sync(table, data)
                             if completed_trade_offer_id:
                                 completed_trade_offer_ids.append(completed_trade_offer_id)
@@ -2942,6 +2964,18 @@ async def receive_sync_data(
                         },
                     )
         await db.commit()
+
+        if market_runtime_state_changed:
+            try:
+                await reconcile_market_channel_notice_for_current_state(db, source="sync_receive")
+            except Exception as exc:
+                logger.error(
+                    "Failed to reconcile market channel notice after sync",
+                    extra={
+                        "event": "sync.market_channel_notice_reconcile_failed",
+                        **_summarize_exception(exc),
+                    },
+                )
 
         await _run_synced_deleted_user_telegram_effects(synced_deleted_user_telegram_effects)
 

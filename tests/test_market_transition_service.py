@@ -120,6 +120,238 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             timeout=10,
         )
 
+    def test_market_channel_notice_dedupe_key_is_stable_and_transition_sensitive(self):
+        transition_at = datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc)
+
+        first = market_transition_service.market_channel_notice_dedupe_key(
+            transition=market_transition_service.MARKET_NOTICE_TRANSITION_OPENED,
+            transition_at=transition_at,
+            notice_text=market_transition_service.MARKET_OPENED_CHANNEL_NOTICE,
+        )
+        second = market_transition_service.market_channel_notice_dedupe_key(
+            transition=market_transition_service.MARKET_NOTICE_TRANSITION_OPENED,
+            transition_at=transition_at,
+            notice_text=market_transition_service.MARKET_OPENED_CHANNEL_NOTICE,
+        )
+        closed = market_transition_service.market_channel_notice_dedupe_key(
+            transition=market_transition_service.MARKET_NOTICE_TRANSITION_CLOSED,
+            transition_at=transition_at,
+            notice_text=market_transition_service.MARKET_CLOSED_CHANNEL_NOTICE,
+        )
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, closed)
+        self.assertTrue(first.startswith("market-channel-notice:opened:2026-06-28T05:30:00Z:"))
+
+    async def test_reconcile_market_channel_notice_skips_on_non_foreign_server(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+
+        with patch("core.services.market_transition_service.current_server", return_value="iran"), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(),
+        ) as receipt_mock:
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                SimpleNamespace(),
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "non_foreign_server")
+        receipt_mock.assert_not_awaited()
+
+    async def test_reconcile_market_channel_notice_sends_and_marks_receipt_sent_on_foreign(self):
+        now = datetime(2026, 6, 28, 5, 31, tzinfo=timezone.utc)
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+        receipt = SimpleNamespace(
+            status=market_transition_service.MARKET_NOTICE_STATUS_PENDING,
+            attempt_count=0,
+            last_error_class=None,
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        gateway_result = market_transition_service.telegram_gateway.TelegramGatewayResult(
+            ok=True,
+            method="sendMessage",
+            response_json={"result": {"message_id": 44}},
+        )
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "-1001",
+        ), patch.object(
+            market_transition_service,
+            "utc_now",
+            return_value=now,
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(return_value=gateway_result),
+        ) as send_mock:
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "sent")
+        self.assertEqual(receipt.status, market_transition_service.MARKET_NOTICE_STATUS_SENT)
+        self.assertEqual(receipt.telegram_message_id, 44)
+        self.assertEqual(receipt.sent_at, now)
+        self.assertEqual(receipt.channel_id, "-1001")
+        self.assertEqual(receipt.attempt_count, 1)
+        db.commit.assert_awaited_once()
+        send_mock.assert_awaited_once()
+        self.assertEqual(send_mock.await_args.kwargs["idempotency_key"], result.dedupe_key)
+
+    async def test_reconcile_market_channel_notice_skips_already_sent_receipt(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 15, 30, tzinfo=timezone.utc),
+        )
+        receipt = SimpleNamespace(
+            status=market_transition_service.MARKET_NOTICE_STATUS_SENT,
+            attempt_count=1,
+            last_error_class=None,
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(),
+        ) as send_mock:
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "already_sent")
+        db.commit.assert_not_awaited()
+        send_mock.assert_not_awaited()
+
+    async def test_reconcile_market_channel_notice_marks_missing_channel_skipped(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+        receipt = SimpleNamespace(
+            status=market_transition_service.MARKET_NOTICE_STATUS_PENDING,
+            attempt_count=0,
+            last_error_class=None,
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            None,
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(),
+        ) as send_mock:
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "missing_channel_id")
+        self.assertEqual(receipt.status, market_transition_service.MARKET_NOTICE_STATUS_SKIPPED)
+        self.assertEqual(receipt.last_error_class, "missing_channel_id")
+        db.commit.assert_awaited_once()
+        send_mock.assert_not_awaited()
+
+    async def test_reconcile_market_channel_notice_marks_gateway_failure_for_retry(self):
+        now = datetime(2026, 6, 28, 5, 31, tzinfo=timezone.utc)
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+        receipt = SimpleNamespace(
+            status=market_transition_service.MARKET_NOTICE_STATUS_PENDING,
+            attempt_count=0,
+            last_error_class=None,
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+        gateway_result = market_transition_service.telegram_gateway.TelegramGatewayResult(
+            ok=False,
+            method="sendMessage",
+            status_code=403,
+            response_text="Forbidden",
+            error="Forbidden",
+        )
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "-1001",
+        ), patch.object(
+            market_transition_service,
+            "utc_now",
+            return_value=now,
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(return_value=gateway_result),
+        ):
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.reason, "Forbidden")
+        self.assertEqual(receipt.status, market_transition_service.MARKET_NOTICE_STATUS_FAILED)
+        self.assertEqual(receipt.last_error_class, "Forbidden")
+        self.assertEqual(receipt.last_error, "Forbidden")
+        self.assertEqual(receipt.next_retry_at, now + timedelta(seconds=60))
+        self.assertEqual(receipt.attempt_count, 1)
+        db.commit.assert_awaited_once()
+
     async def test_get_or_create_market_runtime_state_creates_initial_row(self):
         db = SimpleNamespace(
             execute=AsyncMock(return_value=_ExecuteResult(first=None)),
@@ -192,7 +424,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
-            market_transition_service, "_send_market_channel_notice", new=AsyncMock()
+            market_transition_service, "reconcile_market_channel_notice_for_state", new=AsyncMock()
         ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
         ) as publish_mock:
@@ -222,7 +454,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         now = datetime(2026, 5, 22, 8, 0, tzinfo=timezone.utc)
 
         with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
-            market_transition_service, "_send_market_channel_notice", new=AsyncMock()
+            market_transition_service, "reconcile_market_channel_notice_for_state", new=AsyncMock()
         ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
         ) as publish_mock:
@@ -240,7 +472,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.offers_since_last_open, 0)
         self.assertEqual(state.last_transition_at, now)
         db.commit.assert_awaited_once()
-        notice_mock.assert_awaited_once_with(market_transition_service.MARKET_OPENED_CHANNEL_NOTICE)
+        notice_mock.assert_awaited_once_with(db, state, source="local_transition")
         publish_mock.assert_called_once()
         self.assertEqual(publish_mock.call_args.args[0], "market:opened")
 
@@ -269,7 +501,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         now = datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc)
 
         with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
-            market_transition_service, "_send_market_channel_notice", new=AsyncMock()
+            market_transition_service, "reconcile_market_channel_notice_for_state", new=AsyncMock()
         ) as notice_mock, patch(
             "core.services.market_transition_service.current_server",
             return_value="foreign",
@@ -310,7 +542,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         apply_channel_state_mock.assert_any_await(offers[0], reason="market_close_expire")
         apply_channel_state_mock.assert_any_await(offers[1], reason="market_close_expire")
         self.assertEqual(decr_mock.await_count, 2)
-        notice_mock.assert_awaited_once_with(market_transition_service.MARKET_CLOSED_CHANNEL_NOTICE)
+        notice_mock.assert_awaited_once_with(db, state, source="local_transition")
         publish_mock.assert_called_once()
         self.assertEqual(publish_mock.call_args.args[0], "market:closed")
 
@@ -608,7 +840,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             market_transition_service,
-            "_send_market_channel_notice",
+            "reconcile_market_channel_notice_for_state",
             new=AsyncMock(side_effect=RuntimeError("telegram down")),
         ), patch(
             "core.services.market_transition_service.publish_event_sync",
@@ -639,7 +871,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(side_effect=RuntimeError("cache down")),
         ), patch.object(
             market_transition_service,
-            "_send_market_channel_notice",
+            "reconcile_market_channel_notice_for_state",
             new=AsyncMock(side_effect=RuntimeError("notice down")),
         ), patch(
             "core.services.market_transition_service.publish_event_sync",

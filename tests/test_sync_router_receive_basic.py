@@ -190,6 +190,65 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         send_notification.assert_not_awaited()
         remove_from_channel.assert_not_awaited()
 
+    async def test_receive_sync_data_reconciles_market_notice_after_runtime_state_sync(self):
+        db = FakeDB()
+        items = [
+            {
+                "table": "market_runtime_state",
+                "operation": "UPDATE",
+                "id": 1,
+                "data": {
+                    "is_open": True,
+                    "active_web_notice_visible": True,
+                    "offers_since_last_open": 0,
+                    "last_transition_at": "2026-06-28T05:30:00+00:00",
+                },
+            }
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch(
+            "api.routers.sync.reconcile_market_channel_notice_for_current_state",
+            new=AsyncMock(),
+        ) as reconcile_mock, patch("api.routers.sync.settings.server_mode", "foreign"):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_awaited_once()
+        rollout_mock.assert_not_awaited()
+        reconcile_mock.assert_awaited_once_with(db, source="sync_receive")
+        self.assertEqual(result, {"status": "success", "processed": 1})
+        self.assertGreaterEqual(db.commits, 2)
+
+    async def test_receive_sync_data_does_not_reconcile_market_notice_when_runtime_state_guard_ignores_item(self):
+        db = FakeDB()
+        items = [
+            {
+                "table": "market_runtime_state",
+                "operation": "UPDATE",
+                "id": 1,
+                "data": {
+                    "is_open": False,
+                    "active_web_notice_visible": True,
+                    "offers_since_last_open": 0,
+                    "last_transition_at": "2026-06-27T15:30:00+00:00",
+                },
+            }
+        ]
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ignored")) as apply_mock, patch(
+            "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
+        ) as rollout_mock, patch(
+            "api.routers.sync.reconcile_market_channel_notice_for_current_state",
+            new=AsyncMock(),
+        ) as reconcile_mock, patch("api.routers.sync.settings.server_mode", "foreign"):
+            result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
+
+        apply_mock.assert_awaited_once()
+        rollout_mock.assert_not_awaited()
+        reconcile_mock.assert_not_awaited()
+        self.assertEqual(result, {"status": "success", "processed": 1})
+
     async def test_receive_sync_data_retries_deferred_items_and_invalidates_commodity_caches(self):
         db = FakeDB()
         items = [

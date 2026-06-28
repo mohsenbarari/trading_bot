@@ -16,6 +16,7 @@ import models.offer_publication_state
 import models.trade  # مدل معاملات
 import models.trade_delivery_receipt
 import models.sync_apply_watermark
+import models.market_channel_notice_receipt
 import models.message  # مدل پیام چت
 import models.conversation  # مدل مکالمات چت
 import models.push_subscription

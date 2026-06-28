@@ -670,6 +670,29 @@ Exit criteria:
 - `/api/sync/health` remains delivery/parity focused; market notice delivery is
   proven through the new receipt/log evidence, not by row parity alone.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- Added `market_channel_notice_receipts` as a foreign-local no-sync receipt
+  table for Telegram market open/close side effects.
+- Local market transitions now call the same idempotent reconciler used by sync
+  receive. Iran still skips Telegram execution; foreign sends and records the
+  receipt.
+- Sync receive now detects successfully applied `market_runtime_state`
+  INSERT/UPDATE items and reconciles the foreign market channel notice after the
+  sync commit. Stale transition upserts with `rowcount = 0` are returned as
+  `ignored`, so old replayed state cannot emit an old open/close notice.
+- Unit evidence collected:
+  - `docker compose run --rm -v /root/trading-bot/trading_bot:/app app python -m unittest tests.test_market_transition_service tests.test_sync_router_receive_basic tests.test_sync_router_apply_item_success tests.test_sync_registry tests.test_sync_guarantee_matrix`
+  - `docker compose run --rm -v /root/trading-bot/trading_bot:/app app python -m unittest tests.test_market_schedule_foundation tests.test_core_events tests.test_observability_config`
+  - `docker compose run --rm -v /root/trading-bot/trading_bot:/app app python -m unittest tests.test_sync_router_stale_events tests.test_sync_router_apply_item_errors`
+  - `docker compose run --rm -v /root/trading-bot/trading_bot:/app app python -m py_compile core/services/market_transition_service.py api/routers/sync.py core/sync_registry.py models/market_channel_notice_receipt.py tests/test_market_transition_service.py tests/test_sync_router_receive_basic.py tests/test_sync_router_apply_item_success.py`
+- Migration evidence: `alembic heads` reports single head
+  `f4b5c6d7e8f0`. `alembic check` still reports pre-existing model/database
+  drift outside this table, so it is not a clean gate for this stage yet.
+- Remaining evidence: fresh staging validation must still prove actual Telegram
+  channel messages for both Iran-origin and foreign-origin open/close
+  transitions after the staging environment issue is resolved.
+
 ## Suggested Execution Order
 
 1. Stage R0

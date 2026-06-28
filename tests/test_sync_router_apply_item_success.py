@@ -433,6 +433,27 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("excluded.last_transition_at IS NULL", compiled)
         self.assertIn("market_runtime_state.last_transition_at <= excluded.last_transition_at", compiled)
 
+    async def test_apply_item_ignores_market_runtime_state_when_timestamp_guard_noops(self):
+        db = FakeDB([SimpleNamespace(rowcount=0)])
+
+        result = await _apply_item(
+            db,
+            "market_runtime_state",
+            "UPDATE",
+            1,
+            {
+                "is_open": False,
+                "active_web_notice_visible": True,
+                "offers_since_last_open": 0,
+                "last_transition_at": datetime(2026, 6, 27, 15, 30, tzinfo=timezone.utc),
+            },
+            MarketRuntimeState,
+            [],
+        )
+
+        self.assertEqual(result, "ignored")
+        self.assertEqual(len(db.execute_calls), 1)
+
     def test_offer_publication_state_upsert_uses_version_and_status_precedence_guard(self):
         stmt = _build_upsert_stmt(
             OfferPublicationState,

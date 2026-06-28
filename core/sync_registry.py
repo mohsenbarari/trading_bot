@@ -156,6 +156,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "latest transition state; explicit conflict policy needed before multi-writer changes",
         "market notice and offer expiry side effects",
     ),
+    "market_channel_notice_receipts": _entry(
+        "market_channel_notice_receipts",
+        SyncPolicy.NO_SYNC,
+        ("telegram_bot", "sync_reconciliation"),
+        "foreign local Telegram side-effect ledger",
+        "no cross-server merge; dedupe key only protects local Telegram notice replay",
+        "foreign-only market open/close channel notice idempotency",
+    ),
     "market_schedule_overrides": _entry(
         "market_schedule_overrides",
         SyncPolicy.SYNC,

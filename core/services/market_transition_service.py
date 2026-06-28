@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -8,13 +9,14 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core import telegram_gateway
 from core.config import settings
 from core.events import publish_event_sync
-from core.server_routing import current_server
+from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
     OfferExpiryReason,
@@ -24,6 +26,7 @@ from core.services.offer_expiry_service import (
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.trading_settings import get_trading_settings_async
 from core.utils import utc_now
+from models.market_channel_notice_receipt import MarketChannelNoticeReceipt
 from models.market_runtime_state import MarketRuntimeState
 from models.market_schedule_override import MarketScheduleOverride
 from models.offer import Offer, OfferStatus
@@ -40,6 +43,12 @@ logger = logging.getLogger(__name__)
 
 MARKET_OPENED_CHANNEL_NOTICE = "🟢 شروع فعالیت بازار"
 MARKET_CLOSED_CHANNEL_NOTICE = "🔴 پایان فعالیت بازار"
+MARKET_NOTICE_TRANSITION_OPENED = "opened"
+MARKET_NOTICE_TRANSITION_CLOSED = "closed"
+MARKET_NOTICE_STATUS_PENDING = "pending"
+MARKET_NOTICE_STATUS_SENT = "sent"
+MARKET_NOTICE_STATUS_FAILED = "failed"
+MARKET_NOTICE_STATUS_SKIPPED = "skipped"
 MARKET_RUNTIME_ADVISORY_LOCK_KEY = 202605220901
 MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS = float(
     os.getenv("TRADING_BOT_MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS", "1.0")
@@ -61,6 +70,13 @@ class MarketRuntimeView:
     offers_since_last_open: int
     last_transition_at: datetime | None
     next_transition_at: datetime | None
+
+
+@dataclass(slots=True)
+class MarketChannelNoticeResult:
+    status: str
+    dedupe_key: str | None = None
+    reason: str | None = None
 
 
 _market_runtime_view_cache: tuple[float, MarketRuntimeView] | None = None
@@ -136,18 +152,233 @@ async def _acquire_market_runtime_lock(db: AsyncSession) -> None:
     )
 
 
-async def _send_market_channel_notice(text: str) -> None:
+def _market_notice_text_for_transition(transition: str) -> str:
+    if transition == MARKET_NOTICE_TRANSITION_OPENED:
+        return MARKET_OPENED_CHANNEL_NOTICE
+    if transition == MARKET_NOTICE_TRANSITION_CLOSED:
+        return MARKET_CLOSED_CHANNEL_NOTICE
+    raise ValueError(f"unsupported market notice transition: {transition}")
+
+
+def _market_notice_transition_for_state(state: MarketRuntimeState) -> str:
+    return MARKET_NOTICE_TRANSITION_OPENED if state.is_open else MARKET_NOTICE_TRANSITION_CLOSED
+
+
+def _market_notice_transition_at_for_state(state: MarketRuntimeState) -> datetime | None:
+    transition_at = getattr(state, "last_transition_at", None)
+    if transition_at is None:
+        return None
+    return _coerce_utc_now(transition_at)
+
+
+def market_channel_notice_dedupe_key(
+    *,
+    transition: str,
+    transition_at: datetime,
+    notice_text: str,
+) -> str:
+    transition_time = _coerce_utc_now(transition_at).isoformat().replace("+00:00", "Z")
+    digest = hashlib.sha256(f"{transition}|{transition_time}|{notice_text}".encode("utf-8")).hexdigest()[:16]
+    return f"market-channel-notice:{transition}:{transition_time}:{digest}"
+
+
+async def _send_market_channel_notice(
+    text: str,
+    *,
+    idempotency_key: str | None = None,
+    raise_on_failure: bool = True,
+) -> telegram_gateway.TelegramGatewayResult | None:
     channel_id = settings.channel_id
     if not channel_id:
-        return
+        return None
 
     result = await telegram_gateway.send_message(
         channel_id,
         text,
-        idempotency_key=f"market-channel-notice:{text}",
+        idempotency_key=idempotency_key or f"market-channel-notice:{text}",
     )
-    if not result.ok:
+    if not result.ok and raise_on_failure:
         raise RuntimeError(f"Telegram market notice failed: {result.error or result.status_code}")
+    return result
+
+
+async def _get_or_create_market_notice_receipt(
+    db: AsyncSession,
+    *,
+    dedupe_key: str,
+    transition: str,
+    transition_at: datetime,
+    notice_text: str,
+    source: str,
+) -> MarketChannelNoticeReceipt:
+    insert_stmt = (
+        pg_insert(MarketChannelNoticeReceipt)
+        .values(
+            dedupe_key=dedupe_key,
+            transition=transition,
+            transition_at=transition_at,
+            notice_text=notice_text,
+            source=source,
+        )
+        .on_conflict_do_nothing(index_elements=["dedupe_key"])
+    )
+    await db.execute(insert_stmt)
+
+    result = await db.execute(
+        select(MarketChannelNoticeReceipt)
+        .where(MarketChannelNoticeReceipt.dedupe_key == dedupe_key)
+        .with_for_update()
+    )
+    receipt = result.scalars().first()
+    if receipt is None:
+        raise RuntimeError("market notice receipt was not created")
+    return receipt
+
+
+def _compact_market_notice_error(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text_value = str(value)
+    return text_value[:500]
+
+
+async def reconcile_market_channel_notice_for_state(
+    db: AsyncSession,
+    state: MarketRuntimeState,
+    *,
+    source: str,
+) -> MarketChannelNoticeResult:
+    """Send or repair the foreign-owned Telegram market notice for one state."""
+    if current_server() != SERVER_FOREIGN:
+        return MarketChannelNoticeResult(status="skipped", reason="non_foreign_server")
+
+    transition_at = _market_notice_transition_at_for_state(state)
+    if transition_at is None:
+        return MarketChannelNoticeResult(status="skipped", reason="missing_transition_at")
+
+    transition = _market_notice_transition_for_state(state)
+    notice_text = _market_notice_text_for_transition(transition)
+    dedupe_key = market_channel_notice_dedupe_key(
+        transition=transition,
+        transition_at=transition_at,
+        notice_text=notice_text,
+    )
+    receipt = await _get_or_create_market_notice_receipt(
+        db,
+        dedupe_key=dedupe_key,
+        transition=transition,
+        transition_at=transition_at,
+        notice_text=notice_text,
+        source=source,
+    )
+
+    if receipt.status == MARKET_NOTICE_STATUS_SENT:
+        return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="already_sent")
+    if receipt.status == MARKET_NOTICE_STATUS_SKIPPED and receipt.last_error_class == "missing_channel_id":
+        return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="missing_channel_id")
+
+    now = utc_now()
+    receipt.source = source
+    receipt.notice_text = notice_text
+    receipt.transition = transition
+    receipt.transition_at = transition_at
+    receipt.last_attempt_at = now
+    receipt.attempt_count = int(receipt.attempt_count or 0) + 1
+
+    channel_id = settings.channel_id
+    if not channel_id:
+        receipt.status = MARKET_NOTICE_STATUS_SKIPPED
+        receipt.channel_id = None
+        receipt.last_error_class = "missing_channel_id"
+        receipt.last_error = "Telegram channel_id is not configured"
+        await db.commit()
+        logger.info(
+            "Skipped market channel notice because no Telegram channel is configured",
+            extra={
+                "event": "market.channel_notice_skipped",
+                "reason": "missing_channel_id",
+                "transition": transition,
+                "dedupe_key": dedupe_key,
+                "source": source,
+            },
+        )
+        return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="missing_channel_id")
+
+    receipt.channel_id = str(channel_id)
+    try:
+        result = await _send_market_channel_notice(
+            notice_text,
+            idempotency_key=dedupe_key,
+            raise_on_failure=False,
+        )
+    except Exception as exc:
+        receipt.status = MARKET_NOTICE_STATUS_FAILED
+        receipt.last_error_class = type(exc).__name__
+        receipt.last_error = _compact_market_notice_error(exc)
+        receipt.next_retry_at = now + timedelta(seconds=60)
+        await db.commit()
+        logger.warning(
+            "Failed to publish market channel notice",
+            extra={
+                "event": "market.channel_notice_failed",
+                "transition": transition,
+                "dedupe_key": dedupe_key,
+                "source": source,
+                "error_class": type(exc).__name__,
+            },
+        )
+        return MarketChannelNoticeResult(status="failed", dedupe_key=dedupe_key, reason=type(exc).__name__)
+
+    if result is not None and result.ok:
+        receipt.status = MARKET_NOTICE_STATUS_SENT
+        receipt.sent_at = now
+        receipt.next_retry_at = None
+        receipt.last_error_class = None
+        receipt.last_error = None
+        receipt.telegram_message_id = result.message_id
+        await db.commit()
+        logger.info(
+            "Published market channel notice",
+            extra={
+                "event": "market.channel_notice_sent",
+                "transition": transition,
+                "dedupe_key": dedupe_key,
+                "source": source,
+                "telegram_message_id": result.message_id,
+            },
+        )
+        return MarketChannelNoticeResult(status="sent", dedupe_key=dedupe_key)
+
+    error_class = result.error if result is not None and result.error else "telegram_send_failed"
+    error_text = result.response_text if result is not None else None
+    receipt.status = MARKET_NOTICE_STATUS_FAILED
+    receipt.last_error_class = str(error_class)
+    receipt.last_error = _compact_market_notice_error(error_text or error_class)
+    receipt.next_retry_at = now + timedelta(seconds=60)
+    await db.commit()
+    logger.warning(
+        "Failed to publish market channel notice",
+        extra={
+            "event": "market.channel_notice_failed",
+            "transition": transition,
+            "dedupe_key": dedupe_key,
+            "source": source,
+            "error_class": error_class,
+            "status_code": getattr(result, "status_code", None) if result is not None else None,
+        },
+    )
+    return MarketChannelNoticeResult(status="failed", dedupe_key=dedupe_key, reason=str(error_class))
+
+
+async def reconcile_market_channel_notice_for_current_state(
+    db: AsyncSession,
+    *,
+    source: str,
+) -> MarketChannelNoticeResult:
+    state = await get_market_runtime_state(db)
+    if state is None:
+        return MarketChannelNoticeResult(status="skipped", reason="missing_runtime_state")
+    return await reconcile_market_channel_notice_for_state(db, state, source=source)
 
 
 async def get_market_runtime_state(db: AsyncSession) -> MarketRuntimeState | None:
@@ -306,7 +537,7 @@ async def _apply_market_open_transition(
 
     notice_text = MARKET_OPENED_CHANNEL_NOTICE
     try:
-        await _send_market_channel_notice(notice_text)
+        await reconcile_market_channel_notice_for_state(db, state, source="local_transition")
     except Exception as exc:
         logger.warning("Failed to publish market-open channel notice: %s", exc)
 
@@ -372,7 +603,7 @@ async def _apply_market_closed_transition(
 
     notice_text = MARKET_CLOSED_CHANNEL_NOTICE
     try:
-        await _send_market_channel_notice(notice_text)
+        await reconcile_market_channel_notice_for_state(db, state, source="local_transition")
     except Exception as exc:
         logger.warning("Failed to publish market-close channel notice: %s", exc)
 

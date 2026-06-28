@@ -24,6 +24,7 @@ from .admin_message import AdminBroadcastMessage, AdminMarketMessage
 from .trading_setting import TradingSetting
 from .market_schedule_override import MarketScheduleOverride, MarketScheduleOverrideType
 from .market_runtime_state import MarketRuntimeState
+from .market_channel_notice_receipt import MarketChannelNoticeReceipt
 from .offer import Offer, OfferType, OfferStatus
 from .offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
 from .offer_publication_state import (
@@ -114,6 +115,7 @@ __all__ = [
     "MarketScheduleOverride",
     "MarketScheduleOverrideType",
     "MarketRuntimeState",
+    "MarketChannelNoticeReceipt",
     "UploadBatch",
     "UploadBatchMessageKind",
     "UploadBatchStatus",
