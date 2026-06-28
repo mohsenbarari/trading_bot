@@ -86,11 +86,34 @@ def build_webapp_init_data(bot_token, user_payload, auth_date=None, hash_overrid
 
 
 class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dev_login_is_unavailable_outside_staging_before_any_db_work(self):
+        cases = [
+            make_request(headers={}, host="127.0.0.1"),
+            make_request(headers={"X-DEV-API-KEY": "dev-secret"}, host="8.8.8.8"),
+            make_request(headers={"x-forwarded-for": "127.0.0.1"}, host="8.8.8.8"),
+        ]
+
+        for request in cases:
+            with self.subTest(headers=request.headers, host=request.client.host):
+                db = FakeDB()
+                with patch.object(auth.settings, "environment", "production"), patch.object(
+                    auth.settings,
+                    "dev_api_key",
+                    "dev-secret",
+                ):
+                    with self.assertRaises(HTTPException) as exc_info:
+                        await dev_login(request, db=db)
+                self.assertEqual(exc_info.exception.status_code, 404)
+                self.assertEqual(exc_info.exception.detail, "Not found")
+                self.assertEqual(db.executed, [])
+                db.commit.assert_not_awaited()
+
     async def test_dev_login_rejects_remote_requests_without_valid_dev_key(self):
         request = make_request(headers={}, host="8.8.8.8")
 
-        with self.assertRaises(HTTPException) as exc_info:
-            await dev_login(request, db=FakeDB())
+        with patch.object(auth.settings, "environment", "staging"):
+            with self.assertRaises(HTTPException) as exc_info:
+                await dev_login(request, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(
             exc_info.exception.detail,
@@ -102,7 +125,10 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB([FakeExecuteResult(None)])
         now = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-        with patch("api.routers.auth.time.time", return_value=1700000000), patch(
+        with patch.object(auth.settings, "environment", "staging"), patch(
+            "api.routers.auth.time.time",
+            return_value=1700000000,
+        ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ) as refresh_mock, patch(
@@ -164,7 +190,10 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         existing_user = SimpleNamespace(id=7, role=UserRole.SUPER_ADMIN, home_server="iran")
         db = FakeDB([FakeExecuteResult(existing_user)])
 
-        with patch("api.routers.auth.create_refresh_token", return_value="refresh-token"), patch(
+        with patch.object(auth.settings, "environment", "staging"), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ), patch(
             "api.routers.auth.ensure_mandatory_channel_membership", new=AsyncMock()
         ) as mandatory_mock, patch("api.routers.auth.hash_token", return_value="hashed-refresh"), patch(
             "api.routers.auth.uuid.uuid4", return_value="session-uuid"

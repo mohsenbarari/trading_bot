@@ -217,6 +217,10 @@ def _is_local_dev_request(raw_request: Request) -> bool:
     return real_ip.startswith("172.") or real_ip.startswith("192.168.") or real_ip.startswith("10.")
 
 
+def _is_dev_login_environment() -> bool:
+    return (settings.environment or "").strip().lower() == "staging"
+
+
 # --- Schemas ---
 class Token(BaseModel):
     access_token: str
@@ -800,6 +804,9 @@ async def refresh_access_token(
 @router.post("/dev-login")
 async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
     """ورود ویژه‌ی توسعه‌دهنده (بدون نیاز به کد، محدودیت سشن و ... مقدور از روی رزولوشن محلی)"""
+    if not _is_dev_login_environment():
+        raise HTTPException(status_code=404, detail="Not found")
+
     real_ip = _extract_request_real_ip(raw_request)
     is_local = _is_local_dev_request(raw_request)
 
