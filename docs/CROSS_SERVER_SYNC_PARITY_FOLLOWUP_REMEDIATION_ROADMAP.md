@@ -586,6 +586,47 @@ Required evidence:
   behavior.
 - Repair tool production-safety tests pass; no production apply is attempted.
 
+Evidence collected on `candidate/sync-parity-hardening`:
+
+- Artifact directory:
+  `tmp/sync-parity-f7-evidence-20260628T112937Z/`.
+- Remote Iran staging was validated as a separate staging app/DB/Redis stack on
+  the Iran server, with release `220528b0c29a`.
+- Local foreign staging and local Iran staging were also healthy, but they share
+  the same local staging DB/Redis and therefore are not sufficient by
+  themselves for the two-server evidence requirement.
+- Deep snapshot compare between local foreign staging and remote Iran staging
+  was clean across 20 synced tables: status `ok`, business drift `0`, critical
+  drift `0`, incomplete tables `0`, duplicate identities `0`, and truncated
+  tables `0`.
+- The compare record includes artifact metadata:
+  `local_server_mode=foreign`, `peer_server_mode=iran`, both release SHAs
+  `220528b0c29a`, `snapshot_mode=deep`, table counts, snapshot timestamps,
+  `artifact_reference`, and `comparison_artifact_hash`.
+- `POST /api/sync/parity/status` accepted the artifact-backed comparison on
+  local Iran staging, local foreign staging, and remote Iran staging.
+- Final `/api/sync/health` on all three checked endpoints reported fresh parity
+  status `ok`, no sync backlog, no missing comparison state, and
+  `artifact_metadata_complete=true`.
+
+Remaining F7 evidence before this stage can be called complete:
+
+- A safe remote Iran staging `sync_worker` or equivalent staging-only sync
+  harness must exist. The current remote Iran staging stack observed during this
+  pass had only app, DB, and Redis containers, so live two-server sync
+  side-effect scenarios were not executed.
+- Run Iran-origin open and close transitions through the live staging sync path
+  and prove the foreign-only Telegram channel notices are sent exactly once.
+- Run Iran-origin market close with foreign-home active offers and prove the
+  final F1 authority model expires those offers exactly once.
+- Replay duplicate `market_runtime_state` transitions and prove no duplicate
+  Telegram notices or duplicate offer-expire side effects occur.
+- Force Telegram send failures and no-receipt failures in staging and prove the
+  F4 retry/reconciliation path repairs them.
+- Toggle `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED` in staging and prove
+  side effects pause without deleting receipts, then resume safely after
+  re-enable.
+
 Exit criteria:
 
 - Evidence artifacts are saved under `tmp/` with a short manifest.
