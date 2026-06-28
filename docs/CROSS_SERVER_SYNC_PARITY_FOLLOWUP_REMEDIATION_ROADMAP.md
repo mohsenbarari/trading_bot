@@ -790,3 +790,7 @@ Production rollout still requires a separate production preflight:
 - no active repair apply;
 - strict alerts warning-only during the observation window;
 - explicit user approval before deployment.
+
+The production env correction, retired peer guard, stale market notice rollout
+guard, and final worker-to-remote-receiver validation are tracked in
+`docs/CROSS_SERVER_SYNC_PRODUCTION_ENV_AND_TRANSPORT_VALIDATION_ROADMAP.md`.
