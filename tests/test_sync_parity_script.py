@@ -45,6 +45,45 @@ class SyncParityScriptTests(unittest.TestCase):
 
         self.assertEqual(code, 2)
 
+    def test_compare_returns_nonzero_for_incomplete_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "local.json"
+            peer = Path(tmp) / "peer.json"
+            incomplete_payload = {
+                "status": "ok",
+                "schema_version": 1,
+                "mode": "deep",
+                "tables": {
+                    "offers": build_table_parity_snapshot(
+                        "offers",
+                        [
+                            {"id": 1, "offer_public_id": "ofr_1", "price": 100},
+                            {"id": 2, "offer_public_id": "ofr_2", "price": 100},
+                        ],
+                        max_rows=1,
+                    ),
+                },
+            }
+            local.write_text(json.dumps(incomplete_payload, sort_keys=True), encoding="utf-8")
+            write_snapshot(peer, "offers", [{"id": 1, "offer_public_id": "ofr_1", "price": 100}])
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                code = _compare(
+                    SimpleNamespace(
+                        local_snapshot=str(local),
+                        peer_snapshot=str(peer),
+                        local_url=None,
+                        peer_url=None,
+                        local_observability_key=None,
+                        peer_observability_key=None,
+                        sample_limit=5,
+                    )
+                )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "incomplete")
+
 
 if __name__ == "__main__":
     unittest.main()

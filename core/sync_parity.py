@@ -211,10 +211,26 @@ def build_table_parity_snapshot(
         records.append(build_record_parity(table_name, row))
 
     records.sort(key=lambda item: item["identity_hash"])
+    identity_counts: dict[str, int] = {}
+    for record in records:
+        identity_hash = str(record["identity_hash"])
+        identity_counts[identity_hash] = identity_counts.get(identity_hash, 0) + 1
+    duplicate_identity_hashes = sorted(
+        identity_hash
+        for identity_hash, count in identity_counts.items()
+        if count > 1
+    )
+    duplicate_identity_count = sum(
+        count - 1
+        for count in identity_counts.values()
+        if count > 1
+    )
     return {
         "table": table_name,
         "row_count": len(records),
         "truncated": truncated,
+        "duplicate_identity_count": duplicate_identity_count,
+        "duplicate_identity_hashes": duplicate_identity_hashes[:20],
         "records_hash": _hash_payload(
             [
                 {
@@ -292,6 +308,40 @@ def _records_by_identity(table_snapshot: Mapping[str, Any]) -> dict[str, Mapping
     }
 
 
+def _duplicate_identity_hashes(table_snapshot: Mapping[str, Any]) -> list[str]:
+    records = table_snapshot.get("records") if isinstance(table_snapshot, Mapping) else []
+    if not isinstance(records, Sequence):
+        return []
+    counts: dict[str, int] = {}
+    for record in records:
+        if not isinstance(record, Mapping) or not record.get("identity_hash"):
+            continue
+        identity_hash = str(record["identity_hash"])
+        counts[identity_hash] = counts.get(identity_hash, 0) + 1
+    return sorted(identity_hash for identity_hash, count in counts.items() if count > 1)
+
+
+def _duplicate_identity_count(table_snapshot: Mapping[str, Any]) -> int:
+    explicit = table_snapshot.get("duplicate_identity_count") if isinstance(table_snapshot, Mapping) else None
+    try:
+        explicit_count = int(explicit)
+    except (TypeError, ValueError):
+        explicit_count = -1
+    if explicit_count >= 0:
+        return explicit_count
+
+    records = table_snapshot.get("records") if isinstance(table_snapshot, Mapping) else []
+    if not isinstance(records, Sequence):
+        return 0
+    counts: dict[str, int] = {}
+    for record in records:
+        if not isinstance(record, Mapping) or not record.get("identity_hash"):
+            continue
+        identity_hash = str(record["identity_hash"])
+        counts[identity_hash] = counts.get(identity_hash, 0) + 1
+    return sum(count - 1 for count in counts.values() if count > 1)
+
+
 def compare_parity_snapshots(
     local_snapshot: Mapping[str, Any],
     peer_snapshot: Mapping[str, Any],
@@ -306,6 +356,7 @@ def compare_parity_snapshots(
     table_names = sorted(set(local_tables) | set(peer_tables))
     table_reports: dict[str, Any] = {}
     severity_counts = {
+        "incomplete": 0,
         "critical_drift": 0,
         "business_drift": 0,
         "local_only_difference": 0,
@@ -319,6 +370,15 @@ def compare_parity_snapshots(
         peer_records = _records_by_identity(peer_table)
         local_ids = set(local_records)
         peer_ids = set(peer_records)
+        local_row_count = int(local_table.get("row_count") or len(local_records))
+        peer_row_count = int(peer_table.get("row_count") or len(peer_records))
+        local_truncated = bool(local_table.get("truncated"))
+        peer_truncated = bool(peer_table.get("truncated"))
+        local_duplicate_hashes = _duplicate_identity_hashes(local_table)
+        peer_duplicate_hashes = _duplicate_identity_hashes(peer_table)
+        local_duplicate_count = _duplicate_identity_count(local_table)
+        peer_duplicate_count = _duplicate_identity_count(peer_table)
+        row_count_mismatch = local_row_count != peer_row_count
 
         missing_on_local = sorted(peer_ids - local_ids)
         missing_on_peer = sorted(local_ids - peer_ids)
@@ -336,7 +396,11 @@ def compare_parity_snapshots(
             elif local_record.get("volatile_hash") != peer_record.get("volatile_hash"):
                 volatile_mismatches.append(identity_hash)
 
-        if missing_on_local or missing_on_peer:
+        if local_truncated or peer_truncated:
+            severity = "incomplete"
+        elif local_duplicate_count or peer_duplicate_count:
+            severity = "critical_drift"
+        elif missing_on_local or missing_on_peer or row_count_mismatch:
             severity = "critical_drift"
         elif business_mismatches:
             severity = "business_drift"
@@ -352,8 +416,13 @@ def compare_parity_snapshots(
 
         table_reports[table_name] = {
             "severity": severity,
-            "local_row_count": int(local_table.get("row_count") or len(local_records)),
-            "peer_row_count": int(peer_table.get("row_count") or len(peer_records)),
+            "local_row_count": local_row_count,
+            "peer_row_count": peer_row_count,
+            "local_truncated": local_truncated,
+            "peer_truncated": peer_truncated,
+            "row_count_mismatch": row_count_mismatch,
+            "local_duplicate_identity_count": local_duplicate_count,
+            "peer_duplicate_identity_count": peer_duplicate_count,
             "missing_on_local_count": len(missing_on_local),
             "missing_on_peer_count": len(missing_on_peer),
             "business_mismatch_count": len(business_mismatches),
@@ -362,13 +431,17 @@ def compare_parity_snapshots(
             "samples": {
                 "missing_on_local": missing_on_local[:sample_limit],
                 "missing_on_peer": missing_on_peer[:sample_limit],
+                "local_duplicate_identities": local_duplicate_hashes[:sample_limit],
+                "peer_duplicate_identities": peer_duplicate_hashes[:sample_limit],
                 "business_mismatches": business_mismatches[:sample_limit],
                 "local_only_differences": local_only_mismatches[:sample_limit],
                 "volatile_differences": volatile_mismatches[:sample_limit],
             },
         }
 
-    if severity_counts["critical_drift"]:
+    if severity_counts["incomplete"]:
+        status = "incomplete"
+    elif severity_counts["critical_drift"]:
         status = "critical_drift"
     elif severity_counts["business_drift"]:
         status = "business_drift"

@@ -57,6 +57,59 @@ class SyncParityTests(unittest.TestCase):
         self.assertEqual(report["tables"]["trades"]["severity"], "critical_drift")
         self.assertEqual(report["tables"]["trades"]["missing_on_local_count"], 1)
 
+    def test_truncated_snapshot_is_incomplete_not_ok(self):
+        local = {
+            "status": "ok",
+            "schema_version": 1,
+            "mode": "deep",
+            "tables": {
+                "offers": build_table_parity_snapshot(
+                    "offers",
+                    [
+                        {"id": 1, "offer_public_id": "ofr_1", "price": 100},
+                        {"id": 2, "offer_public_id": "ofr_2", "price": 100},
+                    ],
+                    max_rows=1,
+                )
+            },
+        }
+        peer = snapshot("offers", [{"id": 1, "offer_public_id": "ofr_1", "price": 100}])
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "incomplete")
+        self.assertEqual(report["severity_counts"]["incomplete"], 1)
+        self.assertEqual(report["tables"]["offers"]["severity"], "incomplete")
+        self.assertTrue(report["tables"]["offers"]["local_truncated"])
+
+    def test_duplicate_identity_is_critical_drift(self):
+        local = snapshot(
+            "offers",
+            [
+                {"id": 1, "offer_public_id": "ofr_dup", "price": 100},
+                {"id": 2, "offer_public_id": "ofr_dup", "price": 100},
+            ],
+        )
+        peer = snapshot("offers", [{"id": 3, "offer_public_id": "ofr_dup", "price": 100}])
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(local["tables"]["offers"]["duplicate_identity_count"], 1)
+        self.assertEqual(report["status"], "critical_drift")
+        self.assertEqual(report["tables"]["offers"]["local_duplicate_identity_count"], 1)
+        self.assertEqual(len(report["tables"]["offers"]["samples"]["local_duplicate_identities"]), 1)
+
+    def test_unexplained_row_count_mismatch_is_critical_drift(self):
+        local = snapshot("offers", [{"id": 1, "offer_public_id": "ofr_1", "price": 100}])
+        peer = snapshot("offers", [{"id": 1, "offer_public_id": "ofr_1", "price": 100}])
+        peer["tables"]["offers"]["row_count"] = 2
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "critical_drift")
+        self.assertEqual(report["tables"]["offers"]["severity"], "critical_drift")
+        self.assertTrue(report["tables"]["offers"]["row_count_mismatch"])
+
     def test_volatile_difference_is_separate_from_business_drift(self):
         local = snapshot(
             "notifications",

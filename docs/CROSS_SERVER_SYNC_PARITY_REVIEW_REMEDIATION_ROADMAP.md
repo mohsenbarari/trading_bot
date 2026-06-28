@@ -379,6 +379,22 @@ Exit criteria:
 
 - A clean parity result means the compared data was complete enough to trust.
 
+Implementation status - 2026-06-28:
+
+- Table snapshots now include `duplicate_identity_count` and sampled duplicate
+  identity hashes before records are collapsed for comparison.
+- `compare_parity_snapshots()` now returns status `incomplete` when either side
+  of any compared table is truncated.
+- Duplicate identities and unexplained row-count mismatches now produce
+  `critical_drift` instead of being hidden by the identity dictionary.
+- Table reports now expose truncation flags, duplicate identity counts,
+  row-count mismatch status, and duplicate samples for operator diagnostics.
+- `scripts/compare_sync_parity.py` already failed non-clean statuses; tests now
+  explicitly cover the `incomplete` exit path.
+- Targeted tests cover truncated snapshots, duplicate identities, unexplained
+  row-count mismatch, script exit behavior, and the existing repair/gate
+  consumers.
+
 ### Stage R5 - `offer_publication_states` Policy Closure
 
 Goal: remove the code/document mismatch for publication state.
