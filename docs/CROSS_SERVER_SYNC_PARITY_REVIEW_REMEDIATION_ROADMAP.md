@@ -5,6 +5,7 @@ Branch: `candidate/sync-parity-hardening`
 Reviewed head: `c89c0315`
 Source review: `tmp/sync_parity_hardening_agent_review.md`
 Primary roadmap: `docs/CROSS_SERVER_SYNC_PARITY_IMPLEMENTATION_ROADMAP.md`
+Follow-up roadmap: `docs/CROSS_SERVER_SYNC_PARITY_FOLLOWUP_REMEDIATION_ROADMAP.md`
 
 This document is the post-review remediation contract for the sync parity
 hardening branch. The implementation roadmap added useful measurement,
@@ -13,6 +14,10 @@ P0/P1 issues that can still create drift or hide drift.
 
 Until this remediation roadmap is completed, the branch is not ready for merge
 to `main`, production rollout, strict watermark mode, or production repair.
+
+Follow-up review on 2026-06-28 accepted additional merge and production blockers
+after the initial remediation pass. The active follow-up contract is documented
+in `docs/CROSS_SERVER_SYNC_PARITY_FOLLOWUP_REMEDIATION_ROADMAP.md`.
 
 ## Non-Negotiable Guardrails
 
