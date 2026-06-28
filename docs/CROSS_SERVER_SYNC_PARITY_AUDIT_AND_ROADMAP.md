@@ -62,6 +62,9 @@ Therefore, the following are still possible in principle:
 - stale `notifications` update can overwrite read/delivery state;
 - stale `user_blocks` insert can recreate a block after delete, or stale delete can remove a re-created block;
 - stale admin/settings/market state can overwrite a newer admin/runtime state;
+- market runtime state can be in parity while the foreign-only Telegram market
+  open/close channel notice side effect is missing after an Iran-origin
+  transition sync;
 - stale publication-state update can overwrite terminal publication state;
 - a table can be marked `sync` in registry/events while not being receiver-enabled, as seen with `user_notification_preferences`;
 - sync health can stay green while row parity is broken.
@@ -129,7 +132,7 @@ The following synced tables matched exactly in the spot-check hash:
 | --- | --- | --- | --- | --- |
 | `trading_settings` | sync | Upsert by key | Stale setting can overwrite newer setting; authority says Iran single-writer but receiver does not enforce source authority strongly enough | Add source authority check and `updated_at`/watermark guard by key. |
 | `market_schedule_overrides` | sync | Natural key fallback by `date`; unique date | Stale admin update can overwrite newer override | Add receiver upsert by `date` first and `updated_at`/watermark guard. Enforce Iran admin authority. |
-| `market_runtime_state` | sync | PK upsert; `last_transition_at` exists | Older transition can overwrite newer open/closed state | Guard by `last_transition_at` and source sequence. Older transition must be ignored. |
+| `market_runtime_state` | sync | PK upsert; `last_transition_at` exists | Older transition can overwrite newer open/closed state. A clean synced state also does not prove the foreign-only Telegram open/close notice was sent when the transition originated on Iran. | Guard by `last_transition_at` and source sequence. Older transition must be ignored. Add foreign-owned idempotent market notice reconciliation so synced Iran-origin transitions still publish the Telegram channel notice exactly once. |
 | `admin_market_messages` | sync | PK upsert | Active/current market message can be overwritten by stale update; no general authority/source guard | Enforce Iran admin authority. Add source-sequence watermark and optional published/current-state guard. |
 | `admin_broadcast_messages` | sync | PK upsert | Mostly append/audit, lower risk; stale update still possible if mutable fields are added | Enforce Iran admin authority. Add source-sequence watermark. |
 

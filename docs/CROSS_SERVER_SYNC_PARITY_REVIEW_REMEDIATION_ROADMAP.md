@@ -146,6 +146,32 @@ Required direction:
 - Test existing `NULL updated_at`, incoming `NULL updated_at`, older update,
   and newer update.
 
+### P1 - Market Schedule Telegram Notice Can Be Lost After Iran-Origin Sync
+
+Production evidence from 2026-06-28 showed a market-open transition applied on
+the Iran server. The Iran server correctly refused the Telegram `sendMessage`
+side effect because Telegram is foreign-only, then synced `market_runtime_state`
+to foreign. The foreign receiver applied the database state but did not execute
+the Telegram channel notice side effect, so the channel never received the
+`market:opened` notice.
+
+This is not a row-parity problem by itself: `market_runtime_state` can be clean
+on both servers while the foreign-only Telegram side effect is missing.
+
+Required direction:
+
+- Keep Iran forbidden from Telegram.
+- Treat market channel notices as foreign-owned, recoverable side effects.
+- Add a durable/idempotent receipt or equivalent guard keyed by transition,
+  `last_transition_at`, and notice text so foreign can send exactly once.
+- When foreign receives a newer `market_runtime_state` transition via sync, it
+  must reconcile the pending market channel notice if the transition notice has
+  not already been sent.
+- Duplicate sync replay must not send duplicate channel notices.
+- Tests must cover Iran-origin open/close transitions, foreign-origin
+  transitions, duplicate sync replay, missing channel configuration, and
+  Telegram gateway failure/retry behavior.
+
 ## Implementation Stages
 
 ### Stage R0 - Documentation And Release Stop
@@ -581,6 +607,68 @@ Implementation status:
   repair.
 - Strict alerts remain reserved and warning-only until fresh clean parity
   evidence exists from staging and the production warning window.
+- Staging evidence collected on 2026-06-28 recorded a fresh deep comparison in
+  `/api/sync/parity/status`: both `iran -> foreign` and `foreign -> iran`
+  directions reported `status=ok`, 20 deep tables, zero business drift, zero
+  critical drift, zero incomplete tables, zero truncated tables, and zero
+  duplicate identities. After recording, `/api/sync/health` reported
+  `parity_status.comparison_status=ok` and `fresh=true` on both staging roles.
+- Important limitation: the current staging deployment runs `app` and
+  `foreign_app` against the same staging PostgreSQL/Redis instance and has no
+  separate `sync_worker` service. At the evidence time, health still showed
+  `unsynced_change_log_count=6731` and Redis `sync:outbound=171756`. This
+  validates the Stage R7 endpoint/observability path, but it is not sufficient
+  proof of real two-database parity until staging has a separate Iran server or
+  an explicitly drained two-database test environment.
+
+### Stage R8 - Foreign Market Notice Reconciliation
+
+Goal: guarantee Telegram market open/close channel notices even when the market
+runtime transition is first applied on Iran and then synced to foreign.
+
+Deliverables:
+
+- Introduce a small durable/idempotent market notice receipt, or reuse an
+  existing compatible receipt mechanism, for `market:opened` and
+  `market:closed` channel notices.
+- Add a foreign-only reconciler path that inspects newer synced
+  `market_runtime_state` transitions and sends the missing Telegram channel
+  notice exactly once.
+- Keep local transition behavior unchanged for foreign-origin transitions, but
+  record the same receipt so replay remains idempotent.
+- Keep Iran behavior unchanged: it may update market runtime state, but it must
+  never connect to Telegram.
+- Expose enough logging to prove whether a notice was sent, skipped as already
+  sent, skipped because no channel is configured, or failed and remains
+  retryable.
+
+Required searches before editing:
+
+- `market_runtime_state`
+- `market_schedule_loop`
+- `_send_market_channel_notice`
+- `telegram_gateway`
+- `Sync Item Applied`
+- `offer_publication_states`
+- `trade_delivery_receipts`
+
+Tests:
+
+- Iran-origin `market:opened` sync to foreign sends the Telegram notice once.
+- Iran-origin `market:closed` sync to foreign sends the Telegram notice once.
+- Foreign-origin transitions still send the notice once and record the same
+  idempotency evidence.
+- Duplicate sync replay of the same transition does not send a second notice.
+- Telegram failure does not mark the notice as sent and is retryable without
+  crashing the receiver or market loop.
+- Missing `channel_id` is explicitly skipped and logged without retry noise.
+
+Exit criteria:
+
+- A fresh staging run proves both open and close notices are sent on Telegram
+  for Iran-origin and foreign-origin transitions.
+- `/api/sync/health` remains delivery/parity focused; market notice delivery is
+  proven through the new receipt/log evidence, not by row parity alone.
 
 ## Suggested Execution Order
 
@@ -592,10 +680,13 @@ Implementation status:
 6. Stage R5
 7. Stage R6
 8. Stage R7
+9. Stage R8
 
 R1 and R2 are merge blockers. R3 and R4 are production blockers. R5 is both a
 merge blocker and a product decision blocker because current docs and code
 disagree. R6 and R7 are required before production rollout or strict alerting.
+R8 is required before relying on automated Telegram market open/close notices
+in production.
 
 ## Minimum Test Gate Before Merge
 
