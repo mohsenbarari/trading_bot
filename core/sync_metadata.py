@@ -72,7 +72,16 @@ def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -
         blocked_id = coerce_positive_int(data.get("blocked_id"))
         if blocker_id and blocked_id:
             return f"{blocker_id}:{blocked_id}"
-    if table_name in {"offers", "offer_requests"}:
+    if table_name == "offer_requests":
+        request_home_server = _string_or_none(data.get("request_home_server"))
+        idempotency_key = _string_or_none(data.get("idempotency_key"))
+        if request_home_server and idempotency_key:
+            return f"{request_home_server}:{idempotency_key}"
+    if table_name == "trading_settings":
+        key = _string_or_none(data.get("key"))
+        if key:
+            return key
+    if table_name == "offers":
         public_id = _string_or_none(data.get("offer_public_id"))
         if public_id:
             return public_id

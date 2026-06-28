@@ -132,6 +132,69 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["source_server"], "iran")
         self.assertEqual(metadata["source_sequence"], 113)
 
+    def test_offer_request_metadata_uses_request_home_and_idempotency_not_offer_public_id(self):
+        first = build_sync_metadata(
+            "offer_requests",
+            31,
+            "INSERT",
+            {
+                "offer_public_id": "ofr_shared",
+                "request_home_server": "foreign",
+                "idempotency_key": "request-a",
+            },
+            change_log_id=201,
+        )
+        second = build_sync_metadata(
+            "offer_requests",
+            32,
+            "INSERT",
+            {
+                "offer_public_id": "ofr_shared",
+                "request_home_server": "foreign",
+                "idempotency_key": "request-b",
+            },
+            change_log_id=202,
+        )
+
+        self.assertEqual(first["aggregate_table"], "offer_requests")
+        self.assertEqual(first["aggregate_id"], "foreign:request-a")
+        self.assertEqual(first["authority_server"], "foreign")
+        self.assertEqual(second["aggregate_id"], "foreign:request-b")
+        self.assertNotEqual(first["aggregate_id"], second["aggregate_id"])
+
+    def test_offer_request_metadata_falls_back_to_record_id_for_legacy_payload_without_idempotency(self):
+        metadata = build_sync_metadata(
+            "offer_requests",
+            33,
+            "INSERT",
+            {"offer_public_id": "ofr_legacy"},
+            change_log_id=203,
+        )
+
+        self.assertEqual(metadata["aggregate_id"], "33")
+
+    def test_trading_settings_metadata_uses_setting_key_not_record_id_zero(self):
+        open_time = build_sync_metadata(
+            "trading_settings",
+            0,
+            "UPDATE",
+            {"key": "market_open_time_local", "value": "10:00"},
+            change_log_id=301,
+        )
+        close_time = build_sync_metadata(
+            "trading_settings",
+            0,
+            "UPDATE",
+            {"key": "market_close_time_local", "value": "17:00"},
+            change_log_id=302,
+        )
+
+        self.assertEqual(open_time["aggregate_table"], "trading_settings")
+        self.assertEqual(open_time["aggregate_id"], "market_open_time_local")
+        self.assertEqual(open_time["aggregate_db_id"], 0)
+        self.assertEqual(close_time["aggregate_id"], "market_close_time_local")
+        self.assertNotEqual(open_time["aggregate_id"], close_time["aggregate_id"])
+
     def test_public_identity_payloads_prefer_stable_cross_server_keys(self):
         self.assertEqual(
             build_sync_public_identity("offers", 12, {"offer_public_id": "ofr_12"}),

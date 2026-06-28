@@ -8,6 +8,7 @@ from api.routers.sync import (
     _sync_watermark_context_from_item,
     receive_sync_data,
 )
+from core.sync_metadata import build_sync_metadata
 
 
 class ScalarFirstResult:
@@ -85,6 +86,94 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.aggregate_table, "users")
         self.assertEqual(context.aggregate_key, "5")
         self.assertEqual(len(context.payload_hash), 64)
+
+    def test_offer_request_watermark_context_uses_idempotency_key_per_logical_request(self):
+        first_data = {
+            "id": 31,
+            "offer_public_id": "ofr_shared",
+            "request_home_server": "foreign",
+            "idempotency_key": "request-a",
+        }
+        second_data = {
+            "id": 32,
+            "offer_public_id": "ofr_shared",
+            "request_home_server": "foreign",
+            "idempotency_key": "request-b",
+        }
+        first = {
+            "table": "offer_requests",
+            "operation": "INSERT",
+            "id": 31,
+            "data": first_data,
+            "change_log_id": 201,
+            "sync_meta": build_sync_metadata("offer_requests", 31, "INSERT", first_data, change_log_id=201),
+        }
+        second = {
+            "table": "offer_requests",
+            "operation": "INSERT",
+            "id": 32,
+            "data": second_data,
+            "change_log_id": 202,
+            "sync_meta": build_sync_metadata("offer_requests", 32, "INSERT", second_data, change_log_id=202),
+        }
+
+        first_context = _sync_watermark_context_from_item(
+            first,
+            table="offer_requests",
+            operation="INSERT",
+            record_id=31,
+            data=first_data,
+        )
+        second_context = _sync_watermark_context_from_item(
+            second,
+            table="offer_requests",
+            operation="INSERT",
+            record_id=32,
+            data=second_data,
+        )
+
+        self.assertEqual(first_context.aggregate_key, "foreign:request-a")
+        self.assertEqual(second_context.aggregate_key, "foreign:request-b")
+        self.assertNotEqual(first_context.aggregate_key, second_context.aggregate_key)
+
+    def test_trading_settings_watermark_context_uses_setting_key_per_logical_setting(self):
+        first_data = {"key": "market_open_time_local", "value": "10:00"}
+        second_data = {"key": "market_close_time_local", "value": "17:00"}
+        first = {
+            "table": "trading_settings",
+            "operation": "UPDATE",
+            "id": 0,
+            "data": first_data,
+            "change_log_id": 301,
+            "sync_meta": build_sync_metadata("trading_settings", 0, "UPDATE", first_data, change_log_id=301),
+        }
+        second = {
+            "table": "trading_settings",
+            "operation": "UPDATE",
+            "id": 0,
+            "data": second_data,
+            "change_log_id": 302,
+            "sync_meta": build_sync_metadata("trading_settings", 0, "UPDATE", second_data, change_log_id=302),
+        }
+
+        first_context = _sync_watermark_context_from_item(
+            first,
+            table="trading_settings",
+            operation="UPDATE",
+            record_id=0,
+            data=first_data,
+        )
+        second_context = _sync_watermark_context_from_item(
+            second,
+            table="trading_settings",
+            operation="UPDATE",
+            record_id=0,
+            data=second_data,
+        )
+
+        self.assertEqual(first_context.aggregate_key, "market_open_time_local")
+        self.assertEqual(second_context.aggregate_key, "market_close_time_local")
+        self.assertNotEqual(first_context.aggregate_key, second_context.aggregate_key)
 
     async def test_watermark_decisions_cover_newer_stale_duplicate_and_conflict(self):
         item = sync_item(10)

@@ -319,7 +319,7 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["data"], {"id": 42, "status": "confirmed"})
         self.assertEqual(len(fake_session.statements), 1)
 
-    async def test_offer_change_log_replay_uses_latest_authoritative_snapshot(self):
+    async def test_offer_change_log_replay_uses_original_committed_payload(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)
         entry = SimpleNamespace(
             id=90,
@@ -341,15 +341,16 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["hash"], "hash-90")
         self.assertEqual(item["id"], 12)
         self.assertEqual(item["data"]["offer_public_id"], "ofr_12")
-        self.assertEqual(item["data"]["status"], "expired")
-        self.assertEqual(item["data"]["version_id"], 4)
-        self.assertEqual(item["data"]["remaining_quantity"], 0)
-        self.assertEqual(item["sync_meta"]["authoritative_version"], 4)
-        self.assertEqual(item["sync_meta"]["event_sequence"], 4)
+        self.assertEqual(item["data"]["status"], "active")
+        self.assertEqual(item["data"]["version_id"], 1)
+        self.assertNotIn("remaining_quantity", item["data"])
+        self.assertEqual(item["sync_meta"]["authoritative_version"], 1)
+        self.assertEqual(item["sync_meta"]["event_sequence"], 1)
         self.assertEqual(item["sync_meta"]["outbox_id"], 90)
         self.assertEqual(item["public_identity"]["value"], "ofr_12")
+        self.assertEqual(len(fake_session.statements), 1)
 
-    async def test_offer_change_log_replay_uses_latest_completed_snapshot(self):
+    async def test_offer_change_log_replay_does_not_rebuild_same_sequence_from_current_state(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)
         entry = SimpleNamespace(
             id=91,
@@ -376,12 +377,13 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(item["change_log_id"], 91)
         self.assertEqual(item["hash"], "hash-91")
-        self.assertEqual(item["data"]["status"], "completed")
-        self.assertEqual(item["data"]["version_id"], 4)
-        self.assertEqual(item["data"]["remaining_quantity"], 0)
-        self.assertEqual(item["sync_meta"]["authoritative_version"], 4)
-        self.assertEqual(item["sync_meta"]["event_sequence"], 4)
+        self.assertEqual(item["data"]["status"], "active")
+        self.assertEqual(item["data"]["version_id"], 1)
+        self.assertNotIn("remaining_quantity", item["data"])
+        self.assertEqual(item["sync_meta"]["authoritative_version"], 1)
+        self.assertEqual(item["sync_meta"]["event_sequence"], 1)
         self.assertEqual(item["sync_meta"]["outbox_id"], 91)
+        self.assertEqual(len(fake_session.statements), 1)
 
 
 class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
@@ -397,7 +399,6 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         marker_return_value=1,
         fetch_return_value=None,
         fetch_side_effect=None,
-        refresh_side_effect=None,
     ):
         fake_redis = FakeRedis(blpop_results)
         fake_settings = SimpleNamespace(redis_host="redis", redis_port=6379, sync_api_key=api_key)
@@ -405,7 +406,6 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         send_mock = AsyncMock(side_effect=send_side_effect, return_value=send_return_value)
         marker_mock = AsyncMock(side_effect=marker_side_effect, return_value=marker_return_value)
         fetch_mock = AsyncMock(side_effect=fetch_side_effect, return_value=fetch_return_value)
-        refresh_mock = AsyncMock(side_effect=refresh_side_effect or (lambda item: item))
         sleep_mock = AsyncMock()
 
         with patch("core.sync_worker.redis.Redis", return_value=fake_redis), patch(
@@ -417,15 +417,12 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.sync_worker.fetch_next_unsynced_change_log_item", fetch_mock
         ), patch(
-            "core.sync_worker.refresh_offer_sync_item_from_authoritative_state", refresh_mock
-        ), patch(
             "core.sync_worker.asyncio.sleep", sleep_mock
         ):
             with self.assertRaises(asyncio.CancelledError):
                 await sync_worker.main()
 
         self.fetch_mock = fetch_mock
-        self.refresh_mock = refresh_mock
         return fake_redis, send_mock, sleep_mock, marker_mock
 
     async def test_main_skips_invalid_json_payload(self):
@@ -714,7 +711,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         )
         sleep_mock.assert_awaited_once_with(1)
 
-    async def test_main_refreshes_queued_offer_payload_before_send_and_requeue(self):
+    async def test_main_retries_payload_without_refreshing_offer_state(self):
         stale_item = {
             "type": "db_change",
             "operation": "INSERT",
@@ -724,26 +721,19 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
             "hash": "hash-12",
             "change_log_id": 90,
         }
-        refreshed_item = {
-            **stale_item,
-            "data": {"id": 12, "offer_public_id": "ofr_12", "status": "expired", "version_id": 4},
-            "sync_meta": {"authoritative_version": 4},
-        }
         response = FakeResponse(500, "peer down", {"status": "error", "errors": 1})
 
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
             blpop_results=[("sync:retry", json.dumps(stale_item)), asyncio.CancelledError()],
             send_return_value=response,
-            refresh_side_effect=lambda _item: refreshed_item,
         )
 
-        self.refresh_mock.assert_awaited_once_with(stale_item)
         send_mock.assert_awaited_once()
-        self.assertEqual(send_mock.await_args.args[1], refreshed_item)
+        self.assertEqual(send_mock.await_args.args[1], stale_item)
         marker_mock.assert_not_awaited()
         self.assertEqual(len(fake_redis.rpush_calls), 1)
         self.assertEqual(fake_redis.rpush_calls[0][0], "sync:retry")
-        self.assertEqual(json.loads(fake_redis.rpush_calls[0][1])["data"]["status"], "expired")
+        self.assertEqual(json.loads(fake_redis.rpush_calls[0][1])["data"]["status"], "active")
         sleep_mock.assert_awaited_once_with(1)
 
     async def test_main_requeues_when_marker_fails_after_peer_acceptance(self):

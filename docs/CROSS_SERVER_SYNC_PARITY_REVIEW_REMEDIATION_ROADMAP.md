@@ -250,6 +250,26 @@ Exit criteria:
 
 - A source sequence only orders one logical aggregate, never an unrelated row.
 
+Implementation status - 2026-06-28:
+
+- `core.sync_worker` no longer refreshes offer replay payloads from current
+  offer state. Committed `change_log` rows are replayed with their original
+  payload and original hash, so a source sequence is not reused for a different
+  payload.
+- `_aggregate_identity()` now keys `offer_requests` by
+  `request_home_server:idempotency_key` when available, with record-id fallback
+  for legacy payloads that do not carry idempotency metadata.
+- `_aggregate_identity()` now keys `trading_settings` by `data["key"]` instead
+  of collapsing all setting rows under record id `0`.
+- Active `SyncPolicy.SYNC` aggregate identity coverage was reviewed. Remaining
+  id/natural-key hardening for deletes and receiver merge rules is intentionally
+  left for Stage R3.
+- `sync_watermark_strict_mode` remains off by default; strict mode is still
+  blocked until R3/R4 complete and staging parity is clean.
+- Targeted tests cover committed offer replay, retry payload preservation,
+  `offer_requests` per-request aggregate identity, `trading_settings` per-key
+  aggregate identity, and watermark contexts for both table families.
+
 ### Stage R3 - Receiver Merge And Delete Identity Hardening
 
 Goal: remove remaining id-drift and stale-merge traps from receiver paths.
