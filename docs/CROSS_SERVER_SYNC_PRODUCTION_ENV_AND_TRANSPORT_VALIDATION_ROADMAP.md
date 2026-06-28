@@ -12,6 +12,10 @@ the sync parity hardening investigation:
 - Foreign production sent a delayed Telegram market-open notice because the new
   market notice receipt table was empty at rollout time and the current-state
   repair logic treated an old transition as unsent work.
+- Market schedule settings are synced, but the current foreign runtime behavior
+  still waits for Iran `market_runtime_state` sync before closing the Telegram
+  market surface. If the Iran/foreign link drops shortly before market close,
+  Telegram can incorrectly remain open until sync resumes.
 - Production deploy tooling does not yet have a hard release gate that proves
   runtime identity values match the canonical Iran/foreign topology before
   containers are recreated.
@@ -47,6 +51,10 @@ this branch for production rollout or strict production parity confidence.
 - Final worker-to-remote-receiver validation must use normal TLS verification.
   `curl -k`, `verify=False`, or insecure TLS flags are not acceptable evidence
   for the final gate.
+- A short Iran/foreign outage must not keep Telegram open past the already
+  synced market close schedule. The foreign server must either act on the
+  synced schedule independently for local Telegram-side closure, or enter a
+  clearly defined short-outage local closed mode.
 
 ## Incident Evidence Already Collected
 
@@ -267,6 +275,121 @@ Exit criteria:
   hours earlier.
 - A fresh synced transition still produces the expected Telegram notice.
 
+## Stage V3A - Short-Outage Market Schedule Autonomy
+
+Goal: prevent Telegram from staying open during a short Iran/foreign outage
+when both servers already know the same market schedule.
+
+Problem scenario:
+
+- The configured market close time is 22:00 Iran time.
+- Iran/foreign connectivity drops at 21:59.
+- Iran closes the WebApp market at 22:00 and writes the authoritative
+  `market_runtime_state` close transition.
+- Connectivity resumes at 22:04.
+- With the current foreign behavior, Telegram can remain open between 22:00
+  and 22:04 because foreign waits for the Iran runtime-state sync before
+  applying local Telegram-side closure.
+
+Why this is wrong:
+
+`trading_settings` and `market_schedule_overrides` are already synced business
+configuration. If foreign has a fresh copy of the schedule before the outage,
+it has enough information to locally protect the Telegram surface at the close
+time. Waiting for `market_runtime_state` sync is acceptable for final parity,
+but not for preventing trades and active buttons after the known close time.
+
+Recommended decision:
+
+Keep Iran authoritative for `market_runtime_state`, but let foreign evaluate
+the synced schedule for local protective side effects during short outages.
+Foreign must not create an authoritative `market_runtime_state` transition. It
+may create only foreign-local side-effect evidence such as market notice
+receipts or local outage-closure guard records.
+
+Allowed foreign actions at the scheduled close time during a short outage:
+
+- stop accepting Telegram trade requests because the synced schedule says the
+  market is closed;
+- expire active offers where `Offer.home_server == "foreign"`;
+- remove/update interactive Telegram offer buttons for expired foreign-home
+  offers;
+- send the market-close Telegram channel notice if the transition is within
+  the approved short-outage freshness window and no matching receipt exists;
+- record idempotent local evidence so reconnection/replay does not duplicate
+  expiry or Telegram notices.
+
+Forbidden foreign actions:
+
+- do not write a foreign-authoritative `market_runtime_state` row;
+- do not reopen the market locally if Iran later syncs a newer closed state;
+- do not push a foreign market-runtime transition back to Iran;
+- do not accept trades after the local schedule has reached close time merely
+  because the last synced `market_runtime_state` still says open.
+
+Alternative if independent schedule action is not selected:
+
+- Add a short-outage mode detector. If peer connectivity is down and the synced
+  schedule says closed, foreign enters `local_market_closed_due_to_outage`.
+  This mode blocks Telegram trade actions and expires foreign-home offers
+  locally until Iran sync confirms the authoritative close. This alternative
+  still relies on the synced schedule; it only makes the outage state explicit.
+
+Recommended implementation shape:
+
+- Split market behavior into two concepts:
+  - authoritative product state: `market_runtime_state`, Iran-owned;
+  - local protective market surface state: derived from synced schedule and
+    used by the server that owns that surface.
+- On foreign market-schedule loop:
+  - load synced `trading_settings` and `market_schedule_overrides`;
+  - evaluate the schedule in `market_timezone`;
+  - if schedule is closed while local Telegram surface is still open, run an
+    idempotent local close-side-effect command for foreign-home offers and
+    Telegram buttons;
+  - do not call the Iran-authoritative runtime-state writer.
+- On reconnect:
+  - when Iran's close `market_runtime_state` arrives, reconcile it with the
+    local foreign side effects;
+  - if the local close already happened, skip duplicate expiry and duplicate
+    Telegram notice;
+  - if Iran sends a newer override/runtime state that changes the intended
+    result, apply only the explicitly safe transition policy documented for
+    short outages.
+- If schedule settings or overrides are stale/not synced, fail closed for
+  Telegram trading after the last known close time rather than allowing trades
+  during uncertainty.
+
+Required tests:
+
+- `21:59` connectivity loss, `22:00` scheduled close, `22:04` reconnect:
+  foreign blocks Telegram trades at 22:00 without waiting for runtime sync.
+- The same scenario expires foreign-home active offers at 22:00.
+- The same scenario removes/updates Telegram buttons at 22:00.
+- Reconnection at 22:04 applies Iran `market_runtime_state` without duplicating
+  expiry, notice receipts, or channel edits.
+- If the schedule was changed on Iran immediately before the outage but did not
+  sync to foreign, foreign follows only its last confirmed synced schedule and
+  records an explicit stale-schedule warning.
+- If an override marks the day closed all day and is already synced, foreign
+  never opens Telegram trading that day even if runtime sync is delayed.
+- If an override changes custom hours and is already synced, foreign closes at
+  the custom close time.
+- If foreign restarts during the outage, it reconstructs the local protective
+  state from durable local evidence and the synced schedule.
+- If connectivity is normal, the behavior remains compatible with normal
+  Iran-origin `market_runtime_state` sync and does not create duplicate local
+  side effects.
+
+Exit criteria:
+
+- A short outage before close cannot leave Telegram trade actions enabled past
+  the known synced close time.
+- Foreign still does not become authoritative for `market_runtime_state`.
+- Reconnect is idempotent and does not create duplicate side effects.
+- The chosen implementation path, independent schedule action or explicit
+  outage mode, is documented before coding.
+
 ## Stage V4 - Parity And Health Evidence After Env Correction
 
 Goal: prove sync parity evidence is fresh after the bad peer URL is removed.
@@ -411,6 +534,7 @@ Prerequisites:
 - Stage V1 has corrected Iran runtime env.
 - Stage V2 guard is active in the release path.
 - Stage V3 stale market notice suppression is active.
+- Stage V3A short-outage market schedule autonomy is active.
 - Stage V4 parity evidence is fresh.
 - Stage V6 staging validation passed.
 - User has explicitly approved production validation execution.
@@ -484,10 +608,11 @@ This roadmap is complete only when all of the following are true:
   container recreation.
 - Market notice reconciliation cannot send stale historical open/close notices.
 - Fresh market transitions still send exactly one Telegram notice on foreign.
+- Telegram cannot remain open past the already synced close schedule during a
+  short Iran/foreign outage.
 - Parity status is fresh and clean/non-critical after the env correction.
 - A staging production-like worker-to-remote-receiver validation has passed in
   both directions.
 - The final production preflight transport validation plan is executable and
   gated by explicit approval.
 - Documentation/runbooks require these checks for future production releases.
-
