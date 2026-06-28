@@ -23,12 +23,12 @@ class SyncHealthMonitorTests(unittest.TestCase):
         args = SimpleNamespace(
             iran_host="root@example",
             iran_dir="/srv/trading-bot",
-            ssh_option=["StrictHostKeyChecking=no", "ConnectTimeout=5"],
+            ssh_option=["StrictHostKeyChecking=accept-new", "ConnectTimeout=5"],
         )
 
         command = sample_sync_health.build_iran_ssh_command(args)
 
-        self.assertEqual(command[:5], ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"])
+        self.assertEqual(command[:5], ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5"])
         self.assertEqual(command[5], "root@example")
         self.assertIn("cd /srv/trading-bot", command[6])
         self.assertIn("python3 scripts/sample_sync_health.py --skip-iran", command[6])

@@ -106,7 +106,7 @@ wait_for_local_api() {
 
 wait_for_iran_api() {
     for _ in $(seq 1 30); do
-        if ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" "curl -fsS '$IRAN_API_URL/api/config' >/dev/null" 2>/dev/null; then
+        if ssh -o StrictHostKeyChecking=accept-new -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" "curl -fsS '$IRAN_API_URL/api/config' >/dev/null" 2>/dev/null; then
             return 0
         fi
         sleep 4
@@ -134,7 +134,7 @@ start_sync_workers() {
         $compose_cmd rm -sf sync_worker >/dev/null 2>&1 || docker rm -f trading_bot_sync_worker >/dev/null 2>&1 || true
         $compose_cmd up -d --no-deps sync_worker >/dev/null
     )
-    ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
+    ssh -o StrictHostKeyChecking=accept-new -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
         "cd '$IRAN_PROJECT_DIR' && if docker compose version >/dev/null 2>&1; then compose_cmd='docker compose'; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd='docker-compose'; else echo 'No Docker Compose command is available on the Iran host.' >&2; exit 1; fi; \$compose_cmd -f docker-compose.iran.yml rm -sf sync_worker >/dev/null 2>&1 || docker rm -f trading_bot_sync_worker >/dev/null 2>&1 || true; \$compose_cmd -f docker-compose.iran.yml up -d --no-deps sync_worker >/dev/null"
 }
 
@@ -154,7 +154,7 @@ resync_local_table() {
 
 resync_iran_table() {
     local table="$1"
-    ssh -o StrictHostKeyChecking=no -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
+    ssh -o StrictHostKeyChecking=accept-new -p "$IRAN_SSH_PORT" "$IRAN_USER@$IRAN_HOST" \
         "curl -fsS -X POST '$IRAN_API_URL/api/sync/resync?limit=$SYNC_LIMIT&table_filter=$table' -H 'X-Dev-Api-Key: $IRAN_DEV_API_KEY'"
 }
 

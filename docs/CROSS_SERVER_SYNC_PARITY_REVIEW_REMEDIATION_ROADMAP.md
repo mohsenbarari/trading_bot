@@ -506,6 +506,14 @@ Implementation status:
 - Stage 9 production rollout planning now includes a transport security gate and
   blocks preflight/execute/postdeploy modes if sync TLS verification is disabled
   without a CA bundle.
+- Stage 9 backup mode remains explicitly production-mutating: it has a separate
+  confirmation token, marks every backup command as `mutates_production=true`,
+  and release execution still requires `main`.
+- Stage 9 SSH access, production deploy helpers, sync-health sampling, recovery
+  helpers, worker-pool probes, and production backup pullback now use
+  `StrictHostKeyChecking=accept-new` instead of disabling host-key checks. This
+  keeps first-time host onboarding workable while still refusing silent host-key
+  replacement.
 - Remaining `verify=False` text appears only in historical/roadmap notes, not in
   runtime code paths.
 

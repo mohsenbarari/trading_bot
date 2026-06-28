@@ -67,6 +67,7 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertTrue(plan["branch_gate"]["planning_passed"])
         self.assertFalse(plan["branch_gate"]["release_passed"])
         self.assertEqual(plan["execution_contract"]["release_requires_branch"], "main")
+        self.assertEqual(plan["execution_contract"]["ssh_strict_host_key_checking"], "accept-new")
         self.assertEqual(plan["transport_security_gate"]["status"], "passed")
         self.assertEqual(plan["read_only_preflight"]["status"], "blocked_until_explicit_confirm")
         self.assertEqual(plan["backup_confirmation"]["status"], "blocked_until_explicit_confirm")
@@ -82,6 +83,12 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertIn("iran_parity_snapshot_deep", preflight_names)
         self.assertIn("production_predeploy_parity_compare_deep", preflight_names)
         self.assertIn("production_alerts_warning_only", preflight_names)
+
+    def test_iran_stage9_ssh_uses_accept_new_host_key_policy(self):
+        ssh_command = stage9.iran_compose_exec(FAKE_SETTINGS, "python", "-V")
+
+        self.assertEqual(ssh_command[0], "ssh")
+        self.assertIn("StrictHostKeyChecking=accept-new", ssh_command)
 
     def test_insecure_sync_transport_blocks_production_preflight(self):
         insecure_settings = {**FAKE_SETTINGS, "SYNC_VERIFY_TLS": "false", "SYNC_CA_BUNDLE": ""}

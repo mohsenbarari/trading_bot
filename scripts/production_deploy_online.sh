@@ -543,25 +543,25 @@ load_manifest() {
         key)
             if [[ -n "${IRAN_SSH_PRIVATE_KEY_PATH:-}" ]]; then
                 [[ -f "$IRAN_SSH_PRIVATE_KEY_PATH" ]] || die "IRAN_SSH_PRIVATE_KEY_PATH does not exist: $IRAN_SSH_PRIVATE_KEY_PATH"
-                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
-                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new -i "$IRAN_SSH_PRIVATE_KEY_PATH")
+                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new -i "$IRAN_SSH_PRIVATE_KEY_PATH")
             else
                 log "IRAN_SSH_PRIVATE_KEY_PATH is empty; using SSH agent/default keys for Iran access."
-                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
-                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
+                SSH_IRAN_CMD=(ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
+                SCP_IRAN_CMD=(scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
             fi
             ;;
         password)
             : "${IRAN_SSH_PASSWORD:?IRAN_SSH_PASSWORD is required for password auth}"
             need_cmd sshpass
-            SSH_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
-            SCP_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=no)
+            SSH_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" ssh -p "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
+            SCP_IRAN_CMD=(sshpass -p "$IRAN_SSH_PASSWORD" scp -P "$IRAN_SSH_PORT" -o StrictHostKeyChecking=accept-new)
             ;;
         *)
             die "Unsupported IRAN_SSH_AUTH_METHOD: $IRAN_SSH_AUTH_METHOD"
             ;;
     esac
-    RSYNC_SSH="ssh -p $IRAN_SSH_PORT -o StrictHostKeyChecking=no"
+    RSYNC_SSH="ssh -p $IRAN_SSH_PORT -o StrictHostKeyChecking=accept-new"
     RELEASE_TMP_DIR="$LOCAL_PROJECT_DIR/tmp/production-release"
     RELEASE_ARTIFACT_DIR="$RELEASE_TMP_DIR/artifacts"
     REMOTE_IMAGE_BUNDLE="$IRAN_DEPLOY_BASE_DIR/releases/trading-bot-images.tar"

@@ -54,6 +54,19 @@ class ProductionBaselineCaptureTests(unittest.TestCase):
         self.assertFalse(parsed["clean"])
         self.assertEqual(parsed["unsynced_values"], [1])
 
+    def test_remote_args_use_accept_new_host_key_policy(self) -> None:
+        args = baseline.remote_args(
+            {
+                "IRAN_HOST": "87.107.3.22",
+                "IRAN_SSH_PORT": "22",
+                "IRAN_SSH_USER": "root",
+            },
+            "true",
+        )
+
+        self.assertIn("StrictHostKeyChecking=accept-new", args)
+        self.assertNotIn("StrictHostKeyChecking=no", args)
+
 
 if __name__ == "__main__":
     unittest.main()

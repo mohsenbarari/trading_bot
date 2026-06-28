@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iran-host", default=os.getenv("IRAN_SSH_TARGET", defaults["IRAN_SSH_TARGET"]), help="Iran SSH target.")
     parser.add_argument("--iran-dir", default=os.getenv("IRAN_DIR", defaults["IRAN_DIR"]), help="Iran repo directory.")
     parser.add_argument("--iran-port", default=os.getenv("IRAN_SSH_PORT", defaults["IRAN_SSH_PORT"]), help="Iran SSH port.")
-    parser.add_argument("--ssh-option", action="append", default=["StrictHostKeyChecking=no"], help="Additional ssh -o options.")
+    parser.add_argument("--ssh-option", action="append", default=["StrictHostKeyChecking=accept-new"], help="Additional ssh -o options.")
     parser.add_argument("--skip-iran", action="store_true", help="Only sample the local host.")
     return parser.parse_args()
 
@@ -67,7 +67,7 @@ def fetch_sync_health(url: str, api_key: str) -> dict:
 
 def build_iran_ssh_command(args: argparse.Namespace) -> list[str]:
     ssh_cmd = ["ssh"]
-    for option in getattr(args, "ssh_option", ["StrictHostKeyChecking=no"]):
+    for option in getattr(args, "ssh_option", ["StrictHostKeyChecking=accept-new"]):
         ssh_cmd.extend(["-o", option])
     if hasattr(args, "iran_port"):
         ssh_cmd.extend(["-p", str(args.iran_port)])

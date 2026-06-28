@@ -338,7 +338,7 @@ def pull_iran_files(settings: dict[str, str], payload: dict[str, Any], destinati
             "-P",
             settings.get("IRAN_SSH_PORT", "22"),
             "-o",
-            "StrictHostKeyChecking=no",
+            "StrictHostKeyChecking=accept-new",
             f"{target}:{remote_path}",
             str(local_path),
         ]

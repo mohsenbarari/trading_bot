@@ -39,6 +39,7 @@ RELEASE_CONFIRM_ENV = "SYNC_PARITY_STAGE9_PRODUCTION_RELEASE_CONFIRM"
 RELEASE_CONFIRM_VALUE = "execute-production-rollout"
 STRICT_ALERT_CONFIRM_ENV = "SYNC_PARITY_STAGE9_STRICT_ALERT_CONFIRM"
 STRICT_ALERT_CONFIRM_VALUE = "enable-strict-parity-alerts"
+SSH_STRICT_HOST_KEY_CHECKING = "accept-new"
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ def ssh_args(settings: dict[str, str], command: str) -> list[str]:
     return [
         "ssh",
         "-o",
-        "StrictHostKeyChecking=no",
+        f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY_CHECKING}",
         "-p",
         settings.get("IRAN_SSH_PORT", "22"),
         f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
@@ -567,6 +568,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "release_confirm_env": RELEASE_CONFIRM_ENV,
             "release_confirm_value": RELEASE_CONFIRM_VALUE,
             "release_requires_branch": RELEASE_BRANCH,
+            "ssh_strict_host_key_checking": SSH_STRICT_HOST_KEY_CHECKING,
             "repair_policy": "production repair remains manual and dry-run-first; this rollout does not auto-repair drift",
         },
         "transport_security_gate": build_transport_security_gate(settings),

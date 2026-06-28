@@ -224,7 +224,7 @@ def remote_args(settings: dict[str, str], command: str) -> list[str]:
     return [
         "ssh",
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=accept-new",
         "-p",
         settings.get("IRAN_SSH_PORT", "22"),
         f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
