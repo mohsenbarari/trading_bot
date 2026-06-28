@@ -434,6 +434,20 @@ Implementation direction:
   - missing channel configuration remains skipped without retry noise;
   - retry failure updates `attempt_count`, `last_error`, and `next_retry_at`.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- Added `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED` as a foreign-side degrade
+  switch. When enabled, market notice reconciliation and retry skip Telegram
+  side effects without creating or mutating receipt rows.
+- Added `reconcile_due_market_channel_notice_receipts()` to retry due failed
+  `market_channel_notice_receipts` rows on the foreign server with the existing
+  dedupe key and the existing sent-receipt guard.
+- Foreign market schedule cycles now run current-state notice recovery and due
+  failed-receipt retry. Iran remains a no-op for Telegram notices.
+- Retry limit is runtime-configurable through
+  `TRADING_BOT_MARKET_NOTICE_RETRY_LIMIT`; invalid values fall back to the safe
+  default instead of preventing service startup.
+
 Exit criteria:
 
 - A transient Telegram send failure does not permanently lose the market notice.

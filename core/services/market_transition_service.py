@@ -50,6 +50,8 @@ MARKET_NOTICE_STATUS_PENDING = "pending"
 MARKET_NOTICE_STATUS_SENT = "sent"
 MARKET_NOTICE_STATUS_FAILED = "failed"
 MARKET_NOTICE_STATUS_SKIPPED = "skipped"
+MARKET_NOTICE_RETRY_LIMIT = 20
+MARKET_NOTICE_DISABLE_VALUES = {"1", "true", "yes", "on", "disabled"}
 MARKET_RUNTIME_ADVISORY_LOCK_KEY = 202605220901
 MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS = float(
     os.getenv("TRADING_BOT_MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS", "1.0")
@@ -78,6 +80,15 @@ class MarketChannelNoticeResult:
     status: str
     dedupe_key: str | None = None
     reason: str | None = None
+
+
+@dataclass(slots=True)
+class MarketChannelNoticeRetrySummary:
+    checked: int = 0
+    sent: int = 0
+    failed: int = 0
+    skipped: int = 0
+    disabled: bool = False
 
 
 _market_runtime_view_cache: tuple[float, MarketRuntimeView] | None = None
@@ -183,6 +194,25 @@ def market_channel_notice_dedupe_key(
     return f"market-channel-notice:{transition}:{transition_time}:{digest}"
 
 
+def market_channel_notice_delivery_disabled() -> bool:
+    raw = os.getenv("TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED", "").strip().lower()
+    return raw in MARKET_NOTICE_DISABLE_VALUES
+
+
+def _market_notice_retry_limit() -> int:
+    raw = os.getenv("TRADING_BOT_MARKET_NOTICE_RETRY_LIMIT")
+    if raw is None:
+        return MARKET_NOTICE_RETRY_LIMIT
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid TRADING_BOT_MARKET_NOTICE_RETRY_LIMIT; falling back to default",
+            extra={"event": "market.channel_notice_retry_limit_invalid", "value": raw},
+        )
+        return MARKET_NOTICE_RETRY_LIMIT
+
+
 async def _send_market_channel_notice(
     text: str,
     *,
@@ -252,6 +282,8 @@ async def reconcile_market_channel_notice_for_state(
     """Send or repair the foreign-owned Telegram market notice for one state."""
     if current_server() != SERVER_FOREIGN:
         return MarketChannelNoticeResult(status="skipped", reason="non_foreign_server")
+    if market_channel_notice_delivery_disabled():
+        return MarketChannelNoticeResult(status="skipped", reason="disabled")
 
     transition_at = _market_notice_transition_at_for_state(state)
     if transition_at is None:
@@ -369,6 +401,60 @@ async def reconcile_market_channel_notice_for_state(
         },
     )
     return MarketChannelNoticeResult(status="failed", dedupe_key=dedupe_key, reason=str(error_class))
+
+
+def _market_runtime_state_from_notice_receipt(receipt: MarketChannelNoticeReceipt) -> MarketRuntimeState:
+    return MarketRuntimeState(
+        id=1,
+        is_open=receipt.transition == MARKET_NOTICE_TRANSITION_OPENED,
+        active_web_notice_visible=True,
+        offers_since_last_open=0,
+        last_transition_at=receipt.transition_at,
+    )
+
+
+async def reconcile_due_market_channel_notice_receipts(
+    db: AsyncSession,
+    *,
+    source: str,
+    current_time: datetime | None = None,
+    limit: int | None = None,
+) -> MarketChannelNoticeRetrySummary:
+    if current_server() != SERVER_FOREIGN:
+        return MarketChannelNoticeRetrySummary()
+    if market_channel_notice_delivery_disabled():
+        return MarketChannelNoticeRetrySummary(disabled=True)
+
+    now = _coerce_utc_now(current_time)
+    max_rows = max(1, int(limit)) if limit is not None else _market_notice_retry_limit()
+    result = await db.execute(
+        select(MarketChannelNoticeReceipt)
+        .where(
+            MarketChannelNoticeReceipt.status == MARKET_NOTICE_STATUS_FAILED,
+            MarketChannelNoticeReceipt.next_retry_at.isnot(None),
+            MarketChannelNoticeReceipt.next_retry_at <= now,
+        )
+        .order_by(MarketChannelNoticeReceipt.next_retry_at.asc(), MarketChannelNoticeReceipt.id.asc())
+        .limit(max_rows)
+        .with_for_update(skip_locked=True)
+    )
+    receipts = list(result.scalars().all())
+    summary = MarketChannelNoticeRetrySummary(checked=len(receipts))
+
+    for receipt in receipts:
+        retry_result = await reconcile_market_channel_notice_for_state(
+            db,
+            _market_runtime_state_from_notice_receipt(receipt),
+            source=source,
+        )
+        if retry_result.status == "sent":
+            summary.sent += 1
+        elif retry_result.status == "failed":
+            summary.failed += 1
+        else:
+            summary.skipped += 1
+
+    return summary
 
 
 async def reconcile_market_channel_notice_for_current_state(

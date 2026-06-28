@@ -10,6 +10,7 @@ from core.services.market_schedule_service import evaluate_market_schedule, get_
 from core.services.market_transition_service import (
     apply_market_schedule_transition,
     load_market_schedule_overrides_window,
+    reconcile_due_market_channel_notice_receipts,
     reconcile_market_runtime_side_effects_for_current_state,
 )
 from core.trading_settings import get_trading_settings_async
@@ -29,10 +30,22 @@ async def reconcile_market_schedule_runtime(*, current_time=None):
                 db,
                 source="market_schedule_loop",
             )
+            retry_summary = await reconcile_due_market_channel_notice_receipts(
+                db,
+                source="market_schedule_loop_retry",
+            )
             if result.changed:
                 logger.info(
                     "⏰ Foreign market schedule reconciled local side effects (expired_offers=%s)",
                     len(result.expired_offer_ids),
+                )
+            if retry_summary.checked:
+                logger.info(
+                    "⏰ Foreign market notice retry completed (checked=%s sent=%s failed=%s skipped=%s)",
+                    retry_summary.checked,
+                    retry_summary.sent,
+                    retry_summary.failed,
+                    retry_summary.skipped,
                 )
             return result
 

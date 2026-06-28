@@ -352,6 +352,113 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.attempt_count, 1)
         db.commit.assert_awaited_once()
 
+    async def test_reconcile_market_channel_notice_skips_when_disabled_without_receipt_mutation(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED": "1"},
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(),
+        ) as receipt_mock:
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                SimpleNamespace(),
+                state,
+                source="sync_receive",
+            )
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "disabled")
+        receipt_mock.assert_not_awaited()
+
+    async def test_reconcile_due_market_channel_notice_receipts_retries_failed_due_receipt(self):
+        now = datetime(2026, 6, 28, 5, 35, tzinfo=timezone.utc)
+        receipt = SimpleNamespace(
+            id=9,
+            dedupe_key="market-channel-notice:opened:2026-06-28T05:30:00Z:test",
+            transition=market_transition_service.MARKET_NOTICE_TRANSITION_OPENED,
+            transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+            notice_text=market_transition_service.MARKET_OPENED_CHANNEL_NOTICE,
+            status=market_transition_service.MARKET_NOTICE_STATUS_FAILED,
+            attempt_count=1,
+            last_error_class="TimeoutError",
+            next_retry_at=now - timedelta(seconds=1),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=_ExecuteResult(values=[receipt])),
+            commit=AsyncMock(),
+        )
+        gateway_result = market_transition_service.telegram_gateway.TelegramGatewayResult(
+            ok=True,
+            method="sendMessage",
+            response_json={"result": {"message_id": 55}},
+        )
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "-1001",
+        ), patch.object(
+            market_transition_service,
+            "utc_now",
+            return_value=now,
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(return_value=gateway_result),
+        ) as send_mock:
+            summary = await market_transition_service.reconcile_due_market_channel_notice_receipts(
+                db,
+                source="market_schedule_loop_retry",
+                current_time=now,
+            )
+
+        self.assertEqual(summary.checked, 1)
+        self.assertEqual(summary.sent, 1)
+        self.assertEqual(summary.failed, 0)
+        self.assertEqual(summary.skipped, 0)
+        self.assertEqual(receipt.status, market_transition_service.MARKET_NOTICE_STATUS_SENT)
+        self.assertEqual(receipt.telegram_message_id, 55)
+        self.assertEqual(receipt.attempt_count, 2)
+        db.commit.assert_awaited_once()
+        send_mock.assert_awaited_once()
+
+    async def test_reconcile_due_market_channel_notice_receipts_skips_non_foreign_and_disabled(self):
+        db = SimpleNamespace(execute=AsyncMock())
+
+        with patch("core.services.market_transition_service.current_server", return_value="iran"):
+            non_foreign = await market_transition_service.reconcile_due_market_channel_notice_receipts(
+                db,
+                source="market_schedule_loop_retry",
+            )
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED": "true"},
+        ):
+            disabled = await market_transition_service.reconcile_due_market_channel_notice_receipts(
+                db,
+                source="market_schedule_loop_retry",
+            )
+
+        self.assertEqual(non_foreign.checked, 0)
+        self.assertFalse(non_foreign.disabled)
+        self.assertEqual(disabled.checked, 0)
+        self.assertTrue(disabled.disabled)
+        db.execute.assert_not_awaited()
+
     async def test_get_or_create_market_runtime_state_creates_initial_row(self):
         db = SimpleNamespace(
             execute=AsyncMock(return_value=_ExecuteResult(first=None)),

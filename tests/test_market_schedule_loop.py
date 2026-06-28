@@ -67,6 +67,7 @@ class MarketScheduleLoopTests(unittest.IsolatedAsyncioTestCase):
             state=SimpleNamespace(is_open=False),
             expired_offer_ids=(11,),
         )
+        retry_summary = SimpleNamespace(checked=0, sent=0, failed=0, skipped=0)
 
         with patch("core.market_schedule_loop.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
             "core.market_schedule_loop.current_server",
@@ -82,11 +83,15 @@ class MarketScheduleLoopTests(unittest.IsolatedAsyncioTestCase):
         ) as transition_mock, patch(
             "core.market_schedule_loop.reconcile_market_runtime_side_effects_for_current_state",
             new=AsyncMock(return_value=side_effect_result),
-        ) as side_effect_mock:
+        ) as side_effect_mock, patch(
+            "core.market_schedule_loop.reconcile_due_market_channel_notice_receipts",
+            new=AsyncMock(return_value=retry_summary),
+        ) as retry_mock:
             result = await market_schedule_loop.reconcile_market_schedule_runtime(current_time="marker-now")
 
         self.assertIs(result, side_effect_result)
         side_effect_mock.assert_awaited_once_with(session, source="market_schedule_loop")
+        retry_mock.assert_awaited_once_with(session, source="market_schedule_loop_retry")
         settings_mock.assert_not_awaited()
         evaluate_mock.assert_not_called()
         transition_mock.assert_not_awaited()
