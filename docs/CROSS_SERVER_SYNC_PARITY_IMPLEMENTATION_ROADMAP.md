@@ -10,6 +10,12 @@ The main engineering rule is:
 
 `sync delivery clean` is not enough. A release is acceptable only when delivery, parity, stale-event protection, and repairability are all covered.
 
+Post-review status update - 2026-06-28:
+
+- A branch review confirmed new P0/P1 blockers after Stage 9 planning.
+- Merge to `main`, production rollout, strict watermark mode, and production repair are blocked until `docs/CROSS_SERVER_SYNC_PARITY_REVIEW_REMEDIATION_ROADMAP.md` is completed.
+- The remediation roadmap is now the active execution contract for the remaining sync parity hardening work.
+
 ## Execution Guardrails
 
 - Before every code change, verify the current branch with `git branch --show-current` and verify there are no unrelated working-tree changes.
