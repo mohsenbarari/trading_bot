@@ -195,17 +195,21 @@ Recommended fix:
 ### VF6 - Secret And Signature Comparisons Use Regular Equality
 
 - Severity: Medium
-- Status: Confirmed
+- Status: Remediated in follow-up hardening
 - Area: Auth, sync
 - Files:
   - `api/deps.py:189-224`
   - `api/routers/sync.py:43-47`
   - `api/routers/sync.py:400-448`
   - `api/routers/auth.py:806-808`
+  - `main.py`
+  - `api/routers/commodities.py`
+  - `core/session_authority.py`
+  - `core/trade_forwarding.py`
 
-Evidence:
+Original evidence:
 
-- `DEV_API_KEY`, sync API key, and HMAC signature comparisons use `==` or `!=`.
+- `DEV_API_KEY`, sync API key, and HMAC signature comparisons used `==` or `!=` before the follow-up hardening pass.
 - `core/session_authority.py` and `core/trade_forwarding.py` already use `hmac.compare_digest`, so there is an established safer local pattern.
 
 Impact:
@@ -216,6 +220,13 @@ Recommended fix:
 
 - Use `hmac.compare_digest` for all API-key and signature comparisons.
 - Normalize missing values safely before comparison.
+
+Remediation update:
+
+- Added `core.security.constant_time_secret_equals()` as the shared API-key comparison helper.
+- Replaced direct secret comparisons for dev-key, sync API key, observability key, session-authority key, trade-forwarding key, and sync HMAC signature checks.
+- Hardened commodities request-source detection so an arbitrary `X-DEV-API-KEY` header is no longer enough to classify a request as bot-origin.
+- Added focused unit coverage and a tracked-file secret-lint test for future `DEV_API_KEY` regressions.
 
 ### VF7 - Header Trust Is Inconsistent And Should Be Centralized
 
@@ -310,7 +321,7 @@ Recommended fix:
 2. Disable `dev-login` in production and remove the IP-only bypass.
 3. Add authorization checks to chat file download.
 4. Add OTP verify throttling/lockout and stop logging OTP digits.
-5. Replace secret/signature equality checks with `hmac.compare_digest`.
+5. Replace secret/signature equality checks with `hmac.compare_digest`. Completed; keep regression tests active.
 6. Centralize trusted proxy handling for IP and host headers.
 7. Remove localhost CORS origins in production.
 8. Add production data hygiene checks for dev/test users and fixture prefixes.

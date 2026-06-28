@@ -45,6 +45,7 @@ import schemas
 from core.logging_config import configure_logging
 from core.metrics import metrics_response_body, registry, uptime_seconds
 from core.audit_logger import audit_log
+from core.security import constant_time_secret_equals
 from core.request_logging import install_request_logging_middleware
 
 # -------------------------------------------------------
@@ -115,7 +116,7 @@ def _is_loopback_client(client_host: str | None) -> bool:
 def _is_metrics_request_allowed(request: Request) -> bool:
     configured_key = getattr(settings, "observability_api_key", None)
     supplied_key = request.headers.get(OBSERVABILITY_API_KEY_HEADER)
-    if configured_key and supplied_key == configured_key:
+    if constant_time_secret_equals(supplied_key, configured_key):
         return True
     return _is_loopback_client(request.client.host if request.client else None)
 

@@ -12,6 +12,7 @@ import re
 from core.commodity_defaults import is_locked_imam_commodity_name
 from core.db import get_db
 from core.config import settings
+from core.security import constant_time_secret_equals
 from models.commodity import Commodity, CommodityAlias
 from models.user import User
 from api.admin_authority import require_shared_admin_write_authority
@@ -39,7 +40,7 @@ async def get_request_source(
     - اگر x-api-key باشد -> 'bot'
     - اگر Token باشد -> مقدار source داخل توکن (مثلاً 'miniapp')
     """
-    if api_key:
+    if constant_time_secret_equals(api_key, settings.dev_api_key):
         return "bot"
     
     if token:

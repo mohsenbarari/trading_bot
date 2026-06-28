@@ -195,7 +195,7 @@ async def verify_super_admin_or_dev_key(
     Allow access if user is SUPER_ADMIN OR if valid DEV_API_KEY is provided
     """
     # 1. Check Dev Key
-    if dev_key and dev_key == settings.dev_api_key:
+    if security.constant_time_secret_equals(dev_key, settings.dev_api_key):
         return None # Special return value indicating system access
 
     # 2. Check User Token
@@ -218,7 +218,7 @@ async def verify_admin_or_dev_key(
     """
     Allow access if user is SUPER_ADMIN/MIDDLE_MANAGER OR if valid DEV_API_KEY is provided.
     """
-    if dev_key and dev_key == settings.dev_api_key:
+    if security.constant_time_secret_equals(dev_key, settings.dev_api_key):
         return None
 
     if token:

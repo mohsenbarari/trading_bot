@@ -19,6 +19,7 @@ from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.invitation import Invitation
 from core.enums import NotificationCategory, NotificationLevel
 from core.security import (
+    constant_time_secret_equals,
     create_access_token,
     create_refresh_token,
     get_password_hash,
@@ -811,7 +812,7 @@ async def dev_login(raw_request: Request, db: AsyncSession = Depends(get_db)):
     is_local = _is_local_dev_request(raw_request)
 
     dev_key = raw_request.headers.get("X-DEV-API-KEY")
-    if not is_local and (not dev_key or dev_key != settings.dev_api_key):
+    if not is_local and not constant_time_secret_equals(dev_key, settings.dev_api_key):
         raise HTTPException(status_code=403, detail="دسترسی فقط از محیط برنامه‌نویسی یا با کلید امکان‌پذیر است")
         
     dev_mobile = "09999999999"

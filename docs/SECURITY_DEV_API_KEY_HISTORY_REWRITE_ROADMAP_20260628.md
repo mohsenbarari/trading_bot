@@ -290,6 +290,24 @@ Actions performed:
    - `f7dff814 docs: record dev api key rotation`
 3. Added this detailed roadmap/log so future agents can see the exact sequence and limitations.
 
+## Stage S11 - Secret Comparison And Lint Gate Hardening
+
+Status: Completed as a follow-up hardening item.
+
+Actions performed:
+
+1. Added `core.security.constant_time_secret_equals()` to centralize configured secret comparison with `hmac.compare_digest`.
+2. Replaced direct equality/inequality checks for:
+   - `DEV_API_KEY` admin/dev dependencies.
+   - staging-only `dev-login` remote key access.
+   - sync router dev-key, sync API key, observability key, and HMAC signature checks.
+   - metrics observability key access.
+   - session-authority and trade-forwarding internal sync keys.
+3. Hardened commodities request-source detection so a request is marked `bot` only when `X-DEV-API-KEY` is actually valid, not merely present.
+4. Added focused tests for the comparison helper and commodities invalid-key behavior.
+5. Added a tracked-file static secret lint test that fails if a real-looking `DEV_API_KEY` literal is committed again.
+6. No production deploy or runtime secret mutation was performed in this stage.
+
 ## Current Status
 
 - Current branch: `candidate/sync-parity-hardening`
@@ -336,16 +354,15 @@ Required rule:
 
 ### R3 - DEV_API_KEY Still Used As A Broad Bypass Surface
 
-Status: Still open as a separate hardening item.
+Status: Partially remediated; design-scope narrowing remains open.
 
 Scope:
 
 - This run removed and rotated the leaked value.
-- It did not yet redesign every `DEV_API_KEY` consumer.
+- The follow-up hardening replaced regular equality checks and added a tracked-file secret-lint gate.
+- It did not yet redesign every `DEV_API_KEY` consumer or remove all production dev-key bypass dependencies.
 
 Next recommended remediation:
 
-- Replace regular equality checks with `hmac.compare_digest`.
 - Narrow production usage of dev-key bypass dependencies.
-- Add a static secret-lint gate to prevent future committed key literals.
-
+- Keep the static secret-lint gate in the required test suite.

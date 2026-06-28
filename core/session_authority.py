@@ -172,7 +172,13 @@ def verify_session_authority_signature(
     signature: str | None,
     api_key: str | None,
 ) -> bool:
-    if not settings.sync_api_key or api_key != settings.sync_api_key or not timestamp or not signature:
+    if (
+        not settings.sync_api_key
+        or not api_key
+        or not hmac.compare_digest(str(api_key), str(settings.sync_api_key))
+        or not timestamp
+        or not signature
+    ):
         return False
     try:
         ts = int(timestamp)

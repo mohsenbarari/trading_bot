@@ -8,8 +8,14 @@ from api.routers.commodities import get_request_source
 
 class CommoditiesRouterRequestSourceTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_request_source_prefers_dev_api_key(self):
-        result = await get_request_source(api_key="dev-key", token=None)
-        self.assertEqual(result, "bot")
+        with patch("api.routers.commodities.settings.dev_api_key", "dev-key"):
+            result = await get_request_source(api_key="dev-key", token=None)
+            self.assertEqual(result, "bot")
+
+    async def test_get_request_source_ignores_invalid_dev_api_key(self):
+        with patch("api.routers.commodities.settings.dev_api_key", "dev-key"):
+            result = await get_request_source(api_key="wrong-key", token=None)
+            self.assertEqual(result, "unknown")
 
     async def test_get_request_source_reads_source_from_token_or_defaults(self):
         with patch("api.routers.commodities.jwt.decode", return_value={"source": "miniapp-web"}):

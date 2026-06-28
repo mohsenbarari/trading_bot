@@ -1,7 +1,8 @@
-from jose import jwt
 from datetime import timedelta
+import hmac
 from typing import Optional, Union, Any
 import bcrypt
+from jose import jwt
 from core.config import settings
 from core.utils import utc_now_naive
 
@@ -10,6 +11,13 @@ SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
+
+
+def constant_time_secret_equals(supplied: str | None, expected: str | None) -> bool:
+    """Compare configured secrets without leaking prefix match timing."""
+    if not supplied or not expected:
+        return False
+    return hmac.compare_digest(str(supplied), str(expected))
 
 def create_access_token(subject: Union[int, str, Any] = None, data: dict = None, expires_delta: Optional[timedelta] = None, session_id: str = None, server_id: str = None) -> str:
     to_encode = data.copy() if data else {}

@@ -22,6 +22,7 @@ from core.sync_parity_observability import summarize_parity_comparison
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
+from core.security import constant_time_secret_equals
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
@@ -43,7 +44,7 @@ SYNC_PARITY_STATUS_REDIS_KEY = "sync:parity:latest_comparison"
 
 def _require_dev_key(request: Request) -> None:
     dev_key = request.headers.get("X-Dev-Api-Key")
-    if not settings.dev_api_key or dev_key != settings.dev_api_key:
+    if not constant_time_secret_equals(dev_key, settings.dev_api_key):
         raise HTTPException(status_code=403, detail="Dev API Key required")
 
 
@@ -64,13 +65,13 @@ def _is_loopback_sync_request(request: Request) -> bool:
 def _require_observability_key(request: Request) -> None:
     configured_key = getattr(settings, "observability_api_key", None)
     supplied_key = request.headers.get(OBSERVABILITY_API_KEY_HEADER)
-    if configured_key and supplied_key == configured_key:
+    if constant_time_secret_equals(supplied_key, configured_key):
         return
     if _is_loopback_sync_request(request):
         return
     if not configured_key:
         raise HTTPException(status_code=503, detail="Observability API key is not configured for remote sync health access")
-    if supplied_key != configured_key:
+    if not constant_time_secret_equals(supplied_key, configured_key):
         audit_log(
             "sync.health_access",
             target_type="sync_health",
@@ -401,7 +402,7 @@ async def verify_signature(request: Request):
         raise HTTPException(status_code=401, detail="Missing authentication headers")
         
     
-    if api_key != settings.sync_api_key:
+    if not constant_time_secret_equals(api_key, settings.sync_api_key):
         audit_log(
             "sync.authenticate",
             target_type="sync",
@@ -446,7 +447,7 @@ async def verify_signature(request: Request):
             hashlib.sha256
         ).hexdigest()
         
-        if signature != expected_signature:
+        if not hmac.compare_digest(signature, expected_signature):
             audit_log(
                 "sync.authenticate",
                 target_type="sync",

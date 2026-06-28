@@ -29,7 +29,13 @@ def sign_internal_payload(body: str, timestamp: int) -> str:
 
 
 def verify_internal_signature(body: bytes, timestamp: str | None, signature: str | None, api_key: str | None) -> bool:
-    if not settings.sync_api_key or api_key != settings.sync_api_key or not timestamp or not signature:
+    if (
+        not settings.sync_api_key
+        or not api_key
+        or not hmac.compare_digest(str(api_key), str(settings.sync_api_key))
+        or not timestamp
+        or not signature
+    ):
         return False
     try:
         ts = int(timestamp)
