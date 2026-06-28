@@ -678,14 +678,27 @@ Evidence collected on `candidate/sync-parity-hardening`:
   comparison was recorded to local foreign `/api/sync/parity/status`, and
   `/api/sync/health` reported parity `available` instead of `missing` with
   `unsynced_change_log_count=0`.
+- Post-deploy F7 evidence directory:
+  `tmp/sync-parity-post-deploy-20260628T1325Z/`.
+- The terminal policy rejection fix was deployed to local staging and copied to
+  remote Iran staging. Both local foreign staging and remote Iran staging were
+  then refreshed with a new deep parity compare using release metadata
+  `a50ecbb9` on both sides. Final `/api/sync/health` on both checked sides
+  reported `fresh=true`, `comparison_status=non_business_difference`,
+  `business_drift_count=0`, `critical_drift_count=0`, `incomplete_count=0`,
+  `unsynced_change_log_count=0`, empty Redis sync queues, and complete artifact
+  metadata.
+- Market channel notice repair evidence is saved in
+  `tmp/sync-parity-post-deploy-20260628T1325Z/f7-market-notice-repair-evidence.json`.
+  The foreign staging evidence forced a Telegram send failure with an invalid
+  channel id, preserved the failed receipt unchanged while
+  `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED=1`, then re-enabled delivery and
+  repaired the receipt to `sent` with exactly one retry. The same evidence also
+  proved no-receipt reconciliation: a missing receipt for a unique transition
+  was created and sent, and replaying the same transition returned
+  `already_sent` without changing `attempt_count` or the Telegram message id.
 
-Remaining F7 evidence before this stage can be called complete:
-
-- Force Telegram send failures and no-receipt failures in staging and prove the
-  F4 retry/reconciliation path repairs them.
-- Toggle `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED` in staging and prove
-  side effects pause without deleting receipts, then resume safely after
-  re-enable.
+Remaining F7 evidence before this stage can be called complete: none.
 
 Exit criteria:
 
