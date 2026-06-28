@@ -69,6 +69,7 @@ Suggested tests:
 - Severity: Critical
 - Status: Confirmed. Secret value intentionally omitted.
 - Area: Secrets hygiene, admin bypass, sync resync
+- Remediation execution log: `docs/SECURITY_DEV_API_KEY_HISTORY_REWRITE_ROADMAP_20260628.md`
 - Files:
   - `.github/copilot-instructions.md:107`
   - `api/deps.py:189-224`
@@ -322,4 +323,3 @@ Recommended fix:
 - OTP lockout tests.
 - Static secret scan for tracked docs/config.
 - Production read-only check: no `09999999999`, no `dev_` superadmin, no test fixture prefixes.
-
