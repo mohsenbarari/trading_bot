@@ -43,6 +43,7 @@ def replay_manifest(
     target_url: str = "https://peer.example",
     identity_fields: list[str] | None = None,
     identity_hash: str | None = None,
+    environment: str = "staging",
     git_branch: str = "candidate/sync-parity-hardening",
     git_commit: str = "abc123",
     approval: str = "apply-sync-repair:test",
@@ -62,6 +63,7 @@ def replay_manifest(
         "expected_source_row_count": 1,
         "expected_target_row_count_impact": 1,
         "source_sequence": source_sequence,
+        "environment": environment,
         "before_parity_artifact_hash": "before-sha256",
         "after_parity_command": "python3 scripts/sync_parity_compare.py --after",
         "backup_artifact": "backup-manifest.json",
@@ -182,7 +184,9 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                 confirm_write=True,
             )
 
-            with patch("scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()), patch(
+            with patch.object(sync_repair_tool.settings, "environment", "staging"), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
                 "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
             ), patch(
                 "scripts.sync_repair_tool._send_items",
@@ -223,7 +227,9 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                 confirm_write=True,
             )
 
-            with patch("scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()), patch(
+            with patch.object(sync_repair_tool.settings, "environment", "staging"), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
                 "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
             ), patch("scripts.sync_repair_tool._send_items") as send_items:
                 with self.assertRaises(ValueError):
@@ -242,6 +248,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                     replay_manifest(
                         identity_fields=["id"],
                         identity_hash=identity_hash,
+                        environment="production",
                         git_branch="main",
                         approval=approval,
                     )
@@ -265,7 +272,9 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                 confirm_write=True,
             )
 
-            with patch("scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()), patch(
+            with patch.object(sync_repair_tool.settings, "environment", "production"), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
                 "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
             ), patch("scripts.sync_repair_tool._send_items") as send_items:
                 with self.assertRaises(ValueError):
@@ -283,6 +292,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                 json.dumps(
                     replay_manifest(
                         identity_hash=identity_hash,
+                        environment="production",
                         git_branch="candidate/sync-parity-hardening",
                         approval=approval,
                     )
@@ -306,7 +316,46 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                 confirm_write=True,
             )
 
-            with patch("scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()), patch(
+            with patch.object(sync_repair_tool.settings, "environment", "production"), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
+                "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
+            ), patch("scripts.sync_repair_tool._send_items") as send_items:
+                with self.assertRaises(ValueError):
+                    await sync_repair_tool.replay_row_command(args)
+
+        send_items.assert_not_called()
+
+    async def test_replay_row_apply_rejects_cli_environment_downgrade_from_production(self):
+        identity_hash = replay_identity_hash_for_fake_row()
+        approval = f"apply-sync-repair:{identity_hash}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(replay_manifest(identity_hash=identity_hash, environment="staging", approval=approval)),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                table="offers",
+                identity='{"offer_public_id":"ofr_1"}',
+                operation="UPDATE",
+                source_server="foreign",
+                source_sequence=123,
+                target_server="iran",
+                target_url="https://peer.example",
+                sync_api_key="secret",
+                environment="staging",
+                manifest=str(manifest_path),
+                operator_approval=approval,
+                allow_local_id_identity=False,
+                apply=True,
+                confirm_write=True,
+            )
+
+            with patch.object(sync_repair_tool.settings, "environment", "production"), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
                 "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
             ), patch("scripts.sync_repair_tool._send_items") as send_items:
                 with self.assertRaises(ValueError):

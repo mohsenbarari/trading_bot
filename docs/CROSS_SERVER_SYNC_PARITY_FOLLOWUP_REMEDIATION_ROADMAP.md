@@ -215,6 +215,12 @@ Implementation status on `candidate/sync-parity-hardening`:
   delivered/non-applicable instead of retrying forever. This prevents a valid
   Iran-authoritative table rejection from blocking later foreign-to-Iran sync
   rows at the head of the queue.
+- Post-review hardening accepted after Claude Code and legacy-agent review:
+  the worker treats `source_authority_forbidden:*` as terminal only for the
+  explicit Iran-authoritative table allowlist and only when peer
+  `error_items[0].table` and `record_id` match the outgoing sync item. Terminal
+  worker drops and receiver-side source-authority rejections also emit
+  low-cardinality metrics so non-zero rates can be alerted during rollout.
 - `api/routers/sync.py` now returns structured `error_items` for apply failure,
   retry exception, and unresolved deferred FK dependency paths. This keeps
   worker and operator evidence actionable when a row is legitimately still
@@ -251,6 +257,7 @@ Implementation direction:
   - identity fields and identity hash;
   - expected source row count and target row count impact;
   - source sequence policy;
+  - runtime environment;
   - before-parity artifact hash;
   - required after-parity command;
   - backup artifact id or backup path;
@@ -282,6 +289,11 @@ Implementation status on `candidate/sync-parity-hardening`:
   non-production override flag is present.
 - Non-production raw local `id` apply remains possible only with
   `--allow-local-id-identity` and complete manifest evidence.
+- Post-review hardening accepted after Claude Code and legacy-agent review:
+  runtime `settings.environment` is the source of truth for repair apply,
+  CLI `--environment` must match it, and the repair manifest must include the
+  same environment. This closes the production-downgrade path where an operator
+  could run on production while passing `--environment staging`.
 
 Exit criteria:
 
@@ -289,6 +301,7 @@ Exit criteria:
 - Production repair apply cannot run accidentally.
 - Raw local IDs are not accepted for public/natural identity tables in
   production repair.
+- Production runtime cannot be downgraded by a CLI environment override.
 
 ## Stage F3 - Parity Field Classification Matrix
 

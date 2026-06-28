@@ -13,6 +13,8 @@ from core.metrics import (
     record_bot_update,
     record_http_request,
     record_sync_conflict,
+    record_sync_source_authority_rejection,
+    record_sync_terminal_policy_rejection,
     registry,
 )
 
@@ -60,6 +62,16 @@ class MetricsTests(unittest.TestCase):
             finding_counts={"failed_telegram_publication": 2},
         )
         record_sync_conflict(server_mode="foreign", table="offers", reason="same_version_terminal_conflict")
+        record_sync_source_authority_rejection(
+            server_mode="iran",
+            table="market_runtime_state",
+            reason="source_authority_forbidden:foreign",
+        )
+        record_sync_terminal_policy_rejection(
+            server_mode="foreign",
+            table="market_runtime_state",
+            reason="source_authority_forbidden:foreign",
+        )
 
         body = metrics_response_body()
 
@@ -70,6 +82,9 @@ class MetricsTests(unittest.TestCase):
         self.assertIn('issue="failed_telegram_publication"', body)
         self.assertIn("trading_bot_sync_conflicts_total", body)
         self.assertIn('reason="same_version_terminal_conflict"', body)
+        self.assertIn("trading_bot_sync_source_authority_rejections_total", body)
+        self.assertIn("trading_bot_sync_terminal_policy_rejections_total", body)
+        self.assertIn('reason="source_authority_forbidden:foreign"', body)
 
     def test_default_memory_backend_does_not_create_sqlite_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:

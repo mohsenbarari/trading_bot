@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
+from core.metrics import record_sync_terminal_policy_rejection
 from core.server_routing import current_server, default_peer_server_url
 from core.sync_metadata import (
     build_sync_metadata,
@@ -26,6 +27,16 @@ from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_s
 configure_logging("sync-worker")
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
+
+TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = {
+    "admin_broadcast_messages",
+    "admin_market_messages",
+    "commodities",
+    "commodity_aliases",
+    "market_runtime_state",
+    "market_schedule_overrides",
+    "trading_settings",
+}
 
 
 class SyncDeliveryError(Exception):
@@ -90,7 +101,7 @@ def peer_response_is_success(response) -> bool:
     return payload.get("status") in {"success", "ok"} and error_count == 0
 
 
-def _single_item_partial_rejection_reason(response) -> str | None:
+def _single_item_partial_rejection_detail(response) -> dict | None:
     if getattr(response, "status_code", None) != 200:
         return None
     try:
@@ -112,16 +123,61 @@ def _single_item_partial_rejection_reason(response) -> str | None:
     error_item = error_items[0]
     if not isinstance(error_item, dict):
         return None
+    return error_item
+
+
+def _single_item_partial_rejection_reason(response) -> str | None:
+    error_item = _single_item_partial_rejection_detail(response)
+    if error_item is None:
+        return None
     reason = error_item.get("reason")
     return reason if isinstance(reason, str) else None
 
 
-def peer_response_is_terminal_policy_rejection(response) -> bool:
-    """Return True when the peer intentionally rejected one item as non-applicable."""
-    reason = _single_item_partial_rejection_reason(response)
+def _terminal_policy_rejection_reason(error_item: dict | None) -> str | None:
+    if not isinstance(error_item, dict):
+        return None
+    reason = error_item.get("reason")
+    if not isinstance(reason, str):
+        return None
     if reason == "policy_forbidden:no-sync":
-        return True
-    return bool(reason and reason.startswith("source_authority_forbidden:"))
+        return reason
+    table = error_item.get("table")
+    if (
+        reason.startswith("source_authority_forbidden:")
+        and isinstance(table, str)
+        and table in TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES
+    ):
+        return reason
+    return None
+
+
+def peer_response_is_terminal_policy_rejection(response) -> bool:
+    """Return True when a single receiver rejection is intrinsically terminal."""
+    return _terminal_policy_rejection_reason(_single_item_partial_rejection_detail(response)) is not None
+
+
+def _sync_identity_value_matches(left, right) -> bool:
+    if left is None or right is None:
+        return False
+    return str(left) == str(right)
+
+
+def terminal_policy_rejection_detail_for_item(response, item: dict) -> dict | None:
+    """Return terminal rejection detail only when it matches the outgoing item."""
+    error_item = _single_item_partial_rejection_detail(response)
+    reason = _terminal_policy_rejection_reason(error_item)
+    if reason is None:
+        return None
+    if not _sync_identity_value_matches(error_item.get("table"), item.get("table")):
+        return None
+    if not _sync_identity_value_matches(error_item.get("record_id"), item.get("id")):
+        return None
+    return error_item
+
+
+def peer_response_is_terminal_policy_rejection_for_item(response, item: dict) -> bool:
+    return terminal_policy_rejection_detail_for_item(response, item) is not None
 
 
 def peer_response_is_policy_forbidden_no_sync(response) -> bool:
@@ -383,11 +439,17 @@ async def main():
                                     "duration_ms": duration_ms_since(start_time),
                                 },
                             )
-                        elif peer_response_is_terminal_policy_rejection(response):
+                        elif terminal_rejection_detail := terminal_policy_rejection_detail_for_item(response, data):
                             try:
                                 marked_count = await mark_change_log_delivered(data)
                             except Exception as marker_err:
                                 raise SyncDeliveryMarkerError(error_type=type(marker_err).__name__) from marker_err
+                            peer_rejection_reason = str(terminal_rejection_detail.get("reason") or "unknown")
+                            record_sync_terminal_policy_rejection(
+                                server_mode=current_server(),
+                                table=str(data.get("table") or "unknown"),
+                                reason=peer_rejection_reason,
+                            )
                             logger.warning(
                                 "Dropped terminal policy-rejected sync item.",
                                 extra={
@@ -397,7 +459,7 @@ async def main():
                                     "iteration": iteration,
                                     "table": data.get("table"),
                                     "record_id": data.get("id"),
-                                    "peer_rejection_reason": _single_item_partial_rejection_reason(response),
+                                    "peer_rejection_reason": peer_rejection_reason,
                                     "marked_change_logs": marked_count,
                                     "duration_ms": duration_ms_since(start_time),
                                 },

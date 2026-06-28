@@ -144,6 +144,12 @@ class PeerResponsePolicyTests(unittest.TestCase):
 
         self.assertTrue(sync_worker.peer_response_is_policy_forbidden_no_sync(response))
         self.assertTrue(sync_worker.peer_response_is_terminal_policy_rejection(response))
+        self.assertTrue(
+            sync_worker.peer_response_is_terminal_policy_rejection_for_item(
+                response,
+                {"table": "chat_members", "id": 12},
+            )
+        )
 
     def test_source_authority_forbidden_response_is_terminal_rejection(self):
         response = FakeResponse(
@@ -165,6 +171,60 @@ class PeerResponsePolicyTests(unittest.TestCase):
 
         self.assertFalse(sync_worker.peer_response_is_policy_forbidden_no_sync(response))
         self.assertTrue(sync_worker.peer_response_is_terminal_policy_rejection(response))
+        self.assertTrue(
+            sync_worker.peer_response_is_terminal_policy_rejection_for_item(
+                response,
+                {"table": "market_runtime_state", "id": 1},
+            )
+        )
+
+    def test_source_authority_terminal_rejection_requires_allowed_table_and_identity_match(self):
+        allowed_response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {
+                        "table": "market_runtime_state",
+                        "record_id": 1,
+                        "reason": "source_authority_forbidden:foreign",
+                    }
+                ],
+            },
+        )
+        non_authority_table_response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {
+                        "table": "offers",
+                        "record_id": 1,
+                        "reason": "source_authority_forbidden:foreign",
+                    }
+                ],
+            },
+        )
+
+        self.assertFalse(
+            sync_worker.peer_response_is_terminal_policy_rejection_for_item(
+                allowed_response,
+                {"table": "offers", "id": 1},
+            )
+        )
+        self.assertFalse(
+            sync_worker.peer_response_is_terminal_policy_rejection_for_item(
+                allowed_response,
+                {"table": "market_runtime_state", "id": 2},
+            )
+        )
+        self.assertFalse(sync_worker.peer_response_is_terminal_policy_rejection(non_authority_table_response))
 
     def test_policy_forbidden_no_sync_response_requires_exact_single_rejection(self):
         success_response = FakeResponse(
@@ -567,6 +627,39 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         marker_mock.assert_awaited_once_with(json.loads(payload))
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_not_awaited()
+
+    async def test_main_requeues_terminal_rejection_when_peer_identity_does_not_match_item(self):
+        payload = json.dumps(
+            {"hash": "abc", "table": "market_runtime_state", "id": 1, "change_log_id": 100}
+        )
+        response = FakeResponse(
+            200,
+            '{"status":"partial","processed":0,"errors":1}',
+            {
+                "status": "partial",
+                "processed": 0,
+                "errors": 1,
+                "error_items": [
+                    {
+                        "table": "market_runtime_state",
+                        "record_id": 2,
+                        "reason": "source_authority_forbidden:foreign",
+                    }
+                ],
+            },
+        )
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
+            send_return_value=response,
+        )
+
+        send_mock.assert_awaited_once()
+        marker_mock.assert_not_awaited()
+        self.assertEqual(
+            [(queue, json.loads(queued_payload)) for queue, queued_payload in fake_redis.rpush_calls],
+            [("sync:retry", json.loads(payload))],
+        )
+        sleep_mock.assert_awaited_once_with(1)
 
     async def test_main_drops_source_authority_forbidden_without_requeue(self):
         payload = json.dumps(

@@ -402,6 +402,26 @@ def record_sync_conflict(*, server_mode: str, table: str, reason: str) -> None:
     )
 
 
+def record_sync_source_authority_rejection(*, server_mode: str, table: str, reason: str) -> None:
+    registry.counter(
+        "trading_bot_sync_source_authority_rejections_total",
+        "Receiver-side sync rejections caused by source authority policy.",
+        server_mode=_sanitize_label_value(server_mode, max_length=16),
+        table=_sanitize_label_value(table, max_length=64),
+        reason=_sanitize_label_value(reason, max_length=80),
+    )
+
+
+def record_sync_terminal_policy_rejection(*, server_mode: str, table: str, reason: str) -> None:
+    registry.counter(
+        "trading_bot_sync_terminal_policy_rejections_total",
+        "Worker-dropped terminal sync policy rejections by table and reason.",
+        server_mode=_sanitize_label_value(server_mode, max_length=16),
+        table=_sanitize_label_value(table, max_length=64),
+        reason=_sanitize_label_value(reason, max_length=80),
+    )
+
+
 def record_sync_watermark_decision(*, server_mode: str, table: str, decision: str, reason: str | None = None) -> None:
     registry.counter(
         "trading_bot_sync_watermark_decisions_total",

@@ -73,8 +73,16 @@ def _sync_api_key(args: argparse.Namespace) -> str:
     return api_key
 
 
+def _normalize_environment(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def _environment(args: argparse.Namespace) -> str:
-    return str(getattr(args, "environment", None) or getattr(settings, "environment", "") or "").strip().lower()
+    runtime_environment = _normalize_environment(getattr(settings, "environment", ""))
+    cli_environment = _normalize_environment(getattr(args, "environment", None))
+    if runtime_environment and cli_environment and runtime_environment != cli_environment:
+        raise ValueError("CLI environment does not match runtime settings; refusing repair apply")
+    return runtime_environment or cli_environment
 
 
 def _is_production_environment(args: argparse.Namespace) -> bool:
@@ -118,6 +126,7 @@ def _manifest_required_keys() -> tuple[str, ...]:
         "expected_source_row_count",
         "expected_target_row_count_impact",
         "source_sequence",
+        "environment",
         "before_parity_artifact_hash",
         "after_parity_command",
         "backup_artifact",
@@ -172,6 +181,9 @@ def _validate_replay_apply_manifest(
         raise ValueError("repair manifest expected_target_row_count_impact must be 1 for replay-row")
     if int(manifest.get("source_sequence")) != int(getattr(args, "source_sequence", 0)):
         raise ValueError("repair manifest source_sequence does not match CLI")
+    environment = _environment(args)
+    if _normalize_environment(manifest.get("environment")) != environment:
+        raise ValueError("repair manifest environment does not match runtime settings")
 
     production = _is_production_environment(args)
     raw_local_id = _identity_uses_raw_local_id(str(summary.get("table") or ""), identity_fields)
@@ -238,6 +250,7 @@ def plan_command(args: argparse.Namespace) -> int:
         "expected_source_row_count": 1,
         "expected_target_row_count_impact": 1,
         "source_sequence": "<auditable source sequence>",
+        "environment": str(getattr(settings, "environment", "") or "<runtime environment>"),
         "before_parity_artifact_hash": "<sha256 of before parity artifact>",
         "after_parity_command": "<exact command to collect after parity evidence>",
         "backup_artifact": "<backup manifest/path/hash>",

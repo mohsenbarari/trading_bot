@@ -9,6 +9,7 @@ from core.metrics import (
     record_sync_conflict,
     record_sync_health,
     record_sync_parity_summary,
+    record_sync_source_authority_rejection,
     record_sync_watermark_decision,
 )
 from core.redis import get_redis_client
@@ -2748,6 +2749,11 @@ async def receive_sync_data(
                 error_detail = _sync_error_detail(item, authority_rejection_reason)
                 errors.append(error_detail)
                 error_details.append(error_detail)
+                record_sync_source_authority_rejection(
+                    server_mode=settings.server_mode,
+                    table=table,
+                    reason=authority_rejection_reason,
+                )
                 logger.warning(
                     "Rejected sync item by source authority policy",
                     extra={
