@@ -162,6 +162,15 @@ Stage F1A - authority decision and tests, no behavior change:
   - close transition expires only local-home active offers;
   - duplicate or stale transition does not reopen or re-expire terminal offers.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- Added a router regression proving foreign-origin `market_runtime_state`
+  payloads are intentionally rejected under the current Iran-authoritative
+  receiver policy.
+- Added market transition regressions proving close expiry targets only
+  active local-home offers and duplicate already-closed schedule evaluation
+  does not reload or re-expire offers.
+
 Stage F1B - implementation after F1A passes:
 
 - Prevent or disable foreign writes to `market_runtime_state` from the market

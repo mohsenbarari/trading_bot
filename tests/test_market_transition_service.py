@@ -546,6 +546,64 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_called_once()
         self.assertEqual(publish_mock.call_args.args[0], "market:closed")
 
+    async def test_load_active_local_offers_filters_by_active_status_and_current_server(self):
+        db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult(values=[])))
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"):
+            await market_transition_service._load_active_local_offers(db)
+
+        stmt = db.execute.await_args.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("offers.status = 'ACTIVE'", compiled)
+        self.assertIn("offers.home_server = 'foreign'", compiled)
+
+    async def test_duplicate_closed_schedule_does_not_reexpire_terminal_offers(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc),
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(return_value=_ExecuteResult(first=state)),
+            add=Mock(),
+            commit=AsyncMock(),
+        )
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=datetime(2026, 5, 23, 9, 0, tzinfo=timezone.utc),
+            timezone="Asia/Tehran",
+        )
+
+        with patch.object(market_transition_service, "_acquire_market_runtime_lock", new=AsyncMock()) as lock_mock, patch.object(
+            market_transition_service,
+            "_load_active_local_offers",
+            new=AsyncMock(),
+        ) as load_offers_mock, patch.object(
+            market_transition_service,
+            "expire_offers_authoritatively",
+            new=AsyncMock(),
+        ) as expire_mock, patch.object(
+            market_transition_service,
+            "reconcile_market_channel_notice_for_state",
+            new=AsyncMock(),
+        ) as notice_mock, patch(
+            "core.services.market_transition_service.publish_event_sync"
+        ) as publish_mock:
+            result = await market_transition_service.apply_market_schedule_transition(db, evaluation)
+
+        lock_mock.assert_awaited_once_with(db)
+        self.assertFalse(result.changed)
+        self.assertIsNone(result.transition)
+        self.assertEqual(result.expired_offer_ids, ())
+        load_offers_mock.assert_not_awaited()
+        expire_mock.assert_not_awaited()
+        db.commit.assert_not_awaited()
+        notice_mock.assert_not_awaited()
+        publish_mock.assert_not_called()
+
     async def test_load_market_schedule_overrides_window_uses_local_date_range(self):
         db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult(values=[])))
         current_time = datetime(2026, 5, 22, 6, 0, tzinfo=timezone.utc)
