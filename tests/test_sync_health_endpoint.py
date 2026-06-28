@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -5,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from api.routers.sync import get_sync_health, get_sync_parity_snapshot
+from api.routers.sync import get_sync_health, get_sync_parity_snapshot, record_sync_parity_status
 
 
 PUBLICATION_SUMMARY = {
@@ -66,7 +67,7 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sync_health_allows_loopback_without_observability_key(self):
         db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
-        redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]))
+        redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]), get=AsyncMock(return_value=None))
         request = SimpleNamespace(
             headers={},
             url=SimpleNamespace(path="/api/sync/health", hostname="public.example"),
@@ -88,7 +89,8 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["publication_reconciliation"], PUBLICATION_SUMMARY)
         self.assertEqual(payload["parity_status"]["status"], "available")
-        self.assertEqual(payload["parity_status"]["comparison_status"], "operator_script_required")
+        self.assertEqual(payload["parity_status"]["comparison_status"], "missing")
+        self.assertFalse(payload["parity_status"]["fresh"])
 
     async def test_sync_health_does_not_trust_host_header_for_loopback_bypass(self):
         request = SimpleNamespace(
@@ -142,8 +144,87 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["active_publication_gate"]["outage_class"], "long")
         self.assertEqual(payload["publication_reconciliation"]["status"], "action_required")
         self.assertEqual(payload["parity_status"]["snapshot_endpoint"], "/api/sync/parity/snapshot")
+        self.assertEqual(payload["parity_status"]["comparison_status"], "missing")
         record_sync_health.assert_called_once()
         record_publication_health.assert_called_once()
+
+    async def test_sync_health_reports_fresh_stored_parity_status(self):
+        db = FakeDB(FakeSummaryResult((0, None)), FakeTableRows([]))
+        parity_summary = {
+            "status": "ok",
+            "fresh": True,
+            "mode": "deep",
+            "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "business_drift_count": 0,
+            "critical_drift_count": 0,
+            "incomplete_count": 0,
+            "duplicate_identity_count": 0,
+            "truncated_table_count": 0,
+        }
+        redis_client = SimpleNamespace(
+            llen=AsyncMock(side_effect=[0, 0]),
+            get=AsyncMock(side_effect=[json.dumps(parity_summary), '{"enabled": false}']),
+        )
+        request = SimpleNamespace(
+            headers={"X-Observability-Api-Key": "obs-key"},
+            url=SimpleNamespace(path="/api/sync/health"),
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.settings.sync_parity_status_max_age_seconds", 3600), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://iran.example"
+        ), patch("api.routers.sync.get_redis_client", return_value=redis_client), patch(
+            "api.routers.sync.record_sync_health"
+        ), patch("api.routers.sync.record_offer_publication_health"), patch(
+            "api.routers.sync.record_sync_parity_summary"
+        ) as record_parity_summary, patch(
+            "api.routers.sync.publication_observability_summary",
+            new=AsyncMock(return_value=PUBLICATION_SUMMARY),
+        ):
+            payload = await get_sync_health(request=request, db=db)
+
+        self.assertEqual(payload["parity_status"]["comparison_status"], "ok")
+        self.assertTrue(payload["parity_status"]["fresh"])
+        self.assertEqual(payload["parity_status"]["latest_comparison"]["mode"], "deep")
+        record_parity_summary.assert_called_once()
+
+    async def test_record_sync_parity_status_stores_summary_in_redis(self):
+        stored = {}
+
+        async def fake_set(key, value, ex=None):
+            stored["key"] = key
+            stored["value"] = value
+            stored["ex"] = ex
+            return True
+
+        redis_client = SimpleNamespace(set=fake_set)
+        request = SimpleNamespace(
+            headers={"X-Observability-Api-Key": "obs-key"},
+            url=SimpleNamespace(path="/api/sync/parity/status"),
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+        comparison = {
+            "status": "business_drift",
+            "mode": "deep",
+            "compared_at": "2026-06-28T05:00:00Z",
+            "severity_counts": {"business_drift": 2, "critical_drift": 0, "incomplete": 0},
+            "tables": {},
+        }
+
+        with patch("api.routers.sync.settings.observability_api_key", "obs-key"), patch(
+            "api.routers.sync.settings.server_mode", "foreign"
+        ), patch("api.routers.sync.settings.sync_parity_status_max_age_seconds", 900), patch(
+            "api.routers.sync.get_redis_client", return_value=redis_client
+        ), patch("api.routers.sync.record_sync_parity_summary") as record_parity_summary:
+            payload = await record_sync_parity_status(request=request, comparison=comparison)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["parity_status"]["business_drift_count"], 2)
+        self.assertEqual(stored["key"], "sync:parity:latest_comparison")
+        self.assertGreaterEqual(stored["ex"], 3600)
+        record_parity_summary.assert_called_once()
 
     async def test_parity_snapshot_requires_observability_key_and_redacted_snapshot_builder(self):
         request = SimpleNamespace(

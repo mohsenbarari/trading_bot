@@ -74,6 +74,10 @@ Returned fields:
 - `unsynced_by_table`
 - `redis_queues.sync:outbound`
 - `redis_queues.sync:retry`
+- `parity_status.comparison_status`
+- `parity_status.fresh`
+- `parity_status.latest_comparison`
+- `parity_status.freshness_required_seconds`
 
 Each call also emits a structured log:
 
@@ -83,6 +87,50 @@ log_class=integration
 ```
 
 Grafana uses this event to show sync state.
+
+### Parity Status
+
+`GET /api/sync/health` is not proof of database parity by itself. It reports
+local backlog, Redis queues, publication health, and the last parity comparison
+that an operator or scheduled job explicitly recorded.
+
+The latest comparison is recorded with:
+
+```text
+POST /api/sync/parity/status
+X-Observability-Api-Key: ...
+```
+
+Loopback callers may omit the key. Non-loopback callers must send the configured
+observability key.
+
+The body must be the JSON output from `scripts/compare_sync_parity.py compare`.
+The endpoint stores only an operator summary in Redis under
+`sync:parity:latest_comparison`.
+
+Example:
+
+```bash
+python3 scripts/compare_sync_parity.py compare \
+  --local-snapshot tmp/foreign-parity-deep.json \
+  --peer-snapshot tmp/iran-parity-deep.json \
+  --record-url http://127.0.0.1:8000/api/sync/parity/status \
+  --record-observability-key "$OBSERVABILITY_API_KEY"
+```
+
+Healthy strict-mode evidence requires:
+
+- `parity_status.comparison_status` is fresh and not `missing` or `stale`
+- `parity_status.latest_comparison.status` is `ok` or only an accepted
+  `non_business_difference`
+- `parity_status.latest_comparison.business_drift_count = 0`
+- `parity_status.latest_comparison.critical_drift_count = 0`
+- `parity_status.latest_comparison.incomplete_count = 0`
+- `parity_status.latest_comparison.truncated_table_count = 0`
+- `parity_status.latest_comparison.duplicate_identity_count = 0`
+
+If the latest comparison is missing or stale, the system may still be syncing
+normally, but strict parity alerts must remain warning-only.
 
 ## Reconnect Procedure
 
@@ -215,6 +263,26 @@ First action:
 make sync-recover
 ```
 
+### Watermark stale, duplicate, or conflict decisions
+
+The receiver records source-sequence watermark decisions in metrics:
+
+```text
+trading_bot_sync_watermark_decisions_total
+```
+
+Important labels:
+
+- `server_mode`
+- `table`
+- `decision`
+- `reason`
+
+Expected duplicate decisions can happen when direct push and worker replay
+deliver the same logical event. Stale or conflict decisions require investigation
+because they can indicate out-of-order delivery, manual replay mistakes, or a
+bad watermark repair.
+
 ## Missing Sync Health Samples
 
 Trigger:
@@ -248,6 +316,87 @@ Only consider manual cleanup after:
 - audit/trade/user surfaces are verified
 - a backup exists
 - the cleanup is documented
+
+## Degrade And Rollback Playbook
+
+Use this playbook when sync behavior is suspicious but production data must stay
+safe. The first goal is to stop new cross-server side effects while preserving
+evidence for recovery.
+
+### Hold immediate cross-server push
+
+Set this on the affected app/bot process environment and restart only the
+affected services:
+
+```bash
+TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=true
+```
+
+This disables the fire-and-forget HTTP push path. It does not delete committed
+`change_log` rows. The `sync_worker` can still drain durable backlog when it is
+running.
+
+### Disable strict watermark mode
+
+Keep or restore:
+
+```bash
+SYNC_WATERMARK_STRICT_MODE=false
+```
+
+With strict mode off, compatibility behavior is preserved while the receiver
+still logs and counts stale, duplicate, and conflict decisions. Do not enable
+strict mode again until fresh parity evidence is clean.
+
+### Hold queue drain without data loss
+
+To pause cross-server delivery while keeping the durable backlog, stop only the
+sync worker service on the affected side:
+
+```bash
+docker compose stop sync_worker
+```
+
+To resume:
+
+```bash
+docker compose up -d --no-deps sync_worker
+```
+
+Do not clear `sync:outbound`, `sync:retry`, or unsynced `change_log` rows as a
+normal rollback action.
+
+### Publication gate during medium or long outage recovery
+
+The active-publication gate is the safe path for medium/long outage recovery.
+It prevents old local-only active offers from being republished as active before
+full catch-up and recovery finalization are complete. Use the existing recovery
+flow and keep the gate active until sync health is clean.
+
+```bash
+make sync-health
+make sync-health-iran
+make sync-recover
+make sync-health
+make sync-health-iran
+```
+
+If the gate reports candidates, run the documented recovery finalization flow in
+dry-run first and only apply it after the expected row count is reviewed.
+
+### Repair is dry-run-first
+
+Build repair evidence before any repair write:
+
+```bash
+python3 scripts/sync_repair_tool.py plan \
+  --local-snapshot tmp/local-parity.json \
+  --peer-snapshot tmp/peer-parity.json
+```
+
+For one-row replay, run without `--apply` first. `--apply` also requires
+`--confirm-write` and `--source-sequence` so receiver watermarks remain
+auditable.
 
 ## Production Sampler
 

@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.db import AsyncSessionLocal
 from core.sync_parity import build_database_parity_snapshot, compare_parity_snapshots
+from core.sync_parity_observability import infer_parity_comparison_mode, summarize_parity_comparison
 
 
 def _read_json(path: str | None) -> dict[str, Any] | None:
@@ -42,6 +44,20 @@ def _fetch_json(url: str | None, api_key: str | None) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         raise ValueError(f"{url} returned a non-object JSON payload")
     return payload
+
+
+def _post_json(url: str, payload: dict[str, Any], api_key: str | None) -> None:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-Observability-Api-Key"] = api_key
+    body = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        response.read()
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 async def _snapshot(args: argparse.Namespace) -> int:
@@ -77,6 +93,15 @@ def _compare(args: argparse.Namespace) -> int:
         api_key=args.peer_observability_key or os.getenv("PEER_OBSERVABILITY_API_KEY"),
     )
     payload = compare_parity_snapshots(local_snapshot, peer_snapshot, sample_limit=args.sample_limit)
+    payload["mode"] = infer_parity_comparison_mode(local_snapshot, peer_snapshot)
+    payload["compared_at"] = _utc_now_iso()
+    payload["summary"] = summarize_parity_comparison(payload, mode=payload["mode"], observed_at=payload["compared_at"])
+    for record_url in args.record_url or []:
+        _post_json(
+            record_url,
+            payload,
+            args.record_observability_key or os.getenv("RECORD_OBSERVABILITY_API_KEY"),
+        )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if payload["status"] in {"ok", "non_business_difference"} else 2
 
@@ -97,6 +122,8 @@ def parse_args() -> argparse.Namespace:
     compare.add_argument("--local-observability-key")
     compare.add_argument("--peer-observability-key")
     compare.add_argument("--sample-limit", type=int, default=5)
+    compare.add_argument("--record-url", action="append", help="POST the comparison result to a /api/sync/parity/status endpoint.")
+    compare.add_argument("--record-observability-key")
 
     return parser.parse_args()
 

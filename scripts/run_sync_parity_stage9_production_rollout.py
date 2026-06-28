@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.deploy_config import resolve_deploy_settings
 from core.sync_transport import sync_transport_security_status_from_values
+from core.sync_parity_observability import strict_alert_gate_from_parity_summary, summarize_parity_comparison
 
 
 SCHEMA_VERSION = "sync_parity_stage9_production_rollout_v1"
@@ -494,12 +495,46 @@ def build_post_deploy_checks(args: argparse.Namespace, settings: dict[str, str])
     ]
 
 
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def load_latest_parity_evidence(args: argparse.Namespace) -> dict[str, Any] | None:
+    candidates: list[Path] = []
+    if args.latest_parity_status:
+        candidates.append(Path(args.latest_parity_status))
+    candidates.extend(
+        [
+            args.artifact_dir / "postdeploy-parity-deep.json",
+            args.artifact_dir / "production-predeploy-parity-deep.json",
+            args.artifact_dir / "production-predeploy-parity-quick.json",
+        ]
+    )
+    for candidate in candidates:
+        payload = _read_json_file(candidate)
+        if payload is None:
+            continue
+        if "summary" in payload and isinstance(payload["summary"], dict):
+            return dict(payload["summary"])
+        return summarize_parity_comparison(payload, mode=str(payload.get("mode") or "unknown"))
+    return None
+
+
 def build_strict_alert_plan(args: argparse.Namespace) -> dict[str, Any]:
+    latest_parity = load_latest_parity_evidence(args)
     return {
         "status": "reserved_for_after_warning_window",
         "confirm_env": STRICT_ALERT_CONFIRM_ENV,
         "confirm_value": STRICT_ALERT_CONFIRM_VALUE,
         "minimum_warning_window_hours": args.warning_window_hours,
+        "latest_parity_evidence": latest_parity,
+        "activation_gate": strict_alert_gate_from_parity_summary(latest_parity),
         "required_evidence": [
             "postdeploy delivery health clean on both servers",
             "postdeploy parity comparison clean or only accepted documented exemptions",
@@ -732,6 +767,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--quick-max-rows", type=int, default=5000)
     parser.add_argument("--deep-max-rows", type=int, default=10000)
     parser.add_argument("--warning-window-hours", type=int, default=24)
+    parser.add_argument("--latest-parity-status", type=Path)
     args = parser.parse_args(argv)
     if args.artifact_dir is None:
         args.artifact_dir = Path("tmp") / "sync-parity-stage9-production" / args.stamp

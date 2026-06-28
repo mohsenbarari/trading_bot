@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -40,6 +41,8 @@ class SyncParityScriptTests(unittest.TestCase):
                         local_observability_key=None,
                         peer_observability_key=None,
                         sample_limit=5,
+                        record_url=[],
+                        record_observability_key=None,
                     )
                 )
 
@@ -78,11 +81,68 @@ class SyncParityScriptTests(unittest.TestCase):
                         local_observability_key=None,
                         peer_observability_key=None,
                         sample_limit=5,
+                        record_url=[],
+                        record_observability_key=None,
                     )
                 )
 
         self.assertEqual(code, 2)
         self.assertEqual(json.loads(stdout.getvalue())["status"], "incomplete")
+
+    def test_compare_adds_summary_and_can_publish_result(self):
+        posted = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"status":"ok"}'
+
+        def fake_urlopen(request, timeout):
+            posted.append(
+                {
+                    "url": request.full_url,
+                    "headers": dict(request.header_items()),
+                    "body": json.loads(request.data.decode("utf-8")),
+                    "timeout": timeout,
+                }
+            )
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "local.json"
+            peer = Path(tmp) / "peer.json"
+            write_snapshot(local, "offers", [{"id": 1, "offer_public_id": "ofr_1", "price": 100}])
+            write_snapshot(peer, "offers", [{"id": 1, "offer_public_id": "ofr_1", "price": 100}])
+
+            stdout = StringIO()
+            with unittest.mock.patch("scripts.compare_sync_parity.urllib.request.urlopen", side_effect=fake_urlopen):
+                with redirect_stdout(stdout):
+                    code = _compare(
+                        SimpleNamespace(
+                            local_snapshot=str(local),
+                            peer_snapshot=str(peer),
+                            local_url=None,
+                            peer_url=None,
+                            local_observability_key=None,
+                            peer_observability_key=None,
+                            sample_limit=5,
+                            record_url=["http://127.0.0.1:8000/api/sync/parity/status"],
+                            record_observability_key="obs-key",
+                        )
+                    )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["mode"], "quick")
+        self.assertEqual(payload["summary"]["status"], "ok")
+        self.assertEqual(posted[0]["url"], "http://127.0.0.1:8000/api/sync/parity/status")
+        self.assertEqual(posted[0]["headers"]["X-observability-api-key"], "obs-key")
+        self.assertEqual(posted[0]["body"]["status"], "ok")
 
 
 if __name__ == "__main__":

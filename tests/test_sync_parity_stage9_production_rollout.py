@@ -72,6 +72,7 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertEqual(plan["read_only_preflight"]["status"], "blocked_until_explicit_confirm")
         self.assertEqual(plan["backup_confirmation"]["status"], "blocked_until_explicit_confirm")
         self.assertEqual(plan["release_plan"]["status"], "blocked_until_main_and_explicit_confirm")
+        self.assertEqual(plan["strict_alert_enablement_plan"]["activation_gate"]["reason"], "missing_parity_evidence")
 
         self.assertTrue(all(not command["mutates_production"] for command in plan["read_only_preflight"]["commands"]))
         self.assertTrue(any(command["reads_production"] for command in plan["read_only_preflight"]["commands"]))
@@ -103,6 +104,57 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertEqual(plan["transport_security_gate"]["status"], "blocked_insecure_sync_transport")
         self.assertEqual(exit_code, 2)
         self.assertEqual(executed["status"], "blocked_insecure_sync_transport")
+
+    def test_strict_alert_plan_uses_latest_parity_evidence_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence = Path(tmp_dir) / "parity.json"
+            evidence.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "status": "ok",
+                            "fresh": True,
+                            "mode": "deep",
+                            "observed_at": "2026-06-28T05:00:00Z",
+                            "business_drift_count": 0,
+                            "critical_drift_count": 0,
+                            "incomplete_count": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = self.build_args(Path(tmp_dir), "--latest-parity-status", str(evidence))
+
+            plan = stage9.build_strict_alert_plan(args)
+
+        self.assertEqual(plan["latest_parity_evidence"]["status"], "ok")
+        self.assertEqual(plan["activation_gate"]["status"], "passed")
+
+    def test_strict_alert_plan_blocks_critical_parity_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence = Path(tmp_dir) / "parity.json"
+            evidence.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "status": "critical_drift",
+                            "fresh": True,
+                            "mode": "deep",
+                            "observed_at": "2026-06-28T05:00:00Z",
+                            "business_drift_count": 0,
+                            "critical_drift_count": 1,
+                            "incomplete_count": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = self.build_args(Path(tmp_dir), "--latest-parity-status", str(evidence))
+
+            plan = stage9.build_strict_alert_plan(args)
+
+        self.assertEqual(plan["activation_gate"]["reason"], "parity_status_critical_drift")
 
     def test_preflight_requires_explicit_read_only_confirmation(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

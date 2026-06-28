@@ -552,6 +552,36 @@ Exit criteria:
 
 - Strict mode and strict alerts have enough live evidence to be safely enabled.
 
+Implementation status:
+
+- Added `core/sync_parity_observability.py` to produce operator-facing parity
+  summaries and strict-alert activation gates from comparison evidence.
+- `scripts/compare_sync_parity.py compare` now adds `mode`, `compared_at`, and a
+  summary to its output, and can optionally publish the comparison to
+  `/api/sync/parity/status`.
+- `/api/sync/parity/status` stores the latest summarized parity comparison in
+  Redis, protected by the observability API key.
+- `/api/sync/health` now reports `parity_status.comparison_status`, freshness,
+  the latest recorded comparison summary, the freshness window, and the parity
+  status endpoint. Missing or stale comparison evidence is explicit and cannot
+  be mistaken for a clean parity proof.
+- Added watermark decision metrics through
+  `trading_bot_sync_watermark_decisions_total`, covering stale, duplicate, and
+  conflict receiver decisions.
+- Added parity summary metrics for business drift, critical drift, and
+  incomplete table counts.
+- Stage 9 strict-alert planning now reads the latest parity evidence from an
+  explicit file or Stage 9 artifacts and blocks activation when evidence is
+  missing, stale, unknown, incomplete, truncated, duplicate-identity,
+  business drift, or critical drift.
+- `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md` now documents parity-status
+  recording, freshness rules, watermark decision metrics, and a non-destructive
+  degrade/rollback playbook covering direct-push disable, strict-mode disable,
+  worker drain hold/resume, active-publication gate recovery, and dry-run-first
+  repair.
+- Strict alerts remain reserved and warning-only until fresh clean parity
+  evidence exists from staging and the production warning window.
+
 ## Suggested Execution Order
 
 1. Stage R0

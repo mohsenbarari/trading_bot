@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     sync_direct_push_cooldown_seconds: float = 90.0
     sync_verify_tls: bool = True
     sync_ca_bundle: str | None = None
+    sync_parity_status_max_age_seconds: int = 900
     sync_watermark_strict_mode: bool = False
     environment: str = "production"
     release_sha: str | None = None

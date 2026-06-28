@@ -402,6 +402,51 @@ def record_sync_conflict(*, server_mode: str, table: str, reason: str) -> None:
     )
 
 
+def record_sync_watermark_decision(*, server_mode: str, table: str, decision: str, reason: str | None = None) -> None:
+    registry.counter(
+        "trading_bot_sync_watermark_decisions_total",
+        "Source-sequence watermark decisions by table, decision, and reason.",
+        server_mode=_sanitize_label_value(server_mode, max_length=16),
+        table=_sanitize_label_value(table, max_length=64),
+        decision=_sanitize_label_value(decision, max_length=32),
+        reason=_sanitize_label_value(reason, fallback="none", max_length=80),
+    )
+
+
+def record_sync_parity_summary(
+    *,
+    server_mode: str,
+    status: str,
+    fresh: bool,
+    business_drift_count: int,
+    critical_drift_count: int,
+    incomplete_count: int,
+) -> None:
+    labels = {
+        "server_mode": _sanitize_label_value(server_mode, max_length=16),
+        "status": _sanitize_label_value(status, max_length=40),
+        "fresh": "true" if fresh else "false",
+    }
+    registry.gauge(
+        "trading_bot_sync_parity_business_drift_tables",
+        "Latest stored parity comparison business-drift table count.",
+        max(int(business_drift_count or 0), 0),
+        **labels,
+    )
+    registry.gauge(
+        "trading_bot_sync_parity_critical_drift_tables",
+        "Latest stored parity comparison critical-drift table count.",
+        max(int(critical_drift_count or 0), 0),
+        **labels,
+    )
+    registry.gauge(
+        "trading_bot_sync_parity_incomplete_tables",
+        "Latest stored parity comparison incomplete table count.",
+        max(int(incomplete_count or 0), 0),
+        **labels,
+    )
+
+
 def record_business_action(*, action: str, result: str) -> None:
     registry.counter(
         "trading_bot_business_actions_total",

@@ -1,15 +1,22 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.db import get_db
 from models.change_log import ChangeLog
 from core.config import settings
 from core.audit_logger import audit_log
-from core.metrics import record_offer_publication_health, record_sync_conflict, record_sync_health
+from core.metrics import (
+    record_offer_publication_health,
+    record_sync_conflict,
+    record_sync_health,
+    record_sync_parity_summary,
+    record_sync_watermark_decision,
+)
 from core.redis import get_redis_client
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, default_peer_server_url, normalize_server, peer_server_url_for
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
+from core.sync_parity_observability import summarize_parity_comparison
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
@@ -28,6 +35,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
 PRODUCTION_FULL_MATRIX_SYNC_MARKERS = ("PFM_", "PRODTEST_", "FMX_")
+SYNC_PARITY_STATUS_REDIS_KEY = "sync:parity:latest_comparison"
 
 
 def _require_dev_key(request: Request) -> None:
@@ -2568,6 +2576,12 @@ async def _record_sync_watermark_applied(db: AsyncSession, context: SyncWatermar
 
 
 def _log_sync_watermark_decision(context: SyncWatermarkContext, decision: SyncWatermarkDecision) -> None:
+    record_sync_watermark_decision(
+        server_mode=settings.server_mode,
+        table=context.aggregate_table,
+        decision=decision.action,
+        reason=decision.reason,
+    )
     record_sync_conflict(
         server_mode=settings.server_mode,
         table=context.aggregate_table,
@@ -2724,6 +2738,12 @@ async def receive_sync_data(
                     continue
                 if watermark_context is not None and watermark_decision.action == "duplicate":
                     processed_count += 1
+                    record_sync_watermark_decision(
+                        server_mode=settings.server_mode,
+                        table=watermark_context.aggregate_table,
+                        decision=watermark_decision.action,
+                        reason=watermark_decision.reason,
+                    )
                     logger.info(
                         "Duplicate sync item ignored by source-sequence watermark",
                         extra={
@@ -2799,6 +2819,12 @@ async def receive_sync_data(
                         continue
                     if watermark_context is not None and watermark_decision.action == "duplicate":
                         processed_count += 1
+                        record_sync_watermark_decision(
+                            server_mode=settings.server_mode,
+                            table=watermark_context.aggregate_table,
+                            decision=watermark_decision.action,
+                            reason=watermark_decision.reason,
+                        )
                         logger.info(
                             "Deferred duplicate sync item ignored by source-sequence watermark",
                             extra={
@@ -3301,13 +3327,52 @@ async def resync_from_changelog(
     return {"status": "ok", "processed": processed, "errors": errors, "total_entries": len(entries)}
 
 
-def _parity_status_payload() -> dict[str, object]:
+def _coerce_parity_status_max_age_seconds() -> int:
+    try:
+        return max(int(getattr(settings, "sync_parity_status_max_age_seconds", 900) or 900), 1)
+    except (TypeError, ValueError):
+        return 900
+
+
+async def _load_latest_parity_summary(redis_client) -> dict[str, object] | None:
+    if redis_client is None:
+        return None
+    raw = await redis_client.get(SYNC_PARITY_STATUS_REDIS_KEY)
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "status" not in payload or "observed_at" not in payload:
+        return None
+    return payload
+
+
+def _parity_status_payload(latest_summary: dict[str, object] | None = None) -> dict[str, object]:
     quick_tables = synced_parity_table_names("quick")
     deep_tables = synced_parity_table_names("deep")
+    max_age_seconds = _coerce_parity_status_max_age_seconds()
+    if latest_summary:
+        latest_summary = summarize_parity_comparison(
+            latest_summary,
+            mode=str(latest_summary.get("mode") or "unknown"),
+            observed_at=str(latest_summary.get("observed_at") or ""),
+            max_age_seconds=max_age_seconds,
+        )
+        comparison_status = str(latest_summary.get("status") or "unknown") if latest_summary.get("fresh") else "stale"
+    else:
+        comparison_status = "missing"
     return {
         "status": "available",
-        "comparison_status": "operator_script_required",
+        "comparison_status": comparison_status,
+        "fresh": bool(latest_summary and latest_summary.get("fresh")),
+        "latest_comparison": latest_summary,
+        "freshness_required_seconds": max_age_seconds,
         "snapshot_endpoint": "/api/sync/parity/snapshot",
+        "status_endpoint": "/api/sync/parity/status",
         "quick_table_count": len(quick_tables),
         "deep_table_count": len(deep_tables),
     }
@@ -3339,6 +3404,63 @@ async def get_sync_parity_snapshot(
 
     snapshot["server_mode"] = settings.server_mode
     return snapshot
+
+
+@router.post("/parity/status")
+async def record_sync_parity_status(
+    request: Request,
+    comparison: dict = Body(...),
+):
+    """Store the latest operator-produced parity comparison summary."""
+    _require_observability_key(request)
+    summary = summarize_parity_comparison(
+        comparison,
+        mode=str(comparison.get("mode") or "unknown"),
+        observed_at=str(comparison.get("compared_at") or comparison.get("observed_at") or ""),
+        max_age_seconds=_coerce_parity_status_max_age_seconds(),
+    )
+    summary["server_mode"] = settings.server_mode
+    summary["stored_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        redis_client = get_redis_client()
+        await redis_client.set(
+            SYNC_PARITY_STATUS_REDIS_KEY,
+            json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            ex=max(_coerce_parity_status_max_age_seconds() * 96, 3600),
+        )
+    except Exception as exc:
+        logger.warning(
+            "Could not store sync parity status",
+            extra={
+                "event": "sync.parity_status.store_failed",
+                "log_class": "integration",
+                "server_mode": settings.server_mode,
+                **_summarize_exception(exc),
+            },
+        )
+        raise HTTPException(status_code=503, detail="Could not store sync parity status") from exc
+
+    record_sync_parity_summary(
+        server_mode=settings.server_mode,
+        status=str(summary.get("status") or "unknown"),
+        fresh=bool(summary.get("fresh")),
+        business_drift_count=int(summary.get("business_drift_count") or 0),
+        critical_drift_count=int(summary.get("critical_drift_count") or 0),
+        incomplete_count=int(summary.get("incomplete_count") or 0),
+    )
+    logger.info(
+        "Sync parity status stored",
+        extra={
+            "event": "sync.parity_status.stored",
+            "log_class": "integration",
+            "server_mode": settings.server_mode,
+            "parity_status": summary.get("status"),
+            "parity_fresh": summary.get("fresh"),
+            "business_drift_count": summary.get("business_drift_count"),
+            "critical_drift_count": summary.get("critical_drift_count"),
+        },
+    )
+    return {"status": "ok", "parity_status": summary}
 
 
 @router.get("/health")
@@ -3373,8 +3495,10 @@ async def get_sync_health(
         redis_client = get_redis_client()
         outbound_queue = int(await redis_client.llen("sync:outbound") or 0)
         retry_queue = int(await redis_client.llen("sync:retry") or 0)
+        latest_parity_summary = await _load_latest_parity_summary(redis_client)
     except Exception as exc:
         redis_ok = False
+        latest_parity_summary = None
         logger.warning(
             "Could not read sync Redis queues",
             extra={
@@ -3453,8 +3577,18 @@ async def get_sync_health(
         },
         "active_publication_gate": active_publication_gate,
         "publication_reconciliation": publication_reconciliation,
-        "parity_status": _parity_status_payload(),
+        "parity_status": _parity_status_payload(latest_parity_summary),
     }
+    latest_parity = payload["parity_status"].get("latest_comparison") if isinstance(payload.get("parity_status"), dict) else None
+    if isinstance(latest_parity, dict):
+        record_sync_parity_summary(
+            server_mode=settings.server_mode,
+            status=str(latest_parity.get("status") or "unknown"),
+            fresh=bool(latest_parity.get("fresh")),
+            business_drift_count=int(latest_parity.get("business_drift_count") or 0),
+            critical_drift_count=int(latest_parity.get("critical_drift_count") or 0),
+            incomplete_count=int(latest_parity.get("incomplete_count") or 0),
+        )
     logger.info(
         "Sync health sampled",
         extra={
