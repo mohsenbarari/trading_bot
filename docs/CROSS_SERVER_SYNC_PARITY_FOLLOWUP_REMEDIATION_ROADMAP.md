@@ -197,6 +197,19 @@ Stage F1B - implementation after F1A passes:
 - Add a test that an Iran-origin runtime transition applied on foreign triggers
   exactly one market channel notice.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- `core/market_schedule_loop.py` now routes foreign market-schedule cycles to
+  synced-state side-effect reconciliation instead of local schedule evaluation
+  and `market_runtime_state` writes.
+- `core/services/market_transition_service.py` now guards direct foreign calls
+  to `apply_market_schedule_transition()` and reconciles foreign-home active
+  offer expiry from the latest synced closed Iran runtime state.
+- `api/routers/sync.py` now runs the same runtime side-effect reconciliation
+  after an applied `market_runtime_state` sync item, so foreign can send/retry
+  Telegram market notices and expire local foreign-home offers without owning
+  product runtime truth.
+
 Exit criteria:
 
 - No code path on foreign mutates `market_runtime_state` as product truth.

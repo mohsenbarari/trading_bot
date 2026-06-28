@@ -20,6 +20,7 @@ from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.offer_expiry_service import (
     OfferExpiryCommand,
     OfferExpiryReason,
+    OfferExpiryResult,
     OfferExpirySourceSurface,
     expire_offers_authoritatively,
 )
@@ -59,7 +60,7 @@ MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS = float(
 class MarketTransitionResult:
     changed: bool
     transition: str | None
-    state: MarketRuntimeState
+    state: MarketRuntimeState | None
     expired_offer_ids: tuple[int, ...] = ()
 
 
@@ -381,6 +382,104 @@ async def reconcile_market_channel_notice_for_current_state(
     return await reconcile_market_channel_notice_for_state(db, state, source=source)
 
 
+async def _expire_active_local_offers_for_market_close(
+    db: AsyncSession,
+    *,
+    now: datetime,
+) -> tuple[OfferExpiryResult, list[int]]:
+    active_offers = await _load_active_local_offers(db)
+    expired_user_ids: list[int] = []
+
+    expiry_result = await expire_offers_authoritatively(
+        db,
+        active_offers,
+        OfferExpiryCommand(
+            reason=OfferExpiryReason.MARKET_CLOSED,
+            source_surface=OfferExpirySourceSurface.SYSTEM,
+            source_server=current_server(),
+            expired_by_user_id=None,
+            expired_by_actor_user_id=None,
+        ),
+        commit=False,
+        now=now,
+    )
+
+    for offer in expiry_result.expired_offers:
+        if offer.user_id:
+            expired_user_ids.append(int(offer.user_id))
+
+    return expiry_result, expired_user_ids
+
+
+async def _apply_market_close_expiry_side_effects(
+    expired_offers: tuple[Offer, ...],
+    expired_user_ids: list[int],
+) -> None:
+    for offer in expired_offers:
+        try:
+            await apply_offer_channel_state(offer, reason="market_close_expire")
+        except Exception as exc:
+            logger.warning("Failed to apply channel state for market-close expiry %s: %s", offer.id, exc)
+
+    if expired_user_ids:
+        try:
+            from core.cache import decr_active_offer_count
+
+            for user_id in expired_user_ids:
+                await decr_active_offer_count(user_id)
+        except Exception as exc:
+            logger.warning("Failed to update active-offer cache after market close: %s", exc)
+
+
+async def reconcile_market_runtime_side_effects_for_state(
+    db: AsyncSession,
+    state: MarketRuntimeState | None,
+    *,
+    source: str,
+) -> MarketTransitionResult:
+    """Reconcile local side effects from the latest synced market runtime state."""
+    if state is None:
+        return MarketTransitionResult(changed=False, transition=None, state=None)
+
+    expired_offer_ids: tuple[int, ...] = ()
+    transition: str | None = None
+    if current_server() == SERVER_FOREIGN and not state.is_open:
+        close_time = _market_notice_transition_at_for_state(state) or utc_now()
+        expiry_result, expired_user_ids = await _expire_active_local_offers_for_market_close(
+            db,
+            now=close_time,
+        )
+        if expiry_result.expired_count:
+            await db.commit()
+            await _apply_market_close_expiry_side_effects(
+                expiry_result.expired_offers,
+                expired_user_ids,
+            )
+            expired_offer_ids = tuple(offer.id for offer in expiry_result.expired_offers)
+            transition = "closed_local_offer_expiry"
+
+    try:
+        await reconcile_market_channel_notice_for_state(db, state, source=source)
+    except Exception as exc:
+        logger.warning("Failed to reconcile market channel notice from runtime side effects: %s", exc)
+
+    return MarketTransitionResult(
+        changed=bool(expired_offer_ids),
+        transition=transition,
+        state=state,
+        expired_offer_ids=expired_offer_ids,
+    )
+
+
+async def reconcile_market_runtime_side_effects_for_current_state(
+    db: AsyncSession,
+    *,
+    source: str,
+) -> MarketTransitionResult:
+    state = await get_market_runtime_state(db)
+    return await reconcile_market_runtime_side_effects_for_state(db, state, source=source)
+
+
 async def get_market_runtime_state(db: AsyncSession) -> MarketRuntimeState | None:
     result = await db.execute(
         select(MarketRuntimeState)
@@ -556,28 +655,11 @@ async def _apply_market_closed_transition(
     current_time: datetime | None = None,
 ) -> MarketTransitionResult:
     now = _coerce_utc_now(current_time)
-    active_offers = await _load_active_local_offers(db)
-    expired_offer_ids: list[int] = []
-    expired_user_ids: list[int] = []
-
-    expiry_result = await expire_offers_authoritatively(
+    expiry_result, expired_user_ids = await _expire_active_local_offers_for_market_close(
         db,
-        active_offers,
-        OfferExpiryCommand(
-            reason=OfferExpiryReason.MARKET_CLOSED,
-            source_surface=OfferExpirySourceSurface.SYSTEM,
-            source_server=current_server(),
-            expired_by_user_id=None,
-            expired_by_actor_user_id=None,
-        ),
-        commit=False,
         now=now,
     )
-
-    for offer in expiry_result.expired_offers:
-        expired_offer_ids.append(offer.id)
-        if offer.user_id:
-            expired_user_ids.append(int(offer.user_id))
+    expired_offer_ids = [offer.id for offer in expiry_result.expired_offers]
 
     state.is_open = False
     state.active_web_notice_visible = True
@@ -586,20 +668,10 @@ async def _apply_market_closed_transition(
     await db.commit()
     invalidate_market_runtime_view_cache()
 
-    for offer in expiry_result.expired_offers:
-        try:
-            await apply_offer_channel_state(offer, reason="market_close_expire")
-        except Exception as exc:
-            logger.warning("Failed to apply channel state for market-close expiry %s: %s", offer.id, exc)
-
-    if expired_user_ids:
-        try:
-            from core.cache import decr_active_offer_count
-
-            for user_id in expired_user_ids:
-                await decr_active_offer_count(user_id)
-        except Exception as exc:
-            logger.warning("Failed to update active-offer cache after market close: %s", exc)
+    await _apply_market_close_expiry_side_effects(
+        expiry_result.expired_offers,
+        expired_user_ids,
+    )
 
     notice_text = MARKET_CLOSED_CHANNEL_NOTICE
     try:
@@ -626,6 +698,12 @@ async def apply_market_schedule_transition(
     *,
     current_time: datetime | None = None,
 ) -> MarketTransitionResult:
+    if current_server() == SERVER_FOREIGN:
+        return await reconcile_market_runtime_side_effects_for_current_state(
+            db,
+            source="foreign_schedule_guard",
+        )
+
     await _acquire_market_runtime_lock(db)
     state = await get_market_runtime_state(db)
     if state is None:

@@ -427,7 +427,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             market_transition_service, "reconcile_market_channel_notice_for_state", new=AsyncMock()
         ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
-        ) as publish_mock:
+        ) as publish_mock, patch(
+            "core.services.market_transition_service.current_server",
+            return_value="iran",
+        ):
             result = await market_transition_service.apply_market_schedule_transition(db, evaluation)
 
         lock_mock.assert_awaited_once_with(db)
@@ -457,7 +460,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             market_transition_service, "reconcile_market_channel_notice_for_state", new=AsyncMock()
         ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
-        ) as publish_mock:
+        ) as publish_mock, patch(
+            "core.services.market_transition_service.current_server",
+            return_value="iran",
+        ):
             result = await market_transition_service.apply_market_schedule_transition(
                 db,
                 evaluation,
@@ -479,8 +485,8 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_apply_market_closed_transition_expires_local_offers_and_publishes_notice(self):
         state = MarketRuntimeState(id=1, is_open=True, active_web_notice_visible=False, offers_since_last_open=2)
         offers = [
-            SimpleNamespace(id=11, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=101, user_id=5),
-            SimpleNamespace(id=12, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=None, user_id=8),
+            SimpleNamespace(id=11, status=OfferStatus.ACTIVE, home_server="iran", channel_message_id=101, user_id=5),
+            SimpleNamespace(id=12, status=OfferStatus.ACTIVE, home_server="iran", channel_message_id=None, user_id=8),
         ]
         db = SimpleNamespace(
             execute=AsyncMock(
@@ -504,10 +510,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             market_transition_service, "reconcile_market_channel_notice_for_state", new=AsyncMock()
         ) as notice_mock, patch(
             "core.services.market_transition_service.current_server",
-            return_value="foreign",
+            return_value="iran",
         ), patch(
             "core.services.offer_expiry_service.current_server",
-            return_value="foreign",
+            return_value="iran",
         ), patch(
             "core.services.market_transition_service.apply_offer_channel_state",
             new=AsyncMock(),
@@ -534,7 +540,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
         self.assertEqual([offer.expire_reason for offer in offers], ["market_closed", "market_closed"])
         self.assertEqual([offer.expire_source_surface for offer in offers], ["system", "system"])
-        self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
+        self.assertEqual([offer.expire_source_server for offer in offers], ["iran", "iran"])
         self.assertEqual([offer.expired_by_user_id for offer in offers], [None, None])
         self.assertEqual([offer.expired_by_actor_user_id for offer in offers], [None, None])
         db.commit.assert_awaited_once()
@@ -591,7 +597,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             new=AsyncMock(),
         ) as notice_mock, patch(
             "core.services.market_transition_service.publish_event_sync"
-        ) as publish_mock:
+        ) as publish_mock, patch(
+            "core.services.market_transition_service.current_server",
+            return_value="iran",
+        ):
             result = await market_transition_service.apply_market_schedule_transition(db, evaluation)
 
         lock_mock.assert_awaited_once_with(db)
@@ -603,6 +612,138 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_not_awaited()
         notice_mock.assert_not_awaited()
         publish_mock.assert_not_called()
+
+    async def test_apply_market_schedule_transition_on_foreign_uses_side_effect_guard_without_runtime_write(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc),
+        )
+        db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=datetime(2026, 5, 23, 18, 0, tzinfo=timezone.utc),
+            timezone="Asia/Tehran",
+        )
+        guard_result = market_transition_service.MarketTransitionResult(
+            changed=False,
+            transition=None,
+            state=state,
+        )
+
+        with patch(
+            "core.services.market_transition_service.current_server",
+            return_value="foreign",
+        ), patch.object(
+            market_transition_service,
+            "_acquire_market_runtime_lock",
+            new=AsyncMock(),
+        ) as lock_mock, patch.object(
+            market_transition_service,
+            "reconcile_market_runtime_side_effects_for_current_state",
+            new=AsyncMock(return_value=guard_result),
+        ) as guard_mock:
+            result = await market_transition_service.apply_market_schedule_transition(db, evaluation)
+
+        self.assertIs(result, guard_result)
+        guard_mock.assert_awaited_once_with(db, source="foreign_schedule_guard")
+        lock_mock.assert_not_awaited()
+        db.execute.assert_not_awaited()
+        db.commit.assert_not_awaited()
+
+    async def test_reconcile_market_runtime_side_effects_expires_foreign_home_offers_on_synced_close(self):
+        close_time = datetime(2026, 5, 22, 18, 0, tzinfo=timezone.utc)
+        state = MarketRuntimeState(
+            id=1,
+            is_open=False,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=close_time,
+        )
+        offers = [
+            SimpleNamespace(id=21, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=201, user_id=5),
+            SimpleNamespace(id=22, status=OfferStatus.ACTIVE, home_server="foreign", channel_message_id=None, user_id=8),
+        ]
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch(
+            "core.services.market_transition_service.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.services.offer_expiry_service.current_server",
+            return_value="foreign",
+        ), patch.object(
+            market_transition_service,
+            "_load_active_local_offers",
+            new=AsyncMock(return_value=offers),
+        ) as load_offers_mock, patch(
+            "core.services.market_transition_service.apply_offer_channel_state",
+            new=AsyncMock(),
+        ) as apply_channel_state_mock, patch(
+            "core.cache.decr_active_offer_count",
+            new=AsyncMock(),
+        ) as decr_mock, patch.object(
+            market_transition_service,
+            "reconcile_market_channel_notice_for_state",
+            new=AsyncMock(),
+        ) as notice_mock:
+            result = await market_transition_service.reconcile_market_runtime_side_effects_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertTrue(result.changed)
+        self.assertEqual(result.transition, "closed_local_offer_expiry")
+        self.assertEqual(result.expired_offer_ids, (21, 22))
+        self.assertEqual([offer.status for offer in offers], [OfferStatus.EXPIRED, OfferStatus.EXPIRED])
+        self.assertEqual([offer.expire_reason for offer in offers], ["market_closed", "market_closed"])
+        self.assertEqual([offer.expire_source_surface for offer in offers], ["system", "system"])
+        self.assertEqual([offer.expire_source_server for offer in offers], ["foreign", "foreign"])
+        self.assertEqual([offer.expired_at for offer in offers], [close_time, close_time])
+        load_offers_mock.assert_awaited_once()
+        db.commit.assert_awaited_once()
+        self.assertEqual(apply_channel_state_mock.await_count, 2)
+        self.assertEqual(decr_mock.await_count, 2)
+        notice_mock.assert_awaited_once_with(db, state, source="sync_receive")
+
+    async def test_reconcile_market_runtime_side_effects_does_not_expire_on_open_state(self):
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch(
+            "core.services.market_transition_service.current_server",
+            return_value="foreign",
+        ), patch.object(
+            market_transition_service,
+            "_load_active_local_offers",
+            new=AsyncMock(),
+        ) as load_offers_mock, patch.object(
+            market_transition_service,
+            "reconcile_market_channel_notice_for_state",
+            new=AsyncMock(),
+        ) as notice_mock:
+            result = await market_transition_service.reconcile_market_runtime_side_effects_for_state(
+                db,
+                state,
+                source="sync_receive",
+            )
+
+        self.assertFalse(result.changed)
+        self.assertIsNone(result.transition)
+        self.assertEqual(result.expired_offer_ids, ())
+        load_offers_mock.assert_not_awaited()
+        db.commit.assert_not_awaited()
+        notice_mock.assert_awaited_once_with(db, state, source="sync_receive")
 
     async def test_load_market_schedule_overrides_window_uses_local_date_range(self):
         db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult(values=[])))
@@ -955,6 +1096,9 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             market_transition_service,
             "get_market_runtime_state",
             new=AsyncMock(return_value=None),
+        ), patch(
+            "core.services.market_transition_service.current_server",
+            return_value="iran",
         ):
             result = await market_transition_service.apply_market_schedule_transition(db, evaluation)
 

@@ -5,10 +5,12 @@ import time
 from core.db import AsyncSessionLocal
 from core.background_job_authority import JOB_MARKET_SCHEDULE, assert_background_job_authority
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
+from core.server_routing import SERVER_FOREIGN, current_server
 from core.services.market_schedule_service import evaluate_market_schedule, get_market_timezone_name
 from core.services.market_transition_service import (
     apply_market_schedule_transition,
     load_market_schedule_overrides_window,
+    reconcile_market_runtime_side_effects_for_current_state,
 )
 from core.trading_settings import get_trading_settings_async
 
@@ -22,6 +24,18 @@ _loop_errors = RepeatedErrorLogger(every=10)
 async def reconcile_market_schedule_runtime(*, current_time=None):
     assert_background_job_authority(JOB_MARKET_SCHEDULE)
     async with AsyncSessionLocal() as db:
+        if current_server() == SERVER_FOREIGN:
+            result = await reconcile_market_runtime_side_effects_for_current_state(
+                db,
+                source="market_schedule_loop",
+            )
+            if result.changed:
+                logger.info(
+                    "⏰ Foreign market schedule reconciled local side effects (expired_offers=%s)",
+                    len(result.expired_offer_ids),
+                )
+            return result
+
         trading_settings = await get_trading_settings_async()
         timezone_name = get_market_timezone_name(trading_settings)
         overrides = await load_market_schedule_overrides_window(

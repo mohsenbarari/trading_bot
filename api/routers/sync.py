@@ -21,7 +21,7 @@ from core.sync_protocol import build_sync_protocol_metadata, validate_sync_proto
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
-from core.services.market_transition_service import reconcile_market_channel_notice_for_current_state
+from core.services.market_transition_service import reconcile_market_runtime_side_effects_for_current_state
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
 import hmac
 import hashlib
@@ -2967,12 +2967,12 @@ async def receive_sync_data(
 
         if market_runtime_state_changed:
             try:
-                await reconcile_market_channel_notice_for_current_state(db, source="sync_receive")
+                await reconcile_market_runtime_side_effects_for_current_state(db, source="sync_receive")
             except Exception as exc:
                 logger.error(
-                    "Failed to reconcile market channel notice after sync",
+                    "Failed to reconcile market runtime side effects after sync",
                     extra={
-                        "event": "sync.market_channel_notice_reconcile_failed",
+                        "event": "sync.market_runtime_side_effects_reconcile_failed",
                         **_summarize_exception(exc),
                     },
                 )

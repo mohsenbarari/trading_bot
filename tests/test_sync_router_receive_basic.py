@@ -209,14 +209,14 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_mock, patch(
             "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
         ) as rollout_mock, patch(
-            "api.routers.sync.reconcile_market_channel_notice_for_current_state",
+            "api.routers.sync.reconcile_market_runtime_side_effects_for_current_state",
             new=AsyncMock(),
-        ) as reconcile_mock, patch("api.routers.sync.settings.server_mode", "foreign"):
+        ) as side_effect_mock, patch("api.routers.sync.settings.server_mode", "foreign"):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         apply_mock.assert_awaited_once()
         rollout_mock.assert_not_awaited()
-        reconcile_mock.assert_awaited_once_with(db, source="sync_receive")
+        side_effect_mock.assert_awaited_once_with(db, source="sync_receive")
         self.assertEqual(result, {"status": "success", "processed": 1})
         self.assertGreaterEqual(db.commits, 2)
 
@@ -239,14 +239,14 @@ class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
         with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ignored")) as apply_mock, patch(
             "api.routers.sync.ensure_mandatory_channel_rollout", new=AsyncMock()
         ) as rollout_mock, patch(
-            "api.routers.sync.reconcile_market_channel_notice_for_current_state",
+            "api.routers.sync.reconcile_market_runtime_side_effects_for_current_state",
             new=AsyncMock(),
-        ) as reconcile_mock, patch("api.routers.sync.settings.server_mode", "foreign"):
+        ) as side_effect_mock, patch("api.routers.sync.settings.server_mode", "foreign"):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
         apply_mock.assert_awaited_once()
         rollout_mock.assert_not_awaited()
-        reconcile_mock.assert_not_awaited()
+        side_effect_mock.assert_not_awaited()
         self.assertEqual(result, {"status": "success", "processed": 1})
 
     async def test_receive_sync_data_retries_deferred_items_and_invalidates_commodity_caches(self):

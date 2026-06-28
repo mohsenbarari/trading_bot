@@ -102,15 +102,16 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         mutated_tables=("market_runtime_state", "offers"),
         allowed_servers=(SERVER_FOREIGN, SERVER_IRAN),
         authority_rule=(
-            "each server may apply the replicated market schedule to its own runtime state; "
-            "offer mutations remain offer_home_server-local and use the shared OfferExpiryCommand service"
+            "iran is authoritative for market_runtime_state; foreign must only observe the synced iran runtime state "
+            "and may expire offer_home_server-local active offers through the shared OfferExpiryCommand service"
         ),
         outage_behavior=(
-            "continue local schedule evaluation from the last committed settings/overrides; "
-            "close only local-home offers; converge market runtime and offer terminal state through sync after recovery"
+            "iran continues schedule evaluation from committed settings/overrides; foreign preserves Telegram-local "
+            "side effects and closes only foreign-home offers after a synced iran close state"
         ),
         sync_outbox_behavior=(
-            "market_runtime_state and expired offers are sync tables; transition writes must be recorded by the durable outbox/change_log path"
+            "iran market_runtime_state writes and both servers' offer_home_server-local expiry writes must be recorded "
+            "by the durable outbox/change_log path; foreign market notices remain local Telegram side effects"
         ),
         offer_impacting=True,
         shared_authoritative_command="expire_offers_authoritatively",
