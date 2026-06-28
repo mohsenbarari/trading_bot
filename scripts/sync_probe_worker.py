@@ -655,7 +655,7 @@ async def resync_table(args: argparse.Namespace) -> int:
     if not settings.dev_api_key:
         print_json({"status": "error", "message": "DEV_API_KEY is not configured"})
         return 2
-    async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             "http://127.0.0.1:8000/api/sync/resync",
             params={"limit": args.limit, "table_filter": args.table},

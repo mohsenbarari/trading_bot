@@ -106,9 +106,10 @@ Required direction:
 
 ### P1 - TLS Verification Is Disabled On Sync Paths
 
-`core/sync_push.py` and `/api/sync/resync` use `verify=False`. HMAC protects
-payload authenticity, but disabling TLS verification weakens endpoint identity
-and is not acceptable as the production default.
+Earlier code paths in `core/sync_push.py` and `/api/sync/resync` used
+`verify=False`. HMAC protects payload authenticity, but disabling TLS
+verification weakens endpoint identity and is not acceptable as the production
+default.
 
 Required direction:
 
@@ -490,6 +491,23 @@ Exit criteria:
 
 - Production sync transport and rollout gates no longer rely on insecure
   defaults.
+
+Implementation status:
+
+- Added `SYNC_VERIFY_TLS=true` default and optional `SYNC_CA_BUNDLE` runtime
+  configuration for cross-server sync HTTP clients.
+- `core/sync_worker.py`, `core/sync_push.py`, `/api/sync/resync`,
+  shared-table seed helpers, dev-admin remote session reset, and
+  session-authority checks now use the shared sync transport policy instead of
+  unverified client settings.
+- Production env rendering and the production deployment manifest carry the sync
+  TLS settings, and `scripts/production_deploy_online.sh` rejects
+  `SYNC_VERIFY_TLS=false` without `SYNC_CA_BUNDLE`.
+- Stage 9 production rollout planning now includes a transport security gate and
+  blocks preflight/execute/postdeploy modes if sync TLS verification is disabled
+  without a CA bundle.
+- Remaining `verify=False` text appears only in historical/roadmap notes, not in
+  runtime code paths.
 
 ### Stage R7 - Observability And Strict-Mode Readiness
 

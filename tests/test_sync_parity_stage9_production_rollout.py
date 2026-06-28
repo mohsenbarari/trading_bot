@@ -53,9 +53,9 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
 
     def build_plan(self, artifact_dir: Path, *, branch: str = "candidate/sync-parity-hardening", mode: str = "plan"):
         args = self.build_args(artifact_dir, "--mode", mode)
-        with patch.object(stage9, "resolve_deploy_settings", return_value=FAKE_SETTINGS), patch.object(
-            stage9, "run_git_value", side_effect=fake_git_value(branch)
-        ):
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            stage9, "resolve_deploy_settings", return_value=FAKE_SETTINGS
+        ), patch.object(stage9, "run_git_value", side_effect=fake_git_value(branch)):
             return args, stage9.build_plan(args)
 
     def test_default_plan_is_non_mutating_until_guarded_sections(self):
@@ -67,6 +67,7 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertTrue(plan["branch_gate"]["planning_passed"])
         self.assertFalse(plan["branch_gate"]["release_passed"])
         self.assertEqual(plan["execution_contract"]["release_requires_branch"], "main")
+        self.assertEqual(plan["transport_security_gate"]["status"], "passed")
         self.assertEqual(plan["read_only_preflight"]["status"], "blocked_until_explicit_confirm")
         self.assertEqual(plan["backup_confirmation"]["status"], "blocked_until_explicit_confirm")
         self.assertEqual(plan["release_plan"]["status"], "blocked_until_main_and_explicit_confirm")
@@ -81,6 +82,20 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertIn("iran_parity_snapshot_deep", preflight_names)
         self.assertIn("production_predeploy_parity_compare_deep", preflight_names)
         self.assertIn("production_alerts_warning_only", preflight_names)
+
+    def test_insecure_sync_transport_blocks_production_preflight(self):
+        insecure_settings = {**FAKE_SETTINGS, "SYNC_VERIFY_TLS": "false", "SYNC_CA_BUNDLE": ""}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            args = self.build_args(Path(tmp_dir), "--mode", "preflight")
+            with patch.dict(os.environ, {}, clear=True), patch.object(
+                stage9, "resolve_deploy_settings", return_value=insecure_settings
+            ), patch.object(stage9, "run_git_value", side_effect=fake_git_value("main")):
+                plan = stage9.build_plan(args)
+                executed, exit_code = stage9.execute_plan(plan, args)
+
+        self.assertEqual(plan["transport_security_gate"]["status"], "blocked_insecure_sync_transport")
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(executed["status"], "blocked_insecure_sync_transport")
 
     def test_preflight_requires_explicit_read_only_confirmation(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

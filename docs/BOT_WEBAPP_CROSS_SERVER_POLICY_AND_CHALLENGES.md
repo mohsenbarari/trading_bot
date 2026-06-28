@@ -263,9 +263,9 @@ This section is mandatory for all work derived from this document.
   currently expect a batch containing only an unknown table to return `success`.
 - `core/events.py` and many individual event listeners catch and log sync/logging failures instead
   of making synced-table writes fail closed.
-- `core/sync_push.py` creates the direct-push HTTP client with `verify=False`; manual seed/resync
-  helpers also contain unverified HTTP client paths, and trade forwarding defaults TLS verification
-  to off unless configured otherwise.
+- Sync worker delivery, direct-push, manual resync, seed helpers, and session-authority remote calls
+  use the shared sync transport TLS policy: TLS verification defaults to enabled, private/self-signed
+  paths must use `SYNC_CA_BUNDLE`, and production gates reject disabled sync TLS verification.
 - The current user sync payload includes sensitive fields such as mobile number, address,
   `telegram_id`, and `admin_password_hash`.
 - Current SQLAlchemy model inventory includes additional tables that are not in the starter

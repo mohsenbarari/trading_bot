@@ -5,7 +5,7 @@ import json
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
@@ -399,10 +399,20 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         marker_return_value=1,
         fetch_return_value=None,
         fetch_side_effect=None,
+        sync_verify_tls=True,
+        sync_ca_bundle=None,
     ):
         fake_redis = FakeRedis(blpop_results)
-        fake_settings = SimpleNamespace(redis_host="redis", redis_port=6379, sync_api_key=api_key)
+        fake_settings = SimpleNamespace(
+            redis_host="redis",
+            redis_port=6379,
+            sync_api_key=api_key,
+            sync_verify_tls=sync_verify_tls,
+            sync_ca_bundle=sync_ca_bundle,
+            environment="production",
+        )
         fake_client = FakeAsyncClient()
+        client_ctor = Mock(return_value=fake_client)
         send_mock = AsyncMock(side_effect=send_side_effect, return_value=send_return_value)
         marker_mock = AsyncMock(side_effect=marker_side_effect, return_value=marker_return_value)
         fetch_mock = AsyncMock(side_effect=fetch_side_effect, return_value=fetch_return_value)
@@ -411,7 +421,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.sync_worker.redis.Redis", return_value=fake_redis), patch(
             "core.sync_worker.settings", fake_settings
         ), patch("core.sync_worker.default_peer_server_url", return_value=target_url), patch(
-            "core.sync_worker.httpx.AsyncClient", return_value=fake_client
+            "core.sync_worker.httpx.AsyncClient", client_ctor
         ), patch("core.sync_worker.send_sync_item", send_mock), patch(
             "core.sync_worker.mark_change_log_delivered", marker_mock
         ), patch(
@@ -423,6 +433,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
                 await sync_worker.main()
 
         self.fetch_mock = fetch_mock
+        self.client_ctor = client_ctor
         return fake_redis, send_mock, sleep_mock, marker_mock
 
     async def test_main_skips_invalid_json_payload(self):
@@ -457,6 +468,14 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
             [("sync:retry", json.loads(payload))],
         )
         sleep_mock.assert_awaited_once_with(30)
+
+    async def test_main_uses_sync_transport_ca_bundle(self):
+        with patch("core.config.settings.sync_ca_bundle", "/etc/ssl/internal-ca.pem"):
+            await self._run_main_once(
+                blpop_results=[asyncio.CancelledError()],
+            )
+
+        self.assertEqual(self.client_ctor.call_args.kwargs["verify"], "/etc/ssl/internal-ca.pem")
 
     async def test_main_normalizes_trailing_slash_and_does_not_requeue_success(self):
         payload = json.dumps({"hash": "abc", "change_log_id": 9})

@@ -351,7 +351,7 @@ SCENARIOS: tuple[Scenario, ...] = (
             ref("unit_policy", "tests/test_sync_router_stale_events.py", "test_duplicate_terminal_offer_replay_is_idempotent"),
             ref("sync_worker", "tests/test_sync_worker.py", "test_main_requeues_non_200_response"),
             ref("sync_worker", "tests/test_sync_worker.py", "test_main_requeues_request_errors"),
-            ref("sync_worker", "tests/test_sync_worker.py", "test_main_refreshes_queued_offer_payload_before_send_and_requeue"),
+            ref("sync_worker", "tests/test_sync_worker.py", "test_main_drains_committed_change_log_when_redis_has_no_wakeup"),
             ref("bot_handler", "tests/test_bot_trade_execute_local_success.py", "test_public_channel_trade_callback_resolves_offer_by_public_identity"),
         ),
         staging_checks=(
@@ -405,12 +405,12 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         scenario_id="S11-23",
-        title="Short outage replay sends latest authoritative snapshots and avoids stale active publication",
+        title="Short outage replay preserves committed payload identity and rejects stale terminal reversals",
         risk_area="outage_recovery",
         coverage_refs=(
-            ref("sync_worker", "tests/test_sync_worker.py", "test_offer_change_log_replay_uses_latest_authoritative_snapshot"),
-            ref("sync_worker", "tests/test_sync_worker.py", "test_offer_change_log_replay_uses_latest_completed_snapshot"),
-            ref("sync_worker", "tests/test_sync_worker.py", "test_main_refreshes_queued_offer_payload_before_send_and_requeue"),
+            ref("sync_worker", "tests/test_sync_worker.py", "test_offer_change_log_replay_uses_original_committed_payload"),
+            ref("sync_worker", "tests/test_sync_worker.py", "test_offer_change_log_replay_does_not_rebuild_same_sequence_from_current_state"),
+            ref("sync_worker", "tests/test_sync_worker.py", "test_main_treats_outbound_payload_as_wakeup_and_sends_committed_change_log"),
             ref("unit_policy", "tests/test_sync_router_stale_events.py", "test_out_of_order_offer_update_after_expiry_does_not_reactivate"),
         ),
         staging_checks=(

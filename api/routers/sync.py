@@ -12,6 +12,7 @@ from core.sync_metadata import build_sync_metadata, build_sync_public_identity, 
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
 from core.sync_protocol import build_sync_protocol_metadata, validate_sync_protocol_metadata
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
+from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.services.cross_server_recovery_service import active_publication_is_gated, load_active_publication_gate
 from core.services.offer_publication_reconciliation_service import publication_observability_summary
 import hmac
@@ -3194,7 +3195,8 @@ async def resync_from_changelog(
     errors = 0
     batch_size = 50  # Send items in batches for efficiency
 
-    async with httpx_mod.AsyncClient(timeout=30.0, verify=False) as client:
+    assert_runtime_sync_transport_allowed()
+    async with httpx_mod.AsyncClient(timeout=30.0, verify=runtime_sync_tls_verify_setting()) as client:
         # Group entries into batches
         for i in range(0, len(entries), batch_size):
             batch = entries[i:i + batch_size]

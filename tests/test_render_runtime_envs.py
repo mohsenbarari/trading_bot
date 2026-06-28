@@ -21,6 +21,8 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "JWT_SECRET_KEY": "jwt-secret",
             "DEV_API_KEY": "dev-key",
             "SYNC_API_KEY": "sync-key",
+            "SYNC_VERIFY_TLS": "true",
+            "SYNC_CA_BUNDLE": "",
             "OBSERVABILITY_API_KEY": "obs-key",
             "CHANNEL_ID": "-100123",
             "CHANNEL_INVITE_LINK": "https://t.me/example",
@@ -115,6 +117,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertEqual(iran["API_WORKERS"], "8")
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
+        self.assertEqual(foreign["SYNC_VERIFY_TLS"], "true")
+        self.assertEqual(iran["SYNC_VERIFY_TLS"], "true")
+        self.assertEqual(foreign["SYNC_CA_BUNDLE"], "")
+        self.assertEqual(iran["SYNC_CA_BUNDLE"], "")
         self.assertEqual(foreign["DB_POOL_SIZE"], "15")
         self.assertEqual(foreign["DB_MAX_OVERFLOW"], "10")
         self.assertEqual(iran["DB_POOL_SIZE"], "8")

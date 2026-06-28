@@ -1667,7 +1667,7 @@ async def push_prefix_change_logs_to_peer(
     if not entries:
         return report
 
-    async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         for batch_index, batch in enumerate(_targeted_sync_batches(entries, batch_size=batch_size), start=1):
             batch_report: dict[str, Any] | None = None
             for attempt in range(1, max(1, int(max_attempts)) + 1):

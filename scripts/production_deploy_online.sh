@@ -1559,6 +1559,8 @@ ensure_runtime_env_file() {
     local grafana_alert_warning_receiver="Trading Bot Production Email"
     local grafana_alert_webhook_url=""
     local grafana_alert_email_addresses=""
+    local sync_verify_tls="true"
+    local sync_ca_bundle=""
     local web_push_enabled="false"
     local web_push_vapid_public_key=""
     local web_push_vapid_private_key=""
@@ -1583,6 +1585,8 @@ ensure_runtime_env_file() {
     prompt_value jwt_secret_key "JWT_SECRET_KEY" "" 1
     prompt_value dev_api_key "DEV_API_KEY" "" 1
     prompt_value sync_api_key "SYNC_API_KEY" "" 1
+    prompt_value sync_verify_tls "SYNC_VERIFY_TLS" "$sync_verify_tls"
+    prompt_value sync_ca_bundle "SYNC_CA_BUNDLE" "$sync_ca_bundle"
     prompt_value observability_api_key "OBSERVABILITY_API_KEY" "" 1
     prompt_value channel_id "CHANNEL_ID"
     prompt_value channel_invite_link "CHANNEL_INVITE_LINK"
@@ -1610,6 +1614,9 @@ ensure_runtime_env_file() {
         prompt_value web_push_ttl_seconds "WEB_PUSH_TTL_SECONDS" "$web_push_ttl_seconds"
         prompt_value web_push_timeout_seconds "WEB_PUSH_TIMEOUT_SECONDS" "$web_push_timeout_seconds"
     fi
+    if ! is_truthy "$sync_verify_tls" && [[ -z "$sync_ca_bundle" ]]; then
+        die "SYNC_VERIFY_TLS=false is not allowed for production sync transport without SYNC_CA_BUNDLE"
+    fi
 
     BOT_TOKEN="$bot_token" \
     BOT_USERNAME="$bot_username" \
@@ -1622,6 +1629,8 @@ ensure_runtime_env_file() {
     JWT_SECRET_KEY="$jwt_secret_key" \
     DEV_API_KEY="$dev_api_key" \
     SYNC_API_KEY="$sync_api_key" \
+    SYNC_VERIFY_TLS="$sync_verify_tls" \
+    SYNC_CA_BUNDLE="$sync_ca_bundle" \
     OBSERVABILITY_API_KEY="$observability_api_key" \
     CHANNEL_ID="$channel_id" \
     CHANNEL_INVITE_LINK="$channel_invite_link" \

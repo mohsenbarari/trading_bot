@@ -42,6 +42,7 @@ from core.services.session_reset_service import (
     reset_user_session_state,
 )
 from core.server_routing import current_server, normalize_server, peer_server_url_for
+from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.trade_forwarding import sign_internal_payload
 from models.session import (
     SessionLoginRequest,
@@ -490,7 +491,11 @@ async def forward_remote_session_reset(user: User, target_server: str) -> tuple[
     }
 
     try:
-        async with httpx.AsyncClient(timeout=settings.trade_forward_timeout_seconds, verify=False) as client:
+        assert_runtime_sync_transport_allowed()
+        async with httpx.AsyncClient(
+            timeout=settings.trade_forward_timeout_seconds,
+            verify=runtime_sync_tls_verify_setting(),
+        ) as client:
             response = await client.post(
                 f"{target_url}/api/sessions/internal/reset-user-sessions",
                 content=body,

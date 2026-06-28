@@ -110,6 +110,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         entry = make_entry(1)
         db = FakeDB([FakeExecuteResult([entry])])
         calls = []
+        client_kwargs = []
         client_factory = lambda **kwargs: FakeAsyncClient(
             response=make_response(),
             calls=calls,
@@ -120,7 +121,7 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.default_peer_server_url", return_value="https://peer.example/"
         ), patch("api.routers.sync.settings.sync_api_key", "secret"), patch(
             "api.routers.sync.time.time", return_value=1_700_000_111
-        ), patch("httpx.AsyncClient", side_effect=client_factory):
+        ), patch("httpx.AsyncClient", side_effect=lambda **kwargs: (client_kwargs.append(kwargs) or client_factory(**kwargs))):
             result = await resync_from_changelog(request=request, db=db)
 
         self.assertEqual(result, {"status": "ok", "processed": 1, "errors": 0, "total_entries": 1})
@@ -150,6 +151,8 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
                     "authoritative_version": None,
                     "event_sequence": 1,
                     "outbox_id": 1,
+                    "source_sequence": 1,
+                    "source_server": "foreign",
                     "command_idempotency_id": None,
                 },
             }
@@ -164,6 +167,26 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["X-API-Key"], "secret")
         self.assertEqual(headers["X-Timestamp"], "1700000111")
         self.assertEqual(headers["X-Signature"], expected_signature)
+        self.assertEqual(client_kwargs[0]["verify"], True)
+
+    async def test_resync_uses_configured_sync_ca_bundle(self):
+        request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
+        entry = make_entry(9)
+        db = FakeDB([FakeExecuteResult([entry])])
+        client_kwargs = []
+
+        with patch("api.routers.sync.settings.dev_api_key", "dev-key"), patch(
+            "api.routers.sync.default_peer_server_url", return_value="https://peer.example"
+        ), patch("api.routers.sync.settings.sync_api_key", "secret"), patch(
+            "api.routers.sync.settings.sync_ca_bundle", "/etc/ssl/internal-ca.pem"
+        ), patch(
+            "httpx.AsyncClient",
+            side_effect=lambda **kwargs: (client_kwargs.append(kwargs) or FakeAsyncClient(response=make_response(), **kwargs)),
+        ):
+            result = await resync_from_changelog(request=request, db=db)
+
+        self.assertEqual(result["processed"], 1)
+        self.assertEqual(client_kwargs[0]["verify"], "/etc/ssl/internal-ca.pem")
 
     async def test_resync_counts_parse_and_transport_errors(self):
         request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})

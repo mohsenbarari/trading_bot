@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.config import settings
 from core.server_routing import current_server, normalize_server, peer_server_url_for
 from core.services.session_service import deactivate_session, get_active_sessions, promote_next_primary
+from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.trade_forwarding import sign_internal_payload
 from core.utils import utc_now
 
@@ -107,7 +108,11 @@ async def fetch_remote_session_authority(target_server: str, user_id: int) -> tu
     }
 
     try:
-        async with httpx.AsyncClient(timeout=settings.trade_forward_timeout_seconds, verify=False) as client:
+        assert_runtime_sync_transport_allowed()
+        async with httpx.AsyncClient(
+            timeout=settings.trade_forward_timeout_seconds,
+            verify=runtime_sync_tls_verify_setting(),
+        ) as client:
             response = await client.post(
                 f"{target_url}/api/sessions/internal/authority-check",
                 content=body,

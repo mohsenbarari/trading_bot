@@ -13,6 +13,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import httpx
 
+from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
+
 logger = logging.getLogger(__name__)
 
 # Global thread pool for non-blocking HTTP pushes
@@ -20,6 +22,7 @@ _executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="sync_push")
 
 # Persistent HTTP client (thread-safe)
 _http_client = None
+_http_client_verify_setting = None
 _client_lock = threading.Lock()
 _cooldown_lock = threading.Lock()
 _target_cooldowns: dict[str, float] = {}
@@ -31,20 +34,28 @@ def _direct_push_disabled() -> bool:
 
 def _get_client() -> httpx.Client:
     """Get or create persistent synchronous HTTP client"""
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
+    global _http_client, _http_client_verify_setting
+    assert_runtime_sync_transport_allowed()
+    verify_setting = runtime_sync_tls_verify_setting()
+    if _http_client is None or _http_client.is_closed or _http_client_verify_setting != verify_setting:
         with _client_lock:
-            if _http_client is None or _http_client.is_closed:
+            if _http_client is None or _http_client.is_closed or _http_client_verify_setting != verify_setting:
+                if _http_client is not None and not _http_client.is_closed:
+                    try:
+                        _http_client.close()
+                    except Exception:
+                        pass
                 _http_client = httpx.Client(
                     timeout=5.0,
                     http2=False,
-                    verify=False,  # Allow self-signed certs or IP usage
+                    verify=verify_setting,
                     limits=httpx.Limits(
                         max_connections=5,
                         max_keepalive_connections=2,
                         keepalive_expiry=30
                     )
                 )
+                _http_client_verify_setting = verify_setting
     return _http_client
 
 

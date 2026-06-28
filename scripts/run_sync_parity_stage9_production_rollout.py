@@ -25,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.deploy_config import resolve_deploy_settings
+from core.sync_transport import sync_transport_security_status_from_values
 
 
 SCHEMA_VERSION = "sync_parity_stage9_production_rollout_v1"
@@ -518,6 +519,21 @@ def build_strict_alert_plan(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def build_transport_security_gate(settings: dict[str, str]) -> dict[str, Any]:
+    status = sync_transport_security_status_from_values(
+        environment="production",
+        sync_verify_tls=os.environ.get("SYNC_VERIFY_TLS", settings.get("SYNC_VERIFY_TLS", "true")),
+        sync_ca_bundle=os.environ.get("SYNC_CA_BUNDLE", settings.get("SYNC_CA_BUNDLE", "")),
+    )
+    return {
+        "status": "passed" if status["production_allowed"] else "blocked_insecure_sync_transport",
+        "sync_verify_tls": status["verify_setting"],
+        "sync_ca_bundle_configured": status["ca_bundle_configured"],
+        "reason": status["reason"],
+        "production_allowed": status["production_allowed"],
+    }
+
+
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     current_branch = run_git_value(["branch", "--show-current"])
@@ -553,6 +569,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "release_requires_branch": RELEASE_BRANCH,
             "repair_policy": "production repair remains manual and dry-run-first; this rollout does not auto-repair drift",
         },
+        "transport_security_gate": build_transport_security_gate(settings),
         "local_release_gates": {"status": "planned", "commands": [command_payload(command) for command in local_gates]},
         "read_only_preflight": {"status": "blocked_until_explicit_confirm", "commands": [command_payload(command) for command in preflight]},
         "backup_confirmation": {"status": "blocked_until_explicit_confirm", "commands": [command_payload(command) for command in backups]},
@@ -643,6 +660,10 @@ def execute_section(plan: dict[str, Any], section_name: str) -> tuple[dict[str, 
 def execute_plan(plan: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if not plan["branch_gate"]["planning_passed"]:
         plan["status"] = "blocked_wrong_branch"
+        return plan, 2
+
+    if args.mode in {"preflight", "execute", "postdeploy"} and not plan.get("transport_security_gate", {}).get("production_allowed", False):
+        plan["status"] = "blocked_insecure_sync_transport"
         return plan, 2
 
     failed_required: list[str] = []

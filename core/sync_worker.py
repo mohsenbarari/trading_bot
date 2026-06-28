@@ -20,6 +20,7 @@ from core.sync_metadata import (
 )
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_protocol import build_sync_protocol_metadata
+from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 
 # Configure logging
 configure_logging("sync-worker")
@@ -274,7 +275,8 @@ async def main():
     if not target_url or not api_key:
         logger.warning(f"⚠️ Sync Worker not fully configured. URL={target_url}, API_Key={'***' if api_key else 'None'}")
     
-    async with httpx.AsyncClient() as client:
+    assert_runtime_sync_transport_allowed()
+    async with httpx.AsyncClient(verify=runtime_sync_tls_verify_setting()) as client:
         iteration = 0
         while True:
             iteration += 1

@@ -41,8 +41,10 @@ class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
 class SyncPushHelperTests(unittest.TestCase):
     def setUp(self):
         self.original_client = sync_push._http_client
+        self.original_client_verify_setting = sync_push._http_client_verify_setting
         self.original_cooldowns = dict(sync_push._target_cooldowns)
         sync_push._http_client = None
+        sync_push._http_client_verify_setting = None
         sync_push._target_cooldowns.clear()
 
     def tearDown(self):
@@ -53,6 +55,7 @@ class SyncPushHelperTests(unittest.TestCase):
             except Exception:
                 pass
         sync_push._http_client = self.original_client
+        sync_push._http_client_verify_setting = self.original_client_verify_setting
         sync_push._target_cooldowns.clear()
         sync_push._target_cooldowns.update(self.original_cooldowns)
 
@@ -205,6 +208,7 @@ class SyncPushHelperTests(unittest.TestCase):
     def test_get_client_reuses_open_client_and_recreates_closed_one(self):
         open_client = SimpleNamespace(is_closed=False)
         sync_push._http_client = open_client
+        sync_push._http_client_verify_setting = True
         self.assertIs(sync_push._get_client(), open_client)
 
         created_clients = []
@@ -218,12 +222,32 @@ class SyncPushHelperTests(unittest.TestCase):
             return client
 
         sync_push._http_client = SimpleNamespace(is_closed=True)
-        with patch("core.sync_push.httpx.Client", side_effect=factory):
+        with patch("core.sync_push.httpx.Client", side_effect=factory), \
+             patch("core.config.settings.sync_verify_tls", True), \
+             patch("core.config.settings.sync_ca_bundle", None):
             client = sync_push._get_client()
 
         self.assertIs(client, created_clients[0])
         self.assertEqual(client.init_kwargs["timeout"], 5.0)
-        self.assertFalse(client.init_kwargs["verify"])
+        self.assertTrue(client.init_kwargs["verify"])
+
+    def test_get_client_uses_configured_sync_ca_bundle(self):
+        created_clients = []
+
+        class CreatedClient(SimpleNamespace):
+            pass
+
+        def factory(**kwargs):
+            client = CreatedClient(is_closed=False, init_kwargs=kwargs)
+            created_clients.append(client)
+            return client
+
+        with patch("core.sync_push.httpx.Client", side_effect=factory), \
+             patch("core.config.settings.sync_ca_bundle", "/etc/ssl/internal-ca.pem"):
+            client = sync_push._get_client()
+
+        self.assertIs(client, created_clients[0])
+        self.assertEqual(client.init_kwargs["verify"], "/etc/ssl/internal-ca.pem")
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ from api.routers.sync import TABLE_ORDER, get_model_class
 from core.config import settings
 from core.db import AsyncSessionLocal
 from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 
 
@@ -133,7 +134,8 @@ async def load_chat_sync_flags() -> dict[int, dict[str, Any]]:
 
 async def send_items(target_url: str, api_key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     body = json.dumps(items, sort_keys=True, default=str)
-    async with httpx.AsyncClient(timeout=60.0, verify=False) as client:
+    assert_runtime_sync_transport_allowed()
+    async with httpx.AsyncClient(timeout=60.0, verify=runtime_sync_tls_verify_setting()) as client:
         response = await client.post(
             f"{target_url.rstrip('/')}/api/sync/receive",
             content=body,
