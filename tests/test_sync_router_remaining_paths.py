@@ -317,7 +317,10 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        self.assertEqual(result, {"status": "partial", "processed": 0, "errors": 1})
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["error_items"][0]["reason"], "apply_exception")
 
     async def test_receive_sync_data_covers_deferred_retry_error_and_exception(self):
         items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"telegram_id": 10}}]
@@ -327,14 +330,20 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.sync.settings.server_mode", "iran"
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
-        self.assertEqual(result, {"status": "partial", "processed": 0, "errors": 1})
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["error_items"][0]["reason"], "deferred_foreign_key_dependency_missing")
 
         db = ReceiveDB()
         with patch("api.routers.sync._apply_item", new=AsyncMock(side_effect=["deferred", RuntimeError("retry boom")])), patch(
             "api.routers.sync.settings.server_mode", "iran"
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
-        self.assertEqual(result, {"status": "partial", "processed": 0, "errors": 1})
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["error_items"][0]["reason"], "deferred_retry_exception")
 
     async def test_receive_sync_data_returns_generic_detail_on_commit_failure(self):
         items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"telegram_id": 10}}]

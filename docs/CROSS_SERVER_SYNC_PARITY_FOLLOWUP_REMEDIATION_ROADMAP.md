@@ -210,6 +210,15 @@ Implementation status on `candidate/sync-parity-hardening`:
   after an applied `market_runtime_state` sync item, so foreign can send/retry
   Telegram market notices and expire local foreign-home offers without owning
   product runtime truth.
+- `core/sync_worker.py` now treats single-item receiver rejections for
+  terminal policy reasons, including `source_authority_forbidden:*`, as
+  delivered/non-applicable instead of retrying forever. This prevents a valid
+  Iran-authoritative table rejection from blocking later foreign-to-Iran sync
+  rows at the head of the queue.
+- `api/routers/sync.py` now returns structured `error_items` for apply failure,
+  retry exception, and unresolved deferred FK dependency paths. This keeps
+  worker and operator evidence actionable when a row is legitimately still
+  retryable.
 
 Exit criteria:
 
@@ -641,15 +650,37 @@ Evidence collected on `candidate/sync-parity-hardening`:
   tables `0`, duplicate identities `0`, truncated tables `0`, and complete
   artifact metadata. The final compare was recorded to local Iran, local
   foreign, and remote Iran `/api/sync/parity/status`.
+- Active foreign-home offer expiry evidence directory:
+  `tmp/sync-parity-f7-offer-expiry-20260628T130024Z-valid/`.
+- The first attempted active-offer fixture intentionally exposed a
+  head-of-line sync blocker: foreign-origin `market_runtime_state` and
+  foreign-created `commodities` rows were correctly rejected by Iran authority,
+  but the worker did not previously classify `source_authority_forbidden:*` as
+  terminal. The fix above was added before collecting the valid evidence.
+- The valid active-offer fixture used an existing synced commodity and created a
+  foreign-home active offer on the foreign staging DB. The offer synced to
+  remote Iran staging as `ACTIVE` with the same `offer_public_id` and
+  `home_server=foreign`.
+- A controlled Iran-origin market close at
+  `2026-06-28T13:02:38.976909Z` synced to foreign. Foreign reconciled the
+  synced closed state, expired the foreign-home offer with
+  `status=EXPIRED`, `expire_reason=market_closed`,
+  `expire_source_server=foreign`, and synced that terminal offer state back to
+  Iran.
+- The same close transition replayed from remote Iran `change_log.id=12` did
+  not duplicate side effects: the offer `expired_at` and `updated_at` stayed
+  unchanged, the close notice stayed one row with `attempt_count=1`, and
+  `closed_notice_count=1`.
+- The post-expiry deep parity compare between local foreign staging and remote
+  Iran staging reported `business_drift=0`, `critical_drift=0`,
+  `incomplete=0`, `truncated_table_count=0`, `duplicate_identity_count=0`, and
+  only documented non-business/local-only differences. The artifact-backed
+  comparison was recorded to local foreign `/api/sync/parity/status`, and
+  `/api/sync/health` reported parity `available` instead of `missing` with
+  `unsynced_change_log_count=0`.
 
 Remaining F7 evidence before this stage can be called complete:
 
-- Run Iran-origin market close with foreign-home active offers and prove the
-  final F1 authority model expires those offers exactly once. The live open and
-  close notice paths were proven, but the clean close test did not include
-  active foreign-home offers.
-- Replay duplicate market close with active foreign-home offers and prove no
-  duplicate offer-expire side effects occur. Duplicate notice replay was proven.
 - Force Telegram send failures and no-receipt failures in staging and prove the
   F4 retry/reconciliation path repairs them.
 - Toggle `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED` in staging and prove

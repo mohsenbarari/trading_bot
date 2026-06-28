@@ -90,28 +90,43 @@ def peer_response_is_success(response) -> bool:
     return payload.get("status") in {"success", "ok"} and error_count == 0
 
 
-def peer_response_is_policy_forbidden_no_sync(response) -> bool:
-    """Return True for a receiver-side no-sync rejection of a single item."""
+def _single_item_partial_rejection_reason(response) -> str | None:
     if getattr(response, "status_code", None) != 200:
-        return False
+        return None
     try:
         payload = response.json()
     except Exception:
-        return False
+        return None
     if not isinstance(payload, dict) or payload.get("status") != "partial":
-        return False
+        return None
     try:
         processed = int(payload.get("processed") or 0)
         errors = int(payload.get("errors") or 0)
     except (TypeError, ValueError):
-        return False
+        return None
     if processed != 0 or errors != 1:
-        return False
+        return None
     error_items = payload.get("error_items")
     if not isinstance(error_items, list) or len(error_items) != 1:
-        return False
+        return None
     error_item = error_items[0]
-    return isinstance(error_item, dict) and error_item.get("reason") == "policy_forbidden:no-sync"
+    if not isinstance(error_item, dict):
+        return None
+    reason = error_item.get("reason")
+    return reason if isinstance(reason, str) else None
+
+
+def peer_response_is_terminal_policy_rejection(response) -> bool:
+    """Return True when the peer intentionally rejected one item as non-applicable."""
+    reason = _single_item_partial_rejection_reason(response)
+    if reason == "policy_forbidden:no-sync":
+        return True
+    return bool(reason and reason.startswith("source_authority_forbidden:"))
+
+
+def peer_response_is_policy_forbidden_no_sync(response) -> bool:
+    """Return True for a receiver-side no-sync rejection of a single item."""
+    return _single_item_partial_rejection_reason(response) == "policy_forbidden:no-sync"
 
 
 def deserialize_change_log_data(raw_data):
@@ -368,20 +383,21 @@ async def main():
                                     "duration_ms": duration_ms_since(start_time),
                                 },
                             )
-                        elif peer_response_is_policy_forbidden_no_sync(response):
+                        elif peer_response_is_terminal_policy_rejection(response):
                             try:
                                 marked_count = await mark_change_log_delivered(data)
                             except Exception as marker_err:
                                 raise SyncDeliveryMarkerError(error_type=type(marker_err).__name__) from marker_err
                             logger.warning(
-                                "Dropped policy-forbidden no-sync sync item.",
+                                "Dropped terminal policy-rejected sync item.",
                                 extra={
-                                    "event": "job.item.dropped_no_sync",
+                                    "event": "job.item.dropped_terminal_policy_rejection",
                                     "job_name": "sync_worker",
                                     "run_id": run_id,
                                     "iteration": iteration,
                                     "table": data.get("table"),
                                     "record_id": data.get("id"),
+                                    "peer_rejection_reason": _single_item_partial_rejection_reason(response),
                                     "marked_change_logs": marked_count,
                                     "duration_ms": duration_ms_since(start_time),
                                 },

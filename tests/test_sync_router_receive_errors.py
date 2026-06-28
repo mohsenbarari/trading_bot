@@ -57,7 +57,10 @@ class SyncRouterReceiveErrorTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
 
-        self.assertEqual(result, {"status": "partial", "processed": 0, "errors": 1})
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["error_items"][0]["reason"], "apply_failed")
         self.assertGreaterEqual(db.commits, 2)
 
     async def test_receive_sync_data_rolls_back_and_raises_http_500_on_outer_failure(self):

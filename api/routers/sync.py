@@ -2830,7 +2830,9 @@ async def receive_sync_data(
                 elif result == 'deferred':
                     deferred_items.append((item, table, operation, model, data, record_id, watermark_context))
                 else:
-                    errors.append(f"{table}:{record_id}")
+                    error_detail = _sync_error_detail(item, "apply_failed")
+                    errors.append(error_detail)
+                    error_details.append(error_detail)
             except Exception as e:
                 logger.error(
                     "Unexpected sync application error",
@@ -2841,7 +2843,9 @@ async def receive_sync_data(
                         **_summarize_exception(e),
                     },
                 )
-                errors.append(f"{table}:{record_id}")
+                error_detail = _sync_error_detail(item, "apply_exception")
+                errors.append(error_detail)
+                error_details.append(error_detail)
 
         # --- Pass 2: Retry deferred items (FK violations) ---
         if deferred_items:
@@ -2911,7 +2915,9 @@ async def receive_sync_data(
                                 },
                             )
                     else:
-                        errors.append(f"{table}:{record_id} (deferred)")
+                        error_detail = _sync_error_detail(item, "deferred_foreign_key_dependency_missing")
+                        errors.append(error_detail)
+                        error_details.append(error_detail)
                         logger.error(
                             "Deferred item still failed",
                             extra={
@@ -2930,7 +2936,9 @@ async def receive_sync_data(
                             **_summarize_exception(e),
                         },
                     )
-                    errors.append(f"{table}:{record_id}")
+                    error_detail = _sync_error_detail(item, "deferred_retry_exception")
+                    errors.append(error_detail)
+                    error_details.append(error_detail)
 
         if user_changes_applied:
             try:
