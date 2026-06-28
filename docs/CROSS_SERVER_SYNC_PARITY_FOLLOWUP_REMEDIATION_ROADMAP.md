@@ -45,6 +45,14 @@ are accepted as technically valid:
 - `CROSS_SERVER_SYNC_OBSERVABILITY.md` still describes direct DB-change push as
   active. `CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md` still describes
   `user_notification_preferences` as receiver-missing, which is stale.
+- `user_notification_preferences` is receiver-enabled, but its current
+  `updated_at` guard intentionally allows incoming `updated_at = NULL` to update
+  an existing row. This needs an explicit product/engineering decision and
+  tests before strict parity confidence.
+- `offer_publication_states` has improved local-only parity handling, but the
+  receiver still needs an explicit policy statement about which fields are
+  shared cross-server evidence and which fields are foreign-local Telegram
+  runtime truth.
 - Production SSH tooling is improved in the online production deploy script, but
   the root `Makefile` still contains `StrictHostKeyChecking=no` for legacy Iran
   helper targets.
@@ -67,6 +75,9 @@ are accepted as technically valid:
   order paths. Happy-path coverage is not enough for completion.
 - Iran must never connect to Telegram. Any Telegram market notice or channel
   side effect must remain foreign-owned.
+- Any new foreign-only side effect worker must have a safe disable/degrade path
+  so operators can stop the side effect without deleting receipts or sync
+  backlog.
 
 ## Stage F0 - Baseline And Regression Lock
 
@@ -231,6 +242,52 @@ Exit criteria:
   drift.
 - The field matrix is documented and covered by tests.
 
+## Stage F3A - Receiver Recency And Shared Evidence Policy
+
+Goal: close smaller receiver-policy ambiguities before strict parity is trusted.
+
+Problems:
+
+- `user_notification_preferences` now has receiver coverage, but the generic
+  `updated_at` guard allows incoming `updated_at = NULL` to update an existing
+  non-null row. That may be acceptable for legacy compatibility, but it must not
+  silently overwrite newer local preference state.
+- `offer_publication_states` is a shared surface-state table, while Telegram
+  message ids and provider/runtime details are foreign-local execution evidence.
+  Parity and repair already treat several runtime fields as local-only, but the
+  receiver/operator policy still needs to state whether normal sync payloads may
+  persist those runtime fields as shared evidence.
+
+Implementation direction:
+
+- For `user_notification_preferences`, choose and implement one explicit policy:
+  - strict recency: incoming `updated_at = NULL` cannot overwrite an existing
+    non-null `updated_at`; or
+  - compatibility mode: incoming `NULL` may apply only when the current row is
+    missing or also has `updated_at = NULL`, and metrics/logs record that a
+    legacy payload was accepted.
+- Add tests for:
+  - newer non-null incoming preference update applies;
+  - older non-null incoming preference update is ignored;
+  - incoming `updated_at = NULL` does not overwrite newer non-null state unless
+    the chosen compatibility policy explicitly allows it;
+  - missing `updated_at` legacy payload behavior is visible and documented.
+- For `offer_publication_states`, document the final split between:
+  - business/shared fields such as `dedupe_key`, `offer_public_id`, `surface`,
+    `publication_owner_server`, `status`, and `offer_version_id`;
+  - local Telegram/provider runtime fields such as chat/message ids, attempts,
+    errors, and provider resource ids.
+- If normal receiver payloads should not persist foreign-local runtime fields,
+  sanitize or drop them on receive and add tests. If they are intentionally
+  persisted as shared evidence, document that they must not be treated as strict
+  business truth by parity or repair.
+
+Exit criteria:
+
+- Preference recency behavior is unambiguous and tested for `NULL` and non-null
+  timestamps.
+- `offer_publication_states` no longer has an undocumented mixed truth model.
+
 ## Stage F4 - Market Channel Notice Retry Path
 
 Goal: make market open/close Telegram notice delivery recoverable after
@@ -251,6 +308,9 @@ Implementation direction:
   - `next_retry_at <= now`;
   - the dedupe key remains unchanged;
   - sent receipts are never resent.
+- Add a runtime disable/degrade switch for the retry/reconciler path. Disabling
+  it must stop Telegram side effects without deleting receipt rows, sync backlog,
+  or parity evidence.
 - The retry path may be either:
   - a small background job integrated with the existing market schedule loop; or
   - an explicit operator command plus a scheduled worker hook.
@@ -265,6 +325,8 @@ Exit criteria:
 
 - A transient Telegram send failure does not permanently lose the market notice.
 - Retry remains exactly-once for successful sends.
+- Operators can temporarily disable market notice sending/retry without data
+  loss and re-enable it later.
 
 ## Stage F5 - Documentation And Operator Model Refresh
 
@@ -348,6 +410,10 @@ Required evidence:
   a duplicate notice.
 - A forced Telegram failure creates a failed receipt and the retry path repairs
   it.
+- The market notice retry/reconciler disable switch stops side effects without
+  deleting receipts, and re-enable resumes safe retry.
+- `user_notification_preferences` recency tests cover `updated_at=NULL`
+  behavior.
 - Repair tool production-safety tests pass; no production apply is attempted.
 
 Exit criteria:
@@ -360,7 +426,7 @@ Exit criteria:
 
 The branch can be considered for merge only after:
 
-- Stages F0 through F7 are complete.
+- Stages F0 through F7, including F3A, are complete.
 - All new tests pass.
 - Existing sync, market transition, parity, and repair tests pass.
 - Stale docs are refreshed.
