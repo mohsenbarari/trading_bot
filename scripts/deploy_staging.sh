@@ -44,6 +44,7 @@ default_staging_frontend_url() {
 
 STAGING_FRONTEND_URL="${STAGING_FRONTEND_URL:-$(default_staging_frontend_url)}"
 STAGING_APP_PORT="${STAGING_APP_PORT:-8100}"
+STAGING_FOREIGN_APP_PORT="${STAGING_FOREIGN_APP_PORT:-8121}"
 STAGING_PROJECT_NAME="${STAGING_PROJECT_NAME:-trading_bot_staging}"
 STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
@@ -269,6 +270,7 @@ compose() {
     ensure_env
     assert_staging_frontend_dist_isolated
     STAGING_APP_PORT="$STAGING_APP_PORT" \
+    STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT" \
     STAGING_FRONTEND_DOCKER_DIST_DIR="$(staging_frontend_dist_relpath)" \
     STAGING_RELEASE_SHA="$(release_sha)" \
     "${compose_cmd[@]}" "$@"
@@ -336,6 +338,7 @@ install_nginx() {
         -e "s#__APP_ROOT__#$PROJECT_DIR#g" \
         -e "s#__FRONTEND_ROOT__#$STAGING_FRONTEND_DIST_DIR#g" \
         -e "s#__APP_PORT__#$STAGING_APP_PORT#g" \
+        -e "s#__FOREIGN_APP_PORT__#$STAGING_FOREIGN_APP_PORT#g" \
         -e "s#__BASIC_AUTH_FILE__#$STAGING_BASIC_AUTH_FILE#g" \
         -e "s#__DEV_API_KEY__#$dev_key#g" \
         >"$tmp"
@@ -407,7 +410,7 @@ check() {
     docker compose version >/dev/null
     [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
-    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR"
+    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR"
     getent hosts "$STAGING_DOMAIN" || true
 }
 

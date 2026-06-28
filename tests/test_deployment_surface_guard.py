@@ -145,7 +145,8 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertEqual(foreign_app["environment"]["TRADING_BOT_SERVICE"], "api")
         self.assertEqual(foreign_app["environment"]["SERVER_MODE"], "foreign")
         self.assertIn("uvicorn main:app", str(foreign_app.get("command", "")))
-        self.assertNotIn("ports:", foreign_app_block)
+        self.assertIn("ports:", foreign_app_block)
+        self.assertIn('"127.0.0.1:${STAGING_FOREIGN_APP_PORT:-8121}:8000"', foreign_app_block)
         self.assertIn("foreign_app:", staging_bot_block)
         self.assertIn("condition: service_healthy", staging_bot_block)
 
