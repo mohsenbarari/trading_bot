@@ -57,9 +57,10 @@ are accepted as technically valid:
   receiver still needs an explicit policy statement about which fields are
   shared cross-server evidence and which fields are foreign-local Telegram
   runtime truth.
-- Production SSH tooling is improved in the online production deploy script, but
-  the root `Makefile` still contains `StrictHostKeyChecking=no` for legacy Iran
-  helper targets.
+- Production SSH tooling is improved in the online production deploy script.
+  The root `Makefile` Iran helper targets now use
+  `StrictHostKeyChecking=accept-new`, matching the safer first-connection
+  posture used by the other production helpers.
 
 ## Non-Negotiable Guardrails
 
@@ -481,6 +482,22 @@ Required updates:
 - Root `Makefile`
   - Replace legacy `StrictHostKeyChecking=no` with `accept-new` or document why
     that helper is not production-authoritative.
+
+Implementation status on `candidate/sync-parity-hardening`:
+
+- `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md` now describes committed
+  `change_log` rows as the durable database sync outbox, `sync_worker` as the
+  DB delivery mechanism, `sync:outbound` as wake-up/compatibility state, and
+  `push_sync_direct()` as a narrow non-DB relay helper.
+- `docs/CROSS_SERVER_SYNC_PARITY_AUDIT_AND_ROADMAP.md` keeps the historical
+  `user_notification_preferences` gap, but marks receiver coverage as fixed on
+  this branch and references the current coverage/receiver tests.
+- `docs/CROSS_SERVER_SYNC_PARITY_REVIEW_REMEDIATION_ROADMAP.md` now separates
+  historical R-stage evidence from the active follow-up F-stage blocker list.
+- Root `Makefile` uses `StrictHostKeyChecking=accept-new` for Iran SSH helper
+  targets instead of disabling host-key checks.
+- `core/sync_push.py` comments now match the current narrowed helper role and
+  no longer imply DB event delivery should use direct HTTP push.
 
 Exit criteria:
 

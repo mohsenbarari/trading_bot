@@ -30,9 +30,17 @@ The current receiver table order includes:
 
 `users`, `accountant_relations`, `customer_relations`, `telegram_link_tokens`, `chats`, `chat_members`, `invitations`, `admin_market_messages`, `admin_broadcast_messages`, `notifications`, `user_blocks`, `commodities`, `commodity_aliases`, `trading_settings`, `market_schedule_overrides`, `market_runtime_state`, `offers`, `offer_publication_states`, `offer_requests`, `trades`, `trade_delivery_receipts`.
 
-Important gap:
+Historical gap, fixed on `candidate/sync-parity-hardening`:
 
-`user_notification_preferences` is marked as `SyncPolicy.SYNC` and has event listeners, but it is not currently in `TABLE_ORDER` or `get_model_class()`. This means outgoing change_log rows for that table do not have a complete receiver path.
+`user_notification_preferences` was marked as `SyncPolicy.SYNC` and had event
+listeners, but was not in `TABLE_ORDER` or `get_model_class()`. That meant old
+outgoing `change_log` rows for that table did not have a complete receiver
+path. Current branch status: the table is receiver-enabled in `api/routers/sync.py`,
+has a model mapping and natural identity by `user_id`, is included in parity
+metadata, and is covered by `tests/test_sync_coverage.py`,
+`tests/test_sync_router_parsing.py`, `tests/test_sync_router_apply_item_success.py`,
+`tests/test_sync_router_fail_closed_policy.py`, and
+`tests/test_sync_guarantee_matrix.py`.
 
 ## Existing Guarantees
 
@@ -66,7 +74,10 @@ Therefore, the following are still possible in principle:
   open/close channel notice side effect is missing after an Iran-origin
   transition sync;
 - stale publication-state update can overwrite terminal publication state;
-- a table can be marked `sync` in registry/events while not being receiver-enabled, as seen with `user_notification_preferences`;
+- a table can be marked `sync` in registry/events while not being
+  receiver-enabled, as historically seen with `user_notification_preferences`;
+  the current branch fixes that table and adds coverage tests so the same class
+  of mismatch is caught earlier;
 - sync health can stay green while row parity is broken.
 
 ## Stage 0 Production Drift Snapshot - 2026-06-27
@@ -95,7 +106,7 @@ The following synced tables matched exactly in the spot-check hash:
 
 | Table | Snapshot finding | Classification | Required follow-up |
 | --- | --- | --- | --- |
-| `user_notification_preferences` | Iran has 3 rows; foreign has 0 rows; no `change_log` rows exist for this table on either side | Real sync coverage gap | Stage 1 must receiver-enable this table and provide a safe one-time current-state replay/backfill from Iran to foreign. |
+| `user_notification_preferences` | Iran had 3 rows; foreign had 0 rows; no `change_log` rows existed for this table on either side at the historical production snapshot | Historical real sync coverage gap; receiver coverage fixed on `candidate/sync-parity-hardening` | Current branch has receiver coverage and NULL-safe `updated_at` guard tests. Any remaining historical production drift still needs a separate dry-run-first replay/backfill decision before strict parity is treated as production proof. |
 | `offers.offer_public_id` | Both servers have 115 offers and identical created-at/status distribution, but all 115 `offer_public_id` values differ | Real legacy identity drift | Do not treat `id`/count equality as proof. Add repair tooling that maps legacy offers by deterministic fields and updates dependent public-id references safely, or explicitly archives/exempts historical inactive rows after product approval. Future migrations must not random-backfill shared public identities independently on both servers. |
 | `offers.channel_message_id` | Foreign has 115 non-null values; Iran has 0 | Expected local Telegram runtime field | Keep excluded from sync and from stable parity hash. The parity checker must report it separately as a local-only projection, not as business drift. |
 | `offers.exclude_from_competitive_price` and `offers.price_warning_type` | One offer differs between servers | Real payload gap | `core/offer_sync_payload.py` currently omits these fields. Add them to the canonical offer sync payload and tests. |
@@ -110,7 +121,10 @@ The following synced tables matched exactly in the spot-check hash:
 - `migrations/versions/a6b7c8d9e0f1_add_offer_public_id.py` random-backfills `offer_public_id` with `random()` and `clock_timestamp()`. Running that migration independently on both servers creates different public identities for the same historical offer rows.
 - `core/offer_sync_payload.py` includes `offer_public_id`, `expired_at`, and `channel_message_id`, but does not include `exclude_from_competitive_price` or `price_warning_type`.
 - `api/routers/sync.py` intentionally removes `channel_message_id` from incoming offer sync data because Telegram publication is foreign-local.
-- `user_notification_preferences` is registered as `SyncPolicy.SYNC` and has SQLAlchemy event listeners, but is missing from `TABLE_ORDER` and `get_model_class()`.
+- `user_notification_preferences` was registered as `SyncPolicy.SYNC` and had
+  SQLAlchemy event listeners while missing from `TABLE_ORDER` and
+  `get_model_class()`. Current branch status: receiver coverage is fixed; keep
+  this note as the historical root cause.
 
 ## Table Inventory And Required Changes
 
@@ -124,7 +138,7 @@ The following synced tables matched exactly in the spot-check hash:
 | `invitations` | sync | Natural key fallback by `token`; unique token and short code | `is_used=true` can be overwritten by stale `is_used=false`; expired/used invitation state can drift | Add terminal guard: used invitations never become unused. Add natural-key receiver upsert by `token` first. Add source-sequence watermark keyed by token. |
 | `telegram_link_tokens` | sync | Natural key fallback by `token_hash`; unique token hash | Used/revoked/expired token can be stale-overwritten to pending; `used_telegram_id` can be cleared by stale payload | Add token lifecycle guard: `used` and `revoked` are terminal for that token. Add source-sequence watermark keyed by `token_hash`. |
 | `user_blocks` | sync | Unique `(blocker_id, blocked_id)` exists | Delete/insert order can recreate or remove a block incorrectly; table has hard delete and no tombstone | Convert to soft-delete or add block tombstone/watermark keyed by `(blocker_id, blocked_id)`. Receiver must use the pair as logical identity, not id only. |
-| `user_notification_preferences` | sync in registry/events | Unique `user_id` | Not receiver-enabled; changes can be rejected/stuck or never apply | Add to `TABLE_ORDER`, `get_model_class`, sequence map if needed, and receiver upsert by `user_id` with `updated_at` guard. Add coverage tests. |
+| `user_notification_preferences` | sync | Unique `user_id`; receiver-enabled on this branch; parity identity by `user_id`; NULL-safe `updated_at` guard | Historical rows created before receiver coverage may still need dry-run-first replay/backfill; future stale preference writes rely on the `updated_at` guard | Keep receiver coverage tests and decide any production backfill separately with parity evidence. |
 
 ### Market And Admin Configuration Tables
 
@@ -343,7 +357,7 @@ Exit criteria:
 
 Goal: prevent registry/receiver mismatch.
 
-Actions:
+Historical actions:
 
 - add `user_notification_preferences` to `TABLE_ORDER`;
 - add `UserNotificationPreference` to `get_model_class()`;
@@ -352,6 +366,15 @@ Actions:
 - add tests for registry coverage, receiver model coverage, and event listener coverage.
 - add tests that every `SyncPolicy.SYNC` table is either receiver-enabled or explicitly exempted in one place.
 - add tests that every event listener table is receiver-enabled or explicitly no-sync.
+
+Current status on `candidate/sync-parity-hardening`:
+
+- `user_notification_preferences` is receiver-enabled and uses `user_id` as
+  its logical identity.
+- The receiver upsert has a strict `updated_at` recency guard: incoming
+  `updated_at = NULL` cannot overwrite an existing non-null timestamp.
+- Coverage is locked by the receiver parsing/coverage tests, apply-item SQL
+  tests, fail-closed policy tests, and the sync guarantee matrix.
 
 Exit criteria:
 

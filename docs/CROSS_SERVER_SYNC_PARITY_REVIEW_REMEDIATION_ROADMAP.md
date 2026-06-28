@@ -19,6 +19,11 @@ Follow-up review on 2026-06-28 accepted additional merge and production blockers
 after the initial remediation pass. The active follow-up contract is documented
 in `docs/CROSS_SERVER_SYNC_PARITY_FOLLOWUP_REMEDIATION_ROADMAP.md`.
 
+Current status: the R-stage list below is retained as historical evidence for
+the first remediation pass. Reviewers should use the follow-up F-stage roadmap
+as the active blocker list for remaining merge, staging, and production
+readiness work.
+
 ## Non-Negotiable Guardrails
 
 - Before every change, verify the branch with `git branch --show-current`; work
@@ -700,6 +705,8 @@ Implementation status on `candidate/sync-parity-hardening`:
 
 ## Suggested Execution Order
 
+Historical R-stage execution order:
+
 1. Stage R0
 2. Stage R1
 3. Stage R2
@@ -710,11 +717,20 @@ Implementation status on `candidate/sync-parity-hardening`:
 8. Stage R7
 9. Stage R8
 
-R1 and R2 are merge blockers. R3 and R4 are production blockers. R5 is both a
-merge blocker and a product decision blocker because current docs and code
-disagree. R6 and R7 are required before production rollout or strict alerting.
-R8 is required before relying on automated Telegram market open/close notices
-in production.
+Active follow-up blocker order is now maintained in
+`docs/CROSS_SERVER_SYNC_PARITY_FOLLOWUP_REMEDIATION_ROADMAP.md`:
+
+1. Stage F0 - Baseline and regression lock
+2. Stage F1 - Market runtime authority decision and enforcement
+3. Stage F2 - Production safety envelope for repair apply
+4. Stage F3/F3A - Parity field classification and receiver recency policy
+5. Stage F4 - Market channel notice retry path
+6. Stage F5 - Documentation and operator model refresh
+7. Stage F6 - Artifact-backed parity status
+8. Stage F7 - Two-server staging evidence
+
+Do not treat completion of the R-stage list alone as merge or production
+readiness. Remaining F-stage exit criteria are the active blockers.
 
 ## Minimum Test Gate Before Merge
 

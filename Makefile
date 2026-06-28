@@ -10,7 +10,7 @@ IRAN_HOST ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_TARGET 2>/d
 IRAN_DIR ?= $(shell python3 scripts/deploy_config.py --key IRAN_PROJECT_DIR 2>/dev/null)
 IRAN_HOST_DISPLAY ?= $(shell python3 scripts/deploy_config.py --key IRAN_HOST 2>/dev/null)
 IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>/dev/null)
-SSH_IRAN_OPTS = -o StrictHostKeyChecking=no -p $(IRAN_SSH_PORT)
+SSH_IRAN_OPTS = -o StrictHostKeyChecking=accept-new -p $(IRAN_SSH_PORT)
 LOCAL_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; else printf '%s' 'docker compose'; fi)
 IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 

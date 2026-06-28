@@ -1,7 +1,9 @@
 # core/sync_push.py
 """
-Direct HTTP push for sync data — fire-and-forget via thread pool.
-Falls back to committed change_log draining by sync_worker on failure.
+Direct HTTP helper for narrow cross-server relay paths.
+
+Database sync must not use this helper from flush-time model events. Committed
+database changes are delivered by sync_worker from durable change_log rows.
 """
 import json
 import time
@@ -128,7 +130,7 @@ def _peer_response_is_success(response) -> bool:
 def _do_push(payload: dict, target_url: str, api_key: str):
     """
     Synchronous HTTP push — runs in thread pool.
-    On failure, data stays unsynced in change_log for sync_worker retry.
+    Caller decides whether the payload has any durable retry source.
     """
     try:
         timestamp = int(time.time())
@@ -159,18 +161,17 @@ def _do_push(payload: dict, target_url: str, api_key: str):
             logger.info(f"⚡ Direct push OK: {payload.get('table')}:{payload.get('id')}")
         else:
             _mark_target_cooldown(target_url, f"peer rejected status={response.status_code}")
-            logger.warning(f"⚡ Direct push failed ({response.status_code}), sync_worker will retry")
+            logger.warning("⚡ Direct push failed (%s); retry is caller-owned", response.status_code)
 
     except Exception as e:
         _mark_target_cooldown(target_url, str(e))
-        logger.warning(f"⚡ Direct push error: {e}, sync_worker will retry")
+        logger.warning("⚡ Direct push error: %s; retry is caller-owned", e)
 
 
 def push_sync_direct(payload: dict):
     """
-    Submit a sync payload for direct HTTP push (non-blocking).
-    This runs in a background thread so it doesn't block the DB transaction.
-    Falls back to sync_worker change_log drain if push fails.
+    Submit a non-blocking direct HTTP relay payload.
+    Do not call this from uncommitted database change listeners.
     """
     if _direct_push_disabled():
         return

@@ -11,18 +11,31 @@ The project has two independent runtime stacks:
 
 Both servers should run `sync_worker`. This keeps retry delivery alive after a network outage. Manual `make sync-recover` remains the fallback for long outages or cases where one worker was stopped.
 
-Every synced database change is written to local `change_log` in the same transaction as the original write. The same payload is also pushed to Redis:
+Every synced database change is written to local `change_log` in the same
+transaction as the original write. This committed row is the durable sync
+outbox. `sync_worker` drains committed `change_log` rows and delivers those
+rows to the peer.
+
+Redis is not the source of truth for database sync. It is used only as runtime
+queue/signaling state:
 
 ```text
-sync:outbound
-sync:retry
+sync:outbound  wake-up signal / compatibility queue for committed work
+sync:retry     worker-created retry payloads after a committed delivery failure
 ```
 
-The direct HTTP push path tries to deliver changes immediately. If Iran is disconnected, failed direct pushes are safe because the durable source of truth remains:
+The old flush-time direct HTTP push for database changes is no longer part of
+the committed sync path. `push_sync_direct()` still exists for narrow non-DB
+relay paths such as Telegram notification relay from Iran to foreign. If a
+future database direct-push acceleration is reintroduced, it must run only after
+the source transaction has committed.
+
+If Iran is disconnected, failed delivery attempts are safe because the durable
+source of truth remains:
 
 - `change_log`
-- Redis retry queues
 - always-on `sync_worker` on both servers
+- Redis retry queues created by the worker after committed delivery failure
 - `scripts/recover_cross_server_sync.sh` for reconnect recovery
 
 ## Outage Behavior
@@ -255,7 +268,8 @@ Trigger:
 
 Meaning:
 
-- direct delivery or worker delivery failed and queued retry work remains
+- worker delivery failed, or an explicit replay/relay path queued retry work
+  after a committed source row was already available
 
 First action:
 
@@ -278,10 +292,11 @@ Important labels:
 - `decision`
 - `reason`
 
-Expected duplicate decisions can happen when direct push and worker replay
-deliver the same logical event. Stale or conflict decisions require investigation
-because they can indicate out-of-order delivery, manual replay mistakes, or a
-bad watermark repair.
+Expected duplicate decisions can happen when the worker retries a delivered
+event, when an operator replays an already-applied row, or when a legacy
+compatibility path re-delivers the same logical event. Stale or conflict
+decisions require investigation because they can indicate out-of-order delivery,
+manual replay mistakes, or a bad watermark repair.
 
 ## Missing Sync Health Samples
 
@@ -332,9 +347,11 @@ affected services:
 TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=true
 ```
 
-This disables the fire-and-forget HTTP push path. It does not delete committed
-`change_log` rows. The `sync_worker` can still drain durable backlog when it is
-running.
+This disables the remaining fire-and-forget direct HTTP helper. For database
+sync, committed `change_log` rows remain untouched and the `sync_worker` can
+still drain durable backlog when it is running. For non-DB relay paths, this is
+a side-effect hold and should be used only when temporary loss of that relay is
+acceptable.
 
 ### Disable strict watermark mode
 
