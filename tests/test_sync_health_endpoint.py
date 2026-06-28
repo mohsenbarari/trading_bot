@@ -211,6 +211,19 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
             "compared_at": "2026-06-28T05:00:00Z",
             "severity_counts": {"business_drift": 2, "critical_drift": 0, "incomplete": 0},
             "tables": {},
+            "artifact_metadata": {
+                "local_server_mode": "foreign",
+                "peer_server_mode": "iran",
+                "local_release_sha": "local-sha",
+                "peer_release_sha": "peer-sha",
+                "snapshot_mode": "deep",
+                "local_table_count": 20,
+                "peer_table_count": 20,
+                "local_snapshot_at": "2026-06-28T04:58:00Z",
+                "peer_snapshot_at": "2026-06-28T04:58:02Z",
+                "comparison_artifact_hash": "sha256:comparison",
+                "artifact_reference": "tmp/parity/comparison.json",
+            },
         }
 
         with patch("api.routers.sync.settings.observability_api_key", "obs-key"), patch(
@@ -222,6 +235,13 @@ class SyncHealthEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["parity_status"]["business_drift_count"], 2)
+        self.assertTrue(payload["parity_status"]["artifact_metadata_complete"])
+        self.assertEqual(
+            payload["parity_status"]["artifact_metadata"]["comparison_artifact_hash"],
+            "sha256:comparison",
+        )
+        stored_summary = json.loads(stored["value"])
+        self.assertTrue(stored_summary["artifact_metadata_complete"])
         self.assertEqual(stored["key"], "sync:parity:latest_comparison")
         self.assertGreaterEqual(stored["ex"], 3600)
         record_parity_summary.assert_called_once()

@@ -121,6 +121,27 @@ The body must be the JSON output from `scripts/compare_sync_parity.py compare`.
 The endpoint stores only an operator summary in Redis under
 `sync:parity:latest_comparison`.
 
+The comparison may include optional artifact metadata under
+`artifact_metadata`. Monitoring accepts summaries without this metadata, but
+strict artifact-backed gates must require it before treating a parity summary as
+production release evidence. The complete artifact metadata contract is:
+
+- `local_server_mode`
+- `peer_server_mode`
+- `local_release_sha`
+- `peer_release_sha`
+- `snapshot_mode`
+- `local_table_count`
+- `peer_table_count`
+- `local_snapshot_at`
+- `peer_snapshot_at`
+- `comparison_artifact_hash`
+- `artifact_reference`
+
+`scripts/compare_sync_parity.py compare` can populate most of these fields from
+snapshot files and accepts explicit `--comparison-artifact-hash` and
+`--artifact-reference` values for retained comparison artifacts.
+
 Example:
 
 ```bash

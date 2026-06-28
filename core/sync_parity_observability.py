@@ -7,6 +7,19 @@ from typing import Any, Mapping
 
 
 DEFAULT_PARITY_STATUS_MAX_AGE_SECONDS = 15 * 60
+ARTIFACT_METADATA_REQUIRED_FIELDS = (
+    "local_server_mode",
+    "peer_server_mode",
+    "local_release_sha",
+    "peer_release_sha",
+    "snapshot_mode",
+    "local_table_count",
+    "peer_table_count",
+    "local_snapshot_at",
+    "peer_snapshot_at",
+    "comparison_artifact_hash",
+    "artifact_reference",
+)
 
 
 def utc_now_iso() -> str:
@@ -38,6 +51,70 @@ def infer_parity_comparison_mode(local_snapshot: Mapping[str, Any], peer_snapsho
     return "unknown"
 
 
+def _string_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _int_value(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metadata_value(source: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = source.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def normalize_parity_artifact_metadata(comparison: Mapping[str, Any]) -> dict[str, Any]:
+    source = comparison.get("artifact_metadata")
+    source = source if isinstance(source, Mapping) else {}
+
+    metadata: dict[str, Any] = {}
+    string_fields = {
+        "local_server_mode": ("local_server_mode", "local_mode", "source_server_mode"),
+        "peer_server_mode": ("peer_server_mode", "peer_mode", "target_server_mode"),
+        "local_release_sha": ("local_release_sha", "local_commit_sha", "source_release_sha"),
+        "peer_release_sha": ("peer_release_sha", "peer_commit_sha", "target_release_sha"),
+        "snapshot_mode": ("snapshot_mode", "mode"),
+        "local_snapshot_at": ("local_snapshot_at", "source_snapshot_at"),
+        "peer_snapshot_at": ("peer_snapshot_at", "target_snapshot_at"),
+        "comparison_artifact_hash": ("comparison_artifact_hash", "artifact_hash", "sha256"),
+        "artifact_reference": ("artifact_reference", "artifact_path", "storage_reference", "comparison_artifact_path"),
+    }
+    for normalized_key, aliases in string_fields.items():
+        value = _string_value(_metadata_value(source, *aliases))
+        if value is None and normalized_key == "snapshot_mode":
+            value = _string_value(comparison.get("mode"))
+        if value is not None:
+            metadata[normalized_key] = value
+
+    int_fields = {
+        "local_table_count": ("local_table_count", "source_table_count"),
+        "peer_table_count": ("peer_table_count", "target_table_count"),
+    }
+    for normalized_key, aliases in int_fields.items():
+        value = _int_value(_metadata_value(source, *aliases))
+        if value is not None:
+            metadata[normalized_key] = value
+
+    missing = [field for field in ARTIFACT_METADATA_REQUIRED_FIELDS if field not in metadata]
+    return {
+        "artifact_metadata": metadata,
+        "artifact_metadata_complete": not missing,
+        "artifact_metadata_missing_fields": missing,
+    }
+
+
 def summarize_parity_comparison(
     comparison: Mapping[str, Any],
     *,
@@ -66,6 +143,7 @@ def summarize_parity_comparison(
             truncated_table_count += 1
         duplicate_identity_count += int(report.get("local_duplicate_identity_count") or 0)
         duplicate_identity_count += int(report.get("peer_duplicate_identity_count") or 0)
+    artifact_metadata = normalize_parity_artifact_metadata(comparison)
     return {
         "status": str(comparison.get("status") or "unknown"),
         "fresh": fresh,
@@ -82,54 +160,70 @@ def summarize_parity_comparison(
         "non_business_difference_count": int(severity_counts.get("local_only_difference") or 0)
         + int(severity_counts.get("volatile_difference") or 0)
         + int(comparison.get("non_business_difference_count") or 0),
+        **artifact_metadata,
     }
 
 
-def strict_alert_gate_from_parity_summary(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+def strict_alert_gate_from_parity_summary(
+    summary: Mapping[str, Any] | None,
+    *,
+    require_artifact_metadata: bool = False,
+) -> dict[str, Any]:
     if not summary:
         return {
             "status": "blocked",
             "reason": "missing_parity_evidence",
         }
-    if not bool(summary.get("fresh")):
+    latest_summary = dict(summary)
+    if "artifact_metadata_complete" not in latest_summary:
+        latest_summary.update(normalize_parity_artifact_metadata(latest_summary))
+
+    if not bool(latest_summary.get("fresh")):
         return {
             "status": "blocked",
             "reason": "stale_parity_evidence",
-            "latest_parity": dict(summary),
+            "latest_parity": latest_summary,
         }
-    parity_status = str(summary.get("status") or "unknown")
+    if require_artifact_metadata and not bool(latest_summary.get("artifact_metadata_complete")):
+        return {
+            "status": "blocked",
+            "reason": "missing_artifact_metadata",
+            "missing_fields": list(latest_summary.get("artifact_metadata_missing_fields") or ARTIFACT_METADATA_REQUIRED_FIELDS),
+            "latest_parity": latest_summary,
+        }
+    parity_status = str(latest_summary.get("status") or "unknown")
     if parity_status not in {"ok", "non_business_difference"}:
         return {
             "status": "blocked",
             "reason": f"parity_status_{parity_status}",
-            "latest_parity": dict(summary),
+            "latest_parity": latest_summary,
         }
-    if int(summary.get("incomplete_count") or 0) > 0:
+    if int(latest_summary.get("incomplete_count") or 0) > 0:
         return {
             "status": "blocked",
             "reason": "parity_incomplete_tables",
-            "latest_parity": dict(summary),
+            "latest_parity": latest_summary,
         }
-    if int(summary.get("truncated_table_count") or 0) > 0:
+    if int(latest_summary.get("truncated_table_count") or 0) > 0:
         return {
             "status": "blocked",
             "reason": "parity_truncated_tables",
-            "latest_parity": dict(summary),
+            "latest_parity": latest_summary,
         }
-    if int(summary.get("duplicate_identity_count") or 0) > 0:
+    if int(latest_summary.get("duplicate_identity_count") or 0) > 0:
         return {
             "status": "blocked",
             "reason": "parity_duplicate_identities",
-            "latest_parity": dict(summary),
+            "latest_parity": latest_summary,
         }
-    if int(summary.get("critical_drift_count") or 0) > 0 or int(summary.get("business_drift_count") or 0) > 0:
+    if int(latest_summary.get("critical_drift_count") or 0) > 0 or int(latest_summary.get("business_drift_count") or 0) > 0:
         return {
             "status": "blocked",
             "reason": "parity_business_or_critical_drift",
-            "latest_parity": dict(summary),
+            "latest_parity": latest_summary,
         }
     return {
         "status": "passed",
         "reason": None,
-        "latest_parity": dict(summary),
+        "latest_parity": latest_summary,
     }

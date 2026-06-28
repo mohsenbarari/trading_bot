@@ -131,6 +131,38 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertEqual(plan["latest_parity_evidence"]["status"], "ok")
         self.assertEqual(plan["activation_gate"]["status"], "passed")
 
+    def test_strict_alert_plan_can_require_artifact_backed_parity(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            evidence = Path(tmp_dir) / "parity.json"
+            evidence.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "status": "ok",
+                            "fresh": True,
+                            "mode": "deep",
+                            "observed_at": "2026-06-28T05:00:00Z",
+                            "business_drift_count": 0,
+                            "critical_drift_count": 0,
+                            "incomplete_count": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = self.build_args(
+                Path(tmp_dir),
+                "--latest-parity-status",
+                str(evidence),
+                "--require-artifact-backed-parity",
+            )
+
+            plan = stage9.build_strict_alert_plan(args)
+
+        self.assertTrue(plan["artifact_metadata_required"])
+        self.assertEqual(plan["activation_gate"]["reason"], "missing_artifact_metadata")
+        self.assertIn("comparison_artifact_hash", plan["activation_gate"]["missing_fields"])
+
     def test_strict_alert_plan_blocks_critical_parity_evidence(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             evidence = Path(tmp_dir) / "parity.json"

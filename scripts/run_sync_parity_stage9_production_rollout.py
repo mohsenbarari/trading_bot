@@ -534,10 +534,15 @@ def build_strict_alert_plan(args: argparse.Namespace) -> dict[str, Any]:
         "confirm_value": STRICT_ALERT_CONFIRM_VALUE,
         "minimum_warning_window_hours": args.warning_window_hours,
         "latest_parity_evidence": latest_parity,
-        "activation_gate": strict_alert_gate_from_parity_summary(latest_parity),
+        "artifact_metadata_required": bool(args.require_artifact_backed_parity),
+        "activation_gate": strict_alert_gate_from_parity_summary(
+            latest_parity,
+            require_artifact_metadata=bool(args.require_artifact_backed_parity),
+        ),
         "required_evidence": [
             "postdeploy delivery health clean on both servers",
             "postdeploy parity comparison clean or only accepted documented exemptions",
+            "artifact metadata complete when artifact-backed parity is required",
             "no unexpected retry backlog",
             "operator-reviewed logs for receiver rejection and stale ignored events",
             "repair tool dry-run available and tested",
@@ -768,6 +773,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--deep-max-rows", type=int, default=10000)
     parser.add_argument("--warning-window-hours", type=int, default=24)
     parser.add_argument("--latest-parity-status", type=Path)
+    parser.add_argument(
+        "--require-artifact-backed-parity",
+        action="store_true",
+        help="Require retained artifact metadata before the strict parity activation gate can pass.",
+    )
     args = parser.parse_args(argv)
     if args.artifact_dir is None:
         args.artifact_dir = Path("tmp") / "sync-parity-stage9-production" / args.stamp

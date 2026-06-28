@@ -60,6 +60,57 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _table_count(snapshot: dict[str, Any]) -> int | None:
+    tables = snapshot.get("tables")
+    return len(tables) if isinstance(tables, dict) else None
+
+
+def _snapshot_timestamp(snapshot: dict[str, Any]) -> str | None:
+    for key in ("snapshot_at", "generated_at", "created_at", "captured_at", "observed_at"):
+        value = snapshot.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _optional_arg(args: argparse.Namespace, name: str) -> Any:
+    return getattr(args, name, None)
+
+
+def _build_artifact_metadata(
+    args: argparse.Namespace,
+    *,
+    local_snapshot: dict[str, Any],
+    peer_snapshot: dict[str, Any],
+    mode: str,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+
+    string_values = {
+        "local_server_mode": _optional_arg(args, "local_server_mode") or local_snapshot.get("server_mode"),
+        "peer_server_mode": _optional_arg(args, "peer_server_mode") or peer_snapshot.get("server_mode"),
+        "local_release_sha": _optional_arg(args, "local_release_sha") or local_snapshot.get("release_sha"),
+        "peer_release_sha": _optional_arg(args, "peer_release_sha") or peer_snapshot.get("release_sha"),
+        "snapshot_mode": _optional_arg(args, "snapshot_mode") or mode,
+        "local_snapshot_at": _optional_arg(args, "local_snapshot_at") or _snapshot_timestamp(local_snapshot),
+        "peer_snapshot_at": _optional_arg(args, "peer_snapshot_at") or _snapshot_timestamp(peer_snapshot),
+        "comparison_artifact_hash": _optional_arg(args, "comparison_artifact_hash"),
+        "artifact_reference": _optional_arg(args, "artifact_reference") or _optional_arg(args, "artifact_path"),
+    }
+    for key, value in string_values.items():
+        if value not in (None, ""):
+            metadata[key] = str(value)
+
+    local_table_count = _optional_arg(args, "local_table_count") or _table_count(local_snapshot)
+    peer_table_count = _optional_arg(args, "peer_table_count") or _table_count(peer_snapshot)
+    if local_table_count is not None:
+        metadata["local_table_count"] = int(local_table_count)
+    if peer_table_count is not None:
+        metadata["peer_table_count"] = int(peer_table_count)
+
+    return metadata
+
+
 async def _snapshot(args: argparse.Namespace) -> int:
     async with AsyncSessionLocal() as db:
         payload = await build_database_parity_snapshot(
@@ -95,6 +146,14 @@ def _compare(args: argparse.Namespace) -> int:
     payload = compare_parity_snapshots(local_snapshot, peer_snapshot, sample_limit=args.sample_limit)
     payload["mode"] = infer_parity_comparison_mode(local_snapshot, peer_snapshot)
     payload["compared_at"] = _utc_now_iso()
+    artifact_metadata = _build_artifact_metadata(
+        args,
+        local_snapshot=local_snapshot,
+        peer_snapshot=peer_snapshot,
+        mode=payload["mode"],
+    )
+    if artifact_metadata:
+        payload["artifact_metadata"] = artifact_metadata
     payload["summary"] = summarize_parity_comparison(payload, mode=payload["mode"], observed_at=payload["compared_at"])
     for record_url in args.record_url or []:
         _post_json(
@@ -124,6 +183,18 @@ def parse_args() -> argparse.Namespace:
     compare.add_argument("--sample-limit", type=int, default=5)
     compare.add_argument("--record-url", action="append", help="POST the comparison result to a /api/sync/parity/status endpoint.")
     compare.add_argument("--record-observability-key")
+    compare.add_argument("--local-server-mode")
+    compare.add_argument("--peer-server-mode")
+    compare.add_argument("--local-release-sha")
+    compare.add_argument("--peer-release-sha")
+    compare.add_argument("--snapshot-mode")
+    compare.add_argument("--local-table-count", type=int)
+    compare.add_argument("--peer-table-count", type=int)
+    compare.add_argument("--local-snapshot-at")
+    compare.add_argument("--peer-snapshot-at")
+    compare.add_argument("--comparison-artifact-hash")
+    compare.add_argument("--artifact-reference")
+    compare.add_argument("--artifact-path", help="Alias for --artifact-reference when the retained artifact is a local path.")
 
     return parser.parse_args()
 

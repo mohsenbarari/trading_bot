@@ -533,6 +533,24 @@ Implementation direction:
 - Add tests proving strict gate blocks missing artifact metadata when strict
   artifact mode is requested.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- `core/sync_parity_observability.py` now normalizes optional
+  `artifact_metadata`, reports whether it is complete, and lists missing fields.
+- `strict_alert_gate_from_parity_summary(..., require_artifact_metadata=True)`
+  now blocks otherwise-clean parity evidence when required artifact metadata is
+  missing.
+- `scripts/compare_sync_parity.py compare` carries artifact metadata from
+  snapshots and optional CLI values such as `--comparison-artifact-hash` and
+  `--artifact-reference`.
+- `POST /api/sync/parity/status` remains backward-compatible but stores the
+  normalized artifact metadata when present.
+- Stage 9 strict alert planning has an optional
+  `--require-artifact-backed-parity` flag for future fail-closed gates.
+- `docs/CROSS_SERVER_SYNC_OBSERVABILITY.md` documents the artifact metadata
+  contract and clarifies that monitoring does not require it while strict gates
+  can.
+
 Exit criteria:
 
 - `/api/sync/parity/status` remains useful for monitoring.
