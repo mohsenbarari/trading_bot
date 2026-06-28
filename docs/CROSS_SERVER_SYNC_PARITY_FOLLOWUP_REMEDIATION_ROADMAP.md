@@ -220,7 +220,16 @@ Implementation status on `candidate/sync-parity-hardening`:
   explicit Iran-authoritative table allowlist and only when peer
   `error_items[0].table` and `record_id` match the outgoing sync item. Terminal
   worker drops and receiver-side source-authority rejections also emit
-  low-cardinality metrics so non-zero rates can be alerted during rollout.
+  low-cardinality metrics. Post-validation review found that worker-side metrics
+  are process-local unless a shared metrics backend or worker scrape surface is
+  configured, so rollout alerting must either use the structured worker log
+  event `job.item.dropped_terminal_policy_rejection` or explicitly wire shared
+  metrics before relying on the worker counter.
+- Follow-up hardening after post-validation review: the Iran-authoritative table
+  set is now shared between the receiver and worker so future table additions
+  cannot silently drift between `IRAN_AUTHORITATIVE_SYNC_TABLES` and terminal
+  worker handling. Repair apply also fails closed if runtime environment is
+  empty, and tests cover manifest/runtime environment mismatch directly.
 - `api/routers/sync.py` now returns structured `error_items` for apply failure,
   retry exception, and unresolved deferred FK dependency paths. This keeps
   worker and operator evidence actionable when a row is legitimately still
@@ -703,6 +712,37 @@ Evidence collected on `candidate/sync-parity-hardening`:
   metadata.
 - Market channel notice repair evidence is saved in
   `tmp/sync-parity-post-deploy-20260628T1325Z/f7-market-notice-repair-evidence.json`.
+- Post-validation terminal authority evidence directory:
+  `tmp/sync-parity-staging-validation-20260628T155235Z/`.
+- Scenario A in that evidence posted a synthetic foreign-origin
+  `market_runtime_state` item directly to remote Iran staging and received the
+  expected structured partial rejection:
+  `source_authority_forbidden:foreign`, `table=market_runtime_state`,
+  `record_id=910001`.
+- Scenario B inserted one synthetic `change_log` row on local foreign staging
+  for `market_runtime_state` record `910002`. The real `foreign_sync_worker`
+  processed it, the configured staging Iran peer rejected it by source authority,
+  and the worker logged `job.item.dropped_terminal_policy_rejection` with
+  `marked_change_logs=1`; the source row ended `synced=true` and
+  `verified=true`.
+- The post-validation final health snapshots for local Iran staging, local
+  foreign staging, and remote Iran staging reported `status=ok`,
+  `unsynced_change_log_count=0`, empty Redis sync queues, and fresh deep parity
+  status `non_business_difference` with `business_drift_count=0`,
+  `critical_drift_count=0`, `incomplete_count=0`, `duplicate_identity_count=0`,
+  `truncated_table_count=0`, and complete artifact metadata for release
+  `35c44b70`.
+- Important evidence caveat: the real worker path in Scenario B used the local
+  compose peer `http://app:8000`, while the remote Iran receiver was validated
+  separately by a signed direct POST in Scenario A. This proves the code paths
+  and both receiver implementations, but production readiness still requires one
+  true remote worker-to-remote receiver validation.
+- Important observability caveat: staging has no shared metrics backend, so the
+  worker-side terminal-drop metric is not visible through the app `/metrics`
+  endpoint. The receiver-side source-authority metric was visible, while worker
+  terminal-drop evidence was captured from the worker log. Production rollout
+  must explicitly choose log-based alerting for the worker event or wire shared
+  worker metrics.
   The foreign staging evidence forced a Telegram send failure with an invalid
   channel id, preserved the failed receipt unchanged while
   `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED=1`, then re-enabled delivery and
@@ -737,6 +777,11 @@ Production rollout still requires a separate production preflight:
 - restore-smoke evidence for database backups;
 - single Alembic head and successful migration evidence on both servers;
 - both production sync workers running and draining;
+- one true remote worker-to-remote receiver validation for terminal
+  source-authority rejection, using production-like peer URL/TLS/routing;
+- explicit evidence that worker terminal-drop alerting is active, either through
+  `job.item.dropped_terminal_policy_rejection` logs/Loki or through a configured
+  shared/scraped worker metrics path;
 - transport security evidence for `SYNC_VERIFY_TLS` and any configured CA
   bundle;
 - no market notice retry backlog, no sync backlog, and no stale/conflict

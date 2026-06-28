@@ -80,6 +80,8 @@ def _normalize_environment(value: Any) -> str:
 def _environment(args: argparse.Namespace) -> str:
     runtime_environment = _normalize_environment(getattr(settings, "environment", ""))
     cli_environment = _normalize_environment(getattr(args, "environment", None))
+    if getattr(args, "apply", False) and not runtime_environment:
+        raise ValueError("Runtime environment is required for repair apply")
     if runtime_environment and cli_environment and runtime_environment != cli_environment:
         raise ValueError("CLI environment does not match runtime settings; refusing repair apply")
     return runtime_environment or cli_environment

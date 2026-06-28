@@ -14,6 +14,7 @@ from core.metrics import (
 )
 from core.redis import get_redis_client
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, default_peer_server_url, normalize_server, peer_server_url_for
+from core.sync_authority import IRAN_AUTHORITATIVE_SYNC_TABLES
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity, coerce_positive_int
 from core.sync_parity import build_database_parity_snapshot, synced_parity_table_names
@@ -552,17 +553,6 @@ NATURAL_IDENTITY_DELETE_TABLES = {
     "user_blocks",
     "user_notification_preferences",
 }
-
-IRAN_AUTHORITATIVE_SYNC_TABLES = {
-    "admin_broadcast_messages",
-    "admin_market_messages",
-    "commodities",
-    "commodity_aliases",
-    "market_runtime_state",
-    "market_schedule_overrides",
-    "trading_settings",
-}
-
 
 def _summarize_natural_key_context(table: str, natural_key: str, natural_value) -> dict[str, object]:
     context: dict[str, object] = {"natural_key": natural_key}

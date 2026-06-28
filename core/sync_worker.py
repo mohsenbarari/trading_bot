@@ -13,6 +13,7 @@ from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
 from core.metrics import record_sync_terminal_policy_rejection
 from core.server_routing import current_server, default_peer_server_url
+from core.sync_authority import IRAN_AUTHORITATIVE_SYNC_TABLES
 from core.sync_metadata import (
     build_sync_metadata,
     build_sync_public_identity,
@@ -28,15 +29,7 @@ configure_logging("sync-worker")
 logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
 
-TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = {
-    "admin_broadcast_messages",
-    "admin_market_messages",
-    "commodities",
-    "commodity_aliases",
-    "market_runtime_state",
-    "market_schedule_overrides",
-    "trading_settings",
-}
+TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = IRAN_AUTHORITATIVE_SYNC_TABLES
 
 
 class SyncDeliveryError(Exception):

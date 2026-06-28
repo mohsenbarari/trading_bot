@@ -363,6 +363,80 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
 
         send_items.assert_not_called()
 
+    async def test_replay_row_apply_rejects_manifest_environment_mismatch_from_runtime(self):
+        identity_hash = replay_identity_hash_for_fake_row()
+        approval = f"apply-sync-repair:{identity_hash}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(replay_manifest(identity_hash=identity_hash, environment="staging", approval=approval)),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                table="offers",
+                identity='{"offer_public_id":"ofr_1"}',
+                operation="UPDATE",
+                source_server="foreign",
+                source_sequence=123,
+                target_server="iran",
+                target_url="https://peer.example",
+                sync_api_key="secret",
+                environment=None,
+                manifest=str(manifest_path),
+                operator_approval=approval,
+                allow_local_id_identity=False,
+                apply=True,
+                confirm_write=True,
+            )
+
+            with patch.object(sync_repair_tool.settings, "environment", "production"), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
+                "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
+            ), patch("scripts.sync_repair_tool._send_items") as send_items:
+                with self.assertRaisesRegex(ValueError, "repair manifest environment does not match runtime settings"):
+                    await sync_repair_tool.replay_row_command(args)
+
+        send_items.assert_not_called()
+
+    async def test_replay_row_apply_requires_runtime_environment_even_with_cli_environment(self):
+        identity_hash = replay_identity_hash_for_fake_row()
+        approval = f"apply-sync-repair:{identity_hash}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(replay_manifest(identity_hash=identity_hash, environment="staging", approval=approval)),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(
+                table="offers",
+                identity='{"offer_public_id":"ofr_1"}',
+                operation="UPDATE",
+                source_server="foreign",
+                source_sequence=123,
+                target_server="iran",
+                target_url="https://peer.example",
+                sync_api_key="secret",
+                environment="staging",
+                manifest=str(manifest_path),
+                operator_approval=approval,
+                allow_local_id_identity=False,
+                apply=True,
+                confirm_write=True,
+            )
+
+            with patch.object(sync_repair_tool.settings, "environment", ""), patch(
+                "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+            ), patch(
+                "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
+            ), patch("scripts.sync_repair_tool._send_items") as send_items:
+                with self.assertRaisesRegex(ValueError, "Runtime environment is required for repair apply"):
+                    await sync_repair_tool.replay_row_command(args)
+
+        send_items.assert_not_called()
+
     def test_plan_command_outputs_dry_run_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             local = Path(tmp) / "local.json"

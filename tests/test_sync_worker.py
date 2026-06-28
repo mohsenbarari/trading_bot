@@ -128,6 +128,11 @@ class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PeerResponsePolicyTests(unittest.TestCase):
+    def test_terminal_source_authority_tables_share_receiver_authority_set(self):
+        from api.routers.sync import IRAN_AUTHORITATIVE_SYNC_TABLES as receiver_authority_tables
+
+        self.assertIs(sync_worker.TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES, receiver_authority_tables)
+
     def test_policy_forbidden_no_sync_response_is_detected(self):
         response = FakeResponse(
             200,
@@ -681,13 +686,19 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
                 ],
             },
         )
-        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
-            send_return_value=response,
-        )
+        with patch("core.sync_worker.record_sync_terminal_policy_rejection") as metric_mock:
+            fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+                blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
+                send_return_value=response,
+            )
 
         send_mock.assert_awaited_once()
         marker_mock.assert_awaited_once_with(json.loads(payload))
+        metric_mock.assert_called_once_with(
+            server_mode="foreign",
+            table="market_runtime_state",
+            reason="source_authority_forbidden:foreign",
+        )
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_not_awaited()
 
