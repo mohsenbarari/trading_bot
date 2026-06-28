@@ -51,7 +51,7 @@ IDENTITY_FIELDS_BY_TABLE: dict[str, tuple[str, ...]] = {
     "customer_relations": ("invitation_token",),
     "invitations": ("token",),
     "market_schedule_overrides": ("date",),
-    "notifications": ("dedupe_key", "id"),
+    "notifications": ("dedupe_key",),
     "offer_publication_states": ("dedupe_key",),
     "offer_requests": ("request_home_server", "idempotency_key"),
     "offers": ("offer_public_id",),
@@ -84,6 +84,7 @@ LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
         "error_message",
         "state_metadata",
     },
+    "trade_delivery_receipts": {"trade_id", "offer_id", "notification_id", "worker_id", "lease_until"},
 }
 
 SENSITIVE_IDENTITY_FIELDS = {
@@ -137,6 +138,13 @@ def _local_only_fields(table_name: str) -> set[str]:
     return set(LOCAL_ONLY_FIELDS_BY_TABLE.get(table_name, set()))
 
 
+def _local_db_identity_fields(table_name: str, row: Mapping[str, Any]) -> set[str]:
+    identity_fields = set(_identity_fields_for_row(table_name, row))
+    if identity_fields and identity_fields != {"id"}:
+        return {"id"}
+    return set()
+
+
 def _identity_fields_for_row(table_name: str, row: Mapping[str, Any]) -> tuple[str, ...]:
     configured = IDENTITY_FIELDS_BY_TABLE.get(table_name)
     if configured:
@@ -172,7 +180,7 @@ def _classify_fields(table_name: str, row: Mapping[str, Any]) -> tuple[dict[str,
     local_only: dict[str, Any] = {}
     volatile: dict[str, Any] = {}
     volatile_fields = _volatile_fields(table_name)
-    local_only_fields = _local_only_fields(table_name)
+    local_only_fields = _local_only_fields(table_name) | _local_db_identity_fields(table_name, row)
 
     for key in sorted(str(field) for field in row.keys()):
         value = row.get(key)

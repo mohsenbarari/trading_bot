@@ -135,7 +135,28 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("market_offer_push_enabled = excluded.market_offer_push_enabled", compiled)
         self.assertIn("updated_at = excluded.updated_at", compiled)
         self.assertIn("user_notification_preferences.updated_at IS NULL", compiled)
-        self.assertIn("excluded.updated_at IS NULL", compiled)
+        self.assertIn("excluded.updated_at IS NOT NULL", compiled)
+        self.assertNotIn("OR excluded.updated_at IS NULL", compiled)
+        self.assertIn("user_notification_preferences.updated_at <= excluded.updated_at", compiled)
+
+    def test_user_notification_preference_null_updated_at_is_not_accepted_as_newer(self):
+        stmt = _build_upsert_stmt(
+            UserNotificationPreference,
+            "user_notification_preferences",
+            {
+                "id": 41,
+                "user_id": 7,
+                "market_offer_push_enabled": False,
+                "updated_at": None,
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (user_id)", compiled)
+        self.assertIn("user_notification_preferences.updated_at IS NULL", compiled)
+        self.assertIn("excluded.updated_at IS NOT NULL", compiled)
+        self.assertNotIn("OR excluded.updated_at IS NULL", compiled)
         self.assertIn("user_notification_preferences.updated_at <= excluded.updated_at", compiled)
 
     async def test_user_notification_preference_identity_resolves_by_user_id(self):

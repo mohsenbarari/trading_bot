@@ -317,6 +317,18 @@ Implementation direction:
     FK, same business data must not be business drift;
   - real business changes must still be business drift.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- `core/sync_parity.py` now treats generic `id` as local-only when a row is
+  compared by a stable public/natural identity, and classifies
+  `trade_delivery_receipts.trade_id`, `offer_id`, and `notification_id` as
+  local FK differences rather than business drift.
+- `notifications` now use `dedupe_key` as the stable parity identity when it is
+  present, falling back to local `id` only for rows without a dedupe key.
+- Tests cover offers, trades, and trade-delivery receipts where local IDs differ
+  but business data matches, plus a real receipt-status drift that must still
+  fail as `business_drift`.
+
 Exit criteria:
 
 - Strict parity can distinguish local identity differences from true product
@@ -362,6 +374,21 @@ Implementation direction:
   sanitize or drop them on receive and add tests. If they are intentionally
   persisted as shared evidence, document that they must not be treated as strict
   business truth by parity or repair.
+
+Implementation status on `candidate/sync-parity-hardening`:
+
+- `user_notification_preferences` now uses strict `updated_at` recency on
+  conflict: incoming `updated_at = NULL` can insert a missing row but cannot
+  overwrite an existing non-null preference timestamp.
+- `offer_publication_states` shared truth is limited to fields such as
+  `dedupe_key`, `offer_public_id`, `offer_home_server`, `surface`,
+  `publication_owner_server`, `status`, `offer_version_id`,
+  `last_known_offer_status`, `disabled_at`, `lagged_at`, `archived`, and
+  creation/update metadata.
+- Telegram/provider runtime fields including `offer_id`, `surface_resource_id`,
+  `telegram_chat_id`, `telegram_message_id`, retry timestamps, provider errors,
+  and `state_metadata` are dropped from normal sync payloads and remain
+  local execution evidence.
 
 Exit criteria:
 

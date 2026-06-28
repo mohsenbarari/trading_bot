@@ -56,6 +56,51 @@ class SyncFieldPolicyTests(unittest.TestCase):
         self.assertNotIn("last_error", sanitized)
         self.assertNotIn("raw", json.dumps(sanitized))
 
+    def test_offer_publication_runtime_fields_are_dropped_from_sync_payload(self):
+        payload = {
+            "id": 3,
+            "offer_id": 33,
+            "offer_public_id": "ofr_1",
+            "offer_home_server": "foreign",
+            "surface": "telegram_channel",
+            "publication_owner_server": "foreign",
+            "status": "sent",
+            "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+            "surface_resource_id": "telegram:-1001:777",
+            "telegram_chat_id": -1001,
+            "telegram_message_id": 777,
+            "last_attempt_at": "2026-06-28T10:00:00Z",
+            "last_success_at": "2026-06-28T10:00:01Z",
+            "next_retry_at": "2026-06-28T10:01:00Z",
+            "error_code": "BadRequest",
+            "error_message": "provider detail",
+            "state_metadata": {"provider": "telegram"},
+            "offer_version_id": 4,
+        }
+
+        sanitized = sanitize_sync_payload("offer_publication_states", payload)
+
+        self.assertEqual(sanitized["offer_public_id"], "ofr_1")
+        self.assertEqual(sanitized["offer_home_server"], "foreign")
+        self.assertEqual(sanitized["surface"], "telegram_channel")
+        self.assertEqual(sanitized["publication_owner_server"], "foreign")
+        self.assertEqual(sanitized["status"], "sent")
+        self.assertEqual(sanitized["dedupe_key"], "offer-publication:telegram_channel:ofr_1")
+        self.assertEqual(sanitized["offer_version_id"], 4)
+        for field in {
+            "offer_id",
+            "surface_resource_id",
+            "telegram_chat_id",
+            "telegram_message_id",
+            "last_attempt_at",
+            "last_success_at",
+            "next_retry_at",
+            "error_code",
+            "error_message",
+            "state_metadata",
+        }:
+            self.assertNotIn(field, sanitized)
+
     def test_required_sensitive_fields_have_explicit_classification(self):
         expectations = {
             ("users", "admin_password_hash"): SyncFieldClassification.NO_SYNC,
@@ -68,6 +113,9 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("trade_delivery_receipts", "audit_payload"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "worker_id"): SyncFieldClassification.NO_SYNC,
             ("trade_delivery_receipts", "lease_until"): SyncFieldClassification.NO_SYNC,
+            ("offer_publication_states", "telegram_message_id"): SyncFieldClassification.NO_SYNC,
+            ("offer_publication_states", "error_message"): SyncFieldClassification.NO_SYNC,
+            ("offer_publication_states", "state_metadata"): SyncFieldClassification.NO_SYNC,
             ("push_subscriptions", "endpoint"): SyncFieldClassification.HASH_ONLY,
             ("push_subscriptions", "auth"): SyncFieldClassification.NO_SYNC,
         }

@@ -930,6 +930,22 @@ def _updated_at_recency_where_clause(model, stmt, data: dict):
     return current_updated_at.is_(None) | incoming_updated_at.is_(None) | (current_updated_at <= incoming_updated_at)
 
 
+def _strict_updated_at_recency_where_clause(model, stmt, data: dict):
+    if "updated_at" not in data:
+        return None
+    current_updated_at = getattr(model, "updated_at", None)
+    if current_updated_at is None:
+        return None
+    try:
+        incoming_updated_at = stmt.excluded["updated_at"]
+    except (AttributeError, KeyError):
+        return None
+    return current_updated_at.is_(None) | (
+        incoming_updated_at.isnot(None)
+        & (current_updated_at <= incoming_updated_at)
+    )
+
+
 def _offer_publication_status_rank(expression):
     whens = [
         (expression == status, rank)
@@ -1033,7 +1049,7 @@ def _build_upsert_stmt(model, table, data):
     elif table == "user_notification_preferences" and data.get("user_id") is not None:
         set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "user_id"}}
         if "updated_at" in data:
-            where_clause = _updated_at_recency_where_clause(model, stmt, data)
+            where_clause = _strict_updated_at_recency_where_clause(model, stmt, data)
             if where_clause is None:
                 return stmt.on_conflict_do_update(index_elements=['user_id'], set_=set_dict)
             return stmt.on_conflict_do_update(
