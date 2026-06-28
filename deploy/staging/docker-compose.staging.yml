@@ -88,6 +88,64 @@ services:
     networks:
       - staging_net
 
+  sync_worker:
+    image: *app_image
+    build: *app_build
+    profiles:
+      - staging-sync
+    restart: unless-stopped
+    command: python -m core.sync_worker
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: sync_worker
+      ENVIRONMENT: staging
+      SERVER_MODE: iran
+      DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    volumes:
+      - staging_audit:/app/audit_trail
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - staging_net
+
+  foreign_sync_worker:
+    image: *app_image
+    build: *app_build
+    profiles:
+      - staging-sync
+    restart: unless-stopped
+    command: python -m core.sync_worker
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: sync_worker
+      ENVIRONMENT: staging
+      SERVER_MODE: foreign
+      DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    env_file:
+      - ../../.env.staging
+    volumes:
+      - staging_audit:/app/audit_trail
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      foreign_app:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - staging_net
+
   migration:
     image: *app_image
     build: *app_build

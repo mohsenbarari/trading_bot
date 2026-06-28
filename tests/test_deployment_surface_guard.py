@@ -149,6 +149,33 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("foreign_app:", staging_bot_block)
         self.assertIn("condition: service_healthy", staging_bot_block)
 
+    def test_staging_sync_workers_are_profile_gated_and_role_bound(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
+        staging_services = active_compose_services(staging_compose)
+
+        sync_worker = staging_services["sync_worker"]
+        foreign_sync_worker = staging_services["foreign_sync_worker"]
+        sync_worker_block = compose_service_block(staging_compose, "sync_worker")
+        foreign_sync_worker_block = compose_service_block(staging_compose, "foreign_sync_worker")
+
+        for service_name, service, block in (
+            ("sync_worker", sync_worker, sync_worker_block),
+            ("foreign_sync_worker", foreign_sync_worker, foreign_sync_worker_block),
+        ):
+            self.assertIn("profiles:", block, msg=f"{service_name} must be profile-gated")
+            self.assertIn("- staging-sync", block, msg=f"{service_name} must stay out of normal staging deploys")
+            self.assertEqual(service["environment"]["TRADING_BOT_SERVICE"], "sync_worker")
+            self.assertIn("python -m core.sync_worker", str(service.get("command", "")))
+            self.assertNotIn("run_bot.py", block)
+            self.assertNotIn("BOT_TOKEN:", block)
+            self.assertNotIn("ports:", block)
+
+        self.assertEqual(sync_worker["environment"]["SERVER_MODE"], "iran")
+        self.assertEqual(foreign_sync_worker["environment"]["SERVER_MODE"], "foreign")
+        self.assertIn("app:", sync_worker_block)
+        self.assertIn("foreign_app:", foreign_sync_worker_block)
+
 
 if __name__ == "__main__":
     unittest.main()
