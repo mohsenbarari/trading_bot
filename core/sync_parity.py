@@ -45,8 +45,10 @@ PARITY_QUICK_TABLES = (
 )
 
 IDENTITY_FIELDS_BY_TABLE: dict[str, tuple[str, ...]] = {
+    "accountant_relations": ("invitation_token",),
     "commodities": ("name",),
     "commodity_aliases": ("alias",),
+    "customer_relations": ("invitation_token",),
     "invitations": ("token",),
     "market_schedule_overrides": ("date",),
     "notifications": ("dedupe_key", "id"),

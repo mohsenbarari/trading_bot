@@ -130,6 +130,23 @@ def _lookup_offer_public_id(connection, offer_id: int | None) -> str | None:
         return None
 
 
+def _lookup_commodity_name(connection, commodity_id: int | None) -> str | None:
+    if not commodity_id:
+        return None
+    try:
+        result = connection.execute(
+            text("SELECT name FROM commodities WHERE id = :commodity_id"),
+            {"commodity_id": commodity_id},
+        )
+        row = result.first()
+        if row is None:
+            return None
+        value = row[0]
+        return value if isinstance(value, str) and value.strip() else None
+    except Exception:
+        return None
+
+
 def _chat_sync_payload(target) -> Dict[str, Any]:
     return {
         "id": target.id,
@@ -718,7 +735,18 @@ def setup_accountant_relation_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "accountant_relations", target.id, "DELETE", {"id": target.id})
+            log_change(
+                connection,
+                "accountant_relations",
+                target.id,
+                "DELETE",
+                {
+                    "id": target.id,
+                    "invitation_token": target.invitation_token,
+                    "owner_user_id": target.owner_user_id,
+                    "accountant_user_id": target.accountant_user_id,
+                },
+            )
         except Exception as e:
             logger.error(f"Error in accountant_relation after_delete event: {e}")
 
@@ -780,7 +808,18 @@ def setup_customer_relation_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "customer_relations", target.id, "DELETE", {"id": target.id})
+            log_change(
+                connection,
+                "customer_relations",
+                target.id,
+                "DELETE",
+                {
+                    "id": target.id,
+                    "invitation_token": target.invitation_token,
+                    "owner_user_id": target.owner_user_id,
+                    "customer_user_id": target.customer_user_id,
+                },
+            )
         except Exception as e:
             logger.error(f"Error in customer_relation after_delete event: {e}")
 
@@ -829,7 +868,7 @@ def setup_commodity_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {"id": target.id}
+            data = {"id": target.id, "name": target.name}
             log_change(connection, "commodities", target.id, "DELETE", data)
         except Exception as e:
             logger.error(f"Error in commodity after_delete event: {e}")
@@ -849,7 +888,8 @@ def setup_commodity_alias_events():
             data = {
                 "id": target.id,
                 "alias": target.alias,
-                "commodity_id": target.commodity_id
+                "commodity_id": target.commodity_id,
+                "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
             }
             log_change(connection, "commodity_aliases", target.id, "INSERT", data)
         except Exception as e:
@@ -863,7 +903,8 @@ def setup_commodity_alias_events():
             data = {
                 "id": target.id,
                 "alias": target.alias,
-                "commodity_id": target.commodity_id
+                "commodity_id": target.commodity_id,
+                "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
             }
             log_change(connection, "commodity_aliases", target.id, "UPDATE", data)
         except Exception as e:
@@ -874,7 +915,12 @@ def setup_commodity_alias_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {"id": target.id}
+            data = {
+                "id": target.id,
+                "alias": target.alias,
+                "commodity_id": target.commodity_id,
+                "commodity_name": _lookup_commodity_name(connection, target.commodity_id),
+            }
             log_change(connection, "commodity_aliases", target.id, "DELETE", data)
         except Exception as e:
             logger.error(f"Error in alias after_delete event: {e}")
@@ -963,7 +1009,13 @@ def setup_telegram_link_token_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "telegram_link_tokens", target.id, "DELETE", {"id": target.id})
+            log_change(
+                connection,
+                "telegram_link_tokens",
+                target.id,
+                "DELETE",
+                {"id": target.id, "token_hash": target.token_hash, "user_id": target.user_id},
+            )
         except Exception as e:
             logger.error(f"Error in telegram_link_token after_delete event: {e}")
 
@@ -1050,7 +1102,16 @@ def setup_market_schedule_override_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "market_schedule_overrides", target.id, "DELETE", {"id": target.id})
+            log_change(
+                connection,
+                "market_schedule_overrides",
+                target.id,
+                "DELETE",
+                {
+                    "id": target.id,
+                    "date": target.date.isoformat() if getattr(target, "date", None) else None,
+                },
+            )
         except Exception as e:
             logger.error(f"Error in market_schedule_override after_delete event: {e}")
 
@@ -1193,7 +1254,7 @@ def setup_notification_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            data = {"id": target.id, "user_id": target.user_id}
+            data = {"id": target.id, "user_id": target.user_id, "dedupe_key": target.dedupe_key}
             log_change(connection, "notifications", target.id, "DELETE", data)
         except Exception as e:
             logger.error(f"Error in notification after_delete event: {e}")

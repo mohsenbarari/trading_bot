@@ -49,6 +49,38 @@ def _authority_server(table_name: str, data: dict[str, Any]) -> str | None:
 
 
 def _aggregate_identity(table_name: str, record_id: Any, data: dict[str, Any]) -> str:
+    if table_name in {"accountant_relations", "customer_relations"}:
+        invitation_token = _string_or_none(data.get("invitation_token"))
+        if invitation_token:
+            return invitation_token
+    if table_name == "commodities":
+        name = _string_or_none(data.get("name"))
+        if name:
+            return name
+    if table_name == "commodity_aliases":
+        alias = _string_or_none(data.get("alias"))
+        if alias:
+            return alias
+    if table_name == "telegram_link_tokens":
+        token_hash = _string_or_none(data.get("token_hash"))
+        if token_hash:
+            return token_hash
+    if table_name == "invitations":
+        token = _string_or_none(data.get("token"))
+        if token:
+            return token
+    if table_name == "notifications":
+        dedupe_key = _string_or_none(data.get("dedupe_key"))
+        if dedupe_key:
+            return dedupe_key
+    if table_name == "user_notification_preferences":
+        user_id = coerce_positive_int(data.get("user_id"))
+        if user_id is not None:
+            return str(user_id)
+    if table_name == "market_schedule_overrides":
+        override_date = _string_or_none(data.get("date"))
+        if override_date:
+            return override_date
     if table_name == "offer_publication_states":
         dedupe_key = _string_or_none(data.get("dedupe_key"))
         if dedupe_key:
@@ -165,6 +197,28 @@ def build_sync_public_identity(table_name: str, record_id: Any, data: Any) -> di
                 "table": table_name,
                 "kind": "offer_public_id",
                 "value": offer_public_id,
+                "record_id": record_id,
+            }
+
+    simple_identity_keys = {
+        "accountant_relations": "invitation_token",
+        "commodities": "name",
+        "commodity_aliases": "alias",
+        "customer_relations": "invitation_token",
+        "invitations": "token",
+        "market_schedule_overrides": "date",
+        "notifications": "dedupe_key",
+        "telegram_link_tokens": "token_hash",
+        "user_notification_preferences": "user_id",
+    }
+    simple_key = simple_identity_keys.get(table_name)
+    if simple_key:
+        simple_value = _string_or_none(payload_data.get(simple_key))
+        if simple_value:
+            return {
+                "table": table_name,
+                "kind": simple_key,
+                "value": simple_value,
                 "record_id": record_id,
             }
 

@@ -246,6 +246,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "never cross-sync bookkeeping rows",
         "sync blocking/observability only",
     ),
+    "sync_apply_watermarks": _entry(
+        "sync_apply_watermarks",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("sync_receiver",),
+        "local server",
+        "never cross-sync receiver watermark rows",
+        "sync source-sequence/idempotency observability only",
+    ),
     "trades": _entry(
         "trades",
         SyncPolicy.SYNC,

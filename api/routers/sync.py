@@ -500,11 +500,14 @@ USER_COUNTER_FIELDS = {"trades_count", "commodities_traded_count", "channel_mess
 
 # Natural unique keys per table (used for fallback when ID-based upsert hits name conflict)
 NATURAL_KEYS = {
+    "accountant_relations": "invitation_token",
+    "customer_relations": "invitation_token",
     "commodities": "name",
     "commodity_aliases": "alias",
     "users": "telegram_id",
     "telegram_link_tokens": "token_hash",
     "invitations": "token",
+    "notifications": "dedupe_key",
     "user_notification_preferences": "user_id",
     "market_schedule_overrides": "date",
     "trades": "trade_number",
@@ -519,6 +522,34 @@ SAFE_NATURAL_VALUE_LOG_KEYS = {
     ("trades", "trade_number"),
     ("offer_publication_states", "dedupe_key"),
     ("trade_delivery_receipts", "dedupe_key"),
+}
+
+NATURAL_IDENTITY_DELETE_TABLES = {
+    "accountant_relations",
+    "commodities",
+    "commodity_aliases",
+    "customer_relations",
+    "invitations",
+    "market_schedule_overrides",
+    "notifications",
+    "offer_publication_states",
+    "offer_requests",
+    "offers",
+    "telegram_link_tokens",
+    "trade_delivery_receipts",
+    "trades",
+    "user_blocks",
+    "user_notification_preferences",
+}
+
+IRAN_AUTHORITATIVE_SYNC_TABLES = {
+    "admin_broadcast_messages",
+    "admin_market_messages",
+    "commodities",
+    "commodity_aliases",
+    "market_runtime_state",
+    "market_schedule_overrides",
+    "trading_settings",
 }
 
 
@@ -683,6 +714,24 @@ def _sync_item_policy_rejection_reason(item: dict) -> str | None:
         return None
 
     return f"policy_forbidden:{registry_entry.policy.value}"
+
+
+def _sync_item_authority_rejection_reason(item: dict, table: str) -> str | None:
+    if table not in IRAN_AUTHORITATIVE_SYNC_TABLES:
+        return None
+    source_server = _sync_item_source_server(item)
+    if source_server is None:
+        logger.warning(
+            "Sync item for Iran-authoritative table has no source server metadata; applying in compatibility mode",
+            extra={
+                "event": "sync.authority_compatibility_apply",
+                "table": table,
+            },
+        )
+        return None
+    if source_server != SERVER_IRAN:
+        return f"source_authority_forbidden:{source_server}"
+    return None
 
 
 def _sync_error_detail(item: dict, reason: str) -> dict[str, object]:
@@ -858,6 +907,19 @@ def _market_runtime_state_upsert_where_clause(model, stmt, data: dict):
     return current_transition.is_(None) | incoming_transition.is_(None) | (current_transition <= incoming_transition)
 
 
+def _updated_at_recency_where_clause(model, stmt, data: dict):
+    if "updated_at" not in data:
+        return None
+    current_updated_at = getattr(model, "updated_at", None)
+    if current_updated_at is None:
+        return None
+    try:
+        incoming_updated_at = stmt.excluded["updated_at"]
+    except (AttributeError, KeyError):
+        return None
+    return current_updated_at.is_(None) | incoming_updated_at.is_(None) | (current_updated_at <= incoming_updated_at)
+
+
 def _offer_publication_status_rank(expression):
     whens = [
         (expression == status, rank)
@@ -961,10 +1023,13 @@ def _build_upsert_stmt(model, table, data):
     elif table == "user_notification_preferences" and data.get("user_id") is not None:
         set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "user_id"}}
         if "updated_at" in data:
+            where_clause = _updated_at_recency_where_clause(model, stmt, data)
+            if where_clause is None:
+                return stmt.on_conflict_do_update(index_elements=['user_id'], set_=set_dict)
             return stmt.on_conflict_do_update(
                 index_elements=['user_id'],
                 set_=set_dict,
-                where=model.updated_at <= stmt.excluded["updated_at"],
+                where=where_clause,
             )
         return stmt.on_conflict_do_update(index_elements=['user_id'], set_=set_dict)
     elif (
@@ -1006,6 +1071,37 @@ def _build_upsert_stmt(model, table, data):
         if where_clause is None:
             return stmt.on_conflict_do_update(index_elements=['token_hash'], set_=set_dict)
         return stmt.on_conflict_do_update(index_elements=['token_hash'], set_=set_dict, where=where_clause)
+    elif table in RELATION_LINK_FIELDS and data.get("invitation_token"):
+        set_dict = {
+            key: stmt.excluded[key]
+            for key in data
+            if key not in {"id", "invitation_token"}
+        }
+        where_clause = _linked_relation_upsert_where_clause(model, stmt, data, RELATION_LINK_FIELDS[table])
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['invitation_token'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['invitation_token'], set_=set_dict, where=where_clause)
+    elif table == "commodities" and data.get("name"):
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "name"}}
+        if not set_dict:
+            return stmt.on_conflict_do_nothing(index_elements=['name'])
+        return stmt.on_conflict_do_update(index_elements=['name'], set_=set_dict)
+    elif table == "commodity_aliases" and data.get("alias"):
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "alias"}}
+        if not set_dict:
+            return stmt.on_conflict_do_nothing(index_elements=['alias'])
+        return stmt.on_conflict_do_update(index_elements=['alias'], set_=set_dict)
+    elif table == "market_schedule_overrides" and data.get("date"):
+        set_dict = {key: stmt.excluded[key] for key in data if key not in {"id", "date"}}
+        where_clause = _updated_at_recency_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['date'], set_=set_dict)
+        return stmt.on_conflict_do_update(index_elements=['date'], set_=set_dict, where=where_clause)
+    elif table == "admin_market_messages":
+        where_clause = _updated_at_recency_where_clause(model, stmt, data)
+        if where_clause is None:
+            return stmt.on_conflict_do_update(index_elements=['id'], set_=data)
+        return stmt.on_conflict_do_update(index_elements=['id'], set_=data, where=where_clause)
     elif table == "market_runtime_state":
         where_clause = _market_runtime_state_upsert_where_clause(model, stmt, data)
         if where_clause is None:
@@ -1279,11 +1375,33 @@ async def _resolve_user_block_id_by_pair(db: AsyncSession, data: dict) -> int | 
         return None
 
 
+async def _resolve_model_id_by_natural_key(db: AsyncSession, model, key: str, value) -> int | None:
+    if value is None or value == "":
+        return None
+    column = getattr(model, key, None)
+    if column is None:
+        return None
+    result = await db.execute(select(model.id).where(column == value).limit(1))
+    resolved = _result_scalar_one_or_none(result)
+    try:
+        return int(resolved) if resolved is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def _resolve_local_record_id_by_public_identity(
     db: AsyncSession,
     table: str,
     data: dict,
 ) -> int | None:
+    model = get_model_class(table)
+    if model is not None:
+        natural_key = NATURAL_KEYS.get(table)
+        if natural_key and table != "users":
+            resolved_id = await _resolve_model_id_by_natural_key(db, model, natural_key, data.get(natural_key))
+            if resolved_id is not None:
+                return resolved_id
+
     if table == "offers":
         return await _resolve_offer_id_by_public_id(db, data.get("offer_public_id"))
     if table == "trades":
@@ -1299,6 +1417,15 @@ async def _resolve_local_record_id_by_public_identity(
     if table == "user_blocks":
         return await _resolve_user_block_id_by_pair(db, data)
     return None
+
+
+def _sync_table_has_natural_delete_identity(table: str, data: dict) -> bool:
+    if table in {"offers", "trades", "offer_publication_states", "trade_delivery_receipts", "offer_requests", "user_blocks"}:
+        return _sync_table_has_public_identity(table, data)
+    natural_key = NATURAL_KEYS.get(table)
+    if not natural_key or table == "users":
+        return False
+    return data.get(natural_key) not in (None, "")
 
 
 def _sync_table_has_public_identity(table: str, data: dict) -> bool:
@@ -1319,6 +1446,9 @@ def _sync_table_has_public_identity(table: str, data: dict) -> bool:
             coerce_positive_int(data.get("blocker_id")) is not None
             and coerce_positive_int(data.get("blocked_id")) is not None
         )
+    natural_key = NATURAL_KEYS.get(table)
+    if natural_key and table != "users":
+        return data.get(natural_key) not in (None, "")
     return False
 
 
@@ -1336,6 +1466,17 @@ async def _localize_offer_reference_by_public_id(db: AsyncSession, table: str, d
         data["local_offer_id"] = local_offer_id
     else:
         data["offer_id"] = local_offer_id
+    return True
+
+
+async def _localize_commodity_alias_reference_by_name(db: AsyncSession, data: dict) -> bool:
+    commodity_name = _nonempty_text(data.get("commodity_name"))
+    if not commodity_name:
+        return True
+    local_commodity_id = await _resolve_model_id_by_natural_key(db, Commodity, "name", commodity_name)
+    if local_commodity_id is None:
+        return False
+    data["commodity_id"] = local_commodity_id
     return True
 
 
@@ -1580,6 +1721,21 @@ def _log_stale_linked_relation_sync_ignored(table: str, record_id, operation: st
     )
 
 
+def _log_unsafe_id_only_delete_ignored(table: str, record_id, data: dict, reason: str) -> None:
+    metadata = build_sync_metadata(table, record_id, "DELETE", data)
+    record_sync_conflict(server_mode=settings.server_mode, table=table, reason=reason)
+    logger.warning(
+        "Ignored synced delete without resolvable natural identity",
+        extra={
+            "event": "sync.unsafe_id_only_delete_ignored",
+            "table": table,
+            "record_id": record_id,
+            "reason": reason,
+            "sync_meta": metadata,
+        },
+    )
+
+
 def _trade_delivery_receipt_upsert_where_clause(model, stmt, data: dict):
     if not _enum_value(data.get("status")):
         return None
@@ -1810,7 +1966,12 @@ async def _apply_item(
             return 'error'
         data = _filter_model_columns(model, data)
         stmt = pg_insert(model).values(**data)
-        stmt = stmt.on_conflict_do_update(index_elements=['key'], set_=data)
+        set_dict = {key: value for key, value in data.items() if key != "key"}
+        where_clause = _updated_at_recency_where_clause(model, stmt, data)
+        if where_clause is None:
+            stmt = stmt.on_conflict_do_update(index_elements=['key'], set_=set_dict)
+        else:
+            stmt = stmt.on_conflict_do_update(index_elements=['key'], set_=set_dict, where=where_clause)
         async with db.begin_nested():
             await db.execute(stmt, execution_options={"is_sync": True})
         return 'ok'
@@ -1851,6 +2012,18 @@ async def _apply_item(
             )
             return 'deferred'
 
+        if table == "commodity_aliases" and not await _localize_commodity_alias_reference_by_name(db, data):
+            logger.warning(
+                "Synced commodity alias references a commodity name that is not available locally; deferring",
+                extra={
+                    "event": "sync.public_identity.commodity_alias_reference_deferred",
+                    "table": table,
+                    "record_id": record_id,
+                    "alias": data.get("alias"),
+                },
+            )
+            return 'deferred'
+
         if table == "trade_delivery_receipts" and not await _localize_trade_delivery_receipt_references(db, data):
             logger.warning(
                 "Synced trade delivery receipt references a trade_number that is not available locally; deferring",
@@ -1866,6 +2039,8 @@ async def _apply_item(
         uses_public_identity = _sync_table_has_public_identity(table, data)
         if not uses_public_identity:
             data['id'] = record_id
+        else:
+            data.pop("id", None)
 
         # Never overwrite channel_message_id from sync — it's set locally by channel-send
         track_new_offer = False
@@ -2067,6 +2242,12 @@ async def _apply_item(
                 local_record_id = await _resolve_local_record_id_by_public_identity(db, table, data)
                 if local_record_id is not None:
                     record_id = local_record_id
+                elif table in NATURAL_IDENTITY_DELETE_TABLES:
+                    if _sync_table_has_natural_delete_identity(table, data):
+                        _log_unsafe_id_only_delete_ignored(table, record_id, data, "natural_identity_not_found")
+                    else:
+                        _log_unsafe_id_only_delete_ignored(table, record_id, data, "missing_natural_identity")
+                    return 'ignored'
 
                 local_trade_for_delete_guard = None
                 if table == "trades":
@@ -2513,6 +2694,19 @@ async def receive_sync_data(
                 continue
 
             table, operation, model, data, record_id = parsed
+            authority_rejection_reason = _sync_item_authority_rejection_reason(item, table)
+            if authority_rejection_reason:
+                error_detail = _sync_error_detail(item, authority_rejection_reason)
+                errors.append(error_detail)
+                error_details.append(error_detail)
+                logger.warning(
+                    "Rejected sync item by source authority policy",
+                    extra={
+                        "event": "sync.source_authority_rejected",
+                        **error_detail,
+                    },
+                )
+                continue
 
             try:
                 watermark_context = _sync_watermark_context_from_item(

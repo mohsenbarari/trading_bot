@@ -12,7 +12,11 @@ from api.routers.sync import (
     _resolve_local_record_id_by_public_identity,
     _sync_table_has_public_identity,
 )
+from models.accountant_relation import AccountantRelation
+from models.commodity import Commodity, CommodityAlias
+from models.customer_relation import CustomerRelation
 from models.invitation import Invitation
+from models.market_schedule_override import MarketScheduleOverride
 from models.market_runtime_state import MarketRuntimeState
 from models.notification import Notification
 from models.offer import Offer
@@ -69,8 +73,8 @@ class FakeInsertBuilder:
         self.values_payload = kwargs
         return self
 
-    def on_conflict_do_update(self, index_elements, set_):
-        self.conflict_payload = (index_elements, set_)
+    def on_conflict_do_update(self, index_elements, set_, **kwargs):
+        self.conflict_payload = (index_elements, set_, kwargs)
         return "TRADING_UPSERT"
 
 
@@ -130,7 +134,9 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("user_id = excluded.user_id", compiled)
         self.assertIn("market_offer_push_enabled = excluded.market_offer_push_enabled", compiled)
         self.assertIn("updated_at = excluded.updated_at", compiled)
-        self.assertIn("WHERE user_notification_preferences.updated_at <= excluded.updated_at", compiled)
+        self.assertIn("user_notification_preferences.updated_at IS NULL", compiled)
+        self.assertIn("excluded.updated_at IS NULL", compiled)
+        self.assertIn("user_notification_preferences.updated_at <= excluded.updated_at", compiled)
 
     async def test_user_notification_preference_identity_resolves_by_user_id(self):
         db = FakeDB([ScalarOneOrNoneResult(91)])
@@ -144,6 +150,170 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved_id, 91)
         self.assertTrue(_sync_table_has_public_identity("user_notification_preferences", {"user_id": "7"}))
         self.assertFalse(_sync_table_has_public_identity("user_notification_preferences", {"user_id": None}))
+
+    async def test_delete_resolves_natural_identity_before_delete(self):
+        db = FakeDB([ScalarOneOrNoneResult(14), SimpleNamespace(rowcount=1)])
+
+        result = await _apply_item(
+            db,
+            "commodities",
+            "DELETE",
+            999,
+            {"id": 999, "name": "gold-main"},
+            model=Commodity,
+            new_offers=[],
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(db.execute_calls), 2)
+        delete_stmt = db.execute_calls[1][0]
+        compiled = str(delete_stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("DELETE FROM commodities", compiled)
+        self.assertIn("commodities.id = ", compiled)
+        self.assertNotIn("999", compiled)
+
+    async def test_id_only_delete_for_natural_identity_table_is_ignored(self):
+        db = FakeDB()
+
+        with patch("api.routers.sync.logger") as logger_mock:
+            result = await _apply_item(
+                db,
+                "commodities",
+                "DELETE",
+                999,
+                {"id": 999},
+                model=Commodity,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ignored")
+        self.assertEqual(db.execute_calls, [])
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("missing_natural_identity", rendered_log)
+        self.assertIn("sync.unsafe_id_only_delete_ignored", rendered_log)
+
+    async def test_commodity_alias_localizes_commodity_reference_by_name(self):
+        db = FakeDB([ScalarOneOrNoneResult(88), SimpleNamespace(rowcount=1)])
+        data = {
+            "id": 15,
+            "alias": "gold-alias",
+            "commodity_id": 14,
+            "commodity_name": "gold-main",
+        }
+
+        with patch("api.routers.sync._build_upsert_stmt", return_value="ALIAS_UPSERT") as builder:
+            result = await _apply_item(
+                db,
+                "commodity_aliases",
+                "INSERT",
+                15,
+                data,
+                model=CommodityAlias,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(data["commodity_id"], 88)
+        builder.assert_called_once()
+        persist_data = builder.call_args.args[2]
+        self.assertEqual(persist_data["commodity_id"], 88)
+        self.assertNotIn("commodity_name", persist_data)
+
+    async def test_commodity_alias_defers_until_named_commodity_exists_locally(self):
+        db = FakeDB([ScalarOneOrNoneResult(None)])
+        data = {
+            "id": 15,
+            "alias": "gold-alias",
+            "commodity_id": 14,
+            "commodity_name": "gold-main",
+        }
+
+        with patch("api.routers.sync._build_upsert_stmt") as builder:
+            result = await _apply_item(
+                db,
+                "commodity_aliases",
+                "INSERT",
+                15,
+                data,
+                model=CommodityAlias,
+                new_offers=[],
+            )
+
+        self.assertEqual(result, "deferred")
+        builder.assert_not_called()
+
+    def test_natural_key_upserts_do_not_conflict_on_remote_id(self):
+        relation_stmt = _build_upsert_stmt(
+            AccountantRelation,
+            "accountant_relations",
+            {
+                "id": 19,
+                "owner_user_id": 2,
+                "accountant_user_id": 5,
+                "invitation_token": "acct-token-19",
+                "global_account_name": "acct",
+                "relation_display_name": "دفتر",
+                "mobile_number": "09120000000",
+                "status": "active",
+            },
+        )
+        relation_compiled = str(relation_stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("ON CONFLICT (invitation_token)", relation_compiled)
+        self.assertNotIn("id = excluded.id", relation_compiled)
+        self.assertNotIn("invitation_token = excluded.invitation_token", relation_compiled)
+
+        customer_stmt = _build_upsert_stmt(
+            CustomerRelation,
+            "customer_relations",
+            {
+                "id": 23,
+                "owner_user_id": 2,
+                "customer_user_id": 8,
+                "invitation_token": "cust-token-23",
+                "management_name": "مشتری",
+                "customer_tier": "tier1",
+                "status": "active",
+            },
+        )
+        customer_compiled = str(customer_stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("ON CONFLICT (invitation_token)", customer_compiled)
+        self.assertNotIn("id = excluded.id", customer_compiled)
+
+        commodity_stmt = _build_upsert_stmt(Commodity, "commodities", {"id": 14, "name": "gold-main"})
+        commodity_compiled = str(commodity_stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("ON CONFLICT (name) DO NOTHING", commodity_compiled)
+
+        alias_stmt = _build_upsert_stmt(
+            CommodityAlias,
+            "commodity_aliases",
+            {"id": 15, "alias": "gold-alias", "commodity_id": 14},
+        )
+        alias_compiled = str(alias_stmt.compile(dialect=postgresql.dialect()))
+        self.assertIn("ON CONFLICT (alias)", alias_compiled)
+        self.assertNotIn("id = excluded.id", alias_compiled)
+        self.assertNotIn("alias = excluded.alias", alias_compiled)
+
+    def test_market_schedule_override_upsert_uses_date_and_updated_at_guard(self):
+        stmt = _build_upsert_stmt(
+            MarketScheduleOverride,
+            "market_schedule_overrides",
+            {
+                "id": 18,
+                "date": date(2026, 6, 27),
+                "override_type": "closed_all_day",
+                "note": "holiday",
+                "updated_at": datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+            },
+        )
+
+        compiled = str(stmt.compile(dialect=postgresql.dialect()))
+
+        self.assertIn("ON CONFLICT (date)", compiled)
+        self.assertNotIn("id = excluded.id", compiled)
+        self.assertNotIn("date = excluded.date", compiled)
+        self.assertIn("market_schedule_overrides.updated_at IS NULL", compiled)
+        self.assertIn("excluded.updated_at IS NULL", compiled)
+        self.assertIn("market_schedule_overrides.updated_at <= excluded.updated_at", compiled)
 
     def test_user_upsert_uses_recency_guard_and_monotonic_fields(self):
         stmt = _build_upsert_stmt(
@@ -363,7 +533,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result, "ok")
         self.assertEqual(insert_builder.values_payload, {"key": "offer_expiry_minutes", "value": "15"})
-        self.assertEqual(insert_builder.conflict_payload, (["key"], {"key": "offer_expiry_minutes", "value": "15"}))
+        self.assertEqual(insert_builder.conflict_payload, (["key"], {"value": "15"}, {}))
         self.assertEqual(db.execute_calls[0], ("TRADING_UPSERT", {"is_sync": True}))
 
         new_offers = []
@@ -576,7 +746,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
                 new_offers=[],
             )
         self.assertEqual(result, "ok")
-        self.assertEqual(relation_data["id"], 19)
+        self.assertNotIn("id", relation_data)
         builder.assert_called_once_with(object, "accountant_relations", relation_data)
         self.assertEqual(db.execute_calls[0], ("RELATION_UPSERT", {"is_sync": True}))
 
@@ -602,7 +772,7 @@ class SyncRouterApplyItemSuccessTests(unittest.IsolatedAsyncioTestCase):
                 new_offers=[],
             )
         self.assertEqual(result, "ok")
-        self.assertEqual(customer_relation_data["id"], 23)
+        self.assertNotIn("id", customer_relation_data)
         builder.assert_called_once_with(object, "customer_relations", customer_relation_data)
         self.assertEqual(db.execute_calls[0], ("CUSTOMER_RELATION_UPSERT", {"is_sync": True}))
 

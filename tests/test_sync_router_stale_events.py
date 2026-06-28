@@ -390,12 +390,9 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("completed_trade_delete", rendered_log)
         self.assertIn("sync.trade_guard_ignored", rendered_log)
 
-    async def test_missing_trade_delete_is_not_reported_as_guard_conflict(self):
+    async def test_missing_trade_delete_is_ignored_without_id_fallback(self):
         db = ApplyDB([
             FakeScalarExecuteResult(None),
-            FakeTradeExecuteResult(None),
-            FakeTradeExecuteResult(None),
-            SimpleNamespace(rowcount=0),
         ])
 
         with patch("api.routers.sync.logger") as logger_mock:
@@ -409,8 +406,10 @@ class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
                 new_offers=[],
             )
 
-        self.assertEqual(result, "ok")
-        logger_mock.warning.assert_not_called()
+        self.assertEqual(result, "ignored")
+        rendered_log = repr(logger_mock.warning.call_args)
+        self.assertIn("natural_identity_not_found", rendered_log)
+        self.assertIn("sync.unsafe_id_only_delete_ignored", rendered_log)
 
     async def test_completed_trade_cannot_be_reopened_by_sync(self):
         existing_trade = make_completed_trade()

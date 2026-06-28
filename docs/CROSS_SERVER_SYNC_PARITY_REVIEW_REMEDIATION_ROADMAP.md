@@ -315,6 +315,35 @@ Exit criteria:
 - Deletion and upsert behavior does not depend on accidental database id parity
   when a safer logical identity exists.
 
+Implementation status - 2026-06-28:
+
+- `user_notification_preferences` now uses a NULL-safe `updated_at` upsert
+  guard, matching the safer user-recency pattern.
+- Delete payloads now include natural identity for accountant/customer
+  relations, Telegram link tokens, commodities, commodity aliases, market
+  schedule overrides, and notifications.
+- Receiver delete handling now refuses unsafe id-only deletes for tables with
+  natural/public identity. Legacy id-only deletes are ignored with audit
+  metadata instead of deleting a potentially unrelated local row.
+- Receiver upsert handling now prefers natural keys for relation rows,
+  commodities, commodity aliases, and market schedule overrides. Public/natural
+  identity payloads drop source database `id` before persistence to avoid
+  primary-key collision with unrelated local rows.
+- Commodity alias sync now carries the canonical commodity name and resolves it
+  to the local `commodity_id`; aliases defer until the referenced commodity is
+  present locally.
+- Watermark/public-identity metadata and parity identity now use stable
+  relation/commodity/notification natural keys instead of falling back to local
+  database id.
+- Iran-authoritative admin/config tables reject payloads with explicit
+  non-Iran `source_server`; legacy payloads without source metadata remain in
+  compatibility mode and are logged.
+- `sync_apply_watermarks` is registered as internal sync bookkeeping, not
+  product sync data.
+- Targeted tests cover natural-key upserts, safe delete resolution, id-only
+  delete ignore behavior, commodity alias localization/defer, NULL-safe
+  preference updates, source-authority rejection, and metadata/parity identity.
+
 ### Stage R4 - Parity Checker False-Negative Hardening
 
 Goal: make parity reports fail safe.

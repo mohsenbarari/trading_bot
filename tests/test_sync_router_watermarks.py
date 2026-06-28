@@ -234,6 +234,34 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["error_items"][0]["reason"], "same_source_sequence_different_payload")
         apply_item.assert_not_awaited()
 
+    async def test_iran_authoritative_table_rejects_foreign_source(self):
+        db = FakeDB()
+        data = {"key": "offer_expiry_minutes", "value": "20"}
+        item = {
+            "table": "trading_settings",
+            "operation": "UPDATE",
+            "id": 0,
+            "data": data,
+            "change_log_id": 30,
+            "sync_meta": build_sync_metadata(
+                "trading_settings",
+                0,
+                "UPDATE",
+                data,
+                change_log_id=30,
+                source_server="foreign",
+            ),
+        }
+
+        with patch("api.routers.sync._apply_item", new=AsyncMock(return_value="ok")) as apply_item:
+            result = await receive_sync_data(items=[item], request=SimpleNamespace(), db=db, _=None)
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["error_items"][0]["reason"], "source_authority_forbidden:foreign")
+        apply_item.assert_not_awaited()
+
     async def test_deferred_item_records_watermark_only_after_retry_apply(self):
         db = FakeDB()
         item = sync_item(11)

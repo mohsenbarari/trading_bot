@@ -195,6 +195,34 @@ class SyncMetadataTests(unittest.TestCase):
         self.assertEqual(close_time["aggregate_id"], "market_close_time_local")
         self.assertNotEqual(open_time["aggregate_id"], close_time["aggregate_id"])
 
+    def test_natural_key_metadata_uses_logical_identity_for_id_drift_tables(self):
+        relation = build_sync_metadata(
+            "customer_relations",
+            23,
+            "DELETE",
+            {"invitation_token": "cust-token-23", "owner_user_id": 2},
+            change_log_id=401,
+        )
+        commodity = build_sync_metadata(
+            "commodities",
+            14,
+            "DELETE",
+            {"name": "gold-main"},
+            change_log_id=402,
+        )
+        notification = build_sync_metadata(
+            "notifications",
+            19,
+            "DELETE",
+            {"dedupe_key": "trade_completed:webapp:10019:1"},
+            change_log_id=403,
+        )
+
+        self.assertEqual(relation["aggregate_id"], "cust-token-23")
+        self.assertEqual(relation["aggregate_db_id"], 23)
+        self.assertEqual(commodity["aggregate_id"], "gold-main")
+        self.assertEqual(notification["aggregate_id"], "trade_completed:webapp:10019:1")
+
     def test_public_identity_payloads_prefer_stable_cross_server_keys(self):
         self.assertEqual(
             build_sync_public_identity("offers", 12, {"offer_public_id": "ofr_12"}),
@@ -229,6 +257,19 @@ class SyncMetadataTests(unittest.TestCase):
                 },
             )["value"],
             "offer-publication:webapp_market:ofr_12",
+        )
+        self.assertEqual(
+            build_sync_public_identity(
+                "customer_relations",
+                23,
+                {"invitation_token": "cust-token-23"},
+            ),
+            {
+                "table": "customer_relations",
+                "kind": "invitation_token",
+                "value": "cust-token-23",
+                "record_id": 23,
+            },
         )
 
     def test_sync_protocol_metadata_carries_current_registry_contract(self):
