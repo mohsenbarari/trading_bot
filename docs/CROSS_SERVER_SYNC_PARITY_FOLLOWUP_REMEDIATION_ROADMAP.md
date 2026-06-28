@@ -39,6 +39,10 @@ are accepted as technically valid:
 - `market_runtime_state` has a real authority conflict. The background-job
   authority allows both Iran and foreign to mutate the table, but the sync
   receiver rejects non-Iran source events for this table.
+- The current market-close transition also expires active local-home offers.
+  Any move to Iran-only `market_runtime_state` authority must preserve expiry of
+  foreign-home offers when market close is first observed through synced Iran
+  state.
 - Market channel notice reconciliation is idempotent and foreign-only, but a
   failed notice is only marked retryable in data. No automatic retry scanner or
   explicit operator retry command exists yet.
@@ -131,13 +135,44 @@ read synced Iran state and reconcile Telegram notices locally. This matches the
 policy that WebApp/product state is Iran-centered while Telegram execution is
 foreign-only.
 
-Implementation direction:
+Important coupling:
+
+The existing market-close transition does more than write
+`market_runtime_state`: it also expires active offers where
+`Offer.home_server == current_server()`. Therefore, simply disabling the foreign
+market schedule transition can leave Telegram-origin/foreign-home active offers
+open after market close. This stage must explicitly preserve foreign-home offer
+expiry before changing foreign runtime authority.
+
+Stage F1A - authority decision and tests, no behavior change:
+
+- Decide the final authority model before changing runtime behavior.
+- Add tests that document the intended outcome for a foreign-origin
+  `market_runtime_state` sync item:
+  - rejected intentionally under Iran-only authority; or
+  - accepted under a dual-origin merge policy.
+- Add tests that document current market-close offer expiry coupling:
+  - close transition expires only local-home active offers;
+  - duplicate or stale transition does not reopen or re-expire terminal offers.
+
+Stage F1B - implementation after F1A passes:
 
 - Prevent or disable foreign writes to `market_runtime_state` from the market
   schedule loop. The foreign loop may still:
   - read the current synced state;
   - reconcile missing Telegram notices;
-  - execute local Telegram-only side effects when needed.
+  - execute local Telegram-only side effects when needed;
+  - expire foreign-home active offers on synced Iran close state without writing
+    `market_runtime_state` as foreign authority.
+- Add an explicit foreign-home market-close expiry path triggered by a newer
+  synced Iran close transition, or document and implement an equivalent
+  replacement authority. The preferred path is:
+  - sync receive applies newer Iran `market_runtime_state` close state on
+    foreign;
+  - after commit, foreign runs an idempotent local-home offer expiry command for
+    `Offer.home_server == "foreign"`;
+  - duplicate close sync does not duplicate side effects;
+  - stale open/close replay cannot revert terminal offer state.
 - Keep receiver rejection for non-Iran source events on
   `market_runtime_state`.
 - Update `core/background_job_authority.py` to state the final authority model.
@@ -150,6 +185,8 @@ Exit criteria:
 
 - No code path on foreign mutates `market_runtime_state` as product truth.
 - Foreign still sends/reconciles Telegram market notices from synced Iran state.
+- Foreign-home active offers still expire on market close under the final
+  authority model.
 - The final authority policy is documented in code-facing docs.
 
 ## Stage F2 - Production Safety Envelope For Repair Apply
@@ -308,6 +345,11 @@ Implementation direction:
   - `next_retry_at <= now`;
   - the dedupe key remains unchanged;
   - sent receipts are never resent.
+- Add a no-receipt recovery path for the current market transition. If the
+  reconciler failed before creating or committing a receipt, a retry scanner
+  cannot see a failed row. A current-state reconciliation command/job must be
+  able to derive the current transition dedupe key, create the missing receipt,
+  and send or skip idempotently.
 - Add a runtime disable/degrade switch for the retry/reconciler path. Disabling
   it must stop Telegram side effects without deleting receipt rows, sync backlog,
   or parity evidence.
@@ -324,6 +366,7 @@ Implementation direction:
 Exit criteria:
 
 - A transient Telegram send failure does not permanently lose the market notice.
+- Missing-receipt failures are recoverable by current-state reconciliation.
 - Retry remains exactly-once for successful sends.
 - Operators can temporarily disable market notice sending/retry without data
   loss and re-enable it later.
@@ -348,6 +391,8 @@ Required updates:
 - `docs/CROSS_SERVER_SYNC_PARITY_REVIEW_REMEDIATION_ROADMAP.md`
   - Link this follow-up roadmap.
   - Mark remaining F-stage work as the active blocker list.
+  - Update suggested execution-order text so a reviewer does not treat the old
+    R-stages as the only active blockers.
 - Root `Makefile`
   - Replace legacy `StrictHostKeyChecking=no` with `accept-new` or document why
     that helper is not production-authoritative.
@@ -406,10 +451,15 @@ Required evidence:
   Telegram channel notice.
 - Iran-origin market close transition syncs to foreign and sends exactly one
   Telegram channel notice.
+- Iran-origin market close transition syncs to foreign and expires foreign-home
+  active offers exactly once under the final F1 authority model.
 - Duplicate replay of the same `market_runtime_state` transition does not send
   a duplicate notice.
+- Duplicate replay of the same market close transition does not re-expire or
+  duplicate foreign-home offer side effects.
 - A forced Telegram failure creates a failed receipt and the retry path repairs
   it.
+- A forced no-receipt failure is repaired by current-state reconciliation.
 - The market notice retry/reconciler disable switch stops side effects without
   deleting receipts, and re-enable resumes safe retry.
 - `user_notification_preferences` recency tests cover `updated_at=NULL`
@@ -437,6 +487,13 @@ The branch can be considered for merge only after:
 Production rollout still requires a separate production preflight:
 
 - fresh production backups;
+- restore-smoke evidence for database backups;
+- single Alembic head and successful migration evidence on both servers;
+- both production sync workers running and draining;
+- transport security evidence for `SYNC_VERIFY_TLS` and any configured CA
+  bundle;
+- no market notice retry backlog, no sync backlog, and no stale/conflict
+  watermark spike after preflight;
 - read-only production parity snapshot and compare;
 - no active repair apply;
 - strict alerts warning-only during the observation window;
