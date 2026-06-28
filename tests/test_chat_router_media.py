@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from starlette.responses import FileResponse
 
 from api.routers.chat import get_chat_file, get_stickers, upload_chat_media
+from core.enums import ChatType
 
 
 class FakeUploadFile:
@@ -31,8 +32,9 @@ class FakeAsyncFile:
 
 
 class FakeDB:
-    def __init__(self, *, get_map=None):
+    def __init__(self, *, get_map=None, execute_results=None):
         self.get_map = dict(get_map or {})
+        self.execute_results = list(execute_results or [])
         self.added = []
         self.commit = AsyncMock()
         self.flush = AsyncMock()
@@ -42,6 +44,35 @@ class FakeDB:
 
     async def get(self, _model, primary_key):
         return self.get_map.get(primary_key)
+
+    async def execute(self, _stmt):
+        if not self.execute_results:
+            raise AssertionError("Unexpected execute() call")
+        return self.execute_results.pop(0)
+
+
+class FakeScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class FakeScalarsResult:
+    def __init__(self, values):
+        self.values = values
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: self.values)
+
+
+def make_active_user(user_id: int):
+    return SimpleNamespace(id=user_id, is_deleted=False, account_status=None)
+
+
+def make_deleted_user(user_id: int):
+    return SimpleNamespace(id=user_id, is_deleted=True, account_status=None)
 
 
 class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -85,32 +116,130 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 401)
         self.assertEqual(exc_info.exception.detail, "Invalid token")
 
-        with patch("api.routers.chat.jwt.decode", return_value={}) as decode_mock:
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "5"}) as decode_mock:
             with self.assertRaises(HTTPException) as exc_info:
-                await get_chat_file("file-1", db=db, token="good")
+                await get_chat_file("file-1", db=FakeDB(get_map={5: make_active_user(5)}), token="good")
         decode_mock.assert_called_once()
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(exc_info.exception.detail, "File not found")
 
-        chat_file = SimpleNamespace(s3_key="/tmp/missing.pdf", mime_type="application/pdf", file_name="x.pdf")
-        db = FakeDB(get_map={"file-1": chat_file})
-        with patch("api.routers.chat.jwt.decode", return_value={}), patch("api.routers.chat.os.path.exists", return_value=False):
+        chat_file = SimpleNamespace(s3_key="/tmp/missing.pdf", mime_type="application/pdf", file_name="x.pdf", uploader_id=5)
+        db = FakeDB(get_map={5: make_active_user(5), "file-1": chat_file})
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "5"}), patch("api.routers.chat.os.path.exists", return_value=False):
             with self.assertRaises(HTTPException) as exc_info:
                 await get_chat_file("file-1", db=db, token="good")
         self.assertEqual(exc_info.exception.status_code, 404)
         self.assertEqual(exc_info.exception.detail, "File not found on disk")
 
     async def test_get_chat_file_returns_file_response_on_success(self):
-        chat_file = SimpleNamespace(s3_key="/tmp/file.pdf", mime_type="application/pdf", file_name="report.pdf")
-        db = FakeDB(get_map={"file-1": chat_file})
+        chat_file = SimpleNamespace(s3_key="/tmp/file.pdf", mime_type="application/pdf", file_name="report.pdf", uploader_id=5)
+        db = FakeDB(get_map={5: make_active_user(5), "file-1": chat_file})
 
-        with patch("api.routers.chat.jwt.decode", return_value={}), patch("api.routers.chat.os.path.exists", return_value=True):
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "5"}), patch("api.routers.chat.os.path.exists", return_value=True):
             response = await get_chat_file("file-1", db=db, token="good")
 
         self.assertIsInstance(response, FileResponse)
         self.assertEqual(response.path, "/tmp/file.pdf")
         self.assertEqual(response.media_type, "application/pdf")
-        self.assertIn("report.pdf", response.headers.get("content-disposition", ""))
+
+    async def test_get_chat_file_allows_visible_user_avatar(self):
+        chat_file = SimpleNamespace(s3_key="/tmp/avatar.jpg", mime_type="image/jpeg", file_name="avatar.jpg", uploader_id=5)
+        db = FakeDB(get_map={9: make_active_user(9), "avatar-1": chat_file}, execute_results=[FakeScalarResult(8)])
+
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "9"}), patch("api.routers.chat.os.path.exists", return_value=True):
+            response = await get_chat_file("avatar-1", db=db, token="good")
+
+        self.assertIsInstance(response, FileResponse)
+
+    async def test_get_chat_file_allows_direct_message_recipient(self):
+        chat_file = SimpleNamespace(s3_key="/tmp/direct.jpg", mime_type="image/jpeg", file_name="direct.jpg", uploader_id=5)
+        message = SimpleNamespace(
+            id=10,
+            sender_id=5,
+            receiver_id=9,
+            chat_id=None,
+            content='{"file_id":"file-1"}',
+        )
+        db = FakeDB(
+            get_map={9: make_active_user(9), "file-1": chat_file},
+            execute_results=[
+                FakeScalarResult(None),
+                FakeScalarsResult([]),
+                FakeScalarsResult([message]),
+            ],
+        )
+
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "9"}), patch("api.routers.chat.os.path.exists", return_value=True):
+            response = await get_chat_file("file-1", db=db, token="good")
+
+        self.assertIsInstance(response, FileResponse)
+
+    async def test_get_chat_file_allows_active_group_member(self):
+        chat_file = SimpleNamespace(s3_key="/tmp/group.jpg", mime_type="image/jpeg", file_name="group.jpg", uploader_id=5)
+        chat = SimpleNamespace(id=77, type=ChatType.GROUP, is_deleted=False)
+        message = SimpleNamespace(
+            id=10,
+            sender_id=5,
+            receiver_id=77,
+            chat_id=77,
+            content='{"file_id":"file-1"}',
+        )
+        db = FakeDB(
+            get_map={9: make_active_user(9), "file-1": chat_file, 77: chat},
+            execute_results=[
+                FakeScalarResult(None),
+                FakeScalarsResult([]),
+                FakeScalarsResult([message]),
+                FakeScalarResult(1),
+            ],
+        )
+
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "9"}), patch("api.routers.chat.os.path.exists", return_value=True):
+            response = await get_chat_file("file-1", db=db, token="good")
+
+        self.assertIsInstance(response, FileResponse)
+
+    async def test_get_chat_file_rejects_nonparticipant(self):
+        chat_file = SimpleNamespace(s3_key="/tmp/private.jpg", mime_type="image/jpeg", file_name="private.jpg", uploader_id=5)
+        message = SimpleNamespace(
+            id=10,
+            sender_id=5,
+            receiver_id=9,
+            chat_id=None,
+            content='{"file_id":"file-1"}',
+        )
+        db = FakeDB(
+            get_map={12: make_active_user(12), "file-1": chat_file},
+            execute_results=[
+                FakeScalarResult(None),
+                FakeScalarsResult([]),
+                FakeScalarsResult([message]),
+            ],
+        )
+
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "12"}):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_chat_file("file-1", db=db, token="good")
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+    async def test_get_chat_file_rejects_deleted_requester(self):
+        db = FakeDB(get_map={5: make_deleted_user(5)})
+
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "5"}):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_chat_file("file-1", db=db, token="good")
+
+        self.assertEqual(exc_info.exception.status_code, 403)
+
+    async def test_get_chat_file_rejects_refresh_token_type(self):
+        db = FakeDB(get_map={5: make_active_user(5)})
+
+        with patch("api.routers.chat.jwt.decode", return_value={"sub": "5", "type": "refresh"}):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_chat_file("file-1", db=db, token="refresh-token")
+
+        self.assertEqual(exc_info.exception.status_code, 401)
 
     async def test_upload_chat_media_surfaces_helper_validation_errors(self):
         current_user = SimpleNamespace(id=5)

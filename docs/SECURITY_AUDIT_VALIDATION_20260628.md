@@ -106,7 +106,7 @@ Suggested tests:
 ### VF3 - Chat File Download Lacks Per-File Authorization
 
 - Severity: High
-- Status: Confirmed
+- Status: Remediated with backend-only authorization gate
 - Area: Messenger, privacy, file access control
 - Files:
   - `api/routers/chat.py:2486-2517`
@@ -138,6 +138,15 @@ Suggested tests:
 - Non-participant gets 403.
 - Deleted/inactive user gets 403.
 - Expired/invalid token gets 401.
+
+Remediation update:
+
+- `GET /api/chat/files/{file_id}` now decodes and requires a valid numeric token subject before file lookup/streaming.
+- Access is allowed for the uploader, visible user avatars, active chat avatars, and messages visible to the requester.
+- Message visibility covers legacy/direct messages via sender/receiver and room messages via active group/channel membership.
+- The frontend URL contract stayed unchanged: `/api/chat/files/{file_id}?token=...`.
+- This pass intentionally avoided a schema migration. Existing media is resolved through `messages.content` JSON references for `file_id` and `snapshot_id`.
+- Added focused regression tests for uploader success, user-avatar visibility, direct-message recipient access, active group-member access, and nonparticipant denial.
 
 ### VF4 - OTP Verification Has No Failed-Attempt Limit
 

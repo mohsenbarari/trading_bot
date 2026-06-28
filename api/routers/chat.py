@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import inspect
+import json
 import os
 import uuid
 import asyncio
@@ -18,6 +19,7 @@ from jose import jwt, JWTError
 from core.db import AsyncSessionLocal, get_db
 from core.config import settings
 from models.chat import Chat
+from models.chat_member import ChatMember
 from models.message import Message
 from models.upload_session import UploadSession, UploadSessionStatus, UploadRoomKind
 from models.user import User
@@ -76,7 +78,7 @@ from api.routers.chat_schemas import (
     UploadSessionStatusChangeResponse,
 )
 
-from core.enums import ChatMemberRole, ChatType
+from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
 from core.services.chat_room_service import (
     add_group_member,
     bulk_add_channel_members,
@@ -130,6 +132,7 @@ from core.services.chat_room_service import (
 from core.services.chat_role_badge_service import load_chat_role_badges
 from core.services.avatar_service import resolve_owned_avatar_file_id
 from core.services.accountant_relation_service import is_user_accountant
+from core.services.user_account_status_service import is_user_global_web_locked
 from core.services.customer_relation_service import (
     build_allowed_customer_chat_targets,
     get_active_customer_relation_for_customer,
@@ -2227,6 +2230,145 @@ async def upload_chat_media(
                 await close_result
 
 
+def _decode_chat_file_token_user_id(token: str) -> int:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    token_type = payload.get("type")
+    if token_type is not None and token_type != "access":
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    token_subject = payload.get("sub")
+    try:
+        return int(token_subject)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+async def _load_chat_file_requester(db: AsyncSession, token: str) -> User:
+    requester_lookup_id = _decode_chat_file_token_user_id(token)
+
+    requester = await db.get(User, requester_lookup_id)
+    if requester is None:
+        stmt = select(User).where(User.telegram_id == requester_lookup_id)
+        requester = (await db.execute(stmt)).scalar_one_or_none()
+
+    if requester is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if requester.is_deleted or is_user_global_web_locked(requester):
+        raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+    return requester
+
+
+def _chat_file_content_references_file(content: str | None, file_id: str) -> bool:
+    if not content or not content.lstrip().startswith("{"):
+        return False
+    try:
+        payload = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("file_id") == file_id or payload.get("snapshot_id") == file_id
+
+
+async def _user_is_active_chat_member(db: AsyncSession, *, chat_id: int, user_id: int) -> bool:
+    stmt = (
+        select(ChatMember.id)
+        .where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == user_id,
+            ChatMember.membership_status == ChatMembershipStatus.ACTIVE,
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
+async def _chat_file_is_visible_avatar(db: AsyncSession, *, file_id: str, requester_id: int) -> bool:
+    user_avatar_stmt = select(User.id).where(User.avatar_file_id == file_id).limit(1)
+    user_avatar_result = await db.execute(user_avatar_stmt)
+    if user_avatar_result.scalar_one_or_none() is not None:
+        return True
+
+    chat_avatar_stmt = (
+        select(Chat)
+        .where(Chat.avatar_file_id == file_id, Chat.is_deleted.is_(False))
+    )
+    chat_avatar_result = await db.execute(chat_avatar_stmt)
+    for chat in chat_avatar_result.scalars().all():
+        if await _user_is_active_chat_member(db, chat_id=chat.id, user_id=requester_id):
+            return True
+    return False
+
+
+async def _message_grants_chat_file_access(
+    db: AsyncSession,
+    *,
+    message: Message,
+    requester_id: int,
+) -> bool:
+    if requester_id in (message.sender_id, message.receiver_id):
+        return True
+
+    if message.chat_id is None:
+        return False
+
+    chat = await db.get(Chat, message.chat_id)
+    if chat is None or chat.is_deleted:
+        return False
+
+    if chat.type == ChatType.DIRECT:
+        return requester_id in (message.sender_id, message.receiver_id)
+
+    return await _user_is_active_chat_member(db, chat_id=chat.id, user_id=requester_id)
+
+
+async def _chat_file_is_referenced_by_visible_message(
+    db: AsyncSession,
+    *,
+    file_id: str,
+    requester_id: int,
+) -> bool:
+    stmt = (
+        select(Message)
+        .where(
+            Message.is_deleted.is_(False),
+            Message.content.contains(file_id),
+        )
+        .order_by(Message.id.desc())
+    )
+    result = await db.execute(stmt)
+    for message in result.scalars().all():
+        if not _chat_file_content_references_file(message.content, file_id):
+            continue
+        if await _message_grants_chat_file_access(db, message=message, requester_id=requester_id):
+            return True
+    return False
+
+
+async def _authorize_chat_file_access(
+    db: AsyncSession,
+    *,
+    chat_file: ChatFile,
+    file_id: str,
+    requester_id: int,
+) -> None:
+    if chat_file.uploader_id == requester_id:
+        return
+
+    if await _chat_file_is_visible_avatar(db, file_id=file_id, requester_id=requester_id):
+        return
+
+    if await _chat_file_is_referenced_by_visible_message(db, file_id=file_id, requester_id=requester_id):
+        return
+
+    raise HTTPException(status_code=403, detail="File access denied")
+
+
 @router.post("/upload-batches", response_model=UploadBatchCreateResponse, status_code=status.HTTP_201_CREATED)
 async def post_upload_batch(
     data: UploadBatchCreateRequest,
@@ -2492,16 +2634,19 @@ async def get_chat_file(
     """دریافت امن فایل چت (استریمینگ از دیسک - مسیر واقعی مخفی است)"""
     if not token:
         raise HTTPException(status_code=401, detail="Token is missing")
-    
-    try:
-        jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    requester = await _load_chat_file_requester(db, token)
 
     # پیداکردن رکورد در دیتابیس
     chat_file = await db.get(ChatFile, file_id)
     if not chat_file:
         raise HTTPException(status_code=404, detail="File not found")
+
+    await _authorize_chat_file_access(
+        db,
+        chat_file=chat_file,
+        file_id=file_id,
+        requester_id=requester.id,
+    )
     
     # بررسی وجود فایل روی دیسک
     file_path = chat_file.s3_key  # s3_key حالا مسیر فایل محلی است

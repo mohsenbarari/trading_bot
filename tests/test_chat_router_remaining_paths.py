@@ -52,6 +52,10 @@ def make_message_read(message_id: int, *, content: str = '{"file_id":"f"}', mess
     )
 
 
+def make_active_user(user_id: int):
+    return SimpleNamespace(id=user_id, is_deleted=False, account_status=None)
+
+
 class FakeExecuteResult:
     def __init__(self, scalar_value):
         self._scalar_value = scalar_value
@@ -159,6 +163,7 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_direct_message_serializer_helpers_cover_empty_and_enriched_paths(self):
         db = SimpleNamespace(execute=AsyncMock())
+        db.execute.return_value = SimpleNamespace(all=lambda: [])
         empty: list[MessageRead] = []
         self.assertIs(await _enrich_direct_message_reads(db, empty), empty)
 
@@ -746,16 +751,16 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
 
         with patch('api.routers.chat.jwt.decode', return_value={'sub': '5'}):
             with self.assertRaises(HTTPException) as exc_info:
-                await get_chat_file(file_id='missing', db=FakeDB(get_values={}), token='good')
+                await get_chat_file(file_id='missing', db=FakeDB(get_values={5: make_active_user(5)}), token='good')
         self.assertEqual(exc_info.exception.detail, 'File not found')
 
-        missing_disk_file = SimpleNamespace(s3_key='/tmp/missing-chat-file', mime_type='image/png', file_name='pic.png')
+        missing_disk_file = SimpleNamespace(s3_key='/tmp/missing-chat-file', mime_type='image/png', file_name='pic.png', uploader_id=5)
         with patch('api.routers.chat.jwt.decode', return_value={'sub': '5'}), patch('api.routers.chat.os.path.exists', return_value=False):
             with self.assertRaises(HTTPException) as exc_info:
-                await get_chat_file(file_id='file-1', db=FakeDB(get_values={'file-1': missing_disk_file}), token='good')
+                await get_chat_file(file_id='file-1', db=FakeDB(get_values={5: make_active_user(5), 'file-1': missing_disk_file}), token='good')
         self.assertEqual(exc_info.exception.detail, 'File not found on disk')
 
-        chat_file = SimpleNamespace(s3_key='/tmp/chat-file', mime_type='image/png', file_name='pic.png')
+        chat_file = SimpleNamespace(s3_key='/tmp/chat-file', mime_type='image/png', file_name='pic.png', uploader_id=5)
         sentinel_response = object()
         with patch('api.routers.chat.jwt.decode', return_value={'sub': '5'}), patch(
             'api.routers.chat.os.path.exists',
@@ -763,7 +768,7 @@ class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         ), patch('fastapi.responses.FileResponse', return_value=sentinel_response) as file_response_mock:
             response = await get_chat_file(
                 file_id='file-1',
-                db=FakeDB(get_values={'file-1': chat_file}),
+                db=FakeDB(get_values={5: make_active_user(5), 'file-1': chat_file}),
                 token='good',
             )
 
