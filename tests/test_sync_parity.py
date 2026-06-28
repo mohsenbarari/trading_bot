@@ -41,6 +41,81 @@ class SyncParityTests(unittest.TestCase):
         self.assertEqual(report["tables"]["offers"]["severity"], "local_only_difference")
         self.assertEqual(report["tables"]["offers"]["local_only_difference_count"], 1)
 
+    def test_publication_runtime_fields_do_not_fail_business_parity(self):
+        local = snapshot(
+            "offer_publication_states",
+            [
+                {
+                    "id": 1,
+                    "offer_id": 10,
+                    "offer_public_id": "ofr_1",
+                    "surface": "telegram_channel",
+                    "publication_owner_server": "foreign",
+                    "status": "sent",
+                    "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+                    "telegram_chat_id": -1001,
+                    "telegram_message_id": 777,
+                    "offer_version_id": 4,
+                }
+            ],
+        )
+        peer = snapshot(
+            "offer_publication_states",
+            [
+                {
+                    "id": 9,
+                    "offer_id": 99,
+                    "offer_public_id": "ofr_1",
+                    "surface": "telegram_channel",
+                    "publication_owner_server": "foreign",
+                    "status": "sent",
+                    "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+                    "telegram_chat_id": None,
+                    "telegram_message_id": None,
+                    "offer_version_id": 4,
+                }
+            ],
+        )
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "non_business_difference")
+        self.assertEqual(report["tables"]["offer_publication_states"]["severity"], "local_only_difference")
+        self.assertEqual(report["tables"]["offer_publication_states"]["business_mismatch_count"], 0)
+
+    def test_publication_status_still_fails_business_parity(self):
+        local = snapshot(
+            "offer_publication_states",
+            [
+                {
+                    "offer_public_id": "ofr_1",
+                    "surface": "telegram_channel",
+                    "publication_owner_server": "foreign",
+                    "status": "sent",
+                    "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+                    "offer_version_id": 4,
+                }
+            ],
+        )
+        peer = snapshot(
+            "offer_publication_states",
+            [
+                {
+                    "offer_public_id": "ofr_1",
+                    "surface": "telegram_channel",
+                    "publication_owner_server": "foreign",
+                    "status": "failed",
+                    "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+                    "offer_version_id": 4,
+                }
+            ],
+        )
+
+        report = compare_parity_snapshots(local, peer)
+
+        self.assertEqual(report["status"], "business_drift")
+        self.assertEqual(report["tables"]["offer_publication_states"]["severity"], "business_drift")
+
     def test_missing_row_is_critical_drift(self):
         local = snapshot("trades", [{"id": 1, "trade_number": 10001, "price": 100}])
         peer = snapshot(

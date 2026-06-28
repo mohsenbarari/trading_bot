@@ -10,6 +10,8 @@ from api.routers import sync
 from api.routers.sync import _build_upsert_stmt, receive_sync_data
 from core.sync_parity import (
     IDENTITY_FIELDS_BY_TABLE,
+    LOCAL_ONLY_FIELDS_BY_TABLE,
+    VOLATILE_FIELDS_BY_TABLE,
     build_record_parity,
     build_table_parity_snapshot,
     compare_parity_snapshots,
@@ -370,11 +372,15 @@ def sample_identity(table_name: str, payload: dict) -> dict:
 def business_mutation(table_name: str, payload: dict) -> dict:
     mutated = copy.deepcopy(payload)
     identity_fields = set(IDENTITY_FIELDS_BY_TABLE.get(table_name, ("id",)))
+    local_only_fields = set(LOCAL_ONLY_FIELDS_BY_TABLE.get(table_name, set()))
+    volatile_fields = set(VOLATILE_FIELDS_BY_TABLE.get("*", set())) | set(VOLATILE_FIELDS_BY_TABLE.get(table_name, set()))
     candidates = [
         field
         for field, value in mutated.items()
         if field not in identity_fields
-        and field not in {"updated_at", "last_seen_at", "channel_message_id", "worker_id", "lease_until"}
+        and field not in local_only_fields
+        and field not in volatile_fields
+        and field not in {"last_seen_at", "worker_id", "lease_until"}
         and value is not None
     ]
     if not candidates:

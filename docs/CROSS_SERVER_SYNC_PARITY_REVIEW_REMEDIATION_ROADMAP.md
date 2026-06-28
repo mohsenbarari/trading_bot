@@ -399,6 +399,23 @@ Implementation status - 2026-06-28:
 
 Goal: remove the code/document mismatch for publication state.
 
+Decision:
+
+- `offer_publication_states` remains a shared `SyncPolicy.SYNC` table because it
+  is the cross-server evidence that an offer has been exposed on a surface.
+- Shared/business truth is limited to the natural identity and state machine:
+  `dedupe_key`, `offer_public_id`, `offer_home_server`, `surface`,
+  `publication_owner_server`, `status`, `offer_version_id`,
+  `last_known_offer_status`, terminal state timestamps, and `archived`.
+- Local/runtime publication evidence is not business truth and must not cause a
+  strict parity failure: local row `id`, localized `offer_id`,
+  `surface_resource_id`, `telegram_chat_id`, `telegram_message_id`,
+  provider `error_code` / `error_message`, and `state_metadata`.
+- Volatile retry timing (`last_attempt_at`, `last_success_at`, `next_retry_at`,
+  `updated_at`) remains excluded from business parity.
+- The repair tool may replay the shared state machine, but it must not enforce
+  Telegram runtime identifiers or provider diagnostics from the opposite server.
+
 Deliverables:
 
 - Decide and document shared-vs-local semantics.
@@ -428,6 +445,16 @@ Tests:
 Exit criteria:
 
 - Roadmap and code agree on publication-state semantics.
+
+Implementation status:
+
+- `core/sync_registry.py` documents the selected shared policy.
+- `core/sync_parity.py` classifies Telegram/runtime publication identifiers and
+  diagnostics as local-only so they report as non-business differences.
+- `core/sync_repair.py` excludes local Telegram/runtime publication fields from
+  current-state replay payloads.
+- Targeted tests cover Telegram runtime parity differences, strict status drift,
+  and repair replay payload filtering.
 
 ### Stage R6 - Secure Transport And Production Gates
 

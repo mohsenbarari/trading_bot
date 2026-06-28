@@ -74,6 +74,16 @@ VOLATILE_FIELDS_BY_TABLE: dict[str, set[str]] = {
 
 LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "offers": {"channel_message_id"},
+    "offer_publication_states": {
+        "id",
+        "offer_id",
+        "surface_resource_id",
+        "telegram_chat_id",
+        "telegram_message_id",
+        "error_code",
+        "error_message",
+        "state_metadata",
+    },
 }
 
 SENSITIVE_IDENTITY_FIELDS = {

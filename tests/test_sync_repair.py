@@ -74,6 +74,48 @@ class SyncRepairTests(unittest.TestCase):
             {"id": 2, "dedupe_key": "trade_completed:webapp:10001:1", "status": "pending"},
         )
 
+    def test_row_to_sync_data_drops_offer_publication_runtime_fields(self):
+        publication_row = fake_row(
+            [
+                "id",
+                "offer_id",
+                "offer_public_id",
+                "surface",
+                "publication_owner_server",
+                "status",
+                "dedupe_key",
+                "telegram_chat_id",
+                "telegram_message_id",
+                "last_attempt_at",
+                "error_message",
+                "offer_version_id",
+            ],
+            id=3,
+            offer_id=33,
+            offer_public_id="ofr_1",
+            surface="telegram_channel",
+            publication_owner_server="foreign",
+            status="sent",
+            dedupe_key="offer-publication:telegram_channel:ofr_1",
+            telegram_chat_id=-1001,
+            telegram_message_id=777,
+            last_attempt_at="2026-06-28T04:00:00",
+            error_message="telegram runtime detail",
+            offer_version_id=4,
+        )
+
+        self.assertEqual(
+            row_to_sync_data("offer_publication_states", publication_row),
+            {
+                "offer_public_id": "ofr_1",
+                "surface": "telegram_channel",
+                "publication_owner_server": "foreign",
+                "status": "sent",
+                "dedupe_key": "offer-publication:telegram_channel:ofr_1",
+                "offer_version_id": 4,
+            },
+        )
+
     def test_build_current_state_replay_item_includes_signed_metadata_without_local_runtime_fields(self):
         row = fake_row(
             ["id", "offer_public_id", "price", "channel_message_id"],

@@ -187,7 +187,11 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "surface publication authority plus product owner authority for terminal state",
         "dedupe key and latest terminal state; must not rewrite offer business truth",
         "operator visibility and publication reconciliation",
-        notes="Explicit Step 7A surface state for Telegram channel and WebApp market visibility.",
+        notes=(
+            "Shared Step 7A surface state for Telegram channel and WebApp market visibility. "
+            "Business parity is dedupe/status/version/owner based; Telegram message ids and "
+            "provider diagnostics are local runtime evidence, not business truth."
+        ),
     ),
     "offer_requests": _entry(
         "offer_requests",
