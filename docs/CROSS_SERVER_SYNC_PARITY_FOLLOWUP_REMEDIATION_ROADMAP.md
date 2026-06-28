@@ -258,6 +258,21 @@ Implementation direction:
 - Add tests proving production apply refuses missing manifest, wrong branch,
   missing backup, wrong target, and raw local `id` identity.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- `scripts/sync_repair_tool.py replay-row --apply` now requires
+  `--manifest`, `--operator-approval`, `--confirm-write`, and
+  `--source-sequence` before sending any peer write.
+- The repair apply manifest validates source/target, table, operation,
+  identity fields/hash, expected row counts, source sequence, backup evidence,
+  before/after parity evidence, git branch/commit metadata, and operator
+  approval phrase.
+- Production apply refuses non-`main` manifests, refuses current git
+  branch/commit mismatch, and refuses raw local `id` identity even if the
+  non-production override flag is present.
+- Non-production raw local `id` apply remains possible only with
+  `--allow-local-id-identity` and complete manifest evidence.
+
 Exit criteria:
 
 - Staging repair apply is still possible with complete manifest evidence.
