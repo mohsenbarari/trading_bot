@@ -115,6 +115,13 @@ Exit criteria:
 - No production/staging runtime behavior is changed by this stage except tests
   or harmless documentation notes.
 
+Implementation status on `candidate/sync-parity-hardening`:
+
+- Added `tests/test_sync_parity_followup_f0.py` as the focused F0 regression
+  gate for committed outbox behavior, outbound wake-up semantics, logical sync
+  metadata identities, incomplete parity truncation, and foreign-local market
+  notice receipt registry classification.
+
 ## Stage F1 - Market Runtime Authority Decision And Enforcement
 
 Goal: remove the current contradiction for `market_runtime_state`.
