@@ -6,7 +6,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from core import events
-from core.sync_protocol import build_sync_protocol_metadata
 
 
 class _FakeConnection:
@@ -417,7 +416,7 @@ class CoreEventsTests(unittest.TestCase):
             ('AdminBroadcastMessage', 'after_delete'): admin_broadcast_message,
         }
 
-    def test_get_sync_redis_reuses_connection_and_log_change_paths(self):
+    def test_get_sync_redis_reuses_connection_and_log_change_records_outbox_only(self):
         created_clients = []
 
         def build_client(**kwargs):
@@ -439,31 +438,19 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(created_clients[0][0]['socket_timeout'], 0.3)
 
         connection = _FakeConnection()
-        sync_redis = _FakeSyncRedis()
-        with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
+        with patch('core.events._get_sync_redis') as get_sync_redis, patch(
             'core.sync_push.push_sync_direct'
         ) as push_sync_direct:
             connection.execute.return_value = _FakeInsertResult(42)
             events.log_change(connection, 'offers', 5, 'INSERT', {'id': 5})
 
         connection.execute.assert_called_once()
-        self.assertEqual(sync_redis.lpush_calls[0][0], 'sync:outbound')
-        queued_payload = json.loads(sync_redis.lpush_calls[0][1])
-        self.assertEqual(queued_payload["change_log_id"], 42)
-        self.assertEqual(queued_payload["table"], "offers")
-        self.assertEqual(queued_payload["id"], 5)
-        self.assertEqual(queued_payload["sync_meta"]["aggregate_table"], "offers")
-        self.assertEqual(queued_payload["sync_meta"]["aggregate_id"], "5")
-        self.assertEqual(queued_payload["sync_meta"]["outbox_id"], 42)
-        self.assertEqual(queued_payload["sync_meta"]["event_sequence"], 42)
-        self.assertEqual(queued_payload["sync_protocol"], build_sync_protocol_metadata())
-        push_sync_direct.assert_called_once()
-        self.assertEqual(push_sync_direct.call_args.args[0]["change_log_id"], 42)
-        self.assertEqual(push_sync_direct.call_args.args[0]["sync_meta"], queued_payload["sync_meta"])
-        self.assertEqual(push_sync_direct.call_args.args[0]["sync_protocol"], queued_payload["sync_protocol"])
+        get_sync_redis.assert_not_called()
+        push_sync_direct.assert_not_called()
+        inserted_change_log_data = json.loads(connection.execute.call_args.args[1]['data'])
+        self.assertEqual(inserted_change_log_data, {'id': 5})
 
-        sync_redis = _FakeSyncRedis()
-        with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
+        with patch('core.events._get_sync_redis') as get_sync_redis, patch(
             'core.sync_push.push_sync_direct'
         ) as push_sync_direct:
             connection.execute.return_value = _FakeInsertResult(43)
@@ -475,30 +462,18 @@ class CoreEventsTests(unittest.TestCase):
                 {'id': 5, 'offer_public_id': 'ofr_5', 'status': 'active'},
             )
 
-        queued_payload = json.loads(sync_redis.lpush_calls[0][1])
-        self.assertEqual(queued_payload["public_identity"]["kind"], "offer_public_id")
-        self.assertEqual(queued_payload["public_identity"]["value"], "ofr_5")
-        self.assertEqual(queued_payload["sync_meta"]["aggregate_id"], "ofr_5")
-        self.assertEqual(push_sync_direct.call_args.args[0]["public_identity"], queued_payload["public_identity"])
-
-        sync_redis = _FakeSyncRedis(lpush_error=RuntimeError('redis down'))
-        with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
-            'core.sync_push.push_sync_direct', side_effect=RuntimeError('push down')
-        ), patch.object(events, 'logger') as logger:
-            events._sync_redis = object()
-            events.log_change(connection, 'offers', 6, 'UPDATE', {'id': 6})
-        self.assertIsNone(events._sync_redis)
-        self.assertGreaterEqual(logger.error.call_count, 1)
-        logger.warning.assert_called_once()
+        get_sync_redis.assert_not_called()
+        push_sync_direct.assert_not_called()
+        inserted_change_log_data = json.loads(connection.execute.call_args.args[1]['data'])
+        self.assertEqual(inserted_change_log_data["offer_public_id"], "ofr_5")
 
         with patch.object(connection, 'execute', side_effect=RuntimeError('sql down')), patch.object(events, 'logger') as logger:
             with self.assertRaises(RuntimeError):
                 events.log_change(connection, 'offers', 7, 'DELETE', {'id': 7})
         logger.error.assert_not_called()
 
-    def test_log_change_applies_field_policy_before_outbox_queue_and_direct_push(self):
+    def test_log_change_applies_field_policy_before_outbox_insert(self):
         connection = _FakeConnection()
-        sync_redis = _FakeSyncRedis()
         dirty_payload = {
             'id': 3,
             'mobile_number': '09120000000',
@@ -508,23 +483,22 @@ class CoreEventsTests(unittest.TestCase):
             'avatar_file_id': 'chat-file-user',
         }
 
-        with patch('core.events._get_sync_redis', return_value=sync_redis), patch(
+        with patch('core.events._get_sync_redis') as get_sync_redis, patch(
             'core.sync_push.push_sync_direct'
         ) as push_sync_direct:
             connection.execute.return_value = _FakeInsertResult(44)
             events.log_change(connection, 'users', 3, 'UPDATE', dirty_payload)
 
-        queued_payload = json.loads(sync_redis.lpush_calls[0][1])
         inserted_change_log_data = json.loads(connection.execute.call_args.args[1]['data'])
-        pushed_payload = push_sync_direct.call_args.args[0]
+        get_sync_redis.assert_not_called()
+        push_sync_direct.assert_not_called()
 
-        for payload in (queued_payload['data'], inserted_change_log_data, pushed_payload['data']):
-            self.assertEqual(payload['mobile_number'], '09120000000')
-            self.assertNotIn('admin_password_hash', payload)
-            self.assertNotIn('must_change_password', payload)
-            self.assertNotIn('avatar_file_id', payload)
-            self.assertNotIn('bcrypt-secret', json.dumps(payload))
-            self.assertNotIn('chat-file-user', json.dumps(payload))
+        self.assertEqual(inserted_change_log_data['mobile_number'], '09120000000')
+        self.assertNotIn('admin_password_hash', inserted_change_log_data)
+        self.assertNotIn('must_change_password', inserted_change_log_data)
+        self.assertNotIn('avatar_file_id', inserted_change_log_data)
+        self.assertNotIn('bcrypt-secret', json.dumps(inserted_change_log_data))
+        self.assertNotIn('chat-file-user', json.dumps(inserted_change_log_data))
 
     def test_publish_event_sync_success_and_failure(self):
         sync_redis = _FakeSyncRedis()

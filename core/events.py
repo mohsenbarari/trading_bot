@@ -2,14 +2,16 @@
 """
 SQLAlchemy Event Listeners for Real-time Redis Publishing & Cross-Server Sync
 
-This module automatically publishes Redis events when database models change,
-enabling true real-time synchronization without manual publish calls.
+This module automatically records durable change_log rows when database models
+change, enabling committed outbox synchronization without manual calls.
 
-Sync flow (optimized):
+Sync flow:
   1. Event fires → log_change() inserts into change_log (same DB transaction)
-  2. log_change() pushes to Redis sync:outbound queue (persistent connection)
-  3. log_change() fires direct HTTP push via thread pool (instant delivery)
-  4. sync_worker drains committed change_log rows and also consumes Redis wake-ups/retries
+  2. The source transaction commits or rolls back normally
+  3. sync_worker drains committed change_log rows and delivers them to the peer
+
+log_change() must not publish peer-deliverable payloads before commit. Redis
+publishing in this module is reserved for local realtime UI events.
 """
 import json
 import logging
@@ -17,17 +19,12 @@ from typing import Any, Dict
 from datetime import datetime
 from sqlalchemy import event
 from sqlalchemy.orm import Session
-import redis.asyncio as redis
-from core.redis import pool
 from sqlalchemy.sql import text
 import hashlib
 from core.utils import utc_now_naive
 from core.offer_sync_payload import build_offer_sync_payload
 from core.sync_outbox_guard import mark_sync_outbox_recorded, register_sync_outbox_guards
 from core.sync_field_policy import sanitize_sync_payload
-from core.sync_metadata import build_sync_metadata, build_sync_public_identity
-from core.sync_protocol import build_sync_protocol_metadata
-from core.server_routing import current_server
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +56,12 @@ def _get_sync_redis():
 
 
 def log_change(connection, table_name: str, record_id: int, operation: str, data: Dict[str, Any]):
-    """Log change to change_log + push to Redis + fire direct HTTP push"""
+    """Record a committed-outbox candidate in change_log.
+
+    This function runs inside SQLAlchemy flush-time listeners. It intentionally
+    does not push to Redis or direct HTTP because the enclosing transaction may
+    still roll back. sync_worker is responsible for reading committed rows.
+    """
     data = sanitize_sync_payload(table_name, data)
     json_data = json.dumps(data, default=str)
     data_hash = hashlib.sha256(json_data.encode()).hexdigest()
@@ -80,51 +82,8 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
         "ts": now,
         "hash": data_hash
     })
-    change_log_id = _extract_change_log_id(result)
+    _extract_change_log_id(result)
     mark_sync_outbox_recorded(connection, table_name, operation, record_id, data)
-
-    # Build sync payload
-    payload = {
-        "type": "db_change",
-        "operation": operation,
-        "table": table_name,
-        "id": record_id,
-        "data": data,
-        "hash": data_hash,
-        "timestamp": now.timestamp(),
-        "sync_protocol": build_sync_protocol_metadata(),
-    }
-    if change_log_id is not None:
-        payload["change_log_id"] = change_log_id
-    public_identity = build_sync_public_identity(table_name, record_id, data)
-    if public_identity is not None:
-        payload["public_identity"] = public_identity
-    payload["sync_meta"] = build_sync_metadata(
-        table_name,
-        record_id,
-        operation,
-        data,
-        change_log_id=change_log_id,
-        source_server=current_server(),
-    )
-    payload_json = json.dumps(payload, default=str)
-
-    # 2. Push to Redis queue (persistent connection — backup for sync_worker retry)
-    try:
-        r = _get_sync_redis()
-        r.lpush("sync:outbound", payload_json)
-    except Exception as re:
-        logger.error(f"❌ Redis sync push failed: {re}")
-        # Reset connection on error
-        global _sync_redis
-        _sync_redis = None
-
-    # 3. Direct HTTP push via thread pool (instant delivery — non-blocking)
-    try:
-        from core.sync_push import push_sync_direct
-        push_sync_direct(payload)
-    except Exception as pe:
-        logger.warning(f"⚡ Direct push submit failed: {pe}")
 
 
 def _extract_change_log_id(result) -> int | None:

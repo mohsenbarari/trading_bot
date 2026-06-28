@@ -201,6 +201,20 @@ Exit criteria:
 
 - No sync payload can leave the source as peer-deliverable before commit.
 
+Implementation status - 2026-06-28:
+
+- `core.events.log_change()` now only records the sanitized `change_log` row and
+  outbox guard marker inside the source transaction.
+- `log_change()` no longer publishes a peer-deliverable payload to
+  `sync:outbound` and no longer calls direct HTTP sync push from flush-time
+  listeners.
+- `core.sync_worker` treats `sync:outbound` entries as wake-up signals only and
+  builds peer delivery payloads from committed `change_log` rows.
+- `sync:retry` still carries retry payloads created by the worker after a prior
+  delivery failure.
+- Targeted tests cover outbox-only event logging, committed change-log draining,
+  outbound wake-up handling, and retry payload behavior.
+
 ### Stage R2 - Source-Sequence And Aggregate Identity Correctness
 
 Goal: make watermarks safe for logical rows.

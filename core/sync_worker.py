@@ -352,8 +352,9 @@ async def main():
         while True:
             iteration += 1
             try:
-                # Wait for items in queue
-                # BLPOP blocks until item is available
+                # Wait for queue wake-ups/retries. Fresh outbound queue entries
+                # are treated only as wake-up signals; peer delivery must be
+                # built from committed change_log rows.
                 res = await r.blpop(queue_poll_order(iteration), timeout=5)
                 
                 should_requeue = True
@@ -366,19 +367,36 @@ async def main():
                     should_requeue = False
                 else:
                     origin_queue, payload = res
-                    try:
-                        data = json.loads(payload)
-                    except json.JSONDecodeError:
-                        logger.error(
-                            "❌ Invalid JSON in sync queue",
-                            extra={
-                                "event": "job.item.invalid_payload",
-                                "job_name": "sync_worker",
-                                "origin_queue": origin_queue,
-                                **summarize_queue_payload(payload),
-                            },
-                        )
-                        continue
+                    if origin_queue == queue_name:
+                        data = await fetch_next_unsynced_change_log_item()
+                        if data is None:
+                            logger.info(
+                                "Dropped outbound sync wake-up with no committed change_log row.",
+                                extra={
+                                    "event": "job.item.outbound_wakeup_no_committed_change",
+                                    "job_name": "sync_worker",
+                                    "origin_queue": origin_queue,
+                                    **summarize_queue_payload(payload),
+                                },
+                            )
+                            continue
+                        origin_queue = "change_log"
+                        payload = json.dumps(data, sort_keys=True, default=str)
+                        should_requeue = False
+                    else:
+                        try:
+                            data = json.loads(payload)
+                        except json.JSONDecodeError:
+                            logger.error(
+                                "❌ Invalid JSON in sync queue",
+                                extra={
+                                    "event": "job.item.invalid_payload",
+                                    "job_name": "sync_worker",
+                                    "origin_queue": origin_queue,
+                                    **summarize_queue_payload(payload),
+                                },
+                            )
+                            continue
 
                 data = await refresh_offer_sync_item_from_authoritative_state(data)
                 payload = json.dumps(data, sort_keys=True, default=str)

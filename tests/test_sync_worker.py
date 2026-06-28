@@ -432,7 +432,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         raw_payload = "not-json token=unsafe 09123456789"
         with patch("core.sync_worker.logger") as logger_mock:
             fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-                blpop_results=[("sync:outbound", raw_payload), asyncio.CancelledError()]
+                blpop_results=[("sync:retry", raw_payload), asyncio.CancelledError()]
             )
 
         send_mock.assert_not_awaited()
@@ -448,7 +448,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
     async def test_main_requeues_when_sync_config_missing(self):
         payload = json.dumps({"hash": "abc"})
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-            blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
+            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
             target_url=None,
             api_key=None,
         )
@@ -465,7 +465,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         payload = json.dumps({"hash": "abc", "change_log_id": 9})
         response = FakeResponse(200, '{"status":"success","processed":1,"errors":0}', {"status": "success", "processed": 1, "errors": 0})
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-            blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
+            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
             target_url="https://peer.example/",
             send_return_value=response,
         )
@@ -484,7 +484,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
             "core.sync_worker.logger"
         ) as logger_mock:
             fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-                blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
+                blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
                 send_return_value=response,
             )
 
@@ -595,6 +595,62 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_not_awaited()
 
+    async def test_main_treats_outbound_payload_as_wakeup_and_sends_committed_change_log(self):
+        stale_payload = json.dumps(
+            {
+                "type": "db_change",
+                "operation": "INSERT",
+                "table": "offers",
+                "id": 999,
+                "data": {"id": 999, "status": "precommit"},
+                "hash": "precommit-hash",
+                "change_log_id": 999,
+            }
+        )
+        committed_item = {
+            "type": "db_change",
+            "operation": "UPDATE",
+            "table": "trades",
+            "id": 5,
+            "data": {"id": 5, "status": "confirmed"},
+            "hash": "committed-hash",
+            "timestamp": 1700000000,
+            "change_log_id": 45,
+        }
+        response = FakeResponse(
+            200,
+            '{"status":"success","processed":1,"errors":0}',
+            {"status": "success", "processed": 1, "errors": 0},
+        )
+
+        fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+            blpop_results=[("sync:outbound", stale_payload), asyncio.CancelledError()],
+            fetch_return_value=committed_item,
+            send_return_value=response,
+        )
+
+        self.fetch_mock.assert_awaited_once()
+        send_mock.assert_awaited_once()
+        self.assertEqual(send_mock.await_args.args[1], committed_item)
+        marker_mock.assert_awaited_once_with(committed_item)
+        self.assertEqual(fake_redis.rpush_calls, [])
+        sleep_mock.assert_not_awaited()
+
+    async def test_main_drops_outbound_wakeup_when_no_committed_change_log_exists(self):
+        stale_payload = json.dumps({"hash": "precommit-hash", "change_log_id": 999})
+        with patch("core.sync_worker.logger") as logger_mock:
+            fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
+                blpop_results=[("sync:outbound", stale_payload), asyncio.CancelledError()],
+                fetch_return_value=None,
+            )
+
+        self.fetch_mock.assert_awaited_once()
+        send_mock.assert_not_awaited()
+        marker_mock.assert_not_awaited()
+        self.assertEqual(fake_redis.rpush_calls, [])
+        sleep_mock.assert_not_awaited()
+        self.assertIn("job.item.outbound_wakeup_no_committed_change", repr(logger_mock.info.call_args))
+
     async def test_main_keeps_db_sourced_change_log_unsynced_on_peer_rejection(self):
         item = {
             "type": "db_change",
@@ -646,7 +702,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-            blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
+            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
             send_return_value=response,
         )
 
@@ -694,7 +750,7 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
         payload = json.dumps({"hash": "abc", "change_log_id": 9})
         response = FakeResponse(200, '{"status":"success","processed":1,"errors":0}', {"status": "success", "processed": 1, "errors": 0})
         fake_redis, send_mock, sleep_mock, marker_mock = await self._run_main_once(
-            blpop_results=[("sync:outbound", payload), asyncio.CancelledError()],
+            blpop_results=[("sync:retry", payload), asyncio.CancelledError()],
             send_return_value=response,
             marker_side_effect=RuntimeError("db down"),
         )
