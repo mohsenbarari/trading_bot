@@ -608,19 +608,48 @@ Evidence collected on `candidate/sync-parity-hardening`:
 - Final `/api/sync/health` on all three checked endpoints reported fresh parity
   status `ok`, no sync backlog, no missing comparison state, and
   `artifact_metadata_complete=true`.
+- Live evidence directory:
+  `tmp/sync-parity-f7-live-20260628T114500Z/`.
+- Staging now has a profile-gated `staging-sync` compose surface for
+  `sync_worker` and `foreign_sync_worker`. Normal staging deploys do not start
+  these workers unless the profile is explicitly enabled.
+- Local staging exposes `foreign_app` only on localhost
+  `127.0.0.1:${STAGING_FOREIGN_APP_PORT:-8121}` and nginx exposes only the
+  exact public sync ingress `/foreign-sync/api/sync/receive` to that service
+  with staging basic-auth disabled for this exact path. The FastAPI sync HMAC
+  authentication still protects the endpoint; an unsigned smoke request
+  returned JSON `401` from FastAPI rather than nginx basic-auth.
+- Remote Iran staging `sync_worker` was configured to use
+  `https://staging.362514.ir/foreign-sync` as the foreign peer base URL and
+  delivered `market_runtime_state` changes through the real public staging
+  route.
+- Clean controlled Iran-origin open and close transitions were applied with
+  SQLAlchemy event listeners enabled so real `change_log` rows were generated.
+  The Iran and local staging app schedule loops were paused during the clean
+  transition window and restored afterward to avoid test races with the live
+  schedule.
+- The clean Iran-origin open transition synced to foreign and produced exactly
+  one sent foreign Telegram channel notice receipt with `source=sync_receive`.
+- The clean Iran-origin close transition synced to foreign and produced exactly
+  one sent foreign Telegram channel notice receipt with `source=sync_receive`.
+- Replaying the clean close sync item with the same source sequence did not
+  create a second receipt and did not increment the existing receipt
+  `attempt_count`; the close transition timestamp kept one sent receipt with one
+  Telegram message id.
+- A final deep parity compare after the live evidence was clean across 20 synced
+  tables: status `ok`, business drift `0`, critical drift `0`, incomplete
+  tables `0`, duplicate identities `0`, truncated tables `0`, and complete
+  artifact metadata. The final compare was recorded to local Iran, local
+  foreign, and remote Iran `/api/sync/parity/status`.
 
 Remaining F7 evidence before this stage can be called complete:
 
-- A safe remote Iran staging `sync_worker` or equivalent staging-only sync
-  harness must exist. The current remote Iran staging stack observed during this
-  pass had only app, DB, and Redis containers, so live two-server sync
-  side-effect scenarios were not executed.
-- Run Iran-origin open and close transitions through the live staging sync path
-  and prove the foreign-only Telegram channel notices are sent exactly once.
 - Run Iran-origin market close with foreign-home active offers and prove the
-  final F1 authority model expires those offers exactly once.
-- Replay duplicate `market_runtime_state` transitions and prove no duplicate
-  Telegram notices or duplicate offer-expire side effects occur.
+  final F1 authority model expires those offers exactly once. The live open and
+  close notice paths were proven, but the clean close test did not include
+  active foreign-home offers.
+- Replay duplicate market close with active foreign-home offers and prove no
+  duplicate offer-expire side effects occur. Duplicate notice replay was proven.
 - Force Telegram send failures and no-receipt failures in staging and prove the
   F4 retry/reconciliation path repairs them.
 - Toggle `TRADING_BOT_MARKET_CHANNEL_NOTICE_DISABLED` in staging and prove
