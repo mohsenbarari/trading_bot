@@ -293,6 +293,7 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertEqual(staging_bot["environment"]["TRADING_BOT_SERVICE"], "bot")
         self.assertEqual(staging_bot["environment"]["SERVER_MODE"], "foreign")
         self.assertIn("run_bot.py", str(staging_bot.get("command", "")))
+        self.assertIn("RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}", staging_bot_block)
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", staging_bot_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", staging_bot_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", staging_bot_block)
@@ -354,6 +355,7 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         telegram_runner_block = compose_service_block(staging_compose, "load_telegram_foreign")
 
         self.assertIn("SERVER_MODE: foreign", telegram_runner_block)
+        self.assertIn("RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}", telegram_runner_block)
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", telegram_runner_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", telegram_runner_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", telegram_runner_block)
