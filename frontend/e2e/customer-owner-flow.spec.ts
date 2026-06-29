@@ -688,6 +688,18 @@ async function ensureAccordionOpen(root: Locator, sectionSelector: string) {
   }
 }
 
+async function loadPublicProfileTradeHistory(root: Locator, title: string) {
+  const legacyHeader = root.locator('.ds-accordion-header').filter({ hasText: title }).first()
+  if (await legacyHeader.count()) {
+    await legacyHeader.click()
+    return
+  }
+
+  const historySection = root.locator('.history-section-card').filter({ hasText: title }).first()
+  await expect(historySection).toBeVisible({ timeout: 30000 })
+  await historySection.getByRole('button', { name: 'اعمال فیلتر' }).click()
+}
+
 test.describe('customer owner lifecycle', () => {
   test('owner can create update and unlink a customer, and super-admin can follow the customer handoff', async ({ page, request }) => {
     test.setTimeout(180000)
@@ -860,10 +872,9 @@ test.describe('customer owner lifecycle', () => {
     await expect(ownerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
     await ensureAccordionOpen(ownerProfileView, '.customer-relations-section')
     await expect(ownerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: fixture.customerManagementName })).toBeVisible({ timeout: 30000 })
-    await expect(ownerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
+    await expect(ownerProfileView.getByRole('heading', { name: 'تاریخچه معاملات مشترک' })).toHaveCount(0)
 
-    const ownerHistoryHeader = ownerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
-    await ownerHistoryHeader.click()
+    await loadPublicProfileTradeHistory(ownerProfileView, 'تاریخچه معاملات این کاربر')
 
     const ownerHistoryCard = ownerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '2 عدد' }).first()
     await expect(ownerHistoryCard).toContainText('🟢 خرید')
@@ -876,8 +887,7 @@ test.describe('customer owner lifecycle', () => {
     await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
   await expect(customerProfileView.locator('.profile-hero-copy h3')).toContainText(fixture.customerAccountName)
 
-    const customerHistoryHeader = customerProfileView.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات این کاربر' }).first()
-    await customerHistoryHeader.click()
+    await loadPublicProfileTradeHistory(customerProfileView, 'تاریخچه معاملات این کاربر')
 
     const customerHistoryCard = customerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
     await expect(customerHistoryCard).toContainText('🟢 خرید')
@@ -896,8 +906,7 @@ test.describe('customer owner lifecycle', () => {
     await page.goto(`/users/${fixture.outsiderUserId}`)
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
 
-    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' }).first()
-    await historyHeader.click()
+    await loadPublicProfileTradeHistory(page.locator('.public-profile-view:visible').last(), 'تاریخچه معاملات مشترک')
 
     const tradeCard = page.locator('.history-list .mini-trade-card').filter({ hasText: `${fixture.tradeQuantity} عدد` }).first()
     await expect(tradeCard).toContainText('رابطه:')
@@ -917,8 +926,7 @@ test.describe('customer owner lifecycle', () => {
     await page.goto(`/users/${fixture.ownerUserId}`)
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
 
-    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' }).first()
-    await historyHeader.click()
+    await loadPublicProfileTradeHistory(page.locator('.public-profile-view:visible').last(), 'تاریخچه معاملات مشترک')
 
     const tradeCard = page.locator('.history-list .mini-trade-card').filter({ hasText: `${fixture.tradeQuantity} عدد` }).first()
     await expect(tradeCard).toBeVisible({ timeout: 30000 })

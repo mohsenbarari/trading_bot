@@ -652,7 +652,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await page.getByRole('button', { name: 'فایل' }).first().click()
     await injectDocument(page)
 
-    await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })
     await expect
       .poll(async () => {
         const messages = await fetchDirectMessages(request, actor, peer.userId)
@@ -713,7 +713,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         }, { timeout: 60000 })
         .toBe(true)
 
-      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+      await expect(receiverPage.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 60000 })
     } finally {
       await senderContext.close()
       await receiverContext.close()
@@ -788,11 +788,11 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
         }, { timeout: 60000 })
         .toBe(true)
 
-      await expect(receiverPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 60000 })
+      await expect(receiverPage.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 60000 })
 
       await senderCdp.send('Page.setWebLifecycleState', { state: 'active' })
       await senderPage.bringToFront()
-      await expect(senderPage.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
+      await expect(senderPage.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })
       await expect(senderPage.locator('.messages-container .sending-status-wrapper')).toHaveCount(0, { timeout: 30000 })
     } finally {
       await senderCdp.detach().catch(() => undefined)
@@ -846,7 +846,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
     await page.getByRole('button', { name: 'فایل' }).first().click()
     await injectDocument(page)
 
-    await expect(page.locator('.messages-container .msg-document')).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })
     await expect(page.locator('.messages-container .sending-status-wrapper')).toBeVisible({ timeout: 30000 })
     await initialUploadSeen
     await waitForPersistedPendingDocumentUpload(page)
@@ -864,7 +864,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
       }, { timeout: 60000 })
       .toBe(true)
 
-    await expect(page.locator('.messages-container .msg-document').first()).toBeVisible({ timeout: 60000 })
+    await expect(page.locator('.messages-container .msg-document:not(.is-busy)').first()).toBeVisible({ timeout: 60000 })
     await expect(page.locator('.messages-container .sending-status-wrapper')).toHaveCount(0, { timeout: 60000 })
     expect(legacyUploadHits).toBe(0)
   })

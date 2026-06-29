@@ -817,6 +817,18 @@ async function selectOptionByText(locator: Locator, optionText: string) {
   }, optionText)
 }
 
+async function loadPublicProfileTradeHistory(root: Locator, title: string) {
+  const legacyHeader = root.locator('.ds-accordion-header').filter({ hasText: title }).first()
+  if (await legacyHeader.count()) {
+    await legacyHeader.click()
+    return
+  }
+
+  const historySection = root.locator('.history-section-card').filter({ hasText: title }).first()
+  await expect(historySection).toBeVisible({ timeout: 30000 })
+  await historySection.getByRole('button', { name: 'اعمال فیلتر' }).click()
+}
+
 async function executeTrade(request: APIRequestContext, accessToken: string, offerId: number, quantity: number) {
   const response = await request.post(`${BACKEND_BASE_URL}/api/trades/`, {
     headers: {
@@ -844,8 +856,7 @@ test.describe('Trade history accountant context', () => {
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.viewer.accountName)
 
-    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()
-    await historyHeader.click()
+    await loadPublicProfileTradeHistory(profileView, 'تاریخچه معاملات من')
 
     const counterpartyLink = page.locator('.profile-link-btn').filter({ hasText: fixture.relationDisplayName }).first()
     await expect(counterpartyLink).toBeVisible()
@@ -904,8 +915,7 @@ test.describe('Trade history accountant context', () => {
       })
 
     const profileView = page.locator('.public-profile-view:visible').last()
-    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()
-    await historyHeader.click()
+    await loadPublicProfileTradeHistory(profileView, 'تاریخچه معاملات من')
 
     const counterpartyLink = page.locator('.profile-link-btn').filter({ hasText: fixture.relationDisplayName }).first()
     await expect(counterpartyLink).toBeVisible({ timeout: 30000 })
@@ -930,8 +940,7 @@ test.describe('Trade history accountant context', () => {
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.targetAccountName)
 
-    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات مشترک' }).first()
-    await historyHeader.click()
+    await loadPublicProfileTradeHistory(profileView, 'تاریخچه معاملات مشترک')
 
     await expect.poll(async () => page.locator('.mini-trade-card').count(), { timeout: 30000 }).toBe(3)
     await expect(profileView).toContainText(`#${fixture.recentMutualTradeNumber}`)
@@ -949,7 +958,7 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === `/api/trades/with/${fixture.targetUserId}` && url.searchParams.get('commodity_query') === fixture.goldCommodityName
     })
-    await page.locator('.history-action-btn.primary').filter({ hasText: 'اعمال فیلتر' }).click()
+    await page.getByRole('button', { name: 'اعمال فیلتر' }).click()
     const filteredResponse = await filteredResponsePromise
     const filteredUrl = new URL(filteredResponse.url())
     expect(filteredUrl.searchParams.get('from_date')).toBe(fixture.narrowFromDate)
@@ -966,7 +975,7 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === `/api/trades/with/${fixture.targetUserId}/export` && url.searchParams.get('format') === 'excel'
     })
-    await page.locator('.history-action-btn').filter({ hasText: 'خروجی Excel' }).click()
+    await page.getByRole('button', { name: 'خروجی Excel' }).click()
     const exportResponse = await exportResponsePromise
     const exportUrl = new URL(exportResponse.url())
     expect(exportUrl.searchParams.get('from_date')).toBe(fixture.narrowFromDate)
@@ -984,8 +993,7 @@ test.describe('Trade history accountant context', () => {
     const profileView = page.locator('.public-profile-view:visible').last()
     await expect(profileView).toContainText(fixture.viewer.accountName)
 
-    const historyHeader = page.locator('.ds-accordion-header').filter({ hasText: 'تاریخچه معاملات من' }).first()
-    await historyHeader.click()
+    await loadPublicProfileTradeHistory(profileView, 'تاریخچه معاملات من')
 
     await expect.poll(async () => page.locator('.mini-trade-card').count(), { timeout: 30000 }).toBe(4)
     await expect(profileView).toContainText(`#${fixture.otherCounterpartyTradeNumber}`)
@@ -995,7 +1003,7 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === '/api/trades/my' && Boolean(url.searchParams.get('from_date')) && Boolean(url.searchParams.get('to_date'))
     })
-    await page.locator('.history-chip').filter({ hasText: '۳ ماه' }).click()
+    await page.getByRole('tab', { name: '۳ ماه' }).click()
     const presetResponse = await presetResponsePromise
     const presetUrl = new URL(presetResponse.url())
 
@@ -1007,7 +1015,7 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === '/api/trades/my/export' && url.searchParams.get('format') === 'excel'
     })
-    await page.locator('.history-action-btn').filter({ hasText: 'خروجی Excel' }).click()
+    await page.getByRole('button', { name: 'خروجی Excel' }).click()
     const presetExportResponse = await presetExportPromise
     const presetExportUrl = new URL(presetExportResponse.url())
     expect(presetExportUrl.searchParams.get('from_date')).toBe(presetUrl.searchParams.get('from_date'))
@@ -1020,7 +1028,7 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === '/api/trades/my' && url.searchParams.get('from_date') === fixture.wideFromDate && url.searchParams.get('to_date') === fixture.wideToDate
     })
-    await page.locator('.history-action-btn.primary').filter({ hasText: 'اعمال فیلتر' }).click()
+    await page.getByRole('button', { name: 'اعمال فیلتر' }).click()
     await customResponsePromise
 
     await expect.poll(async () => page.locator('.mini-trade-card').count(), { timeout: 30000 }).toBe(4)
@@ -1031,7 +1039,7 @@ test.describe('Trade history accountant context', () => {
       const url = new URL(response.url())
       return url.pathname === '/api/trades/my/export' && url.searchParams.get('format') === 'pdf'
     })
-    await page.locator('.history-action-btn').filter({ hasText: 'خروجی PDF' }).click()
+    await page.getByRole('button', { name: 'خروجی PDF' }).click()
     const customExportResponse = await customExportPromise
     const customExportUrl = new URL(customExportResponse.url())
     expect(customExportUrl.searchParams.get('from_date')).toBe(fixture.wideFromDate)
@@ -1104,7 +1112,8 @@ test.describe('Trade history accountant context', () => {
       return url.pathname === '/api/trades/'
     })
 
-    await executeButton.dblclick()
+    await executeButton.click()
+    await offerCard.locator('.trade-btn.pending').filter({ hasText: `تایید ${fixture.tradeAmount} عدد؟` }).first().click()
     const tradeResponse = await tradeResponsePromise
     expect(tradeResponse.status()).toBe(400)
     await expect(offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()).toBeVisible()

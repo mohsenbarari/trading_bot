@@ -243,7 +243,7 @@ test.describe('Mandatory channel smoke', () => {
     })
 
     await page.goto(invitation.shortLinkPath)
-    await page.getByRole('button', { name: '🌐 ثبت‌نام از طریق وب' }).click()
+    await page.getByRole('button', { name: /ثبت‌نام از طریق وب/ }).click()
 
     await expect(page).toHaveURL(new RegExp(`/register\\?token=${invitation.token}$`))
     await expect(page.getByText(invitation.accountName)).toBeVisible()

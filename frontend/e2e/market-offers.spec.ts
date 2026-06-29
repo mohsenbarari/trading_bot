@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 import { primeAuthSession } from './helpers/auth'
 
@@ -705,6 +705,13 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
   return response.json() as Promise<AuthTokens>
 }
 
+async function executeTradeFromCard(offerCard: Locator, quantityLabel: string) {
+  await offerCard.locator('.trade-btn').filter({ hasText: quantityLabel }).first().click()
+  const confirmButton = offerCard.locator('.trade-btn.pending').filter({ hasText: `تایید ${quantityLabel}؟` }).first()
+  await expect(confirmButton).toBeVisible()
+  await confirmButton.click()
+}
+
 function authHeaders(accessToken: string) {
   return {
     Authorization: `Bearer ${accessToken}`,
@@ -887,8 +894,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(ownerCard).toBeVisible()
     await expect(ownerCard.locator('.price')).toHaveText('49,700')
 
-    const ownerTradeButton = ownerCard.locator('.trade-btn').filter({ hasText: '4 عدد' }).first()
-    await ownerTradeButton.dblclick()
+    await executeTradeFromCard(ownerCard, '4 عدد')
     await expect
       .poll(() => fetchPersistedTradesForCommodity(fixture.commodityId, [fixture.owner.userId, fixture.tier2Customer.userId, fixture.outsider.userId]), { timeout: 30000 })
       .toEqual([
@@ -908,8 +914,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(outsiderCard).toBeVisible()
     await expect(outsiderCard.locator('.price')).toHaveText('100,500')
 
-    const outsiderTradeButton = outsiderCard.locator('.trade-btn').filter({ hasText: '4 عدد' }).first()
-    await outsiderTradeButton.dblclick()
+    await executeTradeFromCard(outsiderCard, '4 عدد')
 
     await expect
       .poll(() => fetchPersistedTradesForCommodity(fixture.commodityId, [fixture.owner.userId, fixture.tier2Customer.userId, fixture.outsider.userId]), { timeout: 30000 })

@@ -287,14 +287,17 @@ test.describe('accountant owner lifecycle', () => {
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
 
     await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'حسابداران' }).click()
-    const modal = page.locator('.accountant-manager-shell')
-    await expect(modal).toBeVisible({ timeout: 30000 })
+    const workspace = page.locator('.accountant-workspace-view')
+    await expect(workspace).toBeVisible({ timeout: 30000 })
 
-    await modal.locator('input.create-account-name').fill(globalAccountName)
-    await modal.locator('input.create-display-name').fill(relationDisplayName)
-    await modal.locator('input.create-mobile-number').fill(mobileNumber)
-    await modal.locator('textarea.create-duty-description').fill(dutyDescription)
-    await modal.locator('button.submit-create').click()
+    await workspace.getByRole('button', { name: /افزودن حسابدار/ }).first().click()
+    const createPanel = page.locator('.accountant-create-panel')
+    await expect(createPanel).toBeVisible({ timeout: 30000 })
+    await page.getByPlaceholder('مثلاً accountant_01').fill(globalAccountName)
+    await page.getByPlaceholder('مثلاً حسابدار فروش').fill(relationDisplayName)
+    await page.getByPlaceholder('0912xxxxxxx').fill(mobileNumber)
+    await page.getByPlaceholder('مثلاً پیگیری پیشنهادها و ثبت معاملات روزانه').fill(dutyDescription)
+    await page.getByRole('button', { name: 'ثبت دعوت حسابدار' }).click()
 
     let pendingRelation: OwnerRelationPayload | null = null
     await expect
@@ -306,11 +309,13 @@ test.describe('accountant owner lifecycle', () => {
       .toBe('pending')
 
     expect(pendingRelation?.registration_link).toContain('/register')
-    await expect(modal.locator('.accountant-card').filter({ hasText: relationDisplayName })).toContainText('در انتظار ثبت‌نام')
+    await expect(workspace).toContainText(relationDisplayName, { timeout: 30000 })
+    await expect(workspace).toContainText('دعوت', { timeout: 30000 })
 
     const activatedAccountant = activatePendingRelation(owner.userId, globalAccountName)
 
-    await modal.locator('button').filter({ hasText: 'بروزرسانی لیست' }).click()
+    await page.reload()
+    await expect(workspace).toBeVisible({ timeout: 30000 })
     await expect
       .poll(async () => {
         const relations = await fetchOwnerRelations(request, owner.accessToken)
@@ -318,24 +323,22 @@ test.describe('accountant owner lifecycle', () => {
       }, { timeout: 30000 })
       .toBe('active')
 
-    const activeCard = modal.locator('.accountant-card').filter({ hasText: relationDisplayName }).first()
-    await expect(activeCard).toContainText('فعال')
-    await expect(activeCard).toContainText(activatedAccountant.accountantAccountName)
+    await expect(workspace).toContainText('فعال', { timeout: 30000 })
+    await expect(workspace).toContainText(activatedAccountant.accountantAccountName, { timeout: 30000 })
 
-    await modal.getByRole('button', { name: 'بستن' }).click()
-    await expect(modal).toBeHidden({ timeout: 30000 })
-
-    await page.reload()
+    await page.goto(`/users/${owner.userId}`)
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
-    await page.locator('.accountant-relations-section .ds-accordion-header').click()
     await expect(page.locator('.accountant-relations-section')).toContainText(relationDisplayName)
     await expect(page.locator('.accountant-relations-section')).toContainText(dutyDescription)
 
     await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'حسابداران' }).click()
-    await expect(modal).toBeVisible({ timeout: 30000 })
+    await expect(workspace).toBeVisible({ timeout: 30000 })
 
-    page.once('dialog', (dialog) => dialog.accept())
-    await modal.locator('.accountant-card').filter({ hasText: relationDisplayName }).locator('button.unlink-active').click()
+    await workspace.locator('.ui-list-item').filter({ hasText: relationDisplayName }).first().click()
+    await expect(page).toHaveURL(new RegExp(`/operations/accountants/${pendingRelation?.id}(?:\\?.*)?$`))
+    await page.getByRole('tab', { name: 'حساس' }).click()
+    await page.getByRole('button', { name: 'قطع ارتباط حسابدار' }).click()
+    await page.getByRole('button', { name: 'قطع ارتباط' }).click()
 
     await expect
       .poll(async () => (await fetchOwnerRelations(request, owner.accessToken)).length, { timeout: 30000 })
@@ -348,6 +351,8 @@ test.describe('accountant owner lifecycle', () => {
         userDeleted: true,
       })
 
-    await expect(modal).toContainText('ارتباط حسابدار قطع شد')
+    await page.goto('/operations/accountants')
+    await expect(workspace).toBeVisible({ timeout: 30000 })
+    await expect(workspace).toContainText('هنوز حسابداری ثبت نشده است', { timeout: 30000 })
   })
 })

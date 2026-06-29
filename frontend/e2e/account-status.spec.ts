@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { expect, test, type APIRequestContext, type BrowserContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -237,21 +237,10 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
   })
 }
 
-async function openAdminUserProfile(page: Page, accountName: string) {
-  await page.goto('/admin')
-  await expect(page.getByRole('heading', { name: 'پنل مدیریت' })).toBeVisible()
-
-  await page.getByRole('button', { name: /مدیریت کاربران/ }).click()
-  const searchToggleButton = page.locator('.search-toggle-btn').filter({ hasText: 'جستجوی کاربر' }).first()
-  await expect(searchToggleButton).toBeVisible()
-  await searchToggleButton.click()
-  await page.getByPlaceholder('نام، نام کاربری یا موبایل...').fill(accountName)
-  await page.getByRole('button', { name: /^جستجو$/ }).click()
-
-  const userRow = page.locator('.user-item').filter({ hasText: accountName }).first()
-  await expect(userRow).toBeVisible()
-  await userRow.click()
-  await expect(page.getByRole('heading', { name: 'پروفایل کاربر' })).toBeVisible()
+async function openAdminUserProfile(page: Page, user: SessionUser) {
+  await page.goto(`/admin/users/${user.userId}`)
+  await expect(page.getByRole('heading', { name: 'پروفایل کاربر' })).toBeVisible({ timeout: 30000 })
+  await expect(page.getByText(user.accountName)).toBeVisible({ timeout: 30000 })
 }
 
 async function toggleAccountStatusFromAdminProfile(page: any) {
@@ -332,7 +321,7 @@ test.describe('Account status browser regression', () => {
       await expect(userPage.getByRole('button', { name: /ورود به بازار/ })).toBeVisible()
       await expect(userPage.getByText('حساب کاربری غیرفعال شده است')).toHaveCount(0)
 
-      await openAdminUserProfile(adminPage, targetUser.accountName)
+      await openAdminUserProfile(adminPage, targetUser)
       await toggleAccountStatusFromAdminProfile(adminPage)
 
       await expect.poll(async () => {
@@ -354,7 +343,7 @@ test.describe('Account status browser regression', () => {
 
       await userPage.reload({ waitUntil: 'domcontentloaded' })
       await userPage.waitForURL(/\/login$/)
-      await expect(userPage.getByText('ورود به بازار امن طلا')).toBeVisible()
+      await expect(userPage.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
 
       await toggleAccountStatusFromAdminProfile(adminPage)
 

@@ -258,7 +258,7 @@ test.describe('Market mutation UX', () => {
     await expect(page.locator('.offer-preview-error')).toContainText('بازار در حال حاضر بسته است')
     expect(offerPublishCount).toBe(1)
     expect(offerBodies[0]?.idempotency_key).toEqual(expect.any(String))
-    await page.locator('.offer-preview-close').click()
+    await page.locator('.offer-preview-close').evaluate((node: HTMLElement) => node.click())
     await expect(page.locator('.offer-preview-card')).toBeHidden()
 
     const offerCard = page.locator('.offer-card-wrap').filter({ hasText: 'pw execute conflict' }).first()

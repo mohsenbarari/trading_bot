@@ -595,7 +595,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await openConversationListMenu(page)
     await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'ساخت کانال' }).click()
 
-    const channelManager = page.locator('.channel-manager-root:visible').last()
+    const channelManager = page.locator('.channel-admin-shell:visible').last()
     await expect(channelManager).toBeVisible({ timeout: 30000 })
     await channelManager.getByRole('button', { name: 'کانال جدید' }).click()
 
@@ -627,7 +627,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(page.locator('.header-dropdown-menu')).not.toContainText('تنظیمات کانال')
     await manageChannelItem.click()
     await expect(channelManager).toBeVisible({ timeout: 30000 })
-    const reopenedChannelManager = page.locator('.channel-manager-root:visible').last()
+    const reopenedChannelManager = page.locator('.channel-admin-shell:visible').last()
     await expectManagerOverviewIA(reopenedChannelManager, 'سازنده کانال', 'خروج و حذف')
 
     await openChannelSettingsPanel(reopenedChannelManager)
@@ -644,7 +644,7 @@ test.describe('Messenger room manager and public profile flows', () => {
         description: updatedDescription,
       })
     await page.goBack()
-    await expect(page.locator('.channel-manager-root')).toHaveCount(0)
+    await expect(page.locator('.channel-admin-shell')).toHaveCount(0)
     const updatedHeader = page.locator('.chat-header:visible .header-name').first()
     const headerAlreadyUpdated = await expect(updatedHeader)
       .toContainText(updatedTitle, { timeout: 5000 })
@@ -762,7 +762,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await channelRow.click()
     await expect(page.locator('.chat-header .header-name').last()).toHaveText(title, { timeout: 30000 })
 
-    const channelManager = page.locator('.channel-manager-root')
+    const channelManager = page.locator('.channel-admin-shell')
     await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
 
     await channelManager.locator('.telegram-row').filter({ hasText: 'اعضای کانال' }).click()

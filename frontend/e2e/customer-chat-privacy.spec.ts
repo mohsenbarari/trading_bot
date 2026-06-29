@@ -343,7 +343,7 @@ test.describe('Customer chat privacy regressions', () => {
     await openConversationListMenu(page)
     await page.locator('.header-dropdown-menu .header-menu-item').filter({ hasText: 'ساخت کانال' }).click()
 
-    const channelManager = page.locator('.channel-manager-root')
+    const channelManager = page.locator('.channel-admin-shell')
     await expect(channelManager).toBeVisible({ timeout: 30000 })
     await channelManager.getByRole('button', { name: 'کانال جدید' }).click()
 
