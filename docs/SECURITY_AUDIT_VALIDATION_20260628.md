@@ -292,7 +292,7 @@ Remediation notes:
 ### VF8 - Localhost CORS Origins Are Always Included
 
 - Severity: Low
-- Status: Confirmed
+- Status: Remediated in follow-up hardening
 - Area: CORS, frontend/backend surface
 - Files:
   - `core/deployment_surface.py:6-11`
@@ -312,6 +312,12 @@ Impact:
 Recommended fix:
 
 - Include localhost origins only in development/staging.
+
+Remediation notes:
+
+- `allowed_cors_origins()` now includes `localhost` / `127.0.0.1` development origins only for local/dev/test/staging-style environments.
+- Production still includes explicitly configured runtime origins such as `FRONTEND_URL`, Iran/foreign domains, server URLs, and operator-provided `EXTRA_CORS_ORIGINS`.
+- Added focused coverage proving production excludes local development origins.
 
 ### VF9 - `dev-login` Persistent SUPER_ADMIN Design Risk Exists, But No Current Production User Was Found
 
@@ -356,7 +362,7 @@ Recommended fix:
 4. Add OTP verify throttling/lockout and stop logging OTP digits. Completed; keep regression tests active.
 5. Replace secret/signature equality checks with `hmac.compare_digest`. Completed; keep regression tests active.
 6. Centralize trusted proxy handling for IP and host headers. Completed; keep regression tests active.
-7. Remove localhost CORS origins in production.
+7. Remove localhost CORS origins in production. Completed; keep regression tests active.
 8. Add production data hygiene checks for dev/test users and fixture prefixes.
 
 ## Suggested Verification Gates

@@ -73,8 +73,15 @@ def extra_cors_origins(settings) -> set[str]:
     }
 
 
+def _allow_local_development_origins(settings) -> bool:
+    environment = (getattr(settings, "environment", None) or "").strip().lower()
+    return environment in {"", "dev", "development", "local", "test", "testing", "staging"}
+
+
 def allowed_cors_origins(settings) -> list[str]:
-    allowed = set(LOCAL_DEVELOPMENT_ORIGINS)
+    allowed = set()
+    if _allow_local_development_origins(settings):
+        allowed.update(LOCAL_DEVELOPMENT_ORIGINS)
     allowed.update(extra_cors_origins(settings))
 
     for raw_candidate in (
