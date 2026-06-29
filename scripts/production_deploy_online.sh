@@ -6,6 +6,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_runtime_envs.py"
 RELEASE_ARTIFACT_RENDERER="$PROJECT_DIR/scripts/render_release_artifacts.py"
 DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"
+PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygiene.py"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -55,6 +56,7 @@ Notes:
   - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
   - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
   - For SSH, prefer key-based auth. Password auth is supported only when sshpass is installed.
+  - Release healthcheck runs a read-only production data hygiene guard on both hosts.
 EOF
 }
 
@@ -2144,7 +2146,28 @@ healthcheck() {
             sleep 5
         done
     fi
+    run_production_data_hygiene_checks
     log "Health checks passed"
+}
+
+run_production_data_hygiene_foreign() {
+    log "Running production data hygiene check on foreign"
+    [[ -f "$PRODUCTION_DATA_HYGIENE_SCRIPT" ]] || die "Production data hygiene script missing: $PRODUCTION_DATA_HYGIENE_SCRIPT"
+    (cd "$LOCAL_PROJECT_DIR" && $LOCAL_COMPOSE_CMD exec -T app python scripts/check_production_data_hygiene.py --role foreign --json --fail-on high)
+}
+
+run_production_data_hygiene_iran() {
+    log "Running production data hygiene check on Iran"
+    ssh_iran "set -euo pipefail
+$(remote_compose_resolver)
+cd '$IRAN_PROJECT_DIR'
+\$compose_cmd -f docker-compose.iran.yml exec -T app python scripts/check_production_data_hygiene.py --role iran --json --fail-on high"
+}
+
+run_production_data_hygiene_checks() {
+    run_production_data_hygiene_foreign
+    run_production_data_hygiene_iran
+    log "Production data hygiene checks passed"
 }
 
 decide_iran_connectivity() {

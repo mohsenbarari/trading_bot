@@ -14,7 +14,7 @@ SSH_IRAN_OPTS = -o StrictHostKeyChecking=accept-new -p $(IRAN_SSH_PORT)
 LOCAL_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; else printf '%s' 'docker compose'; fi)
 IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-data-hygiene production-data-hygiene-iran production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
 
 help:
 	@echo ""
@@ -104,6 +104,8 @@ help:
 	@echo "  make production-release       - Run the full foreign-controlled production release flow"
 	@echo "  make production-deployment-restart - Run the Stage P10 deploy/restart/backup benchmark"
 	@echo "  make production-release-gate  - Run the Stage P11 final release gate"
+	@echo "  make production-data-hygiene  - Run read-only dev/test artifact guard on the foreign DB"
+	@echo "  make production-data-hygiene-iran - Run read-only dev/test artifact guard on the Iran DB"
 	@echo "  make production-online-help   - Show the production release helper usage"
 	@echo "  make production-online-check  - Validate the production deploy manifest and SSH access"
 	@echo "  make production-online-bootstrap - Install Iran host prerequisites over SSH"
@@ -310,6 +312,12 @@ production-deployment-restart:
 
 production-release-gate:
 	@python3 scripts/report_final_release_gate.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+
+production-data-hygiene:
+	@$(LOCAL_COMPOSE) exec -T app python scripts/check_production_data_hygiene.py --role foreign --json $${ARGS}
+
+production-data-hygiene-iran:
+	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml exec -T app python scripts/check_production_data_hygiene.py --role iran --json' $${ARGS}
 
 production-backup-foreign:
 	@python3 scripts/run_production_backup.py --manifest $${MANIFEST:-./deploy/production/online.env} --role foreign --json $${ARGS}

@@ -209,6 +209,16 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('validate_runtime_identity_files', production_script.split('ensure_runtime_env_file() {', 1)[1])
         self.assertIn('IRAN_ENV_SOURCE_PATH points at a project-root env file', production_script)
 
+    def test_production_release_runs_read_only_data_hygiene_guard(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+
+        self.assertIn('PRODUCTION_DATA_HYGIENE_SCRIPT="$PROJECT_DIR/scripts/check_production_data_hygiene.py"', production_script)
+        self.assertIn('run_production_data_hygiene_checks() {', production_script)
+        self.assertIn('scripts/check_production_data_hygiene.py --role foreign --json --fail-on high', production_script)
+        self.assertIn('scripts/check_production_data_hygiene.py --role iran --json --fail-on high', production_script)
+        healthcheck_body = production_script.split('healthcheck() {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('run_production_data_hygiene_checks', healthcheck_body)
+
     def test_nginx_setup_scripts_keep_api_proxy_off_websocket_upgrade(self):
         for script_name in ("scripts/setup_iran_nginx.sh", "scripts/setup_foreign_nginx.sh"):
             with self.subTest(script=script_name):

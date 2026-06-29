@@ -323,6 +323,7 @@ Remediation notes:
 
 - Severity: Code design risk; not an active data finding at validation time
 - Status: Partially confirmed
+- Remediation status: Completed in VF9 with a read-only release guard.
 - Area: Auth, data hygiene
 - Files:
   - `api/routers/auth.py:810-855`
@@ -340,6 +341,15 @@ Impact:
 Recommended fix:
 
 - Close VF1 first. Then add a production reconciliation check that this user cannot exist.
+
+Remediation:
+
+- Added `scripts/check_production_data_hygiene.py` as a read-only production data hygiene guard.
+- The guard scans `users`, `invitations`, `accountant_relations`, and `customer_relations` for known dev/test artifact signatures without mutating data.
+- Exact sensitive identifiers such as mobile numbers are redacted in output; invitation tokens and secrets are not printed.
+- Active/high-risk artifacts fail by default at `--fail-on high`; soft-deleted or expired suspicious residue is reported as warning.
+- Added `make production-data-hygiene` and `make production-data-hygiene-iran` for manual checks.
+- Wired the guard into `scripts/production_deploy_online.sh` post-deploy `healthcheck`, so `make production-release` now runs the check on both foreign and Iran before declaring health checks passed.
 
 ## Findings Not Confirmed Or Corrected
 
@@ -363,7 +373,7 @@ Recommended fix:
 5. Replace secret/signature equality checks with `hmac.compare_digest`. Completed; keep regression tests active.
 6. Centralize trusted proxy handling for IP and host headers. Completed; keep regression tests active.
 7. Remove localhost CORS origins in production. Completed; keep regression tests active.
-8. Add production data hygiene checks for dev/test users and fixture prefixes.
+8. Add production data hygiene checks for dev/test users and fixture prefixes. Completed; release healthcheck now runs the read-only guard on both production hosts.
 
 ## Suggested Verification Gates
 
