@@ -50,6 +50,7 @@ from datetime import timedelta
 from core.db import AsyncSessionLocal
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
+from core.server_routing import current_server
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
 from models.session import Platform, UserSession
@@ -124,6 +125,7 @@ async def main():
             quantity=34,
             remaining_quantity=34,
             price=76333,
+            home_server=current_server(),
             is_wholesale=False,
             lot_sizes=[16, 10, 8],
             original_lot_sizes=[16, 10, 8],
@@ -137,6 +139,7 @@ async def main():
             quantity=12,
             remaining_quantity=12,
             price=75111,
+            home_server=current_server(),
             is_wholesale=True,
             lot_sizes=None,
             original_lot_sizes=None,

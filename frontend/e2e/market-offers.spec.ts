@@ -116,6 +116,7 @@ from core.db import AsyncSessionLocal
 from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
+from core.server_routing import current_server
 from models.offer import Offer, OfferStatus, OfferType
 from models.session import Platform, UserSession
 from models.user import User
@@ -186,6 +187,7 @@ async def main():
                 quantity=quantity,
                 remaining_quantity=quantity,
                 price=price,
+                home_server=current_server(),
                 is_wholesale=True,
                 lot_sizes=None,
                 original_lot_sizes=None,
@@ -301,6 +303,7 @@ from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
 from core.cache import invalidate_commodities_cache
+from core.server_routing import current_server
 from bot.utils.redis_helpers import invalidate_commodity_cache
 from models.commodity import Commodity
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
@@ -420,6 +423,7 @@ async def main():
       quantity=10,
       remaining_quantity=10,
       price=50000,
+      home_server=current_server(),
       is_wholesale=True,
       lot_sizes=None,
       original_lot_sizes=None,
@@ -465,6 +469,7 @@ from core.enums import UserRole
 from core.security import create_access_token, create_refresh_token
 from core.services.session_service import hash_token
 from core.cache import invalidate_commodities_cache
+from core.server_routing import current_server
 from bot.utils.redis_helpers import invalidate_commodity_cache
 from models.commodity import Commodity
 from models.customer_relation import CustomerRelation, CustomerRelationStatus, CustomerTier
@@ -561,6 +566,7 @@ async def main():
       quantity=4,
       remaining_quantity=4,
       price=50000,
+      home_server=current_server(),
       is_wholesale=True,
       lot_sizes=None,
       original_lot_sizes=None,
@@ -576,6 +582,7 @@ async def main():
       quantity=4,
       remaining_quantity=4,
       price=100000,
+      home_server=current_server(),
       is_wholesale=True,
       lot_sizes=None,
       original_lot_sizes=None,

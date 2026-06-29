@@ -13,6 +13,11 @@ function fakeJwt() {
 async function primeMockAuth(page: Page) {
   const accessToken = fakeJwt()
   await page.addInitScript((token) => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch(() => {})
+    }
     localStorage.setItem('auth_token', token)
     localStorage.setItem('refresh_token', 'pw-refresh-token')
     localStorage.setItem('current_user_summary', JSON.stringify({
@@ -34,6 +39,8 @@ async function fulfillJson(route: Route, status: number, body: unknown) {
 }
 
 test.describe('Market mutation UX', () => {
+  test.use({ serviceWorkers: 'block' })
+
   test('recent expired offers toggle stays clickable above the market FAB on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await primeMockAuth(page)
@@ -44,6 +51,9 @@ test.describe('Market mutation UX', () => {
 
       if (url.pathname === '/api/auth/me') {
         return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
+      }
+      if (url.pathname === '/api/auth/refresh' && request.method() === 'POST') {
+        return fulfillJson(route, 200, { access_token: fakeJwt(), refresh_token: 'pw-refresh-token' })
       }
       if (url.pathname === '/api/sessions/verify') {
         return fulfillJson(route, 200, { ok: true })
@@ -159,6 +169,9 @@ test.describe('Market mutation UX', () => {
 
       if (url.pathname === '/api/auth/me') {
         return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
+      }
+      if (url.pathname === '/api/auth/refresh' && method === 'POST') {
+        return fulfillJson(route, 200, { access_token: fakeJwt(), refresh_token: 'pw-refresh-token' })
       }
       if (url.pathname === '/api/sessions/verify') {
         return fulfillJson(route, 200, { ok: true })
