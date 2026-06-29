@@ -758,6 +758,11 @@ test.describe('customer owner lifecycle', () => {
     await page.route('**/api/auth/register-otp-request', async route => {
       await route.fulfill({
         status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        },
         contentType: 'application/json',
         body: JSON.stringify({ detail: 'کد تایید ارسال شد', expires_in: 120 }),
       })
