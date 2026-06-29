@@ -1518,6 +1518,18 @@ async def _localize_trade_delivery_receipt_references(db: AsyncSession, data: di
     return True
 
 
+async def _localize_offer_request_resulting_trade_reference(db: AsyncSession, data: dict) -> bool:
+    trade_number = data.pop("resulting_trade_number", None)
+    if trade_number in (None, ""):
+        return True
+    local_trade_id = await _resolve_trade_id_by_trade_number(db, trade_number)
+    if local_trade_id is None:
+        data["resulting_trade_id"] = None
+        return False
+    data["resulting_trade_id"] = local_trade_id
+    return True
+
+
 def _normalize_completed_trade_field(field: str, value):
     if field in {
         "offer_id",
@@ -2050,6 +2062,17 @@ async def _apply_item(
                     "table": table,
                     "record_id": record_id,
                     "trade_number": data.get("trade_number"),
+                },
+            )
+            return 'deferred'
+
+        if table == "offer_requests" and not await _localize_offer_request_resulting_trade_reference(db, data):
+            logger.warning(
+                "Synced offer request references a trade_number that is not available locally; deferring",
+                extra={
+                    "event": "sync.public_identity.offer_request_trade_reference_deferred",
+                    "table": table,
+                    "record_id": record_id,
                 },
             )
             return 'deferred'

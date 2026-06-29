@@ -1613,8 +1613,8 @@ TARGETED_SYNC_TABLE_ID_FIELDS = {
     "user_blocks": None,
     "offers": "offer_ids",
     "offer_publication_states": "publication_state_ids",
-    "offer_requests": "offer_request_ids",
     "trades": "trade_ids",
+    "offer_requests": "offer_request_ids",
     "trade_delivery_receipts": "trade_delivery_receipt_ids",
 }
 TARGETED_SYNC_TABLES = tuple(TARGETED_SYNC_TABLE_ID_FIELDS)

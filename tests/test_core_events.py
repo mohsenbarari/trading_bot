@@ -682,6 +682,7 @@ class CoreEventsTests(unittest.TestCase):
             internal_failure_code='internal',
             internal_failure_context={'redacted': True},
             resulting_trade_id=88,
+            resulting_trade=SimpleNamespace(trade_number=10088),
             customer_relation_id=17,
             customer_owner_user_id=4,
             customer_tier_snapshot='tier2',
@@ -708,6 +709,8 @@ class CoreEventsTests(unittest.TestCase):
             self.assertEqual(payload['result_status'], 'completed_trade')
             self.assertEqual(payload['internal_failure_context'], {'redacted': True})
             self.assertEqual(payload['customer_management_name_snapshot'], 'VIP')
+            self.assertEqual(payload['resulting_trade_number'], 10088)
+            self.assertNotIn('resulting_trade_id', payload)
 
         sync_connection = _FakeConnection(is_sync=True)
         registry[('OfferRequest', 'after_insert')](None, sync_connection, target)

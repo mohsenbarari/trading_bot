@@ -386,6 +386,16 @@ def make_offer_snapshot(**overrides):
 
 
 class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
+    def test_outbound_table_priority_sends_trades_before_offer_requests(self):
+        self.assertLess(
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("trades"),
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("offer_requests"),
+        )
+        self.assertLess(
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("trades"),
+            sync_worker.SYNC_OUTBOUND_TABLE_PRIORITY.index("trade_delivery_receipts"),
+        )
+
     async def test_fetch_next_unsynced_change_log_item_reads_committed_row(self):
         timestamp = datetime(2026, 1, 2, 3, 4, 5)
         entry = SimpleNamespace(

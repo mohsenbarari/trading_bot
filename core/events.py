@@ -327,10 +327,11 @@ def setup_offer_events():
     logger.info("✅ Offer event listeners registered")
 
 
-def _offer_request_sync_payload(target) -> Dict[str, Any]:
+def _offer_request_sync_payload(target, connection=None) -> Dict[str, Any]:
     source_surface = getattr(target, "request_source_surface", None)
     result_status = getattr(target, "result_status", None)
     commission_rate = getattr(target, "customer_commission_rate_snapshot", None)
+    resulting_trade_number = _offer_request_resulting_trade_number(target, connection=connection)
     return {
         "id": target.id,
         "version_id": getattr(target, "version_id", None) or 1,
@@ -350,7 +351,7 @@ def _offer_request_sync_payload(target) -> Dict[str, Any]:
         "public_failure_message": target.public_failure_message,
         "internal_failure_code": target.internal_failure_code,
         "internal_failure_context": target.internal_failure_context,
-        "resulting_trade_id": target.resulting_trade_id,
+        "resulting_trade_number": resulting_trade_number,
         "customer_relation_id": target.customer_relation_id,
         "customer_owner_user_id": target.customer_owner_user_id,
         "customer_tier_snapshot": target.customer_tier_snapshot,
@@ -363,6 +364,37 @@ def _offer_request_sync_payload(target) -> Dict[str, Any]:
     }
 
 
+def _offer_request_resulting_trade_number(target, *, connection=None) -> int | None:
+    resulting_trade = getattr(target, "resulting_trade", None)
+    if resulting_trade is not None:
+        trade_number = getattr(resulting_trade, "trade_number", None)
+        if trade_number is not None:
+            try:
+                return int(trade_number)
+            except (TypeError, ValueError):
+                return None
+    trade_id = getattr(target, "resulting_trade_id", None)
+    if trade_id is None or connection is None:
+        return None
+    try:
+        result = connection.execute(
+            text("SELECT trade_number FROM trades WHERE id = :trade_id"),
+            {"trade_id": trade_id},
+        )
+        value = result.scalar_one_or_none()
+        return int(value) if value is not None else None
+    except Exception:
+        logger.warning(
+            "Could not resolve offer request resulting trade_number for sync payload",
+            extra={
+                "event": "sync.offer_request_trade_number_resolution_failed",
+                "offer_request_id": getattr(target, "id", None),
+                "resulting_trade_id": trade_id,
+            },
+        )
+    return None
+
+
 def setup_offer_request_events():
     """Setup event listeners for the offer request ledger."""
     from models.offer_request import OfferRequest
@@ -372,7 +404,7 @@ def setup_offer_request_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "offer_requests", target.id, "INSERT", _offer_request_sync_payload(target))
+            log_change(connection, "offer_requests", target.id, "INSERT", _offer_request_sync_payload(target, connection))
         except Exception as e:
             logger.error(f"Error in offer_request after_insert event: {e}")
 
@@ -381,7 +413,7 @@ def setup_offer_request_events():
         if connection.get_execution_options().get("is_sync"):
             return
         try:
-            log_change(connection, "offer_requests", target.id, "UPDATE", _offer_request_sync_payload(target))
+            log_change(connection, "offer_requests", target.id, "UPDATE", _offer_request_sync_payload(target, connection))
         except Exception as e:
             logger.error(f"Error in offer_request after_update event: {e}")
 

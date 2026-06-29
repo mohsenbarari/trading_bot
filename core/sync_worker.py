@@ -7,7 +7,7 @@ import hashlib
 import httpx
 import redis.asyncio as redis
 from core.background_job_authority import JOB_SYNC_WORKER, assert_background_job_authority
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.logging_config import configure_logging
@@ -30,6 +30,25 @@ logger = logging.getLogger(__name__)
 _loop_errors = RepeatedErrorLogger(every=10)
 
 TERMINAL_SOURCE_AUTHORITY_REJECTION_TABLES = IRAN_AUTHORITATIVE_SYNC_TABLES
+SYNC_OUTBOUND_TABLE_PRIORITY = (
+    "users",
+    "invitations",
+    "accountant_relations",
+    "customer_relations",
+    "telegram_link_tokens",
+    "commodities",
+    "commodity_aliases",
+    "trading_settings",
+    "market_schedule_overrides",
+    "market_runtime_state",
+    "offers",
+    "trades",
+    "offer_requests",
+    "offer_publication_states",
+    "trade_delivery_receipts",
+    "notifications",
+    "user_blocks",
+)
 
 
 class SyncDeliveryError(Exception):
@@ -215,11 +234,18 @@ async def fetch_next_unsynced_change_log_item() -> dict | None:
     from core.db import AsyncSessionLocal
     from models.change_log import ChangeLog
 
+    table_priority = case(
+        *[
+            (ChangeLog.table_name == table_name, priority)
+            for priority, table_name in enumerate(SYNC_OUTBOUND_TABLE_PRIORITY)
+        ],
+        else_=len(SYNC_OUTBOUND_TABLE_PRIORITY),
+    )
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(ChangeLog)
             .where(ChangeLog.synced.is_(False))
-            .order_by(ChangeLog.id.asc())
+            .order_by(table_priority, ChangeLog.id.asc())
             .limit(1)
         )
         entry = result.scalars().first()

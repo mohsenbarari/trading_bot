@@ -282,6 +282,18 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         ):
             self.assertIn(table, worker.TARGETED_SYNC_TABLES)
 
+    def test_sync_prefix_catchup_sends_trades_before_offer_requests(self):
+        from scripts import trading_core_probe_worker as worker
+
+        self.assertLess(
+            worker.TARGETED_SYNC_TABLES.index("trades"),
+            worker.TARGETED_SYNC_TABLES.index("offer_requests"),
+        )
+        self.assertLess(
+            worker.TARGETED_SYNC_TABLES.index("trades"),
+            worker.TARGETED_SYNC_TABLES.index("trade_delivery_receipts"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

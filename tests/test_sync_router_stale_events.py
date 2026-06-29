@@ -1,8 +1,12 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from api.routers.sync import _apply_item, _build_upsert_stmt
+from api.routers.sync import (
+    _apply_item,
+    _build_upsert_stmt,
+    _localize_offer_request_resulting_trade_reference,
+)
 from models.offer import Offer
 from models.offer_request import OfferRequest
 from models.trade import Trade
@@ -259,6 +263,36 @@ def completed_trade_payload(**overrides):
 
 
 class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_offer_request_resulting_trade_number_resolves_to_local_trade_id(self):
+        data = {
+            "request_home_server": "foreign",
+            "idempotency_key": "request-1",
+            "resulting_trade_number": 10088,
+            "resulting_trade_id": 88,
+        }
+
+        with patch("api.routers.sync._resolve_trade_id_by_trade_number", new=AsyncMock(return_value=501)):
+            resolved = await _localize_offer_request_resulting_trade_reference(SimpleNamespace(), data)
+
+        self.assertTrue(resolved)
+        self.assertEqual(data["resulting_trade_id"], 501)
+        self.assertNotIn("resulting_trade_number", data)
+
+    async def test_offer_request_resulting_trade_number_defers_until_trade_arrives(self):
+        data = {
+            "request_home_server": "foreign",
+            "idempotency_key": "request-1",
+            "resulting_trade_number": 10088,
+            "resulting_trade_id": 88,
+        }
+
+        with patch("api.routers.sync._resolve_trade_id_by_trade_number", new=AsyncMock(return_value=None)):
+            resolved = await _localize_offer_request_resulting_trade_reference(SimpleNamespace(), data)
+
+        self.assertFalse(resolved)
+        self.assertIsNone(data["resulting_trade_id"])
+        self.assertNotIn("resulting_trade_number", data)
+
     async def test_offer_upsert_uses_atomic_ordering_where_clause(self):
         insert_builder = FakeOfferInsertBuilder()
 
