@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """Read-only production data hygiene guard.
 
-The guard intentionally reports suspicious dev/test artifacts without deleting
-anything. It is designed to run inside the app container where DATABASE_URL is
-already configured.
+VF9 implementation note for future agents:
+- This security remediation is implemented. The only remaining step is routine
+  execution during the next production release or via the manual Make targets.
+- The guard intentionally reports suspicious dev/test artifacts without deleting
+  anything. Cleanup must stay an explicit operator decision after reviewing the
+  report.
+- First production execution may require pattern tuning if a false positive is
+  found; that is operational tuning, not an incomplete VF9 implementation.
+- Keep this script read-only and keep output redacted. Do not print full mobile
+  numbers, invitation tokens, secrets, OTPs, API keys, or env values.
+
+It is designed to run inside the app container where DATABASE_URL is already
+configured.
 """
 
 from __future__ import annotations

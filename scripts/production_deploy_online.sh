@@ -2165,6 +2165,10 @@ cd '$IRAN_PROJECT_DIR'
 }
 
 run_production_data_hygiene_checks() {
+    # VF9 security guard is intentionally read-only. It is complete at code
+    # level and runs as part of production-release healthcheck. If it fails,
+    # operators must inspect the redacted report and explicitly decide cleanup;
+    # this release script must not auto-delete production data.
     run_production_data_hygiene_foreign
     run_production_data_hygiene_iran
     log "Production data hygiene checks passed"
