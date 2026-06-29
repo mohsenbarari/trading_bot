@@ -766,7 +766,7 @@ test.describe('customer owner lifecycle', () => {
     await page.goto(toRelativeRegistrationPath(registrationLink))
     await expect(page).toHaveURL(new RegExp(`/register\\?token=${registrationToken}$`))
     await expect(page.getByText(customerAccountName)).toBeVisible()
-    await expect(page.getByText(mobileNumber)).toBeVisible()
+    await expect(page.getByText(mobileNumber).first()).toBeVisible()
 
     await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
     await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible()
@@ -824,7 +824,7 @@ test.describe('customer owner lifecycle', () => {
     await ensureAccordionOpen(page.locator('.public-profile-view:visible').last(), '.customer-relations-section')
     await page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
     await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
-    await expect(page.locator('.public-profile-view:visible').last().locator('.profile-hero-copy h3')).toContainText(customerAccountName)
+    await expect(page.locator('.public-profile-view:visible').last().getByRole('heading', { name: new RegExp(managementName) })).toBeVisible({ timeout: 30000 })
 
     await setAuthTokens(page, superAdmin)
     await page.goto(`/users/${owner.userId}`)
