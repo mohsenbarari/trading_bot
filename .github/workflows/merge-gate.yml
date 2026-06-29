@@ -86,7 +86,7 @@ jobs:
           fi
 
   frontend-browser-matrix:
-    name: frontend-browser-matrix (${{ matrix.browser }})
+    name: frontend-browser-matrix (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     needs:
       - repository-governance
@@ -102,6 +102,11 @@ jobs:
           - chromium
           - firefox
           - webkit
+        shard:
+          - 1
+          - 2
+          - 3
+          - 4
 
     steps:
       - name: Checkout repository
@@ -184,13 +189,13 @@ jobs:
         run: |
           case "${{ matrix.browser }}" in
             chromium)
-              npm run test:e2e
+              npm run test:e2e -- --shard=${{ matrix.shard }}/4
               ;;
             firefox)
-              npm run test:e2e:firefox
+              npm run test:e2e:firefox -- --shard=${{ matrix.shard }}/4
               ;;
             webkit)
-              npm run test:e2e:webkit
+              npm run test:e2e:webkit -- --shard=${{ matrix.shard }}/4
               ;;
             *)
               echo "Unsupported browser: ${{ matrix.browser }}" >&2
@@ -202,7 +207,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: merge-gate-playwright-${{ matrix.browser }}
+          name: merge-gate-playwright-${{ matrix.browser }}-shard-${{ matrix.shard }}
           path: |
             frontend/playwright-report
             frontend/test-results
