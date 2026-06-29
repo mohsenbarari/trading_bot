@@ -1603,7 +1603,21 @@ async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any
     raise TradingProbeError("cleanup retry loop exited unexpectedly")
 
 
-TARGETED_SYNC_TABLES = ("users", "offers")
+TARGETED_SYNC_TABLE_ID_FIELDS = {
+    "users": "user_ids",
+    "invitations": "invitation_ids",
+    "accountant_relations": "accountant_relation_ids",
+    "customer_relations": "customer_relation_ids",
+    "telegram_link_tokens": "telegram_link_token_ids",
+    "notifications": "notification_ids",
+    "user_blocks": None,
+    "offers": "offer_ids",
+    "offer_publication_states": "publication_state_ids",
+    "offer_requests": "offer_request_ids",
+    "trades": "trade_ids",
+    "trade_delivery_receipts": "trade_delivery_receipt_ids",
+}
+TARGETED_SYNC_TABLES = tuple(TARGETED_SYNC_TABLE_ID_FIELDS)
 
 
 def _targeted_sync_batches(entries: list[ChangeLog], *, batch_size: int) -> list[list[ChangeLog]]:
@@ -1637,16 +1651,21 @@ async def collect_targeted_prefix_change_logs(
     plan = await collect_cleanup_plan(prefix)
     clauses = []
     normalized_tables = tuple(table for table in tables if table in TARGETED_SYNC_TABLES)
-    if "users" in normalized_tables and plan.user_ids:
-        clauses.append((ChangeLog.table_name == "users") & ChangeLog.record_id.in_(plan.user_ids))
-    if "offers" in normalized_tables and plan.offer_ids:
-        clauses.append((ChangeLog.table_name == "offers") & ChangeLog.record_id.in_(plan.offer_ids))
+    for table in normalized_tables:
+        id_field = TARGETED_SYNC_TABLE_ID_FIELDS[table]
+        if id_field is None:
+            continue
+        ids = list(getattr(plan, id_field, []) or [])
+        if ids:
+            clauses.append((ChangeLog.table_name == table) & ChangeLog.record_id.in_(ids))
     if not clauses:
         return []
 
     table_order = case(
-        (ChangeLog.table_name == "users", 0),
-        (ChangeLog.table_name == "offers", 1),
+        *[
+            (ChangeLog.table_name == table, index)
+            for index, table in enumerate(TARGETED_SYNC_TABLES)
+        ],
         else_=99,
     )
     async with AsyncSessionLocal() as db:
@@ -6965,23 +6984,22 @@ async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
     prefix = args.prefix
     assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
     tables = tuple(args.table or TARGETED_SYNC_TABLES)
-    if "users" in tables and "offers" in tables:
-        stage_results = []
-        for stage_tables in (("users",), ("offers",)):
-            stage_results.append(
-                await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=stage_tables)
-            )
-        result = {
-            "status": "ok",
-            "prefix": prefix,
-            "server_mode": settings.server_mode,
-            "tables": list(tables),
-            "entry_count": sum(int(item.get("entry_count") or 0) for item in stage_results),
-            "processed": sum(int(item.get("processed") or 0) for item in stage_results),
-            "stages": stage_results,
-        }
-    else:
-        result = await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=tables)
+    stage_results = []
+    for table in TARGETED_SYNC_TABLES:
+        if table not in tables:
+            continue
+        stage_results.append(
+            await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=(table,))
+        )
+    result = {
+        "status": "ok" if all(item.get("status") == "ok" for item in stage_results) else "failed",
+        "prefix": prefix,
+        "server_mode": settings.server_mode,
+        "tables": list(tables),
+        "entry_count": sum(int(item.get("entry_count") or 0) for item in stage_results),
+        "processed": sum(int(item.get("processed") or 0) for item in stage_results),
+        "stages": stage_results,
+    }
     if args.output:
         write_json_artifact(Path(args.output), result)
     print_json(result)

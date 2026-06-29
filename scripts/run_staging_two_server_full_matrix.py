@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -139,6 +140,15 @@ SECRET_PATTERNS = [
     re.compile(r"\b\d{10,15}:[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\b09\d{9}\b"),
 ]
+SECRET_KEY_PATTERN = re.compile(
+    r"(?i)(^|[_-])(bot[_-]?token|api[_-]?key|password|secret|jwt|observability[_-]?api[_-]?key)$"
+)
+FORBIDDEN_SECRET_PATTERNS = [
+    re.compile(r"(?i)(bot[_-]?token|api[_-]?key|password|secret|jwt)[=:]\s*(?!\[REDACTED\])[^,\s]+"),
+    re.compile(r'(?i)"(bot[_-]?token|api[_-]?key|password|secret|jwt|observability[^"]*)"\s*:\s*"(?!\[REDACTED\])[^"]+"'),
+    re.compile(r"\b\d{10,15}:[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\b09\d{9}\b"),
+]
 
 
 @dataclass(frozen=True)
@@ -191,22 +201,39 @@ def default_run_id() -> str:
     return f"S2FM-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
-
-
 def sanitize_text(value: str) -> str:
     sanitized = value
     for pattern in SECRET_PATTERNS:
         sanitized = pattern.sub(lambda match: match.group(0).split("=", 1)[0] + "=[REDACTED]" if "=" in match.group(0) else "[REDACTED]", sanitized)
     return sanitized
+
+
+def sanitize_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            text_key = str(key)
+            if SECRET_KEY_PATTERN.search(text_key) and item not in (None, "", False):
+                sanitized[text_key] = "[REDACTED]"
+            else:
+                sanitized[text_key] = sanitize_payload(item)
+        return sanitized
+    if isinstance(value, (list, tuple)):
+        return [sanitize_payload(item) for item in value]
+    return value
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sanitize_payload(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(sanitize_payload(payload), ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def redact_command(command: list[str]) -> list[str]:
@@ -229,6 +256,31 @@ def redact_command(command: list[str]) -> list[str]:
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sanitize_text(content), encoding="utf-8")
+
+
+def detect_forbidden_secret_like_values(root: Path) -> dict[str, Any]:
+    findings: list[dict[str, Any]] = []
+    if not root.exists():
+        return {"detected": False, "findings": findings}
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        if path.name == "redaction-report.json":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for pattern in FORBIDDEN_SECRET_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                findings.append(
+                    {
+                        "path": str(path.relative_to(root)),
+                        "pattern": pattern.pattern,
+                        "sample_sha256": hashlib.sha256(match.group(0).encode("utf-8")).hexdigest()[:16],
+                    }
+                )
+                break
+    return {"detected": bool(findings), "findings": findings[:50]}
 
 
 def run_git_value(args: list[str]) -> str | None:
@@ -314,6 +366,44 @@ def fetch_status(
         return int(exc.code), dict(exc.headers.items()), body
     except Exception as exc:  # noqa: BLE001
         return 0, {}, f"{type(exc).__name__}: {exc}"
+
+
+def fetch_observability_json(
+    url: str,
+    observability_key: str,
+    *,
+    basic_auth: tuple[str, str] | None,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+    timeout_seconds: float = 30.0,
+) -> tuple[int, dict[str, Any] | None, str]:
+    body: bytes | None = None
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "staging-two-server-full-matrix/1",
+        "X-Observability-Api-Key": observability_key,
+    }
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(sanitize_payload(payload), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    if basic_auth:
+        raw = f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
+        request.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds, context=ssl.create_default_context()) as response:
+            raw_body = response.read(1024 * 1024 * 5).decode("utf-8", errors="replace")
+            status_code = int(response.status)
+    except urllib.error.HTTPError as exc:
+        raw_body = exc.read(8192).decode("utf-8", errors="replace")
+        return int(exc.code), None, raw_body
+    except Exception as exc:  # noqa: BLE001
+        return 0, None, f"{type(exc).__name__}: {exc}"
+    try:
+        parsed = json.loads(raw_body)
+    except json.JSONDecodeError:
+        return status_code, None, raw_body[:8192]
+    return status_code, parsed if isinstance(parsed, dict) else None, raw_body[:8192]
 
 
 def check_http_json(name: str, url: str, *, basic_auth: tuple[str, str] | None) -> CheckResult:
@@ -433,6 +523,41 @@ def runtime_identity_python() -> str:
         "'bot_token_configured': bool(settings.bot_token), "
         "'channel_id_configured': bool(settings.channel_id)"
         "}, sort_keys=True))"
+    )
+
+
+def storage_identity_python() -> str:
+    return (
+        "import asyncio, hashlib, json\n"
+        "from sqlalchemy import text\n"
+        "import redis.asyncio as redis\n"
+        "from core.config import settings\n"
+        "from core.db import AsyncSessionLocal\n"
+        "async def main():\n"
+        "    async with AsyncSessionLocal() as db:\n"
+        "        row=(await db.execute(text(\"select coalesce(inet_server_addr()::text, 'local') as addr, inet_server_port() as port, current_database() as db, current_user as usr\"))).mappings().one()\n"
+        "    redis_run_id=''\n"
+        "    redis_errors=0\n"
+        "    try:\n"
+        "        client=redis.Redis.from_url(settings.redis_url, decode_responses=True)\n"
+        "        try:\n"
+        "            info=await client.info('server')\n"
+        "            redis_run_id=str(info.get('run_id') or '')\n"
+        "        finally:\n"
+        "            await client.aclose()\n"
+        "    except Exception:\n"
+        "        redis_errors=1\n"
+        "    db_material=f\"{row['addr']}:{row['port']}:{row['db']}:{row['usr']}\"\n"
+        "    redis_material=redis_run_id or 'missing'\n"
+        "    print(json.dumps({"
+        "'server_mode': settings.server_mode, "
+        "'environment': settings.environment, "
+        "'release_sha': settings.release_sha, "
+        "'database_identity_hash': hashlib.sha256(db_material.encode()).hexdigest()[:16], "
+        "'redis_identity_hash': hashlib.sha256(redis_material.encode()).hexdigest()[:16], "
+        "'redis_errors': redis_errors"
+        "}, sort_keys=True))\n"
+        "asyncio.run(main())"
     )
 
 
@@ -775,6 +900,55 @@ def check_container_runtime_identity(
     )
 
 
+def storage_identity_command(server: str, args: argparse.Namespace) -> list[str]:
+    script = storage_identity_python()
+    if server == "foreign":
+        return ["docker", "exec", args.foreign_app_container, "python", "-c", script]
+    if server == "iran":
+        return [
+            "ssh",
+            args.iran_ssh_host,
+            f"docker exec {args.iran_app_container} python -c {json.dumps(script)}",
+        ]
+    raise ValueError(f"unsupported storage identity server: {server}")
+
+
+def check_storage_identity_separation(name: str, *, args: argparse.Namespace) -> CheckResult:
+    started = time.perf_counter()
+    payloads: dict[str, dict[str, Any]] = {}
+    failures: list[str] = []
+    for server in ("iran", "foreign"):
+        returncode, payload, stdout, stderr = run_json_command(storage_identity_command(server, args), timeout_seconds=20.0)
+        if returncode != 0 or payload is None:
+            failures.append(f"{server} storage identity command failed")
+            payloads[server] = {
+                "stdout": sanitize_text(stdout[:1000]),
+                "stderr": sanitize_text(stderr[:1000]),
+            }
+            continue
+        payloads[server] = payload
+    iran_payload = payloads.get("iran") or {}
+    foreign_payload = payloads.get("foreign") or {}
+    if iran_payload and str(iran_payload.get("server_mode") or "").lower() != "iran":
+        failures.append("Iran storage identity server_mode mismatch")
+    if foreign_payload and str(foreign_payload.get("server_mode") or "").lower() != "foreign":
+        failures.append("foreign storage identity server_mode mismatch")
+    if iran_payload and foreign_payload:
+        if iran_payload.get("database_identity_hash") == foreign_payload.get("database_identity_hash"):
+            failures.append("Iran and foreign staging database identities match")
+        if iran_payload.get("redis_identity_hash") == foreign_payload.get("redis_identity_hash"):
+            failures.append("Iran and foreign staging Redis identities match")
+        if int(iran_payload.get("redis_errors") or 0) or int(foreign_payload.get("redis_errors") or 0):
+            failures.append("Redis identity probe reported errors")
+    return CheckResult(
+        name,
+        "failed" if failures else "passed",
+        "; ".join(failures) if failures else "database and Redis identities are separate",
+        time.perf_counter() - started,
+        {"identities": payloads},
+    )
+
+
 def basic_auth_from_args(args: argparse.Namespace) -> tuple[str, str] | None:
     user = args.basic_auth_user or os.getenv("STAGING_BASIC_AUTH_USER")
     password = args.basic_auth_password or os.getenv("STAGING_BASIC_AUTH_PASSWORD")
@@ -871,9 +1045,36 @@ def build_readme(args: argparse.Namespace, manifest: dict[str, Any], status: str
     )
 
 
+def build_run_metadata(args: argparse.Namespace, manifest: dict[str, Any], *, status: str) -> dict[str, Any]:
+    return {
+        "schema_version": "staging_two_server_full_matrix_run_metadata_v1",
+        "generated_at": utc_now_iso(),
+        "run_id": args.run_id,
+        "status": status,
+        "branch": run_git_value(["branch", "--show-current"]),
+        "commit": run_git_value(["rev-parse", "HEAD"]),
+        "expected_release_sha": expected_release_sha(args),
+        "iran_base_url": args.iran_base_url,
+        "foreign_base_url": args.foreign_base_url,
+        "artifact_dir": str(args.artifact_dir),
+        "agent_log_dirs": [
+            str(CLAUDE_LOG_ROOT / args.run_id),
+            str(CHATGPT_LOG_ROOT / args.run_id),
+        ],
+        "manifest_total": (manifest.get("summary") or {}).get("total_manifest_scenarios"),
+        "driver_scenario_count": len(DRIVER_SCENARIOS),
+        "limitations": [
+            "driver suite evidence is not full release-gate evidence until every mandatory manifest group is executed or explicitly mapped",
+            "real Telegram/channel side effects require separate smoke evidence when --patch-external-side-effects is used",
+        ],
+    }
+
+
 def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: dict[str, Any], *, status: str) -> None:
     targets = [CLAUDE_LOG_ROOT / args.run_id, CHATGPT_LOG_ROOT / args.run_id]
     write_text(artifact_dir / "README.md", build_readme(args, manifest, status))
+    write_json(artifact_dir / "run-metadata.json", build_run_metadata(args, manifest, status=status))
+    redaction_scan = detect_forbidden_secret_like_values(artifact_dir)
     write_json(
         artifact_dir / "redaction-report.json",
         {
@@ -884,7 +1085,8 @@ def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: d
                 "Telegram bot token shape",
                 "Iran mobile number shape",
             ],
-            "forbidden_secret_like_value_detected": False,
+            "forbidden_secret_like_value_detected": bool(redaction_scan["detected"]),
+            "findings": redaction_scan["findings"],
         },
     )
     for target in targets:
@@ -1033,6 +1235,10 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
                 expected_release=expected_release,
                 args=args,
             ),
+            check_storage_identity_separation(
+                "staging_storage_identity_separation",
+                args=args,
+            ),
         ]
     )
     if args.observability_api_key:
@@ -1084,30 +1290,20 @@ def check_observability_json(
     basic_auth: tuple[str, str] | None,
 ) -> CheckResult:
     started = time.perf_counter()
-    request = urllib.request.Request(
+    status_code, payload, body = fetch_observability_json(
         url,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "staging-two-server-full-matrix/1",
-            "X-Observability-Api-Key": observability_key,
-        },
+        observability_key,
+        basic_auth=basic_auth,
+        timeout_seconds=10,
     )
-    if basic_auth:
-        raw = f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
-        request.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
-    try:
-        with urllib.request.urlopen(request, timeout=10, context=ssl.create_default_context()) as response:
-            body = response.read(1024 * 1024).decode("utf-8", errors="replace")
-            status_code = int(response.status)
-    except urllib.error.HTTPError as exc:
-        body = exc.read(8192).decode("utf-8", errors="replace")
-        return CheckResult(name, "failed", f"sync health HTTP status={exc.code}", time.perf_counter() - started, {"body": sanitize_text(body[:1000])})
-    except Exception as exc:  # noqa: BLE001
-        return CheckResult(name, "failed", f"sync health request failed: {type(exc).__name__}: {exc}", time.perf_counter() - started)
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError:
-        return CheckResult(name, "failed", "sync health did not return JSON", time.perf_counter() - started, {"status_code": status_code, "body": sanitize_text(body[:1000])})
+    if payload is None:
+        return CheckResult(
+            name,
+            "failed",
+            f"sync health HTTP/JSON check failed with status={status_code}",
+            time.perf_counter() - started,
+            {"status_code": status_code, "body": sanitize_text(body[:1000])},
+        )
     server_mode = str(payload.get("server_mode") or "")
     if status_code != 200 or server_mode != expected_server_mode:
         return CheckResult(
@@ -1120,10 +1316,158 @@ def check_observability_json(
     return CheckResult(name, "passed", "sync health verified", time.perf_counter() - started, {"status_code": status_code, "payload": payload})
 
 
+def capture_sync_health(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
+    auth = basic_auth_from_args(args)
+    payload: dict[str, Any] = {
+        "schema_version": "staging_two_server_sync_health_pair_v1",
+        "label": label,
+        "captured_at": utc_now_iso(),
+        "status": "failed",
+        "peers": {},
+    }
+    if not args.observability_api_key:
+        payload["error"] = "missing_observability_api_key"
+        write_json(args.artifact_dir / f"sync-health-{label}.json", payload)
+        return payload
+    peer_urls = {
+        "iran": args.iran_base_url.rstrip("/") + "/api/sync/health",
+        "foreign": args.foreign_base_url.rstrip("/") + "/api/sync/health",
+    }
+    failures = []
+    for peer, url in peer_urls.items():
+        status_code, peer_payload, raw = fetch_observability_json(
+            url,
+            args.observability_api_key,
+            basic_auth=auth,
+            timeout_seconds=20,
+        )
+        payload["peers"][peer] = {
+            "status_code": status_code,
+            "payload": peer_payload or {},
+            "body": "" if peer_payload is not None else sanitize_text(raw[:1000]),
+        }
+        if status_code != 200 or not isinstance(peer_payload, dict):
+            failures.append(peer)
+    payload["status"] = "passed" if not failures else "failed"
+    payload["failed_peers"] = failures
+    write_json(args.artifact_dir / f"sync-health-{label}.json", payload)
+    return payload
+
+
+def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
+    from core.sync_parity import compare_parity_snapshots
+    from core.sync_parity_observability import infer_parity_comparison_mode, summarize_parity_comparison
+
+    auth = basic_auth_from_args(args)
+    mode = args.parity_mode
+    payload: dict[str, Any] = {
+        "schema_version": "staging_two_server_parity_pair_v1",
+        "label": label,
+        "captured_at": utc_now_iso(),
+        "mode": mode,
+        "status": "failed",
+        "snapshots": {},
+    }
+    if not args.observability_api_key:
+        payload["error"] = "missing_observability_api_key"
+        write_json(args.artifact_dir / f"parity-{label}.json", payload)
+        return payload
+    peer_urls = {
+        "iran": args.iran_base_url.rstrip("/") + f"/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
+        "foreign": args.foreign_base_url.rstrip("/") + f"/api/sync/parity/snapshot?mode={mode}&max_rows_per_table={args.parity_max_rows_per_table}",
+    }
+    failures = []
+    for peer, url in peer_urls.items():
+        status_code, snapshot, raw = fetch_observability_json(
+            url,
+            args.observability_api_key,
+            basic_auth=auth,
+            timeout_seconds=45,
+        )
+        payload["snapshots"][peer] = {
+            "status_code": status_code,
+            "snapshot": snapshot or {},
+            "body": "" if snapshot is not None else sanitize_text(raw[:1000]),
+        }
+        if status_code != 200 or not isinstance(snapshot, dict):
+            failures.append(peer)
+    iran_snapshot = (payload["snapshots"].get("iran") or {}).get("snapshot") or {}
+    foreign_snapshot = (payload["snapshots"].get("foreign") or {}).get("snapshot") or {}
+    if not failures:
+        comparison = compare_parity_snapshots(iran_snapshot, foreign_snapshot)
+        comparison["mode"] = infer_parity_comparison_mode(iran_snapshot, foreign_snapshot)
+        comparison["compared_at"] = utc_now_iso()
+        comparison["artifact_metadata"] = {
+            "local_server_mode": "iran",
+            "peer_server_mode": "foreign",
+            "local_release_sha": iran_snapshot.get("release_sha") or expected_release_sha(args),
+            "peer_release_sha": foreign_snapshot.get("release_sha") or expected_release_sha(args),
+            "snapshot_mode": comparison["mode"],
+            "local_table_count": len((iran_snapshot.get("tables") or {})),
+            "peer_table_count": len((foreign_snapshot.get("tables") or {})),
+            "local_snapshot_at": iran_snapshot.get("snapshot_at") or payload["captured_at"],
+            "peer_snapshot_at": foreign_snapshot.get("snapshot_at") or payload["captured_at"],
+            "artifact_reference": str(args.artifact_dir / f"parity-{label}.json"),
+        }
+        comparison["artifact_metadata"]["comparison_artifact_hash"] = hashlib.sha256(
+            json.dumps(comparison, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        comparison["summary"] = summarize_parity_comparison(
+            comparison,
+            mode=comparison["mode"],
+            observed_at=comparison["compared_at"],
+        )
+        payload["comparison"] = comparison
+        payload["status"] = "passed" if comparison.get("status") in {"ok", "non_business_difference"} else "failed"
+        for peer, base_url in (("iran", args.iran_base_url), ("foreign", args.foreign_base_url)):
+            record_status, record_payload, record_raw = fetch_observability_json(
+                base_url.rstrip("/") + "/api/sync/parity/status",
+                args.observability_api_key,
+                basic_auth=auth,
+                method="POST",
+                payload=comparison,
+                timeout_seconds=30,
+            )
+            payload.setdefault("status_recording", {})[peer] = {
+                "status_code": record_status,
+                "payload": record_payload or {},
+                "body": "" if record_payload is not None else sanitize_text(record_raw[:1000]),
+            }
+            if record_status != 200:
+                payload["status"] = "failed"
+    else:
+        payload["failed_peers"] = failures
+    write_json(args.artifact_dir / f"parity-{label}.json", payload)
+    return payload
+
+
 def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     plan = build_plan(args)
     manifest = plan["manifest"]
     checks = preflight_checks(args, manifest)
+    if args.observability_api_key:
+        sync_health_before = capture_sync_health(args, label="before")
+        checks.append(
+            CheckResult(
+                "sync_health_before_artifact",
+                "passed" if sync_health_before.get("status") == "passed" else "failed",
+                "top-level sync-health-before artifact captured"
+                if sync_health_before.get("status") == "passed"
+                else "top-level sync-health-before artifact failed",
+                payload={"artifact": str(args.artifact_dir / "sync-health-before.json")},
+            )
+        )
+        parity_before = capture_parity(args, label="before")
+        checks.append(
+            CheckResult(
+                "parity_before_artifact",
+                "passed" if parity_before.get("status") == "passed" else "failed",
+                "top-level parity-before artifact captured"
+                if parity_before.get("status") == "passed"
+                else "top-level parity-before artifact failed",
+                payload={"artifact": str(args.artifact_dir / "parity-before.json")},
+            )
+        )
     failed = [item for item in checks if item.status != "passed"]
     preflight = {
         "schema_version": "staging_two_server_full_matrix_preflight_v1",
@@ -1182,13 +1526,15 @@ def run_cleanup_on_both_sides(
     remote_dir: str,
     log_dir: Path,
     dry_run: bool = False,
+    label: str = "cleanup",
 ) -> list[CommandResult]:
-    worker_args = ["cleanup", "--prefix", prefix, "--artifact", "/artifacts/cleanup.json"]
+    artifact_name = f"{command_slug(label)}.json"
+    worker_args = ["cleanup", "--prefix", prefix, "--artifact", f"/artifacts/{artifact_name}"]
     if dry_run:
         worker_args.append("--dry-run")
     results = [
         run_remote_worker(
-            "cleanup_iran",
+            f"{label}_iran",
             args=args,
             service="load_webapp_iran",
             remote_artifact_dir=remote_dir,
@@ -1197,7 +1543,7 @@ def run_cleanup_on_both_sides(
             timeout_seconds=240,
         ),
         run_local_worker(
-            "cleanup_foreign",
+            f"{label}_foreign",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
             worker_args=worker_args,
@@ -1208,6 +1554,40 @@ def run_cleanup_on_both_sides(
     for result in results:
         require_command_success(result)
     return results
+
+
+def cleanup_planned_total(payload: dict[str, Any]) -> int:
+    planned_counts = payload.get("planned_counts") if isinstance(payload, dict) else {}
+    planned_counts = planned_counts if isinstance(planned_counts, dict) else {}
+    return sum(int(value or 0) for value in planned_counts.values()) + int(payload.get("deleted_redis_keys") or 0)
+
+
+def assert_cleanup_dry_run_zero(results: list[CommandResult], *, label: str) -> dict[str, Any]:
+    details = []
+    failures = []
+    for result in results:
+        payload = result.json_payload or {}
+        planned_total = cleanup_planned_total(payload)
+        details.append(
+            {
+                "name": result.name,
+                "planned_total": planned_total,
+                "planned_counts": payload.get("planned_counts") or {},
+                "planned_redis_keys": payload.get("deleted_redis_keys") or 0,
+            }
+        )
+        if planned_total != 0:
+            failures.append(f"{result.name} planned_total={planned_total}")
+    report = {
+        "schema_version": "staging_two_server_cleanup_zero_proof_v1",
+        "label": label,
+        "status": "passed" if not failures else "failed",
+        "details": details,
+        "failures": failures,
+    }
+    if failures:
+        raise RuntimeError(f"{label} cleanup dry-run is not zero: {'; '.join(failures)}")
+    return report
 
 
 def run_sync_catchup(
@@ -1284,6 +1664,88 @@ def run_observability_snapshots(
     for result in results:
         require_command_success(result)
     return results
+
+
+def observability_unsynced_count(payload: dict[str, Any]) -> int:
+    sync_payload = payload.get("sync") if isinstance(payload, dict) else {}
+    worker_payload = payload.get("worker_backlog") if isinstance(payload, dict) else {}
+    sync_payload = sync_payload if isinstance(sync_payload, dict) else {}
+    worker_payload = worker_payload if isinstance(worker_payload, dict) else {}
+    return max(
+        int(sync_payload.get("unsynced_change_log_count") or 0),
+        int(worker_payload.get("unsynced_change_logs") or 0),
+    )
+
+
+def assert_observability_clean(results: list[CommandResult], *, label: str) -> dict[str, Any]:
+    details = []
+    failures = []
+    for result in results:
+        payload = result.json_payload or {}
+        unsynced = observability_unsynced_count(payload)
+        details.append({"name": result.name, "unsynced_change_log_count": unsynced})
+        if unsynced != 0:
+            failures.append(f"{result.name} unsynced_change_log_count={unsynced}")
+    report = {
+        "schema_version": "staging_two_server_observability_clean_gate_v1",
+        "label": label,
+        "status": "passed" if not failures else "failed",
+        "details": details,
+        "failures": failures,
+    }
+    if failures:
+        raise RuntimeError(f"{label} observability backlog is not clean: {'; '.join(failures)}")
+    return report
+
+
+def run_sync_catchup_until_clean(
+    *,
+    args: argparse.Namespace,
+    prefix: str,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+    label: str,
+    max_rounds: int = 5,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    command_results: list[dict[str, Any]] = []
+    last_report: dict[str, Any] = {}
+    for round_index in range(1, max(1, int(max_rounds)) + 1):
+        command_results.extend(
+            result.asdict()
+            for result in run_sync_catchup(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+        snapshots = run_observability_snapshots(
+            args=args,
+            local_dir=local_dir,
+            remote_dir=remote_dir,
+            log_dir=log_dir,
+            label=f"{label}_round_{round_index}",
+        )
+        command_results.extend(result.asdict() for result in snapshots)
+        try:
+            last_report = assert_observability_clean(snapshots, label=f"{label}_round_{round_index}")
+            last_report["round"] = round_index
+            return command_results, last_report
+        except RuntimeError as exc:
+            last_report = {
+                "schema_version": "staging_two_server_observability_clean_gate_v1",
+                "label": f"{label}_round_{round_index}",
+                "status": "failed",
+                "round": round_index,
+                "error": str(exc),
+            }
+            if round_index < max_rounds:
+                time.sleep(2)
+                continue
+            raise
+    return command_results, last_report
 
 
 def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
@@ -1558,7 +2020,34 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 local_dir=local_dir,
                 remote_dir=remote_dir,
                 log_dir=log_dir,
+                dry_run=True,
+                label="initial_cleanup_dry_run",
             )
+        )
+        command_results.extend(
+            result.asdict()
+            for result in run_cleanup_on_both_sides(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+                label="initial_cleanup_hard_delete",
+            )
+        )
+        initial_zero_results = run_cleanup_on_both_sides(
+            args=args,
+            prefix=prefix,
+            local_dir=local_dir,
+            remote_dir=remote_dir,
+            log_dir=log_dir,
+            dry_run=True,
+            label="initial_cleanup_zero_check",
+        )
+        command_results.extend(result.asdict() for result in initial_zero_results)
+        write_json(
+            local_dir / "initial-cleanup-zero-proof.json",
+            assert_cleanup_dry_run_zero(initial_zero_results, label="initial_cleanup_zero_check"),
         )
         command_results.extend(
             result.asdict()
@@ -1731,26 +2220,16 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 log_dir=log_dir,
             ).asdict()
         )
-        command_results.extend(
-            result.asdict()
-            for result in run_sync_catchup(
-                args=args,
-                prefix=prefix,
-                local_dir=local_dir,
-                remote_dir=remote_dir,
-                log_dir=log_dir,
-            )
+        catchup_results, observability_clean_report = run_sync_catchup_until_clean(
+            args=args,
+            prefix=prefix,
+            local_dir=local_dir,
+            remote_dir=remote_dir,
+            log_dir=log_dir,
+            label="post_trade_catchup",
         )
-        command_results.extend(
-            result.asdict()
-            for result in run_observability_snapshots(
-                args=args,
-                local_dir=local_dir,
-                remote_dir=remote_dir,
-                log_dir=log_dir,
-                label="after",
-            )
-        )
+        command_results.extend(catchup_results)
+        write_json(local_dir / "post-trade-observability-clean.json", observability_clean_report)
         final_payload = read_json_file(local_dir / "final.json")
         status_value = "passed" if final_payload.get("status") == "ok" else "failed"
         if status_value != "passed":
@@ -1767,11 +2246,26 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 local_dir=local_dir,
                 remote_dir=remote_dir,
                 log_dir=log_dir,
+                label="final_cleanup_hard_delete",
+            )
+            command_results.extend(result.asdict() for result in cleanup_results)
+            final_zero_results = run_cleanup_on_both_sides(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+                dry_run=True,
+                label="final_cleanup_zero_check",
+            )
+            command_results.extend(result.asdict() for result in final_zero_results)
+            write_json(
+                local_dir / "final-cleanup-zero-proof.json",
+                assert_cleanup_dry_run_zero(final_zero_results, label="final_cleanup_zero_check"),
             )
         except Exception as exc:  # noqa: BLE001
             error_detail = (error_detail + "; " if error_detail else "") + f"cleanup_failed: {type(exc).__name__}: {exc}"
             status_value = "failed"
-        command_results.extend(result.asdict() for result in cleanup_results)
 
     scenario_result = {
         "event": "driver_scenario_executed",
@@ -1866,6 +2360,25 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         publish_agent_logs(args.artifact_dir, args, plan["manifest"], status=summary["status"])
         return {**plan, "summary": summary}, 2
     driver_suite = run_driver_suite(args, plan["manifest"])
+    post_execution_evidence: dict[str, Any] = {
+        "sync_health_after": capture_sync_health(args, label="after"),
+        "parity_after": capture_parity(args, label="after"),
+    }
+    post_execution_failures = [
+        name
+        for name, payload in post_execution_evidence.items()
+        if not isinstance(payload, dict) or payload.get("status") != "passed"
+    ]
+    if post_execution_failures:
+        driver_suite["status"] = "failed"
+        driver_suite.setdefault("failed_scenarios", []).append(
+            {
+                "scenario_id": "post_execution_evidence",
+                "error": f"post-execution evidence failed: {', '.join(post_execution_failures)}",
+                "artifact_dir": str(args.artifact_dir),
+            }
+        )
+    write_json(args.artifact_dir / "driver-suite-summary.json", driver_suite)
     summary["status"] = "execution_driver_suite_passed" if driver_suite["status"] == "passed" else "execution_driver_suite_failed"
     summary["execution"] = {
         "status": driver_suite["status"],
@@ -1874,6 +2387,13 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "result_counts": driver_suite["result_counts"],
             "failed_scenarios": driver_suite["failed_scenarios"],
             "summary_path": str(args.artifact_dir / "driver-suite-summary.json"),
+        },
+        "post_execution_evidence": {
+            name: {
+                "status": payload.get("status") if isinstance(payload, dict) else "failed",
+                "artifact": str(args.artifact_dir / f"{name.replace('_', '-')}.json"),
+            }
+            for name, payload in post_execution_evidence.items()
         },
         "manifest_total": driver_suite["manifest_total"],
         "note": (
@@ -1907,6 +2427,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stress-max-parallel", type=int, default=manifest_builder.DEFAULT_STRESS_MAX_PARALLEL)
     parser.add_argument("--market-attempts", type=int, default=manifest_builder.DEFAULT_MARKET_ATTEMPTS)
     parser.add_argument("--driver-scenario-limit", type=int, default=int(os.getenv("STAGING_FULL_MATRIX_DRIVER_SCENARIO_LIMIT", "0") or 0))
+    parser.add_argument("--parity-mode", choices=("quick", "deep"), default=os.getenv("STAGING_FULL_MATRIX_PARITY_MODE", "quick"))
+    parser.add_argument("--parity-max-rows-per-table", type=int, default=int(os.getenv("STAGING_FULL_MATRIX_PARITY_MAX_ROWS", "5000") or 5000))
     args = parser.parse_args(argv)
     if args.driver_scenario_limit <= 0:
         args.driver_scenario_limit = len(DRIVER_SCENARIOS)

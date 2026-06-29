@@ -788,6 +788,28 @@ Current execution evidence:
   either expand drivers to every mandatory manifest coverage group or map each
   manifest group to an equivalent executed driver with explicit rationale.
 
+Current hardening after external-agent review:
+
+- New runs must emit `run-metadata.json`.
+- JSON and JSONL artifacts are sanitized before write, not only stdout/stderr
+  text logs.
+- `redaction-report.json` is computed from the retained artifact directory and
+  records findings instead of hardcoding a clean result.
+- Preflight verifies staging DB/Redis separation with hashed storage identities
+  from both app containers.
+- Preflight records top-level `sync-health-before.json` and
+  `parity-before.json`.
+- Execute mode records top-level `sync-health-after.json` and
+  `parity-after.json`; post-execution evidence failure fails the driver suite.
+- Scenario cleanup now performs initial dry-run, hard delete, initial zero
+  dry-run proof, final hard delete, and final zero dry-run proof.
+- Scenario execution now fails if post-trade catchup cannot drive both sides'
+  `unsynced_change_log_count` to zero.
+- Prefix catchup now covers the prefix-scoped synced business tables touched by
+  the driver suite, including token, offer publication, request, trade,
+  delivery receipt, notification, and relation rows, not only `users` and
+  `offers`.
+
 ## Cleanup Contract
 
 Cleanup must be implemented before running mutating staging scenarios.

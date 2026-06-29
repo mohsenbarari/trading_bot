@@ -57,10 +57,89 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             for root in (tmp_path / "claude" / "full_matrix_logs", tmp_path / "chatgpt" / "full_matrix_logs"):
                 log_dir = root / "S2FM-UNIT"
                 self.assertTrue((log_dir / "README.md").exists())
+                self.assertTrue((log_dir / "run-metadata.json").exists())
                 self.assertTrue((log_dir / "manifest.json").exists())
                 self.assertTrue((log_dir / "scenario-results.jsonl").exists())
                 self.assertTrue((log_dir / "summary.json").exists())
                 self.assertTrue((log_dir / "redaction-report.json").exists())
+
+    def test_json_artifacts_are_sanitized_before_publication(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "artifact.json"
+            runner.write_json(
+                path,
+                {
+                    "api_key": "plain-secret-value",
+                    "nested": {"mobile_number": "09370809280"},
+                    "text": "BOT_TOKEN=1234567890:abcdefghijklmnopqrstuvwxyz",
+                },
+            )
+            text = path.read_text(encoding="utf-8")
+
+            self.assertIn("[REDACTED]", text)
+            self.assertNotIn("plain-secret-value", text)
+            self.assertNotIn("09370809280", text)
+            self.assertNotIn("abcdefghijklmnopqrstuvwxyz", text)
+            self.assertFalse(runner.detect_forbidden_secret_like_values(Path(tmpdir))["detected"])
+
+    def test_cleanup_zero_gate_fails_on_remaining_rows(self):
+        result = runner.CommandResult(
+            name="final_cleanup_zero_check_iran",
+            command=["cleanup"],
+            status="passed",
+            returncode=0,
+            elapsed_seconds=0.1,
+            stdout_path="stdout",
+            stderr_path="stderr",
+            json_payload={"planned_counts": {"users": 1}, "deleted_redis_keys": 0},
+        )
+
+        with self.assertRaises(RuntimeError):
+            runner.assert_cleanup_dry_run_zero([result], label="final_cleanup_zero_check")
+
+    def test_observability_clean_gate_fails_on_unsynced_backlog(self):
+        result = runner.CommandResult(
+            name="observability_iran_after",
+            command=["observability"],
+            status="passed",
+            returncode=0,
+            elapsed_seconds=0.1,
+            stdout_path="stdout",
+            stderr_path="stderr",
+            json_payload={"sync": {"unsynced_change_log_count": 2}, "worker_backlog": {"unsynced_change_logs": 2}},
+        )
+
+        with self.assertRaises(RuntimeError):
+            runner.assert_observability_clean([result], label="post_trade_catchup")
+
+    def test_storage_identity_separation_fails_when_backends_match(self):
+        def fake_run_json_command(command, *, timeout_seconds=10.0):
+            server_mode = "iran" if "iran-app" in " ".join(command) else "foreign"
+            return (
+                0,
+                {
+                    "environment": "staging",
+                    "server_mode": server_mode,
+                    "release_sha": "abc123",
+                    "database_identity_hash": "same-db",
+                    "redis_identity_hash": "same-redis",
+                    "redis_errors": 0,
+                },
+                "{}",
+                "",
+            )
+
+        args = SimpleNamespace(
+            iran_ssh_host="root@example",
+            iran_app_container="iran-app",
+            foreign_app_container="foreign-app",
+        )
+        with patch("scripts.run_staging_two_server_full_matrix.run_json_command", side_effect=fake_run_json_command):
+            result = runner.check_storage_identity_separation("storage", args=args)
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("database identities match", result.detail)
+        self.assertIn("Redis identities match", result.detail)
 
     def test_driver_refreshes_both_role_plan_barriers_with_same_future_epoch(self):
         calls = []
@@ -187,6 +266,21 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         )
         self.assertGreater(len(split["telegram_foreign"]), 0)
         self.assertGreater(len(split["webapp_iran"]), 0)
+
+    def test_sync_prefix_catchup_targets_all_business_tables(self):
+        from scripts import trading_core_probe_worker as worker
+
+        for table in (
+            "users",
+            "telegram_link_tokens",
+            "offers",
+            "offer_publication_states",
+            "offer_requests",
+            "trades",
+            "trade_delivery_receipts",
+            "notifications",
+        ):
+            self.assertIn(table, worker.TARGETED_SYNC_TABLES)
 
 
 if __name__ == "__main__":
