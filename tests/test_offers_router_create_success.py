@@ -18,6 +18,20 @@ class FakeExecuteResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def scalars(self):
+        value = self._value
+        if value is None:
+            values = []
+        elif isinstance(value, list):
+            values = value
+        else:
+            values = [value]
+        return SimpleNamespace(all=lambda: values)
+
+
+def empty_customer_read_context_results():
+    return [FakeExecuteResult([]), FakeExecuteResult(None)]
+
 
 class FakeDB:
     def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
@@ -142,7 +156,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             get_results=[old_offer, commodity],
             scalar_results=[1],
-            execute_results=[FakeExecuteResult(reloaded_offer)],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
         )
         current_user = make_user()
         settings = SimpleNamespace(max_active_offers=1)
@@ -193,13 +207,20 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
         self.assertEqual(publish_mock.await_count, 2)
         publish_mock.assert_any_await("offer:expired", {"id": 99})
-        response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
+        response_mock.assert_called_once_with(
+            reloaded_offer,
+            async_settings,
+            viewer_user_id=5,
+            include_owner_identity=True,
+            offer_owner_relation=None,
+            viewer_customer_relation=None,
+        )
         self.assertEqual(result, {"id": 77, "user_id": 5})
         self.register_market_offer_created_mock.assert_awaited_once_with(db)
 
     async def test_create_offer_idempotent_replay_returns_existing_offer_without_side_effects(self):
         existing_offer = make_reloaded_offer(offer_id=72)
-        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer)])
+        db = FakeDB(execute_results=[FakeExecuteResult(existing_offer), *empty_customer_read_context_results()])
         current_user = make_user()
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
 
@@ -230,7 +251,14 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_not_awaited()
         counter_mock.assert_not_awaited()
         self.register_market_offer_created_mock.assert_not_awaited()
-        response_mock.assert_called_once_with(existing_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
+        response_mock.assert_called_once_with(
+            existing_offer,
+            async_settings,
+            viewer_user_id=5,
+            include_owner_identity=True,
+            offer_owner_relation=None,
+            viewer_customer_relation=None,
+        )
 
     async def test_create_offer_uses_webapp_home_server_even_when_owner_and_runtime_are_foreign(self):
         commodity = SimpleNamespace(id=1)
@@ -238,7 +266,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             get_results=[commodity],
             scalar_results=[0],
-            execute_results=[FakeExecuteResult(reloaded_offer)],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
         )
         current_user = make_user(home_server="foreign")
         settings = SimpleNamespace(max_active_offers=5)
@@ -301,7 +329,14 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
                 "expires_at_ts": int(reloaded_offer.created_at.timestamp() + 15 * 60),
             },
         )
-        response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
+        response_mock.assert_called_once_with(
+            reloaded_offer,
+            async_settings,
+            viewer_user_id=5,
+            include_owner_identity=True,
+            offer_owner_relation=None,
+            viewer_customer_relation=None,
+        )
         self.assertEqual(result, {"id": 88, "channel_message_id": 555})
 
     async def test_create_offer_tolerates_post_commit_cache_and_realtime_failures(self):
@@ -310,7 +345,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             get_results=[commodity],
             scalar_results=[0],
-            execute_results=[FakeExecuteResult(reloaded_offer)],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
         )
         current_user = make_user()
         settings = SimpleNamespace(max_active_offers=5)
@@ -362,7 +397,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             get_results=[commodity],
             scalar_results=[0],
-            execute_results=[FakeExecuteResult(reloaded_offer)],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
         )
         current_user = make_user()
         settings = SimpleNamespace(max_active_offers=5)
@@ -429,7 +464,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             get_results=[commodity],
             scalar_results=[0],
-            execute_results=[FakeExecuteResult(reloaded_offer)],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
         )
         settings = SimpleNamespace(max_active_offers=5)
         async_settings = SimpleNamespace(offer_expiry_minutes=30)
@@ -473,7 +508,14 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         )
         set_count_mock.assert_awaited_once_with(5, 1)
         counter_mock.assert_awaited_once_with(db, current_user, "channel_message")
-        response_mock.assert_called_once_with(reloaded_offer, async_settings, viewer_user_id=5, include_owner_identity=True)
+        response_mock.assert_called_once_with(
+            reloaded_offer,
+            async_settings,
+            viewer_user_id=5,
+            include_owner_identity=True,
+            offer_owner_relation=None,
+            viewer_customer_relation=None,
+        )
         self.assertEqual(result, {"id": 120, "user_id": 5})
 
     async def test_create_offer_flags_acknowledged_warning_offers_for_competitive_exclusion(self):
@@ -482,7 +524,7 @@ class OffersRouterCreateSuccessTests(unittest.IsolatedAsyncioTestCase):
         db = FakeDB(
             get_results=[commodity],
             scalar_results=[0],
-            execute_results=[FakeExecuteResult(reloaded_offer)],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
         )
         current_user = make_user()
         settings = SimpleNamespace(max_active_offers=5)

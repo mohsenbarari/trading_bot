@@ -20,6 +20,23 @@ class FakeExecuteResult:
     def scalar_one(self):
         return self._value
 
+    def scalar_one_or_none(self):
+        return self._value
+
+    def scalars(self):
+        value = self._value
+        if value is None:
+            values = []
+        elif isinstance(value, list):
+            values = value
+        else:
+            values = [value]
+        return SimpleNamespace(all=lambda: values)
+
+
+def empty_customer_read_context_results():
+    return [FakeExecuteResult([]), FakeExecuteResult(None)]
+
 
 class ApiSuccessDB:
     def __init__(self, *, get_results=None, execute_results=None, scalar_results=None):
@@ -221,7 +238,11 @@ class OfferLimitCrossSurfaceSmokeTests(unittest.IsolatedAsyncioTestCase):
         live_settings = trading_settings.TradingSettings(max_active_offers=15, offer_expiry_minutes=30)
         commodity = SimpleNamespace(id=1)
         reloaded_offer = make_reloaded_offer(offer_id=701)
-        db = ApiSuccessDB(get_results=[commodity], execute_results=[FakeExecuteResult(reloaded_offer)], scalar_results=[14])
+        db = ApiSuccessDB(
+            get_results=[commodity],
+            execute_results=[FakeExecuteResult(reloaded_offer), *empty_customer_read_context_results()],
+            scalar_results=[14],
+        )
 
         async def fake_set_active_offer_count(_user_id, count):
             shared_count["value"] = count

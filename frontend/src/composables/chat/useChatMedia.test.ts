@@ -178,6 +178,9 @@ describe('useChatMedia', () => {
   const originalImage = globalThis.Image
   const originalFileReader = globalThis.FileReader
   const originalIndexedDB = globalThis.indexedDB
+  const originalHardwareConcurrencyDescriptor = Object.getOwnPropertyDescriptor(navigator, 'hardwareConcurrency')
+  const originalDeviceMemoryDescriptor = Object.getOwnPropertyDescriptor(navigator as object, 'deviceMemory')
+  const originalConnectionDescriptor = Object.getOwnPropertyDescriptor(navigator as object, 'connection')
 
   function stubCanvasImagePipeline(width = 640, height = 320) {
     Object.defineProperty(globalThis, 'createImageBitmap', {
@@ -504,6 +507,27 @@ describe('useChatMedia', () => {
       vi.stubGlobal('indexedDB', originalIndexedDB)
     } else {
       Reflect.deleteProperty(globalThis, 'indexedDB')
+    }
+
+    const currentNavigator = globalThis.navigator
+    if (currentNavigator) {
+      if (originalHardwareConcurrencyDescriptor) {
+        Object.defineProperty(currentNavigator, 'hardwareConcurrency', originalHardwareConcurrencyDescriptor)
+      } else {
+        Reflect.deleteProperty(currentNavigator as object, 'hardwareConcurrency')
+      }
+
+      if (originalDeviceMemoryDescriptor) {
+        Object.defineProperty(currentNavigator as object, 'deviceMemory', originalDeviceMemoryDescriptor)
+      } else {
+        Reflect.deleteProperty(currentNavigator as object, 'deviceMemory')
+      }
+
+      if (originalConnectionDescriptor) {
+        Object.defineProperty(currentNavigator as object, 'connection', originalConnectionDescriptor)
+      } else {
+        Reflect.deleteProperty(currentNavigator as object, 'connection')
+      }
     }
   })
 
