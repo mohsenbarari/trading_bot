@@ -6,6 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import core.config as core_config
 from core.log_redaction import (
     REDACTED,
     REDACTED_CARD,
@@ -237,9 +238,12 @@ class LoggingFoundationTests(unittest.TestCase):
             error_tracking_sample_rate=0.5,
         )
 
-        with patch("sys.stdout", io.StringIO()), patch.dict(sys.modules, {"sentry_sdk": fake_sentry}, clear=False), patch(
-            "core.config.settings", fake_settings
-        ), patch.dict("os.environ", {}, clear=True):
+        with (
+            patch("sys.stdout", io.StringIO()),
+            patch.dict(sys.modules, {"sentry_sdk": fake_sentry}, clear=False),
+            patch.object(core_config, "settings", fake_settings),
+            patch.dict("os.environ", {}, clear=True),
+        ):
             configure_logging("api-test")
 
         self.assertEqual(len(sentry_init_calls), 1)
