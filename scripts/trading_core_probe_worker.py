@@ -1647,6 +1647,7 @@ async def collect_targeted_prefix_change_logs(
     prefix: str,
     *,
     tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
+    include_synced: bool = False,
 ) -> list[ChangeLog]:
     plan = await collect_cleanup_plan(prefix)
     clauses = []
@@ -1669,9 +1670,12 @@ async def collect_targeted_prefix_change_logs(
         else_=99,
     )
     async with AsyncSessionLocal() as db:
+        filters = [or_(*clauses)]
+        if not include_synced:
+            filters.append(ChangeLog.synced.is_(False))
         result = await db.execute(
             select(ChangeLog)
-            .where(ChangeLog.synced.is_(False), or_(*clauses))
+            .where(*filters)
             .order_by(table_order, ChangeLog.id.asc())
         )
         return list(result.scalars().all())
@@ -1683,6 +1687,7 @@ async def push_prefix_change_logs_to_peer(
     batch_size: int = 200,
     tables: tuple[str, ...] = TARGETED_SYNC_TABLES,
     max_attempts: int = 3,
+    include_synced: bool = False,
 ) -> dict[str, Any]:
     from core.server_routing import default_peer_server_url
     from core.sync_worker import change_log_entry_to_sync_item
@@ -1692,13 +1697,14 @@ async def push_prefix_change_logs_to_peer(
     if not target_url or not api_key:
         raise TradingProbeError("targeted prefix sync requires peer URL and sync API key")
 
-    entries = await collect_targeted_prefix_change_logs(prefix, tables=tables)
+    entries = await collect_targeted_prefix_change_logs(prefix, tables=tables, include_synced=include_synced)
     report: dict[str, Any] = {
         "status": "ok",
         "prefix": prefix,
         "server_mode": settings.server_mode,
         "target_url_configured": bool(target_url),
         "tables": list(tables),
+        "include_synced": bool(include_synced),
         "entry_count": len(entries),
         "processed": 0,
         "batches": [],
@@ -6989,7 +6995,12 @@ async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
         if table not in tables:
             continue
         stage_results.append(
-            await push_prefix_change_logs_to_peer(prefix, batch_size=int(args.batch_size), tables=(table,))
+            await push_prefix_change_logs_to_peer(
+                prefix,
+                batch_size=int(args.batch_size),
+                tables=(table,),
+                include_synced=bool(args.include_synced),
+            )
         )
     result = {
         "status": "ok" if all(item.get("status") == "ok" for item in stage_results) else "failed",
@@ -7337,6 +7348,7 @@ def build_parser() -> argparse.ArgumentParser:
     catchup_parser.add_argument("--prefix", required=True)
     catchup_parser.add_argument("--output")
     catchup_parser.add_argument("--batch-size", type=int, default=200)
+    catchup_parser.add_argument("--include-synced", action="store_true")
     catchup_parser.add_argument("--table", action="append", choices=TARGETED_SYNC_TABLES)
     catchup_parser.add_argument(
         "--allow-production-execution",

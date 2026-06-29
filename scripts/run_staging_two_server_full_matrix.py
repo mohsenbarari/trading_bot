@@ -1609,6 +1609,7 @@ def run_sync_catchup(
                 "sync-prefix-catchup",
                 "--prefix",
                 prefix,
+                "--include-synced",
                 "--output",
                 "/artifacts/sync-catchup-iran.json",
             ],
@@ -1623,6 +1624,7 @@ def run_sync_catchup(
                 "sync-prefix-catchup",
                 "--prefix",
                 prefix,
+                "--include-synced",
                 "--output",
                 "/artifacts/sync-catchup-foreign.json",
             ],
@@ -2292,7 +2294,14 @@ def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict
     suite_dir = args.artifact_dir / "driver-suite"
     suite_dir.mkdir(parents=True, exist_ok=True)
     remote_root = f"{args.iran_workdir}/tmp/full_matrix_logs/{args.run_id}"
-    selected = DRIVER_SCENARIOS[: max(1, int(args.driver_scenario_limit or len(DRIVER_SCENARIOS)))]
+    selected = DRIVER_SCENARIOS
+    if args.driver_scenario_id:
+        requested = set(args.driver_scenario_id)
+        selected = [scenario for scenario in selected if scenario["id"] in requested]
+        missing = sorted(requested - {scenario["id"] for scenario in selected})
+        if missing:
+            raise RuntimeError(f"unknown driver scenario id(s): {', '.join(missing)}")
+    selected = selected[: max(1, int(args.driver_scenario_limit or len(selected)))]
     results: list[dict[str, Any]] = []
     for scenario in selected:
         result = execute_driver_scenario(args, scenario, suite_dir=suite_dir, remote_root=remote_root)
@@ -2428,6 +2437,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stress-max-parallel", type=int, default=manifest_builder.DEFAULT_STRESS_MAX_PARALLEL)
     parser.add_argument("--market-attempts", type=int, default=manifest_builder.DEFAULT_MARKET_ATTEMPTS)
     parser.add_argument("--driver-scenario-limit", type=int, default=int(os.getenv("STAGING_FULL_MATRIX_DRIVER_SCENARIO_LIMIT", "0") or 0))
+    parser.add_argument("--driver-scenario-id", action="append", choices=[scenario["id"] for scenario in DRIVER_SCENARIOS])
     parser.add_argument("--parity-mode", choices=("quick", "deep"), default=os.getenv("STAGING_FULL_MATRIX_PARITY_MODE", "quick"))
     parser.add_argument("--parity-max-rows-per-table", type=int, default=int(os.getenv("STAGING_FULL_MATRIX_PARITY_MAX_ROWS", "5000") or 5000))
     args = parser.parse_args(argv)

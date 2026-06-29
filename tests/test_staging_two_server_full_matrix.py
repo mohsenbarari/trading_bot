@@ -294,6 +294,81 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             worker.TARGETED_SYNC_TABLES.index("trade_delivery_receipts"),
         )
 
+    def test_driver_sync_catchup_replays_synced_prefix_rows_for_convergence(self):
+        calls = []
+
+        def fake_remote_worker(name, **kwargs):
+            calls.append(("remote", name, kwargs["worker_args"]))
+            return runner.CommandResult(
+                name=name,
+                command=["remote"],
+                status="passed",
+                returncode=0,
+                elapsed_seconds=0.1,
+                stdout_path="remote.stdout",
+                stderr_path="remote.stderr",
+            )
+
+        def fake_local_worker(name, **kwargs):
+            calls.append(("local", name, kwargs["worker_args"]))
+            return runner.CommandResult(
+                name=name,
+                command=["local"],
+                status="passed",
+                returncode=0,
+                elapsed_seconds=0.1,
+                stdout_path="local.stdout",
+                stderr_path="local.stderr",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.run_remote_worker",
+            side_effect=fake_remote_worker,
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.run_local_worker",
+            side_effect=fake_local_worker,
+        ):
+            runner.run_sync_catchup(
+                args=SimpleNamespace(),
+                prefix="FMX_STAGE_UNIT_",
+                local_dir=Path(tmpdir),
+                remote_dir="/remote/artifacts",
+                log_dir=Path(tmpdir) / "logs",
+            )
+
+        self.assertEqual(len(calls), 2)
+        for _kind, _name, worker_args in calls:
+            self.assertIn("--include-synced", worker_args)
+
+    def test_driver_suite_can_filter_to_one_driver_scenario(self):
+        calls = []
+
+        def fake_execute_driver_scenario(args, scenario, *, suite_dir, remote_root):
+            calls.append(scenario["id"])
+            return {
+                "scenario_id": scenario["id"],
+                "status": "passed",
+                "error": "",
+                "elapsed_seconds": 0.1,
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.execute_driver_scenario",
+            side_effect=fake_execute_driver_scenario,
+        ):
+            args = SimpleNamespace(
+                artifact_dir=Path(tmpdir),
+                iran_workdir="/remote",
+                run_id="S2FM-UNIT",
+                driver_scenario_id=["DRIVER-BOT-DUPLICATE-REPLAY-BUY"],
+                driver_scenario_limit=4,
+            )
+            result = runner.run_driver_suite(args, {"summary": {"total_manifest_scenarios": 5611}})
+
+        self.assertEqual(calls, ["DRIVER-BOT-DUPLICATE-REPLAY-BUY"])
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["scenario_total"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
