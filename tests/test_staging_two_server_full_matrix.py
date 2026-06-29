@@ -112,6 +112,136 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             runner.assert_observability_clean([result], label="post_trade_catchup")
 
+    def test_sync_health_capture_fails_on_nonzero_queue(self):
+        def fake_fetch(url, *_args, **_kwargs):
+            server_mode = "foreign" if "/foreign-sync/" in url else "iran"
+            return (
+                200,
+                {
+                    "server_mode": server_mode,
+                    "status": "ok",
+                    "unsynced_change_log_count": 0,
+                    "redis_queues": {"sync:outbound": 1, "sync:retry": 0},
+                    "parity_status": {
+                        "fresh": True,
+                        "comparison_status": "non_business_difference",
+                        "business_drift_count": 0,
+                        "critical_drift_count": 0,
+                        "duplicate_identity_count": 0,
+                        "incomplete_count": 0,
+                        "truncated_table_count": 0,
+                    },
+                },
+                "{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            side_effect=fake_fetch,
+        ):
+            args = SimpleNamespace(
+                artifact_dir=Path(tmpdir),
+                observability_api_key="key",
+                iran_base_url="https://staging.gold-trade.ir",
+                foreign_base_url="https://staging.362514.ir",
+                basic_auth_user=None,
+                basic_auth_password=None,
+            )
+            payload = runner.capture_sync_health(args, label="after", require_fresh_parity=True)
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("iran", payload["failed_peers"])
+        self.assertIn("sync:outbound=1", "; ".join(payload["gate_failures"]["iran"]))
+
+    def test_sync_health_capture_fails_on_stale_final_parity(self):
+        def fake_fetch(url, *_args, **_kwargs):
+            server_mode = "foreign" if "/foreign-sync/" in url else "iran"
+            return (
+                200,
+                {
+                    "server_mode": server_mode,
+                    "status": "ok",
+                    "unsynced_change_log_count": 0,
+                    "redis_queues": {"sync:outbound": 0, "sync:retry": 0},
+                    "parity_status": {
+                        "fresh": False,
+                        "comparison_status": "stale",
+                        "latest_comparison": {
+                            "business_drift_count": 0,
+                            "critical_drift_count": 0,
+                            "duplicate_identity_count": 0,
+                            "incomplete_count": 0,
+                            "truncated_table_count": 0,
+                        },
+                    },
+                },
+                "{}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            side_effect=fake_fetch,
+        ):
+            args = SimpleNamespace(
+                artifact_dir=Path(tmpdir),
+                observability_api_key="key",
+                iran_base_url="https://staging.gold-trade.ir",
+                foreign_base_url="https://staging.362514.ir",
+                basic_auth_user=None,
+                basic_auth_password=None,
+            )
+            payload = runner.capture_sync_health(args, label="after", require_fresh_parity=True)
+
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("parity_status.fresh=false", "; ".join(payload["gate_failures"]["iran"]))
+
+    def test_execute_records_parity_before_final_sync_health(self):
+        call_order = []
+
+        def fake_capture_parity(_args, *, label):
+            call_order.append(f"parity_{label}")
+            return {"status": "passed"}
+
+        def fake_capture_sync_health(_args, *, label, require_fresh_parity=False):
+            call_order.append(f"sync_health_{label}_{require_fresh_parity}")
+            return {"status": "passed"}
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ",
+            {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.run_preflight",
+            return_value=(
+                {
+                    "summary": {"status": "preflight_passed"},
+                    "manifest": {"summary": {"total_manifest_scenarios": 5611}},
+                },
+                0,
+            ),
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.run_driver_suite",
+            return_value={
+                "status": "passed",
+                "scenario_total": 1,
+                "result_counts": {"passed": 1},
+                "failed_scenarios": [],
+                "manifest_total": 5611,
+            },
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.capture_parity",
+            side_effect=fake_capture_parity,
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.capture_sync_health",
+            side_effect=fake_capture_sync_health,
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.publish_agent_logs",
+        ):
+            args = SimpleNamespace(artifact_dir=Path(tmpdir), run_id="S2FM-UNIT")
+            _payload, exit_code = runner.run_execute(args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(call_order, ["parity_after", "sync_health_after_True"])
+
     def test_storage_identity_separation_fails_when_backends_match(self):
         def fake_run_json_command(command, *, timeout_seconds=10.0):
             server_mode = "iran" if "iran-app" in " ".join(command) else "foreign"

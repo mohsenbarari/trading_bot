@@ -726,8 +726,14 @@ Each reviewer log directory must include at least:
   `branch_change_area`;
 - `preflight.json` and `preflight.md`;
 - `sync-health-before.json`, `sync-health-after.json`, and queue/backlog
-  snapshots for both staging peers;
-- `parity-before.json`, `parity-after.json`, and comparison summaries;
+  snapshots for both staging peers. These artifacts must fail closed when
+  either peer has non-zero `unsynced_change_log_count`, non-zero
+  `sync:outbound`, or non-zero `sync:retry`;
+- `parity-before.json`, `parity-after.json`, and comparison summaries. The
+  final `sync-health-after.json` must be captured after `parity-after.json`
+  is recorded so `/api/sync/health` reports a fresh acceptable parity status
+  (`ok`/`clean`/`non_business_difference`) with zero business, critical,
+  incomplete, duplicate, and truncated counts;
 - `cleanup-dry-run-before-iran.json`,
   `cleanup-dry-run-before-foreign.json`,
   `cleanup-dry-run-after-iran.json`, and
@@ -797,10 +803,13 @@ Current hardening after external-agent review:
   records findings instead of hardcoding a clean result.
 - Preflight verifies staging DB/Redis separation with hashed storage identities
   from both app containers.
-- Preflight records top-level `sync-health-before.json` and
-  `parity-before.json`.
-- Execute mode records top-level `sync-health-after.json` and
-  `parity-after.json`; post-execution evidence failure fails the driver suite.
+- Preflight records top-level `parity-before.json` first and then
+  `sync-health-before.json`, so the health artifact must show clean backlog
+  and fresh parity before mutation starts.
+- Execute mode records top-level `parity-after.json` first and then
+  `sync-health-after.json`; post-execution evidence failure fails the driver
+  suite. The final health artifact is a gate, not a simple HTTP reachability
+  check: stale parity or non-zero sync queues/backlog must fail the run.
 - Scenario cleanup now performs initial dry-run, hard delete, initial zero
   dry-run proof, final hard delete, and final zero dry-run proof.
 - Scenario execution now fails if post-trade catchup cannot drive both sides'

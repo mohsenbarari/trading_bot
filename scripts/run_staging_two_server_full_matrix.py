@@ -1317,13 +1317,74 @@ def check_observability_json(
     return CheckResult(name, "passed", "sync health verified", time.perf_counter() - started, {"status_code": status_code, "payload": payload})
 
 
-def capture_sync_health(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
+def int_or_zero(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def sync_health_gate_failures(
+    peer: str,
+    peer_payload: dict[str, Any],
+    *,
+    expected_server_mode: str,
+    require_fresh_parity: bool,
+) -> list[str]:
+    failures: list[str] = []
+    server_mode = str(peer_payload.get("server_mode") or "")
+    if server_mode != expected_server_mode:
+        failures.append(f"{peer} server_mode={server_mode or 'missing'} expected={expected_server_mode}")
+    unsynced = int_or_zero(peer_payload.get("unsynced_change_log_count"))
+    if unsynced != 0:
+        failures.append(f"{peer} unsynced_change_log_count={unsynced}")
+    queues = peer_payload.get("redis_queues")
+    if not isinstance(queues, dict):
+        queues = peer_payload.get("redis_counts")
+    if not isinstance(queues, dict):
+        queues = {}
+    for queue_name in ("sync:outbound", "sync:retry"):
+        queue_count = int_or_zero(queues.get(queue_name))
+        if queue_count != 0:
+            failures.append(f"{peer} {queue_name}={queue_count}")
+    if require_fresh_parity:
+        parity_status = peer_payload.get("parity_status")
+        if not isinstance(parity_status, dict):
+            failures.append(f"{peer} parity_status=missing")
+        else:
+            if parity_status.get("fresh") is not True:
+                failures.append(f"{peer} parity_status.fresh=false")
+            comparison_status = (
+                parity_status.get("comparison_status")
+                or parity_status.get("status")
+                or ((parity_status.get("latest_comparison") or {}).get("status") if isinstance(parity_status.get("latest_comparison"), dict) else None)
+            )
+            if comparison_status not in {"ok", "clean", "non_business_difference"}:
+                failures.append(f"{peer} parity_status.comparison_status={comparison_status or 'missing'}")
+            comparison_payload = parity_status
+            if isinstance(parity_status.get("latest_comparison"), dict):
+                comparison_payload = parity_status["latest_comparison"]
+            for field_name in (
+                "business_drift_count",
+                "critical_drift_count",
+                "duplicate_identity_count",
+                "incomplete_count",
+                "truncated_table_count",
+            ):
+                field_value = int_or_zero(comparison_payload.get(field_name))
+                if field_value != 0:
+                    failures.append(f"{peer} parity_status.{field_name}={field_value}")
+    return failures
+
+
+def capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_parity: bool = False) -> dict[str, Any]:
     auth = basic_auth_from_args(args)
     payload: dict[str, Any] = {
         "schema_version": "staging_two_server_sync_health_pair_v1",
         "label": label,
         "captured_at": utc_now_iso(),
         "status": "failed",
+        "require_fresh_parity": require_fresh_parity,
         "peers": {},
     }
     if not args.observability_api_key:
@@ -1335,6 +1396,7 @@ def capture_sync_health(args: argparse.Namespace, *, label: str) -> dict[str, An
         "foreign": args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/health",
     }
     failures = []
+    gate_failures: dict[str, list[str]] = {}
     for peer, url in peer_urls.items():
         status_code, peer_payload, raw = fetch_observability_json(
             url,
@@ -1349,8 +1411,21 @@ def capture_sync_health(args: argparse.Namespace, *, label: str) -> dict[str, An
         }
         if status_code != 200 or not isinstance(peer_payload, dict):
             failures.append(peer)
+            gate_failures[peer] = [f"{peer} sync health HTTP/JSON check failed with status={status_code}"]
+            continue
+        peer_gate_failures = sync_health_gate_failures(
+            peer,
+            peer_payload,
+            expected_server_mode=peer,
+            require_fresh_parity=require_fresh_parity,
+        )
+        if peer_gate_failures:
+            failures.append(peer)
+            gate_failures[peer] = peer_gate_failures
+        payload["peers"][peer]["gate_failures"] = peer_gate_failures
     payload["status"] = "passed" if not failures else "failed"
-    payload["failed_peers"] = failures
+    payload["failed_peers"] = sorted(set(failures))
+    payload["gate_failures"] = gate_failures
     write_json(args.artifact_dir / f"sync-health-{label}.json", payload)
     return payload
 
@@ -1447,17 +1522,6 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     manifest = plan["manifest"]
     checks = preflight_checks(args, manifest)
     if args.observability_api_key:
-        sync_health_before = capture_sync_health(args, label="before")
-        checks.append(
-            CheckResult(
-                "sync_health_before_artifact",
-                "passed" if sync_health_before.get("status") == "passed" else "failed",
-                "top-level sync-health-before artifact captured"
-                if sync_health_before.get("status") == "passed"
-                else "top-level sync-health-before artifact failed",
-                payload={"artifact": str(args.artifact_dir / "sync-health-before.json")},
-            )
-        )
         parity_before = capture_parity(args, label="before")
         checks.append(
             CheckResult(
@@ -1467,6 +1531,17 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 if parity_before.get("status") == "passed"
                 else "top-level parity-before artifact failed",
                 payload={"artifact": str(args.artifact_dir / "parity-before.json")},
+            )
+        )
+        sync_health_before = capture_sync_health(args, label="before", require_fresh_parity=True)
+        checks.append(
+            CheckResult(
+                "sync_health_before_artifact",
+                "passed" if sync_health_before.get("status") == "passed" else "failed",
+                "top-level sync-health-before artifact captured with clean backlog and fresh parity"
+                if sync_health_before.get("status") == "passed"
+                else "top-level sync-health-before artifact failed clean backlog/fresh parity gate",
+                payload={"artifact": str(args.artifact_dir / "sync-health-before.json")},
             )
         )
     failed = [item for item in checks if item.status != "passed"]
@@ -2370,9 +2445,11 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         publish_agent_logs(args.artifact_dir, args, plan["manifest"], status=summary["status"])
         return {**plan, "summary": summary}, 2
     driver_suite = run_driver_suite(args, plan["manifest"])
+    parity_after = capture_parity(args, label="after")
+    sync_health_after = capture_sync_health(args, label="after", require_fresh_parity=True)
     post_execution_evidence: dict[str, Any] = {
-        "sync_health_after": capture_sync_health(args, label="after"),
-        "parity_after": capture_parity(args, label="after"),
+        "parity_after": parity_after,
+        "sync_health_after": sync_health_after,
     }
     post_execution_failures = [
         name
