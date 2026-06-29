@@ -277,8 +277,9 @@ Exit criteria:
 
 ## Stage V3A - Short-Outage Market Schedule Autonomy
 
-Goal: prevent Telegram from staying open during a short Iran/foreign outage
-when both servers already know the same market schedule.
+Goal: ensure foreign independently applies Telegram-side market open/close
+transitions during a short Iran/foreign outage when both servers already know
+the same market schedule.
 
 Problem scenario:
 
@@ -302,30 +303,75 @@ but not for preventing trades and active buttons after the known close time.
 Recommended decision:
 
 Keep Iran authoritative for `market_runtime_state`, but let foreign evaluate
-the synced schedule for local protective side effects during short outages.
+the synced schedule for local Telegram-side transitions during short outages.
+Foreign must independently act on both market close and market open when Iran's
+runtime-state transition does not arrive within the configured grace period.
 Foreign must not create an authoritative `market_runtime_state` transition. It
 may create only foreign-local side-effect evidence such as market notice
-receipts or local outage-closure guard records.
+receipts or local outage transition guard records.
 
-Allowed foreign actions at the scheduled close time during a short outage:
+Timeout decision:
+
+- Add a configurable grace setting, recommended default:
+  `TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS=30`.
+- The grace timer starts at the scheduled transition timestamp calculated from
+  the last synced `trading_settings` and `market_schedule_overrides`.
+- If foreign has not received an Iran `market_runtime_state` transition with
+  `last_transition_at >= scheduled_transition_at` by
+  `scheduled_transition_at + grace_seconds`, foreign must run the independent
+  local Telegram-side transition.
+- The default is 30 seconds because the current market schedule loop runs every
+  15 seconds and normal sync is expected to complete within a few seconds. This
+  gives Iran two loop opportunities plus normal sync time while keeping the
+  Telegram risk window short.
+- This value must be environment-configurable and validated in staging. If
+  staging evidence proves the normal loop/sync path is consistently faster, it
+  can be reduced later; it must not be increased silently in production.
+
+Close behavior during the grace window:
+
+- At the exact scheduled close time, Telegram trade validation should already
+  fail closed based on the synced schedule. This prevents trades after the
+  known close time even while foreign waits briefly for Iran's authoritative
+  runtime-state sync.
+- At `scheduled_close_at + grace_seconds`, if Iran's close transition still has
+  not arrived, foreign must independently run the close side effects listed
+  below.
+
+Open behavior during the grace window:
+
+- At the exact scheduled open time, foreign should wait for Iran's
+  runtime-state sync until the grace period expires.
+- At `scheduled_open_at + grace_seconds`, if Iran's open transition still has
+  not arrived and the synced schedule snapshot is considered usable, foreign
+  must independently run the open side effects listed below.
+- If the schedule snapshot is stale or suspect, foreign should remain closed
+  for Telegram trading and emit an operator-visible warning instead of opening
+  on uncertain data.
+
+Allowed foreign actions at the scheduled transition time during a short outage:
 
 - stop accepting Telegram trade requests because the synced schedule says the
   market is closed;
 - expire active offers where `Offer.home_server == "foreign"`;
 - remove/update interactive Telegram offer buttons for expired foreign-home
   offers;
-- send the market-close Telegram channel notice if the transition is within
-  the approved short-outage freshness window and no matching receipt exists;
+- send the Telegram channel notice for close or open if the transition is
+  within the approved short-outage freshness window and no matching receipt
+  exists;
+- reopen Telegram trade actions after scheduled open plus grace if the synced
+  schedule snapshot is usable and no newer Iran state contradicts it;
 - record idempotent local evidence so reconnection/replay does not duplicate
   expiry or Telegram notices.
 
 Forbidden foreign actions:
 
 - do not write a foreign-authoritative `market_runtime_state` row;
-- do not reopen the market locally if Iran later syncs a newer closed state;
+- do not keep accepting Telegram trades after scheduled close merely because
+  the last synced `market_runtime_state` still says open;
+- do not reopen the market locally if Iran later syncs a newer closed state or
+  a newer synced override contradicts the local open;
 - do not push a foreign market-runtime transition back to Iran;
-- do not accept trades after the local schedule has reached close time merely
-  because the last synced `market_runtime_state` still says open.
 
 Alternative if independent schedule action is not selected:
 
@@ -344,18 +390,27 @@ Recommended implementation shape:
 - On foreign market-schedule loop:
   - load synced `trading_settings` and `market_schedule_overrides`;
   - evaluate the schedule in `market_timezone`;
-  - if schedule is closed while local Telegram surface is still open, run an
-    idempotent local close-side-effect command for foreign-home offers and
-    Telegram buttons;
+  - compute the scheduled transition timestamp and compare it with the newest
+    synced Iran `market_runtime_state.last_transition_at`;
+  - if the synced Iran runtime transition arrives before the grace expires, use
+    the normal sync-reconciliation path;
+  - if the grace expires without the Iran transition, run an idempotent local
+    transition command for Telegram-side open or close;
+  - for close, reject Telegram trade actions immediately at the scheduled close
+    time, even before the side-effect command runs after grace;
   - do not call the Iran-authoritative runtime-state writer.
 - On reconnect:
   - when Iran's close `market_runtime_state` arrives, reconcile it with the
     local foreign side effects;
   - if the local close already happened, skip duplicate expiry and duplicate
     Telegram notice;
-  - if Iran sends a newer override/runtime state that changes the intended
-    result, apply only the explicitly safe transition policy documented for
-    short outages.
+  - when Iran's open `market_runtime_state` arrives, reconcile it with the
+    local open-side evidence;
+  - if the local transition already happened, skip duplicate Telegram notices,
+    duplicate channel edits, and duplicate expiry;
+  - if Iran sends a newer override/runtime state that contradicts the local
+    transition, apply only the explicitly safe conflict policy documented for
+    short outages and produce an operator alert.
 - If schedule settings or overrides are stale/not synced, fail closed for
   Telegram trading after the last known close time rather than allowing trades
   during uncertainty.
@@ -364,10 +419,22 @@ Required tests:
 
 - `21:59` connectivity loss, `22:00` scheduled close, `22:04` reconnect:
   foreign blocks Telegram trades at 22:00 without waiting for runtime sync.
-- The same scenario expires foreign-home active offers at 22:00.
-- The same scenario removes/updates Telegram buttons at 22:00.
+- The same scenario expires foreign-home active offers after the configured
+  grace if Iran's close transition did not arrive.
+- The same scenario removes/updates Telegram buttons after the configured
+  grace if Iran's close transition did not arrive.
+- The same scenario sends the Telegram close notice after the configured grace
+  and does not send a duplicate after reconnect.
+- `08:59` connectivity loss, `09:00` scheduled open, no Iran runtime sync by
+  `09:00 + grace`: foreign sends the Telegram open notice and opens Telegram
+  trading if the synced schedule snapshot is usable.
+- `08:59` connectivity loss, `09:00` scheduled open, stale/suspect schedule
+  snapshot: foreign remains closed for Telegram trading and emits an alert.
 - Reconnection at 22:04 applies Iran `market_runtime_state` without duplicating
   expiry, notice receipts, or channel edits.
+- If Iran runtime sync arrives before `scheduled_transition_at + grace_seconds`,
+  foreign uses the normal sync path and does not run the independent transition
+  command.
 - If the schedule was changed on Iran immediately before the outage but did not
   sync to foreign, foreign follows only its last confirmed synced schedule and
   records an explicit stale-schedule warning.
@@ -385,10 +452,12 @@ Exit criteria:
 
 - A short outage before close cannot leave Telegram trade actions enabled past
   the known synced close time.
+- A short outage before open does not leave Telegram closed indefinitely when
+  foreign has a usable synced schedule and Iran runtime sync is late.
 - Foreign still does not become authoritative for `market_runtime_state`.
 - Reconnect is idempotent and does not create duplicate side effects.
-- The chosen implementation path, independent schedule action or explicit
-  outage mode, is documented before coding.
+- The configured grace period and the schedule freshness policy are documented
+  before coding and covered by tests.
 
 ## Stage V4 - Parity And Health Evidence After Env Correction
 
