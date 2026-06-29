@@ -817,19 +817,14 @@ test.describe('customer owner lifecycle', () => {
         max_daily_trades: 5,
       }))
 
-    await page.goto(`/users/${owner.userId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(page.locator('.customer-relations-section')).toContainText(managementName)
-
-    await ensureAccordionOpen(page.locator('.public-profile-view:visible').last(), '.customer-relations-section')
-    await page.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
-    await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
+    await page.goto(`/users/${activatedCustomerUserId}`)
     await expect(page.locator('.public-profile-view:visible').last().getByRole('heading', { name: new RegExp(managementName) })).toBeVisible({ timeout: 30000 })
 
     await setAuthTokens(page, superAdmin)
     await page.goto(`/users/${owner.userId}`)
     const superAdminOwnerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(superAdminOwnerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
+    await expect(superAdminOwnerProfileView.locator('.customer-relations-section')).toContainText(managementName, { timeout: 30000 })
     await ensureAccordionOpen(superAdminOwnerProfileView, '.customer-relations-section')
     await superAdminOwnerProfileView.locator('.customer-relations-section .customer-profile-link-btn').filter({ hasText: managementName }).click()
     await page.waitForURL(new RegExp(`/users/${activatedCustomerUserId}(?:\\?.*)?$`))
@@ -850,7 +845,7 @@ test.describe('customer owner lifecycle', () => {
     await expect(workspace).toBeVisible({ timeout: 30000 })
 
     await workspace.getByRole('button', { name: 'قطع ارتباط مشتری' }).click()
-    await page.getByRole('button', { name: 'قطع ارتباط' }).click()
+    await page.locator('.ui-confirm-dialog:visible').getByRole('button', { name: 'قطع ارتباط', exact: true }).click()
 
     await expect
       .poll(async () => (await fetchOwnerCustomerRelations(request, owner.accessToken)).length, { timeout: 30000 })

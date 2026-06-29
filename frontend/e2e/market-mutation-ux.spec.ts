@@ -45,6 +45,15 @@ test.describe('Market mutation UX', () => {
       if (url.pathname === '/api/auth/me') {
         return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
       }
+      if (url.pathname === '/api/sessions/verify') {
+        return fulfillJson(route, 200, { ok: true })
+      }
+      if (url.pathname === '/api/sessions/active') {
+        return fulfillJson(route, 200, [{ id: 'pw-session', is_current: true, is_primary: true }])
+      }
+      if (url.pathname === '/api/sessions/login-requests/pending' || url.pathname === '/api/sessions/recovery/pending') {
+        return fulfillJson(route, 200, [])
+      }
       if (url.pathname === '/api/notifications/preferences') {
         return fulfillJson(route, 200, { market_offer_push_enabled: true })
       }
@@ -150,6 +159,15 @@ test.describe('Market mutation UX', () => {
 
       if (url.pathname === '/api/auth/me') {
         return fulfillJson(route, 200, { id: 77, role: 'عادی', account_name: 'pw_market_mutation_viewer', customer_tier: null })
+      }
+      if (url.pathname === '/api/sessions/verify') {
+        return fulfillJson(route, 200, { ok: true })
+      }
+      if (url.pathname === '/api/sessions/active') {
+        return fulfillJson(route, 200, [{ id: 'pw-session', is_current: true, is_primary: true }])
+      }
+      if (url.pathname === '/api/sessions/login-requests/pending' || url.pathname === '/api/sessions/recovery/pending') {
+        return fulfillJson(route, 200, [])
       }
       if (url.pathname === '/api/notifications/preferences') {
         return fulfillJson(route, 200, { market_offer_push_enabled: true })
@@ -265,9 +283,8 @@ test.describe('Market mutation UX', () => {
     await expect(offerCard).toBeVisible()
     const tradeButton = offerCard.getByRole('button', { name: '4 عدد' }).first()
     await tradeButton.click()
-    const tradeConfirm = offerCard.locator('.trade-btn.pending').first()
-    await expect(tradeConfirm).toBeVisible()
-    await tradeConfirm.evaluate((node: HTMLElement) => {
+    await expect(tradeButton).toHaveClass(/pending/)
+    await tradeButton.evaluate((node: HTMLElement) => {
       node.click()
       node.click()
     })

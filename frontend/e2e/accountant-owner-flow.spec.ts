@@ -339,7 +339,7 @@ test.describe('accountant owner lifecycle', () => {
     await expect(page).toHaveURL(new RegExp(`/operations/accountants/${pendingRelation?.id}(?:\\?.*)?$`))
     await page.getByRole('tab', { name: 'حساس' }).click()
     await page.getByRole('button', { name: 'قطع ارتباط حسابدار' }).click()
-    await page.getByRole('button', { name: 'قطع ارتباط' }).click()
+    await page.locator('.ui-confirm-dialog:visible').getByRole('button', { name: 'قطع ارتباط', exact: true }).click()
 
     await expect
       .poll(async () => (await fetchOwnerRelations(request, owner.accessToken)).length, { timeout: 30000 })

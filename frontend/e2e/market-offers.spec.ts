@@ -706,10 +706,10 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
 }
 
 async function executeTradeFromCard(offerCard: Locator, quantityLabel: string) {
-  await offerCard.locator('.trade-btn').filter({ hasText: quantityLabel }).first().click()
-  const confirmButton = offerCard.locator('.trade-btn.pending').first()
-  await expect(confirmButton).toBeVisible()
-  await confirmButton.click()
+  const tradeButton = offerCard.locator('.trade-btn').filter({ hasText: quantityLabel }).first()
+  await tradeButton.click()
+  await expect(tradeButton).toHaveClass(/pending/)
+  await tradeButton.click()
 }
 
 function authHeaders(accessToken: string) {
