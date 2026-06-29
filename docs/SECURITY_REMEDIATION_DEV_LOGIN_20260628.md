@@ -29,4 +29,3 @@ Focused coverage was added in `tests/test_auth_router_special_logins.py`:
 - production rejects loopback, spoofed `X-Forwarded-For`, and valid dev-key requests before DB work;
 - staging still rejects remote requests without a valid key;
 - staging still bootstraps and reuses the dev user/session through the existing path.
-

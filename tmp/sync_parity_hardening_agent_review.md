@@ -1,8 +1,8 @@
 # Sync Parity Hardening Branch Review
 
-Repository: `mohsenbarari/trading_bot`  
-Branch reviewed: `candidate/sync-parity-hardening`  
-Review scope: read-only code, docs, tests, commit stats, and repository-search inspection.  
+Repository: `mohsenbarari/trading_bot`
+Branch reviewed: `candidate/sync-parity-hardening`
+Review scope: read-only code, docs, tests, commit stats, and repository-search inspection.
 Reviewer output path: `tmp/sync_parity_hardening_agent_review.md`
 
 ## Executive verdict
