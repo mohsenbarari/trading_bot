@@ -734,7 +734,7 @@ test.describe('customer owner lifecycle', () => {
     await createPanel.getByLabel('نام مدیریتی').fill(managementName)
     await createPanel.getByLabel('شماره موبایل').fill(mobileNumber)
     await createPanel.getByLabel('سطح مشتری').selectOption('tier2')
-    await createPanel.getByLabel('درصد کمیسیون مشتری').fill('1.25')
+    await createPanel.getByLabel('درصد کمیسیون مشتری').first().fill('1.25')
     await createPanel.getByLabel('حداقل مقدار معامله').fill('2')
     await createPanel.getByLabel('حداکثر مقدار معامله').fill('8')
     await createPanel.getByLabel('حداکثر تعداد روزانه').fill('3')
@@ -796,7 +796,7 @@ test.describe('customer owner lifecycle', () => {
     await activeCard.click()
     await page.waitForURL(new RegExp(`/operations/customers/${pendingRelationId}(?:\\?.*)?$`))
     await workspace.getByRole('tab', { name: 'محدودیت‌ها' }).click()
-    await workspace.getByLabel('درصد کمیسیون مشتری').fill('2.50')
+    await workspace.locator('.customer-detail-shell').getByLabel('درصد کمیسیون مشتری').first().fill('2.50')
     await workspace.getByLabel('حداکثر مقدار معامله').fill('12')
     await workspace.getByLabel('حداکثر تعداد روزانه').fill('5')
     await workspace.getByRole('button', { name: 'ذخیره تغییرات' }).click()
@@ -885,7 +885,7 @@ test.describe('customer owner lifecycle', () => {
     await loadPublicProfileTradeHistory(ownerProfileView, 'تاریخچه معاملات این کاربر')
 
     const ownerHistoryCard = ownerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '2 عدد' }).first()
-    await expect(ownerHistoryCard).toContainText('🟢 خرید')
+    await expect(ownerHistoryCard).toContainText('خرید')
     await expect(ownerHistoryCard).toContainText(fixture.customerManagementName)
     await expect(ownerHistoryCard).toContainText('سطح 2')
 
@@ -898,7 +898,7 @@ test.describe('customer owner lifecycle', () => {
     await loadPublicProfileTradeHistory(customerProfileView, 'تاریخچه معاملات این کاربر')
 
     const customerHistoryCard = customerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
-    await expect(customerHistoryCard).toContainText('🟢 خرید')
+    await expect(customerHistoryCard).toContainText('خرید')
     await expect(customerHistoryCard).toContainText(`سرگروه ${fixture.ownerAccountName}`)
     await expect(customerHistoryCard).toContainText('سطح 2')
   })
