@@ -101,6 +101,30 @@ class SyncFieldPolicyTests(unittest.TestCase):
         }:
             self.assertNotIn(field, sanitized)
 
+    def test_trade_delivery_receipt_local_foreign_keys_are_dropped_from_sync_payload(self):
+        payload = {
+            "id": 41,
+            "dedupe_key": "trade_completed:webapp:10001:7",
+            "event_type": "trade_completed",
+            "trade_id": 2,
+            "trade_number": 10001,
+            "offer_id": 8,
+            "notification_id": 13,
+            "recipient_user_id": 7,
+            "channel": "webapp",
+            "destination_server": "iran",
+            "worker_id": "local-worker",
+            "lease_until": "2026-06-29T12:00:00Z",
+        }
+
+        sanitized = sanitize_sync_payload("trade_delivery_receipts", payload)
+
+        self.assertEqual(sanitized["dedupe_key"], "trade_completed:webapp:10001:7")
+        self.assertEqual(sanitized["trade_number"], 10001)
+        self.assertEqual(sanitized["recipient_user_id"], 7)
+        for field in {"trade_id", "offer_id", "notification_id", "worker_id", "lease_until"}:
+            self.assertNotIn(field, sanitized)
+
     def test_required_sensitive_fields_have_explicit_classification(self):
         expectations = {
             ("users", "admin_password_hash"): SyncFieldClassification.NO_SYNC,
@@ -111,6 +135,9 @@ class SyncFieldPolicyTests(unittest.TestCase):
             ("notifications", "extra_payload"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "last_error"): SyncFieldClassification.SYNC,
             ("trade_delivery_receipts", "audit_payload"): SyncFieldClassification.SYNC,
+            ("trade_delivery_receipts", "trade_id"): SyncFieldClassification.NO_SYNC,
+            ("trade_delivery_receipts", "offer_id"): SyncFieldClassification.NO_SYNC,
+            ("trade_delivery_receipts", "notification_id"): SyncFieldClassification.NO_SYNC,
             ("trade_delivery_receipts", "worker_id"): SyncFieldClassification.NO_SYNC,
             ("trade_delivery_receipts", "lease_until"): SyncFieldClassification.NO_SYNC,
             ("offer_publication_states", "telegram_message_id"): SyncFieldClassification.NO_SYNC,

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from api.routers.sync import (
     _apply_item,
     _build_upsert_stmt,
+    _localize_trade_delivery_receipt_references,
     _localize_offer_request_resulting_trade_reference,
 )
 from models.offer import Offer
@@ -61,6 +62,14 @@ class FakeScalarExecuteResult:
 
     def scalar_one_or_none(self):
         return self._value
+
+
+class FakeFirstExecuteResult:
+    def __init__(self, row):
+        self._row = row
+
+    def first(self):
+        return self._row
 
 
 class ExpressionProbe:
@@ -263,6 +272,36 @@ def completed_trade_payload(**overrides):
 
 
 class SyncRouterStaleOfferEventTests(unittest.IsolatedAsyncioTestCase):
+    async def test_trade_delivery_receipt_trade_number_resolves_local_trade_and_offer_ids(self):
+        data = {
+            "dedupe_key": "trade_completed:webapp:10088:7",
+            "trade_number": 10088,
+            "trade_id": 88,
+            "offer_id": 12,
+        }
+        db = ApplyDB([FakeFirstExecuteResult((501, 601))])
+
+        resolved = await _localize_trade_delivery_receipt_references(db, data)
+
+        self.assertTrue(resolved)
+        self.assertEqual(data["trade_id"], 501)
+        self.assertEqual(data["offer_id"], 601)
+
+    async def test_trade_delivery_receipt_trade_number_defers_until_trade_arrives(self):
+        data = {
+            "dedupe_key": "trade_completed:webapp:10088:7",
+            "trade_number": 10088,
+            "trade_id": 88,
+            "offer_id": 12,
+        }
+        db = ApplyDB([FakeFirstExecuteResult(None)])
+
+        resolved = await _localize_trade_delivery_receipt_references(db, data)
+
+        self.assertFalse(resolved)
+        self.assertEqual(data["trade_id"], 88)
+        self.assertEqual(data["offer_id"], 12)
+
     async def test_offer_request_resulting_trade_number_resolves_to_local_trade_id(self):
         data = {
             "request_home_server": "foreign",

@@ -1046,6 +1046,17 @@ class CoreEventsTests(unittest.TestCase):
         self.assertEqual(user_block_delete_payloads[0]['blocker_id'], 8)
         self.assertEqual(user_block_delete_payloads[0]['blocked_id'], 9)
         self.assertIn('created_at', user_block_delete_payloads[0])
+        receipt_payloads = [
+            call.args[4]
+            for call in log_change.call_args_list
+            if call.args[1] == 'trade_delivery_receipts' and call.args[3] != 'DELETE'
+        ]
+        self.assertTrue(receipt_payloads)
+        for payload in receipt_payloads:
+            self.assertEqual(payload['trade_number'], 10001)
+            self.assertNotIn('trade_id', payload)
+            self.assertNotIn('offer_id', payload)
+            self.assertNotIn('notification_id', payload)
         logger.info.assert_any_call('✅ AccountantRelation event listeners registered')
         logger.info.assert_any_call('✅ CustomerRelation event listeners registered')
         logger.info.assert_any_call('✅ Chat event listeners registered')

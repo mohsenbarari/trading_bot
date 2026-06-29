@@ -145,6 +145,27 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         sensitive=True,
         reason="operator audit payload may include trade notification metadata",
     ),
+    ("trade_delivery_receipts", "trade_id"): _entry(
+        "trade_delivery_receipts",
+        "trade_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="local FK; shared receipt identity uses trade_number and dedupe_key",
+    ),
+    ("trade_delivery_receipts", "offer_id"): _entry(
+        "trade_delivery_receipts",
+        "offer_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="local FK derived from the local trade row during sync receive",
+    ),
+    ("trade_delivery_receipts", "notification_id"): _entry(
+        "trade_delivery_receipts",
+        "notification_id",
+        SyncFieldClassification.NO_SYNC,
+        action=SyncFieldAction.DROP,
+        reason="local WebApp notification row id; opposite server must not reuse it",
+    ),
     ("trade_delivery_receipts", "worker_id"): _entry(
         "trade_delivery_receipts",
         "worker_id",
