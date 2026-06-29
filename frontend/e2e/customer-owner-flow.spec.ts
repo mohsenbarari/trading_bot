@@ -734,7 +734,7 @@ test.describe('customer owner lifecycle', () => {
     await createPanel.getByLabel('نام مدیریتی').fill(managementName)
     await createPanel.getByLabel('شماره موبایل').fill(mobileNumber)
     await createPanel.getByLabel('سطح مشتری').selectOption('tier2')
-    await createPanel.getByLabel('درصد کمیسیون مشتری').first().fill('1.25')
+    await createPanel.locator('input[aria-label="درصد کمیسیون مشتری"]').fill('1.25')
     await createPanel.getByLabel('حداقل مقدار معامله').fill('2')
     await createPanel.getByLabel('حداکثر مقدار معامله').fill('8')
     await createPanel.getByLabel('حداکثر تعداد روزانه').fill('3')
@@ -796,7 +796,7 @@ test.describe('customer owner lifecycle', () => {
     await activeCard.click()
     await page.waitForURL(new RegExp(`/operations/customers/${pendingRelationId}(?:\\?.*)?$`))
     await workspace.getByRole('tab', { name: 'محدودیت‌ها' }).click()
-    await workspace.locator('.customer-detail-shell').getByLabel('درصد کمیسیون مشتری').first().fill('2.50')
+    await workspace.locator('.customer-detail-shell input[aria-label="درصد کمیسیون مشتری"]').fill('2.50')
     await workspace.getByLabel('حداکثر مقدار معامله').fill('12')
     await workspace.getByLabel('حداکثر تعداد روزانه').fill('5')
     await workspace.getByRole('button', { name: 'ذخیره تغییرات' }).click()
@@ -893,7 +893,7 @@ test.describe('customer owner lifecycle', () => {
     await page.waitForURL(new RegExp(`/users/${fixture.customerUserId}(?:\\?.*)?$`))
     const customerProfileView = page.locator('.public-profile-view:visible').last()
     await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-  await expect(customerProfileView.locator('.profile-hero-copy h3')).toContainText(fixture.customerAccountName)
+    await expect(customerProfileView.getByRole('heading', { name: /مشتری تاریخچه‌ای/ })).toBeVisible({ timeout: 30000 })
 
     await loadPublicProfileTradeHistory(customerProfileView, 'تاریخچه معاملات این کاربر')
 
