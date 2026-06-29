@@ -75,7 +75,7 @@ def extra_cors_origins(settings) -> set[str]:
 
 def _allow_local_development_origins(settings) -> bool:
     environment = (getattr(settings, "environment", None) or "").strip().lower()
-    return environment in {"", "dev", "development", "local", "test", "testing", "staging"}
+    return environment in {"dev", "development", "local", "test", "testing", "staging"}
 
 
 def allowed_cors_origins(settings) -> list[str]:

@@ -41,6 +41,7 @@ class DeploymentSurfaceTests(unittest.TestCase):
 
     def test_allowed_cors_origins_include_runtime_urls_and_extra_origins(self):
         settings = SimpleNamespace(
+            environment="staging",
             frontend_url="https://coin.gold-trade.ir",
             foreign_server_domain="coin.362514.ir",
             iran_server_domain="coin.gold-trade.ir",
@@ -62,6 +63,24 @@ class DeploymentSurfaceTests(unittest.TestCase):
     def test_allowed_cors_origins_exclude_localhost_in_production(self):
         settings = SimpleNamespace(
             environment="production",
+            frontend_url="https://coin.gold-trade.ir",
+            foreign_server_domain="coin.362514.ir",
+            iran_server_domain="coin.gold-trade.ir",
+            foreign_server_url="https://coin.362514.ir",
+            iran_server_url="https://coin.gold-trade.ir",
+            extra_cors_origins="",
+        )
+
+        origins = allowed_cors_origins(settings)
+
+        self.assertNotIn("http://localhost:5173", origins)
+        self.assertNotIn("http://127.0.0.1:8000", origins)
+        self.assertIn("https://coin.gold-trade.ir", origins)
+        self.assertIn("https://coin.362514.ir", origins)
+
+    def test_allowed_cors_origins_treat_empty_environment_as_production_safe(self):
+        settings = SimpleNamespace(
+            environment="",
             frontend_url="https://coin.gold-trade.ir",
             foreign_server_domain="coin.362514.ir",
             iran_server_domain="coin.gold-trade.ir",

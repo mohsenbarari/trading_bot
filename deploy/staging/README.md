@@ -34,6 +34,13 @@ in `.env.staging` as `STAGING_BASIC_AUTH_USER` and
 be used for manual testing after Basic Auth succeeds. The staging frontend build
 exposes this quick-login button when `STAGING_ENABLE_DEV_LOGIN=true`.
 
+Staging also sets `TRUSTED_PROXY_CIDRS` by default to loopback plus the Docker
+bridge private range used by the host Nginx to reach the app container. This is
+required so trusted-proxy-aware request parsing records the real client IP from
+Nginx headers instead of collapsing all requests to the Docker gateway address.
+Override `STAGING_TRUSTED_PROXY_CIDRS` only when the staging network topology is
+changed and the new proxy hop has been verified.
+
 Staging frontend builds must never write to the production `mini_app_dist`
 directory. `scripts/deploy_staging.sh` passes `FRONTEND_BUILD_OUT_DIR` to Vite,
 serves `mini_app_dist_staging` from the staging Nginx site, and passes the same

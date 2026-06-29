@@ -145,6 +145,15 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/', dockerfile)
         self.assertIn('mini_app_dist_staging/', gitignore)
 
+    def test_staging_env_sets_trusted_proxy_cidrs_for_nginx_container_hop(self):
+        staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
+        staging_example = (REPO_ROOT / 'deploy/staging/env.staging.example').read_text(encoding='utf-8')
+
+        self.assertIn('STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"', staging_script)
+        self.assertIn('TRUSTED_PROXY_CIDRS=$STAGING_TRUSTED_PROXY_CIDRS', staging_script)
+        self.assertIn('set_env_value TRUSTED_PROXY_CIDRS "$STAGING_TRUSTED_PROXY_CIDRS"', staging_script)
+        self.assertIn('TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128,172.16.0.0/12', staging_example)
+
     def test_staging_deploy_rejects_shared_production_frontend_dist(self):
         result = run_checked(
             ['scripts/deploy_staging.sh', 'check'],
