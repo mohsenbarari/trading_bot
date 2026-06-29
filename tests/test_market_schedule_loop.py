@@ -61,11 +61,85 @@ class MarketScheduleLoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reconcile_market_schedule_runtime_on_foreign_only_reconciles_synced_side_effects(self):
         session = SimpleNamespace()
+        trading_settings = SimpleNamespace(market_timezone="Asia/Tehran")
+        overrides = [SimpleNamespace(id=1)]
+        evaluation = MarketScheduleEvaluation(
+            False,
+            "after_daily_window_close",
+            None,
+            "Asia/Tehran",
+            current_transition_at=None,
+        )
         side_effect_result = MarketTransitionResult(
             changed=True,
             transition="closed_local_offer_expiry",
             state=SimpleNamespace(is_open=False),
             expired_offer_ids=(11,),
+        )
+        autonomy_result = MarketTransitionResult(changed=False, transition=None, state=None)
+        retry_summary = SimpleNamespace(checked=0, sent=0, failed=0, skipped=0)
+
+        with patch("core.market_schedule_loop.AsyncSessionLocal", return_value=_AsyncSessionContext(session)), patch(
+            "core.market_schedule_loop.current_server",
+            return_value="foreign",
+        ), patch(
+            "core.market_schedule_loop.get_trading_settings_async",
+            new=AsyncMock(return_value=trading_settings),
+        ) as settings_mock, patch(
+            "core.market_schedule_loop.get_market_timezone_name",
+            return_value="Asia/Tehran",
+        ) as timezone_mock, patch(
+            "core.market_schedule_loop.load_market_schedule_overrides_window",
+            new=AsyncMock(return_value=overrides),
+        ) as overrides_mock, patch(
+            "core.market_schedule_loop.evaluate_market_schedule",
+            return_value=evaluation,
+        ) as evaluate_mock, patch(
+            "core.market_schedule_loop.apply_market_schedule_transition",
+            new=AsyncMock(),
+        ) as transition_mock, patch(
+            "core.market_schedule_loop.reconcile_market_runtime_side_effects_for_current_state",
+            new=AsyncMock(return_value=side_effect_result),
+        ) as side_effect_mock, patch(
+            "core.market_schedule_loop.reconcile_foreign_market_schedule_autonomy",
+            new=AsyncMock(return_value=autonomy_result),
+        ) as autonomy_mock, patch(
+            "core.market_schedule_loop.reconcile_due_market_channel_notice_receipts",
+            new=AsyncMock(return_value=retry_summary),
+        ) as retry_mock:
+            result = await market_schedule_loop.reconcile_market_schedule_runtime(current_time="marker-now")
+
+        self.assertIs(result, side_effect_result)
+        side_effect_mock.assert_awaited_once_with(session, source="market_schedule_loop")
+        settings_mock.assert_awaited_once()
+        timezone_mock.assert_called_once_with(trading_settings)
+        overrides_mock.assert_awaited_once_with(session, timezone_name="Asia/Tehran", current_time="marker-now")
+        evaluate_mock.assert_called_once_with(trading_settings, current_time="marker-now", overrides=overrides)
+        autonomy_mock.assert_awaited_once_with(
+            session,
+            evaluation,
+            current_time="marker-now",
+            source="market_schedule_loop_autonomy",
+        )
+        retry_mock.assert_awaited_once_with(session, source="market_schedule_loop_retry")
+        transition_mock.assert_not_awaited()
+
+    async def test_reconcile_market_schedule_runtime_on_foreign_returns_autonomy_result_when_changed(self):
+        session = SimpleNamespace()
+        trading_settings = SimpleNamespace(market_timezone="Asia/Tehran")
+        evaluation = MarketScheduleEvaluation(
+            False,
+            "after_daily_window_close",
+            None,
+            "Asia/Tehran",
+            current_transition_at=None,
+        )
+        side_effect_result = MarketTransitionResult(changed=False, transition=None, state=SimpleNamespace(is_open=True))
+        autonomy_result = MarketTransitionResult(
+            changed=True,
+            transition="closed_local_offer_expiry",
+            state=SimpleNamespace(is_open=False),
+            expired_offer_ids=(19,),
         )
         retry_summary = SimpleNamespace(checked=0, sent=0, failed=0, skipped=0)
 
@@ -74,27 +148,35 @@ class MarketScheduleLoopTests(unittest.IsolatedAsyncioTestCase):
             return_value="foreign",
         ), patch(
             "core.market_schedule_loop.get_trading_settings_async",
-            new=AsyncMock(),
-        ) as settings_mock, patch(
+            new=AsyncMock(return_value=trading_settings),
+        ), patch(
+            "core.market_schedule_loop.get_market_timezone_name",
+            return_value="Asia/Tehran",
+        ), patch(
+            "core.market_schedule_loop.load_market_schedule_overrides_window",
+            new=AsyncMock(return_value=[]),
+        ), patch(
             "core.market_schedule_loop.evaluate_market_schedule",
-        ) as evaluate_mock, patch(
-            "core.market_schedule_loop.apply_market_schedule_transition",
-            new=AsyncMock(),
-        ) as transition_mock, patch(
+            return_value=evaluation,
+        ), patch(
             "core.market_schedule_loop.reconcile_market_runtime_side_effects_for_current_state",
             new=AsyncMock(return_value=side_effect_result),
-        ) as side_effect_mock, patch(
+        ), patch(
+            "core.market_schedule_loop.reconcile_foreign_market_schedule_autonomy",
+            new=AsyncMock(return_value=autonomy_result),
+        ) as autonomy_mock, patch(
             "core.market_schedule_loop.reconcile_due_market_channel_notice_receipts",
             new=AsyncMock(return_value=retry_summary),
-        ) as retry_mock:
+        ):
             result = await market_schedule_loop.reconcile_market_schedule_runtime(current_time="marker-now")
 
-        self.assertIs(result, side_effect_result)
-        side_effect_mock.assert_awaited_once_with(session, source="market_schedule_loop")
-        retry_mock.assert_awaited_once_with(session, source="market_schedule_loop_retry")
-        settings_mock.assert_not_awaited()
-        evaluate_mock.assert_not_called()
-        transition_mock.assert_not_awaited()
+        self.assertIs(result, autonomy_result)
+        autonomy_mock.assert_awaited_once_with(
+            session,
+            evaluation,
+            current_time="marker-now",
+            source="market_schedule_loop_autonomy",
+        )
 
     async def test_market_schedule_loop_logs_start_success_and_failure_cycles(self):
         sleep_calls = []

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_ENV_RENDERER="$PROJECT_DIR/scripts/render_runtime_envs.py"
 RELEASE_ARTIFACT_RENDERER="$PROJECT_DIR/scripts/render_release_artifacts.py"
+DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
@@ -627,18 +628,40 @@ backup_runtime_env_file() {
 
 validate_runtime_env_source_policy() {
     local project_env_path="$LOCAL_PROJECT_DIR/.env"
-    local local_source project_env iran_output
+    local project_iran_env_path="$LOCAL_PROJECT_DIR/.env.iran"
+    local local_source iran_source project_env project_iran_env iran_output
     local_source="$(canonical_path "$LOCAL_ENV_SOURCE_PATH")"
+    iran_source="$(canonical_path "$IRAN_ENV_SOURCE_PATH")"
     project_env="$(canonical_path "$project_env_path")"
+    project_iran_env="$(canonical_path "$project_iran_env_path")"
     iran_output="$(canonical_path "$IRAN_ENV_SOURCE_PATH")"
 
-    if [[ "$local_source" == "$project_env" && "$ALLOW_PROJECT_ENV_SOURCE" != "1" ]]; then
-        die "LOCAL_ENV_SOURCE_PATH points at the project .env ($project_env_path). Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
+    if [[ "$ALLOW_PROJECT_ENV_SOURCE" != "1" ]]; then
+        if [[ "$local_source" == "$project_env" || "$local_source" == "$project_iran_env" ]]; then
+            die "LOCAL_ENV_SOURCE_PATH points at a project-root env file. Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
+        fi
+        if [[ "$iran_source" == "$project_env" || "$iran_source" == "$project_iran_env" ]]; then
+            die "IRAN_ENV_SOURCE_PATH points at a project-root env file. Use a secure source env outside the repo, or set ALLOW_PROJECT_ENV_SOURCE=1 only for an intentional emergency release."
+        fi
     fi
 
     if [[ "$local_source" == "$iran_output" ]]; then
         die "LOCAL_ENV_SOURCE_PATH and IRAN_ENV_SOURCE_PATH must be different files so foreign and Iran runtime envs can be rendered independently."
     fi
+}
+
+validate_runtime_identity_files() {
+    [[ -f "$DEPLOYMENT_SURFACE_GUARD" ]] || die "Deployment surface guard missing: $DEPLOYMENT_SURFACE_GUARD"
+    local guard_args=(
+        --repo-root "$LOCAL_PROJECT_DIR"
+        --manifest-path "$MANIFEST_PATH"
+        --runtime-env "foreign=$LOCAL_ENV_SOURCE_PATH"
+        --runtime-env "iran=$IRAN_ENV_SOURCE_PATH"
+    )
+    if [[ "$ALLOW_PROJECT_ENV_SOURCE" == "1" ]]; then
+        guard_args+=(--allow-project-env-source)
+    fi
+    python3 "$DEPLOYMENT_SURFACE_GUARD" "${guard_args[@]}"
 }
 
 summarize_web_push_env_file() {
@@ -1523,6 +1546,7 @@ ensure_runtime_env_file() {
             --iran-api-workers "${IRAN_API_WORKERS:-8}"
         chmod 600 "$local_env_path" || true
         chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
+        validate_runtime_identity_files
         log "Rendered runtime env files from source env: $source_env_path"
         summarize_web_push_env_file "$local_env_path" "Foreign"
         summarize_web_push_env_file "$IRAN_ENV_SOURCE_PATH" "Iran"
@@ -1670,6 +1694,7 @@ ensure_runtime_env_file() {
 
     chmod 600 "$local_env_path" || true
     chmod 600 "$IRAN_ENV_SOURCE_PATH" || true
+    validate_runtime_identity_files
     log "Created local env at $local_env_path"
     log "Created Iran runtime env at $IRAN_ENV_SOURCE_PATH"
 }

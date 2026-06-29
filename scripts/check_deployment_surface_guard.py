@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     from deploy_config import DEFAULTS, parse_env_file
@@ -40,6 +41,17 @@ IDENTITY_KEYS = (
     "FOREIGN_FRONTEND_URL",
     "IRAN_FRONTEND_URL",
     "IRAN_HEALTHCHECK_URL",
+)
+
+RUNTIME_IDENTITY_KEYS = (
+    "SERVER_MODE",
+    "FOREIGN_SERVER_URL",
+    "FOREIGN_SERVER_DOMAIN",
+    "IRAN_SERVER_URL",
+    "IRAN_SERVER_DOMAIN",
+    "FRONTEND_URL",
+    "SYNC_VERIFY_TLS",
+    "SYNC_CA_BUNDLE",
 )
 
 RETIRED_IDENTITIES = (
@@ -144,27 +156,194 @@ def check_default_drift(manifest: dict[str, str]) -> list[Finding]:
     return findings
 
 
-def run_guard(repo_root: Path) -> list[Finding]:
-    manifest_path = repo_root / "deploy/production/online.env.example"
+def _host_from_url(value: str) -> str:
+    parsed = urlparse(value)
+    return parsed.hostname or ""
+
+
+def _expected_runtime_identity(manifest: dict[str, str], role: str) -> dict[str, str]:
+    common = {
+        "FOREIGN_SERVER_URL": manifest.get("FOREIGN_SERVER_URL", ""),
+        "FOREIGN_SERVER_DOMAIN": manifest.get("FOREIGN_SERVER_DOMAIN", ""),
+        "IRAN_SERVER_URL": manifest.get("IRAN_SERVER_URL", ""),
+        "IRAN_SERVER_DOMAIN": manifest.get("IRAN_SERVER_DOMAIN", ""),
+    }
+    if role == "foreign":
+        return {
+            "SERVER_MODE": "foreign",
+            "FRONTEND_URL": manifest.get("FOREIGN_FRONTEND_URL") or manifest.get("FOREIGN_SERVER_URL", ""),
+            **common,
+        }
+    if role == "iran":
+        return {
+            "SERVER_MODE": "iran",
+            "FRONTEND_URL": manifest.get("IRAN_FRONTEND_URL") or manifest.get("IRAN_SERVER_URL", ""),
+            **common,
+        }
+    raise ValueError(f"unsupported runtime role: {role}")
+
+
+def _identity_runtime_values(values: dict[str, str]) -> dict[str, str]:
+    return {key: values[key] for key in RUNTIME_IDENTITY_KEYS if values.get(key)}
+
+
+def _is_project_env_source(env_path: Path, repo_root: Path) -> bool:
+    try:
+        resolved = env_path.resolve()
+        project_env = (repo_root / ".env").resolve()
+        project_iran_env = (repo_root / ".env.iran").resolve()
+    except OSError:
+        return False
+    return resolved in {project_env, project_iran_env}
+
+
+def check_runtime_env_identity(
+    *,
+    manifest: dict[str, str],
+    role: str,
+    env_path: Path,
+    repo_root: Path,
+    allow_project_env_source: bool = False,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    display_path = str(env_path)
+    if role not in {"foreign", "iran"}:
+        return [Finding(display_path, f"unsupported runtime role {role!r}")]
+    if not allow_project_env_source and _is_project_env_source(env_path, repo_root):
+        findings.append(
+            Finding(
+                display_path,
+                "production runtime env source must not be project-root .env or .env.iran",
+            )
+        )
+    if not env_path.exists():
+        findings.append(Finding(display_path, "runtime env file is missing"))
+        return findings
+
+    values = parse_env_file(env_path)
+    expected = _expected_runtime_identity(manifest, role)
+    runtime_values = _identity_runtime_values(values)
+
+    for key, expected_value in expected.items():
+        actual = values.get(key)
+        if not actual:
+            findings.append(Finding(display_path, f"missing required runtime identity field {key}"))
+            continue
+        if expected_value and actual != expected_value:
+            findings.append(
+                Finding(
+                    display_path,
+                    f"{role} runtime identity field {key} does not match production manifest",
+                )
+            )
+
+    for key, actual in runtime_values.items():
+        for retired in RETIRED_IDENTITIES:
+            if retired and retired in actual:
+                findings.append(
+                    Finding(
+                        display_path,
+                        f"runtime identity field {key} contains retired deployment identity {retired!r}",
+                    )
+                )
+
+    for url_key, domain_key in (
+        ("FOREIGN_SERVER_URL", "FOREIGN_SERVER_DOMAIN"),
+        ("IRAN_SERVER_URL", "IRAN_SERVER_DOMAIN"),
+    ):
+        url_value = values.get(url_key, "")
+        domain_value = values.get(domain_key, "")
+        if url_value and domain_value and _host_from_url(url_value) != domain_value:
+            findings.append(
+                Finding(
+                    display_path,
+                    f"{url_key} host does not match {domain_key}",
+                )
+            )
+
+    frontend_url = values.get("FRONTEND_URL", "")
+    expected_frontend_url = expected.get("FRONTEND_URL", "")
+    if frontend_url and expected_frontend_url and _host_from_url(frontend_url) != _host_from_url(expected_frontend_url):
+        findings.append(Finding(display_path, f"{role} FRONTEND_URL host does not match production manifest"))
+
+    sync_verify_tls = values.get("SYNC_VERIFY_TLS", "true").strip().lower()
+    sync_ca_bundle = values.get("SYNC_CA_BUNDLE", "").strip()
+    if sync_verify_tls in {"0", "false", "no", "off"} and not sync_ca_bundle:
+        findings.append(Finding(display_path, "SYNC_VERIFY_TLS=false is forbidden without SYNC_CA_BUNDLE"))
+
+    return findings
+
+
+def _parse_runtime_env_arg(raw_value: str) -> tuple[str, Path]:
+    if "=" not in raw_value:
+        raise ValueError("runtime env argument must use ROLE=PATH")
+    role, path = raw_value.split("=", 1)
+    role = role.strip().lower()
+    if not role or not path:
+        raise ValueError("runtime env argument must use ROLE=PATH")
+    return role, Path(path)
+
+
+def run_guard(
+    repo_root: Path,
+    *,
+    manifest_path: Path | None = None,
+    runtime_envs: tuple[tuple[str, Path], ...] = (),
+    allow_project_env_source: bool = False,
+) -> list[Finding]:
+    manifest_path = manifest_path or repo_root / "deploy/production/online.env.example"
     manifest = parse_env_file(manifest_path)
     values = deployment_identities(manifest)
     findings: list[Finding] = []
     findings.extend(check_runtime_code(repo_root, values))
     findings.extend(check_operator_entrypoints(repo_root, values))
     findings.extend(check_default_drift(manifest))
+    for role, env_path in runtime_envs:
+        findings.extend(
+            check_runtime_env_identity(
+                manifest=manifest,
+                role=role,
+                env_path=env_path,
+                repo_root=repo_root,
+                allow_project_env_source=allow_project_env_source,
+            )
+        )
     return findings
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Prevent production deployment identity hardcodes from leaking back in.")
     parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--manifest-path", default=None)
+    parser.add_argument(
+        "--runtime-env",
+        action="append",
+        default=[],
+        help="Validate a rendered production runtime env file using ROLE=PATH. Repeat for foreign and iran.",
+    )
+    parser.add_argument(
+        "--allow-project-env-source",
+        action="store_true",
+        help="Emergency-only: allow project-root .env/.env.iran as source while still enforcing identity validation.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     repo_root = Path(args.repo_root).resolve()
-    findings = run_guard(repo_root)
+    try:
+        runtime_envs = tuple(_parse_runtime_env_arg(raw_value) for raw_value in args.runtime_env)
+    except ValueError as exc:
+        print(f"invalid --runtime-env: {exc}")
+        return 2
+    manifest_path = Path(args.manifest_path).resolve() if args.manifest_path else None
+    findings = run_guard(
+        repo_root,
+        manifest_path=manifest_path,
+        runtime_envs=runtime_envs,
+        allow_project_env_source=bool(args.allow_project_env_source),
+    )
     if findings:
         for finding in findings:
             print(f"{finding.path}: {finding.detail}")

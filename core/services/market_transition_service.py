@@ -50,8 +50,11 @@ MARKET_NOTICE_STATUS_PENDING = "pending"
 MARKET_NOTICE_STATUS_SENT = "sent"
 MARKET_NOTICE_STATUS_FAILED = "failed"
 MARKET_NOTICE_STATUS_SKIPPED = "skipped"
+MARKET_NOTICE_STATUS_SUPPRESSED_STALE = "suppressed_stale"
 MARKET_NOTICE_RETRY_LIMIT = 20
 MARKET_NOTICE_DISABLE_VALUES = {"1", "true", "yes", "on", "disabled"}
+MARKET_NOTICE_STALENESS_SECONDS = 120
+MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS = 30
 MARKET_RUNTIME_ADVISORY_LOCK_KEY = 202605220901
 MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS = float(
     os.getenv("TRADING_BOT_MARKET_RUNTIME_VIEW_CACHE_TTL_SECONDS", "1.0")
@@ -213,6 +216,78 @@ def _market_notice_retry_limit() -> int:
         return MARKET_NOTICE_RETRY_LIMIT
 
 
+def _market_notice_staleness_seconds() -> int:
+    raw = os.getenv("TRADING_BOT_MARKET_NOTICE_STALENESS_SECONDS")
+    if raw is None:
+        return MARKET_NOTICE_STALENESS_SECONDS
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid TRADING_BOT_MARKET_NOTICE_STALENESS_SECONDS; falling back to default",
+            extra={"event": "market.channel_notice_staleness_invalid", "value": raw},
+        )
+        return MARKET_NOTICE_STALENESS_SECONDS
+
+
+def _foreign_independent_grace_seconds() -> int:
+    raw = os.getenv("TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS")
+    if raw is None:
+        return MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS; falling back to default",
+            extra={"event": "market.foreign_independent_grace_invalid", "value": raw},
+        )
+        return MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS
+
+
+def _market_notice_is_stale(*, transition_at: datetime, now: datetime) -> bool:
+    max_age_seconds = _market_notice_staleness_seconds()
+    if max_age_seconds <= 0:
+        return False
+    return now - _coerce_utc_now(transition_at) > timedelta(seconds=max_age_seconds)
+
+
+async def _suppress_stale_market_notice(
+    db: AsyncSession,
+    receipt: MarketChannelNoticeReceipt,
+    *,
+    transition: str,
+    transition_at: datetime,
+    notice_text: str,
+    source: str,
+    dedupe_key: str,
+    now: datetime,
+) -> MarketChannelNoticeResult:
+    receipt.status = MARKET_NOTICE_STATUS_SUPPRESSED_STALE
+    receipt.source = source
+    receipt.notice_text = notice_text
+    receipt.transition = transition
+    receipt.transition_at = transition_at
+    receipt.next_retry_at = None
+    receipt.last_error_class = "stale_transition"
+    receipt.last_error = (
+        "Market channel notice suppressed because the transition is older than "
+        "TRADING_BOT_MARKET_NOTICE_STALENESS_SECONDS"
+    )
+    await db.commit()
+    logger.info(
+        "Suppressed stale market channel notice",
+        extra={
+            "event": "market.channel_notice_suppressed_stale",
+            "transition": transition,
+            "dedupe_key": dedupe_key,
+            "source": source,
+            "transition_at": _coerce_utc_now(transition_at).isoformat(),
+            "now": now.isoformat(),
+        },
+    )
+    return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="stale_transition")
+
+
 async def _send_market_channel_notice(
     text: str,
     *,
@@ -278,6 +353,7 @@ async def reconcile_market_channel_notice_for_state(
     state: MarketRuntimeState,
     *,
     source: str,
+    current_time: datetime | None = None,
 ) -> MarketChannelNoticeResult:
     """Send or repair the foreign-owned Telegram market notice for one state."""
     if current_server() != SERVER_FOREIGN:
@@ -307,10 +383,24 @@ async def reconcile_market_channel_notice_for_state(
 
     if receipt.status == MARKET_NOTICE_STATUS_SENT:
         return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="already_sent")
+    if receipt.status == MARKET_NOTICE_STATUS_SUPPRESSED_STALE:
+        return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="stale_transition")
     if receipt.status == MARKET_NOTICE_STATUS_SKIPPED and receipt.last_error_class == "missing_channel_id":
         return MarketChannelNoticeResult(status="skipped", dedupe_key=dedupe_key, reason="missing_channel_id")
 
-    now = utc_now()
+    now = _coerce_utc_now(current_time)
+    if _market_notice_is_stale(transition_at=transition_at, now=now):
+        return await _suppress_stale_market_notice(
+            db,
+            receipt,
+            transition=transition,
+            transition_at=transition_at,
+            notice_text=notice_text,
+            source=source,
+            dedupe_key=dedupe_key,
+            now=now,
+        )
+
     receipt.source = source
     receipt.notice_text = notice_text
     receipt.transition = transition
@@ -446,6 +536,7 @@ async def reconcile_due_market_channel_notice_receipts(
             db,
             _market_runtime_state_from_notice_receipt(receipt),
             source=source,
+            current_time=now,
         )
         if retry_result.status == "sent":
             summary.sent += 1
@@ -564,6 +655,66 @@ async def reconcile_market_runtime_side_effects_for_current_state(
 ) -> MarketTransitionResult:
     state = await get_market_runtime_state(db)
     return await reconcile_market_runtime_side_effects_for_state(db, state, source=source)
+
+
+async def reconcile_foreign_market_schedule_autonomy(
+    db: AsyncSession,
+    evaluation: MarketScheduleEvaluation,
+    *,
+    current_time: datetime | None = None,
+    source: str,
+) -> MarketTransitionResult:
+    """Run foreign-local Telegram market transition side effects after grace.
+
+    This function intentionally does not write ``market_runtime_state``. Iran
+    remains authoritative for product runtime state; foreign only protects the
+    Telegram surface when the synced schedule is known and Iran's runtime-state
+    transition has not arrived within the configured short-outage grace window.
+    """
+    if current_server() != SERVER_FOREIGN:
+        return MarketTransitionResult(changed=False, transition=None, state=None)
+
+    scheduled_transition_at = getattr(evaluation, "current_transition_at", None)
+    if scheduled_transition_at is None:
+        return MarketTransitionResult(changed=False, transition=None, state=None)
+
+    transition_at = _coerce_utc_now(scheduled_transition_at)
+    now = _coerce_utc_now(current_time)
+    grace_seconds = _foreign_independent_grace_seconds()
+    if now < transition_at + timedelta(seconds=grace_seconds):
+        return MarketTransitionResult(changed=False, transition=None, state=None)
+
+    synced_state = await get_market_runtime_state(db)
+    synced_transition_at = getattr(synced_state, "last_transition_at", None) if synced_state is not None else None
+    if synced_transition_at is not None:
+        synced_transition_at = _coerce_utc_now(synced_transition_at)
+        if synced_transition_at >= transition_at and bool(getattr(synced_state, "is_open", False)) == bool(evaluation.is_open):
+            return MarketTransitionResult(changed=False, transition=None, state=synced_state)
+        if synced_transition_at > transition_at and bool(getattr(synced_state, "is_open", False)) != bool(evaluation.is_open):
+            logger.warning(
+                "Skipping foreign market schedule autonomy because newer synced state contradicts schedule evaluation",
+                extra={
+                    "event": "market.foreign_schedule_autonomy_conflict",
+                    "schedule_is_open": bool(evaluation.is_open),
+                    "schedule_transition_at": transition_at.isoformat(),
+                    "synced_is_open": bool(getattr(synced_state, "is_open", False)),
+                    "synced_transition_at": synced_transition_at.isoformat(),
+                },
+            )
+            return MarketTransitionResult(changed=False, transition=None, state=synced_state)
+
+    local_state = MarketRuntimeState(
+        id=1,
+        is_open=bool(evaluation.is_open),
+        active_web_notice_visible=True,
+        offers_since_last_open=0,
+        last_transition_at=transition_at,
+    )
+    return await reconcile_market_runtime_side_effects_for_state(
+        db,
+        local_state,
+        source=source,
+    )
 
 
 async def get_market_runtime_state(db: AsyncSession) -> MarketRuntimeState | None:

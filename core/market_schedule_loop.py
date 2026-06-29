@@ -11,6 +11,7 @@ from core.services.market_transition_service import (
     apply_market_schedule_transition,
     load_market_schedule_overrides_window,
     reconcile_due_market_channel_notice_receipts,
+    reconcile_foreign_market_schedule_autonomy,
     reconcile_market_runtime_side_effects_for_current_state,
 )
 from core.trading_settings import get_trading_settings_async
@@ -30,6 +31,24 @@ async def reconcile_market_schedule_runtime(*, current_time=None):
                 db,
                 source="market_schedule_loop",
             )
+            trading_settings = await get_trading_settings_async()
+            timezone_name = get_market_timezone_name(trading_settings)
+            overrides = await load_market_schedule_overrides_window(
+                db,
+                timezone_name=timezone_name,
+                current_time=current_time,
+            )
+            evaluation = evaluate_market_schedule(
+                trading_settings,
+                current_time=current_time,
+                overrides=overrides,
+            )
+            autonomy_result = await reconcile_foreign_market_schedule_autonomy(
+                db,
+                evaluation,
+                current_time=current_time,
+                source="market_schedule_loop_autonomy",
+            )
             retry_summary = await reconcile_due_market_channel_notice_receipts(
                 db,
                 source="market_schedule_loop_retry",
@@ -39,6 +58,11 @@ async def reconcile_market_schedule_runtime(*, current_time=None):
                     "⏰ Foreign market schedule reconciled local side effects (expired_offers=%s)",
                     len(result.expired_offer_ids),
                 )
+            if autonomy_result.changed:
+                logger.info(
+                    "⏰ Foreign market schedule applied autonomous local side effects (expired_offers=%s)",
+                    len(autonomy_result.expired_offer_ids),
+                )
             if retry_summary.checked:
                 logger.info(
                     "⏰ Foreign market notice retry completed (checked=%s sent=%s failed=%s skipped=%s)",
@@ -47,7 +71,7 @@ async def reconcile_market_schedule_runtime(*, current_time=None):
                     retry_summary.failed,
                     retry_summary.skipped,
                 )
-            return result
+            return autonomy_result if autonomy_result.changed else result
 
         trading_settings = await get_trading_settings_async()
         timezone_name = get_market_timezone_name(trading_settings)

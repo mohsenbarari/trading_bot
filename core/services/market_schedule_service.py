@@ -19,6 +19,7 @@ class MarketScheduleEvaluation:
     reason: str
     next_transition_at: datetime | None
     timezone: str
+    current_transition_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -201,6 +202,42 @@ def _next_transition_at(
     return None
 
 
+def _current_transition_at(
+    now_local: datetime,
+    trading_settings: TradingSettings,
+    overrides_by_date: dict[date, MarketScheduleOverride],
+) -> datetime | None:
+    if not trading_settings.market_schedule_enabled:
+        return None
+    current_state = _is_market_open_at(now_local, trading_settings, overrides_by_date)
+    candidates: set[datetime] = set()
+    for offset in range(-NEXT_TRANSITION_SEARCH_DAYS, 1):
+        target_date = now_local.date() + timedelta(days=offset)
+        midnight = datetime.combine(target_date, time.min, tzinfo=now_local.tzinfo)
+        if midnight <= now_local:
+            candidates.add(midnight)
+
+        day_rule = _resolve_day_rule(target_date, trading_settings, overrides_by_date)
+        if day_rule.source == "invalid_schedule":
+            continue
+        if day_rule.open_time_local is not None:
+            open_dt = datetime.combine(target_date, day_rule.open_time_local, tzinfo=now_local.tzinfo)
+            if open_dt <= now_local:
+                candidates.add(open_dt)
+        if day_rule.close_time_local is not None:
+            close_dt = datetime.combine(target_date, day_rule.close_time_local, tzinfo=now_local.tzinfo)
+            if close_dt <= now_local:
+                candidates.add(close_dt)
+
+    for candidate in sorted(candidates, reverse=True):
+        before_candidate = candidate - timedelta(microseconds=1)
+        before_state = _is_market_open_at(before_candidate, trading_settings, overrides_by_date)
+        after_state = _is_market_open_at(candidate, trading_settings, overrides_by_date)
+        if before_state != after_state and after_state == current_state:
+            return candidate
+    return None
+
+
 def evaluate_market_schedule(
     trading_settings: TradingSettings,
     *,
@@ -216,6 +253,7 @@ def evaluate_market_schedule(
             reason="schedule_disabled",
             next_transition_at=None,
             timezone=timezone_name,
+            current_transition_at=None,
         )
 
     overrides_by_date = _override_mapping(overrides)
@@ -225,4 +263,5 @@ def evaluate_market_schedule(
         reason=_reason_for_local_time(now_local, day_rule),
         next_transition_at=_next_transition_at(now_local, trading_settings, overrides_by_date),
         timezone=timezone_name,
+        current_transition_at=_current_transition_at(now_local, trading_settings, overrides_by_date),
     )

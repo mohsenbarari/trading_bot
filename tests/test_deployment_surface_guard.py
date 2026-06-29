@@ -1,7 +1,8 @@
 import unittest
+import tempfile
 from pathlib import Path
 
-from scripts.check_deployment_surface_guard import run_guard
+from scripts.check_deployment_surface_guard import check_runtime_env_identity, run_guard
 
 
 def active_compose_services(path: Path) -> dict[str, dict[str, object]]:
@@ -62,6 +63,34 @@ def compose_service_block(path: Path, service_name: str) -> str:
 
 
 class DeploymentSurfaceGuardTests(unittest.TestCase):
+    def production_manifest(self) -> dict[str, str]:
+        return {
+            "FOREIGN_SERVER_URL": "https://coin.362514.ir",
+            "FOREIGN_SERVER_DOMAIN": "coin.362514.ir",
+            "IRAN_SERVER_URL": "https://coin.gold-trade.ir",
+            "IRAN_SERVER_DOMAIN": "coin.gold-trade.ir",
+            "FOREIGN_FRONTEND_URL": "https://coin.362514.ir",
+            "IRAN_FRONTEND_URL": "https://coin.gold-trade.ir",
+        }
+
+    def write_runtime_env(self, directory: Path, role: str, *, overrides: dict[str, str] | None = None) -> Path:
+        values = {
+            "SERVER_MODE": role,
+            "FOREIGN_SERVER_URL": "https://coin.362514.ir",
+            "FOREIGN_SERVER_DOMAIN": "coin.362514.ir",
+            "IRAN_SERVER_URL": "https://coin.gold-trade.ir",
+            "IRAN_SERVER_DOMAIN": "coin.gold-trade.ir",
+            "FRONTEND_URL": "https://coin.362514.ir" if role == "foreign" else "https://coin.gold-trade.ir",
+            "SYNC_VERIFY_TLS": "true",
+            "SYNC_CA_BUNDLE": "",
+            "DEV_API_KEY": "secret-dev-key-that-must-not-leak",
+        }
+        if overrides:
+            values.update(overrides)
+        path = directory / f"{role}.env"
+        path.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+        return path
+
     def test_repository_has_no_runtime_or_entrypoint_deployment_identity_leaks(self):
         repo_root = Path(__file__).resolve().parents[1]
         findings = run_guard(repo_root)
@@ -71,6 +100,139 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
             [],
             "\n".join(f"{finding.path}: {finding.detail}" for finding in findings),
         )
+
+    def test_runtime_identity_guard_accepts_valid_foreign_and_iran_envs(self):
+        manifest = self.production_manifest()
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            foreign_env = self.write_runtime_env(tmp_path, "foreign")
+            iran_env = self.write_runtime_env(tmp_path, "iran")
+
+            foreign_findings = check_runtime_env_identity(
+                manifest=manifest,
+                role="foreign",
+                env_path=foreign_env,
+                repo_root=repo_root,
+            )
+            iran_findings = check_runtime_env_identity(
+                manifest=manifest,
+                role="iran",
+                env_path=iran_env,
+                repo_root=repo_root,
+            )
+
+        self.assertEqual(foreign_findings, [])
+        self.assertEqual(iran_findings, [])
+
+    def test_runtime_identity_guard_rejects_retired_iran_peer(self):
+        manifest = self.production_manifest()
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = self.write_runtime_env(
+                Path(tmpdir),
+                "iran",
+                overrides={
+                    "FOREIGN_SERVER_URL": "https://kharej.362514.ir",
+                    "FOREIGN_SERVER_DOMAIN": "kharej.362514.ir",
+                },
+            )
+            findings = check_runtime_env_identity(
+                manifest=manifest,
+                role="iran",
+                env_path=env_path,
+                repo_root=repo_root,
+            )
+
+        details = "\n".join(finding.detail for finding in findings)
+        self.assertIn("retired deployment identity", details)
+        self.assertIn("does not match production manifest", details)
+
+    def test_runtime_identity_guard_rejects_missing_and_mismatched_domain_fields_without_secret_leak(self):
+        manifest = self.production_manifest()
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = self.write_runtime_env(
+                Path(tmpdir),
+                "foreign",
+                overrides={
+                    "IRAN_SERVER_DOMAIN": "",
+                    "FOREIGN_SERVER_DOMAIN": "wrong.example",
+                },
+            )
+            findings = check_runtime_env_identity(
+                manifest=manifest,
+                role="foreign",
+                env_path=env_path,
+                repo_root=repo_root,
+            )
+
+        rendered = "\n".join(f"{finding.path}: {finding.detail}" for finding in findings)
+        self.assertIn("missing required runtime identity field IRAN_SERVER_DOMAIN", rendered)
+        self.assertIn("FOREIGN_SERVER_URL host does not match FOREIGN_SERVER_DOMAIN", rendered)
+        self.assertNotIn("secret-dev-key-that-must-not-leak", rendered)
+
+    def test_runtime_identity_guard_rejects_project_root_env_source(self):
+        manifest = self.production_manifest()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            env_path = repo_root / ".env.iran"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "SERVER_MODE=iran",
+                        "FOREIGN_SERVER_URL=https://coin.362514.ir",
+                        "FOREIGN_SERVER_DOMAIN=coin.362514.ir",
+                        "IRAN_SERVER_URL=https://coin.gold-trade.ir",
+                        "IRAN_SERVER_DOMAIN=coin.gold-trade.ir",
+                        "FRONTEND_URL=https://coin.gold-trade.ir",
+                        "SYNC_VERIFY_TLS=true",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            findings = check_runtime_env_identity(
+                manifest=manifest,
+                role="iran",
+                env_path=env_path,
+                repo_root=repo_root,
+            )
+
+        self.assertIn(
+            "production runtime env source must not be project-root .env or .env.iran",
+            "\n".join(finding.detail for finding in findings),
+        )
+
+    def test_runtime_identity_guard_allows_project_env_source_only_with_emergency_flag(self):
+        manifest = self.production_manifest()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            env_path = repo_root / ".env.iran"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "SERVER_MODE=iran",
+                        "FOREIGN_SERVER_URL=https://coin.362514.ir",
+                        "FOREIGN_SERVER_DOMAIN=coin.362514.ir",
+                        "IRAN_SERVER_URL=https://coin.gold-trade.ir",
+                        "IRAN_SERVER_DOMAIN=coin.gold-trade.ir",
+                        "FRONTEND_URL=https://coin.gold-trade.ir",
+                        "SYNC_VERIFY_TLS=true",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            findings = check_runtime_env_identity(
+                manifest=manifest,
+                role="iran",
+                env_path=env_path,
+                repo_root=repo_root,
+                allow_project_env_source=True,
+            )
+
+        self.assertEqual(findings, [])
 
     def test_compose_surface_keeps_telegram_bot_foreign_only(self):
         repo_root = Path(__file__).resolve().parents[1]

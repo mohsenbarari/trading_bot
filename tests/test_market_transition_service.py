@@ -257,6 +257,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         send_mock.assert_not_awaited()
 
     async def test_reconcile_market_channel_notice_marks_missing_channel_skipped(self):
+        now = datetime(2026, 6, 28, 5, 30, 30, tzinfo=timezone.utc)
         state = MarketRuntimeState(
             id=1,
             is_open=True,
@@ -288,6 +289,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
                 db,
                 state,
                 source="sync_receive",
+                current_time=now,
             )
 
         self.assertEqual(result.status, "skipped")
@@ -352,6 +354,53 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.attempt_count, 1)
         db.commit.assert_awaited_once()
 
+    async def test_reconcile_market_channel_notice_suppresses_stale_transition_without_send(self):
+        now = datetime(2026, 6, 28, 5, 45, tzinfo=timezone.utc)
+        state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=datetime(2026, 6, 28, 5, 30, tzinfo=timezone.utc),
+        )
+        receipt = SimpleNamespace(
+            status=market_transition_service.MARKET_NOTICE_STATUS_PENDING,
+            attempt_count=0,
+            last_error_class=None,
+        )
+        db = SimpleNamespace(commit=AsyncMock())
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "-1001",
+        ), patch.object(
+            market_transition_service,
+            "_get_or_create_market_notice_receipt",
+            new=AsyncMock(return_value=receipt),
+        ), patch.object(
+            market_transition_service,
+            "_send_market_channel_notice",
+            new=AsyncMock(),
+        ) as send_mock, patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_NOTICE_STALENESS_SECONDS": "120"},
+        ):
+            result = await market_transition_service.reconcile_market_channel_notice_for_state(
+                db,
+                state,
+                source="sync_receive",
+                current_time=now,
+            )
+
+        self.assertEqual(result.status, "skipped")
+        self.assertEqual(result.reason, "stale_transition")
+        self.assertEqual(receipt.status, market_transition_service.MARKET_NOTICE_STATUS_SUPPRESSED_STALE)
+        self.assertEqual(receipt.last_error_class, "stale_transition")
+        self.assertEqual(receipt.attempt_count, 0)
+        db.commit.assert_awaited_once()
+        send_mock.assert_not_awaited()
+
     async def test_reconcile_market_channel_notice_skips_when_disabled_without_receipt_mutation(self):
         state = MarketRuntimeState(
             id=1,
@@ -380,7 +429,7 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         receipt_mock.assert_not_awaited()
 
     async def test_reconcile_due_market_channel_notice_receipts_retries_failed_due_receipt(self):
-        now = datetime(2026, 6, 28, 5, 35, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 28, 5, 30, 30, tzinfo=timezone.utc)
         receipt = SimpleNamespace(
             id=9,
             dedupe_key="market-channel-notice:opened:2026-06-28T05:30:00Z:test",
@@ -851,6 +900,133 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         load_offers_mock.assert_not_awaited()
         db.commit.assert_not_awaited()
         notice_mock.assert_awaited_once_with(db, state, source="sync_receive")
+
+    async def test_foreign_market_schedule_autonomy_waits_until_grace_expires(self):
+        transition_at = datetime(2026, 6, 29, 18, 30, tzinfo=timezone.utc)
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+            current_transition_at=transition_at,
+        )
+        synced_state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=transition_at - timedelta(hours=9),
+        )
+        db = SimpleNamespace()
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS": "30"},
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=synced_state),
+        ), patch.object(
+            market_transition_service,
+            "reconcile_market_runtime_side_effects_for_state",
+            new=AsyncMock(),
+        ) as side_effect_mock:
+            result = await market_transition_service.reconcile_foreign_market_schedule_autonomy(
+                db,
+                evaluation,
+                current_time=transition_at + timedelta(seconds=29),
+                source="market_schedule_loop_autonomy",
+            )
+
+        self.assertFalse(result.changed)
+        side_effect_mock.assert_not_awaited()
+
+    async def test_foreign_market_schedule_autonomy_applies_close_after_grace_without_runtime_write(self):
+        transition_at = datetime(2026, 6, 29, 18, 30, tzinfo=timezone.utc)
+        evaluation = MarketScheduleEvaluation(
+            is_open=False,
+            reason="after_daily_window_close",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+            current_transition_at=transition_at,
+        )
+        synced_state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=transition_at - timedelta(hours=9),
+        )
+        autonomy_result = market_transition_service.MarketTransitionResult(
+            changed=True,
+            transition="closed_local_offer_expiry",
+            state=SimpleNamespace(is_open=False),
+            expired_offer_ids=(17,),
+        )
+        db = SimpleNamespace()
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.dict(
+            "os.environ",
+            {"TRADING_BOT_MARKET_FOREIGN_INDEPENDENT_GRACE_SECONDS": "30"},
+        ), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=synced_state),
+        ), patch.object(
+            market_transition_service,
+            "reconcile_market_runtime_side_effects_for_state",
+            new=AsyncMock(return_value=autonomy_result),
+        ) as side_effect_mock:
+            result = await market_transition_service.reconcile_foreign_market_schedule_autonomy(
+                db,
+                evaluation,
+                current_time=transition_at + timedelta(seconds=31),
+                source="market_schedule_loop_autonomy",
+            )
+
+        self.assertIs(result, autonomy_result)
+        side_effect_mock.assert_awaited_once()
+        synthetic_state = side_effect_mock.await_args.args[1]
+        self.assertFalse(synthetic_state.is_open)
+        self.assertEqual(synthetic_state.last_transition_at, transition_at)
+
+    async def test_foreign_market_schedule_autonomy_skips_when_iran_transition_already_arrived(self):
+        transition_at = datetime(2026, 6, 29, 5, 30, tzinfo=timezone.utc)
+        evaluation = MarketScheduleEvaluation(
+            is_open=True,
+            reason="daily_window_open",
+            next_transition_at=None,
+            timezone="Asia/Tehran",
+            current_transition_at=transition_at,
+        )
+        synced_state = MarketRuntimeState(
+            id=1,
+            is_open=True,
+            active_web_notice_visible=True,
+            offers_since_last_open=0,
+            last_transition_at=transition_at,
+        )
+        db = SimpleNamespace()
+
+        with patch("core.services.market_transition_service.current_server", return_value="foreign"), patch.object(
+            market_transition_service,
+            "get_market_runtime_state",
+            new=AsyncMock(return_value=synced_state),
+        ), patch.object(
+            market_transition_service,
+            "reconcile_market_runtime_side_effects_for_state",
+            new=AsyncMock(),
+        ) as side_effect_mock:
+            result = await market_transition_service.reconcile_foreign_market_schedule_autonomy(
+                db,
+                evaluation,
+                current_time=transition_at + timedelta(minutes=5),
+                source="market_schedule_loop_autonomy",
+            )
+
+        self.assertFalse(result.changed)
+        self.assertIs(result.state, synced_state)
+        side_effect_mock.assert_not_awaited()
 
     async def test_load_market_schedule_overrides_window_uses_local_date_range(self):
         db = SimpleNamespace(execute=AsyncMock(return_value=_ExecuteResult(values=[])))

@@ -98,6 +98,49 @@ Root cause: receipt backfill/rollout logic was missing. The repair path was
 idempotent, but it did not apply a staleness guard or seed receipts for already
 completed historical transitions.
 
+## Implementation Status - 2026-06-29
+
+Current branch: `candidate/sync-parity-hardening`.
+
+Completed in code on this branch:
+
+- Stage V0 evidence snapshot was collected under `tmp/` with secret values
+  excluded from the committed repository.
+- Stage V2 deployment-surface identity guard now validates production runtime
+  env identity values for both Iran and foreign before production container
+  recreation. It rejects retired identities, mismatched URL/domain pairs, and
+  project-root env sources unless an explicit emergency flag is supplied.
+- Stage V3 market channel notice staleness protection now records stale
+  market open/close notices as `suppressed_stale` instead of sending them to
+  Telegram.
+- Stage V3A foreign short-outage autonomy now lets the foreign market schedule
+  loop evaluate the already-synced schedule and run foreign-local Telegram
+  side effects after the configured grace period without writing
+  `market_runtime_state`.
+- Telegram trade-request validation already uses schedule evaluation through
+  `evaluate_current_market_schedule`, so close-time trade blocking is based on
+  the synced schedule and does not wait for Iran `market_runtime_state`.
+
+Focused tests added/updated:
+
+- deployment-surface guard tests for valid identities, retired identities,
+  project-root env rejection, mismatched domain/URL pairs, and secret-safe
+  failure output;
+- production deploy smoke tests proving the real release path invokes runtime
+  identity validation and does not recreate stateful Iran services;
+- market schedule tests for `current_transition_at`;
+- market transition tests for stale notice suppression, fresh retry behavior,
+  and foreign autonomy after the grace window;
+- market schedule loop tests for the updated foreign path.
+
+Important sequencing decision:
+
+- Stage V1 runtime env correction must remain deferred until the Stage V2/V3/V3A
+  code is deployed. The current Iran production backlog contains stale market
+  runtime transitions from the retired peer URL incident; correcting routing
+  before stale-notice suppression is active could replay old open/close channel
+  notices as live Telegram messages.
+
 ## Stage V0 - Freeze And Evidence Snapshot
 
 Goal: capture the exact pre-fix state before touching production runtime.
@@ -165,11 +208,10 @@ Post-reload checks:
 
 Expected user-facing side effect:
 
-- If the delayed close notice is still eligible and not too old under the code
-  currently deployed, foreign may send one delayed close notice after sync
-  resumes. That is acceptable only as a one-time consequence of the current
-  production state. The hardening in Stage V3 must prevent stale notices from
-  being sent after future rollouts.
+- Stage V1 must not be executed on production until Stage V3 stale-notice
+  suppression is active. After sync resumes, any old close/open notice outside
+  the freshness window must be recorded as `suppressed_stale`, not sent to the
+  Telegram channel.
 
 Exit criteria:
 

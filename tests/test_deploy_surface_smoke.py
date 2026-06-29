@@ -198,6 +198,17 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
 
         self.assertEqual(preseed_tables, shared_tables)
 
+    def test_production_release_validates_runtime_identity_files(self):
+        production_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')
+
+        self.assertIn('DEPLOYMENT_SURFACE_GUARD="$PROJECT_DIR/scripts/check_deployment_surface_guard.py"', production_script)
+        self.assertIn('validate_runtime_identity_files() {', production_script)
+        self.assertIn('--runtime-env "foreign=$LOCAL_ENV_SOURCE_PATH"', production_script)
+        self.assertIn('--runtime-env "iran=$IRAN_ENV_SOURCE_PATH"', production_script)
+        self.assertIn('guard_args+=(--allow-project-env-source)', production_script)
+        self.assertIn('validate_runtime_identity_files', production_script.split('ensure_runtime_env_file() {', 1)[1])
+        self.assertIn('IRAN_ENV_SOURCE_PATH points at a project-root env file', production_script)
+
     def test_nginx_setup_scripts_keep_api_proxy_off_websocket_upgrade(self):
         for script_name in ("scripts/setup_iran_nginx.sh", "scripts/setup_foreign_nginx.sh"):
             with self.subTest(script=script_name):

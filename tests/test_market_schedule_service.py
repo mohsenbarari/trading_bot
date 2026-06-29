@@ -104,6 +104,29 @@ class MarketScheduleServiceTests(unittest.TestCase):
         self.assertFalse(result.is_open)
         self.assertEqual(result.reason, "invalid_schedule")
         self.assertIsNone(result.next_transition_at)
+        self.assertIsNone(result.current_transition_at)
+
+    def test_daily_window_reports_current_transition_at_for_open_and_closed_state(self):
+        tz = ZoneInfo("Asia/Tehran")
+        settings = TradingSettings(
+            market_schedule_enabled=True,
+            market_open_time_local="09:00",
+            market_close_time_local="17:00",
+        )
+
+        in_window = evaluate_market_schedule(
+            settings,
+            current_time=datetime(2026, 5, 24, 13, 0, tzinfo=tz),
+        )
+        after_close = evaluate_market_schedule(
+            settings,
+            current_time=datetime(2026, 5, 24, 18, 0, tzinfo=tz),
+        )
+
+        self.assertTrue(in_window.is_open)
+        self.assertEqual(in_window.current_transition_at, datetime(2026, 5, 24, 9, 0, tzinfo=tz))
+        self.assertFalse(after_close.is_open)
+        self.assertEqual(after_close.current_transition_at, datetime(2026, 5, 24, 17, 0, tzinfo=tz))
 
     def test_schedule_fields_remain_json_friendly(self):
         settings = TradingSettings(
