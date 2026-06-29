@@ -119,7 +119,7 @@ jobs:
         run: |
           cat > .env <<'EOF'
           ENVIRONMENT=staging
-          SERVER_MODE=foreign
+          SERVER_MODE=iran
           BOT_USERNAME=ci_test_bot
           POSTGRES_DB=trading_bot_db
           POSTGRES_USER=admin
@@ -153,6 +153,27 @@ jobs:
 
       - name: Bootstrap backend stack
         run: bash ./scripts/bootstrap_ci_backend.sh
+
+      - name: Verify browser CI backend surface
+        shell: bash
+        run: |
+          docker compose exec -T app python - <<'PY'
+          from core.config import settings
+
+          environment = (settings.environment or "").strip().lower()
+          server_mode = (settings.server_mode or "").strip().lower()
+          if environment != "staging":
+              raise SystemExit(f"unexpected environment={environment!r}")
+          if server_mode != "iran":
+              raise SystemExit(f"unexpected server_mode={server_mode!r}")
+          PY
+          curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
+            -H 'Content-Type: application/json'
+          curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
+            -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
+            -H 'Origin: http://127.0.0.1:4173' \
+            -H 'Access-Control-Request-Method: POST'
+          grep -qi '^access-control-allow-origin: http://127.0.0.1:4173' /tmp/browser-ci-cors.headers
 
       - name: Run Playwright browser gate
         working-directory: frontend
