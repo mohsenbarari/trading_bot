@@ -35,13 +35,13 @@ test.describe('Login/auth regressions', () => {
     await page.goto('/profile')
 
     await expect(page).toHaveURL(/\/login$/)
-    await expect(page.getByText('ورود به بازار امن طلا')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'دریافت کد تایید' })).toBeVisible()
   })
 
   test('developer quick login reaches the dashboard and stores tokens', async ({ page }) => {
     await page.goto('/login')
-    await page.getByRole('button', { name: 'ورود سریع ۱ ساله (توسعه‌دهنده)' }).click()
+    await page.getByRole('button', { name: 'ورود سریع ۱ ساله' }).click()
 
     await page.waitForURL('**/')
     await expect(page.getByText('ورود به بازار')).toBeVisible()

@@ -117,6 +117,7 @@ jobs:
         shell: bash
         run: |
           cat > .env <<'EOF'
+          ENVIRONMENT=staging
           SERVER_MODE=foreign
           BOT_USERNAME=ci_test_bot
           POSTGRES_DB=trading_bot_db
@@ -128,6 +129,10 @@ jobs:
           FRONTEND_URL=http://127.0.0.1:4173
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+          EOF
+          cat > frontend/.env.local <<'EOF'
+          VITE_API_BASE_URL=http://127.0.0.1:8000
+          VITE_STAGING_DEV_LOGIN=true
           EOF
 
       - name: Prepare CI host paths

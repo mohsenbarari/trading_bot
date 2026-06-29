@@ -626,7 +626,7 @@ function authHeaders(accessToken: string) {
 
 async function loginAsDev(page: Page) {
   await gotoWithWebKitRetry(page, '/login')
-  await page.getByRole('button', { name: 'ورود سریع ۱ ساله (توسعه‌دهنده)' }).click()
+  await page.getByRole('button', { name: 'ورود سریع ۱ ساله' }).click()
   await page.waitForURL('**/', { waitUntil: 'domcontentloaded' })
 }
 
