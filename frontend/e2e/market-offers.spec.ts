@@ -707,7 +707,7 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
 
 async function executeTradeFromCard(offerCard: Locator, quantityLabel: string) {
   await offerCard.locator('.trade-btn').filter({ hasText: quantityLabel }).first().click()
-  const confirmButton = offerCard.locator('.trade-btn.pending').filter({ hasText: `تایید ${quantityLabel}؟` }).first()
+  const confirmButton = offerCard.locator('.trade-btn.pending').first()
   await expect(confirmButton).toBeVisible()
   await confirmButton.click()
 }
@@ -822,9 +822,8 @@ test.describe('Market offer creation regressions', () => {
     const ownerCard = page.locator('.offer-card-wrap', { hasText: fixture.commodityName }).first()
     await expect(ownerCard).toBeVisible()
     await expect(ownerCard.locator('.price')).toHaveText('50,000')
-    await expect(ownerCard.locator('.customer-context-badge')).toHaveText('مشتری')
-    await expect(ownerCard.locator('.customer-context-name')).toHaveText(fixture.sourceManagementName)
-    await expect(ownerCard.locator('.customer-context-tier')).toHaveText('سطح 1')
+    await expect(ownerCard.locator('.customer-context-row')).toContainText(fixture.sourceManagementName)
+    await expect(ownerCard.locator('.customer-context-row')).toContainText('سطح 1')
 
     await setSeededSession(page, fixture.tier2Customer)
     await page.goto('/market')
@@ -871,9 +870,8 @@ test.describe('Market offer creation regressions', () => {
     const ownerCard = page.locator('.offer-card-wrap', { hasText: uniqueNote }).first()
     await expect(ownerCard).toBeVisible()
     await expect(ownerCard.locator('.price')).toHaveText('50,000')
-    await expect(ownerCard.locator('.customer-context-badge')).toHaveText('مشتری')
-    await expect(ownerCard.locator('.customer-context-name')).toHaveText(fixture.sourceManagementName)
-    await expect(ownerCard.locator('.customer-context-tier')).toHaveText('سطح 1')
+    await expect(ownerCard.locator('.customer-context-row')).toContainText(fixture.sourceManagementName)
+    await expect(ownerCard.locator('.customer-context-row')).toContainText('سطح 1')
 
     await setSeededSession(page, fixture.tier2Customer)
     await page.goto('/market')

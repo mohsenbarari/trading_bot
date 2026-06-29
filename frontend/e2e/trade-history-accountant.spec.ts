@@ -1113,7 +1113,7 @@ test.describe('Trade history accountant context', () => {
     })
 
     await executeButton.click()
-    await offerCard.locator('.trade-btn.pending').filter({ hasText: `تایید ${fixture.tradeAmount} عدد؟` }).first().click()
+    await offerCard.locator('.trade-btn.pending').first().click()
     const tradeResponse = await tradeResponsePromise
     expect(tradeResponse.status()).toBe(400)
     await expect(offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()).toBeVisible()

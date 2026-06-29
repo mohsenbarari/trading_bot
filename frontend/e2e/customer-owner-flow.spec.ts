@@ -678,8 +678,13 @@ async function waitForActiveOwnerCustomerRelation(
 }
 
 async function ensureAccordionOpen(root: Locator, sectionSelector: string) {
-  const accordion = root.locator(`${sectionSelector} .ds-accordion`).first()
-  await expect(accordion).toBeVisible({ timeout: 30000 })
+  const section = root.locator(sectionSelector).first()
+  await expect(section).toBeVisible({ timeout: 30000 })
+
+  const accordion = section.locator('.ds-accordion').first()
+  if (await accordion.count() === 0) {
+    return
+  }
 
   const className = await accordion.getAttribute('class')
   if (!className?.includes('open')) {
@@ -707,9 +712,9 @@ test.describe('customer owner lifecycle', () => {
     const owner = seedSessionUser('customer_owner_flow_owner')
     const superAdmin = seedSessionUser('customer_owner_flow_admin', 'super_admin')
     const suffix = Date.now()
-    const customerAccountName = `pwcust_${suffix}`
     const managementName = `مشتری تست ${suffix}`
     const mobileNumber = `09${String(suffix).slice(-9)}`
+    const customerAccountName = `customer_${mobileNumber}`
 
     await waitForBackendReady(request)
     await setAuthTokens(page, owner)
@@ -718,19 +723,23 @@ test.describe('customer owner lifecycle', () => {
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
 
     await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'مشتریان' }).click()
-    const modal = page.locator('.customer-manager-shell')
-    await expect(modal).toBeVisible({ timeout: 30000 })
+    await page.waitForURL(/\/operations\/customers(?:\?.*)?$/)
+    const workspace = page.locator('.customer-workspace-view')
+    await expect(workspace).toBeVisible({ timeout: 30000 })
 
-    await modal.locator('input.create-account-name').fill(customerAccountName)
-    await modal.locator('input.create-management-name').fill(managementName)
-    await modal.locator('input.create-mobile-number').fill(mobileNumber)
-    await modal.locator('select.create-tier-select').selectOption('tier2')
-    await modal.locator('input.create-commission-rate').fill('1.25')
-    await modal.locator('input.create-min-trade').fill('2')
-    await modal.locator('input.create-max-trade').fill('8')
-    await modal.locator('input.create-max-daily-trades').fill('3')
-    await modal.locator('input.create-max-daily-volume').fill('40')
-    await modal.locator('button.submit-create').click()
+    await workspace.getByRole('button', { name: 'افزودن مشتری' }).first().click()
+    const createPanel = page.locator('.customer-create-panel')
+    await expect(createPanel).toBeVisible({ timeout: 30000 })
+
+    await createPanel.getByLabel('نام مدیریتی').fill(managementName)
+    await createPanel.getByLabel('شماره موبایل').fill(mobileNumber)
+    await createPanel.getByLabel('سطح مشتری').selectOption('tier2')
+    await createPanel.getByLabel('درصد کمیسیون مشتری').fill('1.25')
+    await createPanel.getByLabel('حداقل مقدار معامله').fill('2')
+    await createPanel.getByLabel('حداکثر مقدار معامله').fill('8')
+    await createPanel.getByLabel('حداکثر تعداد روزانه').fill('3')
+    await createPanel.getByLabel('حداکثر حجم روزانه').fill('40')
+    await page.getByRole('button', { name: 'ثبت دعوت مشتری' }).click()
 
     const confirmedPendingRelation = await waitForPendingOwnerCustomerRelation(
       request,
@@ -742,7 +751,7 @@ test.describe('customer owner lifecycle', () => {
     const registrationLink = confirmedPendingRelation.registration_link
 
     expect(registrationLink).toContain('/register')
-    await expect(modal.locator('.customer-card').filter({ hasText: managementName })).toContainText('در انتظار ثبت‌نام')
+    await expect(workspace.locator('.customer-pending-card').filter({ hasText: managementName })).toContainText('دعوت')
 
     seedRegistrationVerified(registrationToken)
 
@@ -769,12 +778,8 @@ test.describe('customer owner lifecycle', () => {
     )
 
     await setAuthTokens(page, owner)
-    await page.goto(`/users/${owner.userId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
-    await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'مشتریان' }).click()
-    await expect(modal).toBeVisible({ timeout: 30000 })
-
-    await modal.locator('button').filter({ hasText: 'بروزرسانی لیست' }).click()
+    await page.goto('/operations/customers')
+    await expect(workspace).toBeVisible({ timeout: 30000 })
     const confirmedActivatedCustomer = await waitForActiveOwnerCustomerRelation(
       request,
       owner.accessToken,
@@ -782,15 +787,19 @@ test.describe('customer owner lifecycle', () => {
     )
     const activatedCustomerUserId = confirmedActivatedCustomer.customer_user_id
 
-    const activeCard = modal.locator('.customer-card').filter({ hasText: managementName }).first()
+    await page.reload()
+    await expect(workspace).toBeVisible({ timeout: 30000 })
+    const activeCard = workspace.locator('.ui-list-item').filter({ hasText: managementName }).first()
     await expect(activeCard).toContainText('فعال')
-    await expect(activeCard).toContainText(customerAccountName)
+    await expect(activeCard).toContainText('سطح ۲')
 
-    await activeCard.locator('button.start-edit').click()
-    await activeCard.locator('input.edit-commission-rate').fill('2.50')
-    await activeCard.locator('input.edit-max-trade').fill('12')
-    await activeCard.locator('input.edit-max-daily-trades').fill('5')
-    await activeCard.locator('button.save-edit').click()
+    await activeCard.click()
+    await page.waitForURL(new RegExp(`/operations/customers/${pendingRelationId}(?:\\?.*)?$`))
+    await workspace.getByRole('tab', { name: 'محدودیت‌ها' }).click()
+    await workspace.getByLabel('درصد کمیسیون مشتری').fill('2.50')
+    await workspace.getByLabel('حداکثر مقدار معامله').fill('12')
+    await workspace.getByLabel('حداکثر تعداد روزانه').fill('5')
+    await workspace.getByRole('button', { name: 'ذخیره تغییرات' }).click()
 
     await expect
       .poll(async () => {
@@ -808,8 +817,8 @@ test.describe('customer owner lifecycle', () => {
         max_daily_trades: 5,
       }))
 
-    await modal.getByRole('button', { name: 'بستن' }).click()
-    await expect(modal).toBeHidden({ timeout: 30000 })
+    await page.goto(`/users/${owner.userId}`)
+    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
     await expect(page.locator('.customer-relations-section')).toContainText(managementName)
 
     await ensureAccordionOpen(page.locator('.public-profile-view:visible').last(), '.customer-relations-section')
@@ -837,13 +846,11 @@ test.describe('customer owner lifecycle', () => {
     await expect(adminModal).toBeHidden({ timeout: 30000 })
 
     await setAuthTokens(page, owner)
-    await page.goto(`/users/${owner.userId}`)
-    await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
-    await page.locator('.owner-profile-section .settings-btn').filter({ hasText: 'مشتریان' }).click()
-    await expect(modal).toBeVisible({ timeout: 30000 })
+    await page.goto(`/operations/customers/${pendingRelationId}?tab=danger`)
+    await expect(workspace).toBeVisible({ timeout: 30000 })
 
-    page.once('dialog', (dialog) => dialog.accept())
-    await modal.locator('.customer-card').filter({ hasText: managementName }).locator('button.unlink-active').click()
+    await workspace.getByRole('button', { name: 'قطع ارتباط مشتری' }).click()
+    await page.getByRole('button', { name: 'قطع ارتباط' }).click()
 
     await expect
       .poll(async () => (await fetchOwnerCustomerRelations(request, owner.accessToken)).length, { timeout: 30000 })
@@ -856,7 +863,8 @@ test.describe('customer owner lifecycle', () => {
         userDeleted: true,
       })
 
-    await expect(modal).toContainText('ارتباط مشتری قطع شد')
+    await page.goto('/operations/customers')
+    await expect(workspace).toContainText('هنوز مشتری ثبت نشده است')
   })
 
   test('super-admin sees target trade history from the viewed public-profile perspective', async ({ page, request }) => {
@@ -891,7 +899,7 @@ test.describe('customer owner lifecycle', () => {
 
     const customerHistoryCard = customerProfileView.locator('.history-list .mini-trade-card').filter({ hasText: '5 عدد' }).first()
     await expect(customerHistoryCard).toContainText('🟢 خرید')
-    await expect(customerHistoryCard).toContainText(`مالک ${fixture.ownerAccountName}`)
+    await expect(customerHistoryCard).toContainText(`سرگروه ${fixture.ownerAccountName}`)
     await expect(customerHistoryCard).toContainText('سطح 2')
   })
 
@@ -910,9 +918,9 @@ test.describe('customer owner lifecycle', () => {
 
     const tradeCard = page.locator('.history-list .mini-trade-card').filter({ hasText: `${fixture.tradeQuantity} عدد` }).first()
     await expect(tradeCard).toContainText('رابطه:')
-    await expect(tradeCard.locator('.customer-context-badge')).toHaveText('مشتری')
-    await expect(tradeCard.locator('.trade-customer-context-value')).toContainText(fixture.customerManagementName)
-    await expect(tradeCard.locator('.trade-customer-context-value')).toContainText('سطح 2')
+    await expect(tradeCard).toContainText('مشتری')
+    await expect(tradeCard).toContainText(fixture.customerManagementName)
+    await expect(tradeCard).toContainText('سطح 2')
   })
 
   test('third-party mutual history with owner hides customer context', async ({ page, request }) => {

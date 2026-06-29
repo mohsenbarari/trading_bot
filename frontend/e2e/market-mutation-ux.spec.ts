@@ -265,7 +265,7 @@ test.describe('Market mutation UX', () => {
     await expect(offerCard).toBeVisible()
     const tradeButton = offerCard.getByRole('button', { name: '4 عدد' }).first()
     await tradeButton.click()
-    const tradeConfirm = offerCard.getByRole('button', { name: 'تایید 4 عدد؟' })
+    const tradeConfirm = offerCard.locator('.trade-btn.pending').first()
     await expect(tradeConfirm).toBeVisible()
     await tradeConfirm.evaluate((node: HTMLElement) => {
       node.click()

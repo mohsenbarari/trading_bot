@@ -271,7 +271,7 @@ test.describe('Lot suggestion regressions', () => {
     await expect(lot10Button).toBeVisible({ timeout: 30000 })
     await lot10Button.evaluate((node: HTMLElement) => node.click())
 
-    const confirm10Button = publicOfferCard.getByRole('button', { name: 'تایید 10 عدد؟' }).first()
+    const confirm10Button = publicOfferCard.locator('.trade-btn.pending').first()
     await expect(confirm10Button).toBeVisible({ timeout: 30000 })
     await confirm10Button.evaluate((node: HTMLElement) => node.click())
 
@@ -287,7 +287,7 @@ test.describe('Lot suggestion regressions', () => {
 
     await expect(dialog.getByRole('button', { name: '16 عدد' })).toBeVisible({ timeout: 30000 })
     await dialog.getByRole('button', { name: '16 عدد' }).evaluate((node: HTMLElement) => node.click())
-    await expect(dialog.getByRole('button', { name: 'تایید 16 عدد؟' })).toBeVisible({ timeout: 30000 })
+    await expect(dialog.locator('.trade-suggestion-lot-btn.pending')).toBeVisible({ timeout: 30000 })
 
     updateOfferState(fixture.publicOfferId, 8, [8], 'active')
     await expect(dialog).toContainText('8 عدد')

@@ -207,6 +207,53 @@ export function useChatMessages(options: UseChatMessagesOptions) {
         return newConversation
     }
 
+    function parseMessagePayload(message: Message): Record<string, unknown> {
+        if (typeof message.content !== 'string' || message.content.trim() === '') {
+            return {}
+        }
+
+        try {
+            const parsed = JSON.parse(message.content)
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? parsed as Record<string, unknown>
+                : {}
+        } catch {
+            return {}
+        }
+    }
+
+    function normalizePayloadText(value: unknown) {
+        return typeof value === 'string' ? value.trim() : ''
+    }
+
+    function normalizePayloadNumber(value: unknown) {
+        const numeric = Number(value)
+        return Number.isFinite(numeric) ? numeric : null
+    }
+
+    function isPendingDocumentCoveredByServerMessage(pendingMessage: Message, serverMessage: Message) {
+        if (pendingMessage.id >= 0 || serverMessage.id <= 0) return false
+        if (pendingMessage.message_type !== 'document' || serverMessage.message_type !== 'document') return false
+        if (pendingMessage.sender_id !== serverMessage.sender_id) return false
+        if (pendingMessage.receiver_id !== serverMessage.receiver_id) return false
+
+        const pendingPayload = parseMessagePayload(pendingMessage)
+        const serverPayload = parseMessagePayload(serverMessage)
+        const pendingFileName = normalizePayloadText(pendingPayload.file_name)
+        const serverFileName = normalizePayloadText(serverPayload.file_name)
+        if (!pendingFileName || pendingFileName !== serverFileName) return false
+
+        const pendingMimeType = normalizePayloadText(pendingPayload.mime_type)
+        const serverMimeType = normalizePayloadText(serverPayload.mime_type)
+        if (pendingMimeType && serverMimeType && pendingMimeType !== serverMimeType) return false
+
+        const pendingSize = normalizePayloadNumber(pendingPayload.size)
+        const serverSize = normalizePayloadNumber(serverPayload.size)
+        if (pendingSize !== null && serverSize !== null && pendingSize !== serverSize) return false
+
+        return normalizePayloadText(serverPayload.file_id) !== ''
+    }
+
     function mergeOptimisticMessages(baseMessages: Message[], optimisticMessages: Message[]) {
         if (optimisticMessages.length === 0) {
             return baseMessages
@@ -214,9 +261,13 @@ export function useChatMessages(options: UseChatMessagesOptions) {
 
         const merged = [...baseMessages]
         const seen = new Set<number>(baseMessages.map(message => message.id))
+        const persistedMessages = baseMessages.filter(message => message.id > 0)
 
         for (const message of optimisticMessages) {
             if (seen.has(message.id)) continue
+            if (persistedMessages.some(serverMessage => isPendingDocumentCoveredByServerMessage(message, serverMessage))) {
+                continue
+            }
             seen.add(message.id)
             merged.push(cloneMessage(message))
         }

@@ -249,6 +249,11 @@ async function toggleAccountStatusFromAdminProfile(page: any) {
     await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
     await expect(settingsHeading).toBeVisible()
   }
+  const toggleButton = page.getByRole('button', { name: /تغییر وضعیت حساب/ }).first()
+  if (!(await toggleButton.isVisible().catch(() => false))) {
+    await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
+    await expect(toggleButton).toBeVisible({ timeout: 30000 })
+  }
   const playwrightPage = page as any
   const dialogHandler: any = async (dialog: any) => {
     await dialog.accept()
@@ -259,7 +264,7 @@ async function toggleAccountStatusFromAdminProfile(page: any) {
     return response.request().method() === 'PUT' && /\/api\/users\/\d+$/.test(response.url())
   })
   try {
-    await page.getByRole('button', { name: /تغییر وضعیت حساب/ }).click()
+    await toggleButton.click()
     const response = await updateResponsePromise
     expect(response.ok()).toBeTruthy()
   } finally {

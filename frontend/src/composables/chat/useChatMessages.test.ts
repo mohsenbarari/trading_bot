@@ -242,6 +242,55 @@ describe('useChatMessages', () => {
     expect(isLoadingMessages.value).toBe(false)
   })
 
+  it('does not re-add a pending document upload already represented by a server message', async () => {
+    createSubject()
+    const documentPayload = {
+      file_name: 'resume.txt',
+      mime_type: 'text/plain',
+      size: 34,
+    }
+    messageMocks.getPendingForUser.mockReturnValue(
+      [
+        {
+          message: {
+            id: -101,
+            sender_id: 7,
+            receiver_id: 12,
+            content: JSON.stringify({ placeholder: true, ...documentPayload }),
+            message_type: 'document',
+          },
+        },
+      ] as any
+    )
+    messageMocks.apiFetchJson.mockImplementation(async (url: string) => {
+      if (url.startsWith('/api/chat/messages/12?limit=')) {
+        return [
+          {
+            id: 51,
+            sender_id: 7,
+            receiver_id: 12,
+            content: JSON.stringify({ file_id: 'file-51', ...documentPayload }),
+            message_type: 'document',
+            is_read: true,
+            created_at: '2026-05-14T13:59:00Z',
+          },
+        ]
+      }
+      if (url === '/api/chat/read/12') {
+        return {}
+      }
+      throw new Error(`unexpected url ${url}`)
+    })
+
+    await subject.loadMessages(12)
+    await flushPromises()
+    vi.advanceTimersByTime(0)
+    await flushPromises()
+
+    expect(messages.value!.map((message) => message.id)).toEqual([51])
+    expect(messages.value![0]?.is_sending).not.toBe(true)
+  })
+
   it('opens at the first valid unread message from the peer before marking the direct chat read', async () => {
     createSubject()
     messageMocks.apiFetchJson.mockImplementation(async (url: string) => {

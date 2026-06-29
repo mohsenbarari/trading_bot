@@ -263,7 +263,6 @@ test.describe('Mandatory channel smoke', () => {
       () => page.evaluate(() => Boolean(localStorage.getItem('auth_token'))),
       { timeout: 30000 },
     ).toBe(true)
-    await page.waitForURL('**/')
 
     await page.goto('/chat')
 

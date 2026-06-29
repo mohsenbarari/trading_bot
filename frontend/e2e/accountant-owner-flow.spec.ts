@@ -324,7 +324,8 @@ test.describe('accountant owner lifecycle', () => {
       .toBe('active')
 
     await expect(workspace).toContainText('فعال', { timeout: 30000 })
-    await expect(workspace).toContainText(activatedAccountant.accountantAccountName, { timeout: 30000 })
+    await expect(workspace).toContainText(relationDisplayName, { timeout: 30000 })
+    await expect(workspace).toContainText(dutyDescription, { timeout: 30000 })
 
     await page.goto(`/users/${owner.userId}`)
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({ timeout: 30000 })
