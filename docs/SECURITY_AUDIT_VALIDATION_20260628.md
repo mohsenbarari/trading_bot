@@ -151,7 +151,7 @@ Remediation update:
 ### VF4 - OTP Verification Has No Failed-Attempt Limit
 
 - Severity: High
-- Status: Confirmed
+- Status: Remediated in follow-up hardening
 - Area: Auth
 - Files:
   - `api/routers/auth.py:916-930`
@@ -181,10 +181,20 @@ Suggested tests:
 - Counter expires with the OTP.
 - Successful verification clears failure counters.
 
+Remediation notes:
+
+- Added Redis-backed failed verification counters for login OTP by subject/mobile digest and client-IP digest.
+- Added the same subject-level protection for registration OTP tokens so invitation registration cannot repeatedly brute-force a live code.
+- After 5 failed attempts for the same login/registration subject, the live OTP is invalidated and a 5-minute lockout is set.
+- A broader per-IP counter is also tracked for login OTP verification and locks the IP after excessive failures in the OTP validity window.
+- Successful login OTP verification clears the subject failure counter before continuing session creation or registration handoff.
+- OTP comparison now uses the shared constant-time secret comparison helper.
+- The OTP length was intentionally left unchanged in this pass to avoid SMS template and UX churn while the brute-force window is now bounded.
+
 ### VF5 - OTP Digits Are Partially Logged
 
 - Severity: Low individually; increases risk when combined with VF4.
-- Status: Confirmed
+- Status: Remediated in follow-up hardening
 - Area: Logging, auth privacy
 - Files:
   - `api/routers/auth.py:921-927`
@@ -200,6 +210,13 @@ Impact:
 Recommended fix:
 
 - Log only state such as "OTP exists" or "OTP generated", never any OTP digit.
+
+Remediation notes:
+
+- Login OTP request logs no longer include any OTP prefix or masked digit.
+- Login OTP resend logs no longer include any OTP prefix or masked digit.
+- Focused tests assert that generated/resend OTP values do not appear in captured auth logs.
+- The staging-only `STAGING_AUTH_VALUE_FOR_TEST_ONLY` path remains intentionally allowed only when `settings.environment == "staging"` and `staging_log_otp_codes` is enabled.
 
 ### VF6 - Secret And Signature Comparisons Use Regular Equality
 
@@ -329,7 +346,7 @@ Recommended fix:
 1. Rotate `DEV_API_KEY` in production and remove the literal from tracked documentation.
 2. Disable `dev-login` in production and remove the IP-only bypass.
 3. Add authorization checks to chat file download.
-4. Add OTP verify throttling/lockout and stop logging OTP digits.
+4. Add OTP verify throttling/lockout and stop logging OTP digits. Completed; keep regression tests active.
 5. Replace secret/signature equality checks with `hmac.compare_digest`. Completed; keep regression tests active.
 6. Centralize trusted proxy handling for IP and host headers.
 7. Remove localhost CORS origins in production.

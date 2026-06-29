@@ -60,6 +60,8 @@ class FakeRedis:
         self.values = dict(values or {})
         self.setex_calls = []
         self.delete_calls = []
+        self.expire_calls = []
+        self.incr_calls = []
 
     async def get(self, key):
         return self.values.get(key)
@@ -71,6 +73,19 @@ class FakeRedis:
     async def delete(self, key):
         self.delete_calls.append(key)
         self.values.pop(key, None)
+
+    async def incr(self, key):
+        self.incr_calls.append(key)
+        value = int(self.values.get(key, 0)) + 1
+        self.values[key] = str(value)
+        return value
+
+    async def expire(self, key, ttl):
+        self.expire_calls.append((key, ttl))
+        return True
+
+    async def ttl(self, key):
+        return 120 if key in self.values else -2
 
 
 def make_request(headers=None, host="127.0.0.1"):
@@ -192,6 +207,25 @@ class AuthRouterRegistrationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(redis.delete_calls, ["reg_otp:abc"])
         self.assertIn(("reg_verified:abc", 600, "1"), redis.setex_calls)
         self.assertEqual(result, {"detail": "کد تایید شد"})
+
+    async def test_register_otp_verify_throttles_repeated_invalid_codes(self):
+        req = RegisterOTPVerify(token="abc", code="00000")
+        redis = FakeRedis({"reg_otp:abc": "12345"})
+
+        with patch("api.routers.auth.get_redis", new=AsyncMock(return_value=redis)):
+            for _ in range(4):
+                with self.assertRaises(HTTPException) as exc_info:
+                    await register_otp_verify(req, db=FakeDB())
+                self.assertEqual(exc_info.exception.status_code, 400)
+
+            with self.assertRaises(HTTPException) as exc_info:
+                await register_otp_verify(req, db=FakeDB())
+
+        self.assertEqual(exc_info.exception.status_code, 429)
+        self.assertEqual(exc_info.exception.detail, "تعداد تلاش‌های ناموفق زیاد است. چند دقیقه دیگر دوباره تلاش کنید.")
+        self.assertIn("reg_otp:abc", redis.delete_calls)
+        self.assertNotIn("reg_otp:abc", redis.values)
+        self.assertTrue(any(call[0].startswith("otp_verify_lock:subject:") for call in redis.setex_calls))
 
     async def test_register_complete_requires_verified_token_and_valid_invitation(self):
         req = RegisterComplete(token="abc", address="Tehran")

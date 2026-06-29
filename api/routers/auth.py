@@ -77,6 +77,13 @@ from core.services.customer_relation_service import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+OTP_TTL_SECONDS = 120
+OTP_VERIFY_FAILURE_TTL_SECONDS = OTP_TTL_SECONDS
+OTP_VERIFY_LOCK_SECONDS = 300
+OTP_VERIFY_SUBJECT_MAX_FAILURES = 5
+OTP_VERIFY_IP_MAX_FAILURES = 30
+OTP_VERIFY_LOCKED_DETAIL = "تعداد تلاش‌های ناموفق زیاد است. چند دقیقه دیگر دوباره تلاش کنید."
+
 
 def _deliver_otp_via_staging_log(*, mobile: str, otp_code: str, purpose: str) -> bool:
     if settings.environment != "staging" or not settings.staging_log_otp_codes:
@@ -93,6 +100,97 @@ def _deliver_otp_via_staging_log(*, mobile: str, otp_code: str, purpose: str) ->
         },
     )
     return True
+
+
+def _redis_text(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    return str(value)
+
+
+def _stable_key_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+
+
+def _request_client_host(raw_request: Request | None) -> str | None:
+    client = getattr(raw_request, "client", None) if raw_request is not None else None
+    host = getattr(client, "host", None)
+    if not host:
+        return None
+    return str(host).strip() or None
+
+
+def _otp_verify_subject_key(subject: str) -> str:
+    return f"otp_verify_fail:subject:{_stable_key_digest(subject)}"
+
+
+def _otp_verify_subject_lock_key(subject: str) -> str:
+    return f"otp_verify_lock:subject:{_stable_key_digest(subject)}"
+
+
+def _otp_verify_ip_key(raw_request: Request | None) -> str | None:
+    host = _request_client_host(raw_request)
+    if not host:
+        return None
+    return f"otp_verify_fail:ip:{_stable_key_digest(host)}"
+
+
+def _otp_verify_ip_lock_key(raw_request: Request | None) -> str | None:
+    host = _request_client_host(raw_request)
+    if not host:
+        return None
+    return f"otp_verify_lock:ip:{_stable_key_digest(host)}"
+
+
+async def _otp_counter_ttl(redis, otp_key: str) -> int:
+    try:
+        ttl = int(await redis.ttl(otp_key))
+    except Exception:
+        ttl = OTP_VERIFY_FAILURE_TTL_SECONDS
+    if ttl <= 0:
+        return OTP_VERIFY_FAILURE_TTL_SECONDS
+    return min(ttl, OTP_VERIFY_FAILURE_TTL_SECONDS)
+
+
+async def _ensure_otp_verify_not_locked(redis, *, subject: str, raw_request: Request | None) -> None:
+    if await redis.get(_otp_verify_subject_lock_key(subject)):
+        raise HTTPException(status_code=429, detail=OTP_VERIFY_LOCKED_DETAIL)
+
+    ip_lock_key = _otp_verify_ip_lock_key(raw_request)
+    if ip_lock_key and await redis.get(ip_lock_key):
+        raise HTTPException(status_code=429, detail=OTP_VERIFY_LOCKED_DETAIL)
+
+
+async def _record_otp_verify_failure(redis, *, subject: str, raw_request: Request | None, otp_key: str) -> None:
+    ttl = await _otp_counter_ttl(redis, otp_key)
+    subject_key = _otp_verify_subject_key(subject)
+    subject_count = int(await redis.incr(subject_key))
+    await redis.expire(subject_key, ttl)
+
+    locked = False
+    if subject_count >= OTP_VERIFY_SUBJECT_MAX_FAILURES:
+        await redis.delete(otp_key)
+        await redis.setex(_otp_verify_subject_lock_key(subject), OTP_VERIFY_LOCK_SECONDS, "1")
+        locked = True
+
+    ip_key = _otp_verify_ip_key(raw_request)
+    if ip_key:
+        ip_count = int(await redis.incr(ip_key))
+        await redis.expire(ip_key, ttl)
+        if ip_count >= OTP_VERIFY_IP_MAX_FAILURES:
+            await redis.setex(_otp_verify_ip_lock_key(raw_request), OTP_VERIFY_LOCK_SECONDS, "1")
+            locked = True
+
+    if locked:
+        raise HTTPException(status_code=429, detail=OTP_VERIFY_LOCKED_DETAIL)
+
+
+async def _clear_otp_verify_subject_failures(redis, *, subject: str) -> None:
+    subject_key = _otp_verify_subject_key(subject)
+    if await redis.get(subject_key):
+        await redis.delete(subject_key)
 
 
 def _should_announce_project_user_registration(accountant_relation, customer_relation) -> bool:
@@ -568,15 +666,15 @@ async def register_otp_request(
     otp_code = str(random.randint(10000, 99999))
     otp_key = f"reg_otp:{req.token}" # Use token as key identifier for security
     
-    await redis.setex(otp_key, 120, otp_code)
-    await redis.setex(rate_limit_key, 120, "1")
+    await redis.setex(otp_key, OTP_TTL_SECONDS, otp_code)
+    await redis.setex(rate_limit_key, OTP_TTL_SECONDS, "1")
 
     if _deliver_otp_via_staging_log(mobile=mobile, otp_code=otp_code, purpose="registration"):
-        return {"detail": "کد تایید در لاگ staging ثبت شد", "expires_in": 120}
+        return {"detail": "کد تایید در لاگ staging ثبت شد", "expires_in": OTP_TTL_SECONDS}
     
     # Send SMS (Always SMS because user is not registered on Telegram yet)
     if send_otp_sms(mobile, otp_code):
-        return {"detail": "کد تایید ارسال شد", "expires_in": 120}
+        return {"detail": "کد تایید ارسال شد", "expires_in": OTP_TTL_SECONDS}
     else:
         await redis.delete(otp_key)
         await redis.delete(rate_limit_key)
@@ -591,12 +689,16 @@ async def register_otp_verify(
     otp_key = f"reg_otp:{req.token}"
     stored_code = await redis.get(otp_key)
     submitted_code = normalize_persian_numerals(req.code)
+    verify_subject = f"registration:{req.token}"
+    await _ensure_otp_verify_not_locked(redis, subject=verify_subject, raw_request=None)
     
-    if not stored_code or stored_code != submitted_code:
+    if not constant_time_secret_equals(submitted_code, _redis_text(stored_code)):
+        await _record_otp_verify_failure(redis, subject=verify_subject, raw_request=None, otp_key=otp_key)
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
     
     # Delete OTP to prevent replay attacks
     await redis.delete(otp_key)
+    await _clear_otp_verify_subject_failures(redis, subject=verify_subject)
     
     # Set verified flag — 10 mins to complete registration
     verify_key = f"reg_verified:{req.token}"
@@ -927,22 +1029,22 @@ async def request_otp(
     active_otp = await redis.get(otp_key)
     
     if active_otp:
-        logger.info(f"OTP Request for {mobile}: Active OTP exists ({active_otp[:2]}***). Blocking new generation.")
+        logger.info("OTP Request for %s: Active OTP exists. Blocking new generation.", mobile)
         # Raise 429 so frontend triggers timer
         raise HTTPException(status_code=429, detail="کد قبلی هنوز معتبر است. لطفاً صبر کنید.")
 
     otp_code = str(random.randint(10000, 99999))
-    logger.info(f"Generated NEW OTP for {mobile}: {otp_code[:2]}***")
+    logger.info("Generated NEW OTP for %s", mobile)
     
     # ذخیره در Redis (۲ دقیقه اعتبار)
-    await redis.setex(otp_key, 120, otp_code)
-    await redis.setex(rate_limit_key, 120, "1")
+    await redis.setex(otp_key, OTP_TTL_SECONDS, otp_code)
+    await redis.setex(rate_limit_key, OTP_TTL_SECONDS, "1")
 
     if _deliver_otp_via_staging_log(mobile=mobile, otp_code=otp_code, purpose="login"):
         return {
             "detail": "کد تایید در لاگ staging ثبت شد",
             "method": "log",
-            "expires_in": 120,
+            "expires_in": OTP_TTL_SECONDS,
         }
 
     # تصمیم‌گیری برای روش ارسال
@@ -988,7 +1090,7 @@ async def request_otp(
     return {
         "detail": "کد تایید ارسال شد",
         "method": "telegram" if sent_via_telegram else "sms",
-        "expires_in": 120
+        "expires_in": OTP_TTL_SECONDS
     }
 
 @router.post("/resend-otp-sms", response_model=dict)
@@ -1035,7 +1137,7 @@ async def resend_otp_sms(
         logger.info(f"Resend SMS Rate Limit Hit for {mobile}")
         raise HTTPException(status_code=429, detail="لطفاً ۱ دقیقه صبر کنید")
         
-    logger.info(f"Resending Existing OTP via SMS to {mobile}: {otp_code[:2]}***")
+    logger.info("Resending existing OTP via SMS to %s", mobile)
     
     # Get remaining TTL for the timer
     ttl = await redis.ttl(otp_key)
@@ -1074,8 +1176,10 @@ async def verify_otp(
     redis = await get_redis()
     otp_key = f"otp:{mobile}"
     stored_code = await redis.get(otp_key)
+    await _ensure_otp_verify_not_locked(redis, subject=mobile, raw_request=raw_request)
     
-    if not stored_code or stored_code != code:
+    if not constant_time_secret_equals(code, _redis_text(stored_code)):
+        await _record_otp_verify_failure(redis, subject=mobile, raw_request=raw_request, otp_key=otp_key)
         raise HTTPException(status_code=400, detail="کد تایید نامعتبر یا منقضی شده است")
         
     # کد درست است
@@ -1089,6 +1193,7 @@ async def verify_otp(
         invitation, _, _ = pending_invitation
         await redis.delete(otp_key)
         await redis.delete(f"otp_limit:{mobile}")
+        await _clear_otp_verify_subject_failures(redis, subject=mobile)
         registration_token, expires_in = await _store_registration_session(
             redis,
             invitation_token=invitation.token,
@@ -1103,6 +1208,7 @@ async def verify_otp(
     if get_user_account_status(user).value == "inactive":
         await redis.delete(otp_key)
         await redis.delete(f"otp_limit:{mobile}")
+        await _clear_otp_verify_subject_failures(redis, subject=mobile)
         _raise_inactive_account_error()
 
     login_home_server = _login_home_server(raw_request)
@@ -1112,11 +1218,13 @@ async def verify_otp(
         if exc.status_code == 409:
             await redis.delete(otp_key)
             await redis.delete(f"otp_limit:{mobile}")
+            await _clear_otp_verify_subject_failures(redis, subject=mobile)
         raise
 
     # پاک کردن کد OTP
     await redis.delete(otp_key)
     await redis.delete(f"otp_limit:{mobile}")
+    await _clear_otp_verify_subject_failures(redis, subject=mobile)
 
     # Generate tokens
     access_token_expires = timedelta(minutes=60)
