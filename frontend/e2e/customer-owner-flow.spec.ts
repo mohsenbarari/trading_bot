@@ -543,18 +543,6 @@ function toRelativeRegistrationPath(registrationLink: string): string {
   }
 }
 
-function seedRegistrationOtp(token: string, code = '12345') {
-  execFileSync('docker', [
-    'exec',
-    'trading_bot_redis',
-    'redis-cli',
-    'SETEX',
-    `reg_otp:${token}`,
-    '300',
-    code,
-  ], { encoding: 'utf8' })
-}
-
 function seedRegistrationVerified(token: string) {
   execFileSync('docker', [
     'exec',
@@ -755,26 +743,10 @@ test.describe('customer owner lifecycle', () => {
 
     seedRegistrationVerified(registrationToken)
 
-    await page.route('**/api/auth/register-otp-request', async route => {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        },
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'کد تایید ارسال شد', expires_in: 120 }),
-      })
-    })
-
     await page.goto(toRelativeRegistrationPath(registrationLink))
     await expect(page).toHaveURL(new RegExp(`/register\\?token=${registrationToken}$`))
     await expect(page.getByText(customerAccountName)).toBeVisible()
     await expect(page.getByText(mobileNumber).first()).toBeVisible()
-
-    await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
-    await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible()
 
     await completeRegistrationViaApi(
       request,

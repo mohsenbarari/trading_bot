@@ -705,11 +705,16 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
   return response.json() as Promise<AuthTokens>
 }
 
-async function executeTradeFromCard(offerCard: Locator, quantityLabel: string) {
+async function executeTradeFromCard(page: Page, offerCard: Locator, quantityLabel: string) {
   const tradeButton = offerCard.locator('.trade-btn').filter({ hasText: quantityLabel }).first()
-  await tradeButton.click()
+  await expect(tradeButton).toBeVisible({ timeout: 30000 })
+  await tradeButton.evaluate((node: HTMLElement) => node.click())
   await expect(tradeButton).toHaveClass(/pending/)
-  await tradeButton.click()
+  const tradeRequest = page.waitForRequest((request) =>
+    request.url().includes('/api/trades/') && request.method() === 'POST',
+  )
+  await tradeButton.evaluate((node: HTMLElement) => node.click())
+  await tradeRequest
 }
 
 function authHeaders(accessToken: string) {
@@ -892,7 +897,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(ownerCard).toBeVisible()
     await expect(ownerCard.locator('.price')).toHaveText('49,700')
 
-    await executeTradeFromCard(ownerCard, '4 عدد')
+    await executeTradeFromCard(page, ownerCard, '4 عدد')
     await expect
       .poll(() => fetchPersistedTradesForCommodity(fixture.commodityId, [fixture.owner.userId, fixture.tier2Customer.userId, fixture.outsider.userId]), { timeout: 30000 })
       .toEqual([
@@ -912,7 +917,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(outsiderCard).toBeVisible()
     await expect(outsiderCard.locator('.price')).toHaveText('100,500')
 
-    await executeTradeFromCard(outsiderCard, '4 عدد')
+    await executeTradeFromCard(page, outsiderCard, '4 عدد')
 
     await expect
       .poll(() => fetchPersistedTradesForCommodity(fixture.commodityId, [fixture.owner.userId, fixture.tier2Customer.userId, fixture.outsider.userId]), { timeout: 30000 })
