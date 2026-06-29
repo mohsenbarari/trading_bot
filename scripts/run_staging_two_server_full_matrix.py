@@ -902,13 +902,14 @@ def check_container_runtime_identity(
 
 def storage_identity_command(server: str, args: argparse.Namespace) -> list[str]:
     script = storage_identity_python()
+    wrapper = f"import base64; exec(base64.b64decode({base64.b64encode(script.encode()).decode('ascii')!r}))"
     if server == "foreign":
-        return ["docker", "exec", args.foreign_app_container, "python", "-c", script]
+        return ["docker", "exec", args.foreign_app_container, "python", "-c", wrapper]
     if server == "iran":
         return [
             "ssh",
             args.iran_ssh_host,
-            f"docker exec {args.iran_app_container} python -c {json.dumps(script)}",
+            f"docker exec {shlex.quote(args.iran_app_container)} python -c {shlex.quote(wrapper)}",
         ]
     raise ValueError(f"unsupported storage identity server: {server}")
 
@@ -1253,7 +1254,7 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
                 ),
                 check_observability_json(
                     "foreign_sync_health",
-                    args.foreign_base_url.rstrip("/") + "/api/sync/health",
+                    args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/health",
                     args.observability_api_key,
                     expected_server_mode="foreign",
                     basic_auth=auth,
@@ -1331,7 +1332,7 @@ def capture_sync_health(args: argparse.Namespace, *, label: str) -> dict[str, An
         return payload
     peer_urls = {
         "iran": args.iran_base_url.rstrip("/") + "/api/sync/health",
-        "foreign": args.foreign_base_url.rstrip("/") + "/api/sync/health",
+        "foreign": args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/health",
     }
     failures = []
     for peer, url in peer_urls.items():
