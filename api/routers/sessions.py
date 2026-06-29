@@ -81,6 +81,12 @@ logger = logging.getLogger(__name__)
 ACCOUNTANT_SESSION_MANAGEMENT_DETAIL = "حسابداران به مدیریت نشست و خروج از حساب کاربری دسترسی ندارند."
 
 
+def _audit_actor_role(user: object) -> str | None:
+    role = getattr(user, "role", None)
+    value = getattr(role, "value", role)
+    return str(value) if value is not None else None
+
+
 # --- Schemas ---
 class SessionOut(BaseModel):
     id: str
@@ -1105,7 +1111,7 @@ async def terminate_session(
         target_type="session",
         target_id=session.id,
         actor_id=current_user.id,
-        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        actor_role=_audit_actor_role(current_user),
         after_summary={"target_user_id": current_user.id, "is_current": str(sid) == current_session_id_str},
     )
     return {"detail": "نشست با موفقیت پایان یافت"}
@@ -1150,7 +1156,7 @@ async def logout_all_sessions(
         target_type="user",
         target_id=current_user.id,
         actor_id=current_user.id,
-        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        actor_role=_audit_actor_role(current_user),
         after_summary={"terminated_sessions": count, "excluded_session_id": str(caller_sid)},
     )
     return {"detail": f"{count} نشست پایان یافت"}
@@ -1228,7 +1234,7 @@ async def approve_request(
         target_type="session_login_request",
         target_id=rid,
         actor_id=current_user.id,
-        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        actor_role=_audit_actor_role(current_user),
         after_summary={"target_user_id": login_req.user_id, "new_session_id": str(result["session"].id)},
     )
 
@@ -1269,7 +1275,7 @@ async def reject_request(
         target_type="session_login_request",
         target_id=rid,
         actor_id=current_user.id,
-        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        actor_role=_audit_actor_role(current_user),
         after_summary={"target_user_id": current_user.id},
     )
 

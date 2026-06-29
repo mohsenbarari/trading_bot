@@ -29,6 +29,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=11,
             forwarded_from_id=12,
+            forwarded_from_name_override=None,
         )
 
         with patch("api.routers.chat.prepare_direct_message_send", new=AsyncMock(return_value=(receiver, "prepared"))) as prepare_mock, patch(
@@ -52,6 +53,7 @@ class ChatRouterDirectMutationEndpointTests(unittest.IsolatedAsyncioTestCase):
             message_type="text",
             reply_to_message_id=11,
             forwarded_from_id=12,
+            forwarded_from_name_override=None,
         )
         publish_mock.assert_awaited_once_with(
             receiver_id=9,

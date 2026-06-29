@@ -99,7 +99,12 @@ class ChatRoomServiceChannelReadModelsTests(unittest.IsolatedAsyncioTestCase):
         member = SimpleNamespace(role=ChatMemberRole.ADMIN, joined_at=joined_at, user_id=8)
         user = SimpleNamespace(id=8, account_name="alpha", full_name="Alpha User", mobile_number="0912")
         chat = SimpleNamespace(id=5, created_by_id=8)
-        db = FakeDB(execute_results=[FakeExecuteResult(rows=[(member, user)])])
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(rows=[(member, user)]),
+                FakeExecuteResult(rows=[]),
+            ]
+        )
 
         members = await list_channel_members(db, chat=chat)
 

@@ -405,6 +405,9 @@ async def _load_active_customer_management_name_map(
     db: AsyncSession,
     user_ids: Sequence[object],
 ) -> dict[int, str]:
+    if not hasattr(db, "execute"):
+        return {}
+
     normalized_user_ids = _normalize_positive_user_ids(user_ids)
     if not normalized_user_ids:
         return {}

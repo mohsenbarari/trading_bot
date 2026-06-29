@@ -243,7 +243,12 @@ class ChatRoomServiceRoomReadModelsTests(unittest.IsolatedAsyncioTestCase):
         member = SimpleNamespace(role=ChatMemberRole.ADMIN, joined_at=joined_at)
         user = SimpleNamespace(id=50, account_name="owner", full_name="Owner User", mobile_number="0912")
         chat = SimpleNamespace(id=44, created_by_id=50)
-        db = FakeDB(execute_results=[FakeExecuteResult(rows=[(member, user)])])
+        db = FakeDB(
+            execute_results=[
+                FakeExecuteResult(rows=[(member, user)]),
+                FakeExecuteResult(rows=[]),
+            ]
+        )
 
         items = await list_group_members(db, chat=chat)
 

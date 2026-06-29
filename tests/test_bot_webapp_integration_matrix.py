@@ -55,7 +55,7 @@ class BotWebAppIntegrationMatrixTests(unittest.TestCase):
             "Telegram publish failure is recorded, retried, and does not corrupt business offer state",
             "WebApp realtime failure is tolerated and recovered through sync/publication state",
             "Unknown table, forbidden table, unsupported version, and sensitive fields fail closed",
-            "Short outage replay sends latest authoritative snapshots and avoids stale active publication",
+            "Short outage replay preserves committed payload identity and rejects stale terminal reversals",
             "Medium and long outage recovery gates active publication until full catch-up and expires local-only active offers",
             "Migration/cutover rehearsal requires zero active offers and fresh shared-sync state",
             "Rollback and fail-closed behavior preserve data without destructive cleanup",

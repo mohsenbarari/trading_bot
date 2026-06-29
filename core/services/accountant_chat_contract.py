@@ -37,6 +37,9 @@ async def load_accountant_chat_identity_map(
     db: AsyncSession,
     user_ids: Iterable[int],
 ) -> dict[int, AccountantChatIdentity]:
+    if not hasattr(db, "execute"):
+        return {}
+
     normalized_user_ids = sorted(
         {
             normalized_user_id
@@ -115,7 +118,9 @@ async def resolve_relation_aware_sender_display_name(
             CustomerRelation.deleted_at.is_(None),
         )
     )
-    customer_management_name = str(customer_relation_result.scalar_one_or_none() or "").strip()
+    scalar_one_or_none = getattr(customer_relation_result, "scalar_one_or_none", None)
+    raw_customer_management_name = scalar_one_or_none() if callable(scalar_one_or_none) else None
+    customer_management_name = str(raw_customer_management_name or "").strip()
     if customer_management_name:
         return customer_management_name
 

@@ -876,6 +876,7 @@ async def _enrich_direct_message_reads(
 ) -> list[MessageRead]:
     if not messages:
         return messages
+    can_execute = hasattr(db, "execute")
 
     # Fetch mention details
     all_mentioned_ids = set()
@@ -884,7 +885,7 @@ async def _enrich_direct_message_reads(
             all_mentioned_ids.update(msg.mentions)
 
     mention_details_map = {}
-    if all_mentioned_ids:
+    if can_execute and all_mentioned_ids:
         from models.user import User
         stmt = select(User.id, User.account_name).where(User.id.in_(list(all_mentioned_ids)))
         result = await db.execute(stmt)
@@ -903,7 +904,7 @@ async def _enrich_direct_message_reads(
     }
     customer_sender_names: dict[int, str] = {}
     customer_lookup_ids = sender_ids | forwarded_from_ids
-    if customer_lookup_ids:
+    if can_execute and customer_lookup_ids:
         from models.customer_relation import CustomerRelation, CustomerRelationStatus
 
         customer_stmt = select(CustomerRelation.customer_user_id, CustomerRelation.management_name).where(
@@ -1912,7 +1913,7 @@ async def send_message(
         message_type=data.message_type,
         reply_to_message_id=data.reply_to_message_id,
         forwarded_from_id=data.forwarded_from_id,
-        forwarded_from_name_override=data.forwarded_from_name_override,
+        forwarded_from_name_override=getattr(data, "forwarded_from_name_override", None),
     )
     if message is None:
         raise HTTPException(status_code=500, detail="Failed to persist message")

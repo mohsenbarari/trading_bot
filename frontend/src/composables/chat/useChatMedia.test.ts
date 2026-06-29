@@ -589,6 +589,18 @@ describe('useChatMedia', () => {
   })
 
   it('covers media helper branches for file normalization, metadata, capability, and payload parsing', async () => {
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      configurable: true,
+      value: 6,
+    })
+    Object.defineProperty(navigator as object, 'deviceMemory', {
+      configurable: true,
+      value: 4,
+    })
+    Object.defineProperty(navigator as object, 'connection', {
+      configurable: true,
+      value: { effectiveType: '4g', saveData: false },
+    })
     const { wrapper } = mountHarness([
       makeImageMessage(1),
       makeImageMessage(2),

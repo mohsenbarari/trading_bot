@@ -70,6 +70,12 @@ CUSTOMER_BLOCK_MANAGEMENT_DETAIL = "سیستم بلاک مشتریان توسط 
 ACCOUNTANT_BLOCK_MANAGEMENT_DETAIL = "قابلیت بلاک کاربران فقط در اختیار سرگروه است."
 
 
+def _audit_actor_role(user: object) -> str | None:
+    role = getattr(user, "role", None)
+    value = getattr(role, "value", role)
+    return str(value) if value is not None else None
+
+
 async def ensure_block_management_allowed(db: AsyncSession, current_user: User) -> None:
     if hasattr(db, "execute") and await is_user_customer(db, current_user.id):
         audit_log(
@@ -78,7 +84,7 @@ async def ensure_block_management_allowed(db: AsyncSession, current_user: User) 
             target_id=current_user.id,
             result="denied",
             actor_id=current_user.id,
-            actor_role=getattr(current_user.role, "value", str(current_user.role)),
+            actor_role=_audit_actor_role(current_user),
             reason="customer_cannot_manage_blocks",
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=CUSTOMER_BLOCK_MANAGEMENT_DETAIL)
@@ -89,7 +95,7 @@ async def ensure_block_management_allowed(db: AsyncSession, current_user: User) 
             target_id=current_user.id,
             result="denied",
             actor_id=current_user.id,
-            actor_role=getattr(current_user.role, "value", str(current_user.role)),
+            actor_role=_audit_actor_role(current_user),
             reason="accountant_cannot_manage_blocks",
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ACCOUNTANT_BLOCK_MANAGEMENT_DETAIL)
@@ -157,7 +163,7 @@ async def block_a_user(
         target_type="user",
         target_id=user_id,
         actor_id=current_user.id,
-        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        actor_role=_audit_actor_role(current_user),
         after_summary={"blocked": True},
     )
     
@@ -187,7 +193,7 @@ async def unblock_a_user(
         target_type="user",
         target_id=user_id,
         actor_id=current_user.id,
-        actor_role=getattr(current_user.role, "value", str(current_user.role)),
+        actor_role=_audit_actor_role(current_user),
         after_summary={"blocked": False},
     )
     

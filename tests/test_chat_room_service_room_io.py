@@ -370,7 +370,10 @@ class ChatRoomServiceRoomIOTests(unittest.IsolatedAsyncioTestCase):
         reader_user = SimpleNamespace(id=12, account_name="reader", full_name="Reader User", avatar_file_id="avatar-12")
         db = FakeDB(
             get_map={42: message},
-            execute_results=[FakeExecuteResult(rows=[(reader_member, reader_user)])],
+            execute_results=[
+                FakeExecuteResult(rows=[(reader_member, reader_user)]),
+                FakeExecuteResult(rows=[]),
+            ],
         )
 
         with patch(

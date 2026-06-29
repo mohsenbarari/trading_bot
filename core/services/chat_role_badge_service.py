@@ -51,6 +51,9 @@ def make_chat_role_badge(
 async def load_chat_role_badges(db: AsyncSession, user_ids: list[int] | set[int]) -> dict[int, ChatRoleBadge]:
     """Resolve messenger role badges for many users with accountant precedence."""
 
+    if not hasattr(db, "execute"):
+        return {}
+
     normalized_ids = {
         int(user_id)
         for user_id in user_ids
