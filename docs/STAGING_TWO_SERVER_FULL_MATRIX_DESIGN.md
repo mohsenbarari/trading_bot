@@ -4,10 +4,9 @@ Date: 2026-06-29
 
 Branch: `candidate/sync-parity-hardening`
 
-Status: design contract only. Do not merge, release, or run production from this
-document. Security hardening is still active in a parallel workflow, so this
-document intentionally avoids changing existing staging scripts until that work
-is settled.
+Status: staging-only implementation and evidence contract. Do not merge,
+release, or run production from this document. This matrix is for the real Iran
+and foreign staging environments and must remain isolated from production.
 
 ## Goal
 
@@ -61,17 +60,40 @@ Runtime identity requirements:
 - Iran staging:
   - `SERVER_MODE=iran`
   - `FRONTEND_URL=https://staging.gold-trade.ir`
-  - `IRAN_SERVER_URL=https://staging.gold-trade.ir`
-  - `FOREIGN_SERVER_URL=<foreign staging HTTPS URL>`
+  - `IRAN_SERVER_URL` may be a local self URL such as `http://app:8000`
+  - `FOREIGN_SERVER_URL` and `GERMANY_SERVER_URL` must point to the real
+    foreign staging HTTPS peer, for example `https://staging.362514.ir/foreign-sync`
   - no `BOT_TOKEN`
   - no Telegram channel id
 - Foreign staging:
   - `SERVER_MODE=foreign`
   - `FRONTEND_URL` must not point to a served foreign WebApp surface
   - `IRAN_SERVER_URL=https://staging.gold-trade.ir`
-  - `FOREIGN_SERVER_URL=<foreign staging HTTPS URL>`
+  - `FOREIGN_SERVER_URL` may be a local self URL for the foreign app
   - staging `BOT_TOKEN` only
   - staging `CHANNEL_ID` only
+
+The staging Nginx layer must not put signed internal receiver endpoints behind
+Basic Auth. These endpoints are still protected by application-level sync API
+keys and HMAC signatures, but Basic Auth would block real worker-to-receiver
+and trade-forwarding probes before FastAPI can validate the signed payload.
+Preflight must prove that these paths reach FastAPI without Basic Auth:
+
+- `https://staging.gold-trade.ir/api/sync/receive`
+- `https://staging.gold-trade.ir/api/trades/internal/execute`
+- `https://staging.gold-trade.ir/api/offers/internal/expire`
+- `https://staging.gold-trade.ir/api/sessions/internal/authority-check`
+- `https://staging.362514.ir/foreign-sync/api/sync/receive`
+- `https://staging.362514.ir/foreign-sync/api/trades/internal/execute`
+- `https://staging.362514.ir/foreign-sync/api/offers/internal/expire`
+- `https://staging.362514.ir/foreign-sync/api/sessions/internal/authority-check`
+
+Load-runner containers must receive explicit peer URL overrides from the
+matrix runner. The run is invalid if a foreign load-runner resolves Iran as
+`http://app:8000` or any other local compose hostname. This guard exists
+because a stale `.env.staging` can otherwise make a foreign-to-Iran test stay
+inside the foreign compose project while still producing superficially valid
+trade responses.
 
 Each side must have its own Postgres and Redis. Sharing one staging DB between
 Iran and foreign is not acceptable for the final evidence because it bypasses
@@ -643,6 +665,13 @@ Recommended implementation after security hardening settles:
    - sync/parity probes on both sides;
    - outage control and recovery;
    - prefix-scoped cleanup on both DBs.
+   The first mutating implementation currently executes a deterministic
+   four-scenario driver suite covering:
+   - WebApp-home wholesale contention with mixed WebApp/Telegram requests;
+   - Telegram-home wholesale contention with mixed WebApp/Telegram requests;
+   - WebApp-home retail two-lot contention with mixed WebApp/Telegram requests;
+   - Telegram-home duplicate replay using Telegram-only requests to keep the
+     idempotency probe deterministic.
 3. Keep high-volume Telegram tests fake/in-process, but require a small manual
    real Telegram pass after automated matrix completion.
 4. Store every scenario result by `manifest_id` in JSONL so interrupted runs can
@@ -744,6 +773,20 @@ Release gate status can be `passed` only when:
   documented;
 - manual real-Telegram smoke evidence is attached or explicitly deferred by the
   owner.
+
+Current execution evidence:
+
+- `S2FM-PREFLIGHT-ROUTING-20260629-03`: preflight passed with real
+  `staging.gold-trade.ir` and `staging.362514.ir` routing, TLS, internal
+  ingress, runtime identity, sync health, and manifest validation.
+- `S2FM-DRIVER-SUITE-20260629-02`: real two-server staging driver suite passed
+  all four mutating scenarios. Logs were mirrored under both
+  `tmp/claude/full_matrix_logs/S2FM-DRIVER-SUITE-20260629-02/` and
+  `tmp/chatgpt/full_matrix_logs/S2FM-DRIVER-SUITE-20260629-02/`.
+- This evidence validates the implemented driver suite. It does not yet mean
+  all 5,611 manifest rows were individually mutated; the remaining work is to
+  either expand drivers to every mandatory manifest coverage group or map each
+  manifest group to an equivalent executed driver with explicit rationale.
 
 ## Cleanup Contract
 

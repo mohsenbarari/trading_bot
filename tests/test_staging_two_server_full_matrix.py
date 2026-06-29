@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts import build_staging_two_server_full_matrix_manifest as manifest_builder
 from scripts import run_staging_two_server_full_matrix as runner
@@ -59,6 +61,132 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 self.assertTrue((log_dir / "scenario-results.jsonl").exists())
                 self.assertTrue((log_dir / "summary.json").exists())
                 self.assertTrue((log_dir / "redaction-report.json").exists())
+
+    def test_driver_refreshes_both_role_plan_barriers_with_same_future_epoch(self):
+        calls = []
+
+        def fake_remote_worker(name, **kwargs):
+            calls.append(("remote", name, kwargs["worker_args"]))
+            return runner.CommandResult(
+                name=name,
+                command=["remote"],
+                status="passed",
+                returncode=0,
+                elapsed_seconds=0.1,
+                stdout_path="remote.stdout",
+                stderr_path="remote.stderr",
+            )
+
+        def fake_local_worker(name, **kwargs):
+            calls.append(("local", name, kwargs["worker_args"]))
+            return runner.CommandResult(
+                name=name,
+                command=["local"],
+                status="passed",
+                returncode=0,
+                elapsed_seconds=0.1,
+                stdout_path="local.stdout",
+                stderr_path="local.stderr",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "scripts.run_staging_two_server_full_matrix.time.time",
+            return_value=1000.0,
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.run_remote_worker",
+            side_effect=fake_remote_worker,
+        ), patch(
+            "scripts.run_staging_two_server_full_matrix.run_local_worker",
+            side_effect=fake_local_worker,
+        ):
+            results = runner.refresh_role_plan_barriers_on_both_sides(
+                args=SimpleNamespace(),
+                local_dir=Path(tmpdir),
+                remote_dir="/remote/artifacts",
+                log_dir=Path(tmpdir) / "logs",
+            )
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual([call[0] for call in calls], ["remote", "local"])
+        barrier_values = []
+        for _kind, _name, worker_args in calls:
+            self.assertEqual(worker_args[0], "set-role-plan-barrier")
+            barrier_values.append(worker_args[worker_args.index("--barrier-epoch") + 1])
+        self.assertEqual(barrier_values, ["1030.000000", "1030.000000"])
+
+    def test_foreign_runtime_identity_rejects_local_iran_route(self):
+        def fake_run_json_command(_command, *, timeout_seconds=10.0):
+            return (
+                0,
+                {
+                    "environment": "staging",
+                    "server_mode": "foreign",
+                    "service": "staging-bot",
+                    "release_sha": "abc123",
+                    "frontend_url": "https://staging.gold-trade.ir",
+                    "iran_server_url": "http://app:8000",
+                    "germany_server_url": "http://foreign_app:8000",
+                    "foreign_server_url": "http://foreign_app:8000",
+                    "peer_server_url": "",
+                    "bot_token_configured": True,
+                    "channel_id_configured": True,
+                },
+                "{}",
+                "",
+            )
+
+        with patch("scripts.run_staging_two_server_full_matrix.run_json_command", side_effect=fake_run_json_command):
+            result = runner.check_container_runtime_identity(
+                "foreign_runtime_identity",
+                server="foreign",
+                expected_server_mode="foreign",
+                expected_release="abc123",
+                args=SimpleNamespace(foreign_app_container="foreign-app"),
+        )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("IRAN_SERVER_URL points to local compose", result.detail)
+
+    def test_local_load_runner_command_overrides_iran_route(self):
+        args = SimpleNamespace(iran_base_url="https://staging.gold-trade.ir")
+        command = runner.local_load_runner_command(
+            "load_telegram_foreign",
+            Path("/tmp/full-matrix-artifacts"),
+            ["load-runner-ready", "--role", "telegram_foreign"],
+            args=args,
+        )
+
+        self.assertIn("IRAN_SERVER_URL=https://staging.gold-trade.ir", command)
+        self.assertIn("GERMANY_SERVER_URL=http://foreign_app:8000", command)
+        self.assertIn("FOREIGN_SERVER_URL=http://foreign_app:8000", command)
+
+    def test_worker_split_reindexes_each_role_schedule_from_zero(self):
+        from scripts import trading_core_probe_worker as worker
+
+        users = [
+            worker.LoadUserRef(user_id=1, telegram_id=9001),
+            worker.LoadUserRef(user_id=2, telegram_id=9002),
+            worker.LoadUserRef(user_id=3, telegram_id=9003),
+            worker.LoadUserRef(user_id=4, telegram_id=9004),
+        ]
+        plan = worker.build_mixed_surface_plan(
+            users=users,
+            owner_user_id=1,
+            total_requests=12,
+            telegram_ratio=0.5,
+        )
+        split = worker.split_mixed_plan_by_role(plan)
+
+        self.assertEqual(
+            [spec.index for spec in split["telegram_foreign"]],
+            list(range(len(split["telegram_foreign"]))),
+        )
+        self.assertEqual(
+            [spec.index for spec in split["webapp_iran"]],
+            list(range(len(split["webapp_iran"]))),
+        )
+        self.assertGreater(len(split["telegram_foreign"]), 0)
+        self.assertGreater(len(split["webapp_iran"]), 0)
 
 
 if __name__ == "__main__":

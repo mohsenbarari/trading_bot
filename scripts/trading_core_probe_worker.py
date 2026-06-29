@@ -185,6 +185,10 @@ _TELEGRAM_IDEMPOTENCY_KEYS: contextvars.ContextVar[list[str] | None] = contextva
     "trading_probe_telegram_idempotency_keys",
     default=None,
 )
+_TELEGRAM_FORWARD_RECORDS: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "trading_probe_telegram_forward_records",
+    default=None,
+)
 _ORIGINAL_CHANNEL_TRADE_IDEMPOTENCY_KEY = bot_trade_execute._channel_trade_idempotency_key
 
 
@@ -516,7 +520,15 @@ def split_mixed_plan_by_role(plan: list[MixedLoadAttemptSpec]) -> dict[str, list
         role = SURFACE_TO_LOAD_RUNNER_ROLE.get(spec.surface)
         if role is None:
             raise TradingProbeError(f"unsupported mixed load attempt surface: {spec.surface}")
-        split[role].append(spec)
+        split[role].append(
+            MixedLoadAttemptSpec(
+                index=len(split[role]),
+                surface=spec.surface,
+                user_id=spec.user_id,
+                telegram_id=spec.telegram_id,
+                idempotency_key=spec.idempotency_key,
+            )
+        )
     return split
 
 
@@ -722,6 +734,7 @@ def _validate_role_result_artifact(raw: Mapping[str, Any]) -> Mapping[str, Any]:
     required_attempt_fields = {
         "index",
         "monotonic_timestamp",
+        "epoch_timestamp",
         "source_role",
         "source_surface",
         "user_id",
@@ -772,7 +785,7 @@ def _merged_attempt_elapsed_seconds(attempts: list[dict[str, Any]]) -> float | N
     finishes: list[float] = []
     for attempt in attempts:
         try:
-            started = float(attempt["monotonic_timestamp"])
+            started = float(attempt.get("epoch_timestamp") or attempt["monotonic_timestamp"])
             duration_seconds = max(float(attempt["latency_ms"]), 0.0) / 1000.0
         except (KeyError, TypeError, ValueError):
             continue
@@ -787,12 +800,19 @@ def _merged_attempt_start_elapsed_seconds(attempts: list[dict[str, Any]]) -> flo
     starts: list[float] = []
     for attempt in attempts:
         try:
-            starts.append(float(attempt["monotonic_timestamp"]))
+            starts.append(float(attempt.get("epoch_timestamp") or attempt["monotonic_timestamp"]))
         except (KeyError, TypeError, ValueError):
             continue
     if len(starts) < 2:
         return None
     return max(starts) - min(starts)
+
+
+def _attempt_sort_timestamp(attempt: Mapping[str, Any]) -> float:
+    try:
+        return float(attempt.get("epoch_timestamp") or attempt["monotonic_timestamp"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
 
 
 def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dict[str, Any]:
@@ -833,7 +853,7 @@ def merge_role_result_artifacts(result_payloads: list[Mapping[str, Any]]) -> dic
                 )
             )
 
-    attempts.sort(key=lambda item: (float(item["monotonic_timestamp"]), int(item["index"])))
+    attempts.sort(key=lambda item: (_attempt_sort_timestamp(item), int(item["index"])))
     elapsed_seconds = _merged_attempt_elapsed_seconds(attempts)
     if elapsed_seconds is None:
         elapsed_seconds = max(finished_epochs) - min(started_epochs)
@@ -1646,7 +1666,7 @@ async def push_prefix_change_logs_to_peer(
     max_attempts: int = 3,
 ) -> dict[str, Any]:
     from core.server_routing import default_peer_server_url
-    from core.sync_worker import change_log_entry_to_sync_item, refresh_offer_sync_item_from_authoritative_state
+    from core.sync_worker import change_log_entry_to_sync_item
 
     target_url = (default_peer_server_url() or "").rstrip("/")
     api_key = getattr(settings, "sync_api_key", None)
@@ -1674,8 +1694,6 @@ async def push_prefix_change_logs_to_peer(
                 items = []
                 for entry in batch:
                     item = change_log_entry_to_sync_item(entry)
-                    if item.get("table") == "offers":
-                        item = await refresh_offer_sync_item_from_authoritative_state(item)
                     items.append(item)
 
                 body = json.dumps(items, sort_keys=True, default=str)
@@ -2291,6 +2309,7 @@ async def patched_external_side_effects():
         "register_market_offer_created": offers_router.register_market_offer_created,
         "update_channel_buttons": trades_router.update_channel_buttons,
         "send_telegram_message_sync": trades_router.send_telegram_message_sync,
+        "bot_forward_trade_to_home_server": bot_trade_execute.forward_trade_to_home_server,
         "offer_expiry_apply_channel_state": offer_expiry_worker.apply_offer_channel_state,
         "bot_manage_apply_channel_state": bot_trade_manage.apply_offer_channel_state,
         "realtime_publish": realtime_router.publish_event,
@@ -2308,12 +2327,42 @@ async def patched_external_side_effects():
     async def no_price_warning(**_kwargs: Any) -> None:
         return None
 
+    async def recording_bot_forward_trade_to_home_server(
+        target_server: str,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[int, Any]:
+        started = time.perf_counter()
+        status_code, body = await original["bot_forward_trade_to_home_server"](
+            target_server,
+            payload,
+            timeout_seconds=timeout_seconds,
+        )
+        records = _TELEGRAM_FORWARD_RECORDS.get()
+        if records is not None:
+            records.append(
+                {
+                    "target_server": normalize_server(target_server, ""),
+                    "status_code": int(status_code),
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
+                    "offer_public_id": payload.get("offer_public_id"),
+                    "responder_user_id": payload.get("responder_user_id"),
+                    "quantity": payload.get("quantity"),
+                    "idempotency_key": payload.get("idempotency_key"),
+                    "body": json_safe(body),
+                }
+            )
+        return status_code, body
+
+    recording_bot_forward_trade_to_home_server.__wrapped__ = original["bot_forward_trade_to_home_server"]  # type: ignore[attr-defined]
     offers_router.evaluate_current_market_schedule = fake_market_open
     trades_router.evaluate_current_market_schedule = fake_market_open
     offers_router.send_offer_to_channel = noop_send_offer
     offers_router.register_market_offer_created = noop_register_market_offer_created
     trades_router.update_channel_buttons = noop_update_channel_buttons
     trades_router.send_telegram_message_sync = lambda *_args, **_kwargs: None
+    bot_trade_execute.forward_trade_to_home_server = recording_bot_forward_trade_to_home_server
     offer_expiry_worker.apply_offer_channel_state = noop_update_channel_buttons
     bot_trade_manage.apply_offer_channel_state = noop_update_channel_buttons
     realtime_router.publish_event = noop_async
@@ -2332,6 +2381,7 @@ async def patched_external_side_effects():
         offers_router.register_market_offer_created = original["register_market_offer_created"]
         trades_router.update_channel_buttons = original["update_channel_buttons"]
         trades_router.send_telegram_message_sync = original["send_telegram_message_sync"]
+        bot_trade_execute.forward_trade_to_home_server = original["bot_forward_trade_to_home_server"]
         offer_expiry_worker.apply_offer_channel_state = original["offer_expiry_apply_channel_state"]
         bot_trade_manage.apply_offer_channel_state = original["bot_manage_apply_channel_state"]
         realtime_router.publish_event = original["realtime_publish"]
@@ -3263,6 +3313,16 @@ async def execute_webapp_trade_for_user(
             business_latency_ms = round((time.perf_counter() - create_started) * 1000.0, 3)
             phase_details["business_latency_ms"] = business_latency_ms
             phase_details["create_trade_ms"] = business_latency_ms
+            if isinstance(response, JSONResponse):
+                try:
+                    response_body = json.loads(response.body.decode("utf-8") or "{}")
+                except Exception:
+                    response_body = {"detail": "invalid JSONResponse body"}
+                phase_details["response_status_code"] = int(response.status_code)
+                phase_details["response_body"] = json_safe(response_body)
+            elif hasattr(response, "model_dump"):
+                phase_details["response_status_code"] = 201
+                phase_details["response_body"] = json_safe(response.model_dump(mode="json"))
         background_started = time.perf_counter()
         await background_tasks()
         if phase_details is not None:
@@ -4620,6 +4680,7 @@ async def wait_for_offer_visibility(
                         "offer_public_id": normalized_public_id,
                         "attempts": attempts,
                         "visible_status": getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None)),
+                        "home_server": getattr(getattr(offer, "home_server", None), "value", getattr(offer, "home_server", None)),
                     }
                 raise TradingProbeError(
                     f"offer public id {normalized_public_id} is visible with mismatched local id {last_seen_id}; expected {offer_id}"
@@ -4716,9 +4777,12 @@ async def execute_bot_trade_with_dispatcher(
     first_callback_id = f"{prefix}tap1-{spec.index}"
     second_callback_id = f"{prefix}tap2-{spec.index}"
     recorder_token = None
+    forward_recorder_token = None
+    forward_records: list[dict[str, Any]] = []
     telegram_update_count = 0
     if observed_idempotency_keys is not None:
         recorder_token = _TELEGRAM_IDEMPOTENCY_KEYS.set(observed_idempotency_keys)
+    forward_recorder_token = _TELEGRAM_FORWARD_RECORDS.set(forward_records)
     try:
         if preconfirmed:
             if phase_details is not None:
@@ -4751,14 +4815,18 @@ async def execute_bot_trade_with_dispatcher(
             phase_details["second_answer_text"] = str((answer or {}).get("text") or "")
             phase_details["second_answer_alert"] = (answer or {}).get("show_alert")
             phase_details["telegram_update_count"] = telegram_update_count
+            phase_details["forward_records"] = forward_records
     except Exception as exc:
         if error_details is not None:
             error_details.append(f"{type(exc).__name__}: {exc}")
         if phase_details is not None:
             phase_details["exception"] = type(exc).__name__
             phase_details["telegram_update_count"] = telegram_update_count
+            phase_details["forward_records"] = forward_records
         return "error"
     finally:
+        if forward_recorder_token is not None:
+            _TELEGRAM_FORWARD_RECORDS.reset(forward_recorder_token)
         if recorder_token is not None:
             _TELEGRAM_IDEMPOTENCY_KEYS.reset(recorder_token)
 
@@ -4867,6 +4935,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         if scheduled_delay > 0:
             await asyncio.sleep(scheduled_delay)
 
+        epoch_timestamp = time.time()
         monotonic_timestamp = time.perf_counter()
         attempt_started = time.perf_counter()
         status_value = "error"
@@ -4929,6 +4998,7 @@ async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any
         return result, {
             "index": spec.index,
             "monotonic_timestamp": round(monotonic_timestamp, 6),
+            "epoch_timestamp": round(epoch_timestamp, 6),
             "source_role": role,
             "source_surface": surface,
             "user_id": spec.user_id,
@@ -4995,6 +5065,7 @@ def build_dry_role_result_artifact(plan_payload: Mapping[str, Any], *, started_e
             {
                 "index": spec.index,
                 "monotonic_timestamp": round(monotonic_timestamp, 6),
+                "epoch_timestamp": round(monotonic_timestamp, 6),
                 "source_role": role,
                 "source_surface": surface,
                 "user_id": spec.user_id,
@@ -7004,6 +7075,104 @@ async def wait_offer_visible_command(args: argparse.Namespace) -> int:
     return 0
 
 
+async def rebase_role_plan_command(args: argparse.Namespace) -> int:
+    plan = dict(validate_role_plan_artifact(read_json_artifact(Path(args.plan))))
+    offer_payload = dict(_require_mapping(plan["offer"], "role plan offer"))
+    original_offer_id = int(offer_payload["id"])
+    original_owner_user_id = int(offer_payload["owner_user_id"])
+    offer_public_id = str(offer_payload.get("public_id") or "").strip() or None
+    attempt_payloads = [dict(_require_mapping(item, "role plan attempt")) for item in plan.get("attempts") or []]
+
+    async with AsyncSessionLocal() as db:
+        offer = None
+        if offer_public_id:
+            offer = (
+                await db.execute(
+                    select(Offer)
+                    .where(Offer.offer_public_id == offer_public_id)
+                    .order_by(Offer.id.asc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        if offer is None:
+            offer = await db.get(Offer, original_offer_id)
+        if offer is None:
+            raise TradingProbeError(
+                f"cannot rebase role plan offer id={original_offer_id} public_id={offer_public_id!r}"
+            )
+
+        user_id_map: dict[int, int] = {}
+        missing_telegram_ids: list[int] = []
+        for attempt in attempt_payloads:
+            spec = mixed_attempt_from_artifact_dict(attempt)
+            local_user = (
+                await db.execute(
+                    select(User)
+                    .where(User.telegram_id == spec.telegram_id)
+                    .order_by(User.id.asc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if local_user is None:
+                missing_telegram_ids.append(int(spec.telegram_id))
+                continue
+            local_user_id = int(local_user.id)
+            user_id_map[int(spec.user_id)] = local_user_id
+            attempt["user_id"] = local_user_id
+
+    if missing_telegram_ids:
+        raise TradingProbeError(
+            f"cannot rebase role plan; missing telegram ids: {missing_telegram_ids[:10]}"
+        )
+
+    rebased_offer_id = int(offer.id)
+    rebased_owner_user_id = int(getattr(offer, "user_id"))
+    rebased_offer_home_server = getattr(getattr(offer, "home_server", None), "value", getattr(offer, "home_server", None))
+    offer_payload["id"] = rebased_offer_id
+    offer_payload["owner_user_id"] = rebased_owner_user_id
+    offer_payload["home_server"] = rebased_offer_home_server
+    plan["offer"] = offer_payload
+    plan["attempts"] = attempt_payloads
+    plan["identity_rebase"] = {
+        "server_mode": settings.server_mode,
+        "original_offer_id": original_offer_id,
+        "rebased_offer_id": rebased_offer_id,
+        "original_owner_user_id": original_owner_user_id,
+        "rebased_owner_user_id": rebased_owner_user_id,
+        "rebased_offer_home_server": rebased_offer_home_server,
+        "user_id_map": {str(key): value for key, value in sorted(user_id_map.items())},
+    }
+    validate_role_plan_artifact(plan)
+    if args.output:
+        write_json_artifact(Path(args.output), plan)
+        print_json({"status": "ok", "output": args.output, "identity_rebase": plan["identity_rebase"]})
+    else:
+        print_json(plan)
+    return 0
+
+
+async def set_role_plan_barrier_command(args: argparse.Namespace) -> int:
+    plan = dict(validate_role_plan_artifact(read_json_artifact(Path(args.plan))))
+    barrier_epoch = float(args.barrier_epoch)
+    if not math.isfinite(barrier_epoch):
+        raise TradingProbeError("role plan barrier_epoch must be finite")
+    old_barrier_epoch = float(plan["barrier_epoch"])
+    plan["barrier_epoch"] = round(barrier_epoch, 6)
+    validate_role_plan_artifact(plan)
+    if args.output:
+        write_json_artifact(Path(args.output), plan)
+    payload = {
+        "status": "ok",
+        "server_mode": settings.server_mode,
+        "plan": args.plan,
+        "output": args.output,
+        "old_barrier_epoch": round(old_barrier_epoch, 6),
+        "new_barrier_epoch": round(barrier_epoch, 6),
+    }
+    print_json(payload)
+    return 0
+
+
 async def merge_role_results_command(args: argparse.Namespace) -> int:
     results = [read_json_artifact(Path(path)) for path in args.results]
     merged = merge_role_result_artifacts(results)
@@ -7183,6 +7352,15 @@ def build_parser() -> argparse.ArgumentParser:
     wait_offer_parser.add_argument("--timeout-seconds", type=float, default=90.0)
     wait_offer_parser.add_argument("--poll-seconds", type=float, default=0.25)
 
+    rebase_plan_parser = subparsers.add_parser("rebase-role-plan")
+    rebase_plan_parser.add_argument("--plan", required=True)
+    rebase_plan_parser.add_argument("--output")
+
+    barrier_plan_parser = subparsers.add_parser("set-role-plan-barrier")
+    barrier_plan_parser.add_argument("--plan", required=True)
+    barrier_plan_parser.add_argument("--output")
+    barrier_plan_parser.add_argument("--barrier-epoch", type=float, required=True)
+
     manual_expiry_parser = subparsers.add_parser("run-manual-expiry-race")
     manual_expiry_parser.add_argument("--prepare", required=True)
     manual_expiry_parser.add_argument("--output")
@@ -7291,6 +7469,10 @@ async def dispatch(args: argparse.Namespace) -> int:
         return await run_role_plan_command(args)
     if args.command == "wait-offer-visible":
         return await wait_offer_visible_command(args)
+    if args.command == "rebase-role-plan":
+        return await rebase_role_plan_command(args)
+    if args.command == "set-role-plan-barrier":
+        return await set_role_plan_barrier_command(args)
     if args.command == "run-manual-expiry-race":
         return await run_manual_expiry_race_command(args)
     if args.command == "run-time-expiry-race":

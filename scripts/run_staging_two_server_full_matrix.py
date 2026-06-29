@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import socket
 import ssl
 import subprocess
@@ -47,6 +48,85 @@ EXECUTION_CONFIRM_VALUE = "execute-staging-two-server-full-matrix"
 DEFAULT_IRAN_SSH_HOST = "root@87.107.3.22"
 DEFAULT_IRAN_APP_CONTAINER = "trading_bot_staging_iran_app_1"
 DEFAULT_FOREIGN_APP_CONTAINER = "trading_bot_staging-foreign_app-1"
+DEFAULT_IRAN_WORKDIR = "/srv/trading-bot/staging-iran"
+LOCAL_STAGING_PROJECT_NAME = "trading_bot_staging"
+LOCAL_STAGING_COMPOSE_FILE = REPO_ROOT / "deploy" / "staging" / "docker-compose.staging.yml"
+LOCAL_STAGING_ENV_FILE = REPO_ROOT / ".env.staging"
+REMOTE_STAGING_PROJECT_NAME = "trading_bot_staging_iran"
+REMOTE_STAGING_COMPOSE_FILE = "deploy/staging/docker-compose.staging.yml"
+REMOTE_STAGING_ENV_FILE = ".env.staging"
+ROLE_START_BARRIER_DELAY_SECONDS = 30.0
+
+DRIVER_SCENARIOS = [
+    {
+        "id": "DRIVER-WEBAPP-WHOLESALE-MIXED-BUY",
+        "offer_origin": "webapp",
+        "offer_type": "buy",
+        "retail": False,
+        "lot_sizes": "",
+        "hot_offer_quantity": 5,
+        "request_amount": 5,
+        "expected_winner_count": 1,
+        "expected_remaining_quantity": 0,
+        "request_surface": "mixed",
+        "telegram_ratio": 0.5,
+        "hot_offer_requests": 8,
+        "target_rps": 4.0,
+        "idempotency_mode": "unique",
+        "coverage": ["iran_to_iran", "iran_to_foreign", "wholesale_full", "notification_delivery"],
+    },
+    {
+        "id": "DRIVER-BOT-WHOLESALE-MIXED-SELL",
+        "offer_origin": "bot",
+        "offer_type": "sell",
+        "retail": False,
+        "lot_sizes": "",
+        "hot_offer_quantity": 5,
+        "request_amount": 5,
+        "expected_winner_count": 1,
+        "expected_remaining_quantity": 0,
+        "request_surface": "mixed",
+        "telegram_ratio": 0.5,
+        "hot_offer_requests": 8,
+        "target_rps": 4.0,
+        "idempotency_mode": "unique",
+        "coverage": ["foreign_to_iran", "foreign_to_foreign", "wholesale_full", "publication_terminal_state"],
+    },
+    {
+        "id": "DRIVER-WEBAPP-RETAIL-TWO-LOT-MIXED-SELL",
+        "offer_origin": "webapp",
+        "offer_type": "sell",
+        "retail": True,
+        "lot_sizes": "10,10",
+        "hot_offer_quantity": 20,
+        "request_amount": 10,
+        "expected_winner_count": 2,
+        "expected_remaining_quantity": 0,
+        "request_surface": "mixed",
+        "telegram_ratio": 0.5,
+        "hot_offer_requests": 12,
+        "target_rps": 4.0,
+        "idempotency_mode": "unique",
+        "coverage": ["retail_two_lot", "same_lot_contention", "mixed_surface_requests"],
+    },
+    {
+        "id": "DRIVER-BOT-DUPLICATE-REPLAY-BUY",
+        "offer_origin": "bot",
+        "offer_type": "buy",
+        "retail": False,
+        "lot_sizes": "",
+        "hot_offer_quantity": 5,
+        "request_amount": 5,
+        "expected_winner_count": 1,
+        "expected_remaining_quantity": 0,
+        "request_surface": "telegram",
+        "telegram_ratio": 1.0,
+        "hot_offer_requests": 6,
+        "target_rps": 3.0,
+        "idempotency_mode": "duplicate_replay",
+        "coverage": ["idempotency_no_duplicate_trade", "foreign_home_offer", "telegram_only_replay"],
+    },
+]
 
 FORBIDDEN_PRODUCTION_HOSTS = {
     "coin.gold-trade.ir",
@@ -79,6 +159,30 @@ class CheckResult:
         }
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    name: str
+    command: list[str]
+    status: str
+    returncode: int
+    elapsed_seconds: float
+    stdout_path: str
+    stderr_path: str
+    json_payload: dict[str, Any] | None = None
+
+    def asdict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "status": self.status,
+            "returncode": self.returncode,
+            "elapsed_seconds": round(self.elapsed_seconds, 3),
+            "command": redact_command(self.command),
+            "stdout_path": self.stdout_path,
+            "stderr_path": self.stderr_path,
+            "json_payload": self.json_payload or {},
+        }
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -103,6 +207,23 @@ def sanitize_text(value: str) -> str:
     for pattern in SECRET_PATTERNS:
         sanitized = pattern.sub(lambda match: match.group(0).split("=", 1)[0] + "=[REDACTED]" if "=" in match.group(0) else "[REDACTED]", sanitized)
     return sanitized
+
+
+def redact_command(command: list[str]) -> list[str]:
+    redacted: list[str] = []
+    skip_next = False
+    secret_flags = {"--basic-auth-password", "--observability-api-key"}
+    for part in command:
+        if skip_next:
+            redacted.append("[REDACTED]")
+            skip_next = False
+            continue
+        if part in secret_flags:
+            redacted.append(part)
+            skip_next = True
+            continue
+        redacted.append(sanitize_text(part))
+    return redacted
 
 
 def write_text(path: Path, content: str) -> None:
@@ -169,6 +290,32 @@ def fetch_json(url: str, *, basic_auth: tuple[str, str] | None, timeout_seconds:
     return status_code, payload if isinstance(payload, dict) else None, body[:8192]
 
 
+def fetch_status(
+    url: str,
+    *,
+    basic_auth: tuple[str, str] | None = None,
+    method: str = "HEAD",
+    timeout_seconds: float = 10.0,
+) -> tuple[int, dict[str, str], str]:
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "User-Agent": "staging-two-server-full-matrix/1"},
+        method=method,
+    )
+    if basic_auth:
+        raw = f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
+        request.add_header("Authorization", "Basic " + base64.b64encode(raw).decode("ascii"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds, context=ssl.create_default_context()) as response:
+            body = response.read(8192).decode("utf-8", errors="replace")
+            return int(response.status), dict(response.headers.items()), body
+    except urllib.error.HTTPError as exc:
+        body = exc.read(8192).decode("utf-8", errors="replace")
+        return int(exc.code), dict(exc.headers.items()), body
+    except Exception as exc:  # noqa: BLE001
+        return 0, {}, f"{type(exc).__name__}: {exc}"
+
+
 def check_http_json(name: str, url: str, *, basic_auth: tuple[str, str] | None) -> CheckResult:
     started = time.perf_counter()
     status_code, payload, raw = fetch_json(url, basic_auth=basic_auth)
@@ -215,6 +362,46 @@ def check_foreign_public_surface_guard(name: str, base_url: str, *, basic_auth: 
     )
 
 
+def check_internal_ingress_without_basic_auth(name: str, url: str) -> CheckResult:
+    started = time.perf_counter()
+    status_code, headers, raw = fetch_status(url, basic_auth=None, method="HEAD")
+    elapsed = time.perf_counter() - started
+    authenticate_header = str(headers.get("WWW-Authenticate") or headers.get("www-authenticate") or "")
+    if status_code == 401 and ("basic" in raw.lower() or "basic" in authenticate_header.lower()):
+        return CheckResult(
+            name,
+            "failed",
+            "internal signed endpoint is still blocked by staging Basic Auth",
+            elapsed,
+            {
+                "url": url,
+                "status_code": status_code,
+                "www_authenticate": sanitize_text(authenticate_header[:200]),
+                "body": sanitize_text(raw[:500]),
+            },
+        )
+    if status_code in {400, 401, 405, 422}:
+        return CheckResult(
+            name,
+            "passed",
+            "internal signed endpoint reaches FastAPI without Basic Auth",
+            elapsed,
+            {
+                "url": url,
+                "status_code": status_code,
+                "www_authenticate": sanitize_text(authenticate_header[:200]),
+                "body": sanitize_text(raw[:500]),
+            },
+        )
+    return CheckResult(
+        name,
+        "failed",
+        f"internal signed endpoint returned unexpected status={status_code}",
+        elapsed,
+        {"url": url, "status_code": status_code, "body": sanitize_text(raw[:1000])},
+    )
+
+
 def check_tls(name: str, base_url: str) -> CheckResult:
     started = time.perf_counter()
     hostname = host_of(base_url)
@@ -240,11 +427,22 @@ def runtime_identity_python() -> str:
         "'release_sha': settings.release_sha, "
         "'frontend_url': settings.frontend_url, "
         "'iran_server_url': settings.iran_server_url, "
+        "'germany_server_url': settings.germany_server_url, "
         "'foreign_server_url': settings.foreign_server_url, "
+        "'peer_server_url': settings.peer_server_url, "
         "'bot_token_configured': bool(settings.bot_token), "
         "'channel_id_configured': bool(settings.channel_id)"
         "}, sort_keys=True))"
     )
+
+
+def is_local_compose_url(value: Any) -> bool:
+    hostname = host_of(str(value or "")).lower()
+    return hostname in {"", "app", "foreign_app", "localhost", "127.0.0.1", "0.0.0.0"}
+
+
+def normalized_url_host(value: Any) -> str:
+    return host_of(str(value or "")).lower()
 
 
 def run_json_command(command: list[str], *, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str, str]:
@@ -259,6 +457,256 @@ def run_json_command(command: list[str], *, timeout_seconds: float = 10.0) -> tu
     except json.JSONDecodeError:
         payload = None
     return int(result.returncode), payload if isinstance(payload, dict) else None, stdout, stderr
+
+
+def parse_last_json_object(stdout: str) -> dict[str, Any] | None:
+    for line in reversed(stdout.splitlines()):
+        candidate = line.strip()
+        if not candidate.startswith("{"):
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def command_slug(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_")[:120] or "command"
+
+
+def run_logged_command(
+    name: str,
+    command: list[str],
+    *,
+    log_dir: Path,
+    timeout_seconds: float = 300.0,
+    cwd: Path = REPO_ROOT,
+    env: dict[str, str] | None = None,
+) -> CommandResult:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    slug = command_slug(name)
+    stdout_path = log_dir / f"{slug}.stdout.log"
+    stderr_path = log_dir / f"{slug}.stderr.log"
+    meta_path = log_dir / f"{slug}.command.json"
+    started = time.perf_counter()
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        stdout = sanitize_text(result.stdout or "")
+        stderr = sanitize_text(result.stderr or "")
+        returncode = int(result.returncode)
+        status_value = "passed" if returncode == 0 else "failed"
+    except subprocess.TimeoutExpired as exc:
+        stdout = sanitize_text((exc.stdout or "") if isinstance(exc.stdout, str) else "")
+        stderr = sanitize_text((exc.stderr or "") if isinstance(exc.stderr, str) else "")
+        stderr = (stderr + "\n" if stderr else "") + f"TimeoutExpired after {timeout_seconds}s"
+        returncode = 124
+        status_value = "failed"
+    elapsed = time.perf_counter() - started
+    stdout_path.write_text(stdout, encoding="utf-8")
+    stderr_path.write_text(stderr, encoding="utf-8")
+    payload = parse_last_json_object(stdout)
+    command_result = CommandResult(
+        name=name,
+        command=command,
+        status=status_value,
+        returncode=returncode,
+        elapsed_seconds=elapsed,
+        stdout_path=str(stdout_path),
+        stderr_path=str(stderr_path),
+        json_payload=payload,
+    )
+    write_json(meta_path, command_result.asdict())
+    return command_result
+
+
+def run_logged_commands_parallel(
+    commands: list[tuple[str, list[str]]],
+    *,
+    log_dir: Path,
+    timeout_seconds: float = 300.0,
+    cwd: Path = REPO_ROOT,
+    env: dict[str, str] | None = None,
+) -> list[CommandResult]:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+    processes: list[tuple[str, list[str], Path, Path, subprocess.Popen[str]]] = []
+    for name, command in commands:
+        slug = command_slug(name)
+        stdout_path = log_dir / f"{slug}.stdout.log"
+        stderr_path = log_dir / f"{slug}.stderr.log"
+        process = subprocess.Popen(
+            command,
+            cwd=str(cwd),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        processes.append((name, command, stdout_path, stderr_path, process))
+
+    deadline = time.monotonic() + timeout_seconds
+    results: list[CommandResult] = []
+    for name, command, stdout_path, stderr_path, process in processes:
+        remaining = max(1.0, deadline - time.monotonic())
+        try:
+            stdout_raw, stderr_raw = process.communicate(timeout=remaining)
+            returncode = int(process.returncode or 0)
+            status_value = "passed" if returncode == 0 else "failed"
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout_raw, stderr_raw = process.communicate()
+            returncode = 124
+            status_value = "failed"
+            stderr_raw = (stderr_raw or "") + f"\nTimeoutExpired after {timeout_seconds}s"
+        stdout = sanitize_text(stdout_raw or "")
+        stderr = sanitize_text(stderr_raw or "")
+        stdout_path.write_text(stdout, encoding="utf-8")
+        stderr_path.write_text(stderr, encoding="utf-8")
+        command_result = CommandResult(
+            name=name,
+            command=command,
+            status=status_value,
+            returncode=returncode,
+            elapsed_seconds=time.perf_counter() - started,
+            stdout_path=str(stdout_path),
+            stderr_path=str(stderr_path),
+            json_payload=parse_last_json_object(stdout),
+        )
+        write_json(log_dir / f"{command_slug(name)}.command.json", command_result.asdict())
+        results.append(command_result)
+    return results
+
+
+def require_command_success(result: CommandResult) -> None:
+    if result.status != "passed":
+        raise RuntimeError(f"{result.name} failed with returncode={result.returncode}; see {result.stderr_path}")
+
+
+def local_load_runner_command(
+    service: str,
+    artifact_dir: Path,
+    worker_args: list[str],
+    *,
+    args: argparse.Namespace | None = None,
+) -> list[str]:
+    absolute_artifact_dir = artifact_dir.resolve()
+    iran_peer_url = (getattr(args, "iran_base_url", None) or DEFAULT_IRAN_BASE_URL).rstrip("/")
+    return [
+        "docker",
+        "compose",
+        "-p",
+        LOCAL_STAGING_PROJECT_NAME,
+        "--env-file",
+        str(LOCAL_STAGING_ENV_FILE),
+        "-f",
+        str(LOCAL_STAGING_COMPOSE_FILE),
+        "--profile",
+        "staging-load",
+        "run",
+        "--rm",
+        "--no-deps",
+        "-e",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "-e",
+        f"IRAN_SERVER_URL={iran_peer_url}",
+        "-e",
+        "GERMANY_SERVER_URL=http://foreign_app:8000",
+        "-e",
+        "FOREIGN_SERVER_URL=http://foreign_app:8000",
+        "-v",
+        f"{REPO_ROOT}:/app:ro",
+        "-v",
+        f"{absolute_artifact_dir}:/artifacts",
+        service,
+        "python",
+        "scripts/trading_core_probe_worker.py",
+        *worker_args,
+    ]
+
+
+def remote_shell_command(args: argparse.Namespace, inner: str) -> list[str]:
+    return ["ssh", args.iran_ssh_host, f"cd {shlex.quote(args.iran_workdir)} && {inner}"]
+
+
+def remote_load_runner_command(args: argparse.Namespace, service: str, remote_artifact_dir: str, worker_args: list[str]) -> list[str]:
+    quoted_worker = " ".join(shlex.quote(part) for part in worker_args)
+    foreign_peer_url = args.foreign_base_url.rstrip("/") + "/foreign-sync"
+    inner = (
+        f"mkdir -p {shlex.quote(remote_artifact_dir)} && "
+        f"STAGING_RELEASE_SHA={shlex.quote(expected_release_sha(args) or '')} "
+        "STAGING_APP_PORT=8100 "
+        "STAGING_FRONTEND_DOCKER_DIST_DIR=mini_app_dist_staging "
+        "docker-compose "
+        f"--env-file {shlex.quote(REMOTE_STAGING_ENV_FILE)} "
+        f"-p {shlex.quote(REMOTE_STAGING_PROJECT_NAME)} "
+        f"-f {shlex.quote(REMOTE_STAGING_COMPOSE_FILE)} "
+        "run --rm --no-deps "
+        "-e PYTHONDONTWRITEBYTECODE=1 "
+        f"-e GERMANY_SERVER_URL={shlex.quote(foreign_peer_url)} "
+        f"-e FOREIGN_SERVER_URL={shlex.quote(foreign_peer_url)} "
+        "-e IRAN_SERVER_URL=http://app:8000 "
+        f"-v {shlex.quote(args.iran_workdir)}:/app:ro "
+        f"-v {shlex.quote(remote_artifact_dir)}:/artifacts "
+        f"{shlex.quote(service)} "
+        "python scripts/trading_core_probe_worker.py "
+        f"{quoted_worker}"
+    )
+    return remote_shell_command(args, inner)
+
+
+def scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) -> list[str]:
+    return ["scp", f"{args.iran_ssh_host}:{remote_path}", str(local_path)]
+
+
+def scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) -> list[str]:
+    return ["scp", str(local_path), f"{args.iran_ssh_host}:{remote_path}"]
+
+
+def run_local_worker(
+    name: str,
+    *,
+    args: argparse.Namespace | None = None,
+    service: str,
+    artifact_dir: Path,
+    worker_args: list[str],
+    log_dir: Path,
+    timeout_seconds: float = 300.0,
+) -> CommandResult:
+    return run_logged_command(
+        name,
+        local_load_runner_command(service, artifact_dir, worker_args, args=args),
+        log_dir=log_dir,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def run_remote_worker(
+    name: str,
+    *,
+    args: argparse.Namespace,
+    service: str,
+    remote_artifact_dir: str,
+    worker_args: list[str],
+    log_dir: Path,
+    timeout_seconds: float = 300.0,
+) -> CommandResult:
+    return run_logged_command(
+        name,
+        remote_load_runner_command(args, service, remote_artifact_dir, worker_args),
+        log_dir=log_dir,
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def check_container_runtime_identity(
@@ -301,6 +749,18 @@ def check_container_runtime_identity(
         failures.append("Iran staging app has Telegram bot token configured")
     if expected_server_mode == "iran" and payload.get("channel_id_configured"):
         failures.append("Iran staging app has Telegram channel id configured")
+    if expected_server_mode == "foreign":
+        iran_host = normalized_url_host(payload.get("iran_server_url"))
+        if iran_host != host_of(DEFAULT_IRAN_BASE_URL):
+            failures.append("foreign staging IRAN_SERVER_URL must point to real Iran staging")
+        if is_local_compose_url(payload.get("iran_server_url")):
+            failures.append("foreign staging IRAN_SERVER_URL points to local compose, not Iran staging")
+    if expected_server_mode == "iran":
+        foreign_host = normalized_url_host(payload.get("germany_server_url") or payload.get("foreign_server_url"))
+        if foreign_host != host_of(DEFAULT_FOREIGN_BASE_URL):
+            failures.append("Iran staging foreign peer URL must point to real foreign staging")
+        if is_local_compose_url(payload.get("germany_server_url") or payload.get("foreign_server_url")):
+            failures.append("Iran staging foreign peer URL points to local compose, not foreign staging")
     return CheckResult(
         name,
         "failed" if failures else "passed",
@@ -413,17 +873,6 @@ def build_readme(args: argparse.Namespace, manifest: dict[str, Any], status: str
 
 def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: dict[str, Any], *, status: str) -> None:
     targets = [CLAUDE_LOG_ROOT / args.run_id, CHATGPT_LOG_ROOT / args.run_id]
-    source_files = [
-        "README.md",
-        "manifest.json",
-        "manifest-summary.md",
-        "scenario-results.jsonl",
-        "summary.json",
-        "summary.md",
-        "preflight.json",
-        "preflight.md",
-        "redaction-report.json",
-    ]
     write_text(artifact_dir / "README.md", build_readme(args, manifest, status))
     write_json(
         artifact_dir / "redaction-report.json",
@@ -439,11 +888,9 @@ def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: d
         },
     )
     for target in targets:
-        target.mkdir(parents=True, exist_ok=True)
-        for name in source_files:
-            source = artifact_dir / name
-            if source.exists():
-                shutil.copy2(source, target / name)
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(artifact_dir, target)
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
@@ -540,6 +987,38 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
             check_tls("foreign_tls", args.foreign_base_url),
             check_http_json("iran_public_config", args.iran_base_url.rstrip("/") + "/api/config", basic_auth=auth),
             check_foreign_public_surface_guard("foreign_public_surface_guard", args.foreign_base_url, basic_auth=auth),
+            check_internal_ingress_without_basic_auth(
+                "iran_sync_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/sync/receive",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "iran_trade_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/trades/internal/execute",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "iran_offer_expiry_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/offers/internal/expire",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "iran_session_internal_ingress_without_basic_auth",
+                args.iran_base_url.rstrip("/") + "/api/sessions/internal/authority-check",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "foreign_sync_internal_ingress_without_basic_auth",
+                args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/receive",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "foreign_trade_internal_ingress_without_basic_auth",
+                args.foreign_base_url.rstrip("/") + "/foreign-sync/api/trades/internal/execute",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "foreign_offer_expiry_internal_ingress_without_basic_auth",
+                args.foreign_base_url.rstrip("/") + "/foreign-sync/api/offers/internal/expire",
+            ),
+            check_internal_ingress_without_basic_auth(
+                "foreign_session_internal_ingress_without_basic_auth",
+                args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sessions/internal/authority-check",
+            ),
             check_container_runtime_identity(
                 "iran_runtime_identity",
                 server="iran",
@@ -681,6 +1160,691 @@ def build_preflight_md(preflight: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def scenario_prefix(run_prefix: str, scenario_id: str) -> str:
+    return f"{run_prefix}{command_slug(scenario_id)}_"
+
+
+def read_json_file(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        return {"status": "invalid_json", "path": str(path)}
+    return payload if isinstance(payload, dict) else {"status": "invalid_json", "path": str(path)}
+
+
+def run_cleanup_on_both_sides(
+    *,
+    args: argparse.Namespace,
+    prefix: str,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+    dry_run: bool = False,
+) -> list[CommandResult]:
+    worker_args = ["cleanup", "--prefix", prefix, "--artifact", "/artifacts/cleanup.json"]
+    if dry_run:
+        worker_args.append("--dry-run")
+    results = [
+        run_remote_worker(
+            "cleanup_iran",
+            args=args,
+            service="load_webapp_iran",
+            remote_artifact_dir=remote_dir,
+            worker_args=worker_args,
+            log_dir=log_dir,
+            timeout_seconds=240,
+        ),
+        run_local_worker(
+            "cleanup_foreign",
+            service="load_telegram_foreign",
+            artifact_dir=local_dir,
+            worker_args=worker_args,
+            log_dir=log_dir,
+            timeout_seconds=240,
+        ),
+    ]
+    for result in results:
+        require_command_success(result)
+    return results
+
+
+def run_sync_catchup(
+    *,
+    args: argparse.Namespace,
+    prefix: str,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> list[CommandResult]:
+    results = [
+        run_remote_worker(
+            "sync_catchup_iran_to_foreign",
+            args=args,
+            service="load_webapp_iran",
+            remote_artifact_dir=remote_dir,
+            worker_args=[
+                "sync-prefix-catchup",
+                "--prefix",
+                prefix,
+                "--output",
+                "/artifacts/sync-catchup-iran.json",
+            ],
+            log_dir=log_dir,
+            timeout_seconds=300,
+        ),
+        run_local_worker(
+            "sync_catchup_foreign_to_iran",
+            service="load_telegram_foreign",
+            artifact_dir=local_dir,
+            worker_args=[
+                "sync-prefix-catchup",
+                "--prefix",
+                prefix,
+                "--output",
+                "/artifacts/sync-catchup-foreign.json",
+            ],
+            log_dir=log_dir,
+            timeout_seconds=300,
+        ),
+    ]
+    for result in results:
+        require_command_success(result)
+    return results
+
+
+def run_observability_snapshots(
+    *,
+    args: argparse.Namespace,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+    label: str,
+) -> list[CommandResult]:
+    results = [
+        run_remote_worker(
+            f"observability_iran_{label}",
+            args=args,
+            service="load_webapp_iran",
+            remote_artifact_dir=remote_dir,
+            worker_args=["observability-snapshot", "--output", f"/artifacts/observability-iran-{label}.json"],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        ),
+        run_local_worker(
+            f"observability_foreign_{label}",
+            service="load_telegram_foreign",
+            artifact_dir=local_dir,
+            worker_args=["observability-snapshot", "--output", f"/artifacts/observability-foreign-{label}.json"],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        ),
+    ]
+    for result in results:
+        require_command_success(result)
+    return results
+
+
+def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
+    worker_args = [
+        "prepare-dual-role-run",
+        "--output-dir",
+        "/artifacts",
+        "--prefix",
+        prefix,
+        "--run-id",
+        scenario["id"],
+        "--offer-origin",
+        scenario["offer_origin"],
+        "--scenario-name",
+        scenario["id"],
+        "--request-surface",
+        scenario["request_surface"],
+        "--idempotency-mode",
+        scenario["idempotency_mode"],
+        "--user-count",
+        str(max(8, int(scenario["hot_offer_requests"]) + 2)),
+        "--hot-offer-requests",
+        str(scenario["hot_offer_requests"]),
+        "--telegram-ratio",
+        str(scenario["telegram_ratio"]),
+        "--target-rps",
+        str(scenario["target_rps"]),
+        "--hot-offer-quantity",
+        str(scenario["hot_offer_quantity"]),
+        "--request-amount",
+        str(scenario["request_amount"]),
+        "--expected-winner-count",
+        str(scenario["expected_winner_count"]),
+        "--expected-remaining-quantity",
+        str(scenario["expected_remaining_quantity"]),
+        "--price",
+        "100000",
+        "--offer-type",
+        scenario["offer_type"],
+        "--barrier-delay-seconds",
+        "45",
+    ]
+    if scenario.get("retail"):
+        worker_args.append("--retail")
+        worker_args.extend(["--lot-sizes", str(scenario.get("lot_sizes") or "")])
+    return worker_args
+
+
+def copy_prepare_artifacts_to_peer(
+    *,
+    args: argparse.Namespace,
+    scenario: dict[str, Any],
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> list[CommandResult]:
+    offer_origin = scenario["offer_origin"]
+    results: list[CommandResult] = []
+    if offer_origin == "webapp":
+        for name in ("prepare.json", "manifest.json", "telegram_foreign.plan.json", "webapp_iran.plan.json"):
+            result = run_logged_command(
+                f"copy_iran_to_foreign_{name}",
+                scp_from_iran(args, f"{remote_dir}/{name}", local_dir / name),
+                log_dir=log_dir,
+                timeout_seconds=120,
+            )
+            require_command_success(result)
+            results.append(result)
+    else:
+        for name in ("prepare.json", "manifest.json", "telegram_foreign.plan.json", "webapp_iran.plan.json"):
+            result = run_logged_command(
+                f"copy_foreign_to_iran_{name}",
+                scp_to_iran(args, local_dir / name, f"{remote_dir}/{name}"),
+                log_dir=log_dir,
+                timeout_seconds=120,
+            )
+            require_command_success(result)
+            results.append(result)
+    return results
+
+
+def copy_role_result_from_iran(
+    *,
+    args: argparse.Namespace,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> CommandResult:
+    result = run_logged_command(
+        "copy_webapp_role_result_from_iran",
+        scp_from_iran(args, f"{remote_dir}/webapp_iran.result.json", local_dir / "webapp_iran.result.json"),
+        log_dir=log_dir,
+        timeout_seconds=120,
+    )
+    require_command_success(result)
+    return result
+
+
+def rebase_role_plans_on_both_sides(
+    *,
+    args: argparse.Namespace,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> list[CommandResult]:
+    results = [
+        run_remote_worker(
+            "rebase_webapp_plan_on_iran",
+            args=args,
+            service="load_webapp_iran",
+            remote_artifact_dir=remote_dir,
+            worker_args=[
+                "rebase-role-plan",
+                "--plan",
+                "/artifacts/webapp_iran.plan.json",
+                "--output",
+                "/artifacts/webapp_iran.plan.json",
+            ],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        ),
+        run_local_worker(
+            "rebase_telegram_plan_on_foreign",
+            service="load_telegram_foreign",
+            artifact_dir=local_dir,
+            worker_args=[
+                "rebase-role-plan",
+                "--plan",
+                "/artifacts/telegram_foreign.plan.json",
+                "--output",
+                "/artifacts/telegram_foreign.plan.json",
+            ],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        ),
+    ]
+    for result in results:
+        require_command_success(result)
+    return results
+
+
+def refresh_role_plan_barriers_on_both_sides(
+    *,
+    args: argparse.Namespace,
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> list[CommandResult]:
+    barrier_epoch = time.time() + ROLE_START_BARRIER_DELAY_SECONDS
+    barrier_arg = f"{barrier_epoch:.6f}"
+    results = [
+        run_remote_worker(
+            "refresh_webapp_plan_barrier_on_iran",
+            args=args,
+            service="load_webapp_iran",
+            remote_artifact_dir=remote_dir,
+            worker_args=[
+                "set-role-plan-barrier",
+                "--plan",
+                "/artifacts/webapp_iran.plan.json",
+                "--output",
+                "/artifacts/webapp_iran.plan.json",
+                "--barrier-epoch",
+                barrier_arg,
+            ],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        ),
+        run_local_worker(
+            "refresh_telegram_plan_barrier_on_foreign",
+            service="load_telegram_foreign",
+            artifact_dir=local_dir,
+            worker_args=[
+                "set-role-plan-barrier",
+                "--plan",
+                "/artifacts/telegram_foreign.plan.json",
+                "--output",
+                "/artifacts/telegram_foreign.plan.json",
+                "--barrier-epoch",
+                barrier_arg,
+            ],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        ),
+    ]
+    for result in results:
+        require_command_success(result)
+    return results
+
+
+def finalize_on_home(
+    *,
+    args: argparse.Namespace,
+    scenario: dict[str, Any],
+    local_dir: Path,
+    remote_dir: str,
+    log_dir: Path,
+) -> CommandResult:
+    if scenario["offer_origin"] == "webapp":
+        copy_result = run_logged_command(
+            "copy_merged_result_to_iran",
+            scp_to_iran(args, local_dir / "merged.result.json", f"{remote_dir}/merged.result.json"),
+            log_dir=log_dir,
+            timeout_seconds=120,
+        )
+        require_command_success(copy_result)
+        result = run_remote_worker(
+            "finalize_on_iran",
+            args=args,
+            service="load_webapp_iran",
+            remote_artifact_dir=remote_dir,
+            worker_args=[
+                "finalize-dual-role-run",
+                "--prepare",
+                "/artifacts/prepare.json",
+                "--merged-result",
+                "/artifacts/merged.result.json",
+                "--output",
+                "/artifacts/final.json",
+                "--check",
+            ],
+            log_dir=log_dir,
+            timeout_seconds=240,
+        )
+        require_command_success(result)
+        pull_final = run_logged_command(
+            "copy_final_from_iran",
+            scp_from_iran(args, f"{remote_dir}/final.json", local_dir / "final.json"),
+            log_dir=log_dir,
+            timeout_seconds=120,
+        )
+        require_command_success(pull_final)
+        return result
+    result = run_local_worker(
+        "finalize_on_foreign",
+        service="load_telegram_foreign",
+        artifact_dir=local_dir,
+        worker_args=[
+            "finalize-dual-role-run",
+            "--prepare",
+            "/artifacts/prepare.json",
+            "--merged-result",
+            "/artifacts/merged.result.json",
+            "--output",
+            "/artifacts/final.json",
+            "--check",
+        ],
+        log_dir=log_dir,
+        timeout_seconds=240,
+    )
+    require_command_success(result)
+    return result
+
+
+def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, suite_dir: Path, remote_root: str) -> dict[str, Any]:
+    scenario_id = scenario["id"]
+    local_dir = suite_dir / scenario_id
+    log_dir = local_dir / "logs"
+    remote_dir = f"{remote_root}/{scenario_id}"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    prefix = scenario_prefix(args.prefix or f"FMX_STAGE_{args.run_id}_", scenario_id)
+    command_results: list[dict[str, Any]] = []
+    started = time.perf_counter()
+    status_value = "failed"
+    error_detail = ""
+    try:
+        command_results.extend(
+            result.asdict()
+            for result in run_cleanup_on_both_sides(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+        command_results.extend(
+            result.asdict()
+            for result in run_observability_snapshots(
+                args=args,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+                label="before",
+            )
+        )
+        if scenario["offer_origin"] == "webapp":
+            prepare = run_remote_worker(
+                "prepare_on_iran",
+                args=args,
+                service="load_webapp_iran",
+                remote_artifact_dir=remote_dir,
+                worker_args=prepare_worker_args(scenario, prefix),
+                log_dir=log_dir,
+                timeout_seconds=300,
+            )
+        else:
+            prepare = run_local_worker(
+                "prepare_on_foreign",
+                service="load_telegram_foreign",
+                artifact_dir=local_dir,
+                worker_args=prepare_worker_args(scenario, prefix),
+                log_dir=log_dir,
+                timeout_seconds=300,
+            )
+        require_command_success(prepare)
+        command_results.append(prepare.asdict())
+        command_results.extend(
+            result.asdict()
+            for result in copy_prepare_artifacts_to_peer(
+                args=args,
+                scenario=scenario,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+        command_results.extend(
+            result.asdict()
+            for result in run_sync_catchup(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+        command_results.extend(
+            result.asdict()
+            for result in rebase_role_plans_on_both_sides(
+                args=args,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+        if scenario["offer_origin"] == "webapp":
+            wait_result = run_local_worker(
+                "wait_offer_visible_on_foreign",
+                service="load_telegram_foreign",
+                artifact_dir=local_dir,
+                worker_args=[
+                    "wait-offer-visible",
+                    "--plan",
+                    "/artifacts/telegram_foreign.plan.json",
+                    "--timeout-seconds",
+                    "90",
+                    "--poll-seconds",
+                    "0.5",
+                ],
+                log_dir=log_dir,
+                timeout_seconds=120,
+            )
+        else:
+            wait_result = run_remote_worker(
+                "wait_offer_visible_on_iran",
+                args=args,
+                service="load_webapp_iran",
+                remote_artifact_dir=remote_dir,
+                worker_args=[
+                    "wait-offer-visible",
+                    "--plan",
+                    "/artifacts/webapp_iran.plan.json",
+                    "--timeout-seconds",
+                    "90",
+                    "--poll-seconds",
+                    "0.5",
+                ],
+                log_dir=log_dir,
+                timeout_seconds=120,
+            )
+        require_command_success(wait_result)
+        command_results.append(wait_result.asdict())
+        command_results.extend(
+            result.asdict()
+            for result in refresh_role_plan_barriers_on_both_sides(
+                args=args,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+
+        role_commands = [
+            (
+                "run_webapp_role_on_iran",
+                remote_load_runner_command(
+                    args,
+                    "load_webapp_iran",
+                    remote_dir,
+                    [
+                        "run-role-plan",
+                        "--plan",
+                        "/artifacts/webapp_iran.plan.json",
+                        "--output",
+                        "/artifacts/webapp_iran.result.json",
+                        "--patch-external-side-effects",
+                    ],
+                ),
+            ),
+            (
+                "run_telegram_role_on_foreign",
+                local_load_runner_command(
+                    "load_telegram_foreign",
+                    local_dir,
+                    [
+                        "run-role-plan",
+                        "--plan",
+                        "/artifacts/telegram_foreign.plan.json",
+                        "--output",
+                        "/artifacts/telegram_foreign.result.json",
+                        "--patch-external-side-effects",
+                    ],
+                    args=args,
+                ),
+            ),
+        ]
+        role_results = run_logged_commands_parallel(role_commands, log_dir=log_dir, timeout_seconds=360)
+        for result in role_results:
+            require_command_success(result)
+            command_results.append(result.asdict())
+        command_results.append(copy_role_result_from_iran(args=args, local_dir=local_dir, remote_dir=remote_dir, log_dir=log_dir).asdict())
+        merge_result = run_local_worker(
+            "merge_role_results",
+            service="load_telegram_foreign",
+            artifact_dir=local_dir,
+            worker_args=[
+                "merge-role-results",
+                "--output",
+                "/artifacts/merged.result.json",
+                "/artifacts/webapp_iran.result.json",
+                "/artifacts/telegram_foreign.result.json",
+            ],
+            log_dir=log_dir,
+            timeout_seconds=180,
+        )
+        require_command_success(merge_result)
+        command_results.append(merge_result.asdict())
+        command_results.append(
+            finalize_on_home(
+                args=args,
+                scenario=scenario,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            ).asdict()
+        )
+        command_results.extend(
+            result.asdict()
+            for result in run_sync_catchup(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        )
+        command_results.extend(
+            result.asdict()
+            for result in run_observability_snapshots(
+                args=args,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+                label="after",
+            )
+        )
+        final_payload = read_json_file(local_dir / "final.json")
+        status_value = "passed" if final_payload.get("status") == "ok" else "failed"
+        if status_value != "passed":
+            error_detail = "final artifact did not report ok"
+    except Exception as exc:  # noqa: BLE001 - scenario evidence must include exact failure class.
+        error_detail = f"{type(exc).__name__}: {exc}"
+        status_value = "failed"
+    finally:
+        cleanup_results: list[CommandResult] = []
+        try:
+            cleanup_results = run_cleanup_on_both_sides(
+                args=args,
+                prefix=prefix,
+                local_dir=local_dir,
+                remote_dir=remote_dir,
+                log_dir=log_dir,
+            )
+        except Exception as exc:  # noqa: BLE001
+            error_detail = (error_detail + "; " if error_detail else "") + f"cleanup_failed: {type(exc).__name__}: {exc}"
+            status_value = "failed"
+        command_results.extend(result.asdict() for result in cleanup_results)
+
+    scenario_result = {
+        "event": "driver_scenario_executed",
+        "manifest_id": scenario_id,
+        "scenario_id": scenario_id,
+        "status": status_value,
+        "error": error_detail,
+        "prefix": prefix,
+        "local_artifact_dir": str(local_dir),
+        "remote_artifact_dir": remote_dir,
+        "coverage": scenario.get("coverage") or [],
+        "scenario": scenario,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "commands": command_results,
+        "final": read_json_file(local_dir / "final.json"),
+        "merged": read_json_file(local_dir / "merged.result.json"),
+    }
+    write_json(local_dir / "driver-scenario-result.json", scenario_result)
+    return scenario_result
+
+
+def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str, Any]:
+    suite_dir = args.artifact_dir / "driver-suite"
+    suite_dir.mkdir(parents=True, exist_ok=True)
+    remote_root = f"{args.iran_workdir}/tmp/full_matrix_logs/{args.run_id}"
+    selected = DRIVER_SCENARIOS[: max(1, int(args.driver_scenario_limit or len(DRIVER_SCENARIOS)))]
+    results: list[dict[str, Any]] = []
+    for scenario in selected:
+        result = execute_driver_scenario(args, scenario, suite_dir=suite_dir, remote_root=remote_root)
+        results.append(result)
+        append_jsonl(args.artifact_dir / "driver-scenario-results.jsonl", result)
+        append_jsonl(
+            args.artifact_dir / "scenario-results.jsonl",
+            {
+                "event": "driver_scenario_executed",
+                "manifest_id": scenario["id"],
+                "section": "two_server_driver_suite",
+                "execution_status": result["status"],
+                "coverage": result.get("coverage") or [],
+                "artifact_dir": result.get("local_artifact_dir"),
+                "remote_artifact_dir": result.get("remote_artifact_dir"),
+                "elapsed_seconds": result.get("elapsed_seconds"),
+                "error": result.get("error"),
+            },
+        )
+    counts = Counter(str(item.get("status") or "unknown") for item in results)
+    failed = [item for item in results if item.get("status") != "passed"]
+    coverage_counter: Counter[str] = Counter()
+    for item in results:
+        for coverage in item.get("coverage") or []:
+            coverage_counter[str(coverage)] += 1
+    payload = {
+        "schema_version": "staging_two_server_driver_suite_v1",
+        "status": "passed" if not failed else "failed",
+        "run_id": args.run_id,
+        "scenario_total": len(results),
+        "manifest_total": (manifest.get("summary") or {}).get("total_manifest_scenarios"),
+        "coverage_counts": dict(sorted(coverage_counter.items())),
+        "result_counts": dict(sorted(counts.items())),
+        "failed_scenarios": [
+            {
+                "scenario_id": item.get("scenario_id"),
+                "error": item.get("error"),
+                "artifact_dir": item.get("local_artifact_dir"),
+            }
+            for item in failed
+        ],
+        "results": results,
+    }
+    write_json(args.artifact_dir / "driver-suite-summary.json", payload)
+    return payload
+
+
 def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     plan, preflight_exit = run_preflight(args)
     summary = dict(plan["summary"])
@@ -701,16 +1865,27 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         write_text(args.artifact_dir / "summary.md", build_summary_md(summary))
         publish_agent_logs(args.artifact_dir, args, plan["manifest"], status=summary["status"])
         return {**plan, "summary": summary}, 2
-    summary["status"] = "execution_blocked_driver_review_required"
+    driver_suite = run_driver_suite(args, plan["manifest"])
+    summary["status"] = "execution_driver_suite_passed" if driver_suite["status"] == "passed" else "execution_driver_suite_failed"
     summary["execution"] = {
-        "status": "blocked",
-        "reason": "mutating_two_server_staging_drivers_require_review_before_enablement",
-        "note": "The manifest, preflight, and artifact contract are ready; scenario mutation drivers must be enabled in a separate reviewed stage.",
+        "status": driver_suite["status"],
+        "driver_suite": {
+            "scenario_total": driver_suite["scenario_total"],
+            "result_counts": driver_suite["result_counts"],
+            "failed_scenarios": driver_suite["failed_scenarios"],
+            "summary_path": str(args.artifact_dir / "driver-suite-summary.json"),
+        },
+        "manifest_total": driver_suite["manifest_total"],
+        "note": (
+            "This is the first mutating real two-server staging driver suite. "
+            "It does not claim every manifest row was individually mutated; full release evidence remains invalid "
+            "until the driver suite is expanded or mapped to every mandatory manifest coverage group."
+        ),
     }
     write_json(args.artifact_dir / "summary.json", summary)
     write_text(args.artifact_dir / "summary.md", build_summary_md(summary))
     publish_agent_logs(args.artifact_dir, args, plan["manifest"], status=summary["status"])
-    return {**plan, "summary": summary}, 2
+    return {**plan, "summary": summary, "driver_suite": driver_suite}, 0 if driver_suite["status"] == "passed" else 1
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -726,11 +1901,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--observability-api-key", default=os.getenv("STAGING_OBSERVABILITY_API_KEY"))
     parser.add_argument("--expected-release-sha", default=os.getenv("STAGING_EXPECTED_RELEASE_SHA"))
     parser.add_argument("--iran-ssh-host", default=os.getenv("STAGING_IRAN_SSH_HOST", DEFAULT_IRAN_SSH_HOST))
+    parser.add_argument("--iran-workdir", default=os.getenv("STAGING_IRAN_WORKDIR", DEFAULT_IRAN_WORKDIR))
     parser.add_argument("--iran-app-container", default=os.getenv("STAGING_IRAN_APP_CONTAINER", DEFAULT_IRAN_APP_CONTAINER))
     parser.add_argument("--foreign-app-container", default=os.getenv("STAGING_FOREIGN_APP_CONTAINER", DEFAULT_FOREIGN_APP_CONTAINER))
     parser.add_argument("--stress-max-parallel", type=int, default=manifest_builder.DEFAULT_STRESS_MAX_PARALLEL)
     parser.add_argument("--market-attempts", type=int, default=manifest_builder.DEFAULT_MARKET_ATTEMPTS)
+    parser.add_argument("--driver-scenario-limit", type=int, default=int(os.getenv("STAGING_FULL_MATRIX_DRIVER_SCENARIO_LIMIT", "0") or 0))
     args = parser.parse_args(argv)
+    if args.driver_scenario_limit <= 0:
+        args.driver_scenario_limit = len(DRIVER_SCENARIOS)
     if args.artifact_dir is None:
         args.artifact_dir = DEFAULT_ARTIFACT_ROOT / args.run_id
     return args

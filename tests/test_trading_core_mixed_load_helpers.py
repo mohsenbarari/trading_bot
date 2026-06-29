@@ -691,6 +691,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         first_attempt = merged["attempts"][0]
         for key in {
             "monotonic_timestamp",
+            "epoch_timestamp",
             "source_role",
             "source_surface",
             "user_id",
@@ -721,9 +722,11 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         for offset, attempt in enumerate(telegram_result["attempts"]):
             attempt["monotonic_timestamp"] = 5000.0 + offset * 0.01
+            attempt["epoch_timestamp"] = 7000.0 + offset * 0.01
             attempt["latency_ms"] = 10.0
         for offset, attempt in enumerate(webapp_result["attempts"]):
             attempt["monotonic_timestamp"] = 5000.005 + offset * 0.01
+            attempt["epoch_timestamp"] = 7000.005 + offset * 0.01
             attempt["latency_ms"] = 10.0
 
         merged = worker.merge_role_result_artifacts([telegram_result, webapp_result])
@@ -753,9 +756,11 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
 
         for offset, attempt in enumerate(telegram_result["attempts"]):
             attempt["monotonic_timestamp"] = 5000.0 + offset * 0.01
+            attempt["epoch_timestamp"] = 7000.0 + offset * 0.01
             attempt["latency_ms"] = 1000.0
         for offset, attempt in enumerate(webapp_result["attempts"]):
             attempt["monotonic_timestamp"] = 5000.005 + offset * 0.01
+            attempt["epoch_timestamp"] = 7000.005 + offset * 0.01
             attempt["latency_ms"] = 1000.0
 
         merged = worker.merge_role_result_artifacts([telegram_result, webapp_result])
@@ -1177,7 +1182,11 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         async def run_probe():
             async with worker.patched_external_side_effects():
                 self.assertIs(worker.trades_router.forward_trade_to_home_server, original_trade_forward)
-                self.assertIs(worker.bot_trade_execute.forward_trade_to_home_server, original_bot_trade_forward)
+                self.assertIsNot(worker.bot_trade_execute.forward_trade_to_home_server, original_bot_trade_forward)
+                self.assertIs(
+                    getattr(worker.bot_trade_execute.forward_trade_to_home_server, "__wrapped__", None),
+                    original_bot_trade_forward,
+                )
                 self.assertIs(worker.offers_router.forward_offer_expiry_to_home_server, original_offer_expiry_forward)
                 self.assertIs(worker.bot_trade_manage.forward_offer_expiry_to_home_server, original_bot_expiry_forward)
 
