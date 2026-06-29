@@ -7,6 +7,7 @@ from typing import Optional
 
 from core.config import settings
 from core.deployment_surface import extract_host, foreign_server_aliases, iran_server_aliases
+from core.request_logging import trusted_forwarded_host_from_request
 
 SERVER_FOREIGN = "foreign"
 SERVER_IRAN = "iran"
@@ -49,7 +50,7 @@ def peer_server_name() -> str:
 def _host_from_request(request) -> str:
     if not request or not hasattr(request, "headers"):
         return ""
-    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("x-original-host")
+    forwarded_host = trusted_forwarded_host_from_request(request)
     host = forwarded_host or request.headers.get("host", "")
     return extract_host(host)
 

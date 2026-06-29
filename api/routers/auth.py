@@ -59,6 +59,7 @@ from models.session import Platform, UserSession
 import uuid
 from core.utils import create_user_notification, normalize_persian_numerals, utc_now, utc_now_naive
 from core.server_routing import SERVER_FOREIGN, server_from_request
+from core.request_logging import client_ip_from_request
 from core.services.chat_room_service import ensure_mandatory_channel_membership
 from core.services.accountant_relation_service import (
     get_active_accountant_relation_for_accountant,
@@ -115,8 +116,9 @@ def _stable_key_digest(value: str) -> str:
 
 
 def _request_client_host(raw_request: Request | None) -> str | None:
-    client = getattr(raw_request, "client", None) if raw_request is not None else None
-    host = getattr(client, "host", None)
+    if raw_request is None:
+        return None
+    host = client_ip_from_request(raw_request)
     if not host:
         return None
     return str(host).strip() or None
@@ -278,7 +280,7 @@ def _extract_device_info(request) -> dict:
     except ValueError:
         platform = Platform.WEB
 
-    ip = request.client.host if hasattr(request, 'client') and request.client else None
+    ip = client_ip_from_request(request)
     return {"device_name": device_name, "device_ip": ip, "platform": platform}
 
 
@@ -304,9 +306,7 @@ def _login_home_server(raw_request: Request, *, is_telegram: bool = False) -> st
 
 
 def _extract_request_real_ip(raw_request: Request) -> str:
-    client_ip = raw_request.client.host if raw_request.client else ""
-    forwarded = raw_request.headers.get("x-forwarded-for", "")
-    return forwarded.split(",")[0].strip() if forwarded else client_ip
+    return client_ip_from_request(raw_request) or ""
 
 
 def _is_local_dev_request(raw_request: Request) -> bool:

@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -240,6 +241,25 @@ class RequestLoggingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         extra = logger.info.call_args.kwargs["extra"]
         self.assertEqual(extra["client_ip"], "198.51.100.4")
+
+    def test_forwarded_host_only_trusted_from_configured_proxy(self):
+        from core.request_logging import trusted_forwarded_host_from_request
+
+        trusted_request = SimpleNamespace(
+            client=SimpleNamespace(host="127.0.0.1"),
+            headers={"x-forwarded-host": "coin.gold-trade.ir:443"},
+        )
+        untrusted_request = SimpleNamespace(
+            client=SimpleNamespace(host="198.51.100.10"),
+            headers={"x-forwarded-host": "coin.gold-trade.ir:443"},
+        )
+
+        with patch(
+            "core.request_logging._trusted_proxy_networks",
+            return_value=(__import__("ipaddress").ip_network("127.0.0.1/32"),),
+        ):
+            self.assertEqual(trusted_forwarded_host_from_request(trusted_request), "coin.gold-trade.ir:443")
+            self.assertIsNone(trusted_forwarded_host_from_request(untrusted_request))
 
     def test_metrics_use_sanitized_path_for_unmatched_sensitive_route(self):
         app = make_test_app()

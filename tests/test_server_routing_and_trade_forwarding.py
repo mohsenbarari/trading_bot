@@ -58,11 +58,17 @@ class ServerRoutingTests(unittest.TestCase):
         self.assertEqual(server_routing._host_from_request(None), "")
         self.assertEqual(server_routing._host_from_request(SimpleNamespace()), "")
 
-        request = SimpleNamespace(headers={"x-original-host": "Mini-App.362514.ir:443, proxy", "host": "ignored"})
+        request = SimpleNamespace(
+            headers={"x-original-host": "Mini-App.362514.ir:443, proxy", "host": "ignored"},
+            client=SimpleNamespace(host="127.0.0.1"),
+        )
         self.assertEqual(server_routing._host_from_request(request), "mini-app.362514.ir")
 
     def test_server_from_request_prefers_forwarded_host_and_telegram_override(self):
-        request = SimpleNamespace(headers={"x-forwarded-host": "coin.gold-trade.ir:443", "host": "coin.362514.ir"})
+        request = SimpleNamespace(
+            headers={"x-forwarded-host": "coin.gold-trade.ir:443", "host": "coin.362514.ir"},
+            client=SimpleNamespace(host="127.0.0.1"),
+        )
 
         with patch.object(server_routing.settings, "iran_server_aliases", "coin.gold-trade.ir"), \
              patch.object(server_routing.settings, "foreign_server_aliases", "coin.362514.ir"):
@@ -71,6 +77,17 @@ class ServerRoutingTests(unittest.TestCase):
                 server_routing.server_from_request(request, force_telegram_foreign=True),
                 server_routing.SERVER_FOREIGN,
             )
+
+    def test_server_from_request_ignores_forwarded_host_from_untrusted_peer(self):
+        request = SimpleNamespace(
+            headers={"x-forwarded-host": "coin.gold-trade.ir:443", "host": "coin.362514.ir"},
+            client=SimpleNamespace(host="198.51.100.10"),
+        )
+
+        with patch.object(server_routing.settings, "iran_server_aliases", "coin.gold-trade.ir"), \
+             patch.object(server_routing.settings, "foreign_server_aliases", "coin.362514.ir"):
+            self.assertEqual(server_routing._host_from_request(request), "coin.362514.ir")
+            self.assertEqual(server_routing.server_from_request(request), server_routing.SERVER_FOREIGN)
 
     def test_server_from_request_uses_configured_domains_aliases_and_current_server_fallback(self):
         request_iran = SimpleNamespace(headers={"host": "iran.custom.example"})

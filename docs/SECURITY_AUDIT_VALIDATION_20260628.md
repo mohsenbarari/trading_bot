@@ -257,7 +257,7 @@ Remediation update:
 ### VF7 - Header Trust Is Inconsistent And Should Be Centralized
 
 - Severity: Medium
-- Status: Confirmed with correction to Claude's wording
+- Status: Remediated in follow-up hardening
 - Area: Auth, routing, audit attribution
 - Files:
   - `api/routers/auth.py:203-217`
@@ -281,6 +281,13 @@ Recommended fix:
 - Centralize request-origin parsing into one utility.
 - Only honor forwarded IP/host headers when the direct peer is a configured trusted proxy.
 - Ensure production `TRUSTED_PROXY_CIDRS` includes the actual Nginx/container hop.
+
+Remediation notes:
+
+- Reused `core.request_logging.client_ip_from_request()` as the shared request IP parser for auth device attribution, dev-login locality checks, and login OTP throttling.
+- Added `core.request_logging.trusted_forwarded_host_from_request()` and connected `core.server_routing._host_from_request()` to it.
+- `X-Forwarded-Host` and `X-Original-Host` are now ignored unless the direct peer matches `TRUSTED_PROXY_CIDRS`.
+- Added focused tests for trusted/untrusted forwarded host behavior and kept existing forwarded-IP trust tests active.
 
 ### VF8 - Localhost CORS Origins Are Always Included
 
@@ -348,7 +355,7 @@ Recommended fix:
 3. Add authorization checks to chat file download.
 4. Add OTP verify throttling/lockout and stop logging OTP digits. Completed; keep regression tests active.
 5. Replace secret/signature equality checks with `hmac.compare_digest`. Completed; keep regression tests active.
-6. Centralize trusted proxy handling for IP and host headers.
+6. Centralize trusted proxy handling for IP and host headers. Completed; keep regression tests active.
 7. Remove localhost CORS origins in production.
 8. Add production data hygiene checks for dev/test users and fixture prefixes.
 

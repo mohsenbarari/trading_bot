@@ -147,6 +147,17 @@ def client_ip_from_request(request: Request) -> str | None:
     return None
 
 
+def trusted_forwarded_host_from_request(request: Request) -> str | None:
+    client = getattr(request, "client", None)
+    direct_host = client.host if client else None
+    if not _is_trusted_proxy(direct_host):
+        return None
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("x-original-host")
+    if not forwarded_host:
+        return None
+    return forwarded_host
+
+
 def is_sensitive_path(path: str) -> bool:
     lowered = path.lower()
     return any(part in lowered for part in _SENSITIVE_PATH_PARTS)
