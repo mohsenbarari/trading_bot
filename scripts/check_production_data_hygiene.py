@@ -15,9 +15,14 @@ import json
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 DEFAULT_SCAN_LIMIT = 100_000
 DEFAULT_MAX_FINDINGS = 200

@@ -1,10 +1,27 @@
 import unittest
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from scripts import check_production_data_hygiene as hygiene
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 class ProductionDataHygieneTests(unittest.TestCase):
+    def test_cli_help_works_outside_repo_cwd(self):
+        result = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts/check_production_data_hygiene.py"), "--help"],
+            cwd="/tmp",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("Read-only production data hygiene guard", result.stdout)
+
     def test_exact_dev_mobile_user_is_critical_and_redacted(self):
         record = {
             "id": 7,
