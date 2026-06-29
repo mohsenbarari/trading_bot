@@ -3,10 +3,9 @@ import json
 import logging
 import sys
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
-import core.config as core_config
 from core.log_redaction import (
     REDACTED,
     REDACTED_CARD,
@@ -237,11 +236,12 @@ class LoggingFoundationTests(unittest.TestCase):
             release_sha="sha-test",
             error_tracking_sample_rate=0.5,
         )
+        fake_config = ModuleType("core.config")
+        fake_config.settings = fake_settings
 
         with (
             patch("sys.stdout", io.StringIO()),
-            patch.dict(sys.modules, {"sentry_sdk": fake_sentry}, clear=False),
-            patch.object(core_config, "settings", fake_settings),
+            patch.dict(sys.modules, {"sentry_sdk": fake_sentry, "core.config": fake_config}, clear=False),
             patch.dict("os.environ", {}, clear=True),
         ):
             configure_logging("api-test")
