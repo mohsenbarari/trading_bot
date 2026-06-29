@@ -55,6 +55,10 @@ default_staging_internal_foreign_server_url() {
     fi
 }
 STAGING_INTERNAL_FOREIGN_SERVER_URL="${STAGING_INTERNAL_FOREIGN_SERVER_URL:-$(default_staging_internal_foreign_server_url)}"
+STAGING_FOREIGN_IRAN_SERVER_URL="${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}"
+STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FOREIGN_IRAN_SERVER_URL}"
+STAGING_FOREIGN_FOREIGN_SERVER_URL="${STAGING_FOREIGN_FOREIGN_SERVER_URL:-$STAGING_INTERNAL_FOREIGN_SERVER_URL}"
+STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-$STAGING_ENABLE_BOT}"
 STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
 STAGING_TRUSTED_PROXY_CIDRS="${STAGING_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128,172.16.0.0/12}"
@@ -276,11 +280,27 @@ compose() {
     STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT" \
     STAGING_FRONTEND_DOCKER_DIST_DIR="$(staging_frontend_dist_relpath)" \
     STAGING_RELEASE_SHA="$(release_sha)" \
+    STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL" \
+    STAGING_FOREIGN_FRONTEND_URL="$STAGING_FOREIGN_FRONTEND_URL" \
+    STAGING_FOREIGN_FOREIGN_SERVER_URL="$STAGING_FOREIGN_FOREIGN_SERVER_URL" \
     "${compose_cmd[@]}" "$@"
 }
 
+foreign_public_surface_guard_nginx() {
+    if [[ "$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD" != "1" ]]; then
+        return
+    fi
+    cat <<'NGINX'
+    location = /api/config {
+        auth_basic off;
+        return 404;
+    }
+NGINX
+}
+
 render_nginx_template() {
-    local redirect_server listen_directives ssl_directives
+    local redirect_server listen_directives ssl_directives foreign_public_surface_guard
+    foreign_public_surface_guard="$(foreign_public_surface_guard_nginx)"
     if staging_ssl_enabled; then
         printf -v redirect_server '%s\n%s\n%s\n%s\n%s\n%s' \
             'server {' \
@@ -308,10 +328,12 @@ render_nginx_template() {
     awk \
         -v redirect_server="$redirect_server" \
         -v listen_directives="$listen_directives" \
-        -v ssl_directives="$ssl_directives" '
+        -v ssl_directives="$ssl_directives" \
+        -v foreign_public_surface_guard="$foreign_public_surface_guard" '
         $0 == "__HTTP_REDIRECT_SERVER__" { print redirect_server; next }
         $0 == "    __LISTEN_DIRECTIVES__" { print listen_directives; next }
         $0 == "    __SSL_DIRECTIVES__" { print ssl_directives; next }
+        $0 == "    __FOREIGN_PUBLIC_SURFACE_GUARD__" { print foreign_public_surface_guard; next }
         { print }
     ' "$NGINX_TEMPLATE"
 }
@@ -356,17 +378,31 @@ install_nginx() {
 
 health() {
     local base="${1:-$STAGING_FRONTEND_URL}"
-    log "checking $base/api/config"
+    local path="/api/config"
+    log "checking $base$path"
     ensure_basic_auth_env
     local basic_user basic_password
     basic_user="$(env_value STAGING_BASIC_AUTH_USER)"
     basic_password="$(env_value STAGING_BASIC_AUTH_PASSWORD)"
+    if [[ "$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD" == "1" && "$base" == "$STAGING_FRONTEND_URL" ]]; then
+        local status_code
+        if [[ "$base" == "http://$STAGING_DOMAIN" ]]; then
+            status_code="$(curl -sS --max-time 10 --user "$basic_user:$basic_password" --resolve "$STAGING_DOMAIN:80:127.0.0.1" -o /dev/null -w '%{http_code}' "$base$path")"
+        elif [[ "$base" == "https://$STAGING_DOMAIN" ]]; then
+            status_code="$(curl -sS --max-time 10 --user "$basic_user:$basic_password" --resolve "$STAGING_DOMAIN:443:127.0.0.1" -o /dev/null -w '%{http_code}' "$base$path")"
+        else
+            status_code="$(curl -sS --max-time 10 --user "$basic_user:$basic_password" -o /dev/null -w '%{http_code}' "$base$path")"
+        fi
+        [[ "$status_code" == "404" ]] || die "foreign staging public /api/config guard returned HTTP $status_code instead of 404"
+        printf 'foreign_public_surface_guard=404\n'
+        return
+    fi
     if [[ "$base" == "http://$STAGING_DOMAIN" ]]; then
-        curl -fsS --max-time 10 --user "$basic_user:$basic_password" --resolve "$STAGING_DOMAIN:80:127.0.0.1" "$base/api/config"
+        curl -fsS --max-time 10 --user "$basic_user:$basic_password" --resolve "$STAGING_DOMAIN:80:127.0.0.1" "$base$path"
     elif [[ "$base" == "https://$STAGING_DOMAIN" ]]; then
-        curl -fsS --max-time 10 --user "$basic_user:$basic_password" --resolve "$STAGING_DOMAIN:443:127.0.0.1" "$base/api/config"
+        curl -fsS --max-time 10 --user "$basic_user:$basic_password" --resolve "$STAGING_DOMAIN:443:127.0.0.1" "$base$path"
     else
-        curl -fsS --max-time 10 --user "$basic_user:$basic_password" "$base/api/config"
+        curl -fsS --max-time 10 --user "$basic_user:$basic_password" "$base$path"
     fi
     printf '\n'
 }
@@ -413,7 +449,7 @@ check() {
     docker compose version >/dev/null
     [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
-    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR"
+    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR foreign_iran_url=$STAGING_FOREIGN_IRAN_SERVER_URL foreign_public_guard=$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD"
     getent hosts "$STAGING_DOMAIN" || true
 }
 

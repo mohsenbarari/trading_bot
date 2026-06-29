@@ -809,6 +809,13 @@ Current hardening after external-agent review:
   the driver suite, including token, offer publication, request, trade,
   delivery receipt, notification, and relation rows, not only `users` and
   `offers`.
+- Foreign staging deployment now injects explicit `STAGING_FOREIGN_*` peer
+  overrides into foreign API, bot, foreign sync worker, and foreign load-runner
+  services so `IRAN_SERVER_URL` resolves to `https://staging.gold-trade.ir`,
+  not the local compose `app` service. The same deployment path renders an
+  Nginx public-surface guard so `https://staging.362514.ir/api/config` returns
+  `404` while signed `/foreign-sync/api/...` receiver paths still reach the
+  foreign FastAPI service.
 
 ## Cleanup Contract
 
