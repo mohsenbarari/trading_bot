@@ -57,6 +57,23 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Write CI environment file
+        shell: bash
+        run: |
+          cat > .env <<'EOF'
+          SERVER_MODE=foreign
+          BOT_USERNAME=ci_test_bot
+          POSTGRES_DB=trading_bot_db
+          POSTGRES_USER=admin
+          POSTGRES_PASSWORD=strongpassword
+          DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
+          SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
+          REDIS_URL=redis://redis:6379/0
+          FRONTEND_URL=http://127.0.0.1:4173
+          DEV_API_KEY=REDACTED_DEV_API_KEY
+          JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+          EOF
+
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
