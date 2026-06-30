@@ -357,6 +357,31 @@ Required follow-up:
 - Before any parity policy exemption, run a read-only report that classifies every drifted `offers` and `offer_publication_states` identity by active/terminal state.
 - No production data mutation is allowed until the report is reviewed.
 
+### 16. Telegram channel message repair emits non-blocking `400 Bad Request` noise for old channel messages
+
+Observed behavior:
+
+- During the post-release log review for `e1faae92`, the foreign bot restarted cleanly and the offer publication worker began its reconciliation cycle.
+- Telegram returned several non-blocking `400 Bad Request` responses for `editMessageText` and `editMessageReplyMarkup`.
+- The worker completed the cycle with `status=ok`, `channel_state_applied=6`, and `channel_state_failed=1`.
+
+Likely cause:
+
+- These failures are consistent with old channel messages that were deleted manually, are no longer editable by Telegram, or have stale publication state.
+- The bot runtime handled the errors without crashing and without blocking the release.
+
+Impact:
+
+- This does not affect the Telegram link-token sync-race fix or production health.
+- It adds log noise and leaves at least one stale publication state that should be classified and handled deliberately.
+
+Required follow-up:
+
+- Add a closed-market read-only report for `offer_publication_states` rows whose Telegram edit/update fails with non-retryable `Bad Request`.
+- Classify each failed row as active, terminal, deleted-message, or unknown before any mutation.
+- For confirmed terminal/deleted-message rows, design an idempotent cleanup or archived-state transition so the publication worker stops retrying impossible edits.
+- Keep active-offer publication repair strict; do not suppress active-offer Telegram publication failures without explicit operator visibility.
+
 ## Closed-Market Remediation Order
 
 1. Add a pre-mutation release decision gate for `IRAN_CONNECTIVITY_MODE` and `IRAN_SHARED_DATA_MODE`.
@@ -370,6 +395,7 @@ Required follow-up:
 9. Add customer-invite gate reject-reason observability before considering any gate relaxation.
 10. Design the database uniqueness backstop for duplicate customer invitations in a dedicated migration roadmap.
 11. Reduce pip warning noise if it can be done without hiding real packaging problems.
+12. Classify non-retryable Telegram `Bad Request` publication-state rows and stop impossible terminal/deleted-message retries safely.
 
 ## Validation Required After Remediation
 
@@ -382,3 +408,4 @@ Required follow-up:
 - Confirm the live bot runtime no longer rejects a clean sync state because the shared Redis singleton is uninitialized.
 - Confirm the internal endpoint rejects non-Iran execution, source mismatch, invalid owner states, and invalid tier/account/idempotency payloads.
 - Confirm existing bot users cannot be forced into onboarding by crafted acknowledgement callbacks.
+- Confirm Telegram publication-state cleanup keeps active-offer failures visible while preventing repeated retries for confirmed terminal/deleted-message rows.
