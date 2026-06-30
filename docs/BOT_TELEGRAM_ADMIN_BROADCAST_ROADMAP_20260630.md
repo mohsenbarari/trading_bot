@@ -127,7 +127,7 @@ Field policy recommendation:
 - The broadcast worker must be a separate job/loop with its own batch and rate budget so a large broadcast cannot starve trade Telegram delivery.
 - Use proactive global send pacing, not only reactive `429 retry_after` handling. Initial target: use conservative bounded concurrency and sleeps, then tune from staging evidence.
 - Add a parent broadcast finalizer that transitions `queued/running` to `completed`, `completed_with_errors`, or `failed` after receipt statuses reach terminal states.
-- Delivery is at-least-once at the Telegram side-effect boundary. The worker keeps claim/send/status persistence in one DB transaction so a crash rolls the receipt back to a retryable state, but if Telegram accepted the message before the crash, a later retry can duplicate the direct message. This is a known Telegram-side limitation; the receipt `dedupe_key` prevents local duplicate processing but cannot make Telegram `sendMessage` exactly-once.
+- Delivery is at-least-once at the Telegram side-effect boundary. The worker keeps claim/send/status persistence in one DB transaction so a crash rolls the receipt back to a retryable state, but if Telegram accepted the message before the crash, a later retry can duplicate the direct message. The same duplicate window also exists without a process crash when Telegram accepts the message but the HTTP response is lost, times out, or is otherwise ambiguous/retryable. This is a known Telegram-side limitation; the receipt `dedupe_key` prevents local duplicate processing but cannot make Telegram `sendMessage` exactly-once.
 
 ## Bot UX Flow
 
@@ -290,6 +290,7 @@ For selected-user search, customers should be displayed with the customer manage
 - Send pending receipts with bounded concurrency and rate limits.
 - Keep this worker separate from trade Telegram delivery and give it its own batch/rate settings.
 - Claim receipts atomically with lease and short-circuit terminal rows before sending.
+- Expired-lease recovery is a defensive safety net for abnormal committed `sending` rows and future multi-process cases. In the current single-transaction worker, a crash before commit normally rolls the claim back to `pending`/`retryable_failed`, so the rollback path is the primary crash recovery mechanism.
 - Re-load the current user, re-run `evaluate_bot_access`, and send to the current `telegram_id`; store `telegram_id_at_send`.
 - Classify Telegram gateway responses using patterns aligned with trade delivery.
 - Persist retry/terminal/sent status.

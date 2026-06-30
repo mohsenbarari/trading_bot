@@ -2,9 +2,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import create_engine, text
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import sessionmaker
 
 from core.services import telegram_admin_broadcast_service as service
+from core.enums import UserAccountStatus
+from models.accountant_relation import AccountantRelationStatus
+from models.customer_relation import CustomerRelationStatus, CustomerTier
 from models.telegram_admin_broadcast import (
     TelegramAdminBroadcast,
     TelegramAdminBroadcastAudienceType,
@@ -54,6 +59,14 @@ class FakeMetadataDB:
     async def execute(self, statement):
         self.execute_calls.append(statement)
         return FakeRowsResult(self.rows)
+
+
+class AsyncSyncSession:
+    def __init__(self, session):
+        self.session = session
+
+    async def execute(self, statement):
+        return self.session.execute(statement)
 
 
 class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -127,6 +140,203 @@ class TelegramAdminBroadcastServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(recipients), 1)
         self.assertEqual(recipients[0].display_name, "نام مدیریت‌شده")
         self.assertEqual(recipients[0].customer_tier, "tier1")
+
+    async def test_recipient_resolution_behaves_for_supported_user_taxonomy(self):
+        engine = create_engine("sqlite:///:memory:")
+        session_cls = sessionmaker(bind=engine)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE users (
+                        id INTEGER PRIMARY KEY,
+                        account_name VARCHAR,
+                        mobile_number VARCHAR,
+                        telegram_id BIGINT,
+                        username VARCHAR,
+                        full_name VARCHAR,
+                        address TEXT,
+                        avatar_file_id VARCHAR,
+                        role VARCHAR,
+                        account_status VARCHAR,
+                        deactivated_at DATETIME,
+                        messenger_grace_expires_at DATETIME,
+                        messenger_blocked_at DATETIME,
+                        has_bot_access BOOLEAN,
+                        bot_onboarding_required_step INTEGER,
+                        bot_onboarding_completed_step INTEGER,
+                        bot_onboarding_completed_at DATETIME,
+                        is_deleted BOOLEAN,
+                        deleted_at DATETIME,
+                        admin_password_hash VARCHAR,
+                        must_change_password BOOLEAN,
+                        trading_restricted_until DATETIME,
+                        max_daily_trades INTEGER,
+                        max_active_commodities INTEGER,
+                        max_daily_requests INTEGER,
+                        limitations_expire_at DATETIME,
+                        trades_count INTEGER,
+                        commodities_traded_count INTEGER,
+                        channel_messages_count INTEGER,
+                        max_sessions INTEGER,
+                        max_accountants INTEGER,
+                        max_customers INTEGER,
+                        home_server VARCHAR,
+                        can_block_users BOOLEAN,
+                        max_blocked_users INTEGER,
+                        last_seen_at DATETIME,
+                        created_at DATETIME,
+                        updated_at DATETIME
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE customer_relations (
+                        id INTEGER PRIMARY KEY,
+                        owner_user_id INTEGER,
+                        customer_user_id INTEGER,
+                        customer_tier VARCHAR,
+                        management_name VARCHAR,
+                        status VARCHAR,
+                        deleted_at DATETIME
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE accountant_relations (
+                        id INTEGER PRIMARY KEY,
+                        owner_user_id INTEGER,
+                        accountant_user_id INTEGER,
+                        status VARCHAR,
+                        deleted_at DATETIME
+                    )
+                    """
+                )
+            )
+
+            role_values = {role: role.name for role in UserRole}
+            active_status = UserAccountStatus.ACTIVE.value
+            inactive_status = UserAccountStatus.INACTIVE.value
+            user_rows = [
+                (1, "ordinary", UserRole.STANDARD, active_status, 9001, False),
+                (2, "police", UserRole.POLICE, active_status, 9002, False),
+                (3, "manager", UserRole.MIDDLE_MANAGER, active_status, 9003, False),
+                (4, "superadmin", UserRole.SUPER_ADMIN, active_status, 9004, False),
+                (5, "watch", UserRole.WATCH, active_status, 9005, False),
+                (6, "tier1_raw", UserRole.STANDARD, active_status, 9006, False),
+                (7, "tier2_raw", UserRole.STANDARD, active_status, 9007, False),
+                (8, "accountant", UserRole.STANDARD, active_status, 9008, False),
+                (9, "inactive", UserRole.STANDARD, inactive_status, 9009, False),
+                (10, "deleted", UserRole.STANDARD, active_status, 9010, True),
+                (11, "unlinked", UserRole.STANDARD, active_status, None, False),
+            ]
+            for user_id, account_name, role, status, telegram_id, is_deleted in user_rows:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO users (
+                            id, account_name, mobile_number, telegram_id, full_name, address,
+                            role, account_status, has_bot_access, bot_onboarding_required_step,
+                            bot_onboarding_completed_step, is_deleted, must_change_password,
+                            trades_count, commodities_traded_count, channel_messages_count,
+                            max_sessions, max_accountants, max_customers, home_server,
+                            can_block_users, max_blocked_users
+                        )
+                        VALUES (
+                            :id, :account_name, :mobile_number, :telegram_id, :full_name, '',
+                            :role, :account_status, 1, 0,
+                            0, :is_deleted, 0,
+                            0, 0, 0,
+                            1, 3, 5, 'foreign',
+                            1, 10
+                        )
+                        """
+                    ),
+                    {
+                        "id": user_id,
+                        "account_name": account_name,
+                        "mobile_number": f"091200000{user_id:02d}",
+                        "telegram_id": telegram_id,
+                        "full_name": f"User {user_id}",
+                        "role": role_values[role],
+                        "account_status": status,
+                        "is_deleted": int(is_deleted),
+                    },
+                )
+
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO customer_relations (
+                        id, owner_user_id, customer_user_id, customer_tier, management_name, status, deleted_at
+                    )
+                    VALUES
+                        (1, 100, 6, :tier1, 'Tier One Managed', :active, NULL),
+                        (2, 100, 7, :tier2, 'Tier Two Managed', :active, NULL)
+                    """
+                ),
+                {
+                    "tier1": CustomerTier.TIER_1.value,
+                    "tier2": CustomerTier.TIER_2.value,
+                    "active": CustomerRelationStatus.ACTIVE.value,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO accountant_relations (
+                        id, owner_user_id, accountant_user_id, status, deleted_at
+                    )
+                    VALUES (1, 100, 8, :active, NULL)
+                    """
+                ),
+                {"active": AccountantRelationStatus.ACTIVE.value},
+            )
+
+        with session_cls() as sync_session:
+            db = AsyncSyncSession(sync_session)
+
+            all_recipients = await service.resolve_telegram_admin_broadcast_recipients(
+                db,
+                audience_type=TelegramAdminBroadcastAudienceType.ALL,
+                sender_user_id=99,
+            )
+            self.assertEqual({recipient.user_id for recipient in all_recipients}, {1, 2, 3, 4, 6})
+
+            ordinary_recipients = await service.resolve_telegram_admin_broadcast_recipients(
+                db,
+                audience_type=TelegramAdminBroadcastAudienceType.GROUP,
+                target_groups=[service.TELEGRAM_ADMIN_BROADCAST_GROUP_ORDINARY],
+            )
+            self.assertEqual([recipient.user_id for recipient in ordinary_recipients], [1])
+
+            manager_recipients = await service.resolve_telegram_admin_broadcast_recipients(
+                db,
+                audience_type=TelegramAdminBroadcastAudienceType.GROUP,
+                target_groups=[service.TELEGRAM_ADMIN_BROADCAST_GROUP_MANAGERS],
+            )
+            self.assertEqual({recipient.user_id for recipient in manager_recipients}, {3, 4})
+
+            tier1_recipients = await service.resolve_telegram_admin_broadcast_recipients(
+                db,
+                audience_type=TelegramAdminBroadcastAudienceType.GROUP,
+                target_groups=[service.TELEGRAM_ADMIN_BROADCAST_GROUP_TIER1_CUSTOMERS],
+            )
+            self.assertEqual([recipient.user_id for recipient in tier1_recipients], [6])
+            self.assertEqual(tier1_recipients[0].display_name, "Tier One Managed")
+
+            selected_recipients = await service.resolve_telegram_admin_broadcast_recipients(
+                db,
+                audience_type=TelegramAdminBroadcastAudienceType.SELECTED,
+                selected_user_ids=[1, 2, 5, 7, 8, 9, 10, 11],
+            )
+            self.assertEqual({recipient.user_id for recipient in selected_recipients}, {1, 2})
 
     async def test_create_broadcast_queues_receipts_without_calling_telegram(self):
         db = FakeQueueDB()
