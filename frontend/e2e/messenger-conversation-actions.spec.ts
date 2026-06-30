@@ -2,8 +2,11 @@
 
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+
+test.use({ serviceWorkers: 'block' })
 
 function resolveAppContainerName() {
   const stdout = execFileSync('docker', ['ps', '--format', '{{.Names}}'], {
@@ -225,12 +228,7 @@ function authHeaders(accessToken: string) {
 }
 
 async function loginWithSeededSession(page: Page, fixture: ConversationStateFixture) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, fixture)
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
   await page.goto('/')
   await expect(page.getByText(fixture.actorAccountName)).toBeVisible({ timeout: 30000 })
 }

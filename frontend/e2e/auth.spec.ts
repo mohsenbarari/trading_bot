@@ -1,6 +1,9 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+
+test.use({ serviceWorkers: 'block' })
 
 interface AuthTokens {
   access_token: string
@@ -19,15 +22,7 @@ async function fetchDevLoginTokens(request: APIRequestContext): Promise<AuthToke
 }
 
 async function setAuthTokens(page: Page, tokens: AuthTokens) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
-  })
+  await primeAuthSession(page, tokens.access_token, tokens.refresh_token)
 }
 
 test.describe('Login/auth regressions', () => {

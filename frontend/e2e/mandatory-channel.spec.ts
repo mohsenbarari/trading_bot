@@ -2,8 +2,11 @@
 
 import { execFileSync } from 'child_process'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
+import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
+
+test.use({ serviceWorkers: 'block' })
 
 interface MandatoryChannelFixture {
   accountName: string
@@ -200,15 +203,7 @@ async function createInvitation(request: APIRequestContext): Promise<InvitationF
 }
 
 async function loginWithSeededSession(page: Page, fixture: MandatoryChannelFixture) {
-  await page.goto('/login')
-  await page.evaluate(({ accessToken, refreshToken }) => {
-    localStorage.setItem('auth_token', accessToken)
-    localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('suspended_refresh_token')
-  }, {
-    accessToken: fixture.accessToken,
-    refreshToken: fixture.refreshToken,
-  })
+  await primeAuthSession(page, fixture.accessToken, fixture.refreshToken)
   await page.goto('/')
   await expect(page.getByText(fixture.accountName)).toBeVisible()
 }
@@ -234,7 +229,7 @@ test.describe('Mandatory channel smoke', () => {
   test('freshly activated web user immediately sees the mandatory room in messenger', async ({ page, request }) => {
     const invitation = await createInvitation(request)
 
-    await page.route('**/api/auth/register-otp-request', async route => {
+    await page.route('**/api/auth/register-otp-request**', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -249,8 +244,12 @@ test.describe('Mandatory channel smoke', () => {
     await expect(page.getByText(invitation.accountName)).toBeVisible()
     await expect(page.getByText(invitation.mobileNumber)).toBeVisible()
 
+    const otpResponse = page.waitForResponse((response) =>
+      response.url().includes('/api/auth/register-otp-request') && response.status() === 200,
+    )
     await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
-    await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible()
+    await otpResponse
+    await expect(page.getByText('کد تایید ۵ رقمی را وارد کنید:')).toBeVisible({ timeout: 10000 })
 
     await page.locator('.otp-input').fill(invitation.otpCode)
     await page.getByRole('button', { name: 'تایید کد' }).click()

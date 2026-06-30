@@ -22,6 +22,12 @@ export async function primeAuthSession(
       return
     }
 
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch(() => {})
+    }
+
     localStorage.setItem('auth_token', nextAccessToken)
     localStorage.setItem('refresh_token', nextRefreshToken)
     if (nextCurrentUserSummary) {

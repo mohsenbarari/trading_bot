@@ -7,6 +7,8 @@ import { primeAuthSession } from './helpers/auth'
 
 const BACKEND_BASE_URL = 'http://127.0.0.1:8000'
 
+test.use({ serviceWorkers: 'block' })
+
 interface SeededMarketSession {
   userId: number
   accountName: string
@@ -296,15 +298,24 @@ async function openFreshMarketContext(browser: Browser, fixture: SeededMarketSes
         contentType: 'application/json',
         body: JSON.stringify(marketState),
       })
-    }, { times: 1 })
+    })
   }
   const freshPage = await openFreshMarketPage(freshContext, fixture)
   return { freshContext, freshPage }
 }
 
 async function openOfferPreview(page: Page, text: string) {
-  await page.locator('.text-offer-input').fill(text)
-  await page.locator('.send-btn').click()
+  const offerInput = page.locator('.text-offer-input')
+  const sendButton = page.locator('.send-btn')
+  await expect(offerInput).toBeEnabled({ timeout: 15000 })
+  await offerInput.fill(text)
+  await expect(offerInput).toHaveValue(text)
+  await expect(sendButton).toBeEnabled({ timeout: 15000 })
+  const parseRequest = page.waitForRequest((request) =>
+    request.url().includes('/api/offers/parse') && request.method() === 'POST',
+  )
+  await sendButton.click()
+  await parseRequest
   await expect(page.locator('.offer-preview-card')).toBeVisible()
 }
 

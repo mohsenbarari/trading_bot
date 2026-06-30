@@ -146,12 +146,14 @@ test.describe('Market mutation UX', () => {
     expect(toggleBox!.x + toggleBox!.width).toBeLessThanOrEqual(inputBox!.x + inputBox!.width)
     expect(Math.abs((sendBox!.x + sendBox!.width) - (inputBox!.x + inputBox!.width))).toBeLessThanOrEqual(4)
     await page.locator('.recent-offers-toggle').click()
-    await expect(page.locator('.recent-offers-dropdown')).toHaveCSS('z-index', '1200')
-    const dropdownBox = await page.locator('.recent-offers-dropdown').boundingBox()
+    const recentOffersDropdown = page.locator('.recent-offers-dropdown')
+    await expect(recentOffersDropdown).toBeVisible({ timeout: 10000 })
+    await expect(recentOffersDropdown).toHaveCSS('z-index', '1200')
+    await expect(page.locator('.recent-offer-item')).toContainText('سکه', { timeout: 10000 })
+    const dropdownBox = await recentOffersDropdown.boundingBox()
     expect(dropdownBox).not.toBeNull()
     expect(dropdownBox!.y).toBeGreaterThanOrEqual(0)
     expect(dropdownBox!.y + dropdownBox!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
-    await expect(page.locator('.recent-offer-item')).toContainText('سکه')
   })
 
   test('publish and execute conflict states are bounded, visible, and duplicate-safe', async ({ page }) => {
@@ -275,16 +277,28 @@ test.describe('Market mutation UX', () => {
 
     await page.goto('/market', { waitUntil: 'domcontentloaded' })
 
-    await expect(page.locator('.text-offer-input')).toBeVisible()
-    await page.locator('.text-offer-input').fill('خرید سکه 4 عدد 50000')
-    await page.locator('.send-btn').click()
-    await expect(page.locator('.offer-preview-card')).toBeVisible()
+    const offerInput = page.locator('.text-offer-input')
+    const sendButton = page.locator('.send-btn')
+    await expect(offerInput).toBeVisible()
+    await offerInput.fill('خرید سکه 4 عدد 50000')
+    await expect(offerInput).toHaveValue('خرید سکه 4 عدد 50000')
+    await expect(sendButton).toBeEnabled()
+    const parseRequest = page.waitForRequest((request) =>
+      request.url().includes('/api/offers/parse') && request.method() === 'POST',
+    )
+    await sendButton.click()
+    await parseRequest
+    await expect(page.locator('.offer-preview-card')).toBeVisible({ timeout: 10000 })
 
     const publishConfirm = page.locator('.offer-preview-confirm')
-    await publishConfirm.evaluate((node: HTMLElement) => {
-      node.click()
-      node.click()
-    })
+    await expect(publishConfirm).toBeEnabled()
+    const publishRequest = page.waitForRequest((request) =>
+      request.url().includes('/api/offers/') && request.method() === 'POST',
+    )
+    await publishConfirm.click()
+    await expect(publishConfirm).toBeDisabled()
+    await publishConfirm.evaluate((node: HTMLElement) => node.click())
+    await publishRequest
 
     await expect(page.locator('.offer-preview-error')).toContainText('بازار در حال حاضر بسته است')
     expect(offerPublishCount).toBe(1)
@@ -295,12 +309,14 @@ test.describe('Market mutation UX', () => {
     const offerCard = page.locator('.offer-card-wrap').filter({ hasText: 'pw execute conflict' }).first()
     await expect(offerCard).toBeVisible()
     const tradeButton = offerCard.getByRole('button', { name: '4 عدد' }).first()
+    await expect(tradeButton).toBeEnabled()
+    const tradeRequest = page.waitForRequest((request) =>
+      request.url().includes('/api/trades/') && request.method() === 'POST',
+    )
     await tradeButton.click()
     await expect(tradeButton).toHaveClass(/pending/)
-    await tradeButton.evaluate((node: HTMLElement) => {
-      node.click()
-      node.click()
-    })
+    await tradeButton.evaluate((node: HTMLElement) => node.click())
+    await tradeRequest
 
     await expect(page.getByText('نمی‌توانید روی لفظ خودتان معامله کنید.')).toBeVisible()
     expect(tradeExecuteCount).toBe(1)
