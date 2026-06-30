@@ -9,6 +9,7 @@ The release eventually completed successfully and production health checks passe
 Released commit:
 
 - `4fc10df7` - `Implement Telegram tier1 customer invite flow`
+- `375cbb88` - `Fix bot customer invite sync gate Redis fallback` (pending production release at the time this follow-up was expanded)
 
 Production state after release:
 
@@ -187,6 +188,175 @@ Required follow-up:
 - Either pass the appropriate pip root-user action flag for this controlled container/server context, or move wheel-cache generation into a virtual environment.
 - Keep the warning visible if it can signal a real host-level packaging risk.
 
+## Bot Invite Review Follow-Up Actions
+
+The Claude review in `tmp/claude/bot-tier1-customer-invite-production-review.md` was compared against the current code after the Redis fallback fix.
+
+### 8. Live bot invite gate failed because the bot runtime did not initialize the shared Redis singleton
+
+Observed behavior:
+
+- A real bot invite attempt returned:
+
+```text
+همگام‌سازی دو سرور کامل نیست. کمی بعد دوباره تلاش کنید.
+```
+
+- Production sync health was clean on both servers.
+- Direct runtime probing inside the bot container showed:
+
+```text
+RuntimeError: Redis client not initialized. Call init_redis() first.
+```
+
+Impact:
+
+- The customer-invite sync gate failed before it could check Iran health.
+- This was a false negative, not a real cross-server sync failure.
+
+Status:
+
+- Fixed in `375cbb88`.
+- The fix keeps the change narrow: when the Redis singleton is not initialized in the bot runtime, the customer-invite gate creates a temporary Redis client from the configured pool, performs the read-only queue check, and closes the temporary client.
+- Regression coverage was added for the uninitialized-singleton bot runtime path.
+
+Required follow-up:
+
+- Production release is required for the live bot to load this fix.
+- After release, verify `check_customer_invite_sync_ready(wait_seconds=0)` inside the bot container returns `ready=True` while queues are clean.
+
+### 9. Internal customer-invite endpoint needs additional trust-boundary regression tests
+
+Accepted review finding:
+
+- The endpoint implementation is layered correctly, but tests should lock the trust boundary more explicitly.
+
+Required follow-up:
+
+- Add tests for source-server mismatch between payload and `X-Source-Server`.
+- Add tests for calling the internal endpoint on a non-Iran server.
+- Add tests for bad tier, bad `account_name`, and bad idempotency key.
+- Add tests for invalid owner states:
+  - owner not found
+  - owner inactive
+  - owner is a customer
+  - owner is an accountant
+- Add tests for Redis lock contention (`409`) and Redis lock unavailability (`503`).
+
+### 10. Iran internal endpoint should re-assert the allowed owner role list
+
+Accepted review finding:
+
+- The bot already limits the feature to standard users, middle admins, and superadmins.
+- Iran currently rejects deleted/inactive owners, customers, and accountants, but does not explicitly re-check the same owner role allow-list.
+
+Impact:
+
+- The HMAC-signed channel currently has only the bot as caller, so this is not an immediate exploit path.
+- If another internal caller is added later, it could bypass the bot-side role allow-list.
+
+Required follow-up:
+
+- Add an explicit Iran-side role allow-list for:
+  - `STANDARD`
+  - `MIDDLE_MANAGER`
+  - `SUPER_ADMIN`
+- Return `403` for all other roles.
+- Add endpoint tests for allowed and disallowed roles.
+
+### 11. Bot onboarding acknowledgement should not escalate existing users into a required tutorial state through crafted callbacks
+
+Accepted review finding:
+
+- Existing users are not locked by the middleware.
+- However, if a user with `bot_onboarding_required_step=0` manually sends an old/crafted offer-tutorial acknowledgement callback, the handler can raise `required_step` to the current required step and leave the user partially completed.
+
+Impact:
+
+- Low risk and self-inflicted, because normal users only receive these callbacks after Join Request onboarding is started.
+- Still worth hardening because it is a small state-machine edge case.
+
+Required follow-up:
+
+- If `bot_onboarding_required_step < 1`, acknowledgement callbacks should not raise the required step.
+- Add regression coverage that a legacy/existing user cannot become newly blocked by a crafted offer-tutorial acknowledgement callback.
+
+### 12. Duplicate customer invitation protection should eventually get a database backstop
+
+Accepted in principle, but requires careful design:
+
+- Current no-migration release uses:
+  - pre-check
+  - Redis lock
+  - post-lock pre-check
+  - existing service validation
+- This is acceptable for the current release.
+
+Design constraint:
+
+- A raw unique index on `invitations.mobile_number` or `invitations.account_name` is not acceptable; previous migrations intentionally removed those unique indexes so users can be re-invited after expiry.
+- Any database uniqueness backstop must preserve re-invite-after-expiry behavior and customer lifecycle semantics.
+
+Required follow-up:
+
+- Design a partial uniqueness strategy for active/non-deleted pending customer invitations/relations.
+- Run a read-only duplicate audit before migration.
+- Add an `IntegrityError` mapping path that returns the existing `already_pending` behavior instead of a 500.
+- Do not ship this migration without a dedicated closed-market review.
+
+### 13. Customer-invite sync gate is intentionally strict, but needs observability before any relaxation
+
+Review finding:
+
+- Claude correctly noted that requiring Iran outbound backlog to be exactly zero can cause fail-closed UX blocks after recent Iran writes.
+
+Decision:
+
+- Do not relax this gate immediately.
+- The current product policy is that bot-based customer invitation should only happen when the two-server sync state is normal and fully clean for the customer-invite tables.
+
+Required follow-up:
+
+- Add structured metrics or log aggregation for customer-invite gate reject reasons:
+  - `foreign_queue_dirty`
+  - `iran_sync_dirty`
+  - `iran_health_unreachable`
+  - `missing_observability_key`
+  - `redis_unavailable`
+- Review production reject frequency before changing the gate.
+- If false negatives are frequent, propose a product decision separately:
+  - keep exact-zero strictness
+  - widen grace time
+  - use freshness thresholds
+  - or split safety-required checks from display-freshness checks
+
+### 14. Runtime parity status staleness does not weaken the bot invite gate
+
+Accepted clarification:
+
+- The invite gate reads:
+  - Redis queue state
+  - Iran `/api/sync/health`
+  - `unsynced_by_table` for required tables
+  - `redis_ok`
+- It does not authorize invites based on global `parity_status`.
+
+Required follow-up:
+
+- Keep issue 6 as an operator observability problem.
+- Do not block bot invite solely because global parity evidence is stale if required invite tables and queues are clean.
+
+### 15. Historical offer/publication drift must be confirmed terminal-only before any policy exemption
+
+Accepted review clarification:
+
+- The current evidence suggests the drift is terminal/historical, but that must be proven before repair or exemption.
+
+Required follow-up:
+
+- Before any parity policy exemption, run a read-only report that classifies every drifted `offers` and `offer_publication_states` identity by active/terminal state.
+- No production data mutation is allowed until the report is reviewed.
+
 ## Closed-Market Remediation Order
 
 1. Add a pre-mutation release decision gate for `IRAN_CONNECTIVITY_MODE` and `IRAN_SHARED_DATA_MODE`.
@@ -195,7 +365,11 @@ Required follow-up:
 4. Improve healthcheck retry messages around app startup.
 5. Add parity-status publication or explicit artifact-status reporting to the production release path.
 6. Prepare a dry-run-only repair report for historical `offers` and `offer_publication_states` drift.
-7. Reduce pip warning noise if it can be done without hiding real packaging problems.
+7. Add customer-invite trust-boundary tests and Iran-side role allow-list defense-in-depth.
+8. Harden bot onboarding acknowledgement against crafted callbacks from users who were never required to onboard.
+9. Add customer-invite gate reject-reason observability before considering any gate relaxation.
+10. Design the database uniqueness backstop for duplicate customer invitations in a dedicated migration roadmap.
+11. Reduce pip warning noise if it can be done without hiding real packaging problems.
 
 ## Validation Required After Remediation
 
@@ -205,3 +379,6 @@ Required follow-up:
 - Confirm production healthcheck logs startup retries clearly and still fails on real timeout.
 - Capture fresh quick/deep parity artifacts and confirm `/api/sync/health` reflects either fresh published status or an explicit unpublished-artifact state.
 - Confirm bot tier1 customer invite still rejects when required sync queues/tables are not clean and succeeds when they are clean.
+- Confirm the live bot runtime no longer rejects a clean sync state because the shared Redis singleton is uninitialized.
+- Confirm the internal endpoint rejects non-Iran execution, source mismatch, invalid owner states, and invalid tier/account/idempotency payloads.
+- Confirm existing bot users cannot be forced into onboarding by crafted acknowledgement callbacks.
