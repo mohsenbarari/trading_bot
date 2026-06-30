@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from core import offer_publication_worker as worker
+from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
 from models.offer import OfferStatus, OfferType
 
 
@@ -117,19 +118,29 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.offer_publication_worker.assert_background_job_authority") as authority, patch(
             "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
         ), patch(
-            "core.offer_publication_worker.apply_offer_channel_state",
-            new=AsyncMock(side_effect=[True, False]),
-        ) as apply_state:
+            "core.offer_publication_worker.apply_offer_channel_state_with_result",
+            new=AsyncMock(
+                side_effect=[
+                    OfferChannelStateApplyResult(ok=True, response_class="2xx", reason="ok"),
+                    OfferChannelStateApplyResult(ok=False, response_class="5xx", reason="telegram_server_error"),
+                ]
+            ),
+        ) as apply_state, patch(
+            "core.offer_publication_worker._channel_edit_spacing_seconds", return_value=0.01
+        ), patch("core.offer_publication_worker.asyncio.sleep", new=AsyncMock()) as sleep:
             result = await worker.run_offer_channel_state_cycle(limit=2)
 
         authority.assert_called_once_with(worker.JOB_OFFER_TELEGRAM_PUBLICATION)
         fake_db.execute.assert_awaited_once()
         self.assertEqual(apply_state.await_count, 2)
         self.assertEqual(apply_state.await_args_list[0].kwargs["reason"], "offer_channel_state_reconcile")
+        sleep.assert_awaited_once()
         self.assertEqual(result.processed, 2)
         self.assertEqual(result.applied, 1)
         self.assertEqual(result.failed, 1)
         self.assertEqual(result.skipped_recent, 0)
+        self.assertEqual(result.retryable_failed, 1)
+        self.assertEqual(dict(result.response_counts), {"2xx": 1, "5xx": 1})
 
     async def test_channel_state_cycle_skips_already_applied_signature(self):
         offer = make_offer(id=31, status=OfferStatus.COMPLETED, remaining_quantity=0, version_id=7)
@@ -138,8 +149,8 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
         with patch("core.offer_publication_worker.assert_background_job_authority"), patch(
             "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
         ), patch(
-            "core.offer_publication_worker.apply_offer_channel_state",
-            new=AsyncMock(return_value=True),
+            "core.offer_publication_worker.apply_offer_channel_state_with_result",
+            new=AsyncMock(return_value=OfferChannelStateApplyResult(ok=True, response_class="2xx", reason="ok")),
         ) as apply_state:
             first = await worker.run_offer_channel_state_cycle(limit=1)
             second = await worker.run_offer_channel_state_cycle(limit=1)
@@ -150,3 +161,88 @@ class OfferPublicationWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.processed, 0)
         self.assertEqual(second.applied, 0)
         self.assertEqual(second.skipped_recent, 1)
+
+    async def test_channel_state_cycle_stops_on_rate_limit_and_sets_cooldown(self):
+        offers = [
+            make_offer(id=41, status=OfferStatus.COMPLETED, remaining_quantity=0, version_id=8),
+            make_offer(id=42, status=OfferStatus.COMPLETED, remaining_quantity=0, version_id=9),
+        ]
+        fake_db = FakeExecuteSession(offers)
+
+        with patch("core.offer_publication_worker.assert_background_job_authority"), patch(
+            "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
+        ), patch(
+            "core.offer_publication_worker.apply_offer_channel_state_with_result",
+            new=AsyncMock(
+                return_value=OfferChannelStateApplyResult(
+                    ok=False,
+                    response_class="429",
+                    reason="telegram_rate_limited",
+                    retry_after_seconds=7,
+                )
+            ),
+        ) as apply_state, patch("core.offer_publication_worker.asyncio.sleep", new=AsyncMock()) as sleep:
+            result = await worker.run_offer_channel_state_cycle(limit=2)
+
+        self.assertEqual(apply_state.await_count, 1)
+        sleep.assert_not_awaited()
+        self.assertEqual(result.processed, 1)
+        self.assertEqual(result.failed, 1)
+        self.assertEqual(result.rate_limited, 1)
+        self.assertEqual(result.retryable_failed, 1)
+        self.assertEqual(result.cooldown_seconds, 7)
+        self.assertEqual(dict(result.response_counts), {"429": 1})
+
+    async def test_channel_state_cycle_remembers_terminal_bad_request_signature(self):
+        offer = make_offer(id=51, status=OfferStatus.EXPIRED, remaining_quantity=30, version_id=10)
+        fake_db = FakeExecuteSession([offer])
+
+        with patch("core.offer_publication_worker.assert_background_job_authority"), patch(
+            "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
+        ), patch(
+            "core.offer_publication_worker.apply_offer_channel_state_with_result",
+            new=AsyncMock(
+                return_value=OfferChannelStateApplyResult(
+                    ok=False,
+                    response_class="400",
+                    reason="telegram_bad_request",
+                )
+            ),
+        ) as apply_state:
+            first = await worker.run_offer_channel_state_cycle(limit=1)
+            second = await worker.run_offer_channel_state_cycle(limit=1)
+
+        self.assertEqual(apply_state.await_count, 1)
+        self.assertEqual(first.processed, 1)
+        self.assertEqual(first.failed, 1)
+        self.assertEqual(first.bad_request, 1)
+        self.assertEqual(first.non_retryable_remembered, 1)
+        self.assertEqual(second.processed, 0)
+        self.assertEqual(second.skipped_recent, 1)
+
+    async def test_channel_state_cycle_keeps_active_bad_request_visible(self):
+        offer = make_offer(id=61, status=OfferStatus.ACTIVE, remaining_quantity=25, version_id=11)
+        fake_db = FakeExecuteSession([offer])
+
+        with patch("core.offer_publication_worker.assert_background_job_authority"), patch(
+            "core.offer_publication_worker.AsyncSessionLocal", return_value=FakeSessionContext(fake_db)
+        ), patch(
+            "core.offer_publication_worker.apply_offer_channel_state_with_result",
+            new=AsyncMock(
+                return_value=OfferChannelStateApplyResult(
+                    ok=False,
+                    response_class="400",
+                    reason="telegram_bad_request",
+                )
+            ),
+        ) as apply_state:
+            first = await worker.run_offer_channel_state_cycle(limit=1)
+            second = await worker.run_offer_channel_state_cycle(limit=1)
+
+        self.assertEqual(apply_state.await_count, 2)
+        self.assertEqual(first.failed, 1)
+        self.assertEqual(first.bad_request, 1)
+        self.assertEqual(first.non_retryable_remembered, 0)
+        self.assertEqual(first.retryable_failed, 1)
+        self.assertEqual(second.processed, 1)
+        self.assertEqual(second.skipped_recent, 0)

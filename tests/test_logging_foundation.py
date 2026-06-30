@@ -93,6 +93,21 @@ class LoggingFoundationTests(unittest.TestCase):
         self.assertEqual(redacted["trail_sha256"], hash_value)
         self.assertIn(REDACTED_NATIONAL_ID, redacted["message"])
 
+    def test_redact_preserves_uuid_correlation_ids_while_masking_standalone_national_ids(self):
+        run_id = "838ee21e-90ab-46e0-8ed2-ac9181234567"
+        request_id = "11111111-2222-3333-4444-555555555555"
+
+        redacted = redact({
+            "run_id": run_id,
+            "request_id": request_id,
+            "message": "کد ملی 0079059744 برای بررسی ثبت شد",
+        })
+
+        self.assertEqual(redacted["run_id"], run_id)
+        self.assertEqual(redacted["request_id"], request_id)
+        self.assertIn(REDACTED_NATIONAL_ID, redacted["message"])
+        self.assertNotIn("0079059744", redacted["message"])
+
     def test_redact_masks_iranian_pii_signed_urls_and_file_names(self):
         signed_url = (
             "https://cdn.example.test/private/report.pdf?"

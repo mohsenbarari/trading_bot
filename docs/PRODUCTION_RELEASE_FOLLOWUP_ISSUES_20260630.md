@@ -482,3 +482,38 @@ Required follow-up:
 - Confirm Telegram publication-state cleanup keeps active-offer failures visible while preventing repeated retries for confirmed terminal/deleted-message rows.
 - Confirm Telegram publication-worker restart reconciliation no longer causes repeated `429 Too Many Requests` bursts.
 - Confirm structured logs preserve UUID correlation IDs while still redacting real secrets and PII.
+
+## Remediation Progress
+
+### 2026-06-30 Telegram publication worker and redaction hardening
+
+Status:
+
+- Code remediation prepared on `main`; production deploy is still required before live services load it.
+
+Completed for issues 16 and 17:
+
+- `core.services.telegram_offer_channel_service.apply_offer_channel_state_with_result()` now returns a classified Telegram channel-state result while the existing `apply_offer_channel_state()` boolean contract remains available for current callers.
+- Terminal/history channel edits now require both text update and button-removal update to succeed before reporting success; a failed button-removal call is no longer hidden behind a successful text edit.
+- If `editMessageText` is rate-limited, the service stops before issuing the second Telegram edit call for the same post.
+- `core.offer_publication_worker` now aggregates Telegram channel-state response classes per cycle, including `2xx`, `400`, `429`, `4xx`, `5xx`, `transport`, and `unknown` style classes.
+- The worker honors Telegram `retry_after` when present, otherwise applies a bounded configured cooldown, and stops the current channel-state cycle on `429` instead of continuing to apply pressure.
+- Confirmed terminal/deleted-message-like `400 Bad Request` failures are remembered per offer-state signature in memory so repeated cycles do not keep retrying the same impossible terminal edit.
+- Active-offer `400 Bad Request` failures are intentionally not remembered; they stay visible and retryable because active-offer publication failures must not be silently suppressed.
+
+Remaining limitation for issue 16:
+
+- The non-retryable terminal `400` skip is in-memory only. A future closed-market maintenance task can add an operator-reviewed dry-run report and durable archive/cleanup policy for historical deleted-message publication rows if production logs still show unacceptable one-time restart noise.
+
+Completed for issue 18:
+
+- Generic PII redaction boundaries now avoid matching UUID/correlation-id substrings as mobile, card, or national-id values.
+- Regression tests preserve structured `run_id` and `request_id` UUID values while still redacting standalone Persian national IDs, mobile numbers, card numbers, Telegram Bot API URLs, and other existing sensitive patterns.
+
+Validation run:
+
+- `python3 -m py_compile core/services/telegram_offer_channel_service.py core/offer_publication_worker.py core/log_redaction.py core/config.py`
+- `python3 -m unittest tests.test_telegram_offer_channel_service tests.test_offer_publication_worker tests.test_logging_foundation`
+- `python3 -m unittest tests.test_telegram_gateway_policy tests.test_job_logging`
+- `python3 -m unittest tests.test_offer_expiry tests.test_market_transition_service tests.test_telegram_offer_channel_service tests.test_offer_publication_worker`
+- `git diff --check`

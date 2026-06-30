@@ -7,8 +7,9 @@ from models.offer import OfferStatus, OfferType
 
 
 class FakeHttpClientContext:
-    def __init__(self, *, response=None, error=None):
+    def __init__(self, *, response=None, responses=None, error=None):
         self.response = response
+        self.responses = list(responses or [])
         self.error = error
         self.post = AsyncMock(side_effect=self._post)
 
@@ -21,6 +22,8 @@ class FakeHttpClientContext:
     async def _post(self, *_args, **_kwargs):
         if self.error is not None:
             raise self.error
+        if self.responses:
+            return self.responses.pop(0)
         return self.response
 
 
@@ -212,6 +215,47 @@ class TelegramOfferChannelServiceTests(unittest.IsolatedAsyncioTestCase):
             result = await channel_service.apply_offer_channel_state(make_offer(), reason="replay")
 
         self.assertTrue(result)
+
+    async def test_apply_terminal_state_returns_markup_failure_classification(self):
+        text_response = SimpleNamespace(status_code=200, text="")
+        markup_response = SimpleNamespace(
+            status_code=429,
+            text="Too Many Requests",
+            json=lambda: {"ok": False, "parameters": {"retry_after": 7}},
+        )
+        client = FakeHttpClientContext(responses=[text_response, markup_response])
+
+        with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch.object(channel_service.settings, "bot_token", "bot-token"), \
+             patch.object(channel_service.settings, "channel_id", -100), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
+            result = await channel_service.apply_offer_channel_state_with_result(make_offer(), reason="retry-after")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.response_class, "429")
+        self.assertEqual(result.retry_after_seconds, 7)
+        self.assertEqual(result.method, "editMessageReplyMarkup")
+        self.assertEqual(client.post.await_count, 2)
+
+    async def test_apply_terminal_state_does_not_remove_buttons_after_text_rate_limit(self):
+        response = SimpleNamespace(
+            status_code=429,
+            text="Too Many Requests",
+            json=lambda: {"ok": False, "parameters": {"retry_after": 9}},
+        )
+        client = FakeHttpClientContext(response=response)
+
+        with patch("core.services.telegram_offer_channel_service.current_server", return_value="foreign"), \
+             patch.object(channel_service.settings, "bot_token", "bot-token"), \
+             patch.object(channel_service.settings, "channel_id", -100), \
+             patch("core.telegram_gateway.httpx.AsyncClient", return_value=client):
+            result = await channel_service.apply_offer_channel_state_with_result(make_offer(), reason="rate-limited")
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.response_class, "429")
+        self.assertEqual(result.retry_after_seconds, 9)
+        self.assertEqual(result.method, "editMessageText")
+        self.assertEqual(client.post.await_count, 1)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from core.db import AsyncSessionLocal
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.cross_server_recovery_service import active_publication_is_gated
 from core.services.offer_publication_reconciliation_service import reconcile_offer_publications
-from core.services.telegram_offer_channel_service import apply_offer_channel_state
+from core.services.telegram_offer_channel_service import apply_offer_channel_state_with_result
 from models.offer import Offer, OfferStatus
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,12 @@ class OfferChannelStateCycleReport:
     applied: int
     failed: int
     skipped_recent: int
+    rate_limited: int = 0
+    bad_request: int = 0
+    retryable_failed: int = 0
+    non_retryable_remembered: int = 0
+    cooldown_seconds: float = 0.0
+    response_counts: tuple[tuple[str, int], ...] = ()
 
 
 def _worker_interval_seconds() -> float:
@@ -49,6 +55,41 @@ def _worker_batch_limit(limit: int | None = None) -> int:
     if limit is not None:
         return max(1, int(limit))
     return max(1, int(getattr(settings, "offer_publication_worker_batch_limit", 25)))
+
+
+def _bounded_setting_seconds(setting_name: str, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(getattr(settings, setting_name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _channel_edit_spacing_seconds() -> float:
+    return _bounded_setting_seconds(
+        "offer_publication_worker_channel_edit_spacing_seconds",
+        default=0.35,
+        minimum=0.0,
+        maximum=5.0,
+    )
+
+
+def _rate_limit_cooldown_seconds(retry_after_seconds: int | None) -> float:
+    configured_default = _bounded_setting_seconds(
+        "offer_publication_worker_rate_limit_cooldown_seconds",
+        default=10.0,
+        minimum=1.0,
+        maximum=120.0,
+    )
+    configured_max = _bounded_setting_seconds(
+        "offer_publication_worker_max_rate_limit_cooldown_seconds",
+        default=120.0,
+        minimum=configured_default,
+        maximum=300.0,
+    )
+    if retry_after_seconds is None:
+        return configured_default
+    return max(1.0, min(configured_max, float(retry_after_seconds)))
 
 
 def _coerce_int(value) -> int | None:
@@ -87,6 +128,18 @@ def _remember_offer_channel_state_applied(offer: Offer, signature: tuple[object,
     overflow_count = len(_channel_state_applied_signatures) - _CHANNEL_STATE_APPLIED_MAX_KEYS
     for stale_offer_id in list(_channel_state_applied_signatures)[:overflow_count]:
         _channel_state_applied_signatures.pop(stale_offer_id, None)
+
+
+def _offer_status_value(offer: Offer) -> str:
+    return str(getattr(getattr(offer, "status", None), "value", getattr(offer, "status", None)) or "").lower()
+
+
+def _is_terminal_offer(offer: Offer) -> bool:
+    return _offer_status_value(offer) in {
+        OfferStatus.COMPLETED.value,
+        OfferStatus.CANCELLED.value,
+        OfferStatus.EXPIRED.value,
+    }
 
 
 async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> OfferPublicationCycleReport:
@@ -144,28 +197,66 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
     applied = 0
     failed = 0
     skipped_recent = 0
+    rate_limited = 0
+    bad_request = 0
+    retryable_failed = 0
+    non_retryable_remembered = 0
+    cooldown_seconds = 0.0
+    response_counts: dict[str, int] = {}
 
     async with AsyncSessionLocal() as db:
         offers = await _load_channel_state_reconciliation_offers(db, limit=_worker_batch_limit(limit))
-        for offer in offers:
+        for index, offer in enumerate(offers):
             signature = _offer_channel_state_signature(offer)
             if _offer_channel_state_recently_applied(offer, signature):
                 skipped_recent += 1
                 continue
 
             processed += 1
-            result = await apply_offer_channel_state(offer, reason="offer_channel_state_reconcile", timeout=5)
-            if result:
+            result = await apply_offer_channel_state_with_result(
+                offer,
+                reason="offer_channel_state_reconcile",
+                timeout=5,
+            )
+            response_counts[result.response_class] = response_counts.get(result.response_class, 0) + 1
+            if result.ok:
                 applied += 1
                 _remember_offer_channel_state_applied(offer, signature)
+            elif result.response_class == "429":
+                failed += 1
+                rate_limited += 1
+                retryable_failed += 1
+                cooldown_seconds = max(cooldown_seconds, _rate_limit_cooldown_seconds(result.retry_after_seconds))
+                break
+            elif result.response_class == "400":
+                failed += 1
+                bad_request += 1
+                if _is_terminal_offer(offer):
+                    non_retryable_remembered += 1
+                    _remember_offer_channel_state_applied(offer, signature)
+                else:
+                    retryable_failed += 1
             else:
                 failed += 1
+                if result.response_class != "skipped":
+                    retryable_failed += 1
+
+            if index < len(offers) - 1:
+                spacing_seconds = _channel_edit_spacing_seconds()
+                if spacing_seconds > 0:
+                    await asyncio.sleep(spacing_seconds)
 
     return OfferChannelStateCycleReport(
         processed=processed,
         applied=applied,
         failed=failed,
         skipped_recent=skipped_recent,
+        rate_limited=rate_limited,
+        bad_request=bad_request,
+        retryable_failed=retryable_failed,
+        non_retryable_remembered=non_retryable_remembered,
+        cooldown_seconds=cooldown_seconds,
+        response_counts=tuple(sorted(response_counts.items())),
     )
 
 
@@ -184,10 +275,12 @@ async def offer_telegram_publication_loop() -> None:
     while True:
         iteration += 1
         start_time = time.perf_counter()
+        sleep_seconds = _worker_interval_seconds()
         with job_context(JOB_OFFER_TELEGRAM_PUBLICATION, iteration=iteration) as run_id:
             try:
                 report = await run_offer_telegram_publication_cycle()
                 channel_state_report = await run_offer_channel_state_cycle()
+                sleep_seconds = max(sleep_seconds, channel_state_report.cooldown_seconds)
                 if (
                     report.processed
                     or report.repaired
@@ -213,6 +306,14 @@ async def offer_telegram_publication_loop() -> None:
                             "channel_state_applied": channel_state_report.applied,
                             "channel_state_failed": channel_state_report.failed,
                             "channel_state_skipped_recent": channel_state_report.skipped_recent,
+                            "channel_state_rate_limited": channel_state_report.rate_limited,
+                            "channel_state_bad_request": channel_state_report.bad_request,
+                            "channel_state_retryable_failed": channel_state_report.retryable_failed,
+                            "channel_state_non_retryable_remembered": (
+                                channel_state_report.non_retryable_remembered
+                            ),
+                            "channel_state_cooldown_seconds": channel_state_report.cooldown_seconds,
+                            "channel_state_response_counts": dict(channel_state_report.response_counts),
                             "duration_ms": duration_ms_since(start_time),
                         },
                     )
@@ -225,4 +326,4 @@ async def offer_telegram_publication_loop() -> None:
                     run_id=run_id,
                 )
 
-        await asyncio.sleep(_worker_interval_seconds())
+        await asyncio.sleep(sleep_seconds)

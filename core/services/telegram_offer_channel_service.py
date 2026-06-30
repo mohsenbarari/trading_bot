@@ -1,6 +1,8 @@
 """Telegram channel offer rendering and terminal-state side effects."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 import logging
 from typing import Any, Optional
 
@@ -20,6 +22,17 @@ TELEGRAM_OFFER_FULLY_TRADED_TAG = "🤝 ✅"
 TELEGRAM_OFFER_EXPIRED_TAG = "❌"
 
 
+@dataclass(frozen=True, slots=True)
+class OfferChannelStateApplyResult:
+    ok: bool
+    response_class: str
+    status_code: int | None = None
+    reason: str = "unknown"
+    retry_after_seconds: int | None = None
+    error: str | None = None
+    method: str | None = None
+
+
 def _status_value(status: Any) -> str:
     return str(getattr(status, "value", status) or "").strip().lower()
 
@@ -36,6 +49,100 @@ def _finite_int(value: Any) -> Optional[int]:
     except (TypeError, ValueError):
         return None
     return numeric_value
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    numeric_value = _finite_int(value)
+    if numeric_value is None or numeric_value <= 0:
+        return None
+    return numeric_value
+
+
+def _gateway_status_code(result: telegram_gateway.TelegramGatewayResult) -> int | None:
+    status_code = result.status_code
+    if status_code is None and isinstance(result.response_json, Mapping):
+        status_code = _positive_int(result.response_json.get("error_code"))
+    return status_code
+
+
+def _retry_after_from_result(result: telegram_gateway.TelegramGatewayResult) -> int | None:
+    raw_retry_after = None
+    if isinstance(result.response_json, Mapping):
+        parameters = result.response_json.get("parameters")
+        if isinstance(parameters, Mapping):
+            raw_retry_after = parameters.get("retry_after")
+    retry_after = _positive_int(raw_retry_after)
+    if retry_after is None:
+        return None
+    return min(120, max(1, retry_after))
+
+
+def _classify_gateway_result(
+    result: telegram_gateway.TelegramGatewayResult,
+) -> OfferChannelStateApplyResult:
+    status_code = _gateway_status_code(result)
+    if result.ok:
+        return OfferChannelStateApplyResult(
+            ok=True,
+            response_class="2xx",
+            status_code=status_code,
+            reason="ok",
+            method=result.method,
+        )
+
+    if status_code == 429:
+        return OfferChannelStateApplyResult(
+            ok=False,
+            response_class="429",
+            status_code=status_code,
+            reason="telegram_rate_limited",
+            retry_after_seconds=_retry_after_from_result(result),
+            error=result.error,
+            method=result.method,
+        )
+    if status_code == 400:
+        return OfferChannelStateApplyResult(
+            ok=False,
+            response_class="400",
+            status_code=status_code,
+            reason="telegram_bad_request",
+            error=result.error,
+            method=result.method,
+        )
+    if status_code is not None and 400 <= status_code <= 499:
+        return OfferChannelStateApplyResult(
+            ok=False,
+            response_class="4xx",
+            status_code=status_code,
+            reason="telegram_client_error",
+            error=result.error,
+            method=result.method,
+        )
+    if status_code is not None and 500 <= status_code <= 599:
+        return OfferChannelStateApplyResult(
+            ok=False,
+            response_class="5xx",
+            status_code=status_code,
+            reason="telegram_server_error",
+            error=result.error,
+            method=result.method,
+        )
+    if result.error:
+        return OfferChannelStateApplyResult(
+            ok=False,
+            response_class="transport",
+            status_code=status_code,
+            reason="telegram_transport_error",
+            error=result.error,
+            method=result.method,
+        )
+    return OfferChannelStateApplyResult(
+        ok=False,
+        response_class="unknown",
+        status_code=status_code,
+        reason="telegram_unknown_error",
+        method=result.method,
+    )
 
 
 def infer_traded_quantity_from_offer(offer: Any) -> int:
@@ -141,18 +248,40 @@ async def apply_offer_channel_state(
     This function is intentionally foreign-only. Iran may render WebApp history,
     but must not call Telegram for channel post mutations.
     """
+    result = await apply_offer_channel_state_with_result(
+        offer,
+        publication_state=publication_state,
+        traded_quantity=traded_quantity,
+        reason=reason,
+        timeout=timeout,
+    )
+    return result.ok
+
+
+async def apply_offer_channel_state_with_result(
+    offer: Any,
+    *,
+    publication_state: Any | None = None,
+    traded_quantity: Optional[int] = None,
+    reason: str = "",
+    timeout: float = 10,
+) -> OfferChannelStateApplyResult:
+    """
+    Apply the current offer state to its Telegram channel post and classify the
+    Telegram response for worker pacing/retry decisions.
+    """
     if current_server() != SERVER_FOREIGN:
-        return False
+        return OfferChannelStateApplyResult(ok=False, response_class="skipped", reason="non_foreign_server")
 
     channel_message_id = telegram_publication_message_id(offer, publication_state)
     if not channel_message_id:
-        return False
+        return OfferChannelStateApplyResult(ok=False, response_class="skipped", reason="missing_channel_message_id")
     if not _finite_int(getattr(offer, "channel_message_id", None)):
         setattr(offer, "channel_message_id", channel_message_id)
 
     channel_id = settings.channel_id
     if not channel_id:
-        return False
+        return OfferChannelStateApplyResult(ok=False, response_class="skipped", reason="missing_channel_id")
 
     status = _status_value(getattr(offer, "status", None))
     history_tag = get_offer_channel_history_tag(offer, traded_quantity=traded_quantity)
@@ -166,13 +295,16 @@ async def apply_offer_channel_state(
                 timeout=timeout,
                 idempotency_key=f"offer-channel-state:{getattr(offer, 'id', '')}:{status}",
             )
+            classified_text = _classify_gateway_result(text_result)
+            if not classified_text.ok:
+                return classified_text
             buttons_result = await telegram_gateway.edit_message_reply_markup(
                 channel_id,
                 channel_message_id,
                 timeout=timeout,
                 idempotency_key=f"offer-channel-buttons-remove:{getattr(offer, 'id', '')}:{status}",
             )
-            result = text_result
+            return _classify_gateway_result(buttons_result)
         elif status and status != OfferStatus.ACTIVE.value:
             result = await telegram_gateway.edit_message_reply_markup(
                 channel_id,
@@ -188,7 +320,7 @@ async def apply_offer_channel_state(
                 timeout=timeout,
                 idempotency_key=f"offer-channel-buttons:{getattr(offer, 'id', '')}",
             )
-        return result.ok
+        return _classify_gateway_result(result)
     except Exception as exc:
         logger.debug(
             "Failed to apply Telegram channel offer state",
@@ -199,4 +331,9 @@ async def apply_offer_channel_state(
                 "error_class": type(exc).__name__,
             },
         )
-        return False
+        return OfferChannelStateApplyResult(
+            ok=False,
+            response_class="transport",
+            reason="unexpected_exception",
+            error=type(exc).__name__,
+        )

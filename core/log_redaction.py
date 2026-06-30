@@ -114,14 +114,18 @@ _TELEGRAM_BOT_URL_RE = re.compile(
     r"(?i)(https://api\.telegram\.org/bot)[A-Za-z0-9:_-]+(?=/)"
 )
 _OTP_RE = re.compile(r"(?i)\b(otp|code)(\s*[:=]\s*)\d{4,8}\b")
-_MOBILE_RE = re.compile(r"(?<!\d)(09\d{2})\d{4}(\d{3})(?!\d)")
+_MOBILE_RE = re.compile(r"(?<![\dA-Za-z-])(09\d{2})\d{4}(\d{3})(?![\dA-Za-z-])")
 _IRAN_MOBILE_VARIANT_RE = re.compile(
-    r"(?<![\d۰-۹٠-٩])(?:\+?98|0098|0)?[\s\-._()]*9(?:[\s\-._()]*[\d۰-۹٠-٩]){9}(?![\d۰-۹٠-٩])"
+    r"(?<![\d۰-۹٠-٩A-Za-z-])"
+    r"(?:\+?98|0098|0)?[\s\-._()]*9(?:[\s\-._()]*[\d۰-۹٠-٩]){9}"
+    r"(?![\d۰-۹٠-٩A-Za-z-])"
 )
 _EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 _SHEBA_RE = re.compile(r"(?i)\bIR[\s-]*[\d۰-۹٠-٩](?:[\s-]*[\d۰-۹٠-٩]){23}\b")
-_CARD_RE = re.compile(r"(?<![\d۰-۹٠-٩])[\d۰-۹٠-٩](?:[\s-]?[\d۰-۹٠-٩]){15}(?![\d۰-۹٠-٩])")
-_NATIONAL_ID_RE = re.compile(r"(?<![\d۰-۹٠-٩])[\d۰-۹٠-٩]{10}(?![\d۰-۹٠-٩])")
+_CARD_RE = re.compile(
+    r"(?<![\d۰-۹٠-٩A-Za-z-])[\d۰-۹٠-٩](?:[\s-]?[\d۰-۹٠-٩]){15}(?![\d۰-۹٠-٩A-Za-z-])"
+)
+_NATIONAL_ID_RE = re.compile(r"(?<![\d۰-۹٠-٩A-Za-z-])[\d۰-۹٠-٩]{10}(?![\d۰-۹٠-٩A-Za-z-])")
 
 _SAFE_SCALAR_TYPES = (str, int, float, bool)
 
