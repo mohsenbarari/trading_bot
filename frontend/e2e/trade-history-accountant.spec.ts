@@ -1106,15 +1106,17 @@ test.describe('Trade history accountant context', () => {
     await expect(offerCard).toBeVisible()
 
     const executeButton = offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()
-    const tradeResponsePromise = page.waitForResponse((response) => {
-      if (response.request().method() !== 'POST') return false
-      const url = new URL(response.url())
-      return url.pathname === '/api/trades/'
-    })
-
     await executeButton.click()
-    await offerCard.locator('.trade-btn.pending').first().click()
-    const tradeResponse = await tradeResponsePromise
+    const pendingButton = offerCard.locator('.trade-btn.pending').first()
+    await expect(pendingButton).toBeVisible({ timeout: 10000 })
+    const [tradeResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        if (response.request().method() !== 'POST') return false
+        const url = new URL(response.url())
+        return url.pathname === '/api/trades/'
+      }),
+      pendingButton.click({ force: true }),
+    ])
     expect(tradeResponse.status()).toBe(400)
     await expect(offerCard.locator('.trade-btn').filter({ hasText: `${fixture.tradeAmount} عدد` }).first()).toBeVisible()
 

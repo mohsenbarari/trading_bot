@@ -279,6 +279,7 @@ async function openNamedRoomFromRoute(page: Page, roomId: number, title: string)
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       await page.goto(route, { waitUntil: 'domcontentloaded' })
+      lastError = null
       break
     } catch (error) {
       lastError = error
@@ -294,6 +295,33 @@ async function openNamedRoomFromRoute(page: Page, roomId: number, title: string)
   }
   await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(-roomId)
   await expect(page.locator('.chat-header .header-name').last()).toContainText(title, { timeout: 30000 })
+}
+
+async function openDirectConversationFromRoute(page: Page, userId: number, accountName: string) {
+  const route = `/chat?user_id=${userId}&user_name=${encodeURIComponent(accountName)}`
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(route, { waitUntil: 'domcontentloaded' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/interrupted by another navigation|ERR_ABORTED|NS_BINDING_ABORTED/i.test(message) || attempt === 2) {
+        throw error
+      }
+    }
+
+    const selected = await expect
+      .poll(() => selectedRoomIdFromUrl(page), { timeout: 10000 })
+      .toBe(userId)
+      .then(() => true)
+      .catch(() => false)
+    if (selected && await page.locator('.chat-header .header-name').last().isVisible().catch(() => false)) {
+      break
+    }
+    await openMessenger(page)
+  }
+
+  await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(userId)
+  await expect(page.locator('.chat-header .header-name').last()).toContainText(accountName, { timeout: 30000 })
 }
 
 async function openRoomManagerFromHeader(page: Page, managerRoot: Locator, menuLabel: string) {
@@ -350,17 +378,25 @@ async function clickManagerBack(managerRoot: Locator) {
 }
 
 async function returnToChannelOverview(managerRoot: Locator) {
-  const roleStrip = managerRoot.locator('.manager-role-strip')
+  const openInMessengerButton = managerRoot.getByRole('button', { name: 'باز کردن در پیام‌رسان' }).first()
+  const overviewHeading = managerRoot.locator('.section-heading').filter({ hasText: 'اعضا و دسترسی‌ها' })
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    if (await roleStrip.isVisible().catch(() => false)) {
+    if (
+      await openInMessengerButton.isVisible().catch(() => false) ||
+      await overviewHeading.isVisible().catch(() => false)
+    ) {
       return
     }
     await clickManagerBack(managerRoot)
-    if (await roleStrip.isVisible({ timeout: 1500 }).catch(() => false)) {
+    const reachedOverview = await expect(openInMessengerButton)
+      .toBeVisible({ timeout: 1500 })
+      .then(() => true)
+      .catch(() => false)
+    if (reachedOverview) {
       return
     }
   }
-  await expect(roleStrip).toBeVisible({ timeout: 30000 })
+  await expect(overviewHeading).toBeVisible({ timeout: 30000 })
 }
 
 async function clickOpenInMessengerButton(managerRoot: Locator) {
@@ -826,8 +862,8 @@ test.describe('Messenger room manager and public profile flows', () => {
     if (!navigatedToProfile) {
       if (!(await channelManager.isVisible().catch(() => false))) {
         await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
+        await clickManagerAction(channelManager, 'اعضای کانال')
       }
-      await clickManagerAction(channelManager, 'اعضای کانال')
       await clickChannelMemberProfile()
     }
 
@@ -942,8 +978,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(page.locator('.public-profile-view .profile-avatar-image')).toBeVisible({ timeout: 30000 })
     await expect(page.getByRole('button', { name: 'تغییر آواتار' })).toBeVisible({ timeout: 30000 })
 
-    await page.goto(`/chat?user_id=${peer.userId}&user_name=${encodeURIComponent(peer.accountName)}`, { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('.chat-header .header-name').last()).toHaveText(peer.accountName, { timeout: 30000 })
+    await openDirectConversationFromRoute(page, peer.userId, peer.accountName)
     await page.locator('.chat-header .header-user-info').last().click()
 
     await expect(page).toHaveURL(new RegExp(`/users/${peer.userId}`))
