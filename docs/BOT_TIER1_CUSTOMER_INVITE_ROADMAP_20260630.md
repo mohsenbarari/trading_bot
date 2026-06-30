@@ -176,11 +176,26 @@ Before starting or submitting the tier1 invite flow, foreign should require:
 
 If only global parity is available and reports unrelated historical drift, the implementation should prefer a customer-invite-scoped gate rather than permanently disabling this feature.
 
+Operational definition for this feature:
+
+- "Synced" is primarily state-based, not only time-based.
+- If any required table has unsynced rows, or either sync queue is non-empty, the bot should treat customer invitation as not fully synced.
+- A short grace window is allowed for momentary backlog: retry the health check for about 5-10 seconds.
+- If the required table/queue backlog is still present after that grace window, the bot must reject the invite flow as temporarily unavailable due to sync state.
+- The existing global parity freshness window is 900 seconds, but this feature must not rely on that broad observability value as permission to invite customers. The invite gate must inspect the required tables and queues at request time.
+
+Outage behavior:
+
+- Short outage: up to 2 minutes. Do not accept new bot customer invites. If Iran already accepted the invitation and the success response was delayed, send the success message after connectivity returns and the successful result is known.
+- Medium outage: more than 2 minutes up to 1 hour. Do not accept new bot customer invites. If a previous successful result can be resolved after recovery, send the success message.
+- Long outage: more than 1 hour. Do not accept new bot customer invites. No delayed success message is required.
+
 Reason:
 
 - Customer invite depends on current user, customer, accountant, and invitation state.
 - Global offer/history drift should not block customer invite forever if customer-invite tables are clean.
 - Iran final validation remains the source of truth even after foreign preliminary validation passes.
+- A 5-10 second grace prevents false denial for normal momentary queue movement while still keeping this feature strict enough for customer identity/ownership data.
 
 ### Idempotency
 
